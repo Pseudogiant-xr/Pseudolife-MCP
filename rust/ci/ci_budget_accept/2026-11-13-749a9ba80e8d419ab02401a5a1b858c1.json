@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "b280739891b6e09e",
+  "fingerprint": "5e0cf825879abfff",
+  "reason": "Python freeze (2026-11-14): every remaining shard runs a subset of its measured steps (the live passes, oracle binding and eval differential tests left), except cli-store, which gains the body and security golden replays and the kept live security checks (startup refusals and the two remote-bind scenarios, part of cli-live's measured 8.6-minute Windows security step) and carries an estimate; cli-live, judges and every H5 suite left the matrix and the budget."
+}

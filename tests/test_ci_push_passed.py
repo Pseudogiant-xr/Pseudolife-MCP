@@ -86,7 +86,7 @@ def test_missing_token_writes_an_explicit_false(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("workflow,skips,keeps", [
     ("rust.yml", ["rust", "parity-checks", "daemon-image"],
-     ["candidate", "candidate-harness", "fixtures", "source-mutants", "parity-live", "parity-selfhosted", "body-evidence"]),
+     ["candidate", "candidate-harness", "fixtures", "source-mutants", "parity-selfhosted"]),
     ("ci.yml", ["test", "test-lite-linux", "test-lite-windows", "test-lite-macos", "frontend", "lock-resolve"],
      ["test-windows-nightly"]),
 ])

@@ -464,8 +464,9 @@ def test_rust_skips_only_the_image_check_and_parity_pairs():
     assert consulted == {"daemon-image"}
     assert f"!contains({PASSED}, 'Rust daemon / disposable image')" in jobs["daemon-image"]["if"]
     assert jobs["daemon-image"]["name"] == "Rust daemon / disposable image"
-    # The Rust job, the candidate build, parity-live and the gate never read
-    # it: Rust and the eval and judges shards compare against the event's
-    # oracle, which differs between a pull request and a push.
-    for job_id in ("rust", "candidate", "parity-live", "parity", "parity-checks"):
+    # The Rust job, the candidate build and the gate never read it: the
+    # Rust job and the candidate builds also keep master's Rust caches
+    # current, and parity-checks takes the passed pairs through scope's
+    # parity matrix instead (parity_scope.pruned).
+    for job_id in ("rust", "candidate", "parity", "parity-checks"):
         assert "batch_passed" not in json.dumps(jobs[job_id].get("if", "")), job_id

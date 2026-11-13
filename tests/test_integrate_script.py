@@ -893,7 +893,7 @@ def _steps(steps) -> list[dict]:
 
 
 def _gate_world(world, run=_RUN_1059, rollup: list[str] | None = None,
-                gate_steps=GATE_STEPS, head_workflow: str = WORKFLOW):
+                gate_steps=GATE_STEPS, head_workflow: str = WORKFLOW, checkout_workflow: str = WORKFLOW):
     """PR #11 whose head carries `run` (by default #1059's jobs), listed in
     its rollup (the given job ids, else every job that did not skip), with
     `head_workflow` (the real rust.yml) as that head's workflow, the real
@@ -902,7 +902,7 @@ def _gate_world(world, run=_RUN_1059, rollup: list[str] | None = None,
     past its timeout)."""
     workflows = world.work / ".github" / "workflows"
     workflows.mkdir(parents=True, exist_ok=True)
-    (workflows / "rust.yml").write_text(WORKFLOW, encoding="utf-8")
+    (workflows / "rust.yml").write_text(checkout_workflow, encoding="utf-8")
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
     world.gh.add(10, sha10)
@@ -2884,8 +2884,26 @@ def test_the_rust_harness_run_fails_a_database_case_it_cannot_run():
 
 
 # --- the report-only frozen-probe check (rust.yml's frozen-probes job) ---
+# The job left rust.yml with the Python freeze (14 November 2026); the
+# exemption stays in ops/integrate.py for heads built before it, so these
+# tests run it against a workflow that still carries a report-only job.
 
 PROBE = "Frozen judge probes (report only) / ubuntu-latest"
+
+
+def _with_probe_job(text: str) -> str:
+    import yaml
+    data = yaml.safe_load(text)
+    data["jobs"]["frozen-probes"] = {
+        "needs": "scope", "continue-on-error": True,
+        "if": "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' }}",
+        "name": "Frozen judge probes (report only) / ${{ matrix.os }}",
+        "strategy": {"matrix": {"os": ["ubuntu-latest", "windows-latest"]}},
+        "runs-on": "${{ matrix.os }}", "steps": [{"run": "true"}]}
+    return yaml.safe_dump(data, sort_keys=False)
+
+
+PROBE_WORKFLOW = _with_probe_job(WORKFLOW)
 
 
 def _probe_world(world, *checks):
@@ -2936,7 +2954,8 @@ def test_a_red_probe_beside_a_cancelled_gate_does_not_keep_a_member_out(world, c
     # report-only probe of the same run is red: the second read of the
     # run's jobs must leave the probe out as the rollup read does.
     sha10, sha11 = _gate_world(world, _RUN_1059 + [("510", PROBE, "failure")],
-                               rollup=list(GATES) + (["510"] if listed else []))
+                               rollup=list(GATES) + (["510"] if listed else []),
+                               head_workflow=PROBE_WORKFLOW, checkout_workflow=PROBE_WORKFLOW)
 
     assert _publish(world) == 0, capsys.readouterr()
 
@@ -2964,12 +2983,13 @@ def test_status_shows_a_red_probe_as_not_counted(world, capsys):
     assert f"report-only red, not counted: {PROBE}" in lines["#11"]
 
 
-def test_the_report_only_exemption_names_exactly_the_frozen_probes_job():
-    """A rename of the job, or of the workflow, must not silently turn the
-    exemption off or leave it exempting nothing; and no other job may
-    produce a name it exempts."""
+def test_no_current_job_produces_the_report_only_name():
+    """The report-only job left rust.yml with the Python freeze (14 November
+    2026). The exemption now exempts nothing a current workflow can
+    produce; a job that adopts the prefix must be pinned here first."""
     import yaml
     workflow_name, prefix = integrate.REPORT_ONLY_CHECK
+    assert (workflow_name, prefix) == ("Rust shim", "Frozen judge probes (report only) / ")
     produced = {}
     for path in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -2980,12 +3000,5 @@ def test_the_report_only_exemption_names_exactly_the_frozen_probes_job():
                 name = template.replace("${{ matrix.os }}", str(system))
                 if name.startswith(prefix):
                     produced.setdefault((data["name"], job_id), []).append(name)
-    assert produced == {(workflow_name, "frozen-probes"): [
-        f"{prefix}ubuntu-latest", f"{prefix}windows-latest"]}
-    rust = yaml.safe_load(WORKFLOW)
-    probes = rust["jobs"]["frozen-probes"]
-    # Report-only by construction: nothing needs it and it cannot fail the run.
-    assert probes["continue-on-error"] is True
-    assert all("frozen-probes" not in (job.get("needs") or []) for job in rust["jobs"].values())
-    # It never runs in a batch, whose CI `merge` requires fully green.
-    assert "needs.scope.outputs.full == 'false'" in probes["if"]
+    assert produced == {}
+    assert "frozen-probes" not in yaml.safe_load(WORKFLOW)["jobs"]

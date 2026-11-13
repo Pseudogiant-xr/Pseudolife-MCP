@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "ae533ea0bf5ced90",
+  "fingerprint": "1afe2af3ca316957",
+  "reason": "Python freeze (2026-11-14): the two oracle steps (event oracle selection and its metadata export, about 10-20 s together) become one environment line pointing the version contract at the checkout's pyproject.toml; every build and test step is unchanged, so its cost holds or falls slightly."
+}

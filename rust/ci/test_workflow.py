@@ -21,8 +21,7 @@ RUST_CHECKS = (
     "Check generated daemon schema",
     "Bind the selected Python interpreter for Rust fixtures",
     "Install the Python SDK fixture dependency",
-    "Bind the event-selected Python oracle",
-    "Prepare selected package metadata for the Rust identity contract",
+    "Point the Rust identity contract at the checkout's package metadata",
     "Install pinned nextest in the runner temporary directory",
     "Check formatting", "Check all targets", "Clippy", "Nextest",
     "Check write-path harness targets",
@@ -30,36 +29,40 @@ RUST_CHECKS = (
     "Nextest without default features",
     "Daemon override build configurations",
 )
+# Since the Python freeze (14 November 2026) every parity check replays
+# committed goldens or runs a harness's own tests; no step binds an oracle.
 PARITY_CHECKS = {
     "Install checkout and test dependencies": None,
-    "Bind the event-selected Python oracle": None,
     "Check CI coverage contract": "eval",
     "Compare sent YAML startup with PyYAML": "cli",
-    "Run every eval harness test": "eval",
     "Offline embedding golden and mutant row": "eval",
     "Offline W2-D search harness regressions": "eval",
     "CLI differential harness": "cli",
-    "CLI differential harness live arms": "cli-live",
     "Prepare disposable PostgreSQL for CLI lease row": "cli*",
-    "CLI lease differential harness": "cli",
-    "CLI W1-C differential harness": "w1c",
+    "CLI lease golden harness": "cli",
+    "CLI lease operator golden harness": "cli",
+    "CLI W1-C golden harness": "w1c",
     "Prepare disposable PostgreSQL for W1-C rows": "w1c",
     "Daemon background pruning golden": "cli-store",
-    "Dream cursor differential harness": "cli-store",
-
-
-    "Principal store differential and golden harness": "cli-store",
-    "Daemon static HTTP parity": "cli-store",
-
+    "Dream cursor golden harness": "cli-store",
+    "Principal store golden harness": "cli-store",
+    "Daemon static HTTP golden": "cli-store",
     "Daemon schema startup parity": "cli-startup",
-    "Graph store differential and recorded oracle": "cli-store",
-    "Daemon body admission parity": "cli-live",
-    "Daemon security admission parity": "cli-live",
-    "Daemon MCP live parity and controls": "cli-live",
+    "Graph store golden harness": "cli-store",
+    "Daemon body admission golden": "cli-store",
+    "Daemon security admission golden": "cli-store",
+    "Daemon security live checks without a Rust test": "cli-store",
     "Daemon resident startup parity": "cli-startup",
     "Daemon resident startup parity part 2": "cli-startup",
-    "Run unchanged candidates and differential judges": "judges",
 }
+# Steps and jobs that ran live comparisons against the Python oracle and left
+# CI with the freeze; none may come back.
+RETIRED_STEPS = ("Bind the event-selected Python oracle", "Run every eval harness test",
+                 "CLI differential harness live arms", "Daemon MCP live parity and controls",
+                 "Run unchanged candidates and differential judges", "Ported rows and daemon controls",
+                 "Prepare selected package metadata for the Rust identity contract",
+                 "Record the Linux test_login golden while it is absent")
+RETIRED_JOBS = ("frozen-probes", "parity-live", "body-evidence", "capture-windows")
 # Parity uploads carry the lane prefix: empty on hosted, set by parity-selfhosted.
 ARTIFACT_PREFIX = "${{ env.PARITY_ARTIFACT_PREFIX }}"
 PYTEST_FILTERS = {"-k", "-m", "--ignore", "--ignore-glob", "--deselect",
@@ -107,32 +110,19 @@ def row_commands(invocations, required_rows, golden):
 
 
 W1C_SUITES = ("w1c-doctor", "w1c-pairing", "w1c-connection", "w1c-connect")
-H5_SUITES = ("h5-audit", "h5-backup", "h5-w1a", "h5-background", "h5-daemon-mutants", "h5-graph-mutants")
-CLI_SUITES = ("cli", "cli-store", "cli-startup", "cli-live")
-# h5-light: Linux runs h5-audit, h5-backup and h5-background in one job.
-PARITY_SUITES = ["eval", *CLI_SUITES, "judges", *W1C_SUITES, *H5_SUITES, "h5-light"]
-# The live Python-versus-Rust comparisons hosted Windows cannot run
-# deterministically (docs/specs/2026-10-19-merge-queue.md, "The required
-# Parity gate"): required on Linux, reported by parity-live on Windows.
-LIVE_SUITE = "cli-live"
-LIVE_CHECKS = ("CLI differential harness live arms", "Daemon body admission parity",
-               "Daemon security admission parity", "Daemon MCP live parity and controls")
-WINDOWS_LIVE_EXCLUDE = [{"os": "windows-latest", "suite": LIVE_SUITE}]
-# The full static exclude list: the live pair and the h5-light composite's pairs.
-STATIC_EXCLUDE = WINDOWS_LIVE_EXCLUDE + [{"os": "windows-latest", "suite": "h5-light"}] + [
-    {"os": "ubuntu-latest", "suite": suite} for suite in ("h5-audit", "h5-backup", "h5-background")]
+CLI_SUITES = ("cli", "cli-store", "cli-startup")
+PARITY_SUITES = ["eval", *CLI_SUITES, *W1C_SUITES]
+# No pair is left out of the matrix since the freeze.
+STATIC_EXCLUDE = []
 
 
-# The W1-C step passes its rows through PowerShell arrays (@live, @golden), so
-# row_commands() sees no --row there: the row list and how both passes are
+# The W1-C step passes its rows through a PowerShell array (@golden), so
+# row_commands() sees no --row there: the row list and how the golden pass is
 # built from it are pinned here instead.
 W1C_ROWS = ("transfer", "test_login", "doctor", "connect", "maintainer", "invite", "pair",
             "move", "tunnel", "console", "conductor_watch", "coordination_recovery", "maintainer_setup", "restore")
 W1C_LINES = (
-    "$live = $rows | ForEach-Object { '--row'; $_ }",
-    "$replayed = $rows | Where-Object { $_ -ne 'test_login' -or "
-    "(Test-Path \"rust/cli_harness/goldens/test_login.$platform.json\") }",
-    "$golden = $replayed | ForEach-Object { '--row'; $_ }",
+    "$golden = $rows | ForEach-Object { '--row'; $_ }",
 )
 
 
@@ -144,12 +134,10 @@ def check_w1c_rows(script):
     for line in W1C_LINES:
         assert line in lines, line
     invocations = commands(script)
-    require_command(invocations, ("python", "rust/cli_harness", "@live"), ("--candidate",),
-                    ("--golden", "--record", "--mutants", "--case", "--skip-bank"))
     require_command(invocations, ("python", "rust/cli_harness", "@golden", "--golden"),
                     ("--candidate",), ("--record", "--mutants", "--case"))
     assert [words[:3] for words in invocations if words[:2] == ["python", "rust/cli_harness"]] \
-        == [["python", "rust/cli_harness", "@live"], ["python", "rust/cli_harness", "@golden"]]
+        == [["python", "rust/cli_harness", "@golden"]]
 
 
 def check_w1c_shards(jobs):
@@ -172,7 +160,7 @@ def check_w1c_shards(jobs):
         covered.extend(rows)
     assert Counter(covered) == Counter(W1C_ROWS), covered
     steps = {step.get("name"): step for step in job["steps"]}
-    harness = steps["CLI W1-C differential harness"]
+    harness = steps["CLI W1-C golden harness"]
     assert harness["if"] == "startsWith(matrix.suite, 'w1c-')"
     assert harness["timeout-minutes"] == "${{ matrix.w1c_timeout }}"
     check_w1c_rows(harness["run"])
@@ -185,19 +173,11 @@ def check_w1c_shards(jobs):
     assert image["if"] == "runner.os == 'Linux' && matrix.suite == 'w1c-connection'"
     assert image["run"] == "docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops"
     assert job["steps"].index(image) < job["steps"].index(harness)
-    record = steps["Record the Linux test_login golden while it is absent"]
-    assert record["id"] == "test_login_linux_golden"
-    assert record["if"] == ("!cancelled() && runner.os == 'Linux' && "
-                            "matrix.suite == 'w1c-connection' && "
-                            "hashFiles('rust/cli_harness/goldens/test_login.linux.json') == ''")
-    require_command(commands(record["run"]), ("python", "rust/cli_harness"),
-                    ("--row", "test_login", "--record", "-v", "--out"))
-    retained = steps["Retain the recorded Linux test_login golden"]
-    assert retained["if"] == "!cancelled() && steps.test_login_linux_golden.outcome == 'success'"
-    assert retained["with"]["name"] == ARTIFACT_PREFIX + "test_login-linux-golden"
-    assert retained["with"]["path"].splitlines() == [
-        "rust/cli_harness/goldens/test_login.linux.json",
-        "${{ runner.temp }}/test-login-linux-record.json"]
+    # The Linux test_login golden is committed; the step that recorded it
+    # from the Python oracle while it was absent left with the freeze.
+    assert "Record the Linux test_login golden while it is absent" not in steps
+    assert "Retain the recorded Linux test_login golden" not in steps
+    assert (ROOT / "rust/cli_harness/goldens/test_login.linux.json").is_file()
     summaries = steps["Retain CLI harness summaries"]
     assert summaries["if"] == ("always() && (startsWith(matrix.suite, 'cli') || "
                                "startsWith(matrix.suite, 'w1c-'))")
@@ -205,8 +185,6 @@ def check_w1c_shards(jobs):
     assert summaries["with"]["path"] == "${{ runner.temp }}/cli-harness*.json"
     # A second explicit row invocation outside the shard step duplicates work.
     for step in job["steps"]:
-        if step is record:
-            continue
         for words in commands(step.get("run", "")):
             if words[:2] == ["python", "rust/cli_harness"]:
                 assert not any(word in W1C_ROWS for word in words)
@@ -247,6 +225,11 @@ def check_executable_coverage(jobs):
             cargo = cargo[:cargo.index("--")] if "--" in cargo else cargo
             assert "build" not in cargo, step.get("name")
     parity = {step.get("name"): step for step in parity_steps}
+    # No job compares against a live Python oracle since the freeze.
+    from inventory import live_invocations
+    assert not live_invocations({"jobs": jobs}), live_invocations({"jobs": jobs})
+    for name in RETIRED_STEPS:
+        assert name not in parity and name not in rust, name
     check_w1c_shards(jobs)
     sent_yaml = parity["Compare sent YAML startup with PyYAML"]
     require_command(commands(sent_yaml["run"]), ("python", "-m", "pytest"),
@@ -255,10 +238,6 @@ def check_executable_coverage(jobs):
     assert 'PSEUDOLIFE_SENT_YAML_BIN' in sent_yaml["run"]
     assert 'rust/target/release/pseudolife-stdio' in sent_yaml["run"]
     assert not any(words[0] == "cargo" for words in commands(sent_yaml["run"]))
-    require_command(commands(parity["Run every eval harness test"]["run"]),
-                    ("python", "-m", "pytest"),
-                    ("evals/rust_port", "evals/rust_baseline", "-p",
-                     "evals.rust_port.collection_guard", "--eval-collection-guard"), PYTEST_FILTERS)
     search = parity["Offline W2-D search harness regressions"]
     require_command(commands(search["run"]), ("python", "-m", "pytest"),
                     ("rust/daemon/harness/test_w2d_controls.py",
@@ -266,13 +245,14 @@ def check_executable_coverage(jobs):
                      "rust/daemon/harness/test_w2d_recent.py",
                      "rust/daemon/harness/test_config_knobs_golden.py"), PYTEST_FILTERS)
     assert search["timeout-minutes"] == 1
-    # The mail, hook, episode and update rows replay their goldens in the required
-    # cli shard; their live arms run beside the other live comparisons.
+    # The mail, hook, episode and update rows replay their goldens in the
+    # required cli shard, and so do lease and lease_operator.
     row_commands(commands(parity["CLI differential harness"]["run"]), ("mail", "hook", "episode", "update"), True)
-    row_commands(commands(parity["CLI differential harness live arms"]["run"]),
-                 ("mail", "hook", "episode", "update"), False)
-    for golden in (False, True):
-        row_commands(commands(parity["CLI lease differential harness"]["run"]), ("lease",), golden)
+    row_commands(commands(parity["CLI lease golden harness"]["run"]), ("lease",), True)
+    row_commands(commands(parity["CLI lease operator golden harness"]["run"]), ("lease_operator",), True)
+    require_command(commands(parity["CLI lease operator golden harness"]["run"]), ("python", "-m", "pytest"),
+                    ("rust/cli_harness/test_lease_operator.py", "rust/cli_harness/test_lease_transport.py"),
+                    PYTEST_FILTERS)
     require_command(commands(parity["CLI differential harness"]["run"]),
                     ("python", "-m", "pytest"),
                     ("rust/cli_harness/test_cli_harness.py", "rust/cli_harness/test_lease.py",
@@ -291,50 +271,35 @@ def check_executable_coverage(jobs):
                     ("--rust-bin", "$candidate", "--only", "sweep-pruning", "--no-refusals"),
                     ("--record", "--mutants"))
 
-    static = commands(parity["Daemon static HTTP parity"]["run"])
-    for mode in ("live", "golden"):
-        require_command(static, ("python", "rust/daemon/harness/run.py", mode),
-                        ("--rust-bin", "--only", "static-build", "static-paths", "static-missing", "static-root-link", "--out"),
-                        ("--record", "--mutants"))
+    static = commands(parity["Daemon static HTTP golden"]["run"])
+    require_command(static, ("python", "rust/daemon/harness/run.py", "golden"),
+                    ("--rust-bin", "--only", "static-build", "static-paths", "static-missing", "static-root-link", "--out"),
+                    ("--record", "--mutants"))
     require_command(static, ("python", "-m", "pytest"), ("rust/daemon/harness/test_static.py",), PYTEST_FILTERS)
     assert not any(words[0] == "cargo" for words in static)
-    body = commands(parity["Daemon body admission parity"]["run"])
-    for mode in ("live", "golden"):
-        require_command(body, ("python", "rust/daemon/harness/run.py", mode),
-                        ("--rust-bin", "--only", "body-limits", "body-view-open", "body-pair-budget", "body-text-window", "--out"),
-                        ("--record", "--mutants"))
+    body = commands(parity["Daemon body admission golden"]["run"])
+    require_command(body, ("python", "rust/daemon/harness/run.py", "golden"),
+                    ("--rust-bin", "--only", "body-limits", "body-view-open", "body-pair-budget", "body-text-window", "--out"),
+                    ("--record", "--mutants"))
     require_command(body, ("python", "-m", "pytest"), ("rust/daemon/harness/test_body_cases.py",), PYTEST_FILTERS)
     assert not any(words[0] == "cargo" for words in body)
-    mcp = commands(parity["Daemon MCP live parity and controls"]["run"])
-    require_command(mcp, ("python", "-m", "pip", "install"),
-                    ("pydantic==2.14.0", "pydantic-core==2.50.0"))
-    require_command(mcp, ("python", "-m", "pytest"),
-                    ("tests/test_rust_mcp_catalogue.py", "rust/daemon/harness/test_mcp_mount.py",
-                     "rust/daemon/harness/test_mcp_mutant_verdict.py", "rust/daemon/harness/test_mcp_ci.py", "rust/daemon/harness/test_mcp_runner.py", "rust/daemon/harness/test_mcp_validation.py",
-                     "rust/daemon/harness/test_mcp_wire.py"), PYTEST_FILTERS)
-    require_command(mcp, ("python", "rust/daemon/harness/mcp_ci.py"),
-                    ("--default-bin", "$candidate", "--mutant-bin", "$mutants", "--out"))
-    assert not any(words[0] == "cargo" for words in mcp)
-    security = commands(parity["Daemon security admission parity"]["run"])
+    security = commands(parity["Daemon security admission golden"]["run"])
     require_command(security, ("python", "-m", "pytest"),
                     ("rust/daemon/harness/test_security_cases.py",
                      "rust/daemon/harness/test_principals_settle.py"), PYTEST_FILTERS)
     security_rows = ("security-open", "security-closed", "security-encodings",
                      "security-encoding-priority", "security-terminal-byte")
-    for mode in ("live", "golden", "mutants"):
-        required = ("--rust-bin", "--only", "--out") + security_rows
-        if mode == "live":
-            required += ("security-refusals",)
-        if mode == "mutants":
-            required += ("--mutants", "security-origin-open", "security-host-open",
-                         "security-browser-last", "security-auth-first", "security-drop-latin1",
-                         "security-unavailable-401")
-        require_command(security, ("python", "rust/daemon/harness/run.py", mode),
-                        required, ("--record",) + (("--no-refusals",) if mode == "live" else ()))
-    require_command(security, ("python", "rust/daemon/harness/run.py", "live"),
+    require_command(security, ("python", "rust/daemon/harness/run.py", "golden"),
+                    ("--rust-bin", "$candidate", "--only", "--out") + security_rows, ("--record",))
+    assert not any(words[0] == "cargo" for words in security)
+    # The security properties no Rust test asserts yet keep their live
+    # comparison (rust/ci/inventory.py LIVE_SECURITY_EXCEPTIONS).
+    kept = commands(parity["Daemon security live checks without a Rust test"]["run"])
+    require_command(kept, ("python", "rust/daemon/harness/run.py", "live"),
+                    ("--rust-bin", "$candidate", "--only", "security-refusals", "--out"), ("--record", "--no-refusals"))
+    require_command(kept, ("python", "rust/daemon/harness/run.py", "live"),
                     ("--rust-bin", "$bindFixture", "--only", "security-remote-open", "security-remote-auth", "--out"),
                     ("--record",))
-    assert not any(words[0] == "cargo" for words in security)
     override = commands(rust["Daemon override build configurations"]["run"])
     for release in (False, True):
         required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
@@ -362,11 +327,10 @@ def check_executable_coverage(jobs):
     assert "rust/target/release" in embedding["run"]
     assert not any(words[:2] == ["cargo", "build"] for words in invocations)
 
-    principal = parity["Principal store differential and golden harness"]
+    principal = parity["Principal store golden harness"]
     invocations = commands(principal["run"])
-    for mode in ("live", "golden"):
-        require_command(invocations, ("python", "rust/daemon/harness/principals.py", mode),
-                        ("--rust-bin", "--out"), ("--record", "--mutants"))
+    require_command(invocations, ("python", "rust/daemon/harness/principals.py", "golden"),
+                    ("--rust-bin", "--out"), ("--record", "--mutants"))
     lines = [line.strip() for line in principal["run"].splitlines()]
     assert [line for line in lines if re.match(r"\$binaryName\s*=", line)] == [
         "$binaryName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }"]
@@ -391,10 +355,10 @@ def check_executable_coverage(jobs):
     assert steps.index(parity["Prepare disposable PostgreSQL for CLI lease row"]) < steps.index(principal)
     upload = next(step for step in steps if step.get("name") == "Retain principal store outcomes")
     assert upload["if"] == "always() && matrix.suite == 'cli-store'"
-    graph = commands(parity["Graph store differential and recorded oracle"]["run"])
+    graph = commands(parity["Graph store golden harness"]["run"])
     row_parser = argparse.ArgumentParser(add_help=False)
     row_parser.add_argument("--row", choices=["store", "read"], default="store")
-    for mode in ("live", "golden"):
+    for mode in ("golden",):
         for row in ("store", "read"):
             matches = [words for words in graph if words[:3] ==
                        ["python", "rust/daemon/harness/graph_store.py", mode]]
@@ -407,25 +371,6 @@ def check_executable_coverage(jobs):
     require_command(graph, ("python", "rust/daemon/harness/test_graph_store_harness.py"))
     require_command(graph, ("python", "rust/daemon/harness/test_graph_read_compare.py"))
 
-    script = parity["Run unchanged candidates and differential judges"]["run"]
-    invocations = commands(script)
-    files = ("test_cli_wait_mail.py", "test_wait_mail_phase2d_native.py", "test_wait_mail_reduction_native.py",
-             "test_wait_mail_producer_native.py", "test_wait_mail_candidate_contract.py",
-             "test_wait_mail_measurement.py", "test_wait_mail_listener_events.py")
-    require_command(invocations, ("$oraclePython", "-m", "pytest"),
-                    tuple("evals/rust_port/" + name for name in files), PYTEST_FILTERS)
-    for module, flag in (("lease_headers", "--candidate"), ("cli_argv", "--candidate-json")):
-        require_command(invocations, ("$oraclePython", "-m", "evals.rust_port." + module), (flag,))
-    for variable, module in (("$judgeBootstrap", "phase1_ci"), ("$phase2Bootstrap", "cli_dispatch"),
-                             ("$processBootstrap", "cli_process")):
-        assert f'module_command("evals.rust_port.{module}"' in script
-        require_command(invocations, ("$oraclePython", "-c", variable),
-                        ("--oracle-root", "--candidate-json", "--candidate-root", "--out"))
-    process = next(words for words in invocations if words[:3] == ["$oraclePython", "-c", "$processBootstrap"])
-    modes = process[process.index("--modes") + 1:]
-    modes = modes[:next((index for index, word in enumerate(modes) if word.startswith("--")), len(modes))]
-    assert {"help", "version", "lease"} <= set(modes)
-
 
 def workflow():
     """rust.yml as the nightly runs it: the scope-chosen parity matrix
@@ -434,36 +379,6 @@ def workflow():
     from parity_scope import resolve
     return resolve(yaml.safe_load(WORKFLOW.read_text(encoding="utf-8")))
 
-
-
-def test_h5_step_budgets_fit_their_jobs():
-    shards = {shard["suite"]: shard for shard in workflow()["jobs"]["parity-checks"]["strategy"]["matrix"]["include"]
-              if shard["suite"] in H5_SUITES}
-    assert set(shards) == set(H5_SUITES)
-    for name, shard in shards.items():
-        # Checkout, toolchain, pip, artifacts and PostgreSQL prep take about
-        # 15 minutes of the job on Linux, so the h5 step must leave that much.
-        assert 0 < shard["h5_timeout"] and shard["h5_timeout"] + 15 <= shard["job_timeout"], name
-        assert 0 < shard["h5_windows_timeout"] < shard["job_timeout"], name
-    # Hosted ubuntu 2026-10-12: the audit step ran about 5 minutes and hit a
-    # 4-minute budget three times with every compared case matching.
-    assert shards["h5-audit"]["h5_timeout"] >= 10
-
-
-def test_h5_linux_step_budgets_cover_the_slow_hosted_runner():
-    # Master f82141c4's ubuntu runner ran 4.6-5.4x slower than usual and
-    # timed out h5-graph-mutants with every finished mutant caught, so each
-    # Linux step allows five times its hosted p99, and its job keeps the 15
-    # minutes test_h5_step_budgets_fit_their_jobs asks for around it.
-    hosted = json.loads((ROOT / "rust/ci/h5_linux_measurements.json").read_text(encoding="utf-8"))
-    suites = hosted["hosted_step_distribution"]["suites"]
-    assert set(suites) == set(H5_SUITES)
-    shards = {shard["suite"]: shard for shard in workflow()["jobs"]["parity-checks"]["strategy"]["matrix"]["include"]
-              if shard["suite"] in H5_SUITES}
-    slow = hosted["hosted_step_distribution"]["slow_runner"]
-    assert shards[slow["suite"]]["h5_timeout"] > slow["projected_step_minutes"]
-    for name, cells in suites.items():
-        assert shards[name]["h5_timeout"] * 60 >= 5 * cells["linux"]["p99_s"], name
 
 
 def test_shards_cover_both_systems_and_build_once():
@@ -502,7 +417,8 @@ def test_shards_cover_both_systems_and_build_once():
     assert produced["with"]["name"] == consumed["with"]["name"] == "daemon-bind-fixture-${{ runner.os }}"
     assert produced["with"]["if-no-files-found"] == "error"
     assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
-    assert consumed["if"] == "matrix.suite == 'cli-live' || matrix.suite == 'h5-w1a'"
+    # Only the kept live security checks bind with it since the freeze.
+    assert consumed["if"] == "matrix.suite == 'cli-store'"
     assert consumed["with"]["path"] == "rust/target/debug"
     assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == PARITY_SUITES
     builds = [step for name in ("rust", "candidate", "parity-checks")
@@ -545,12 +461,16 @@ def test_original_checks_remain_gated_on_the_expected_shards():
     check_executable_coverage(jobs)
 
 
-def test_capture_remains_separate_from_ordinary_ci():
-    capture = workflow()["jobs"]["capture-windows"]
-    assert capture["name"] == "Capture / Windows / wait-mail"
-    assert capture["runs-on"] == "windows-latest"
-    assert capture["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'wait-mail'"
-    assert "needs" not in capture
+def test_the_live_comparison_jobs_and_dispatch_modes_are_gone():
+    # The Python freeze (14 November 2026): the frozen judge probes, the
+    # Windows live job, the nightly body evidence and the wait-mail capture
+    # compared the candidate with a live Python oracle, and left CI.
+    raw = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    for name in RETIRED_JOBS:
+        assert name not in raw["jobs"], name
+    inputs = raw[True]["workflow_dispatch"]["inputs"]
+    assert inputs["mode"]["options"] == ["ci", "stress"]
+    assert not {"case_list", "frozen_head"} & set(inputs)
 
 
 def test_artifact_is_from_this_run_and_executable_on_linux():
@@ -586,7 +506,7 @@ def test_artifact_is_from_this_run_and_executable_on_linux():
     assert "Build embedding candidate" not in names
     assert {"rust/target/release/pseudolife-daemon-static", "rust/target/release/pseudolife-daemon-static.exe"} <= set(upload["with"]["path"].splitlines())
     assert "Copy-Item -LiteralPath" in preserved["run"]
-    static = next(s for s in job["steps"] if s.get("name") == "Daemon static HTTP parity")
+    static = next(s for s in job["steps"] if s.get("name") == "Daemon static HTTP golden")
     assert "'pseudolife-daemon-static.exe'" in static["run"]
     assert "'pseudolife-daemon-static'" in static["run"]
 
@@ -625,6 +545,10 @@ GATE_NEEDS = ["scope", "rust", "candidate", "parity-checks", "source-mutants"]
 CANCELLED_IF = "${{ contains(needs.*.result, 'cancelled') }}"
 CANCELLED_STEP = {"name": "A needed job was cancelled", "if": CANCELLED_IF, "run": "exit 1"}
 VERDICT_IF = "${{ !contains(needs.*.result, 'cancelled') }}"
+# The schedules: weekday nightlies, and the Sunday weekly run that also runs
+# the CLI source mutants (and so must not skip them).
+NIGHTLY = "23 3 * * 1-6"
+WEEKLY = "23 3 * * 0"
 
 
 def gate_steps(jobs=None):
@@ -635,10 +559,11 @@ def gate_steps(jobs=None):
     return steps[0], steps[1]
 
 
-def run_verdict(needs, event):
+def run_verdict(needs, event, schedule=WEEKLY):
     import os
     return subprocess.run(["pwsh", "-NoProfile", "-Command", gate_steps()[1]["run"]],
-                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
+                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event,
+                                   GATE_SCHEDULE=schedule if event == "schedule" else ""),
                           capture_output=True, text=True)
 
 
@@ -700,16 +625,51 @@ def test_required_parity_gate_fails_closed(result, dependency, event):
     assert gate["needs"] == GATE_NEEDS
     assert gate["if"].startswith("always() &&")
     step = gate_steps()[1]
-    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}"}
-    import os
+    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}",
+                           "GATE_SCHEDULE": "${{ github.event.schedule }}"}
     needs = {name: {"result": "success"} for name in gate["needs"]}
     needs[dependency]["result"] = result
-    executed = subprocess.run(["pwsh", "-NoProfile", "-Command", step["run"]],
-                              env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
-                              capture_output=True, text=True)
+    # On the Sunday weekly run (the schedule run_verdict passes by default).
+    executed = run_verdict(needs, event)
     accepted = result == "success" or (event in ("pull_request", "merge_group", "push")
                                        and dependency == "source-mutants" and result == "skipped")
     assert executed.returncode == (0 if accepted else 1), executed.stderr
+
+
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
+def test_a_weekday_nightly_may_skip_only_the_source_mutants(result):
+    # Source mutants are weekly since the Python freeze: a weekday nightly
+    # skips them, but never fails or cancels them, and skips nothing else.
+    needs = {name: {"result": "success"} for name in GATE_NEEDS}
+    needs["source-mutants"]["result"] = result
+    accepted = result in ("success", "skipped")
+    assert run_verdict(needs, "schedule", NIGHTLY).returncode == (0 if accepted else 1)
+    assert run_verdict(needs, "schedule", WEEKLY).returncode == (0 if result == "success" else 1)
+    needs["source-mutants"]["result"] = "skipped"
+    for other in ("rust", "candidate", "parity-checks"):
+        skipped = copy.deepcopy(needs)
+        skipped[other]["result"] = "skipped"
+        assert run_verdict(skipped, "schedule", NIGHTLY).returncode == 1, other
+
+
+@pytest.mark.parametrize("event", ["push", "pull_request", "merge_group", "schedule", "workflow_dispatch"])
+@pytest.mark.parametrize("parity_any", ["false", "true", "", None])
+def test_only_a_push_with_no_parity_pairs_left_skips_the_parity_checks(event, parity_any):
+    # A master push whose merged batch passed every pair gets an empty matrix
+    # (parity_scope's parity_any=false), so parity-checks is skipped.
+    needs = {name: {"result": "success"} for name in GATE_NEEDS}
+    needs["scope"]["outputs"] = {"parity_any": parity_any}
+    needs["parity-checks"]["result"] = "skipped"
+    if event != "push":
+        needs["source-mutants"]["result"] = "success"
+    accepted = event == "push" and parity_any == "false"
+    assert run_verdict(needs, event).returncode == (0 if accepted else 1)
+    # It never excuses a failed or cancelled parity job, nor a skipped Rust job.
+    needs["parity-checks"]["result"] = "failure"
+    assert run_verdict(needs, event).returncode == 1
+    needs["parity-checks"]["result"] = "skipped"
+    needs["rust"]["result"] = "skipped"
+    assert run_verdict(needs, event).returncode == 1
 
 
 DOCS_ONLY_SKIP = {"scope": {"result": "success", "outputs": {"rust": "false"}},
@@ -1046,14 +1006,30 @@ def test_image_job_proves_cached_models_without_network_and_retains_result():
     assert upload["with"]["if-no-files-found"] == "error"
 
 
-@pytest.mark.parametrize("event, runs", [("pull_request", False), ("merge_group", False), ("push", False),
-                                         ("schedule", True), ("workflow_dispatch", True)])
-def test_source_mutants_run_nightly_and_on_manual_ci_only(event, runs):
+@pytest.mark.parametrize("event, schedule, runs", [
+    ("pull_request", "", False), ("merge_group", "", False), ("push", "", False),
+    ("schedule", NIGHTLY, False), ("schedule", WEEKLY, True), ("workflow_dispatch", "", True)])
+def test_source_mutants_run_weekly_and_on_manual_ci_only(event, schedule, runs):
+    from ci_budget import Evaluator, condition_text
+
+    class Event(Evaluator):
+        def lookup(self, path):
+            if path == ["github", "event", "schedule"]:
+                return schedule
+            if path == ["inputs", "mode"]:
+                return "ci"
+            if path == ["needs", "candidate", "result"]:
+                return "success"
+            return super().lookup(path)
+
+    raw = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert raw[True]["schedule"] == [{"cron": NIGHTLY}, {"cron": WEEKLY}]
     condition = workflow()["jobs"]["source-mutants"]["if"]
-    assert condition == ("${{ !cancelled() && (github.event_name == 'schedule' || "
+    assert condition == ("${{ !cancelled() && ((github.event_name == 'schedule' && github.event.schedule == "
+                         f"'{WEEKLY}') || "
                          "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
                          "&& needs.candidate.result == 'success' }}")
-    assert (f"'{event}'" in condition) == runs
+    assert Event(event, [], set()).run(condition_text(condition)) is runs
 
 
 def test_scope_gates_every_heavy_job_and_fails_safe():
@@ -1066,7 +1042,7 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
                                 "parity_selfhosted": "${{ steps.parity.outputs.selfhosted }}",
                                 "batch_passed": "${{ steps.batch.outputs.passed }}",
                                 "push_passed": "${{ steps.push.outputs.passed }}",
-                                "oracle_base": "${{ steps.ci_oracle.outputs.oracle_base }}",
+                                "parity_any": "${{ steps.parity.outputs.parity_any }}",
                                 # The Linux pool's exact-case batch ref (test_linux_pool_workflow.py).
                                 "integrate": "${{ steps.trusted.outputs.integrate }}"}
     checkout = next(s for s in scope["steps"] if s.get("uses") == "actions/checkout@v4")
@@ -1106,13 +1082,14 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     assert jobs["candidate-harness"]["if"] == jobs["candidate"]["if"]
     assert jobs["fixtures"]["if"] == gated % ("inputs.mode == 'ci'", " && needs.scope.outputs.full != 'false'")
     assert "rust" in jobs["parity"]["needs"]
-    assert jobs["source-mutants"]["needs"] == ["scope", "candidate"]
+    assert jobs["source-mutants"]["needs"] == ["candidate"]
     assert jobs["source-mutants"]["if"].startswith("${{ !cancelled() && ")
     assert jobs["source-mutants"]["if"].endswith("&& needs.candidate.result == 'success' }}")
     assert jobs["parity"]["needs"][0] == "scope"
 
 
-@pytest.mark.parametrize("name", ["CLI lease differential harness", "Daemon background pruning golden"])
+@pytest.mark.parametrize("name", ["CLI lease golden harness", "Daemon background pruning golden",
+                                  "Daemon security admission golden", "Daemon body admission golden"])
 def test_coverage_guard_rejects_a_removed_check(monkeypatch, name):
     changed = copy.deepcopy(workflow())
     steps = changed["jobs"]["parity-checks"]["steps"]
@@ -1125,30 +1102,30 @@ def test_coverage_guard_rejects_a_removed_check(monkeypatch, name):
 def test_coverage_guard_rejects_an_ungated_w1c_step(monkeypatch):
     changed = copy.deepcopy(workflow())
     step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
-                if s.get("name") == "CLI W1-C differential harness")
+                if s.get("name") == "CLI W1-C golden harness")
     del step["if"]
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
 
 
-@pytest.mark.parametrize("condition", [None, "matrix.suite == 'eval'", "matrix.suite == 'judges'"])
+@pytest.mark.parametrize("condition", [None, "matrix.suite == 'eval'", "matrix.suite == 'cli'"])
 def test_principal_store_requires_the_postgres_shard(monkeypatch, condition):
     changed = copy.deepcopy(workflow())
     step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
-                if s.get("name") == "Principal store differential and golden harness")
+                if s.get("name") == "Principal store golden harness")
     step["if"] = condition
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
     with pytest.raises(AssertionError):
         test_original_checks_remain_gated_on_the_expected_shards()
 
 
-@pytest.mark.parametrize("mode", ["live", "golden"])
+@pytest.mark.parametrize("mode", ["golden"])
 @pytest.mark.parametrize("row", ["store", "read"])
 def test_graph_coverage_rejects_each_removed_invocation(mode, row):
     jobs = copy.deepcopy(workflow()["jobs"])
     step = next(s for s in jobs["parity-checks"]["steps"]
-                if s.get("name") == "Graph store differential and recorded oracle")
+                if s.get("name") == "Graph store golden harness")
     prefix = f"python rust/daemon/harness/graph_store.py {mode} "
     lines = step["run"].splitlines()
     removed = [line for line in lines if line.strip().startswith(prefix)
@@ -1163,7 +1140,7 @@ def test_graph_coverage_rejects_each_removed_invocation(mode, row):
 def test_graph_coverage_rejects_store_commands_selecting_read(selector):
     jobs = copy.deepcopy(workflow()["jobs"])
     step = next(s for s in jobs["parity-checks"]["steps"]
-                if s.get("name") == "Graph store differential and recorded oracle")
+                if s.get("name") == "Graph store golden harness")
     step["run"] = "\n".join(line + " " + selector if
                             line.strip().startswith("python rust/daemon/harness/graph_store.py ")
                             and "--row read" not in line else line
@@ -1178,7 +1155,7 @@ def test_graph_postgres_initialization_pins_linux_locale():
     assert step["env"]["LANG"] == "${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}"
     assert step["env"]["LC_ALL"] == step["env"]["LANG"]
     graph = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
-                 if s.get("name") == "Graph store differential and recorded oracle")
+                 if s.get("name") == "Graph store golden harness")
     assert graph["env"]["PL_GRAPH_REQUIRE_RECORDED_LOCALE"] == "${{ runner.os == 'Linux' && '1' || '0' }}"
 
 
@@ -1196,7 +1173,7 @@ def test_daemon_artifact_retains_both_harness_features(monkeypatch, features):
 
 
 @pytest.mark.parametrize("name, old, new", [
-    ("Run every eval harness test", "--junitxml", "--durations=10 --junitxml"),
+    ("Offline W2-D search harness regressions", "--junitxml", "--durations=10 --junitxml"),
     ("CLI differential harness", "--row episode", "--row episode --row audit"),
 ])
 def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
@@ -1212,11 +1189,19 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml.py", ""),
     ("Compare sent YAML startup with PyYAML", "rust/daemon/harness/test_sent_yaml_mutants.py", ""),
     ("Check generated daemon schema", "--check", ""),
-    ("Daemon security admission parity", "security-refusals", ""),
-    ("Daemon security admission parity", "security-refusals --out", "security-refusals --no-refusals --out"),
-    ("Daemon security admission parity", "--mutants security-origin-open", "--mutants"),
-    ("Daemon security admission parity", "rust/daemon/harness/test_security_cases.py", ""),
-    ("Daemon security admission parity", "security-remote-open", ""),
+    ("Daemon security admission golden", "security-terminal-byte", ""),
+    ("Daemon security admission golden", "run.py golden", "run.py live"),
+    ("Daemon security admission golden", "rust/daemon/harness/test_security_cases.py", ""),
+    ("Daemon security live checks without a Rust test", "security-refusals", ""),
+    ("Daemon security live checks without a Rust test", "security-remote-auth", ""),
+    ("Daemon security live checks without a Rust test", "$bindFixture --only", "$candidate --only"),
+    ("Daemon body admission golden", "body-text-window", ""),
+    ("Daemon body admission golden", "run.py golden", "run.py mutants"),
+    ("Daemon static HTTP golden", "static-root-link", ""),
+    ("Daemon static HTTP golden", "run.py golden", "run.py live"),
+    ("CLI lease golden harness", "--golden", ""),
+    ("CLI lease operator golden harness", "--golden", ""),
+    ("CLI lease operator golden harness", "rust/cli_harness/test_lease_operator.py", ""),
     ("Check generated daemon schema", "python rust/daemon/harness/gen_schema_sql.py", "# python rust/daemon/harness/gen_schema_sql.py"),
     ("Daemon resident startup parity", "--no-build", ""),
     ("Daemon resident startup parity", "--rust-test-bin $candidate", ""),
@@ -1228,35 +1213,31 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("CLI differential harness", "rust/cli_harness/test_update_transactions.py", ""),
     ("CLI differential harness", "rust/cli_harness/test_update_wrappers_native.py", ""),
     ("CLI differential harness", "--row update", ""),
-    ("CLI differential harness live arms", "--row update", ""),
     ("CLI differential harness", "$env:PSEUDOLIFE_RUST_BINARY = $candidate", "$env:PSEUDOLIFE_RUST_BINARY = 'debug-only'"),
     ("CLI differential harness", "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '1'", "$env:PSEUDOLIFE_BACKUP_NATIVE_REQUIRED = '0'"),
-    ("Graph store differential and recorded oracle", "python rust/daemon/harness/graph_store.py live", "# python rust/daemon/harness/graph_store.py live"),
+    ("Graph store golden harness", "python rust/daemon/harness/graph_store.py golden", "# python rust/daemon/harness/graph_store.py golden"),
+    ("Graph store golden harness", "graph_store.py golden --row read", "graph_store.py live --row read"),
     ("CLI differential harness", "--golden", ""),
-    ("Run unchanged candidates and differential judges", "--modes help version lease", "--modes help version"),
-    ("Run unchanged candidates and differential judges", "& $oraclePython -c $judgeBootstrap", "# & $oraclePython -c $judgeBootstrap"),
-    ("Run every eval harness test", "evals/rust_baseline", ""),
     ("Clippy", "--all-targets", ""),
     ("Check write-path harness targets", "harness,mutants", "mutants"),
     ("Check write-path harness targets", "--all-targets", ""),
     ("Nextest without default features", "--no-default-features", ""),
     ("Nextest without default features", "--no-default-features", "--no-default-features --features codex-delivery"),
     ("Nextest", "cargo nextest run", "cargo --version #"),
-    ("Principal store differential and golden harness", "principals.py live", "principals.py oracle"),
-    ("Principal store differential and golden harness", "principals.py golden", "principals.py live"),
-    ("Principal store differential and golden harness", "rust/target/release", "rust/target/debug"),
+    ("Principal store golden harness", "principals.py golden", "principals.py oracle"),
+    ("Principal store golden harness", "principals.py golden", "principals.py live"),
+    ("Principal store golden harness", "rust/target/release", "rust/target/debug"),
     ("Offline embedding golden and mutant row", "--fixture", ""),
     ("Offline embedding golden and mutant row", "--golden", "--record"),
     ("Offline embedding golden and mutant row", "rust/daemon/harness/test_embedding.py", ""),
     ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_controls.py", ""),
     ("Offline W2-D search harness regressions", "rust/daemon/harness/test_w2d_namespace.py", ""),
     ("Offline W2-D search harness regressions", "rust/daemon/harness/test_config_knobs_golden.py", ""),
-    ("CLI W1-C differential harness", "$rows = @(${{ matrix.w1c_rows }})", "$rows = @('move')"),
-    ("CLI W1-C differential harness", "python rust/cli_harness @golden",
+    ("CLI W1-C golden harness", "$rows = @(${{ matrix.w1c_rows }})", "$rows = @('move')"),
+    ("CLI W1-C golden harness", "python rust/cli_harness @golden",
      "# python rust/cli_harness @golden"),
-    ("CLI W1-C differential harness", "@golden --golden", "@golden"),
-    ("CLI W1-C differential harness", "@live --candidate", "@live --skip-bank --candidate"),
-    ("CLI W1-C differential harness", "$golden = $replayed |", "$golden = @('move') |"),
+    ("CLI W1-C golden harness", "@golden --golden", "@golden"),
+    ("CLI W1-C golden harness", "$golden = $rows |", "$golden = @('move') |"),
     ("Daemon background pruning golden", "rust/daemon/harness/test_background_harness.py", ""),
     ("Daemon background pruning golden", "sweep-pruning", "session-reap"),
     ("Daemon background pruning golden", "run.py golden", "run.py golden --record"),
@@ -1275,11 +1256,14 @@ def test_coverage_contract_rejects_reduced_commands(monkeypatch, name, old, new)
 def test_dream_reuses_candidate_and_checks_cancel_control():
     jobs = workflow()["jobs"]
     step = next(s for s in jobs["parity-checks"]["steps"]
-                if s.get("name") == "Dream cursor differential harness")
+                if s.get("name") == "Dream cursor golden harness")
     invocations = commands(step["run"])
-    for mode in ("golden", "mutants"):
-        require_command(invocations, ("python", "rust/daemon/harness/dream_cursors.py", mode),
-                        ("--ci-fixture", "--rust-bin"))
+    require_command(invocations, ("python", "rust/daemon/harness/dream_cursors.py", "golden"),
+                    ("--ci-fixture", "--rust-bin"))
+    # Its eight controls compared each mutant with the Python oracle live,
+    # and left with the Python freeze (14 November 2026).
+    assert not [words for words in invocations
+                if words[:2] == ["python", "rust/daemon/harness/dream_cursors.py"] and words[2] != "golden"]
     require_command(invocations, ("python", "-m", "pytest"),
                     ("rust/daemon/harness/test_dream_cursors.py",
                      "rust/daemon/harness/test_dream_cursor_cancel.py"), PYTEST_FILTERS)
@@ -1307,7 +1291,7 @@ def test_dream_reuses_candidate_and_checks_cancel_control():
 def test_dream_control_survives_runner_exit_wrapper(tmp_path, control_exit, message, accepted):
     import os
     step = next(s for s in workflow()["jobs"]["parity-checks"]["steps"]
-                if s.get("name") == "Dream cursor differential harness")
+                if s.get("name") == "Dream cursor golden harness")
     # Match the hosted pwsh wrapper, including its final native exit status.
     bootstrap = r'''$ErrorActionPreference = 'stop'
 function Resolve-Path { [pscustomobject]@{Path='fixture-candidate'} }
@@ -1330,7 +1314,6 @@ function python {
 
 @pytest.mark.parametrize("old, new", [
     ("--rust-bin $candidate", "--rust-bin stale-candidate"),
-    ("principals.py live --rust-bin $candidate", "principals.py live --rust-bin stale-candidate"),
     ("principals.py golden --rust-bin $candidate", "principals.py golden --rust-bin stale-candidate"),
     ("$candidate = (Resolve-Path", "$unused = (Resolve-Path"),
     ("'pseudolife-daemon.exe'", "'stale-daemon.exe'"),
@@ -1339,7 +1322,7 @@ function python {
 def test_principal_commands_use_the_downloaded_candidate(monkeypatch, old, new):
     changed = copy.deepcopy(workflow())
     step = next(s for s in changed["jobs"]["parity-checks"]["steps"]
-                if s.get("name") == "Principal store differential and golden harness")
+                if s.get("name") == "Principal store golden harness")
     assert old in step["run"]
     step["run"] = step["run"].replace(old, new)
     monkeypatch.setattr(__import__(__name__, fromlist=["workflow"]), "workflow", lambda: changed)
@@ -1370,7 +1353,7 @@ def test_w1c_rows_run_once_on_parallel_suites():
     assert matrix["suite"] == PARITY_SUITES
     assert matrix["os"] == SYSTEMS
     step = next(s for s in jobs["parity-checks"]["steps"]
-                if s.get("name") == "CLI W1-C differential harness")
+                if s.get("name") == "CLI W1-C golden harness")
     assert step["if"] == "startsWith(matrix.suite, 'w1c-')"
     assert jobs["parity"]["needs"] == GATE_NEEDS
     check_executable_coverage(jobs)
@@ -1401,10 +1384,9 @@ def test_w1c_coverage_rejects_a_missing_suite(suite):
 
 
 @pytest.mark.parametrize("name, condition", [
-    ("CLI W1-C differential harness", "matrix.suite == 'cli'"),
+    ("CLI W1-C golden harness", "matrix.suite == 'cli'"),
     ("Prepare disposable PostgreSQL for W1-C rows", "matrix.suite == 'cli'"),
     ("Build the test_login container image", "runner.os == 'Linux'"),
-    ("Record the Linux test_login golden while it is absent", "runner.os == 'Linux'"),
     ("Retain CLI harness summaries", "always() && matrix.suite == 'cli'"),
 ])
 def test_w1c_coverage_rejects_changed_routing(name, condition):
@@ -1417,12 +1399,11 @@ def test_w1c_coverage_rejects_changed_routing(name, condition):
 
 @pytest.mark.parametrize("suite", W1C_SUITES)
 @pytest.mark.parametrize("windows", [False, True])
-@pytest.mark.parametrize("golden_exists", [False, True])
-def test_w1c_powershell_passes_the_same_rows_live_and_golden(tmp_path, suite, windows, golden_exists):
+def test_w1c_powershell_replays_every_row_of_its_shard(tmp_path, suite, windows):
     import os
     job = workflow()["jobs"]["parity-checks"]
     shard = next(s for s in job["strategy"]["matrix"]["include"] if s["suite"] == suite)
-    step = next(s for s in job["steps"] if s.get("name") == "CLI W1-C differential harness")
+    step = next(s for s in job["steps"] if s.get("name") == "CLI W1-C golden harness")
     script = step["run"].replace("${{ matrix.w1c_rows }}", shard["w1c_rows"])
     script = script.replace("$IsWindows", "$fixtureWindows")
     script = script.replace("$IsLinux", "(-not $fixtureWindows)")
@@ -1430,17 +1411,15 @@ def test_w1c_powershell_passes_the_same_rows_live_and_golden(tmp_path, suite, wi
 $fixtureWindows = $env:PL_FIXTURE_WINDOWS -eq '1'
 $global:calls = @()
 function Resolve-Path { [pscustomobject]@{Path='fixture-candidate'} }
-function Test-Path { $env:PL_FIXTURE_GOLDEN -eq '1' }
 function python {
     $global:calls += ,@($args)
     $global:LASTEXITCODE = 0
 }
 '''
-    # Replace the step's final exit only to observe both standalone calls.
+    # Replace the step's final exit only to observe the standalone calls.
     script = script.removesuffix("exit $LASTEXITCODE\n")
     script += "ConvertTo-Json -InputObject $global:calls -Compress -Depth 5\n"
-    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), PL_FIXTURE_WINDOWS=str(int(windows)),
-               PL_FIXTURE_GOLDEN=str(int(golden_exists)))
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), PL_FIXTURE_WINDOWS=str(int(windows)))
     result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command", bootstrap + script],
                             env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1458,13 +1437,13 @@ function python {
                          "test_maintainer_setup_native.py"):
             assert f"rust/cli_harness/{required}" in terminals[-1]
     calls = [call for call in calls if call not in terminals]
-    assert len(calls) == 2
-    for call, golden in zip(calls, (False, True)):
-        expected = [row for row in rows if not golden or row != "test_login" or golden_exists]
-        actual = [call[i + 1] for i, word in enumerate(call[:-1]) if word == "--row"]
-        assert actual == expected
-        assert ("--golden" in call) == golden
-        assert call[call.index("--candidate") + 1] == "fixture-candidate"
+    # One golden pass over every row of the shard; no live pass since the
+    # Python freeze (14 November 2026).
+    assert len(calls) == 1
+    call = calls[0]
+    assert [call[i + 1] for i, word in enumerate(call[:-1]) if word == "--row"] == rows
+    assert "--golden" in call
+    assert call[call.index("--candidate") + 1] == "fixture-candidate"
 
 
 def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
@@ -1472,8 +1451,8 @@ def test_timeout_reduction_is_limited_to_cli_and_new_w1c_suites():
     assert job["timeout-minutes"] == "${{ matrix.job_timeout || 210 }}"
     budgets = {shard["suite"]: shard.get("job_timeout")
                for shard in job["strategy"]["matrix"]["include"]}
-    # Only eval and judges keep the old 210-minute fallback.
-    assert set(PARITY_SUITES) - set(budgets) == {"eval", "judges"}
+    # Only eval keeps the old 210-minute fallback.
+    assert set(PARITY_SUITES) - set(budgets) == {"eval"}
 
 
 def test_cli_budgets_preserve_separate_startup_part_limits():
@@ -1503,9 +1482,8 @@ def test_cli_budgets_preserve_separate_startup_part_limits():
     assert first["timeout-minutes"] == second["timeout-minutes"] == 26
     assert first["if"] == second["if"] == "${{ !cancelled() && matrix.suite == 'cli-startup' && steps.startup_setup.outcome == 'success' }}"
     pin = next(s for s in steps if s.get("name") == "Keep the oracle's pydantic pin for the startup steps")
-    mcp = next(s for s in steps if s.get("name") == "Daemon MCP live parity and controls")
     for package in ("pydantic==2.14.0", "pydantic-core==2.50.0"):
-        assert package in pin["run"] and package in mcp["run"]
+        assert package in pin["run"]
     names = [step.get("name") for step in steps]
     assert names.index("Daemon schema startup parity") < names.index("Daemon resident startup parity")
     assert names.index("Daemon resident startup parity") < names.index(second["name"])
@@ -1596,31 +1574,25 @@ GATE_STEP = "Yield to this machine's full suite"
 VENV_STEP = "Give the shard its own Python environment"
 
 
-def test_selfhosted_windows_gets_measured_security_and_process_test_margins():
-    # 2026-11-02/03: the Windows workers ran the security step past its ten
-    # minutes and the judges' process tests past 240 s while both self-hosted
-    # lanes shared the host; hosted Windows used at most 470 s and 114 s.
-    # Only the self-hosted Windows lane gets the wider guards.
+def test_no_job_carries_the_judges_process_test_margin():
+    # The judges' pinned process tests and their self-hosted margin left CI
+    # with the Python freeze (14 November 2026); the security golden replay
+    # keeps the hosted ten minutes on every lane.
     jobs = workflow()["jobs"]
-    hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
-    security = next(step for step in hosted["steps"] if step.get("name") == "Daemon security admission parity")
-    assert security["timeout-minutes"] == (
-        "${{ runner.environment == 'self-hosted' && runner.os == 'Windows' && 20 || 10 }}")
-    assert lane["env"]["PARITY_PROCESS_TEST_TIMEOUT"] == "${{ matrix.runner == 'windows' && '480' || '' }}"
-    for name, job in jobs.items():
-        if name != "parity-selfhosted":
-            assert "PARITY_PROCESS_TEST_TIMEOUT" not in (job.get("env") or {}), name
-    assert "PARITY_PROCESS_TEST_TIMEOUT" not in WORKFLOW.read_text(encoding="utf-8").split("parity-selfhosted:", 1)[0]
+    security = next(step for step in jobs["parity-checks"]["steps"]
+                    if step.get("name") == "Daemon security admission golden")
+    assert security["timeout-minutes"] == 10
+    assert "PARITY_PROCESS_TEST_TIMEOUT" not in WORKFLOW.read_text(encoding="utf-8")
 
 
 def test_selfhosted_lane_runs_the_hosted_shards_unchanged():
     text = WORKFLOW.read_text(encoding="utf-8")
     # Anchors, not a copy: a step or shard added to the hosted matrix reaches
     # the self-hosted lane in the same edit.
-    # parity-selfhosted and parity-live both reuse the hosted steps; the
-    # self-hosted lane takes the same scope-chosen matrix (every suite on the
-    # nightly and manual CI, its only events).
-    assert text.count("steps: *parity_steps") == 2
+    # parity-selfhosted reuses the hosted steps and takes the same
+    # scope-chosen matrix (every suite on the nightly and manual CI, its only
+    # events).
+    assert text.count("steps: *parity_steps") == 1
     jobs = workflow()["jobs"]
     hosted, lane = jobs["parity-checks"], jobs["parity-selfhosted"]
     assert lane["steps"] == hosted["steps"]
@@ -1671,9 +1643,6 @@ def test_selfhosted_lane_never_touches_a_required_check():
 def test_both_lanes_upload_under_distinct_names():
     jobs = workflow()["jobs"]
     assert jobs["parity-checks"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
-    # Hosted Windows runs cli-live only in parity-live, so its uploads
-    # cannot collide with a parity-checks shard's.
-    assert jobs["parity-live"]["env"]["PARITY_ARTIFACT_PREFIX"] == ""
     assert jobs["parity-selfhosted"]["env"]["PARITY_ARTIFACT_PREFIX"] == "self-hosted-"
     uploads = [step for step in jobs["parity-checks"]["steps"]
                if step.get("uses") == "actions/upload-artifact@v4"]
@@ -1811,59 +1780,6 @@ def test_selfhosted_linux_temp_files_use_the_job_work_drive(tmp_path, system):
 
 
 # --- the required gate holds only deterministic Windows work ---
-
-# The nightly and manual CI only: since 2026-10-24 (maintainer decision) a
-# master push no longer spends a Windows runner on this non-gating job.
-LIVE_EVENTS = ("${{ !cancelled() && (github.event_name == 'schedule' || "
-               "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
-               "&& needs.candidate.result == 'success' && needs.candidate-harness.result == 'success' "
-               "&& needs.fixtures.result == 'success' }}")
-
-
-def test_live_comparisons_run_in_their_own_suite():
-    steps = {step.get("name"): step for step in workflow()["jobs"]["parity-checks"]["steps"]}
-    for name in LIVE_CHECKS:
-        assert steps[name]["if"] == f"matrix.suite == '{LIVE_SUITE}'", name
-    # No other check routes to the live suite: everything else Windows runs
-    # under the required gate is a build, a self-test, a golden or a replay.
-    routed = {name for name, step in steps.items()
-              if LIVE_SUITE in step.get("if", "") and step.get("run")}
-    assert routed == set(LIVE_CHECKS)
-    # The golden arm of the same rows stays in the required cli shard.
-    golden = commands(steps["CLI differential harness"]["run"])
-    assert not [words for words in golden if words[:2] == ["python", "rust/cli_harness"]
-                and "--golden" not in words]
-
-
-def test_linux_requires_the_live_comparisons_and_windows_reports_them():
-    jobs = workflow()["jobs"]
-    matrix = jobs["parity-checks"]["strategy"]["matrix"]
-    assert LIVE_SUITE in matrix["suite"] and "ubuntu-latest" in matrix["os"]
-    assert matrix["exclude"] == STATIC_EXCLUDE
-    live = jobs["parity-live"]
-    assert live["strategy"]["matrix"] == {"os": ["windows-latest"], "suite": [LIVE_SUITE]}
-    assert live["strategy"]["fail-fast"] is False
-    assert live["steps"] == jobs["parity-checks"]["steps"]
-    assert live["needs"] == ["scope", "candidate", "candidate-harness", "fixtures"]
-    assert live["runs-on"] == "${{ matrix.os }}"
-    assert 0 < live["timeout-minutes"] <= 60
-
-
-def test_windows_live_job_reports_but_never_gates():
-    jobs = workflow()["jobs"]
-    live = jobs["parity-live"]
-    assert live["continue-on-error"] is True
-    for name, job in jobs.items():
-        needs = job.get("needs", [])
-        assert "parity-live" not in ([needs] if isinstance(needs, str) else needs), name
-    assert "parity-live" not in gate_steps(jobs)[1]["run"]
-    # Master pushes, the nightly and manual CI: never a pull request or a
-    # merge group, whose required checks it would otherwise hold open.
-    assert live["if"] == LIVE_EVENTS
-    assert "pull_request" not in live["if"] and "merge_group" not in live["if"]
-    assert live["name"] == "Parity live (non-gating) / ${{ matrix.os }} / ${{ matrix.suite }}"
-    assert not live["name"].startswith("Parity /")
-
 
 # --- Rust caches: one key per compiling suite, saved on failure, no image toolchain ---
 
@@ -2050,8 +1966,9 @@ def test_parity_pytest_runs_name_failures_and_keep_reports():
     assert upload["with"]["path"] == "${{ runner.temp }}/junit/*.xml"
     assert upload["with"]["name"] == ARTIFACT_PREFIX + "parity-junit-${{ runner.os }}-${{ matrix.suite }}"
     own = [path for path in reports if path.startswith("${{ runner.temp }}/junit/")]
-    # The eval suite keeps its own report and upload.
-    assert set(reports) - set(own) == {"$evalReport"}
+    # Every report lands in the shared upload (the eval harness's own report
+    # left with its differential tests).
+    assert set(reports) == set(own)
 
 
 def test_runner_facts_name_cpus_and_image(tmp_path):
@@ -2067,34 +1984,6 @@ def test_runner_facts_name_cpus_and_image(tmp_path):
     assert result.stdout.strip() in summary.read_text(encoding="utf-8-sig")
 
 
-@pytest.mark.parametrize("event,mode,expected", [
-    ("schedule", "", True), ("workflow_dispatch", "body-evidence", True),
-    ("workflow_dispatch", "ci", False), ("workflow_dispatch", "stress", False),
-    ("workflow_dispatch", "wait-mail", False), ("pull_request", "", False),
-    ("push", "", False), ("merge_group", "", False),
-])
-def test_body_evidence_trigger_is_nightly_or_its_isolated_dispatch(event, mode, expected):
-    from ci_budget import Evaluator, condition_text
-
-    class Dispatch(Evaluator):
-        def lookup(self, path):
-            if path == ["inputs", "mode"]:
-                return mode
-            if path == ["vars", "PARITY_SELFHOSTED_RUNNERS"]:
-                return '["linux"]'
-            return super().lookup(path)
-
-    jobs = workflow()["jobs"]
-    lane = jobs["body-evidence"]
-    assert Dispatch(event, [], set()).run(condition_text(lane["if"])) is expected
-    if mode == "body-evidence":
-        # None of the ordinary build, parity, image or stress roots may
-        # start. The one self-hosted job performs its own planning/build.
-        for name in ("scope", "rust", "candidate", "candidate-harness", "fixtures",
-                     "parity", "daemon-image", "stress-plan", "capture-windows"):
-            assert Dispatch(event, [], set()).run(condition_text(jobs[name]["if"])) is False, name
-
-
 def test_job_environments_use_only_pre_runner_contexts():
     # GitHub rejects the entire workflow before dispatch when runner.temp
     # is used in job-level env; it is available only after a runner starts.
@@ -2102,62 +1991,24 @@ def test_job_environments_use_only_pre_runner_contexts():
         assert not re.search(r"\brunner[.\[]", json.dumps(job.get("env", {}))), name
 
 
-def test_body_evidence_reuses_runner_guards_and_never_gates():
+def test_no_ordinary_ci_job_selects_or_exports_a_python_oracle():
+    # The Python freeze (14 November 2026): nothing a pull request, a batch,
+    # a master push or a schedule starts binds an event oracle; only the
+    # manual stress loop keeps its best-effort binding.
     jobs = workflow()["jobs"]
-    lane = jobs["body-evidence"]
-    assert lane["runs-on"] == ["self-hosted", "pseudolife-parity-linux"]
-    assert lane["continue-on-error"] is True
-    assert "needs" not in lane
-    assert lane["env"]["PARITY_MIN_FREE_GB"] == "8"
-    assert lane["env"]["PARITY_YIELD_MINUTES"] == "60"
-    assert lane["steps"][:2] == jobs["parity-checks"]["steps"][:2]
-    run_index = next(i for i, step in enumerate(lane["steps"])
-                     if step.get("name") == "Run every body differential")
-    assert lane["steps"][run_index - 1] == lane["steps"][1]
-    for job in jobs.values():
-        assert "body-evidence" not in job.get("needs", [])
-    steps = {s.get("name"): s for s in lane["steps"]}
-    assert steps["Publish body evidence"]["if"] == "always()"
-    assert steps["Publish body evidence"]["with"]["path"] == "${{ runner.temp }}/body-evidence/evidence.json"
-    assert steps["Publish body evidence"]["with"]["if-no-files-found"] == "error"
-    # D6/D11 rows link a nightly's evidence.json: keep it for the repository's
-    # maximum (90 days), not the 30-day default other artifacts use.
-    assert steps["Publish body evidence"]["with"]["retention-days"] == 90
-    require_command(commands(steps["Run every body differential"]["run"]),
-                    ("python", "rust/ci/body_evidence.py", "run"), ("--rust-bin", "--out"))
-    assert not any(s.get("uses", "").startswith("Swatinem/rust-cache") for s in lane["steps"])
-
-
-@pytest.mark.parametrize("runners,enabled", [('', False), ('[]', False),
-    ('["windows"]', False), ('["linux"]', True), ('["linux", "windows"]', True)])
-def test_body_evidence_nightly_respects_registered_linux_runners(runners, enabled):
-    from ci_budget import Evaluator, condition_text
-
-    class Registry(Evaluator):
-        def lookup(self, path):
-            if path == ["vars", "PARITY_SELFHOSTED_RUNNERS"]:
-                return runners
-            if path == ["inputs", "mode"]:
-                return "body-evidence"
-            return super().lookup(path)
-
-    condition = condition_text(workflow()["jobs"]["body-evidence"]["if"])
-    assert Registry("schedule", [], set()).run(condition) is enabled
-    # An explicit trial remains available before registering nightly use.
-    assert Registry("workflow_dispatch", [], set()).run(condition) is True
-
-
-def test_branch_ci_freezes_one_base_for_every_oracle_consumer():
-    jobs = workflow()["jobs"]
-    freeze = next(s for s in jobs["scope"]["steps"] if s.get("id") == "ci_oracle")
-    assert freeze["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'ci'"
-    assert "--freeze-ci-base --github-output" in freeze["run"]
-    assert "scope" in jobs["parity-live"]["needs"] and "scope" in jobs["source-mutants"]["needs"]
-    for name in ("rust", "parity-checks", "parity-live", "parity-selfhosted", "source-mutants"):
-        step = next(s for s in jobs[name]["steps"] if s.get("name") in
-                    ("Bind the event-selected Python oracle", "Bind the source-control Python oracle"))
-        assert step["env"]["PSEUDOLIFE_PORT_DISPATCH_BASE"] == "${{ needs.scope.outputs.oracle_base }}"
-        assert not step.get("continue-on-error")
+    assert not any(s.get("id") == "ci_oracle" for s in jobs["scope"]["steps"])
+    assert "oracle_base" not in jobs["scope"]["outputs"]
+    for name, job in jobs.items():
+        if name.startswith("stress"):
+            continue
+        for step in job.get("steps", []):
+            assert "oracle_selection" not in step.get("run", ""), (name, step.get("name"))
+            assert "phase1_oracle" not in step.get("run", ""), (name, step.get("name"))
+    for name in ("rust",):
+        step = next(s for s in jobs[name]["steps"]
+                    if s.get("name") == "Point the Rust identity contract at the checkout's package metadata")
+        assert step["run"].strip() == (
+            '"PSEUDOLIFE_PORT_ORACLE_ROOT=$env:GITHUB_WORKSPACE" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append')
 
 
 @pytest.mark.parametrize("name", ["rust", "candidate", "candidate-harness", "fixtures", "daemon-image"])

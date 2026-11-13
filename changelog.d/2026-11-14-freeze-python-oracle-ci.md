@@ -1,0 +1,5 @@
+### Changed (2026-11-14 — Python is frozen and CI stops comparing Rust with it)
+- A new `Python freeze` check (`.github/workflows/python-freeze.yml`) fails an ordinary pull request that changes anything under `pseudolife_memory/` other than the Console build output in `pseudolife_memory/web/static/`; a change the maintainer ruled an exception carries the `freeze-exception` label. Integration batches are exempt.
+- Rust CI no longer runs a live Python oracle beside the candidate: the frozen judge probes, the `judges` and `cli-live` parity suites, every H5 suite, the Windows `Parity live` job, the nightly body evidence job and the wait-mail capture are gone, and every remaining parity shard replays committed goldens only. A batch drops from 29 parity shards to 16.
+- The CLI source mutants run weekly (Sunday) instead of nightly.
+- `rust/ci/inventory.py` now refuses any pull request, batch, push or scheduled job step that starts a live comparison, and names every CLI row and daemon scenario no shard replays.

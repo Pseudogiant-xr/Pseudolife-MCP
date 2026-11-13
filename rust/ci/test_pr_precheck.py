@@ -75,10 +75,12 @@ def test_budget_metadata_changes_do_not_replay_runtime_cases(path):
 
 @pytest.mark.parametrize("path", ["rust/Cargo.toml", "rust/Cargo.lock", "rust/rust-toolchain.toml",
                                   ".cargo/config.toml", "rust/.cargo/config.toml", "tests/__init__.py"])
-def test_shared_build_inputs_and_test_package_initializer_keep_all_judges(path):
+def test_shared_build_inputs_and_test_package_initializer_replay_every_golden_row(path):
+    from parity_scope import UNREPLAYED_ROWS
     selected = precheck.select([path])
-    assert selected["linux"] == list(precheck.ROWS)
-    assert selected["judges"] == list(precheck.JUDGES)
+    assert selected["linux"] == [row for row in precheck.ROWS if row not in UNREPLAYED_ROWS]
+    # The frozen judge probes left CI with the Python freeze (14 November 2026).
+    assert selected["judges"] == []
 
 
 @pytest.mark.parametrize("path", [*[f"rust/shim/src/cli/{entry}" for entry in SHIM_COMMANDS],
@@ -94,10 +96,6 @@ def test_report_artifact_upload_is_not_a_pr_gate():
     jobs = yaml.safe_load((precheck.ROOT / ".github/workflows/rust.yml").read_text())["jobs"]
     upload = next(step for step in jobs["rust"]["steps"] if step.get("name") == "Retain ordinary PR parity precheck case IDs")
     assert upload["continue-on-error"] is True
-    probes = next(step for step in jobs["frozen-probes"]["steps"] if step.get("name") == "Retain frozen probe case IDs")
-    assert probes["continue-on-error"] is True
-    # upload-artifact@v4 refuses a second artifact of the same name in a run.
-    assert probes["with"]["name"] != upload["with"]["name"]
 
 
 def goldens(root, *, windows=None):
@@ -131,21 +129,21 @@ def test_missing_or_malformed_goldens_cannot_establish_equivalence(tmp_path):
 def test_missing_diff_selects_all_linux_rows_and_different_windows_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(precheck, "python_owners", lambda root: {})
     monkeypatch.setattr(precheck, "windows_differs", lambda root, row: row == "doctor")
+    from parity_scope import UNREPLAYED_ROWS
     plan = precheck.select(None, tmp_path)
-    assert plan["linux"] == list(precheck.ROWS) and plan["windows"] == ["doctor"]
-    assert plan["judges"] == list(precheck.JUDGES)
+    assert plan["linux"] == [row for row in precheck.ROWS if row not in UNREPLAYED_ROWS]
+    assert plan["windows"] == ["doctor"] and plan["judges"] == []
 
 
-def test_lease_and_shared_cli_changes_select_their_frozen_judges():
-    graph = precheck.import_graph({"pseudolife_memory/lease_cli.py": "from . import os_lock\n",
-                                  "pseudolife_memory/os_lock.py": "",
-                                  "pseudolife_memory/doctor_cli.py": ""})
-    owners = {"pseudolife_memory/doctor_cli.py": ("doctor",)}
-    assert precheck.judges_for("pseudolife_memory/cli.py", graph, owners) == precheck.JUDGES
-    assert precheck.judges_for("pseudolife_memory/os_lock.py", graph, owners) == ("lease-headers", "cli-process")
-    assert precheck.judges_for("pseudolife_memory/doctor_cli.py", graph, owners) == ()
-    assert precheck.judges_for("rust/shim/src/cli/lease.rs", graph, owners) == precheck.JUDGES
-    assert precheck.judges_for("rust/shim/src/main.rs", graph, owners) == precheck.JUDGES
+@pytest.mark.parametrize("path", ["rust/cli_harness/goldens/audit.linux.json", "rust/cli_harness/rows/backup.py",
+                                  "rust/shim/src/cli/migrate_flat.rs", "pyproject.toml"])
+def test_rows_without_a_committed_golden_replay_are_never_recorded(path):
+    # Their only CI replay recorded the Python oracle first (coverage_plan's
+    # record/golden pairs); since the freeze the precheck never records.
+    from parity_scope import UNREPLAYED_ROWS
+    selected = precheck.select([path])
+    assert not set(UNREPLAYED_ROWS) & set(selected["linux"])
+    assert not set(UNREPLAYED_ROWS) & set(selected["windows"])
 
 
 @pytest.mark.parametrize("row,full", [("doctor", False), ("transfer", True), ("test_login", True),
@@ -178,25 +176,11 @@ def test_prechecks_are_ordinary_pr_only_and_keep_python_dependencies_isolated():
     assert "--publish --only goldens" in steps["Summarize PR golden replay"]["run"]
     ordered = [step.get("name") for step in jobs["rust"]["steps"]]
     assert ordered.index(replay["name"]) < ordered.index("Nextest")
-    # The report-only frozen probes run in a job of their own (issue #1519):
-    # a lost probe runner took Rust / ubuntu-latest with it twice. No Rust
-    # step runs them, and no job, the Parity gates included, needs theirs.
-    assert not any("--only judges" in step.get("run", "") for step in jobs["rust"]["steps"])
+    # The report-only frozen judge probes left CI with the Python freeze
+    # (14 November 2026): no job runs them.
+    assert not any("--only judges" in step.get("run", "") for job in jobs.values() for step in job.get("steps", []))
+    assert "frozen-probes" not in jobs
     assert not any("precheck" in name for name in jobs)
-    probe_job = jobs["frozen-probes"]
-    assert probe_job["continue-on-error"] is True
-    assert all("frozen-probes" not in (job.get("needs") or []) for job in jobs.values())
-    assert probe_job["if"] == ("${{ !cancelled() && github.event_name == 'pull_request' && "
-                               "needs.scope.outputs.full == 'false' && needs.scope.outputs.rust != 'false' }}")
-    probe_steps = {step.get("name"): step for step in probe_job["steps"]}
-    probes = probe_steps["Probe PR frozen judges for item-11 diagnostics"]
-    assert probes["continue-on-error"] is True and probes["timeout-minutes"] == 20
-    assert "!cancelled()" in probes["if"] and "precheck_runtime.outcome == 'success'" in probes["if"]
-    assert "precheck_candidate.outcome == 'success'" in probes["if"] and "--only judges" in probes["run"]
-    assert probe_steps["Select ordinary PR parity prechecks"]["run"] == steps["Select ordinary PR parity prechecks"]["run"]
-    assert "--publish --only judges" in probe_steps["Summarize report-only frozen probes"]["run"]
-    assert "venv --system-site-packages" in probe_steps["Install the selected PR precheck dependencies"]["run"]
-    assert "GITHUB_ENV" not in probe_steps["Install the selected PR precheck dependencies"]["run"]
 
 
 def test_precheck_data_tests_join_the_native_windows_lite_selection():

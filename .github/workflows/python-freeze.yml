@@ -1,0 +1,43 @@
+# Python is frozen since 14 November 2026 (maintainer ruling): an ordinary
+# pull request whose own net change touches pseudolife_memory/ (outside the
+# Console build output under pseudolife_memory/web/static/) fails this check,
+# and the fix is to make the change in Rust. rust/ci/python_freeze.py decides
+# on the diff's paths and the exact label `freeze-exception`, which only
+# someone with triage access can apply, for a change the maintainer ruled an
+# exception. Its own workflow, so that labelling a pull request (labeled,
+# unlabeled) reruns only this check, not every ci.yml lane; removing the
+# label brings the refusal back. An integration batch is exempt in the
+# script: its members already passed here.
+name: Python freeze
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+# The newest event on a pull request decides: a label change supersedes an
+# in-flight check of the same pull request.
+concurrency:
+  group: python-freeze-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-freeze:
+    name: Python freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The merge commit and its base parent: the pull request's own change.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Refuse changes to the frozen Python package
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: python3 rust/ci/python_freeze.py --head-ref "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" --labels "$PR_LABELS"

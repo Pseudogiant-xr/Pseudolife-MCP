@@ -28,34 +28,42 @@ Each change waits for hosted CI once, on its batch:
   must still pass. A newer push to an ordinary pull request cancels its
   in-flight runs of both workflows.
 
-  Ordinary Rust jobs also replay CLI rows reached by the PR's diff before
-  batching. Python ownership follows command modules and their static
-  first-party imports; Rust command ownership uses the existing parity
-  map, and unknown runtime inputs select conservatively. Ubuntu runs each
-  selected row; Windows runs rows whose recorded observations or case sets
-  differ, ignoring only recording clocks and arm metadata. The H5 rows use
-  their existing record-then-golden action definitions and an owned
-  PostgreSQL fixture, rather than replaying unused historical captures.
-  Lease, lease-operator, transfer, maintainer and invite also use that
-  owned fixture for their existing database-backed cases.
-  Other rows compare with the committed goldens, so stale records fail on
-  the PR before Nextest. The native candidate shares the Rust job's debug dependencies and
-  the daemon it already built for PDF provisioning; Python dependencies
-  remain in a separate runtime and reuse the existing wheel cache.
+  Ordinary Rust jobs also replay the committed goldens of CLI rows reached
+  by the PR's diff before batching. Python ownership follows command
+  modules and their static first-party imports; Rust command ownership uses
+  the existing parity map, and unknown runtime inputs select
+  conservatively. Ubuntu runs each selected row; Windows runs rows whose
+  recorded observations or case sets differ, ignoring only recording clocks
+  and arm metadata. Lease, lease-operator, transfer, maintainer and invite
+  use an owned PostgreSQL fixture for their database-backed cases. Stale
+  records fail on the PR before Nextest. The native candidate shares the
+  Rust job's debug dependencies and the daemon it already built for PDF
+  provisioning; Python dependencies remain in a separate runtime and reuse
+  the existing wheel cache. The job summary and its artifact
+  (`pr-parity-precheck-<OS>`) name each failed case with its phase; golden
+  replay failures fail `Rust` and its `Parity` gate. Batches retain their
+  parity matrix and do not repeat this ordinary-PR path.
 
-  Covered frozen judge groups are report-only probes using the existing
-  merge-base oracle and source pins. They run in their own job, `Frozen
-  judge probes (report only)`, which builds the same debug candidate, so
-  a probe that loses its runner cannot fail `Rust` or a `Parity` gate; that
-  job's own check still turns red then. Independent comparisons continue after failures and retain their
-  actual failed case IDs; setup/resource failures leave unrun phases
-  visible. Each job's summary and its artifact (`pr-parity-precheck-<OS>`
-  for goldens, `pr-parity-precheck-judges-<OS>` for probes) contain each
-  available failed identifier with its phase,
-  with raw logs and captures kept outside that upload. Golden replay failures
-  fail `Rust` and its `Parity` gate; frozen probe failures leave those checks
-  unaffected and inform the maintainer's item-11 decision. Batches retain their existing parity
-  matrix and do not repeat this ordinary-PR path.
+  Since the Python freeze (14 November 2026, maintainer ruling) nothing in
+  pull request, batch, master-push or scheduled CI compares the candidate
+  with a live Python oracle. The report-only frozen judge probes, the
+  `judges` and `cli-live` suites, every H5 suite, the Windows `Parity live`
+  job, the nightly body evidence and the wait-mail capture are gone; every
+  parity shard replays committed goldens, which are now Rust regression
+  snapshots (`rust/PARITY.md` "Goldens after the freeze"). The rows whose
+  only CI replay was a recording the same run made from the oracle (audit,
+  backup, migrate_flat; `rust/ci/parity_scope.py` `UNREPLAYED_ROWS`) are
+  not replayed at all. The precheck never records, and
+  `rust/ci/inventory.py` refuses a step that starts a live comparison in
+  any of those jobs.
+- **The `Python freeze` check** (its own workflow, `python-freeze.yml`)
+  refuses an ordinary pull request whose net change touches
+  `pseudolife_memory/` outside `pseudolife_memory/web/static/`, the Console
+  build output. It decides on the diff's paths and the exact label
+  `freeze-exception`, which marks a change the maintainer ruled an
+  exception (the expose security fix, the last release's update bridge);
+  it reruns when a label is added or removed. Batches are exempt: their
+  members passed it.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
@@ -85,19 +93,22 @@ Each change waits for hosted CI once, on its batch:
   into master with this commit as its merge commit, a different tree, the
   newest batch run not completed, or an API error. In `ci.yml` that covers
   `lock-resolve`, `test`, the lite OS lanes and `frontend`. In `rust.yml` it
-  covers the disposable-image check and each parity pair (OS and suite).
-  The `Rust` job, the candidate, harness candidate and fixtures builds and
-  the `eval` and `judges` suites always run. They compare
-  against the event-selected Python oracle (or, for `Rust`, its package
-  metadata), which is the merge base on a pull request and the pushed head
-  on a push, so the batch's pass is not the push's result. A merge made
+  covers the disposable-image check and each parity pair (OS and suite);
+  when the batch passed every pair the push runs no parity shard (the scope
+  job's `parity_any` is false and the `Parity` gate accepts the skip).
+  The `Rust` job and the candidate, harness candidate and fixtures builds
+  always run, which also keeps master's Rust caches current for every pull
+  request. Until the Python freeze the `eval` and `judges` suites always ran
+  too, because they compared against an event-selected oracle; no suite
+  does now. A merge made
   under the `merge-forward` skill's exceptions skips only what passed on
   the forwarded head itself; with no completed run there, its master push
   runs everything, which is the backstop that skill relies on.
 - **The nightly and manual runs** run everything, as before. The nightly
-  is the full backstop for everything a master push skipped, and since
-  2026-10-24 the only automatic run of the non-gating Windows `cli-live`
-  job (`parity-live`).
+  is the full backstop for everything a master push skipped. Since the
+  Python freeze the CLI source mutants run weekly, on the Sunday schedule
+  (`23 3 * * 0`, which replaces that day's nightly) and on manual CI; the
+  `Parity` gate accepts their skip on a weekday nightly only.
 - **Never cancelled:** batch runs, master pushes, the nightly, manual and
   stress runs and merge groups each get a concurrency group of their own
   (their run id), so neither a newer push nor a newer run cancels them,
