@@ -767,6 +767,16 @@ def test_a_corrupt_safety_backup_copy_restarts_the_daemon_and_says_retry(docker_
     assert [p.name for p in safety.iterdir() if p.name.endswith(".part")] == []
 
 
+@pytest.mark.parametrize("output", ['{"Id": "x"}', "{}", "[" * 100000 + "]" * 100000], ids=["object", "empty-object", "deep"])
+def test_unusable_inspect_json_is_a_clean_refusal(docker_bank, monkeypatch, output):
+    # A JSON object raises KeyError on [0]; deep nesting raises RecursionError.
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (0, output))
+    with pytest.raises(up.UpdateError, match="cannot inspect probe; restore its Docker container") as caught:
+        bank.inspect("probe")
+    assert caught.value.exit_code == 2
+
+
 def test_symlink_chain_cannot_escape_through_parent_components(docker_bank, tmp_path):
     bank, world = docker_bank
     state = tmp_path / "chain.tgz"

@@ -233,7 +233,8 @@ class DockerBank:
             if not isinstance(result, dict):
                 raise ValueError("container")
             return result
-        except (ValueError, IndexError, TypeError) as exc:
+        # A JSON object raises KeyError on [0]; deep nesting RecursionError.
+        except (ValueError, IndexError, KeyError, TypeError, RecursionError) as exc:
             raise up.UpdateError(f"cannot inspect {container}; restore its Docker container configuration and retry", 2) from exc
 
     @contextmanager

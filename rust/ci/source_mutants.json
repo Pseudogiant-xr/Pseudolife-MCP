@@ -322,6 +322,7 @@
     "restore-host-unmatched-allowed",
     "restore-image-unchecked",
     "restore-inspect-exit",
+    "restore-inspect-object-deferred",
     "restore-inspect-stderr",
     "restore-json-error-refused",
     "restore-later-header-error",

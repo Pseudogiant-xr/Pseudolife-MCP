@@ -689,6 +689,7 @@ def _docker_cases() -> list[Case]:
         _scripted("docker-inspect-pg-fails", [_inspect(DAEMON, _daemon_doc()), _inspect(PG, "", exit=1)]),
         _scripted("docker-inspect-empty-list", [_inspect(DAEMON, "[]")]),
         _scripted("docker-inspect-not-a-dict", [_inspect(DAEMON, "[5]")]),
+        _scripted("docker-inspect-object", [_inspect(DAEMON, '{"Id": "x"}')]),
         _scripted("docker-inspect-empty-output", [_inspect(DAEMON, "")]),
         _scripted("docker-resolve-unmatched-host", [
             _inspect(DAEMON, _daemon_doc(Config={"Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://u@elsewhere/db"]})),
@@ -891,6 +892,9 @@ MUTANTS = [
            "        let text = ascii_text(&ran.output(true)).ok_or(Stop::Defer)?;\n        if text.trim_matches",
            "        let text = ascii_text(&[ran.stdout.clone(), ran.stderr.clone()].concat()).ok_or(Stop::Defer)?;\n"
            "        if text.trim_matches", ("docker-stderr-ignored-on-success",)),
+    Mutant("restore-inspect-object-deferred", "restore", BANK,
+           "            // `{...}[0]` raises KeyError, which the oracle refuses too.\n            _ => Err(refuse()),",
+           "            Value::Object(_) => Err(Stop::Defer),\n            _ => Err(refuse()),", ("docker-inspect-object",)),
     Mutant("restore-json-error-refused", "restore", BANK,
            "let value: Value = serde_json::from_str(&text).map_err(|_| Stop::Defer)?;",
            "let value: Value = serde_json::from_str(&text).map_err(|_| refuse())?;", ("reach-unsure-json",)),

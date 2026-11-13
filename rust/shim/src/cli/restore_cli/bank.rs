@@ -163,8 +163,7 @@ impl<D: Docker> Bank<'_, D> {
                 Some(item @ Value::Object(_)) => Ok(item),
                 _ => Err(refuse()),
             },
-            // `{...}[0]` raises KeyError, which escapes.
-            Value::Object(_) => Err(Stop::Defer),
+            // `{...}[0]` raises KeyError, which the oracle refuses too.
             _ => Err(refuse()),
         }
     }
@@ -681,7 +680,7 @@ mod tests {
         );
         assert_eq!(bank.inspect("d").unwrap_err(), refused);
         assert_eq!(bank.inspect("d").unwrap_err(), refused);
-        assert_eq!(bank.inspect("d").unwrap_err(), Stop::Defer);
+        assert_eq!(bank.inspect("d").unwrap_err(), refused);
         assert_eq!(bank.inspect("d").unwrap_err(), Stop::Defer);
         assert_eq!(bank.inspect("d").unwrap_err(), refused);
     }

@@ -79,8 +79,9 @@ is answered, before any Docker call, as the oracle answers it.
 - Confirmed runs whose outcome the candidate is not sure of, before the
   lock: Docker output that is not ASCII (the oracle decodes it in the
   locale's encoding); `inspect` output serde cannot parse (`json.loads`
-  also reads `NaN`, `Infinity`, huge exponents and lone surrogates) or a
-  JSON object rather than a list; container fields of a type Python would
+  also reads `NaN`, `Infinity`, huge exponents and lone surrogates, and
+  nesting past serde's limit, which the oracle refuses); container fields
+  of a type Python would
   iterate or fail on in a way this leaf does not reproduce (a string or
   dict where a list is expected, a non-dict where `.get` is called, a
   non-string image, alias or binding); a daemon URL outside the libpq
@@ -169,16 +170,17 @@ non-test source: only `docker.rs` starts processes, only `mod.rs` writes
 
 ## Mutants
 
-63 source mutants, one per decision the row pins. The gates (27): exit code,
+64 source mutants, one per decision the row pins. The gates (27): exit code,
 `--yes`, the state check and its order after the dump check, argparse's error
 order and negative numbers, the 80-column guard, the COPY pattern, lone `\r`,
-gzip padding, the CRC check and its refusal, the deflate error's refusal, tar header
-and data handling, the transient pass, FIFOs, loop handling, the ustar
+gzip padding, the CRC check and its refusal, the deflate error's refusal, tar
+header and data handling, the transient pass, FIFOs, loop handling, the ustar
 prefix, the signed checksum, `int`'s base prefix, and GNU long records (the
 name and link patches, the end block and short read after a record, and the
-cut at the first NUL). The confirmed path (36): deferring it all, the busy
+cut at the first NUL). The confirmed path (37): deferring it all, the busy
 pid, the lock check, the lock around a refusal, deferring at the first
-change, `inspect`'s exit code, stderr and parse errors, the four selectors
+change, `inspect`'s exit code, stderr and parse errors, its refusal of a JSON
+object, the four selectors
 and their values, the port range, the image, the `/data` mount, PostgreSQL
 running, the health port and `--leave-stopped`, the socket message, the
 database answer, the checkout and state-mount checks, Docker Desktop's
