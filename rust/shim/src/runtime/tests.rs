@@ -565,3 +565,29 @@ fn redirected_tunnel_roots_and_missing_children_are_unknown_evidence() {
         assert!(prune::tunnel_runtimes(&f.layout, root, &[]).is_err());
     }
 }
+
+#[test]
+fn release_base_defaults_to_the_github_release_and_honours_an_http_override() {
+    use super::install::release_base;
+    assert_eq!(
+        release_base(None, "1.2.3").unwrap(),
+        "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v1.2.3"
+    );
+    assert_eq!(
+        release_base(Some("  "), "1.2.3").unwrap(),
+        release_base(None, "1.2.3").unwrap()
+    );
+    assert_eq!(
+        release_base(Some("http://127.0.0.1:8000/assets/"), "1.2.3").unwrap(),
+        "http://127.0.0.1:8000/assets"
+    );
+    assert_eq!(
+        release_base(Some("https://mirror.example.com/v1.2.3"), "1.2.3").unwrap(),
+        "https://mirror.example.com/v1.2.3"
+    );
+    for refused in ["/srv/assets", "file:///srv/assets", "ftp://example.com/x"] {
+        let error = release_base(Some(refused), "1.2.3").unwrap_err();
+        assert!(error.contains("PSEUDOLIFE_NATIVE_ARCHIVE_URL"), "{error}");
+        assert!(error.contains("nothing was downloaded"), "{error}");
+    }
+}

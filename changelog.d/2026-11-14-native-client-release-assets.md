@@ -12,3 +12,6 @@
   changed file. Editable checkout installs and self-spawning
   registrations stay as they are, and the old Python client stays on
   disk, unregistered. The installers start using it in a later change.
+- `PSEUDOLIFE_NATIVE_ARCHIVE_URL` points the native client's release
+  download at another directory of archives and `SHA256SUMS` (a mirror or
+  a test server); the archive is still verified against those sums.

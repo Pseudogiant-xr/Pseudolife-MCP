@@ -463,8 +463,12 @@ pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Res
     }
     let version = source.strip_prefix("pseudolife-mcp==").unwrap_or(source);
     let name = archive_name(version)?;
-    let base =
-        format!("https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v{version}");
+    let base = release_base(
+        std::env::var("PSEUDOLIFE_NATIVE_ARCHIVE_URL")
+            .ok()
+            .as_deref(),
+        version,
+    )?;
     // A private runtime avoids nested Tokio runtimes in synchronous CLI callers.
     let base_clone = base.clone();
     let name_clone = name.clone();
@@ -493,6 +497,26 @@ pub fn install_source(source: &str, repo: Option<&Path>, layout: &Layout) -> Res
     .join()
     .map_err(|_| "release download worker failed")??;
     install_archive(layout, version, source, &archive, &sums)
+}
+
+/// The URL of the directory holding a release's native archives and its
+/// `SHA256SUMS`: the GitHub release `v<version>`, or
+/// `PSEUDOLIFE_NATIVE_ARCHIVE_URL` (an `http(s)://` directory URL, for a
+/// mirror, a dev-box proof or a test server; the installers read the same
+/// variable). The archive is still verified against that directory's sums.
+pub(crate) fn release_base(configured: Option<&str>, version: &str) -> Result<String> {
+    match configured.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(format!(
+            "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v{version}"
+        )),
+        Some(url) if url.starts_with("https://") || url.starts_with("http://") => {
+            Ok(url.trim_end_matches('/').to_owned())
+        }
+        Some(_) => Err(
+            "PSEUDOLIFE_NATIVE_ARCHIVE_URL must be an http:// or https:// URL of the directory holding the archives and SHA256SUMS; unset it to use the GitHub release; nothing was downloaded"
+                .into(),
+        ),
+    }
 }
 
 fn ensure_build_space(path: &Path) -> Result<()> {
