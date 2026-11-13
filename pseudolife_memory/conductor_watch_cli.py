@@ -364,11 +364,14 @@ def _gh_records(value, what: str, types: dict, *, holder: str = "a list") -> lis
 
 
 class Watcher:
-    def __init__(self, args, runner):
+    def __init__(self, args, runner, note=None):
         self.args = args
         self.runner = runner
         self.repo = ["-R", args.repo] if args.repo else []
         self.warned_cli = False
+        # ``note(detail)`` reports a skipped input once (stderr and ledger).
+        self.note = note or _say
+        self.skipped: set[str] = set()
 
     def gh(self, *argv):
         try:
@@ -417,7 +420,9 @@ class Watcher:
 
     def suites(self, old):
         """Readable result files. One that does not parse yet (still being
-        written) stays out, so a later poll reports it."""
+        written) stays out, so a later poll reports it. One that parses but
+        is not an object is no result: it is noted once per run and stays
+        out too, so a rewrite into a result is still reported."""
         snap = dict(old or {})
         directory = Path(self.args.suite_results)
         for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
@@ -425,7 +430,13 @@ class Watcher:
                 continue
             try:
                 body = json.loads(path.read_text(encoding="utf-8-sig"))
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
+                continue
+            if not isinstance(body, dict):
+                if path.name not in self.skipped:
+                    self.skipped.add(path.name)
+                    self.note(f"suite result {path} is {_json_kind(body)}, not an object; "
+                              "skipped until it holds a result")
                 continue
             snap[path.name] = {"machine": str(body.get("machine", "?")),
                                "commit": str(body.get("commit", ""))[:8],
@@ -903,7 +914,12 @@ def main(argv=None, *, runner=run, clock=time.monotonic, sleep=time.sleep, board
                 _ledger(state, "setup", f"no board: {why}")
                 return EXIT_SETUP
         try:
-            return _Loop(args, owner, state, Watcher(args, runner), board, environ, clock, sleep).run()
+            def note(detail):
+                _say(detail)
+                _ledger(state, "skipped", detail)
+
+            return _Loop(args, owner, state, Watcher(args, runner, note), board, environ, clock,
+                         sleep).run()
         finally:
             _remove_own_pid(state)
             close = getattr(board, "close", None)

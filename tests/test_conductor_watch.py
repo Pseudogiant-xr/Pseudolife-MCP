@@ -623,6 +623,23 @@ def test_an_unreadable_suite_result_is_retried_not_dropped(h):
     assert lines(h.main("--settle", "0")[1])[0].startswith("suite remote cccccccc exit 0")
 
 
+@pytest.mark.parametrize("body", ["[]", "null", "5", '"done"'])
+def test_a_suite_result_that_is_not_an_object_is_skipped_once(h, body):
+    """JSON that is not an object ended the watcher in AttributeError; the
+    file is skipped with one ledger line per run, and others still count."""
+    h.main(max_age="60")
+    (h.world.suites / "bad.json").write_text(body, encoding="utf-8")
+    code, texts, _ = h.main(max_age="600")             # ten polls
+    assert code == watch.EXIT_OK and texts == []
+    skipped = [line for line in h.ledger() if " skipped " in line]
+    assert len(skipped) == 1 and "bad.json" in skipped[0] and "not an object" in skipped[0]
+    assert h.capsys.readouterr().err.count("bad.json") == 1
+    h.world.suite("good.json")
+    assert lines(h.main("--settle", "0")[1])[0].startswith("suite remote cccccccc exit 0")
+    h.world.suite("bad.json")                           # rewritten as a result: reported
+    assert lines(h.main("--settle", "0")[1])[0].startswith("suite remote cccccccc exit 0")
+
+
 def test_gh_failing_repeatedly_tells_the_owner_once_then_exits_2(h):
     h.main(max_age="60")
     h.world.fail_gh = True
