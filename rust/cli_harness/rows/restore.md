@@ -46,8 +46,11 @@ deferred; it is now tested in Rust, and the frozen oracle answers otherwise.
   the first member, data after the end marker, an archive of only zero
   blocks, numeric fields in Python's `int()` spellings (`0o`, `_`, `+`), a
   negative size, two GNU long names for one member, sparse members, global
-  extended headers that set a name or size, link graphs too deep to walk:
-  all refused natively (`state.rs` tests).
+  extended headers that set a name or size, link graphs too deep to walk,
+  member types other than plain files, links and directories (Python reads
+  an unknown type as a file), and a link or directory with a non-zero size
+  (Python skips no data for it, as tar does, but accepts it): all refused
+  natively (`state.rs` tests).
 - A missing container: the native message names the missing container and
   the fix (the oracle reports a failed `inspect`).
 - Help and usage at other widths (one 80-column text natively), a trailing

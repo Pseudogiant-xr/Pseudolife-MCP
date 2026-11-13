@@ -1144,26 +1144,6 @@
     "cwd": "0o755"
    }
   },
-  "state-directory-with-size": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 2,
-   "stdout": "",
-   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
-   "window": [
-    1794540194.4734378,
-    1794540194.6702607
-   ],
-   "arm": "python",
-   "docker": [],
-   "fixtures": "unchanged",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
   "state-v7-directory-slash": {
    "home": null,
    "utc_offset": 39600,
@@ -1173,26 +1153,6 @@
    "window": [
     1794540194.6707375,
     1794540194.8593676
-   ],
-   "arm": "python",
-   "docker": [],
-   "fixtures": "unchanged",
-   "files": {
-    "cwd": "dir"
-   },
-   "modes": {
-    "cwd": "0o755"
-   }
-  },
-  "state-unknown-type-skips": {
-   "home": null,
-   "utc_offset": 39600,
-   "exit": 2,
-   "stdout": "",
-   "stderr": "cmVzdG9yZSBmYWlsZWQ6IHJlc3RvcmUgcmVwbGFjZXMgdGhlIGV4aXN0aW5nIGJhbms7IHJlcnVuIHdpdGggLS15ZXMgdG8gY29uZmlybS4gTm90aGluZyB3YXMgcmVzdG9yZWQK",
-   "window": [
-    1794540194.8598242,
-    1794540195.0503142
    ],
    "arm": "python",
    "docker": [],

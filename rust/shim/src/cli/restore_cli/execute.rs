@@ -43,8 +43,9 @@ pub(super) trait Host {
     /// `<YYYYmmdd-HHMMSS>-<8 hex>` for the safety backup's names.
     fn stamp(&mut self) -> String;
     /// A per-run tag that keeps this run's staging file and helper names
-    /// apart from another run's. Uniqueness only: nothing depends on it
-    /// being unpredictable (no secret, no cryptography).
+    /// apart from another run's. Uniqueness only: the staging files are
+    /// created exclusively (`set -C`) and helpers are addressed by the ID
+    /// Docker returns, so nothing depends on it being unpredictable.
     fn run_tag(&mut self) -> String;
     /// An ISO 8601 time for the journal and the note.
     fn now(&mut self) -> String;
@@ -75,9 +76,12 @@ pub(super) struct Context<'a> {
 /// `restore-in-progress-<bank>.json`: one journal per bank (container and
 /// database), so a restore of another bank never replaces or clears it.
 const JOURNAL: &str = "restore-in-progress";
-/// Streams stdin into a file owned by the container's own user.
-const STREAM_INTO: &str = r#"umask 077 && cat > "$1""#;
-const GUNZIP: &str = r#"gunzip -c "$1" > "$2""#;
+/// Streams stdin into a file owned by the container's own user. `set -C`
+/// (noclobber) makes each staging file's creation exclusive: a path already
+/// there, a symlink included, fails the step instead of being followed or
+/// truncated.
+const STREAM_INTO: &str = r#"set -C && umask 077 && cat > "$1""#;
+const GUNZIP: &str = r#"set -C && gunzip -c "$1" > "$2""#;
 /// Keep an active move gate (`move.json`) through the replay.
 const EXTRACT: &str = "find /data -mindepth 1 -maxdepth 1 ! -name move.json -exec rm -rf -- {} + && tar --exclude=move.json --exclude=./move.json -xzf /tmp/pl_state.tgz -C /data";
 const STALE: &str = "rm -f /tmp/pl_restore-*.sql.gz /tmp/pl_restore-*.sql.gz.sql";
@@ -623,7 +627,10 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             && let Some(dump) = &pair.dump
         {
             let label = if self.earlier.is_some() {
-                format!("as it was immediately before this run ({})", self.started)
+                format!(
+                    "as it was immediately before this run ({}; the incomplete bank the earlier restore left, unless you repaired it since)",
+                    self.started
+                )
             } else {
                 "as it was before this restore".to_owned()
             };
@@ -681,6 +688,9 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                 .as_ref()
                 .map(|dump| command(self.cx, dump, Some(&earlier.pair.state)))
         });
+        // Whether the daemon is down at this point of a pre-drop failure.
+        let daemon_down = self.stopped || !plan.was_running;
+        let journal = journal_path(self.cx);
         let earlier_note = self.earlier.as_ref().map(|earlier| {
             let missing: Vec<String> = earlier
                 .pair
@@ -698,10 +708,21 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     missing.join(", ")
                 )
             };
+            // The journal cannot say whether the bank was repaired since,
+            // so both courses are given; this run changed nothing.
+            let repaired = if daemon_down {
+                format!(
+                    "start the daemon with:\n  docker start {}\nthen delete {}",
+                    shell_word(&daemon),
+                    journal.display()
+                )
+            } else {
+                format!("delete {}", journal.display())
+            };
             format!(
-                "An earlier restore of this bank ({}) stopped after it began replacing it, so the bank is still incomplete; recover the bank as it was before that restore with:\n  {}{missing}",
-                earlier.started,
-                earlier_command.clone().unwrap_or_else(|| retry.clone())
+                "An earlier restore of this bank ({started}) stopped after it began replacing it. If you have not repaired the bank since {started}, it is still incomplete; recover it as it was before that restore with:\n  {}{missing}\nIf you have repaired it since, this run changed nothing: {repaired}",
+                earlier_command.clone().unwrap_or_else(|| retry.clone()),
+                started = earlier.started,
             )
         });
         let mut lines = vec![format!("restore failed: {cause}.")];
@@ -715,7 +736,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     }
                 } else if self.earlier.is_some() {
                     format!(
-                        "The bank was not changed by this run; the daemon {daemon} is left stopped because the bank is incomplete."
+                        "The bank was not changed by this run; the daemon {daemon} is left stopped because the earlier restore may have left the bank incomplete."
                     )
                 } else {
                     let ran = self.bank.run(&["start", &daemon], MINUTE * 5);

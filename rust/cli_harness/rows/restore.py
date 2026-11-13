@@ -187,11 +187,9 @@ STATES: dict[str, bytes] = {
     "bad-later-header": _tar(_file(b"a"), _bad_checksum_header()),
     "short-later-header": _file(b"a") + b"\x01" * 100,
     "later-header-absent": _file(b"a"),
-    "directory-with-size": _header(b"d", b"5", size=1024) + _file(b"d/x") + END,
     # A directory skips no data: the escaping member after it is read.
     "directory-size-skips-nothing": _header(b"d", b"5", size=1024) + _file(b"../x") + END,
     "v7-directory-slash": _tar(_header(b"d/", b"\0"), _file(b"d/x")),
-    "unknown-type-skips": _tar(_header(b"v", b"V", size=600) + _data(b"\x01" * 600), _file(b"w")),
     "prefix-join": _tar(_header(b"x", prefix=b"sub")),
     "octal-prefix-fields": _tar(_header(b"x", mode=b"0o_644\0\0", size_field=b"  0o1\0\0\0\0\0\0\0") + _data(b"x")),
     "signed-checksum": _signed_checksum_name(),
@@ -501,8 +499,8 @@ DUMP_REFUSE = ("no-marker", "in-copy", "copy-crlf", "trailing-space", "vertical-
                "invalid-utf8-marker", "trailing-junk", "bad-crc", "truncated", "plain-sql", "empty",
                "corrupt-deflate", "distance-too-far")
 STATE_PASS = ("plain", "links-inside", "link-loop", "loop-ends-walk", "self-loop-hides-escape",
-              "later-header-absent", "directory-with-size",
-              "v7-directory-slash", "unknown-type-skips", "prefix-join",
+              "later-header-absent",
+              "v7-directory-slash", "prefix-join",
               "signed-checksum", "gnu-long-name", "gnu-long-records", "gnu-long-cut-at-nul",
               "multi-member-gzip", "trailing-zeros-gzip", "pax-name")
 STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "corrupt-deflate-gzip", "empty-file", "empty-gzip",
@@ -717,8 +715,8 @@ MUTANTS = [
     Mutant("restore-gzip-padding", "restore", GZIPRS, "                Some(0) => {}\n", "", ("dump-trailing-zeros",)),
     Mutant("restore-gzip-crc", "restore", GZIPRS, "stored_crc != crc.sum()", "stored_crc == crc.sum().wrapping_add(1)", ("dump-bad-crc",)),
     Mutant("restore-directory-skips", "restore", STATERS,
-           "let data = if matches!(member.kind, b'1' | b'2' | b'3' | b'4' | b'5' | b'6') {",
-           "let data = if matches!(member.kind, b'1' | b'2' | b'3' | b'4' | b'6') {", ("state-directory-size-skips-nothing",)),
+           "let data = if matches!(member.kind, 0 | b'0') {",
+           "let data = if true {", ("state-directory-size-skips-nothing",)),
     Mutant("restore-padding-unchecked", "restore", STATERS, "            || self.seen < self.next\n", "",
            ("state-member-padding-truncated",)),
     Mutant("restore-no-transient-pass", "restore", STATERS, "        links.map.clear();\n        for member in members {",

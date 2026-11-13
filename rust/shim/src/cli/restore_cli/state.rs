@@ -208,7 +208,7 @@ fn parse_header(header: &[u8]) -> Header {
             return unsafe_;
         }
     }
-    let mut kind = header[156];
+    let kind = header[156];
     let mut name = nts(&header[..100]).to_vec();
     let linkname = nts(&header[157..257]).to_vec();
     let prefix = nts(&header[345..500]);
@@ -216,10 +216,22 @@ fn parse_header(header: &[u8]) -> Header {
         b'S' => return Header::Refused(Refusal::Unsupported("a sparse member")),
         b'X' => return Header::Refused(Refusal::Unsupported("a Solaris extended header")),
         b'L' | b'K' | b'x' | b'g' => return Header::Record(kind, size),
-        _ => {}
-    }
-    if kind == 0 && name.ends_with(b"/") {
-        kind = b'5';
+        // What a state archive holds: plain files, hard and symbolic links,
+        // directories (devices and FIFOs are read to be refused by name).
+        // Anything else tar may give its own meaning: refused, not mirrored.
+        0 | b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' => {}
+        b'7' => {
+            return Header::Refused(Refusal::Unsupported("a member of type 7 (contiguous file)"));
+        }
+        b'N' => return Header::Refused(Refusal::Unsupported("a member of type N (old GNU names)")),
+        b'D' => return Header::Refused(Refusal::Unsupported("a member of type D (GNU dumpdir)")),
+        b'M' => {
+            return Header::Refused(Refusal::Unsupported(
+                "a member of type M (multi-volume continuation)",
+            ));
+        }
+        b'V' => return Header::Refused(Refusal::Unsupported("a member of type V (volume label)")),
+        _ => return Header::Refused(Refusal::Unsupported("a member of an unknown type")),
     }
     // tar joins the prefix field only under POSIX magic (`ustar\0`); in an
     // old-GNU or V7 header those bytes are other fields (times, the sparse
@@ -369,6 +381,11 @@ impl Reader {
                         size = override_;
                     }
                 }
+                // Tar makes a directory of a plain member whose final name
+                // (after a long name or PAX path) ends in `/`.
+                if matches!(member.kind, 0 | b'0') && member.name.ends_with(b"/") {
+                    member.kind = b'5';
+                }
                 if member.kind == b'5' {
                     while member.name.last() == Some(&b'/') {
                         member.name.pop();
@@ -386,14 +403,17 @@ impl Reader {
                         "a member named move.json that is not a regular file",
                     ));
                 }
-                // Regular files and unknown types carry data; the other
-                // types carry none, whatever their size field says (GNU tar
-                // 1.34 extracts a link or directory without skipping data,
-                // probed 14 November 2026).
-                let data = if matches!(member.kind, b'1' | b'2' | b'3' | b'4' | b'5' | b'6') {
-                    0
-                } else {
+                // Only a plain file carries data. Every other member must
+                // say size 0, as real archives do: GNU tar 1.34 reads no data
+                // for a link or directory (probed 14 November 2026), so bytes
+                // after one would be read as headers by tar, never by this
+                // check.
+                let data = if matches!(member.kind, 0 | b'0') {
                     size
+                } else if size != 0 {
+                    return self.refuse(Refusal::Unsafe);
+                } else {
+                    0
                 };
                 self.members.push(member);
                 self.next += BLOCK + round_up(data);
@@ -1160,6 +1180,11 @@ mod tests {
 
     #[test]
     fn a_size_beyond_off_t_is_refused() {
+        // A guard test: it passes without the off_t filter too, because no
+        // member can carry such a size and be accepted otherwise (a plain
+        // file's or record's data could never be present, and every other
+        // member must say size 0). The filter keeps that true if either
+        // rule changes.
         let mut huge = header(b"big", b'0', 0, b"");
         huge[124] = 0o200;
         huge[125..136].copy_from_slice(&(1u128 << 70).to_be_bytes()[5..]);
@@ -1169,6 +1194,77 @@ mod tests {
         let mut stream = huge;
         stream.extend(vec![0u8; 4096]);
         assert_eq!(verdict(&[stream]), Err(Refusal::Unsafe));
+    }
+
+    #[test]
+    fn a_directory_is_judged_on_its_final_name_and_carries_no_data() {
+        // Tar makes a directory of a type `0` member named `d/` and reads
+        // no data for it, so its "data" holds the next headers tar reads.
+        let fifo = header(b"hidden-fifo", b'6', 0, b"");
+        assert_eq!(
+            verdict(&[header(b"d/", b'0', 512, b""), fifo.clone(), END.to_vec()]),
+            Err(Refusal::Unsafe)
+        );
+        // The same through a GNU long name ending in `/`.
+        assert_eq!(
+            verdict(&[
+                long(b'L', b"dir/"),
+                header(b"short", 0, 512, b""),
+                fifo.clone(),
+                END.to_vec()
+            ]),
+            Err(Refusal::Unsafe)
+        );
+        // A zero-size directory spelled either way is fine.
+        let reader = read(&[
+            long(b'L', b"dir/"),
+            header(b"short", 0, 0, b""),
+            END.to_vec(),
+        ]);
+        assert_eq!((reader.end, reader.members[0].kind), (End::Done, b'5'));
+        assert_eq!(
+            verdict(&[header(b"d/", b'0', 0, b""), END.to_vec()]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn links_and_directories_with_a_size_are_refused() {
+        for kind in [b'1', b'2', b'5'] {
+            let link = if kind == b'5' { &b""[..] } else { b"target" };
+            assert_eq!(
+                verdict(&[header(b"m", kind, 512, link), vec![0; 512], END.to_vec()]),
+                Err(Refusal::Unsafe),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_member_types_a_state_archive_holds_are_read() {
+        for (kind, reason) in [
+            (b'7', "a member of type 7 (contiguous file)"),
+            (b'N', "a member of type N (old GNU names)"),
+            (b'D', "a member of type D (GNU dumpdir)"),
+            (b'M', "a member of type M (multi-volume continuation)"),
+            (b'V', "a member of type V (volume label)"),
+            (b'Z', "a member of an unknown type"),
+        ] {
+            assert_eq!(
+                verdict(&[header(b"m", kind, 0, b""), END.to_vec()]),
+                Err(Refusal::Unsupported(reason)),
+                "{}",
+                kind as char
+            );
+        }
+        // The types a backup's tar writes are read.
+        for kind in [0u8, b'0', b'5'] {
+            assert_eq!(
+                verdict(&[header(b"m", kind, 0, b""), END.to_vec()]),
+                Ok(()),
+                "{kind}"
+            );
+        }
     }
 
     #[test]

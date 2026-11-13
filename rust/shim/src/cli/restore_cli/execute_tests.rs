@@ -324,7 +324,7 @@ fn label(call: &[String]) -> String {
         ["rm", "-f", h] => format!("rm {h}"),
         ["rm", "-f", "-v", h] => format!("rm {h}"),
         ["exec", "-i", ..] => "copy-in".into(),
-        ["exec", _, "sh", "-c", s, ..] if s.starts_with("gunzip") => "gunzip".into(),
+        ["exec", _, "sh", "-c", s, ..] if s.contains("gunzip -c") => "gunzip".into(),
         ["cp", ..] => "cp state".into(),
         ["exec", _, "df", "-Pk", path] => format!("df {path}"),
         ["exec", _, "rm", "-f", ..] => "rm staged".into(),
@@ -656,7 +656,24 @@ fn a_rerun_after_an_interrupted_replay_keeps_the_first_safety_backup() {
     assert!(!labels.iter().any(|l| l == "start d"), "{labels:?}");
     let text = host.errors.join("\n");
     assert!(
-        text.contains("is left stopped because the bank is incomplete"),
+        text.contains(
+            "is left stopped because the earlier restore may have left the bank incomplete"
+        ),
+        "{text}"
+    );
+    // The journal cannot tell whether the bank was repaired since, so
+    // both courses are given.
+    assert!(
+        text.contains(
+            "If you have not repaired the bank since 2026-11-14T00:00:00+11:00, it is still incomplete; recover it as it was before that restore with:"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "If you have repaired it since, this run changed nothing: start the daemon with:\n  docker start d\nthen delete {}",
+            setup.journal().display()
+        )),
         "{text}"
     );
     assert!(
@@ -834,7 +851,7 @@ fn a_failure_with_an_earlier_journal_names_both_safety_backups() {
     );
     assert!(
         text.contains(&format!(
-            "or recover the bank as it was immediately before this run ({date}) with:
+            "or recover the bank as it was immediately before this run ({date}; the incomplete bank the earlier restore left, unless you repaired it since) with:
   pseudolife-mcp restore {}",
             execute::shell_word(&format!("--backup-file={}", second.to_string_lossy()))
         )),
@@ -852,6 +869,49 @@ fn a_failure_with_an_earlier_journal_names_both_safety_backups() {
         note.contains("as it was immediately before this run"),
         "{note}"
     );
+}
+
+#[test]
+fn a_third_failed_run_names_the_first_incidents_pair_and_its_own() {
+    let setup = Setup::new(false);
+    // Three runs, each dying in its replay. The journal keeps the first
+    // run's pair: the second run's is a backup of the half-restored bank.
+    for _ in 0..3 {
+        let mut docker = Fake {
+            fail_on: Some("replay"),
+            ..Fake::default()
+        };
+        let mut host = ready_host();
+        assert_eq!(setup.run(&mut docker, &mut host), 1);
+        if setup.runs.get() < 3 {
+            continue;
+        }
+        let text = host.errors.join("\n");
+        let safety = Path::new(&setup.plan.safety_dir);
+        let word = |stamp: &str| {
+            execute::shell_word(&format!(
+                "--backup-file={}",
+                safety
+                    .join(format!("pseudolife_memory-{stamp}.sql.gz"))
+                    .to_string_lossy()
+            ))
+        };
+        assert!(
+            text.contains(&format!(
+                "Recover the bank as it was before the interrupted restore of 2026-11-14T00:00:00+11:00 with:\n  pseudolife-mcp restore {}",
+                word(STAMP)
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "unless you repaired it since) with:\n  pseudolife-mcp restore {}",
+                word("20261114-000000-abcde002")
+            )),
+            "{text}"
+        );
+        assert!(!text.contains("abcde001"), "{text}");
+    }
 }
 
 #[test]

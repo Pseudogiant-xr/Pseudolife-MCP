@@ -4083,9 +4083,12 @@ Before it stops anything, restore reads the dump and the state archive to
 their ends. The archive must be one GNU `tar` extracts exactly as restore
 checks it: POSIX extended headers (`path`, `linkpath`, `size`) and GNU long
 names are read, and numeric fields and the ustar prefix are read as tar
-reads them; a sparse member, a global extended header that sets a name or
-size, a damaged header anywhere, a `move.json` that is not a plain file,
-or anything but zeros after the end marker is refused, with the reason. A lite (embedded PostgreSQL) bank is
+reads them. Only plain files, links and directories are read (a member
+whose final name ends in `/` is a directory); any other member type, a
+link or directory with a non-zero size, a sparse member, a global extended
+header that sets a name or size, a damaged header anywhere, a `move.json`
+that is not a plain file, or anything but zeros after the end marker is
+refused, with the reason. A lite (embedded PostgreSQL) bank is
 refused: restore replaces a Docker bank only, so install the Docker bank
 first ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)).
 Restore runs the `docker` it finds on an absolute `PATH` entry (never the
@@ -4105,10 +4108,14 @@ outright. Restore also records `restore-in-progress-<bank>.json` in
 `~/.pseudolife-mcp` (or `PSEUDOLIFE_MCP_DATA_DIR`) before the drop and
 removes it once the database and state are restored (a journal it cannot
 remove is reported, to delete by hand). A later restore of the same bank
-sees it and leaves the daemon stopped if it fails before its own drop;
-every message after its drop names both safety backups with their dates:
+sees it. If that run fails before its own drop it changed nothing and
+leaves the daemon stopped, and gives both courses: if the bank was not
+repaired since the interrupted restore, recover it from that restore's
+safety backup; if it was, start the daemon and delete the journal. Every
+message after its own drop names both safety backups with their dates:
 the bank as it was before the interrupted restore, and as it was
-immediately before this run. Rerunning either
+immediately before this run (the incomplete bank the interrupted restore
+left, unless it was repaired since). Rerunning either
 command after an interruption at any step is safe. Safety backups are
 never rotated.
 
