@@ -241,7 +241,21 @@ Linux), and removes its bookkeeping; a stand-in that never finished leaves
 The row runs live on both OSes in the `w1c-connection` shard. Every case is
 built from fixed bytes (the fixture echoes the request's origin, which the
 harness tokenizes per arm, and the stand-in's path is under the tokenized
-home), so all are golden cases. Both goldens bind the oracle tree of
-`ca803afd` (no `pseudolife_memory/` file differs on this branch): Windows
-from this checkout (CPython 3.11.9), Linux from an export of the branch
-under WSL Ubuntu (`declared`).
+home), so all are golden cases. The goldens record the oracle at this
+branch (no `pseudolife_memory/` file differs from master): Windows from this
+checkout (CPython 3.11.9), Linux from a clone of the branch under WSL Ubuntu
+(CPython 3.11.15).
+
+The browser cases start a process (the stand-in) and wait on its exit and a
+release file, so before the row's new cases join a required lane they need
+20 clean hosted `windows-latest` runs: the Rust workflow's `mode=stress`
+dispatch with `selection: row:console`.
+
+Local evidence (2026-11-13): Windows workstation, 139/139 live and golden and
+all 12 of its mutants caught (`console-display-ignored` is Linux-only); WSL
+Ubuntu, 139/139 live and golden and all 12 of its mutants caught
+(`console-winerror-full-stop` is Windows-only). Before the port, the row
+against master's deferring binary on Windows: 37 of the new and changed
+cases differed, and the five that matched are the four declared pre-mint
+deferrals and a `--no-open --json` answer the first slice already gave.
+Hosted runs are CI's.
