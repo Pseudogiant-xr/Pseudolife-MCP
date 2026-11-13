@@ -1,17 +1,15 @@
 //! CPython 3.11's `gzip._GzipReader`, member by member, with each failure
 //! classed by the exception Python raises there.
 //!
-//! `BadGzipFile` (an `OSError`) and `EOFError` are what restore's checks
-//! catch, so they are a refusal. A deflate error is `zlib.error`, which
-//! neither check catches: the oracle prints a traceback, so it is `Unsure`
-//! (this leaf defers). The inflater here is miniz_oxide, not zlib, and it
-//! is laxer: it decodes a back-reference before the start of a member's
-//! output, which zlib rejects as "invalid distance too far back". Such a
-//! stream decodes to wrong bytes, so a CRC or length mismatch is `Unsure`
-//! too rather than the oracle's `BadGzipFile` refusal. What stays answered
-//! wrongly is a stream with a corruption miniz_oxide accepts that is also
-//! cut off before its trailer: the oracle's traceback, this leaf's
-//! refusal (a declared divergence in the row's spec).
+//! `BadGzipFile` (an `OSError`), `EOFError` and a deflate error
+//! (`zlib.error`) are what restore's checks catch, so each is a refusal. The
+//! inflater here is miniz_oxide, not zlib, and it is laxer: it decodes a
+//! back-reference before the start of a member's output, which zlib rejects
+//! as "invalid distance too far back". Such a stream decodes to wrong bytes,
+//! and the CRC or length mismatch, or the end of input, then refuses it as
+//! zlib's error does. What stays answered differently is a stream whose
+//! trailer matches miniz_oxide's wrong bytes, and any stream miniz_oxide
+//! rejects but zlib accepts (both declared in the row's spec).
 use std::{
     fs::File,
     io::{self, Read},
@@ -150,7 +148,7 @@ pub(super) fn stream(
                     &mut output,
                     FlushDecompress::None,
                 )
-                .map_err(|_| Stop::Unsure)?;
+                .map_err(|_| Stop::Refuse)?;
             let consumed = (inflater.total_in() - before.0) as usize;
             let produced = (inflater.total_out() - before.1) as usize;
             input.position += consumed;
@@ -176,9 +174,9 @@ pub(super) fn stream(
         let stored_crc = u32::from_le_bytes([trailer[0], trailer[1], trailer[2], trailer[3]]);
         let stored_size = u32::from_le_bytes([trailer[4], trailer[5], trailer[6], trailer[7]]);
         if stored_crc != crc.sum() || stored_size != crc.amount() {
-            // Python's BadGzipFile, unless zlib stopped earlier on a
-            // corruption miniz_oxide decoded: this leaf cannot tell which.
-            return Err(Stop::Unsure);
+            // Python's BadGzipFile, or zlib stopped earlier on a corruption
+            // miniz_oxide decoded: both are a refusal.
+            return Err(Stop::Refuse);
         }
         // Zero padding between and after members is skipped.
         loop {
@@ -241,35 +239,35 @@ mod tests {
         let mut bad_crc = one.clone();
         let at = bad_crc.len() - 5;
         bad_crc[at] ^= 0xff;
-        assert_eq!(read(&bad_crc), Err(Stop::Unsure));
+        assert_eq!(read(&bad_crc), Err(Stop::Refuse));
         let mut bad_size = one.clone();
         let at = bad_size.len() - 1;
         bad_size[at] ^= 1;
-        assert_eq!(read(&bad_size), Err(Stop::Unsure));
+        assert_eq!(read(&bad_size), Err(Stop::Refuse));
         let mut method = one;
         method[2] = 7;
         assert_eq!(read(&method), Err(Stop::Refuse));
     }
 
     #[test]
-    fn a_deflate_error_is_unsure_as_zlib_error_escapes_python() {
+    fn a_deflate_error_is_refused_as_python_refuses_zlib_error() {
         // A stored-block header whose length and complement disagree.
         let mut bytes = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff];
         bytes.extend_from_slice(&[0x01, 0x05, 0x00, 0x00, 0x00]);
-        assert_eq!(read(&bytes), Err(Stop::Unsure));
+        assert_eq!(read(&bytes), Err(Stop::Refuse));
     }
 
     #[test]
-    fn a_distance_before_the_output_start_is_unsure() {
+    fn a_distance_before_the_output_start_is_refused() {
         // CPython 3.11's gzip raises zlib.error "invalid distance too far
-        // back" on these bytes (observed 2026-11-13); miniz_oxide decodes
-        // them, and the trailer's CRC then disagrees.
+        // back" on these bytes (observed 2026-11-13), which restore refuses;
+        // miniz_oxide decodes them, and the trailer's CRC then disagrees.
         let hex = "1f8b08004efbf56a02ff0b76f571755b5130b4e6d2d55508c82f2e492f4a0d0ef45148492c494c4a2c4e554829cd2d5048cecf2dc8492d49e50a1e553eaa7c54f9a8f251e5a3ca47958f2a1f59ca010f13ac8a2e090000";
         let bytes: Vec<u8> = (0..hex.len())
             .step_by(2)
             .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
             .collect();
-        assert_eq!(read(&bytes), Err(Stop::Unsure));
+        assert_eq!(read(&bytes), Err(Stop::Refuse));
     }
 
     #[test]

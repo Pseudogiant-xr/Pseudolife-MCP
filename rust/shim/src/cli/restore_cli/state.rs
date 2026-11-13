@@ -10,7 +10,7 @@
 //! bytes) patch the header after them as `_proc_gnulong` does. Members this
 //! leaf does not read (PAX, sparse files, a negative size), long-name chains
 //! and link graphs deep enough to near Python's recursion limit are `Unsure`.
-//! A deflate error is too (`zlib.error` escapes the oracle).
+//! A deflate error is a refusal, as the oracle catches `zlib.error`.
 use std::{collections::HashMap, path::Path};
 
 use super::{
