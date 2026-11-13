@@ -2879,8 +2879,13 @@ foreach ($selectedClient in $clients) {
                     }
                 }
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "codex")) {
-                    Step "Codex registration moved to the shim launcher; the native client is installed."
-                    $mcpState["codex"] = "present-migrated"
+                    if ($script:shimMigrated -eq "current") {
+                        Step "Codex registration preserved; it already runs the native client."
+                        $mcpState["codex"] = "present"
+                    } else {
+                        Step "Codex registration moved to the shim launcher; the native client is installed."
+                        $mcpState["codex"] = "present-migrated"
+                    }
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
@@ -2904,8 +2909,13 @@ foreach ($selectedClient in $clients) {
                                 $mcpState["codex"] = "failed"
                             }
                         } elseif (Test-ShimRegistrationMigrates "codex") {
-                            Step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
-                            $mcpState["codex"] = "present-upgraded"
+                            if ($script:shimMigrated -eq "current") {
+                                Step "Codex registration preserved; it already runs the native client."
+                                $mcpState["codex"] = "present"
+                            } else {
+                                Step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                $mcpState["codex"] = "present-upgraded"
+                            }
                         } else {
                         $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
                         $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
@@ -2997,8 +3007,13 @@ foreach ($selectedClient in $clients) {
                     }
                 }
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "gemini")) {
-                    Step "Gemini CLI registration moved to the shim launcher; the native client is installed."
-                    $mcpState["gemini"] = "present-migrated"
+                    if ($script:shimMigrated -eq "current") {
+                        Step "Gemini CLI registration preserved; it already runs the native client."
+                        $mcpState["gemini"] = "present"
+                    } else {
+                        Step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                        $mcpState["gemini"] = "present-migrated"
+                    }
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
@@ -3022,8 +3037,13 @@ foreach ($selectedClient in $clients) {
                                 $mcpState["gemini"] = "failed"
                             }
                         } elseif (Test-ShimRegistrationMigrates "gemini") {
-                            Step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
-                            $mcpState["gemini"] = "present-upgraded"
+                            if ($script:shimMigrated -eq "current") {
+                                Step "Gemini CLI registration preserved; it already runs the native client."
+                                $mcpState["gemini"] = "present"
+                            } else {
+                                Step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                $mcpState["gemini"] = "present-upgraded"
+                            }
                         } else {
                         $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
                         $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
@@ -3108,8 +3128,13 @@ foreach ($selectedClient in $clients) {
                     }
                 }
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "claude-code")) {
-                    Step "Claude Code registration moved to the shim launcher; the native client is installed."
-                    $mcpState["claude"] = "present-migrated"
+                    if ($script:shimMigrated -eq "current") {
+                        Step "Claude Code registration preserved; it already runs the native client."
+                        $mcpState["claude"] = "present"
+                    } else {
+                        Step "Claude Code registration moved to the shim launcher; the native client is installed."
+                        $mcpState["claude"] = "present-migrated"
+                    }
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
@@ -3133,8 +3158,13 @@ foreach ($selectedClient in $clients) {
                                 $mcpState["claude"] = "failed"
                             }
                         } elseif (Test-ShimRegistrationMigrates "claude-code") {
-                            Step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
-                            $mcpState["claude"] = "present-upgraded"
+                            if ($script:shimMigrated -eq "current") {
+                                Step "Claude Code registration preserved; it already runs the native client."
+                                $mcpState["claude"] = "present"
+                            } else {
+                                Step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                $mcpState["claude"] = "present-upgraded"
+                            }
                         } else {
                         $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
                         $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
@@ -3448,8 +3478,8 @@ function Describe-Mcp($state) {
         "shim" { "stdio shim (writer id: daemon default in ops/.env)" }
         "http" { "HTTP (writer id: daemon default in ops/.env)" }
         "present" { "already wired (unchanged)" }
-        "present-upgraded" { "already wired; checkout shim upgraded" }
-        "present-migrated" { "already wired; registration moved to the shim launcher (side-by-side runtime installed, old file backed up)" }
+        "present-upgraded" { "already wired; it runs the native client from this release" }
+        "present-migrated" { "already wired; registration moved to the native launcher (old file backed up)" }
         "present-custom" { "already wired with custom command (unchanged)" }
         "failed" { "registration or shim upgrade FAILED - see the warning above and re-run" }
         default { "not wired" }

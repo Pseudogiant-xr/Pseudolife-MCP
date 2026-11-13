@@ -240,7 +240,7 @@ def test_install_sh_upgrades_managed_shim_without_rewriting_registration(
     assert "native|install" in calls
     assert not any(" mcp add" in call or " mcp remove" in call for call in calls)
     assert "STATE=present-upgraded" in output
-    assert "[x] already wired; checkout shim upgraded" in output
+    assert "[x] already wired; it runs the native client from this release" in output
 
 
 @pytest.mark.parametrize("client", CLIENTS)
@@ -528,7 +528,7 @@ def test_install_ps1_upgrades_managed_shim_without_rewriting_registration(
     assert "native|install" in calls
     assert not any("mcp add" in call or "mcp remove" in call for call in calls)
     assert "STATE=present-upgraded" in output
-    assert "[x] already wired; checkout shim upgraded" in output
+    assert "[x] already wired; it runs the native client from this release" in output
 
 
 @pytest.mark.parametrize("client", CLIENTS)
@@ -692,3 +692,39 @@ def test_install_ps1_flagless_fresh_cli_fails_before_registration(
     assert "registration was skipped" in output
     assert not any("mcp add" in call and "--help" not in call for call in calls)
     assert not any("mcp remove" in call for call in calls)
+
+
+# A registration naming another path that already resolves to the native
+# launcher (a ~/.local/bin link the native install relinked): the native step
+# reports it current, so the run says so and stays quiet on a rerun.
+@pytest.mark.parametrize("client", VISIBLE_ENV_CLIENTS)
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
+def test_install_sh_reports_a_registration_already_on_the_launcher_as_preserved(
+    bash: str, tmp_path: Path, client: str,
+) -> None:
+    proc = _run_bash_existing(
+        bash, tmp_path, client=client,
+        config=_custom_config(client, "/home/u/.local/bin/pseudolife-mcp", "1"),
+        manager_exit=0, migrate_exit=4,
+    )
+    output = (proc.stdout + proc.stderr).decode(errors="replace")
+    assert proc.returncode == 0, output
+    assert "STATE=present\n" in output
+    assert "registration preserved; it already runs the native client" in output
+    assert "registration moved" not in output
+
+
+@pytest.mark.parametrize("client", VISIBLE_ENV_CLIENTS)
+def test_install_ps1_reports_a_registration_already_on_the_launcher_as_preserved(
+    tmp_path: Path, client: str,
+) -> None:
+    proc = _run_powershell_existing(
+        tmp_path, client=client,
+        config=_custom_config(client, r"C:\Users\u\.local\bin\pseudolife-mcp.exe", "1"),
+        manager_exit=0, migrate_exit=4,
+    )
+    output = (proc.stdout + proc.stderr).decode(errors="replace").replace("\r", "")
+    assert proc.returncode == 0, output
+    assert "STATE=present\n" in output
+    assert "registration preserved; it already runs the native client" in output
+    assert "registration moved" not in output

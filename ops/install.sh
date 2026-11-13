@@ -2919,8 +2919,13 @@ for selected_client in $CLIENTS; do
                     if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
                 fi
                 if [ -z "$managed_registered_shim" ] && shim_registration_migrates codex; then
-                    step "Codex registration moved to the shim launcher; the native client is installed."
-                    MCP_CODEX=present-migrated
+                    if [ "$SHIM_MIGRATED" = current ]; then
+                        step "Codex registration preserved; it already runs the native client."
+                        MCP_CODEX=present
+                    else
+                        step "Codex registration moved to the shim launcher; the native client is installed."
+                        MCP_CODEX=present-migrated
+                    fi
                 elif [ -n "$managed_registered_shim" ]; then
                     ensure_shim
                     if [ -n "$SHIM_OK" ]; then
@@ -2945,8 +2950,13 @@ for selected_client in $CLIENTS; do
                                 MCP_CODEX=failed
                             fi
                         elif shim_registration_migrates codex; then
-                            step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
-                            MCP_CODEX=present-upgraded
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Codex registration preserved; it already runs the native client."
+                                MCP_CODEX=present
+                            else
+                                step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                MCP_CODEX=present-upgraded
+                            fi
                         else
                         resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
                         installed_shim="$SHIM_PATH"
@@ -3050,8 +3060,13 @@ for selected_client in $CLIENTS; do
                     managed_registered_shim=1
                 fi
                 if [ -z "$managed_registered_shim" ] && shim_registration_migrates gemini; then
-                    step "Gemini CLI registration moved to the shim launcher; the native client is installed."
-                    MCP_GEMINI=present-migrated
+                    if [ "$SHIM_MIGRATED" = current ]; then
+                        step "Gemini CLI registration preserved; it already runs the native client."
+                        MCP_GEMINI=present
+                    else
+                        step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                        MCP_GEMINI=present-migrated
+                    fi
                 elif [ -n "$managed_registered_shim" ]; then
                     ensure_shim
                     if [ -n "$SHIM_OK" ]; then
@@ -3076,8 +3091,13 @@ for selected_client in $CLIENTS; do
                                 MCP_GEMINI=failed
                             fi
                         elif shim_registration_migrates gemini; then
-                            step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
-                            MCP_GEMINI=present-upgraded
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Gemini CLI registration preserved; it already runs the native client."
+                                MCP_GEMINI=present
+                            else
+                                step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                MCP_GEMINI=present-upgraded
+                            fi
                         else
                         resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
                         installed_shim="$SHIM_PATH"
@@ -3181,8 +3201,13 @@ for selected_client in $CLIENTS; do
                 if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
             fi
             if [ -z "$managed_registered_shim" ] && shim_registration_migrates claude-code; then
-                step "Claude Code registration moved to the shim launcher; the native client is installed."
-                MCP_CLAUDE=present-migrated
+                if [ "$SHIM_MIGRATED" = current ]; then
+                    step "Claude Code registration preserved; it already runs the native client."
+                    MCP_CLAUDE=present
+                else
+                    step "Claude Code registration moved to the shim launcher; the native client is installed."
+                    MCP_CLAUDE=present-migrated
+                fi
             elif [ -n "$managed_registered_shim" ]; then
                 ensure_shim
                 if [ -n "$SHIM_OK" ]; then
@@ -3207,8 +3232,13 @@ for selected_client in $CLIENTS; do
                             MCP_CLAUDE=failed
                         fi
                     elif shim_registration_migrates claude-code; then
-                        step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
-                        MCP_CLAUDE=present-upgraded
+                        if [ "$SHIM_MIGRATED" = current ]; then
+                            step "Claude Code registration preserved; it already runs the native client."
+                            MCP_CLAUDE=present
+                        else
+                            step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                            MCP_CLAUDE=present-upgraded
+                        fi
                     else
                     resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
                     installed_shim="$SHIM_PATH"
@@ -3648,8 +3678,8 @@ describe_mcp() {  # $1 = state
         shim)     echo "stdio shim (writer id: daemon default in ops/.env)" ;;
         http)     echo "HTTP (writer id: daemon default in ops/.env)" ;;
         present)  echo "already wired (unchanged)" ;;
-        present-upgraded) echo "already wired; checkout shim upgraded" ;;
-        present-migrated) echo "already wired; registration moved to the shim launcher (side-by-side runtime installed, old file backed up)" ;;
+        present-upgraded) echo "already wired; it runs the native client from this release" ;;
+        present-migrated) echo "already wired; registration moved to the native launcher (old file backed up)" ;;
         present-custom) echo "already wired with custom command (unchanged)" ;;
         failed)   echo "registration or shim upgrade FAILED - see warning above and re-run" ;;
         *)        echo "not wired" ;;
