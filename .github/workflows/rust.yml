@@ -281,9 +281,16 @@ jobs:
     # Nextest 9.6, no-default 7.4 and override builds 11.9 min, while master
     # run 41699732205 at the same code took 11.8, 8.7 and 15.9 min and was
     # cancelled at the 45-minute limit inside the override builds.
-    # Ordinary PRs may also replay touched goldens and frozen judges before
-    # batching; batches keep their existing separate parity jobs.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 90 || 60 }}
+    # Ordinary PRs may also replay touched goldens before batching (the
+    # frozen judges moved to the frozen-probes job); batches keep their
+    # existing separate parity jobs.
+    # 2026-11-14: the override step's limit went from 20 to 35 (see it),
+    # so each job limit is where that step starts plus 35, plus a margin.
+    # Hosted Windows reached it 34.5 min in on batch run 43418298157 (job
+    # 131866393314): 60 -> 75. Ordinary PRs reached it 62.3 and 67.8 min
+    # in (jobs 131684824680, 131776517042), less the 9.5 and 9.2 min of
+    # frozen probes that left the job: 52.8 and 58.6, so 90 -> 100.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 100 || 75 }}
     defaults:
       run:
         working-directory: rust
@@ -541,7 +548,17 @@ jobs:
         # Hosted windows: about 7 min cold on 2026-10-10/13 (release build
         # 5-6 min), 3.2 min warm since 2026-10-14. The cold release build
         # was still running 6m20s in when job 116323387861 was cancelled.
-        timeout-minutes: 20
+        # 2026-11-13, hosted Windows, 20 was no longer enough: run
+        # 43392760359 job 131776517042 took 2m47s for the debug test and
+        # 17m10s for the release test on a cold cache, then timed out as
+        # the mutants dev build started; run 43418298157 job 131866393314
+        # was still compiling the release test at 20 min; run 43364043883
+        # job 131684824680 timed out in the mutants dev build. Even a
+        # full cache hit (master run 43389967460 job 131853299319) took
+        # 2m20s, 9m38s and 1m11s (13.2 min): the release build compiles
+        # the daemon itself from scratch. Cold, about 21 min: 35 leaves a
+        # margin and the job limits above make room for it.
+        timeout-minutes: 35
         shell: pwsh
         run: |
           # Each build's output is printed only once it finishes; these lines

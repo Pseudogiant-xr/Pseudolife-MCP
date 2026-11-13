@@ -166,7 +166,7 @@ def test_prechecks_are_ordinary_pr_only_and_keep_python_dependencies_isolated():
     steps = {step.get("name"): step for step in jobs["rust"]["steps"]}
     selected = steps["Select ordinary PR parity prechecks"]
     assert selected["if"] == "github.event_name == 'pull_request' && needs.scope.outputs.full == 'false'"
-    assert jobs["rust"]["timeout-minutes"] == "${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 90 || 60 }}"
+    assert jobs["rust"]["timeout-minutes"] == "${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 100 || 75 }}"
     runtime = steps["Install the selected PR precheck dependencies"]
     assert "venv --system-site-packages" in runtime["run"] and "GITHUB_ENV" not in runtime["run"]
     replay = steps["Replay touched PR goldens"]

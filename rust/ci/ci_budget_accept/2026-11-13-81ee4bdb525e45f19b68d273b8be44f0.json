@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "ae533ea0bf5ced90",
+  "fingerprint": "ab7927623e564cc7",
+  "reason": "Only limits change: the daemon override step 20 -> 35 min and the job 60 -> 75 (batch) and 90 -> 100 (ordinary PR) to make room for it. No step is added; a passing run costs what it did. A cold-cache Windows run, which used to time out at 20 (jobs 131776517042, 131866393314, 131684824680 on 2026-11-13), now finishes its override builds, about 21 min (2m47s debug, 17m10s release, then the mutants dev build) instead of failing and being rerun."
+}
