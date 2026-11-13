@@ -96,6 +96,10 @@ struct Fake {
     truncated_dump: bool,
     /// What the staging helper lists instead of [`listing`].
     extracted: Option<Vec<u8>>,
+    /// The free-space helper's mount table shows this mount below /data.
+    df_nested: Option<&'static str>,
+    /// The swap helper's mount table shows this mount below /data.
+    swap_nested: Option<&'static str>,
 }
 
 impl Docker for Fake {
@@ -172,6 +176,20 @@ impl Docker for Fake {
                 if script.starts_with("tar czf") {
                     write(&archive());
                     ok("")
+                } else if let (Some(mount), true) = (self.df_nested, script.contains("df -Pk")) {
+                    Ran {
+                        code: 3,
+                        stdout: format!("nested {mount}\n").into_bytes(),
+                        ..Ran::default()
+                    }
+                } else if let (Some(mount), true) =
+                    (self.swap_nested, script.contains("mv -t /data"))
+                {
+                    Ran {
+                        code: 3,
+                        stdout: format!("nested {mount}\n").into_bytes(),
+                        ..Ran::default()
+                    }
                 } else if script.contains("-printf") {
                     Ran {
                         code: 0,
@@ -1015,17 +1033,13 @@ fn the_state_is_staged_in_data_and_swapped_in_by_rename() {
         format!("tar czf - --anchored '--exclude=./{glob}' -C /data .")
     );
     assert!(swap.starts_with("set -e;"), "{swap}");
-    // Before anything is removed, a volume mounted inside /data stops it.
-    assert!(swap.contains("/proc/self/mountinfo; then :; else echo 'a volume is mounted inside /data; nothing was replaced' >&2; exit 3; fi; find /data"), "{swap}");
-    assert!(
-        swap.contains(&format!(
-            "! -name move.json ! -name .pseudolife-restore-{RUN_TAG} -exec rm -rf --one-file-system -- {{}} +"
-        )),
-        "{swap}"
-    );
-    assert!(
-        swap.ends_with("-exec mv -t /data -- {} +; rmdir -- $S"),
-        "{swap}"
+    // The whole swap: before anything is removed, a mount below /data in
+    // the helper's mount table stops it with exit 3.
+    assert_eq!(
+        swap,
+        &format!(
+            r#"set -e; S={dir}; test -d $S; awk '$5 ~ /^\/data\// {{ print "nested " $5; found = 1 }} END {{ exit 3 * found }}' /proc/self/mountinfo || exit $?; find /data -mindepth 1 -maxdepth 1 ! -name move.json ! -name .pseudolife-restore-{RUN_TAG} -exec rm -rf --one-file-system -- {{}} +; find $S -mindepth 1 -maxdepth 1 -exec mv -t /data -- {{}} +; rmdir -- $S"#
+        )
     );
     // Stale staging directories (that exact name only) go before the
     // safety backup reads /data.
@@ -1081,6 +1095,77 @@ fn an_interrupt_between_the_replay_and_the_swap_says_the_database_is_restored() 
     );
     assert!(
         text.contains("or, once the cause is fixed, finish this restore with:"),
+        "{text}"
+    );
+    assert!(setup.journal().exists());
+}
+
+#[test]
+fn a_mount_below_data_the_free_space_helper_sees_is_refused_before_the_drop() {
+    // A host mount below a bind-mounted /data: not in `docker inspect`, in
+    // the helper's mount table.
+    let setup = Setup::new(true);
+    let mut docker = Fake {
+        df_nested: Some("/data/models"),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 2, "{:?}", host.errors);
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    assert!(
+        !labels
+            .iter()
+            .any(|l| l == "drop" || l == "create stage-helper"),
+        "{labels:?}"
+    );
+    let text = host.errors.join("\n");
+    assert!(
+        text.starts_with("restore failed: d has a volume mounted at /data/models, inside its /data volume; restore replaces only /data and cannot replace a volume mounted inside it."),
+        "{text}"
+    );
+    assert!(
+        text.contains("The bank was not changed and the daemon d was started again."),
+        "{text}"
+    );
+    assert!(!setup.journal().exists());
+}
+
+#[test]
+fn a_mount_the_swap_finds_below_data_leaves_the_state_unchanged_and_says_so() {
+    let setup = Setup::new(true);
+    let mut docker = Fake {
+        swap_nested: Some("/data/a\\040b"),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 2, "{:?}", host.errors);
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    let swap = HAPPY.iter().position(|l| *l == "start-a helper5").unwrap();
+    assert_eq!(labels[..=swap], HAPPY[..=swap], "{labels:?}");
+    assert!(!labels[swap..].iter().any(|l| l == "start d"), "{labels:?}");
+    let text = host.errors.join("\n");
+    assert!(
+        text.starts_with("restore failed: d has a volume mounted at /data/a b, inside its /data volume, so the state volume could not be replaced."),
+        "{text}"
+    );
+    assert!(
+        text.contains("The database db holds the backup, but the state volume is unchanged: nothing in it was replaced, because a volume is mounted inside /data at /data/a b. The daemon d is left stopped"),
+        "{text}"
+    );
+    // A command that can succeed: the database alone, as it was.
+    let dump = Path::new(&setup.plan.safety_dir).join(format!("pseudolife_memory-{STAMP}.sql.gz"));
+    let database_back = format!(
+        "Put the database back as it was before this restore (this run did not change the state volume) with:\n  pseudolife-mcp restore {} --container=p",
+        execute::shell_word(&format!("--backup-file={}", dump.to_string_lossy()))
+    );
+    assert!(text.contains(&database_back), "{text}");
+    let line = text
+        .lines()
+        .find(|l| l.contains("pseudolife-mcp restore") && l.contains(&*dump.to_string_lossy()))
+        .unwrap();
+    assert!(!line.contains("--state-archive"), "{line}");
+    assert!(
+        text.contains("or mount that volume outside /data and finish this restore with:"),
         "{text}"
     );
     assert!(setup.journal().exists());

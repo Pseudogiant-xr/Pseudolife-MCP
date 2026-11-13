@@ -4098,8 +4098,8 @@ daemon's `/data` volume (`/data/.pseudolife-restore-<run>`) and checks what
 `tar` actually wrote: only plain files, directories and symlinks; every
 symlink relative and leading, through the tree's own links, to a place
 inside it as it will be once it is `/data`; no file sharing its inode with
-anything outside it; no setuid or setgid file or directory; nothing mounted
-inside it. If that check refuses, the
+anything outside it; no setuid or setgid file (a setgid directory, as a
+group-shared `/data` has, is restored); nothing mounted inside it. If that check refuses, the
 staging directory is removed, the daemon starts again and nothing was
 changed. After the replay the old state (except `move.json`) is removed
 and the staged entries are renamed into place. `/data` itself keeps its
@@ -4110,11 +4110,18 @@ kept) is never part of the state: restore removes one before its safety
 backup, the safety backup leaves it out, and restore never extracts one
 from an archive.
 
-Restore replaces only the `/data` volume. A daemon with another volume
-mounted inside it (for example at `/data/models`) is refused before
-anything is stopped when `--state-archive` is given, because replacing
-`/data` would empty that volume and could not replace it: mount that volume
-outside `/data`, or restore the database alone without `--state-archive`.
+Restore replaces only the `/data` volume. A daemon with another volume or
+filesystem mounted inside it (for example at `/data/models`) is refused
+before anything is stopped when `--state-archive` is given, because
+replacing `/data` would empty that volume and could not replace it: mount
+that volume outside `/data`, or restore the database alone without
+`--state-archive`. Restore reads both the daemon's `docker inspect` mounts
+and the mount table a helper over its volumes sees, which also shows a
+filesystem mounted below a host folder bind-mounted as `/data` (Docker
+binds are recursive). Should one appear only after the database was
+replaced, the swap still refuses before removing anything, says the state
+volume is unchanged, and offers the database-only command that puts the
+database back.
 A lite (embedded PostgreSQL) bank is
 refused: restore replaces a Docker bank only, so install the Docker bank
 first ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)).

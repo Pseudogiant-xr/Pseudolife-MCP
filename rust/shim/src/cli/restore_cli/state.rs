@@ -880,18 +880,11 @@ pub(super) fn judge_extracted(listing: &[u8]) -> Result<(), String> {
             return Err(format!("{what} ({})", shown(&entry.path)));
         }
         // The daemon never needs a set-id file, and extraction as root
-        // keeps the bits an archive gives. The staging root's own mode
-        // (the archive's `./`) never reaches /data: only its entries move.
-        if !entry.path.is_empty() && entry.kind != b'l' && entry.mode & 0o6000 != 0 {
-            return Err(format!(
-                "a setuid or setgid {} ({})",
-                if entry.kind == b'd' {
-                    "directory"
-                } else {
-                    "file"
-                },
-                shown(&entry.path)
-            ));
+        // keeps the bits an archive gives. A setgid directory grants
+        // nothing (its new entries take its group) and a group-shared
+        // /data has them, so only files are judged.
+        if entry.kind == b'f' && entry.mode & 0o6000 != 0 {
+            return Err(format!("a setuid or setgid file ({})", shown(&entry.path)));
         }
         if entry.device != device {
             return Err(format!("a mount point inside it ({})", shown(&entry.path)));
@@ -1657,22 +1650,27 @@ mod tests {
     }
 
     #[test]
-    fn a_setuid_or_setgid_entry_is_refused() {
-        for (kind, mode, what) in [
-            ('f', "4755", "file"),
-            ('f', "2755", "file"),
-            ('f', "6711", "file"),
-            ('d', "2775", "directory"),
-        ] {
+    fn a_setuid_or_setgid_file_is_refused() {
+        for mode in ["4755", "2755", "6711"] {
             assert_eq!(
-                judge_extracted(&tree(&[entry_mode(kind, "66", 2, 1, mode, "x", "")])),
-                Err(format!("a setuid or setgid {what} (x)")),
+                judge_extracted(&tree(&[entry_mode('f', "66", 2, 1, mode, "x", "")])),
+                Err("a setuid or setgid file (x)".to_owned()),
                 "{mode}"
             );
         }
+        // A setgid directory (a group-shared /data gives every one the bit)
+        // grants nothing and is restored.
+        assert_eq!(
+            judge_extracted(&tree(&[
+                entry_mode('d', "66", 2, 2, "2775", "shared", ""),
+                entry_mode('d', "66", 3, 2, "2755", "shared/sub", ""),
+                entry_mode('f', "66", 4, 1, "664", "shared/sub/f", ""),
+            ])),
+            Ok(())
+        );
         // The staging root's own mode stays behind with it.
         let mut root_setgid = entry_mode('d', "66", 1, 2, "2775", "", "");
-        root_setgid.extend_from_slice(b"END ");
+        root_setgid.extend_from_slice(b"END\0");
         assert_eq!(judge_extracted(&root_setgid), Ok(()));
         // The sticky bit, an executable and a symlink's 777 are ordinary.
         let ordinary = tree(&[

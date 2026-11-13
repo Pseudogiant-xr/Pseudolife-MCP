@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 
 use super::{
     args::Args,
-    bank::{BULK, Bank, CLEANUP, MINUTE, Plan, Step, Stop, sh_quote},
+    bank::{self, BULK, Bank, CLEANUP, MINUTE, NESTED_MOUNTS, Plan, Step, Stop, sh_quote},
     docker::{Docker, Input, Output},
     safety::{self, Pair},
     state,
@@ -131,7 +131,7 @@ pub(super) fn staged_bytes(state_size: u128, archive: Option<&Path>) -> u128 {
 /// child of `/data`.
 fn swap_script(dir: &str, name: &str) -> String {
     format!(
-        r"set -e; S={dir}; test -d $S; if awk '$5 ~ /^\/data\// {{ found = 1 }} END {{ exit found }}' /proc/self/mountinfo; then :; else echo 'a volume is mounted inside /data; nothing was replaced' >&2; exit 3; fi; find /data -mindepth 1 -maxdepth 1 ! -name move.json ! -name {name} -exec rm -rf --one-file-system -- {{}} +; find $S -mindepth 1 -maxdepth 1 -exec mv -t /data -- {{}} +; rmdir -- $S"
+        r"set -e; S={dir}; test -d $S; {NESTED_MOUNTS} || exit $?; find /data -mindepth 1 -maxdepth 1 ! -name move.json ! -name {name} -exec rm -rf --one-file-system -- {{}} +; find $S -mindepth 1 -maxdepth 1 -exec mv -t /data -- {{}} +; rmdir -- $S"
     )
 }
 const STALE: &str = "rm -f /tmp/pl_restore-*.sql.gz /tmp/pl_restore-*.sql.gz.sql";
@@ -333,6 +333,8 @@ struct Run<'a, 'd, D: Docker, H: Host> {
     stage_name: String,
     /// The staging directory may exist and must be removed.
     staging: bool,
+    /// The swap found this mount below `/data` and replaced nothing.
+    nested: Option<String>,
 }
 
 /// The run ends here: what failed (the [`Stop`]'s text) at the phase
@@ -702,7 +704,39 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             self.check()?;
             self.phase = Phase::StateReplacing;
             self.host.info("==> Replacing the state volume...");
-            self.start_helper(&swap, None, "replacing the state volume")?;
+            let argv: Vec<String> = ["start", "-a", &swap].map(str::to_owned).to_vec();
+            let ran = self
+                .bank
+                .docker
+                .run_io(&argv, BULK, Input::Null, Output::Capture);
+            self.remove_helper(&swap);
+            if ran.interrupted {
+                return Err(Failure(Stop("interrupted".into(), 130)));
+            }
+            if ran.code == 3
+                && let Some(mount) = bank::nested_mount(&ran.stdout)
+            {
+                // The script checks before it removes anything: the state
+                // volume is as it was.
+                self.phase = Phase::Replayed;
+                self.nested = Some(mount.clone());
+                return Err(Failure(Stop(
+                    format!(
+                        "{} has a volume mounted at {mount}, inside its /data volume, so the state volume could not be replaced",
+                        plan.daemon
+                    ),
+                    2,
+                )));
+            }
+            if !ran.ok() {
+                return Err(Failure(Stop(
+                    format!(
+                        "replacing the state volume failed; check docker logs {} and docker logs {}",
+                        plan.pg, plan.daemon
+                    ),
+                    1,
+                )));
+            }
             self.staging = false;
         }
 
@@ -969,6 +1003,11 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                             plan.db
                         )
                     });
+                } else if let Some(mount) = &self.nested {
+                    lines.push(format!(
+                        "The database {} holds the backup, but the state volume is unchanged: nothing in it was replaced, because a volume is mounted inside /data at {mount}. The daemon {daemon} is left stopped so it cannot serve a half-restored bank.",
+                        plan.db
+                    ));
                 } else if self.phase == Phase::Replayed {
                     lines.push(format!(
                         "The database {} holds the backup, but the state volume is unchanged: it was not yet replaced. The daemon {daemon} is left stopped so it cannot serve a half-restored bank.",
@@ -980,11 +1019,21 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                         plan.db
                     ));
                 }
-                match &recovery {
-                    Some(recovery) => lines.push(format!(
+                // A restore with --state-archive cannot finish while that
+                // mount is there: the database alone can be put back.
+                let database_back = self
+                    .nested
+                    .as_ref()
+                    .and(self.safety.as_ref())
+                    .and_then(|pair| pair.dump.as_ref().map(|dump| command(self.cx, dump, None)));
+                match (&recovery, database_back) {
+                    (_, Some(database_back)) => lines.push(format!(
+                        "Put the database back as it was before this restore (this run did not change the state volume) with:\n  {database_back}\nor mount that volume outside /data and finish this restore with:\n  {retry}"
+                    )),
+                    (Some(recovery), None) => lines.push(format!(
                         "{recovery}\nor, once the cause is fixed, finish this restore with:\n  {retry}"
                     )),
-                    None => lines.push(format!(
+                    (None, None) => lines.push(format!(
                         "The database did not exist before this restore; finish the restore, once the cause is fixed, with:\n  {retry}\n(the state volume as it was is in {})",
                         self.safety
                             .as_ref()
@@ -1071,6 +1120,7 @@ pub(super) fn execute<D: Docker, H: Host>(docker: &mut D, host: &mut H, cx: &Con
         stage_dir: format!("/data/{STAGE_PREFIX}{run_tag}"),
         stage_name: format!("{STAGE_PREFIX}{run_tag}"),
         staging: false,
+        nested: None,
     };
     if let Some(earlier) = &run.earlier {
         let note = format!(

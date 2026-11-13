@@ -455,14 +455,24 @@ impl<D: Docker> Bank<'_, D> {
     /// Free space on the state mounts; `/data` must also hold `staged`
     /// bytes (the state archive extracted beside the current state).
     pub fn state_space(&mut self, image: &str, mounts: &[String], staged: u128) -> Step<()> {
-        let script = mounts
-            .iter()
-            .map(|path| format!("LC_ALL=C df -Pk -- {}", sh_quote(path)))
+        // The state is replaced only when nothing is mounted below /data,
+        // which this read-only helper sees before anything is stopped.
+        let script = std::iter::once(NESTED_MOUNTS.to_owned())
+            .chain(
+                mounts
+                    .iter()
+                    .map(|path| format!("LC_ALL=C df -Pk -- {}", sh_quote(path))),
+            )
             .collect::<Vec<_>>()
             .join(" && ");
         let helper = self.helper(image, &script, false)?;
         let ran = self.run(&["start", "-a", &helper], MINUTE);
         self.quiet(&["rm", "-f", &helper]);
+        if ran.code == 3
+            && let Some(mount) = nested_mount(&ran.stdout)
+        {
+            return fail(nested_refusal(&self.daemon, &mount), 2);
+        }
         let text = ascii_text(&ran.stdout).unwrap_or_default();
         let rows: Vec<&str> = text
             .split('\n')
@@ -481,6 +491,43 @@ impl<D: Docker> Bank<'_, D> {
         }
         Ok(())
     }
+}
+
+/// Prints each mount point below `/data` in the helper's mount table as
+/// `nested <path>` and exits 3 when there is one (2 when the table cannot be
+/// read). It sees what `docker inspect` does not list, such as a host mount
+/// below a bind-mounted `/data`.
+pub(super) const NESTED_MOUNTS: &str = r#"awk '$5 ~ /^\/data\// { print "nested " $5; found = 1 } END { exit 3 * found }' /proc/self/mountinfo"#;
+
+/// The first mount a [`NESTED_MOUNTS`] run printed, its octal escapes
+/// (`\040` for a space) decoded.
+pub(super) fn nested_mount(stdout: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(stdout);
+    let raw = text.lines().find_map(|line| line.strip_prefix("nested "))?;
+    let bytes = raw.as_bytes();
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        let escape = bytes.get(at + 1..at + 4).filter(|digits| {
+            bytes[at] == b'\\' && digits.iter().all(|b| (b'0'..=b'7').contains(b))
+        });
+        if let Some(digits) = escape {
+            let value = digits.iter().fold(0u32, |v, b| v * 8 + u32::from(b - b'0'));
+            out.push(u8::try_from(value).unwrap_or(b'?'));
+            at += 4;
+        } else {
+            out.push(bytes[at]);
+            at += 1;
+        }
+    }
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// Restore's refusal of a daemon with a volume mounted inside `/data`.
+pub(super) fn nested_refusal(daemon: &str, mount: &str) -> String {
+    format!(
+        "{daemon} has a volume mounted at {mount}, inside its /data volume; restore replaces only /data and cannot replace a volume mounted inside it. Mount that volume outside /data, or restore the database alone (without --state-archive), then retry. Nothing was restored"
+    )
 }
 
 /// The label on every helper restore creates for `daemon`'s volumes, so a
@@ -683,12 +730,7 @@ pub(super) fn probe<D: Docker>(
     {
         // The swap removes /data's contents: it would empty that volume and
         // could not replace it.
-        return fail(
-            format!(
-                "{daemon_name} has a volume mounted at {nested}, inside its /data volume; restore replaces only /data and cannot replace a volume mounted inside it. Mount that volume outside /data, or restore the database alone (without --state-archive), then retry. Nothing was restored"
-            ),
-            2,
-        );
+        return fail(nested_refusal(&daemon_name, nested), 2);
     }
     let pg_running = match sub_dict(&pg, "State", &pg_name)? {
         Some(state) => get(state, "Running").is_some_and(truthy),
@@ -1116,7 +1158,10 @@ mod tests {
                         "sh",
                         "img",
                         "-c",
-                        "LC_ALL=C df -Pk -- /data",
+                        concat!(
+                            r#"awk '$5 ~ /^\/data\// { print "nested " $5; found = 1 } END { exit 3 * found }' /proc/self/mountinfo"#,
+                            " && LC_ALL=C df -Pk -- /data"
+                        ),
                     ],
                     ok("h1\n"),
                 ),
@@ -1161,6 +1206,27 @@ mod tests {
             "{message}"
         );
         assert!(!script.calls.iter().any(|call| call[0] == "stop"));
+        // A mount below /data only the helper's mount table shows (a host
+        // mount below a bind-mounted /data): refused here, before the stop.
+        let mut script = make();
+        let at = script
+            .answers
+            .iter()
+            .position(|answer| answer.args == ["start", "-a", "h1"])
+            .unwrap();
+        script.answers[at].ran = Ran {
+            code: 3,
+            stdout: b"nested /data/models\n".to_vec(),
+            ..Ran::default()
+        };
+        let Err(Stop(message, code)) =
+            probe(&mut script, &args(&safety), "tag", 0, &mut |_| Ok(()))
+        else {
+            panic!("refused");
+        };
+        assert_eq!(code, 2);
+        assert_eq!(message, nested_refusal("d", "/data/models"));
+        assert!(!script.calls.iter().any(|call| call[0] == "stop"));
     }
 
     /// `--leave-stopped` needs no health port; an absent database is no
@@ -1191,6 +1257,92 @@ mod tests {
         );
         // Nothing past the two inspects ran.
         assert_eq!(script.calls.len(), 2);
+    }
+
+    #[test]
+    fn the_free_space_helper_refuses_a_mount_below_data() {
+        let script_text = concat!(
+            r#"awk '$5 ~ /^\/data\// { print "nested " $5; found = 1 } END { exit 3 * found }' /proc/self/mountinfo"#,
+            " && LC_ALL=C df -Pk -- /data"
+        );
+        let create: Vec<&str> = vec![
+            "create",
+            "--network",
+            "none",
+            "--user",
+            "0",
+            "--volumes-from",
+            "d:ro",
+            "--log-driver",
+            "none",
+            "--label",
+            "pseudolife.restore-helper=d",
+            "--entrypoint",
+            "sh",
+            "img",
+            "-c",
+            script_text,
+        ];
+        let nested = Ran {
+            code: 3,
+            stdout: b"nested /data/models\n".to_vec(),
+            ..Ran::default()
+        };
+        let mut script = Script::new(vec![
+            (&create, ok("h1\n")),
+            (&["start", "-a", "h1"], nested),
+            (&["rm", "-f", "h1"], ok("")),
+        ]);
+        let mut bank = Bank {
+            docker: &mut script,
+            pg: "p".into(),
+            daemon: "d".into(),
+        };
+        let Err(Stop(message, code)) = bank.state_space("img", &["/data".to_owned()], 0) else {
+            panic!("refused");
+        };
+        assert_eq!(code, 2);
+        assert_eq!(message, nested_refusal("d", "/data/models"));
+    }
+
+    #[test]
+    fn probe_lets_a_near_miss_mount_through() {
+        let safety = safety_dir();
+        let exists = psql_exists("db");
+        let exists: Vec<&str> = exists.iter().map(String::as_str).collect();
+        let pg = json!([{"State": {"Running": true}, "Mounts": []}]).to_string();
+        // A database-only restore with a mount below /data, and a state
+        // restore beside sibling paths: neither is the nested refusal. The
+        // probe goes on to its next step (here scripted to fail).
+        let mut no_state = args(&safety);
+        no_state.state_archive = None;
+        for (mounts, run_args) in [
+            (
+                json!([{"Destination": "/data"}, {"Destination": "/data/models"}]),
+                no_state,
+            ),
+            (
+                json!([{"Destination": "/data"}, {"Destination": "/database"}, {"Destination": "/data-old"}]),
+                args(&safety),
+            ),
+        ] {
+            let daemon = json!([{
+                "Image": "img", "State": {"Running": true}, "Mounts": mounts,
+                "HostConfig": {"PortBindings": {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18765"}]}},
+            }])
+            .to_string();
+            let mut script = Script::new(vec![
+                (&["inspect", "d"], ok(&daemon)),
+                (&["inspect", "p"], ok(&pg)),
+                (&exists, failed(1, "boom")),
+            ]);
+            let Err(Stop(message, _)) = probe(&mut script, &run_args, "tag", 0, &mut |_| Ok(()))
+            else {
+                panic!("the scripted failure");
+            };
+            assert!(!message.contains("inside its /data volume"), "{message}");
+            assert_eq!(script.calls.len(), 3, "{message}");
+        }
     }
 
     #[test]
