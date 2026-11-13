@@ -38,8 +38,10 @@ const PROJECT: &str = "pseudolife-mcp";
 const MODELS_VOLUME: &str = "pseudolife_rust_models";
 const MODELS_DIR: &str = "/models";
 const DEFAULT_DAEMON_URL: &str = "http://127.0.0.1:8765";
-const NO_DOCKER: &str = "Cannot reach Docker; start Docker and rerun the installer. Nothing was started.";
-const BAD_OVERLAY: &str = "Cannot read the installer's engine overlay; rerun the installer. Nothing was started.";
+const NO_DOCKER: &str =
+    "Cannot reach Docker; start Docker and rerun the installer. Nothing was started.";
+const BAD_OVERLAY: &str =
+    "Cannot read the installer's engine overlay; rerun the installer. Nothing was started.";
 const USAGE: &str = "usage: pseudolife-mcp installer engine {detect,prepare,accept,choose} [--repo REPO] [--engine {python,rust,rust-checkout}] [--default]";
 
 /// A refusal; `unavailable` marks Rust unavailable for this checkout (no
@@ -51,15 +53,24 @@ struct Refusal {
     unavailable: bool,
 }
 fn refusal(message: impl Into<String>) -> Refusal {
-    Refusal { message: message.into(), unavailable: false }
+    Refusal {
+        message: message.into(),
+        unavailable: false,
+    }
 }
 fn unavailable(message: impl Into<String>) -> Refusal {
-    Refusal { message: message.into(), unavailable: true }
+    Refusal {
+        message: message.into(),
+        unavailable: true,
+    }
 }
 type Result<T> = std::result::Result<T, Refusal>;
 
 fn docker_program() -> String {
-    std::env::var("PSEUDOLIFE_DOCKER").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "docker".into())
+    std::env::var("PSEUDOLIFE_DOCKER")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "docker".into())
 }
 
 struct Ran {
@@ -78,7 +89,9 @@ fn docker(args: &[&str], capture: bool, timeout: u64) -> Result<Ran> {
     if capture {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
     } else {
-        command.stdout(Stdio::from(io::stderr())).stderr(Stdio::inherit());
+        command
+            .stdout(Stdio::from(io::stderr()))
+            .stderr(Stdio::inherit());
     }
     let mut child = command.spawn().map_err(|_| refusal(NO_DOCKER))?;
     let read = |pipe: Option<Box<dyn Read + Send>>| {
@@ -87,11 +100,23 @@ fn docker(args: &[&str], capture: bool, timeout: u64) -> Result<Ran> {
             if let Some(mut pipe) = pipe {
                 let _ = pipe.read_to_end(&mut bytes);
             }
-            String::from_utf8_lossy(&bytes).replace("\r\n", "\n").replace('\r', "\n")
+            String::from_utf8_lossy(&bytes)
+                .replace("\r\n", "\n")
+                .replace('\r', "\n")
         })
     };
-    let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let out = read(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let err = read(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -115,9 +140,16 @@ fn docker(args: &[&str], capture: bool, timeout: u64) -> Result<Ran> {
 
 /// The daemon container's labels, or None when there is no container.
 fn labels() -> Result<Option<Map<String, Value>>> {
-    let ran = docker(&["inspect", "-f", "{{json .Config.Labels}}", DAEMON_CONTAINER], true, 60)?;
+    let ran = docker(
+        &["inspect", "-f", "{{json .Config.Labels}}", DAEMON_CONTAINER],
+        true,
+        60,
+    )?;
     if ran.code != 0 {
-        if format!("{}{}", ran.stderr, ran.stdout).to_lowercase().contains("no such") {
+        if format!("{}{}", ran.stderr, ran.stdout)
+            .to_lowercase()
+            .contains("no such")
+        {
             return Ok(None);
         }
         return Err(refusal(
@@ -125,7 +157,8 @@ fn labels() -> Result<Option<Map<String, Value>>> {
         ));
     }
     let text = ran.stdout.trim();
-    let value: Value = serde_json::from_str(if text.is_empty() { "null" } else { text }).unwrap_or(Value::Null);
+    let value: Value =
+        serde_json::from_str(if text.is_empty() { "null" } else { text }).unwrap_or(Value::Null);
     Ok(Some(match value {
         Value::Object(map) => map,
         _ => Map::new(),
@@ -179,7 +212,11 @@ fn detect(repo: Option<&Path>) -> Result<&'static str> {
         let release = accepted_release();
         // A release-mode switch back to Python leaves a python record: it counts too.
         let record = recorded();
-        let mut newest = if record.is_some() { mtime_ns(&release_accepted()).unwrap_or(-1) } else { -1 };
+        let mut newest = if record.is_some() {
+            mtime_ns(&release_accepted()).unwrap_or(-1)
+        } else {
+            -1
+        };
         let mut choice = if release.is_some() {
             "rust"
         } else if record.is_some() {
@@ -204,7 +241,11 @@ fn detect(repo: Option<&Path>) -> Result<&'static str> {
     if truthy(label(&found, CHECKOUT_LABEL)) && !truthy(label(&found, RELEASE_LABEL)) {
         return Ok("rust-checkout");
     }
-    Ok(if accepted(&found).is_some() { "rust" } else { "rust-unaccepted" })
+    Ok(if accepted(&found).is_some() {
+        "rust"
+    } else {
+        "rust-unaccepted"
+    })
 }
 
 fn checkout_version(repo: &Path) -> Result<String> {
@@ -213,7 +254,9 @@ fn checkout_version(repo: &Path) -> Result<String> {
     // the checkout that is broken, so the default does not fall back.
     let text = fs::read_to_string(repo.join("pyproject.toml")).map_err(|_| refusal(NO_VERSION))?;
     let version = text.lines().find_map(|line| {
-        let rest = line.strip_prefix("version")?.trim_start_matches([' ', '\t']);
+        let rest = line
+            .strip_prefix("version")?
+            .trim_start_matches([' ', '\t']);
         let rest = rest.strip_prefix('=')?.trim_start_matches([' ', '\t']);
         let value = rest.strip_prefix('"')?;
         let end = value.find('"')?;
@@ -238,7 +281,8 @@ fn quoted(text: &str) -> String {
 /// later release updates apply, so both keep the models outside /data.
 fn write_overlay(image: &str, labels: &Map<String, Value>) -> io::Result<PathBuf> {
     let mut lines = vec![
-        "# Written by the installer from the accepted engine selection; rerunning rewrites it.".to_owned(),
+        "# Written by the installer from the accepted engine selection; rerunning rewrites it."
+            .to_owned(),
         "services:".to_owned(),
         format!("  {DAEMON_SERVICE}:"),
         format!("    image: {}", quoted(image)),
@@ -246,13 +290,19 @@ fn write_overlay(image: &str, labels: &Map<String, Value>) -> io::Result<PathBuf
         "    environment:".to_owned(),
         format!("      PSEUDOLIFE_DAEMON_MODELS_DIR: {}", quoted(MODELS_DIR)),
         "    volumes:".to_owned(),
-        format!("      - {}", quoted(&format!("{MODELS_VOLUME}:{MODELS_DIR}"))),
+        format!(
+            "      - {}",
+            quoted(&format!("{MODELS_VOLUME}:{MODELS_DIR}"))
+        ),
         "    labels:".to_owned(),
     ];
     let mut sorted: Vec<_> = labels.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
     for (key, value) in sorted {
-        let value = value.as_str().map(quoted).unwrap_or_else(|| value.to_string());
+        let value = value
+            .as_str()
+            .map(quoted)
+            .unwrap_or_else(|| value.to_string());
         lines.push(format!("      {}: {value}", quoted(key)));
     }
     lines.extend(["volumes:".to_owned(), format!("  {MODELS_VOLUME}: {{}}")]);
@@ -301,7 +351,10 @@ fn preflight_disk() -> Result<()> {
 
 fn provision(image: &str) -> Result<()> {
     preflight_disk()?;
-    let _ = writeln!(io::stderr().lock(), "Pulling the Rust daemon image {image}...");
+    let _ = writeln!(
+        io::stderr().lock(),
+        "Pulling the Rust daemon image {image}..."
+    );
     // A pull that timed out: Rust is unavailable here, not Docker.
     let pulled = docker(&["pull", image], false, 7200).is_ok_and(|ran| ran.code == 0);
     if !pulled {
@@ -314,7 +367,16 @@ fn provision(image: &str) -> Result<()> {
         // Created the way Compose would, so `up` adopts it quietly.
         let project = format!("com.docker.compose.project={PROJECT}");
         let name = format!("com.docker.compose.volume={MODELS_VOLUME}");
-        if docker(&["volume", "create", "--label", &project, "--label", &name, &volume], true, 60)?.code != 0 {
+        if docker(
+            &[
+                "volume", "create", "--label", &project, "--label", &name, &volume,
+            ],
+            true,
+            60,
+        )?
+        .code
+            != 0
+        {
             return Err(refusal(format!(
                 "Cannot create the model volume {volume}; check docker info and rerun. Nothing was started."
             )));
@@ -327,8 +389,18 @@ fn provision(image: &str) -> Result<()> {
     let models = format!("PSEUDOLIFE_DAEMON_MODELS_DIR={MODELS_DIR}");
     let mount = format!("{volume}:{MODELS_DIR}");
     let args = [
-        "run", "--rm", "-e", &models, "-v", &mount, "--entrypoint", "pseudolife-daemon", image, "provision",
-        "models", "--if-missing",
+        "run",
+        "--rm",
+        "-e",
+        &models,
+        "-v",
+        &mount,
+        "--entrypoint",
+        "pseudolife-daemon",
+        image,
+        "provision",
+        "models",
+        "--if-missing",
     ];
     if docker(&args, false, 3600)?.code != 0 {
         return Err(unavailable(
@@ -362,7 +434,10 @@ fn refuse_foreign_unaccepted(found: Option<&Map<String, Value>>, version: &str) 
 fn cause(message: &str) -> &str {
     let text = message.split(';').next().unwrap_or("");
     let text = text.split(". Rerun").next().unwrap_or("");
-    text.split(". Nothing").next().unwrap_or("").trim_end_matches('.')
+    text.split(". Nothing")
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('.')
 }
 
 fn activation() -> String {
@@ -429,7 +504,14 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
 
 fn image_schema(image: &str) -> Option<i64> {
     let args = [
-        "run", "--rm", "--network", "none", "--entrypoint", "/usr/local/bin/pseudolife-mcp", image, "update",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--entrypoint",
+        "/usr/local/bin/pseudolife-mcp",
+        image,
+        "update",
         "--schema-version",
     ];
     let ran = docker(&args, true, 60).ok()?;
@@ -442,7 +524,11 @@ fn image_schema(image: &str) -> Option<i64> {
 /// The bearer the running daemon was started with: its container
 /// environment is what Compose resolved. Never printed.
 fn bearer() -> Result<String> {
-    let ran = docker(&["inspect", "-f", "{{json .Config.Env}}", DAEMON_CONTAINER], true, 60)?;
+    let ran = docker(
+        &["inspect", "-f", "{{json .Config.Env}}", DAEMON_CONTAINER],
+        true,
+        60,
+    )?;
     let entries: Vec<Value> = if ran.code == 0 {
         serde_json::from_str(ran.stdout.trim()).unwrap_or_default()
     } else {
@@ -478,7 +564,10 @@ fn shown(value: &Value) -> String {
 
 fn accept(url: &str) -> Result<&'static str> {
     let found = labels()?.unwrap_or_default();
-    if !overlay_path().is_file() || *label(&found, ENGINE_LABEL) != "rust" || !truthy(label(&found, RELEASE_LABEL)) {
+    if !overlay_path().is_file()
+        || *label(&found, ENGINE_LABEL) != "rust"
+        || !truthy(label(&found, RELEASE_LABEL))
+    {
         return Ok("not-applicable");
     }
     if accepted(&found).is_some() {
@@ -491,8 +580,9 @@ fn accept(url: &str) -> Result<&'static str> {
         ));
     }
     let unrecorded = " The Rust selection was not recorded.";
-    let state = super::seams::fetch_health_json(&format!("{}/health", url.trim_end_matches('/')), 3)
-        .unwrap_or_else(|| json!({}));
+    let state =
+        super::seams::fetch_health_json(&format!("{}/health", url.trim_end_matches('/')), 3)
+            .unwrap_or_else(|| json!({}));
     let release = &service["labels"][RELEASE_LABEL];
     if state["status"] != "ok" || state["ready"] != Value::Bool(true) {
         return Err(refusal(format!(
@@ -533,8 +623,10 @@ fn accept(url: &str) -> Result<&'static str> {
         )));
     }
     let path = release_accepted();
-    fs::create_dir_all(path.parent().expect("selection directory")).map_err(|_| refusal(BAD_OVERLAY))?;
-    super::engine::write_overlay(&path, &service).map_err(|e| refusal(format!("{e}.{unrecorded}")))?;
+    fs::create_dir_all(path.parent().expect("selection directory"))
+        .map_err(|_| refusal(BAD_OVERLAY))?;
+    super::engine::write_overlay(&path, &service)
+        .map_err(|e| refusal(format!("{e}.{unrecorded}")))?;
     Ok("accepted")
 }
 
@@ -546,11 +638,18 @@ struct Arguments {
 }
 
 fn parse(args: &[String]) -> std::result::Result<Arguments, String> {
-    let mut parsed = Arguments { action: String::new(), repo: None, engine: None, default: false };
+    let mut parsed = Arguments {
+        action: String::new(),
+        repo: None,
+        engine: None,
+        default: false,
+    };
     let mut items = args.iter();
     while let Some(item) = items.next() {
         match item.as_str() {
-            "--repo" => parsed.repo = Some(PathBuf::from(items.next().ok_or("--repo needs a path")?)),
+            "--repo" => {
+                parsed.repo = Some(PathBuf::from(items.next().ok_or("--repo needs a path")?))
+            }
             "--engine" => {
                 let engine = items.next().ok_or("--engine needs a value")?;
                 if !["python", "rust", "rust-checkout"].contains(&engine.as_str()) {
@@ -559,7 +658,10 @@ fn parse(args: &[String]) -> std::result::Result<Arguments, String> {
                 parsed.engine = Some(engine.clone());
             }
             "--default" => parsed.default = true,
-            action if parsed.action.is_empty() && ["detect", "prepare", "accept", "choose"].contains(&action) => {
+            action
+                if parsed.action.is_empty()
+                    && ["detect", "prepare", "accept", "choose"].contains(&action) =>
+            {
                 parsed.action = action.to_owned();
             }
             other => return Err(format!("unrecognized argument '{other}'")),
@@ -585,7 +687,10 @@ pub(crate) fn run(args: &[String]) -> u8 {
     let arguments = match parse(args) {
         Ok(arguments) => arguments,
         Err(message) => {
-            let _ = writeln!(io::stderr().lock(), "{USAGE}\ninstaller engine: error: {message}");
+            let _ = writeln!(
+                io::stderr().lock(),
+                "{USAGE}\ninstaller engine: error: {message}"
+            );
             return 2;
         }
     };
@@ -631,7 +736,9 @@ mod tests {
     #[test]
     fn the_fallback_line_keeps_only_the_cause() {
         assert_eq!(
-            cause("Cannot pull x:1: this release may not publish a Rust daemon image. Rerun with --engine python. Nothing was started."),
+            cause(
+                "Cannot pull x:1: this release may not publish a Rust daemon image. Rerun with --engine python. Nothing was started."
+            ),
             "Cannot pull x:1: this release may not publish a Rust daemon image"
         );
         assert_eq!(
@@ -639,7 +746,9 @@ mod tests {
             "Cannot provision the Rust daemon's models"
         );
         assert_eq!(
-            cause("Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. Nothing was started."),
+            cause(
+                "Cannot read a release version from this checkout's pyproject.toml; rerun with --engine python. Nothing was started."
+            ),
             "Cannot read a release version from this checkout's pyproject.toml"
         );
     }
@@ -647,8 +756,23 @@ mod tests {
     #[test]
     fn arguments_follow_the_python_choices() {
         let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let parsed = parse(&args(&["prepare", "--repo", "r", "--engine", "rust", "--default"])).unwrap();
-        assert_eq!((parsed.action.as_str(), parsed.engine.as_deref(), parsed.default), ("prepare", Some("rust"), true));
+        let parsed = parse(&args(&[
+            "prepare",
+            "--repo",
+            "r",
+            "--engine",
+            "rust",
+            "--default",
+        ]))
+        .unwrap();
+        assert_eq!(
+            (
+                parsed.action.as_str(),
+                parsed.engine.as_deref(),
+                parsed.default
+            ),
+            ("prepare", Some("rust"), true)
+        );
         assert!(parse(&args(&["prepare", "--engine", "lite"])).is_err());
         assert!(parse(&args(&["install"])).is_err());
         assert!(parse(&args(&[])).is_err());

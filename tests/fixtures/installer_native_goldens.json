@@ -1,0 +1,509 @@
+{
+  "comment": "Recorded from the Python helpers by tests/test_installer_native_goldens.py; replayed against the native steps by rust/shim/tests/cli_installer_goldens.rs.",
+  "cases": [
+    {
+      "name": "state-choices-claude-shim-crlf",
+      "files": {
+        "ops/.env": "PSEUDOLIFE_MCP_TOKEN=secret-token-value\r\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\r\nPSEUDOLIFE_INSTALL_CLIENT=claude,codex\r\nPSEUDOLIFE_INSTALL_TRANSPORT=shim\r\nPSEUDOLIFE_INSTALL_BANK_LOCATION=local\r\nPSEUDOLIFE_INSTALL_GENERIC_TARGET_B64=L29wdC9hZ2VudHMvQUdFTlRTLm1k\r\nPSEUDOLIFE_INSTALL_INSTRUCTIONS_GENERIC=append\r\nPSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8790/v1\r\nPSEUDOLIFE_DREAM_MODEL=extractor\r\nPSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-sonnet-5-5\r\nPSEUDOLIFE_CLAUDE_SHIM_PORT=8790\r\n# <<< pseudolife-mcp install <<<\r\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=claude-only\nMODEL=claude-sonnet-5-5\nSHIM_PORT=8790\nCLIENT=claude,codex\nBANK_LOCATION=local\nTRANSPORT=shim\nINSTRUCTIONS_GENERIC=append\nGENERIC_TARGET_JSON=\"/opt/agents/AGENTS.md\"\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-endpoint-on-host-docker-internal",
+      "files": {
+        "ops/.env": "﻿# operator line\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_DREAM_BASE_URL='http://host.docker.internal:9000/v1'\nPSEUDOLIFE_DREAM_MODEL=\"qwen3-30b\"\nPSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081\nPSEUDOLIFE_WRITER_ID=claude-desktop\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=endpoint-fallback\nMODEL=qwen3-30b\nEXTRACTOR_URL=http://127.0.0.1:9000/v1\nCLIENT=claude-desktop\nBANK_LOCATION=local\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-open-loopback-and-sidecar",
+      "files": {
+        "ops/.env": "# kept\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CODEX_HOOKS=plugin\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=sidecar\nBANK_LOCATION=local\nCODEX_HOOKS=plugin\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-refuses-reversed-markers",
+      "files": {
+        "ops/.env": "# <<< pseudolife-mcp install <<<\nX=1\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "ops/.env has reversed installer markers. Restore its original managed block, then rerun; nothing changed.\n"
+        }
+      ]
+    },
+    {
+      "name": "state-choices-refuses-a-bad-client",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CLIENT=claude,cursor\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "The recorded client list is invalid. Repeat the original --client/-Client flag; nothing changed.\n"
+        }
+      ]
+    },
+    {
+      "name": "state-write-file-then-unchanged",
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "write-file",
+            "--path",
+            "{HOME}/ops/docker-compose.override.yml"
+          ],
+          "stdin": "services:\n  x: {}\n",
+          "exit": 0,
+          "stdout": "changed\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "state",
+            "write-file",
+            "--path",
+            "{HOME}/ops/docker-compose.override.yml"
+          ],
+          "stdin": "services:\n  x: {}\n",
+          "exit": 0,
+          "stdout": "unchanged\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        "ops/docker-compose.override.yml": "services:\n  x: {}\n"
+      }
+    },
+    {
+      "name": "state-write-env-keeps-operator-lines",
+      "files": {
+        "ops/.env": "PSEUDOLIFE_MCP_TOKEN=keep-me\n# café note\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nOLD=1\n# <<< pseudolife-mcp install <<<\nTAIL=2\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "write-env",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CLIENT=gemini\nPSEUDOLIFE_DREAM_MODEL=extractor\n# <<< pseudolife-mcp install <<<\n",
+          "exit": 0,
+          "stdout": "changed\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        "ops/.env": "PSEUDOLIFE_MCP_TOKEN=keep-me\n# café note\nTAIL=2\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CLIENT=gemini\nPSEUDOLIFE_DREAM_MODEL=extractor\n# <<< pseudolife-mcp install <<<\n"
+      }
+    },
+    {
+      "name": "state-target-is-absolute",
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "target",
+            "--path",
+            "notes/AGENTS.md"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "\"{HOME}/notes/AGENTS.md\"\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "credentials-token-file-round-trip",
+      "env": {
+        "PSEUDOLIFE_INSTALLER_TOKENS": "tok-alpha-0123456789abcdef:Claude-Code, tok-beta-0123456789abcdef:gemini, bad, tok-x:default"
+      },
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "claude-code",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\", \"path\": \"{HOME}/.pseudolife-mcp/claude-code.token\"}\n",
+          "stderr": null
+        },
+        {
+          "argv": [
+            "credentials",
+            "check-token-file",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\"}\n",
+          "stderr": null
+        },
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "claude-code",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\", \"path\": \"{HOME}/.pseudolife-mcp/claude-code.token\"}\n",
+          "stderr": null
+        },
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "codex",
+            "--path",
+            "{HOME}/.pseudolife-mcp/codex.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"tokenless\"}\n",
+          "stderr": null
+        }
+      ],
+      "files_after": {
+        ".pseudolife-mcp/claude-code.token": "tok-alpha-0123456789abcdef",
+        ".pseudolife-mcp/codex.token": null
+      },
+      "compare_stderr": false,
+      "stderr_note": "The Python token-map parser logs a warning per skipped entry; the native step skips them silently."
+    },
+    {
+      "name": "credentials-write-token-file-then-refuse-a-second",
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "write-token-file",
+            "--path",
+            "{HOME}/client/remote.token"
+          ],
+          "stdin": "tok-remote-0123456789abcdef\n",
+          "exit": 0,
+          "stdout": "{\"status\": \"written\", \"path\": \"{HOME}/client/remote.token\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "check-token-file",
+            "--path",
+            "{HOME}/client/remote.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "write-token-file",
+            "--path",
+            "{HOME}/client/remote.token"
+          ],
+          "stdin": "tok-other\n",
+          "exit": 1,
+          "stdout": "{\"status\": \"failed\", \"recovery\": \"{HOME}/client/remote.token already exists; the installer creates a token file but never replaces one\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "check-token-file",
+            "--path",
+            "{HOME}/client/missing.token"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "{\"status\": \"failed\", \"recovery\": \"configured credential file is missing\"}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        "client/remote.token": "tok-remote-0123456789abcdef"
+      }
+    },
+    {
+      "name": "credentials-registration-env-adds-only-missing-keys",
+      "paths": true,
+      "files": {
+        ".claude.json": "{\n  \"numStartups\": 3,\n  \"mcpServers\": {\n    \"pseudolife-memory\": {\n      \"type\": \"stdio\",\n      \"command\": \"/opt/pseudolife/bin/pseudolife-mcp\",\n      \"args\": [],\n      \"env\": {\n        \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\"\n      }\n    }\n  }\n}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/.claude.json",
+            "--set",
+            "PSEUDOLIFE_MCP_TOKEN_FILE={HOME}/.pseudolife-mcp/claude-code.token",
+            "--set",
+            "PSEUDOLIFE_MCP_DAEMON_URL=http://10.0.0.5:8765",
+            "--set",
+            "PSEUDOLIFE_AGENT_STATE_DIR={HOME}/.pseudolife-mcp/claude-code-agents"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": \"{HOME}/.claude.json.bak-pseudolife-<stamp>\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/.claude.json",
+            "--set",
+            "PSEUDOLIFE_MCP_TOKEN_FILE={HOME}/other.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"unchanged\", \"backup\": null}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude.json": "{\n  \"numStartups\": 3,\n  \"mcpServers\": {\n    \"pseudolife-memory\": {\n      \"type\": \"stdio\",\n      \"command\": \"/opt/pseudolife/bin/pseudolife-mcp\",\n      \"args\": [],\n      \"env\": {\n        \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\",\n        \"PSEUDOLIFE_MCP_TOKEN_FILE\": \"{HOME}/.pseudolife-mcp/claude-code.token\",\n        \"PSEUDOLIFE_AGENT_STATE_DIR\": \"{HOME}/.pseudolife-mcp/claude-code-agents\"\n      }\n    }\n  }\n}\n"
+      }
+    },
+    {
+      "name": "credentials-registration-env-absent-and-unsupported",
+      "files": {
+        "http.json": "{\"mcpServers\": {\"pseudolife-memory\": {\"type\": \"http\", \"url\": \"http://127.0.0.1:8765/mcp\"}}}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/none.json",
+            "--set",
+            "A=1"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"absent\", \"backup\": null}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/http.json",
+            "--set",
+            "A=1"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"unsupported\", \"backup\": null}\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "credentials-claude-settings-env",
+      "paths": true,
+      "files": {
+        ".claude/settings.json": "{\n  \"env\": {\n    \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://10.0.0.9:8765\"\n  },\n  \"theme\": \"dark\"\n}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "claude-settings-env",
+            "--settings",
+            "{HOME}/.claude/settings.json",
+            "--token-file",
+            "{HOME}/.pseudolife-mcp/claude-code.token",
+            "--daemon-url",
+            "http://127.0.0.1:8765"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": \"{HOME}/.claude/settings.json.bak-pseudolife-<stamp>\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "claude-settings-env",
+            "--settings",
+            "{HOME}/.claude/settings.json",
+            "--token-file",
+            "{HOME}/.pseudolife-mcp/claude-code.token",
+            "--daemon-url",
+            "http://127.0.0.1:8765",
+            "--replace"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": \"{HOME}/.claude/settings.json.bak-pseudolife-<stamp>\", \"changed\": [\"PSEUDOLIFE_MCP_DAEMON_URL\"]}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "claude-settings-env",
+            "--settings",
+            "{HOME}/fresh/settings.json",
+            "--token-file",
+            "{HOME}/t.token",
+            "--daemon-url",
+            "http://127.0.0.1:8765"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": null}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"env\": {\n    \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\",\n    \"PSEUDOLIFE_MCP_TOKEN_FILE\": \"{HOME}/.pseudolife-mcp/claude-code.token\"\n  },\n  \"theme\": \"dark\"\n}\n",
+        "fresh/settings.json": "{\n  \"env\": {\n    \"PSEUDOLIFE_MCP_TOKEN_FILE\": \"{HOME}/t.token\",\n    \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\"\n  }\n}\n"
+      }
+    },
+    {
+      "name": "credentials-mint-then-present",
+      "files": {
+        "ops/.env": "# empty\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "mint",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"minted\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "mint",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"present\"}\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "credentials-board-without-a-daemon",
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "board",
+            "--daemon-url",
+            "http://127.0.0.1:1"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "off - no bearer token, so the daemon has no principal to admit (open-loopback install)\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "board",
+            "--daemon-url",
+            "http://127.0.0.1:1",
+            "--token-file",
+            "{HOME}/missing.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "off - the client token file is missing, unsafe or malformed\n",
+          "stderr": ""
+        }
+      ]
+    }
+  ]
+}

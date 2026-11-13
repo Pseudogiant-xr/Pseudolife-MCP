@@ -404,7 +404,7 @@ fn registration_env(config: &Path, sets: &[String]) -> Result<Value, String> {
     let additions: Vec<(String, String)> = wanted
         .into_iter()
         .filter(|(key, _)| {
-            !pyjson::has(&env_block, key) && !(key == TOKEN_FILE_KEY && has_credential)
+            !(pyjson::has(&env_block, key) || (key == TOKEN_FILE_KEY && has_credential))
         })
         .collect();
     if additions.is_empty() {
@@ -561,8 +561,16 @@ mod tests {
 
     #[test]
     fn the_token_map_reads_as_python_parse_token_map() {
-        let pairs = super::parse_token_map(" a:b:Alice , bad, :x, t:, d:default, m:Maintainer, a:b:bob, c:Carol");
-        assert_eq!(pairs, vec![("a:b".to_owned(), "alice".to_owned()), ("c".to_owned(), "carol".to_owned())]);
+        let pairs = super::parse_token_map(
+            " a:b:Alice , bad, :x, t:, d:default, m:Maintainer, a:b:bob, c:Carol",
+        );
+        assert_eq!(
+            pairs,
+            vec![
+                ("a:b".to_owned(), "alice".to_owned()),
+                ("c".to_owned(), "carol".to_owned())
+            ]
+        );
     }
 
     #[test]

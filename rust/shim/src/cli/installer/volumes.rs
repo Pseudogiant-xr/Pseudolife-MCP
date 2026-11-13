@@ -26,11 +26,12 @@ fn names(output: &str) -> Result<(String, String), &'static str> {
             .filter_map(|line| line.split_once('='))
             .filter(|(k, _)| *k == key)
             .map(|(_, v)| v.to_owned())
-            .last()
+            .next_back()
             .filter(|v| !v.is_empty())
     };
     let bank = value("PSEUDOLIFE_BANK_VOLUME").unwrap_or_else(|| "pseudolife-mcp-bank".to_owned());
-    let state = value("PSEUDOLIFE_STATE_VOLUME").unwrap_or_else(|| "pseudolife-mcp-state".to_owned());
+    let state =
+        value("PSEUDOLIFE_STATE_VOLUME").unwrap_or_else(|| "pseudolife-mcp-state".to_owned());
     if !valid(&bank) || !valid(&state) {
         return Err(INVALID);
     }
@@ -45,17 +46,27 @@ pub(super) fn run(args: &[String]) -> u8 {
             ("--repo", Some(value)) => repo = Some(value.clone()),
             ("--env-file", Some(value)) => env_file = Some(value.clone()),
             _ => {
-                let _ = writeln!(io::stderr().lock(), "installer volume-names: usage: --repo R --env-file F");
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "installer volume-names: usage: --repo R --env-file F"
+                );
                 return 2;
             }
         }
     }
     let (Some(repo), Some(env_file)) = (repo, env_file) else {
-        let _ = writeln!(io::stderr().lock(), "installer volume-names: usage: --repo R --env-file F");
+        let _ = writeln!(
+            io::stderr().lock(),
+            "installer volume-names: usage: --repo R --env-file F"
+        );
         return 2;
     };
     let ops = Path::new(&repo).join("ops");
-    let source = if Path::new(&env_file).is_file() { Path::new(&env_file).to_path_buf() } else { ops.join(".env.example") };
+    let source = if Path::new(&env_file).is_file() {
+        Path::new(&env_file).to_path_buf()
+    } else {
+        ops.join(".env.example")
+    };
     // Compose owns dotenv syntax, interpolation and exported-value precedence;
     // its output stays private, only the two names leave this process.
     let output = Command::new("docker")
@@ -68,7 +79,9 @@ pub(super) fn run(args: &[String]) -> u8 {
         .stderr(Stdio::null())
         .output();
     let text = match output {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+        }
         _ => {
             let _ = writeln!(io::stderr().lock(), "{RESOLVE_FAILED}");
             return 1;
@@ -89,9 +102,13 @@ mod tests {
 
     #[test]
     fn names_take_compose_values_or_the_defaults_and_refuse_odd_ones() {
-        assert_eq!(names("X=1\n").unwrap(), ("pseudolife-mcp-bank".into(), "pseudolife-mcp-state".into()));
         assert_eq!(
-            names("PSEUDOLIFE_BANK_VOLUME=pseudolife-mcp-bank-pg18\nPSEUDOLIFE_STATE_VOLUME=s.1\n").unwrap(),
+            names("X=1\n").unwrap(),
+            ("pseudolife-mcp-bank".into(), "pseudolife-mcp-state".into())
+        );
+        assert_eq!(
+            names("PSEUDOLIFE_BANK_VOLUME=pseudolife-mcp-bank-pg18\nPSEUDOLIFE_STATE_VOLUME=s.1\n")
+                .unwrap(),
             ("pseudolife-mcp-bank-pg18".into(), "s.1".into())
         );
         assert!(names("PSEUDOLIFE_BANK_VOLUME=-bad\n").is_err());

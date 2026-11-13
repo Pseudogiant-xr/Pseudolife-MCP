@@ -146,8 +146,7 @@ pub(super) fn connect_report(mode: &str) -> u8 {
 /// after checking its shape; exit 1 (nothing printed) for any other report.
 pub(super) fn codex_fields(kind: &str) -> u8 {
     match codex_lines(kind, stdin_json()) {
-        Some(lines) => out(&lines.join("
-")),
+        Some(lines) => out(&lines.join("\n")),
         None => 1,
     }
 }
@@ -155,7 +154,8 @@ pub(super) fn codex_fields(kind: &str) -> u8 {
 fn codex_lines(kind: &str, report: Option<Value>) -> Option<Vec<String>> {
     let report = report.filter(Value::is_object)?;
     let field = |key: &str| report.get(key).unwrap_or(&Value::Null);
-    let one_of = |key: &str, allowed: &[&str]| field(key).as_str().is_some_and(|v| allowed.contains(&v));
+    let one_of =
+        |key: &str, allowed: &[&str]| field(key).as_str().is_some_and(|v| allowed.contains(&v));
     // Python's `str(value or "")`, kept on one line.
     let text = |key: &str| -> String {
         let shown = match field(key) {
@@ -172,19 +172,32 @@ fn codex_lines(kind: &str, report: Option<Value>) -> Option<Vec<String>> {
             if !one_of("status", &["ready", "tokenless"]) {
                 return None;
             }
-            let (Some(file), Some(connection)) =
-                (field("credential_file_configured").as_bool(), field("connection_configured").as_bool())
-            else {
+            let (Some(file), Some(connection)) = (
+                field("credential_file_configured").as_bool(),
+                field("connection_configured").as_bool(),
+            ) else {
                 return None;
             };
             let flag = |b: bool| if b { "1" } else { "0" }.to_owned();
-            Some(vec![flag(file), flag(connection), text("credential_file_path"), text("daemon_url")])
+            Some(vec![
+                flag(file),
+                flag(connection),
+                text("credential_file_path"),
+                text("daemon_url"),
+            ])
         }
         "hooks" => {
             let valid = one_of("status", &["ready", "pending", "unavailable", "skipped"])
                 && one_of("source", &["manual", "plugin", "skip"])
-                && one_of("instructions", &["present", "appended", "skipped", "covered-by-hooks"]);
-            valid.then(|| ["status", "source", "instructions", "recovery"].map(text).to_vec())
+                && one_of(
+                    "instructions",
+                    &["present", "appended", "skipped", "covered-by-hooks"],
+                );
+            valid.then(|| {
+                ["status", "source", "instructions", "recovery"]
+                    .map(text)
+                    .to_vec()
+            })
         }
         "runtime-defaults" => (field("status") == "ready"
             && one_of("runtime_defaults", &["configured", "preserved"]))
@@ -226,18 +239,49 @@ mod tests {
     fn codex_reports_read_as_the_installers_python_did() {
         let lines = |kind: &str, v: serde_json::Value| super::codex_lines(kind, Some(v));
         assert_eq!(
-            lines("credentials", json!({"status": "tokenless", "credential_file_configured": false, "connection_configured": true, "credential_file_path": "", "daemon_url": null})),
+            lines(
+                "credentials",
+                json!({"status": "tokenless", "credential_file_configured": false, "connection_configured": true, "credential_file_path": "", "daemon_url": null})
+            ),
             Some(vec!["0".into(), "1".into(), "".into(), "".into()])
         );
-        assert_eq!(lines("credentials", json!({"status": "ready", "credential_file_configured": 1, "connection_configured": true})), None);
         assert_eq!(
-            lines("hooks", json!({"status": "pending", "source": "plugin", "instructions": "present", "recovery": "line one
-line two"})),
-            Some(vec!["pending".into(), "plugin".into(), "present".into(), "line one line two".into()])
+            lines(
+                "credentials",
+                json!({"status": "ready", "credential_file_configured": 1, "connection_configured": true})
+            ),
+            None
         );
-        assert_eq!(lines("hooks", json!({"status": "ready", "source": "elsewhere", "instructions": "present"})), None);
-        assert_eq!(lines("runtime-defaults", json!({"status": "ready", "runtime_defaults": "preserved"})), Some(vec!["preserved".into()]));
-        assert_eq!(lines("runtime-defaults", json!({"status": "needs-configuration"})), None);
+        assert_eq!(
+            lines(
+                "hooks",
+                json!({"status": "pending", "source": "plugin", "instructions": "present", "recovery": "line one\nline two"})
+            ),
+            Some(vec![
+                "pending".into(),
+                "plugin".into(),
+                "present".into(),
+                "line one line two".into()
+            ])
+        );
+        assert_eq!(
+            lines(
+                "hooks",
+                json!({"status": "ready", "source": "elsewhere", "instructions": "present"})
+            ),
+            None
+        );
+        assert_eq!(
+            lines(
+                "runtime-defaults",
+                json!({"status": "ready", "runtime_defaults": "preserved"})
+            ),
+            Some(vec!["preserved".into()])
+        );
+        assert_eq!(
+            lines("runtime-defaults", json!({"status": "needs-configuration"})),
+            None
+        );
         assert_eq!(super::codex_lines("hooks", None), None);
     }
 

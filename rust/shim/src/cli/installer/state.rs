@@ -24,22 +24,46 @@ use std::{
     time::Duration,
 };
 
-const BEGIN: &str = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>";
+const BEGIN: &str =
+    "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>";
 const END: &str = "# <<< pseudolife-mcp install <<<";
 const PREFIX: &str = "PSEUDOLIFE_INSTALL_";
 const CHOICES: [&str; 15] = [
-    "EXTRACTOR", "MODEL", "EXTRACTOR_URL", "SHIM_PORT", "CLIENT", "BANK_LOCATION",
-    "INSTRUCTIONS", "CODEX_HOOKS", "CLAUDE_PLUGIN", "CLAUDE_LEGACY_HOOKS", "TRANSPORT", "NO_TOKEN",
-    "INSTRUCTIONS_GEMINI", "INSTRUCTIONS_GENERIC", "GENERIC_TARGET_B64",
+    "EXTRACTOR",
+    "MODEL",
+    "EXTRACTOR_URL",
+    "SHIM_PORT",
+    "CLIENT",
+    "BANK_LOCATION",
+    "INSTRUCTIONS",
+    "CODEX_HOOKS",
+    "CLAUDE_PLUGIN",
+    "CLAUDE_LEGACY_HOOKS",
+    "TRANSPORT",
+    "NO_TOKEN",
+    "INSTRUCTIONS_GEMINI",
+    "INSTRUCTIONS_GENERIC",
+    "GENERIC_TARGET_B64",
 ];
 const FINGERPRINTS: [&str; 4] = ["SOURCE_HASH", "BUILD_HASH", "COMPOSE_HASH", "IMAGES_HASH"];
 const INPUT_HASHES: [&str; 3] = ["SOURCE_HASH", "BUILD_HASH", "COMPOSE_HASH"];
-const RESOLVED_CHOICES: [&str; 3] = ["INSTRUCTIONS_GEMINI", "INSTRUCTIONS_GENERIC", "GENERIC_TARGET_B64"];
+const RESOLVED_CHOICES: [&str; 3] = [
+    "INSTRUCTIONS_GEMINI",
+    "INSTRUCTIONS_GENERIC",
+    "GENERIC_TARGET_B64",
+];
 const MODES: [&str; 7] = [
-    "sidecar", "claude-only", "claude-fallback", "openai-only", "openai-fallback", "endpoint", "endpoint-fallback",
+    "sidecar",
+    "claude-only",
+    "claude-fallback",
+    "openai-only",
+    "openai-fallback",
+    "endpoint",
+    "endpoint-fallback",
 ];
 const READ_FAILED: &str = "Cannot read installer records. Repeat the original installer flags or restore the original ops/.env, then rerun.";
-const CHECK_FAILED: &str = "Cannot check installer state. Check docker info and git status in this checkout, then rerun.";
+const CHECK_FAILED: &str =
+    "Cannot check installer state. Check docker info and git status in this checkout, then rerun.";
 pub(super) const USAGE: &str = "usage: pseudolife-mcp installer state choices|write-env|write-file|plan|started|record|target [--env-file F] [--path P] [--template T] [--repo R] [--override O] [--snapshot] [--expected-stdin] [--instruction-gemini append|skip] [--instruction-generic append|skip] [--generic-target P] [--overlay F]...";
 
 struct Refusal(String);
@@ -66,7 +90,12 @@ fn parse(args: &[String]) -> Result<Args, String> {
     let mut parsed = Args::default();
     let mut items = args.iter();
     while let Some(item) = items.next() {
-        let mut value = || items.next().cloned().ok_or_else(|| format!("{item} needs a value"));
+        let mut value = || {
+            items
+                .next()
+                .cloned()
+                .ok_or_else(|| format!("{item} needs a value"))
+        };
         match item.as_str() {
             "--env-file" => parsed.env_file = Some(value()?.into()),
             "--path" => parsed.path = Some(value()?.into()),
@@ -80,7 +109,11 @@ fn parse(args: &[String]) -> Result<Args, String> {
                 if choice != "append" && choice != "skip" {
                     return Err(format!("{item} takes append or skip"));
                 }
-                if item == "--instruction-gemini" { parsed.gemini = Some(choice) } else { parsed.generic = Some(choice) }
+                if item == "--instruction-gemini" {
+                    parsed.gemini = Some(choice)
+                } else {
+                    parsed.generic = Some(choice)
+                }
             }
             "--snapshot" => parsed.snapshot = true,
             "--expected-stdin" => parsed.expected_stdin = true,
@@ -95,7 +128,17 @@ pub(super) fn run(args: &[String]) -> u8 {
     let Some((action, rest)) = args.split_first() else {
         return usage("expected a state action");
     };
-    if !["choices", "write-env", "write-file", "plan", "started", "record", "target"].contains(&action.as_str()) {
+    if ![
+        "choices",
+        "write-env",
+        "write-file",
+        "plan",
+        "started",
+        "record",
+        "target",
+    ]
+    .contains(&action.as_str())
+    {
         return usage(&format!("unknown state action {action:?}"));
     }
     let args = match parse(rest) {
@@ -120,26 +163,42 @@ fn usage(message: &str) -> u8 {
 }
 
 fn need<'a>(value: &'a Option<PathBuf>, name: &str) -> Result<&'a Path, Refusal> {
-    value.as_deref().ok_or_else(|| Refusal(format!("{name} is required")))
+    value
+        .as_deref()
+        .ok_or_else(|| Refusal(format!("{name} is required")))
 }
 
 fn stdin_utf8() -> Result<String, Refusal> {
     let mut bytes = Vec::new();
-    io::stdin().lock().take(16 * 1024 * 1024).read_to_end(&mut bytes).map_err(|_| Refusal(READ_FAILED.into()))?;
+    io::stdin()
+        .lock()
+        .take(16 * 1024 * 1024)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Refusal(READ_FAILED.into()))?;
     String::from_utf8(bytes).map_err(|_| Refusal(UTF8.into()))
 }
 const UTF8: &str = "Installer configuration must be UTF-8. Save ops/.env as UTF-8 while retaining its existing values, then rerun; nothing changed.";
 
 fn act(action: &str, args: &Args) -> Result<String, Refusal> {
     Ok(match action {
-        "target" => format!("{}\n", py_json_string(&absolute(need(&args.path, "--path")?))),
+        "target" => format!(
+            "{}\n",
+            py_json_string(&absolute(need(&args.path, "--path")?))
+        ),
         "choices" => choices(need(&args.env_file, "--env-file")?)?
             .into_iter()
             .map(|(k, v)| format!("{k}={v}\n"))
             .collect(),
         "write-env" => {
             let incoming = stdin_utf8()?;
-            format!("{}\n", write_env(need(&args.env_file, "--env-file")?, &incoming, args.template.as_deref())?)
+            format!(
+                "{}\n",
+                write_env(
+                    need(&args.env_file, "--env-file")?,
+                    &incoming,
+                    args.template.as_deref()
+                )?
+            )
         }
         "write-file" => {
             let incoming = stdin_utf8()?;
@@ -148,28 +207,63 @@ fn act(action: &str, args: &Args) -> Result<String, Refusal> {
         "plan" => {
             let (repo, env, over) = deployment_args(args)?;
             let result = plan(repo, env, over, &args.overlays)?;
-            if args.snapshot { format!("{}\n", compact(&Value::Object(result))) } else { format!("{}\n", result["action"].as_str().unwrap_or("")) }
+            if args.snapshot {
+                format!("{}\n", compact(&Value::Object(result)))
+            } else {
+                format!("{}\n", result["action"].as_str().unwrap_or(""))
+            }
         }
         _ => {
             if !args.expected_stdin {
-                return refuse("The deployment plan is missing; rerun the installer from startup before recording success.");
+                return refuse(
+                    "The deployment plan is missing; rerun the installer from startup before recording success.",
+                );
             }
-            let expected: Value = serde_json::from_str(&stdin_utf8()?).map_err(|_| Refusal(READ_FAILED.into()))?;
+            let expected: Value =
+                serde_json::from_str(&stdin_utf8()?).map_err(|_| Refusal(READ_FAILED.into()))?;
             let (repo, env, over) = deployment_args(args)?;
             if action == "started" {
-                format!("{}\n", compact(&Value::Object(started(repo, env, over, &expected, &args.overlays)?)))
+                format!(
+                    "{}\n",
+                    compact(&Value::Object(started(
+                        repo,
+                        env,
+                        over,
+                        &expected,
+                        &args.overlays
+                    )?))
+                )
             } else {
                 let mut instructions = Vec::new();
-                if let Some(v) = &args.gemini { instructions.push(("gemini", v.as_str())) }
-                if let Some(v) = &args.generic { instructions.push(("generic", v.as_str())) }
-                format!("{}\n", record(repo, env, over, &expected, &instructions, args.generic_target.as_deref(), &args.overlays)?)
+                if let Some(v) = &args.gemini {
+                    instructions.push(("gemini", v.as_str()))
+                }
+                if let Some(v) = &args.generic {
+                    instructions.push(("generic", v.as_str()))
+                }
+                format!(
+                    "{}\n",
+                    record(
+                        repo,
+                        env,
+                        over,
+                        &expected,
+                        &instructions,
+                        args.generic_target.as_deref(),
+                        &args.overlays
+                    )?
+                )
             }
         }
     })
 }
 
 fn deployment_args(args: &Args) -> Result<(&Path, &Path, &Path), Refusal> {
-    Ok((need(&args.repo, "--repo")?, need(&args.env_file, "--env-file")?, need(&args.override_file, "--override")?))
+    Ok((
+        need(&args.repo, "--repo")?,
+        need(&args.env_file, "--env-file")?,
+        need(&args.override_file, "--override")?,
+    ))
 }
 
 // -- managed block ------------------------------------------------------------
@@ -187,10 +281,17 @@ fn split_lines(text: &str) -> Vec<String> {
 fn fields(lines: &[String]) -> BTreeMap<String, String> {
     let mut values = BTreeMap::new();
     for line in lines {
-        let Some((key, value)) = line.split_once('=') else { continue };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
         let mut chars = key.chars();
         let first_ok = chars.next().is_some_and(|c| c.is_ascii_uppercase());
-        if !(first_ok && key.len() >= 2 && key.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')) {
+        if !(first_ok
+            && key.len() >= 2
+            && key
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+        {
             continue;
         }
         let mut value = value.trim().to_owned();
@@ -199,7 +300,11 @@ fn fields(lines: &[String]) -> BTreeMap<String, String> {
             && (first == '\'' || first == '"')
             && value.ends_with(first)
         {
-            value = if value.len() >= 2 { value[1..value.len() - 1].to_owned() } else { String::new() };
+            value = if value.len() >= 2 {
+                value[1..value.len() - 1].to_owned()
+            } else {
+                String::new()
+            };
         }
         values.insert(key.to_owned(), value);
     }
@@ -230,19 +335,33 @@ fn read_block(path: &Path) -> Result<EnvBlock, Refusal> {
     let begins = lines.iter().filter(|l| *l == BEGIN).count();
     let ends = lines.iter().filter(|l| *l == END).count();
     if begins > 1 || ends > 1 || begins != ends {
-        return refuse("ops/.env has incomplete or duplicate installer blocks. Restore its original single managed block, then rerun; nothing changed.");
+        return refuse(
+            "ops/.env has incomplete or duplicate installer blocks. Restore its original single managed block, then rerun; nothing changed.",
+        );
     }
     if begins == 0 {
-        return Ok(EnvBlock { text, kept: Vec::new(), block: Vec::new(), managed: false });
+        return Ok(EnvBlock {
+            text,
+            kept: Vec::new(),
+            block: Vec::new(),
+            managed: false,
+        });
     }
     let start = lines.iter().position(|l| l == BEGIN).unwrap_or(0);
     let finish = lines.iter().position(|l| l == END).unwrap_or(0);
     if finish < start {
-        return refuse("ops/.env has reversed installer markers. Restore its original managed block, then rerun; nothing changed.");
+        return refuse(
+            "ops/.env has reversed installer markers. Restore its original managed block, then rerun; nothing changed.",
+        );
     }
     let mut kept = lines[..start].to_vec();
     kept.extend_from_slice(&lines[finish + 1..]);
-    Ok(EnvBlock { text, kept, block: lines[start + 1..finish].to_vec(), managed: true })
+    Ok(EnvBlock {
+        text,
+        kept,
+        block: lines[start + 1..finish].to_vec(),
+        managed: true,
+    })
 }
 
 fn url_parts(url: &str) -> Option<reqwest::Url> {
@@ -258,18 +377,35 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
     let all_values = fields(&split_lines(&env.text));
     let mut selected: BTreeMap<String, String> = CHOICES
         .iter()
-        .filter_map(|k| saved.get(&format!("{PREFIX}{k}")).map(|v| ((*k).to_owned(), v.clone())))
+        .filter_map(|k| {
+            saved
+                .get(&format!("{PREFIX}{k}"))
+                .map(|v| ((*k).to_owned(), v.clone()))
+        })
         .collect();
-    selected.entry("BANK_LOCATION".into()).or_insert_with(|| "local".into());
+    selected
+        .entry("BANK_LOCATION".into())
+        .or_insert_with(|| "local".into());
     // An older open-loopback install must not acquire a token on a rerun.
     let token_set = |k: &str| all_values.get(k).is_some_and(|v| !v.is_empty());
-    if !selected.contains_key("NO_TOKEN") && !(token_set("PSEUDOLIFE_MCP_TOKEN") || token_set("PSEUDOLIFE_MCP_TOKENS")) {
+    if !(selected.contains_key("NO_TOKEN")
+        || token_set("PSEUDOLIFE_MCP_TOKEN")
+        || token_set("PSEUDOLIFE_MCP_TOKENS"))
+    {
         selected.insert("NO_TOKEN".into(), "1".into());
     }
     if selected.get("EXTRACTOR").is_none_or(String::is_empty) {
-        let base = saved.get("PSEUDOLIFE_DREAM_BASE_URL").cloned().unwrap_or_default();
-        let model = saved.get("PSEUDOLIFE_DREAM_MODEL").cloned().unwrap_or_default();
-        let fallback = saved.get("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL").is_some_and(|v| !v.is_empty());
+        let base = saved
+            .get("PSEUDOLIFE_DREAM_BASE_URL")
+            .cloned()
+            .unwrap_or_default();
+        let model = saved
+            .get("PSEUDOLIFE_DREAM_MODEL")
+            .cloned()
+            .unwrap_or_default();
+        let fallback = saved
+            .get("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL")
+            .is_some_and(|v| !v.is_empty());
         if base.is_empty() {
             selected.insert("EXTRACTOR".into(), "sidecar".into());
         } else if !model.is_empty() && model != "extractor" {
@@ -286,7 +422,15 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
                 let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
                 shown = format!("{}://127.0.0.1{port}{path}", parts.scheme());
             }
-            selected.insert("EXTRACTOR".into(), if fallback { "endpoint-fallback" } else { "endpoint" }.into());
+            selected.insert(
+                "EXTRACTOR".into(),
+                if fallback {
+                    "endpoint-fallback"
+                } else {
+                    "endpoint"
+                }
+                .into(),
+            );
             selected.insert("MODEL".into(), model);
             selected.insert("EXTRACTOR_URL".into(), shown);
         } else {
@@ -295,7 +439,9 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
             for (family, mode) in [("CLAUDE", "claude"), ("CODEX", "openai")] {
                 let prefix = format!("PSEUDOLIFE_{family}_SHIM_");
                 let recorded_port = all_values.get(&format!("{prefix}PORT"));
-                let recorded_model = all_values.get(&format!("{prefix}MODEL")).filter(|m| !m.is_empty());
+                let recorded_model = all_values
+                    .get(&format!("{prefix}MODEL"))
+                    .filter(|m| !m.is_empty());
                 if let (Some(port), Some(rp), Some(model)) = (port, recorded_port, recorded_model)
                     && rp == &port.to_string()
                 {
@@ -303,7 +449,10 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
                 }
             }
             if let [(mode, model, port)] = matches.as_slice() {
-                selected.insert("EXTRACTOR".into(), format!("{mode}{}", if fallback { "-fallback" } else { "-only" }));
+                selected.insert(
+                    "EXTRACTOR".into(),
+                    format!("{mode}{}", if fallback { "-fallback" } else { "-only" }),
+                );
                 selected.insert("MODEL".into(), model.clone());
                 selected.insert("SHIM_PORT".into(), port.to_string());
             }
@@ -313,32 +462,56 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
         && let Some(writer) = saved.get("PSEUDOLIFE_WRITER_ID")
         && ["claude-code", "claude-desktop", "codex", "gemini"].contains(&writer.as_str())
     {
-        selected.insert("CLIENT".into(), if writer == "claude-code" { "claude".into() } else { writer.clone() });
+        selected.insert(
+            "CLIENT".into(),
+            if writer == "claude-code" {
+                "claude".into()
+            } else {
+                writer.clone()
+            },
+        );
     }
     let extractor = selected.get("EXTRACTOR").cloned().unwrap_or_default();
     if extractor.starts_with("claude-") || extractor.starts_with("openai-") {
-        let family = if extractor.starts_with("claude-") { "CLAUDE" } else { "CODEX" };
+        let family = if extractor.starts_with("claude-") {
+            "CLAUDE"
+        } else {
+            "CODEX"
+        };
         for (setting, key) in [("MODEL", "MODEL"), ("PORT", "SHIM_PORT")] {
-            if let Some(value) = all_values.get(&format!("PSEUDOLIFE_{family}_SHIM_{setting}")).filter(|v| !v.is_empty()) {
+            if let Some(value) = all_values
+                .get(&format!("PSEUDOLIFE_{family}_SHIM_{setting}"))
+                .filter(|v| !v.is_empty())
+            {
                 selected.insert(key.into(), value.clone());
             }
         }
     }
     for (key, value) in &selected {
-        if !value.chars().all(|c| c.is_ascii_alphanumeric() || "._:/@+,[]-".contains(c)) {
-            return refuse("Recorded installer choices are invalid. Repeat the original installer flags to replace the managed block; nothing changed.");
+        if !value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._:/@+,[]-".contains(c))
+        {
+            return refuse(
+                "Recorded installer choices are invalid. Repeat the original installer flags to replace the managed block; nothing changed.",
+            );
         }
-        if key == "EXTRACTOR_URL" && !value.is_empty()
+        if key == "EXTRACTOR_URL"
+            && !value.is_empty()
             && let Some(parts) = url_parts(value)
             && (!parts.username().is_empty() || parts.password().is_some())
         {
-            return refuse("The recorded extractor URL contains credentials. Remove URL credentials from ops/.env and keep API keys outside the managed block; nothing changed.");
+            return refuse(
+                "The recorded extractor URL contains credentials. Remove URL credentials from ops/.env and keep API keys outside the managed block; nothing changed.",
+            );
         }
     }
     if let Some(mode) = selected.get("EXTRACTOR").filter(|m| !m.is_empty())
         && !MODES.contains(&mode.as_str())
     {
-        return refuse("The recorded extractor mode is unknown. Repeat the original --extractor/-Extractor flag; nothing changed.");
+        return refuse(
+            "The recorded extractor mode is unknown. Repeat the original --extractor/-Extractor flag; nothing changed.",
+        );
     }
     let allowed: [(&str, &[&str]); 9] = [
         ("BANK_LOCATION", &["local", "shared"]),
@@ -351,18 +524,31 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
         ("INSTRUCTIONS_GEMINI", &["append", "skip"]),
         ("INSTRUCTIONS_GENERIC", &["append", "skip"]),
     ];
-    if allowed.iter().any(|(key, options)| selected.get(*key).is_some_and(|v| !options.contains(&v.as_str()))) {
-        return refuse("Recorded installer choices are invalid. Restore the original managed block or repeat the original installer flags.");
+    if allowed.iter().any(|(key, options)| {
+        selected
+            .get(*key)
+            .is_some_and(|v| !options.contains(&v.as_str()))
+    }) {
+        return refuse(
+            "Recorded installer choices are invalid. Restore the original managed block or repeat the original installer flags.",
+        );
     }
     if let Some(clients) = selected.get("CLIENT")
-        && !clients.split(',').all(|c| ["claude", "claude-desktop", "codex", "gemini", "generic"].contains(&c))
+        && !clients
+            .split(',')
+            .all(|c| ["claude", "claude-desktop", "codex", "gemini", "generic"].contains(&c))
     {
-        return refuse("The recorded client list is invalid. Repeat the original --client/-Client flag; nothing changed.");
+        return refuse(
+            "The recorded client list is invalid. Repeat the original --client/-Client flag; nothing changed.",
+        );
     }
     if let Some(port) = selected.get("SHIM_PORT").filter(|p| !p.is_empty())
-        && !(port.chars().all(|c| c.is_ascii_digit()) && port.parse::<u32>().is_ok_and(|p| (1..65536).contains(&p)))
+        && !(port.chars().all(|c| c.is_ascii_digit())
+            && port.parse::<u32>().is_ok_and(|p| (1..65536).contains(&p)))
     {
-        return refuse("The recorded shim port is invalid. Repeat the original --shim-port/-ShimPort flag; nothing changed.");
+        return refuse(
+            "The recorded shim port is invalid. Repeat the original --shim-port/-ShimPort flag; nothing changed.",
+        );
     }
     let mut result: Vec<(String, String)> = CHOICES
         .iter()
@@ -370,7 +556,9 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
         .filter_map(|k| selected.get(*k).map(|v| ((*k).to_owned(), v.clone())))
         .collect();
     if let Some(encoded) = selected.get("GENERIC_TARGET_B64").filter(|v| !v.is_empty()) {
-        let invalid = || Refusal("The recorded instruction target is invalid; restore the original managed block in ops/.env, then rerun.".into());
+        let invalid = || {
+            Refusal("The recorded instruction target is invalid; restore the original managed block in ops/.env, then rerun.".into())
+        };
         let decoded = base64url_decode(encoded).ok_or_else(invalid)?;
         let target = String::from_utf8(decoded).map_err(|_| invalid())?;
         if target.chars().any(|c| (c as u32) < 32) {
@@ -392,7 +580,11 @@ fn write_file(path: &Path, content: &str) -> Result<&'static str, Refusal> {
     Ok("changed")
 }
 
-fn write_env(path: &Path, incoming: &str, template: Option<&Path>) -> Result<&'static str, Refusal> {
+fn write_env(
+    path: &Path,
+    incoming: &str,
+    template: Option<&Path>,
+) -> Result<&'static str, Refusal> {
     let env = read_block(path)?;
     let mut previous = env.text.clone();
     if !path.is_file()
@@ -401,8 +593,12 @@ fn write_env(path: &Path, incoming: &str, template: Option<&Path>) -> Result<&'s
         previous = read_text(template)?.unwrap_or_default();
     }
     let mut new_lines = split_lines(&incoming.replace("\r\n", "\n"));
-    if new_lines.first().map(String::as_str) != Some(BEGIN) || new_lines.last().map(String::as_str) != Some(END) {
-        return refuse("Installer managed-block input is incomplete; rerun the installer. Nothing changed.");
+    if new_lines.first().map(String::as_str) != Some(BEGIN)
+        || new_lines.last().map(String::as_str) != Some(END)
+    {
+        return refuse(
+            "Installer managed-block input is incomplete; rerun the installer. Nothing changed.",
+        );
     }
     let old_values = fields(&env.block);
     let mut new_values = fields(&new_lines[1..new_lines.len() - 1]);
@@ -419,8 +615,19 @@ fn write_env(path: &Path, incoming: &str, template: Option<&Path>) -> Result<&'s
     if env.managed && old_values == new_values {
         return Ok("unchanged");
     }
-    let outside = if env.managed { env.kept.join("\n") } else { previous.trim_end_matches(['\r', '\n']).to_owned() };
-    write_file(path, &format!("{}\n{}\n", outside.trim_end_matches('\n'), new_lines.join("\n")))
+    let outside = if env.managed {
+        env.kept.join("\n")
+    } else {
+        previous.trim_end_matches(['\r', '\n']).to_owned()
+    };
+    write_file(
+        path,
+        &format!(
+            "{}\n{}\n",
+            outside.trim_end_matches('\n'),
+            new_lines.join("\n")
+        ),
+    )
 }
 
 // -- deployment fingerprints --------------------------------------------------
@@ -428,7 +635,9 @@ fn write_env(path: &Path, incoming: &str, template: Option<&Path>) -> Result<&'s
 /// Python `subprocess.run(..., text=True, errors="replace", timeout=30)`:
 /// stdout with universal newlines, or the refusal on any failure.
 fn run_command(argv: &[String]) -> Result<String, Refusal> {
-    let (program, rest) = argv.split_first().ok_or_else(|| Refusal(CHECK_FAILED.into()))?;
+    let (program, rest) = argv
+        .split_first()
+        .ok_or_else(|| Refusal(CHECK_FAILED.into()))?;
     let mut child = Command::new(program)
         .args(rest)
         .stdin(Stdio::null())
@@ -467,7 +676,9 @@ fn run_command(argv: &[String]) -> Result<String, Refusal> {
     if !status.success() {
         return refuse(CHECK_FAILED);
     }
-    Ok(String::from_utf8_lossy(&bytes).replace("\r\n", "\n").replace('\r', "\n"))
+    Ok(String::from_utf8_lossy(&bytes)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n"))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -486,7 +697,9 @@ fn resolved(path: &Path) -> String {
     if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{rest}");
     }
-    text.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(text)
+    text.strip_prefix(r"\\?\")
+        .map(str::to_owned)
+        .unwrap_or(text)
 }
 
 fn absolute_path(path: &Path) -> PathBuf {
@@ -510,7 +723,12 @@ struct Deployment {
     applied: bool,
 }
 
-fn deployment(repo: &Path, env_file: &Path, override_file: &Path, overlays: &[PathBuf]) -> Result<Deployment, Refusal> {
+fn deployment(
+    repo: &Path,
+    env_file: &Path,
+    override_file: &Path,
+    overlays: &[PathBuf],
+) -> Result<Deployment, Refusal> {
     let repo_s = repo.to_string_lossy().into_owned();
     let git = |args: &[&str]| -> Result<String, Refusal> {
         let mut argv = vec![s("git"), s("-C"), repo_s.clone()];
@@ -526,12 +744,27 @@ fn deployment(repo: &Path, env_file: &Path, override_file: &Path, overlays: &[Pa
         .into_iter()
         .map(|name| {
             let path = repo.join(name);
-            let hash = if path.is_file() { sha256_hex(&std::fs::read(&path).unwrap_or_default()) } else { sha256_hex(b"") };
+            let hash = if path.is_file() {
+                sha256_hex(&std::fs::read(&path).unwrap_or_default())
+            } else {
+                sha256_hex(b"")
+            };
             json!([name, hash])
         })
         .collect();
     let source_hash = digest(&json!([resolved(repo), head, delta, extra]));
-    let mut compose = vec![s("docker"), s("compose"), s("-p"), s("pseudolife-mcp"), s("--env-file"), env_file.to_string_lossy().into_owned(), s("-f"), repo.join("ops/docker-compose.yml").to_string_lossy().into_owned()];
+    let mut compose = vec![
+        s("docker"),
+        s("compose"),
+        s("-p"),
+        s("pseudolife-mcp"),
+        s("--env-file"),
+        env_file.to_string_lossy().into_owned(),
+        s("-f"),
+        repo.join("ops/docker-compose.yml")
+            .to_string_lossy()
+            .into_owned(),
+    ];
     if override_file.is_file() {
         compose.extend([s("-f"), override_file.to_string_lossy().into_owned()]);
     }
@@ -543,7 +776,8 @@ fn deployment(repo: &Path, env_file: &Path, override_file: &Path, overlays: &[Pa
         argv.extend(extra.iter().map(|a| (*a).to_owned()));
         argv
     };
-    let config: Value = serde_json::from_str(&run_command(&with(&["config", "--format", "json"]))?).map_err(|_| Refusal(READ_FAILED.into()))?;
+    let config: Value = serde_json::from_str(&run_command(&with(&["config", "--format", "json"]))?)
+        .map_err(|_| Refusal(READ_FAILED.into()))?;
     let mut service_hashes: BTreeMap<String, String> = BTreeMap::new();
     for line in run_command(&with(&["config", "--hash", "*"]))?.lines() {
         let mut parts = line.splitn(2, char::is_whitespace);
@@ -552,24 +786,45 @@ fn deployment(repo: &Path, env_file: &Path, override_file: &Path, overlays: &[Pa
         };
         service_hashes.insert(name.to_owned(), value.trim().to_owned());
     }
-    let profiles: Vec<String> = std::env::var("COMPOSE_PROFILES").unwrap_or_default().split(',').filter(|p| !p.is_empty()).map(str::to_owned).collect();
-    let services = config.get("services").and_then(Value::as_object).ok_or_else(|| Refusal(READ_FAILED.into()))?;
+    let profiles: Vec<String> = std::env::var("COMPOSE_PROFILES")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let services = config
+        .get("services")
+        .and_then(Value::as_object)
+        .ok_or_else(|| Refusal(READ_FAILED.into()))?;
     let active: Vec<(&String, &Value)> = services
         .iter()
-        .filter(|(_, service)| match service.get("profiles").and_then(Value::as_array) {
-            None => true,
-            Some(list) if list.is_empty() => true,
-            Some(list) => list.iter().filter_map(Value::as_str).any(|p| profiles.iter().any(|e| e == p)),
-        })
+        .filter(
+            |(_, service)| match service.get("profiles").and_then(Value::as_array) {
+                None => true,
+                Some(list) if list.is_empty() => true,
+                Some(list) => list
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .any(|p| profiles.iter().any(|e| e == p)),
+            },
+        )
         .collect();
     let names: BTreeMap<String, String> = active
         .iter()
         .map(|(name, service)| {
-            let container = service.get("container_name").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| format!("pseudolife-mcp-{name}-1"));
+            let container = service
+                .get("container_name")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("pseudolife-mcp-{name}-1"));
             (container, (*name).clone())
         })
         .collect();
-    let ids: Vec<String> = run_command(&[s("docker"), s("ps"), s("-a"), s("--format"), s("{{.ID}}")])?.split_whitespace().map(str::to_owned).collect();
+    let ids: Vec<String> =
+        run_command(&[s("docker"), s("ps"), s("-a"), s("--format"), s("{{.ID}}")])?
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
     let inventory: Vec<Value> = if ids.is_empty() {
         Vec::new()
     } else {
@@ -579,49 +834,90 @@ fn deployment(repo: &Path, env_file: &Path, override_file: &Path, overlays: &[Pa
     };
     let mut found: BTreeMap<String, &Value> = BTreeMap::new();
     for container in &inventory {
-        let name = container.get("Name").and_then(Value::as_str).unwrap_or("").trim_start_matches('/').to_owned();
+        let name = container
+            .get("Name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim_start_matches('/')
+            .to_owned();
         if names.contains_key(&name) {
             found.insert(name, container);
         }
     }
-    let label = |c: &Value, key: &str| c.pointer("/Config/Labels").and_then(|l| l.get(key)).and_then(Value::as_str).map(str::to_owned);
-    if found.values().any(|c| label(c, "com.docker.compose.project").as_deref() != Some("pseudolife-mcp")) {
-        return refuse("The configured containers belong to another Compose project. Use that stack's own compose file; nothing was started or removed.");
+    let label = |c: &Value, key: &str| {
+        c.pointer("/Config/Labels")
+            .and_then(|l| l.get(key))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    if found
+        .values()
+        .any(|c| label(c, "com.docker.compose.project").as_deref() != Some("pseudolife-mcp"))
+    {
+        return refuse(
+            "The configured containers belong to another Compose project. Use that stack's own compose file; nothing was started or removed.",
+        );
     }
     let complete = names.keys().all(|n| found.contains_key(n)) && found.len() == names.len();
-    let running = complete && found.values().all(|c| c.pointer("/State/Running").and_then(Value::as_bool).unwrap_or(false));
+    let running = complete
+        && found.values().all(|c| {
+            c.pointer("/State/Running")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        });
     let applied = complete
         && found.iter().all(|(name, c)| {
             let service = &names[name];
-            service_hashes.get(service).is_some_and(|h| !h.is_empty() && label(c, "com.docker.compose.config-hash").as_deref() == Some(h.as_str()))
+            service_hashes.get(service).is_some_and(|h| {
+                !h.is_empty()
+                    && label(c, "com.docker.compose.config-hash").as_deref() == Some(h.as_str())
+            })
         });
     let build: Map<String, Value> = active
         .iter()
         .filter(|(_, service)| service.get("build").is_some_and(|b| !b.is_null() && b != &Value::Bool(false) && b != &json!("") && b != &json!({})))
         .map(|(name, service)| ((*name).clone(), json!({"build": service["build"], "image": service.get("image").cloned().unwrap_or(Value::Null)})))
         .collect();
-    let images: Map<String, Value> = found.iter().map(|(name, c)| (name.clone(), c.get("Image").cloned().unwrap_or(Value::Null))).collect();
+    let images: Map<String, Value> = found
+        .iter()
+        .map(|(name, c)| (name.clone(), c.get("Image").cloned().unwrap_or(Value::Null)))
+        .collect();
     let mut hashes = Map::new();
     hashes.insert("SOURCE_HASH".into(), json!(source_hash));
     hashes.insert("COMPOSE_HASH".into(), json!(digest(&config)));
     hashes.insert("BUILD_HASH".into(), json!(digest(&Value::Object(build))));
     hashes.insert("IMAGES_HASH".into(), json!(digest(&Value::Object(images))));
-    Ok(Deployment { hashes, complete, running, applied })
+    Ok(Deployment {
+        hashes,
+        complete,
+        running,
+        applied,
+    })
 }
 
 fn hash<'a>(hashes: &'a Map<String, Value>, key: &str) -> &'a str {
     hashes.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-fn plan(repo: &Path, env_file: &Path, override_file: &Path, overlays: &[PathBuf]) -> Result<Map<String, Value>, Refusal> {
+fn plan(
+    repo: &Path,
+    env_file: &Path,
+    override_file: &Path,
+    overlays: &[PathBuf],
+) -> Result<Map<String, Value>, Refusal> {
     let d = deployment(repo, env_file, override_file, overlays)?;
     let old = fields(&read_block(env_file)?.block);
     let recorded = |key: &str| old.get(&format!("{PREFIX}{key}")).cloned();
     let action = if !d.complete
-        || ["SOURCE_HASH", "BUILD_HASH", "IMAGES_HASH"].iter().any(|k| recorded(k).as_deref() != Some(hash(&d.hashes, k)))
+        || ["SOURCE_HASH", "BUILD_HASH", "IMAGES_HASH"]
+            .iter()
+            .any(|k| recorded(k).as_deref() != Some(hash(&d.hashes, k)))
     {
         "build"
-    } else if d.running && d.applied && recorded("COMPOSE_HASH").as_deref() == Some(hash(&d.hashes, "COMPOSE_HASH")) {
+    } else if d.running
+        && d.applied
+        && recorded("COMPOSE_HASH").as_deref() == Some(hash(&d.hashes, "COMPOSE_HASH"))
+    {
         "unchanged"
     } else {
         "start"
@@ -635,24 +931,43 @@ fn plan(repo: &Path, env_file: &Path, override_file: &Path, overlays: &[PathBuf]
 }
 
 fn same_inputs(expected: &Value, hashes: &Map<String, Value>) -> bool {
-    expected.is_object() && INPUT_HASHES.iter().all(|k| expected.get(*k).and_then(Value::as_str) == Some(hash(hashes, k)))
+    expected.is_object()
+        && INPUT_HASHES
+            .iter()
+            .all(|k| expected.get(*k).and_then(Value::as_str) == Some(hash(hashes, k)))
 }
 
-fn started(repo: &Path, env_file: &Path, override_file: &Path, expected: &Value, overlays: &[PathBuf]) -> Result<Map<String, Value>, Refusal> {
+fn started(
+    repo: &Path,
+    env_file: &Path,
+    override_file: &Path,
+    expected: &Value,
+    overlays: &[PathBuf],
+) -> Result<Map<String, Value>, Refusal> {
     let d = deployment(repo, env_file, override_file, overlays)?;
     if !same_inputs(expected, &d.hashes) {
-        return refuse("Checkout or Compose inputs changed during startup; rerun the installer with a stable checkout, and no success record has been saved.");
+        return refuse(
+            "Checkout or Compose inputs changed during startup; rerun the installer with a stable checkout, and no success record has been saved.",
+        );
     }
     if !d.complete || !d.applied {
-        return refuse("The running containers do not match the requested Compose configuration; check docker compose logs and rerun, and no success record has been saved.");
+        return refuse(
+            "The running containers do not match the requested Compose configuration; check docker compose logs and rerun, and no success record has been saved.",
+        );
     }
     if expected.get("action").and_then(Value::as_str) == Some("unchanged")
-        && expected.get("IMAGES_HASH").and_then(Value::as_str) != Some(hash(&d.hashes, "IMAGES_HASH"))
+        && expected.get("IMAGES_HASH").and_then(Value::as_str)
+            != Some(hash(&d.hashes, "IMAGES_HASH"))
     {
-        return refuse("Docker images changed while checking the existing stack; rerun the installer, and no success record has been saved.");
+        return refuse(
+            "Docker images changed while checking the existing stack; rerun the installer, and no success record has been saved.",
+        );
     }
     let mut result = expected.as_object().cloned().unwrap_or_default();
-    result.insert("STARTED_IMAGES_HASH".into(), json!(hash(&d.hashes, "IMAGES_HASH")));
+    result.insert(
+        "STARTED_IMAGES_HASH".into(),
+        json!(hash(&d.hashes, "IMAGES_HASH")),
+    );
     Ok(result)
 }
 
@@ -666,32 +981,52 @@ fn record(
     overlays: &[PathBuf],
 ) -> Result<&'static str, Refusal> {
     let d = deployment(repo, env_file, override_file, overlays)?;
-    if !same_inputs(expected, &d.hashes) || expected.get("STARTED_IMAGES_HASH").and_then(Value::as_str) != Some(hash(&d.hashes, "IMAGES_HASH")) {
-        return refuse("Checkout, Compose inputs or images changed after startup; rerun the installer with stable inputs, and no success record has been saved.");
+    if !same_inputs(expected, &d.hashes)
+        || expected.get("STARTED_IMAGES_HASH").and_then(Value::as_str)
+            != Some(hash(&d.hashes, "IMAGES_HASH"))
+    {
+        return refuse(
+            "Checkout, Compose inputs or images changed after startup; rerun the installer with stable inputs, and no success record has been saved.",
+        );
     }
     if !d.complete || !d.running || !d.applied {
-        return refuse("The verified Docker stack changed during setup; rerun the installer, and no success record has been saved.");
+        return refuse(
+            "The verified Docker stack changed during setup; rerun the installer, and no success record has been saved.",
+        );
     }
     let env = read_block(env_file)?;
     if !env.managed {
-        return refuse("The installer managed block is missing; restore the original ops/.env and rerun.");
+        return refuse(
+            "The installer managed block is missing; restore the original ops/.env and rerun.",
+        );
     }
     // Python dict order: the hashes, then instruction choices, then the target.
-    let mut updates: Vec<(String, String)> = ["SOURCE_HASH", "COMPOSE_HASH", "BUILD_HASH", "IMAGES_HASH"]
-        .iter()
-        .map(|k| (format!("{PREFIX}{k}"), hash(&d.hashes, k).to_owned()))
-        .collect();
+    let mut updates: Vec<(String, String)> =
+        ["SOURCE_HASH", "COMPOSE_HASH", "BUILD_HASH", "IMAGES_HASH"]
+            .iter()
+            .map(|k| (format!("{PREFIX}{k}"), hash(&d.hashes, k).to_owned()))
+            .collect();
     for (client, value) in instructions {
-        updates.push((format!("{PREFIX}INSTRUCTIONS_{}", client.to_uppercase()), (*value).to_owned()));
+        updates.push((
+            format!("{PREFIX}INSTRUCTIONS_{}", client.to_uppercase()),
+            (*value).to_owned(),
+        ));
     }
     if let Some(target) = generic_target {
         let target = absolute(Path::new(target));
-        updates.push((format!("{PREFIX}GENERIC_TARGET_B64"), base64url_encode(target.as_bytes())));
+        updates.push((
+            format!("{PREFIX}GENERIC_TARGET_B64"),
+            base64url_encode(target.as_bytes()),
+        ));
     }
     let mut lines: Vec<String> = env
         .block
         .into_iter()
-        .filter(|line| !updates.iter().any(|(k, _)| line.split_once('=').map_or(line.as_str(), |(key, _)| key) == k))
+        .filter(|line| {
+            !updates
+                .iter()
+                .any(|(k, _)| line.split_once('=').map_or(line.as_str(), |(key, _)| key) == k)
+        })
         .collect();
     lines.extend(updates.iter().map(|(k, v)| format!("{k}={v}")));
     let mut block = vec![BEGIN.to_owned()];
@@ -805,7 +1140,9 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 fn base64url_encode(bytes: &[u8]) -> String {
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
-        let n = (u32::from(chunk[0]) << 16) | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8) | u32::from(*chunk.get(2).unwrap_or(&0));
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
         for i in 0..=chunk.len() {
             out.push(B64[((n >> (18 - 6 * i)) & 63) as usize] as char);
         }
@@ -843,19 +1180,30 @@ mod tests {
     fn sorted_dumps_matches_python_json_dumps() {
         // python3 -c 'import json;print(json.dumps({"b":[1,"é",None],"a":{"z":True,"y":1.5}},sort_keys=True,separators=(",",":")))'
         let value = json!({"b": [1, "é", null], "a": {"z": true, "y": 1.5}});
-        assert_eq!(py_dumps_sorted(&value), r#"{"a":{"y":1.5,"z":true},"b":[1,"\u00e9",null]}"#);
+        assert_eq!(
+            py_dumps_sorted(&value),
+            r#"{"a":{"y":1.5,"z":true},"b":[1,"\u00e9",null]}"#
+        );
         let report = json!({"status": "failed", "recovery": "caf\u{e9}", "n": [1, null]});
-        assert_eq!(py_dumps(&report), r#"{"status": "failed", "recovery": "caf\u00e9", "n": [1, null]}"#);
-        assert_eq!(py_json_string("C:\\x \u{1f600}\t"), r#""C:\\x \ud83d\ude00\t""#);
+        assert_eq!(
+            py_dumps(&report),
+            r#"{"status": "failed", "recovery": "caf\u00e9", "n": [1, null]}"#
+        );
+        assert_eq!(
+            py_json_string("C:\\x \u{1f600}\t"),
+            r#""C:\\x \ud83d\ude00\t""#
+        );
     }
 
     #[test]
     fn fields_reads_assignments_and_unquotes() {
-        let lines = split_lines("A=1\nlower=2\nB_2 = 'x y' \nC=\"q\"\r\n# D=4\n");
+        let lines = split_lines("AB=1\nA=9\nlower=2\nB_2 = 'x y' \nC2=\"q\"\r\n# D=4\n");
         let f = fields(&lines);
-        assert_eq!(f.get("A").map(String::as_str), Some("1"));
+        assert_eq!(f.get("AB").map(String::as_str), Some("1"));
+        // `[A-Z][A-Z0-9_]+`: a one-letter key is not a field.
+        assert!(!f.contains_key("A"));
         assert!(!f.contains_key("lower"));
-        assert_eq!(f.get("C").map(String::as_str), Some("q"));
+        assert_eq!(f.get("C2").map(String::as_str), Some("q"));
         assert!(!f.contains_key("B_2 "));
     }
 
