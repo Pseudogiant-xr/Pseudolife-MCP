@@ -3,7 +3,7 @@
 //! Oracle: `pseudolife_memory/backup_cli.py`. Cases requiring the lite
 //! tier's embedded instance defer before any effect.
 mod archive;
-mod args;
+pub(super) mod args;
 mod dump;
 
 use std::{

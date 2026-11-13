@@ -26,6 +26,7 @@ ROWS = {
     "move": "CLI-MOVE-REFUSALS",
     "tunnel": "CLI-TUNNEL-STATUS",
     "console": "CLI-CONSOLE-PRINT",
+    "restore": "CLI-RESTORE-GATES",
     "update": "CLI-UPDATE",
 }
 
