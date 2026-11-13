@@ -27,6 +27,7 @@ ROWS = {
     "tunnel": "CLI-TUNNEL-STATUS",
     "console": "CLI-CONSOLE-PRINT",
     "expose": "CLI-EXPOSE",
+    "restore": "CLI-RESTORE-GATES",
     "update": "CLI-UPDATE",
 }
 

@@ -44,7 +44,9 @@ modes native, 15 partly and 5 defer. The count is of 29 logical modes, with
 existing `delegate-watch` row; both defer and have no native leaf or scoped
 sub-row yet. Check `shim/src/main.rs` as well as `shim/src/cli.rs`: the former
 dispatches the native lease, board-audit, maintainer and sent-serve paths
-before the latter's deferral list.
+before the latter's deferral list. `restore` (added by d3d3899c,
+2026-11-04, after this audit and outside its count) has its own entry and
+is partly native: its gates before Docker.
 
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|

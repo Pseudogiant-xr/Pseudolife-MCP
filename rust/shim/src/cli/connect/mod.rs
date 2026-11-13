@@ -49,6 +49,11 @@ pub(super) fn process_table() -> Result<Option<ProcessTable>, ()> {
     procs::list()
 }
 
+/// `update_cli.interactive()`: `sys.stdin.isatty() and sys.stdout.isatty()`.
+pub(super) fn interactive() -> bool {
+    procs::stdin_is_tty() && procs::stdout_is_tty()
+}
+
 /// This run is outside the native domain: nothing has been printed or
 /// written, and the dispatcher reports the deferral.
 #[derive(Debug)]
