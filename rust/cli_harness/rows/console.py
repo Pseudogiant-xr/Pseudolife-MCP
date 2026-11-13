@@ -1,17 +1,19 @@
-"""CLI-CONSOLE-PRINT: the shapes of ``pseudolife-mcp console`` that open no browser.
+"""CLI-CONSOLE-PRINT: ``pseudolife-mcp console``, every shape the oracle answers.
 
-Canonical argv: ``console --help``, ``console --no-open [--to PAGE]
-[--json]``, ``console --list [--json]``, ``console --revoke SESSION_ID
-[--json]``, and argparse's and ``main``'s errors on those options. The
-daemon is a fixture serving ``/api/console/link``, ``/api/console/sessions``
-and ``/api/console/sessions/revoke`` in the shapes ``console_cli`` reads;
-both arms see identical bytes and the requests each arm sends are compared.
+Canonical argv: ``console --help``, ``console [--no-open] [--to PAGE]
+[--json] [--unless-signed-in]``, ``console --list [--json]``, ``console
+--revoke SESSION_ID [--json]``, and argparse's and ``main``'s errors on those
+options. The daemon is a fixture serving ``/api/console/link``,
+``/api/console/sessions`` and ``/api/console/sessions/revoke`` in the shapes
+``console_cli`` reads; both arms see identical bytes and the requests each
+arm sends are compared.
 
-No case lets the oracle open a browser: every case with a daemon passes
-``--no-open``, ``--list`` or a non-empty ``--revoke`` (checked when the
-row loads), and the deferral cases, which the oracle answers on its own
-path, run against the closed loopback port, where no sign-in link can come
-back. Scope and deferrals: ``rows/console.md``.
+No case lets either arm open a real browser: every case with a daemon that
+reaches ``open_browser`` runs with BROWSER naming a recording stand-in in
+the case's home and PATH holding only the home's ``bin`` (checked when the
+row loads), so ``webbrowser.get()`` never falls back to ``os.startfile`` or
+``xdg-open``; the stand-in's argv is compared. Scope and deferrals:
+``rows/console.md``.
 """
 
 from __future__ import annotations

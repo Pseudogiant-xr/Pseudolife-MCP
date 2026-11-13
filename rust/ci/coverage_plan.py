@@ -173,6 +173,7 @@ PLATFORM_EXCLUSIONS = {
         'backup-raw-member-name': 'Declared Linux-only raw-byte member name witness.',
         'backup-discovery-generic-errno-class': 'Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.',
         'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
+        'console-display-ignored': 'Declared Linux-only: only Linux gates the browser on DISPLAY or WAYLAND_DISPLAY.',
     },
 }
 # These two controls have no selected OS witness; global gaps cannot arise
