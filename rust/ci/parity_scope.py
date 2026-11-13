@@ -168,11 +168,11 @@ SHIM_COMMANDS = {
     # console and conductor_watch also read move's argv and stream helpers;
     # expose reads them too, and connect's stdin check, so connect's rows
     # include expose's.
-    "connect": ("connect", "expose", "move", "console", "restore"), "doctor": ("doctor", "console"), "console": ("console",),
+    "connect": ("connect", "expose", "move", "console", "conductor_watch", "restore"), "doctor": ("doctor", "console"), "console": ("console",),
     "conductor_watch": ("conductor_watch",),
     # The import scan also reads move's help text ("use `expose status`")
     # as a use of expose, so expose's rows include move's.
-    "expose": ("expose", "move", "console"),
+    "expose": ("expose", "move", "console", "conductor_watch"),
     "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
