@@ -1121,7 +1121,10 @@ function Initialize-NativeClient {
     if (-not (Test-Path -LiteralPath $script:nativeStaged -PathType Leaf)) {
         Stop-NativeInstall "$name holds no $binaryName" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
     }
-    if (-not $isZip) { & chmod 755 $script:nativeStaged 2>$null }
+    if (-not $isZip) {
+        # tar keeps the archive's 0755; set it again without a PATH lookup.
+        try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
+    }
     try {
         $says = (& $script:nativeStaged version 2>&1 | Out-String).Trim()
         $ran = ($LASTEXITCODE -eq 0)

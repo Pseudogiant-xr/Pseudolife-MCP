@@ -64,6 +64,8 @@ native_installed_launcher() {
 # script) and a shell script elsewhere; calls go to $env:CALL_LOG.
 POWERSHELL = r'''
 $script:nativeArchive = "the verified fake archive"
+$script:fakeLauncherSh = @'
+''' + LAUNCHER_SH + r''''@
 function Install-NativeClient {
     if ($env:CALL_LOG) { Add-Content -LiteralPath $env:CALL_LOG -Value 'native|install' }
     if ("$env:FAKE_NATIVE_EXIT" -and "$env:FAKE_NATIVE_EXIT" -ne "0") { return $null }
@@ -82,8 +84,10 @@ function Install-NativeClient {
         ) -join "`r`n"
         Set-Content -LiteralPath $launcher -Value $cmd -Encoding ascii
     } else {
-        Set-Content -LiteralPath $launcher -Value $env:FAKE_LAUNCHER_SH -NoNewline
-        & chmod 755 $launcher
+        $script = if ($env:FAKE_LAUNCHER_SH) { $env:FAKE_LAUNCHER_SH } else { $script:fakeLauncherSh }
+        Set-Content -LiteralPath $launcher -Value $script -NoNewline
+        # No chmod lookup: some harnesses run with a PATH holding only their stubs.
+        [System.IO.File]::SetUnixFileMode($launcher, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute")
     }
     Step "Native client fake installed at $launcher"
     return $launcher
