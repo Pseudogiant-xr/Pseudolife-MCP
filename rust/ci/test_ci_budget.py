@@ -213,7 +213,7 @@ def test_a_cache_key_has_one_saver():
                     if str(s.get("uses", "")).startswith("Swatinem/rust-cache"))
         step["with"].pop("save-if")
     found = check(workflow, raw)
-    assert any("rust-cache key v0-rust-rust on Windows is saved by 2 runs" in problem for problem in found)
+    assert any("rust-cache key v0-rust-?-rust on Windows is saved by 2 runs" in problem for problem in found)
 
 
 def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
@@ -225,7 +225,7 @@ def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
         step["with"].pop("save-if")
     shards = len(workflow["jobs"]["source-mutants"]["strategy"]["matrix"]["shard"])
     assert shards > 1
-    assert any(f"v0-rust-cli-source-mutants-source-mutants on Linux is saved by {shards} runs" in problem
+    assert any(f"v0-rust-?-cli-source-mutants-source-mutants on Linux is saved by {shards} runs" in problem
                for problem in check(workflow, raw))
 
 

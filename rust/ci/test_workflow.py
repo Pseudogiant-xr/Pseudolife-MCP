@@ -521,7 +521,8 @@ def test_shards_cover_both_systems_and_build_once():
     assert fetched["with"]["path"] == "rust/target/storage-test"
     # Read-only: the Rust job's own key, never saved from here.
     cache = next(step for step in fixtures["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
-    assert cache["with"] == {"workspaces": "rust", "shared-key": "rust", "save-if": False}
+    assert cache["with"] == {"prefix-key": WEEKLY_PREFIX, "workspaces": "rust", "shared-key": "rust",
+                             "save-if": False}
 
 
 def test_original_checks_remain_gated_on_the_expected_shards():
@@ -1912,6 +1913,26 @@ def test_every_rust_cache_hashes_only_the_pinned_toolchain():
             expected += f" && ({cache['if']})"
         assert keep["if"] == expected, name
         assert keep["shell"] == "pwsh" and keep["run"] == steps_by_name("parity-checks")[TOOLCHAIN_STEP]["run"]
+
+
+WEEKLY_PREFIX = "v0-rust-${{ steps.cache_week.outputs.week }}"
+
+
+def test_every_rust_cache_key_starts_with_the_week():
+    # An exact hit never saves again and a partial match deletes target
+    # files older than a week (issue #1520): every entry is rebuilt weekly,
+    # and the readers name the same week as the jobs that save.
+    for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
+        for name, job in (yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            caches = [step for step in steps if str(step.get("uses", "")).startswith("Swatinem/rust-cache")]
+            for cache in caches:
+                assert cache["with"]["prefix-key"] == WEEKLY_PREFIX, (path.name, name)
+                week = [step for step in steps if step.get("id") == "cache_week"]
+                assert len(week) == 1 and steps.index(week[0]) < steps.index(cache), (path.name, name)
+                assert "if" not in week[0] and week[0]["shell"] == "pwsh", (path.name, name)
+                assert "[DateTime]::UtcNow" in week[0]["run"] and "ISOWeek]::GetYear" in week[0]["run"]
+                assert week[0]["run"] == steps_by_name("rust")["Name this week's Rust cache"]["run"]
 
 
 def steps_by_name(job):

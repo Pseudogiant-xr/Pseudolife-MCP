@@ -827,7 +827,8 @@ def test_a_cargo_loop_builds_its_test_binaries_once_as_the_rust_job_does():
         # Nextest must be the same version where the archive is built and run.
         assert step_named(build, name)["run"] == step_named(rust, name)["run"], name
     cache = next(step for step in build["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
-    assert cache["with"] == {"workspaces": "rust", "shared-key": "stress-tests", "cache-on-failure": True}
+    assert cache["with"] == {"prefix-key": "v0-rust-${{ steps.cache_week.outputs.week }}", "workspaces": "rust",
+                             "shared-key": "stress-tests", "cache-on-failure": True}
     archive = step_named(build, "Build the selected test binaries into a nextest archive")
     assert "rust/ci/stress.py archive --selection $env:STRESS_SELECTION" in archive["run"]
     assert "stress-tests.tar.zst" in archive["run"]
