@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "71cde5ebe83b5b36",
+  "fingerprint": "fe87901d0f5022fd",
+  "reason": "Adds the restore CLI row (CLI-RESTORE-GATES, 167 cases) to the w1c-connection shard's live and golden harness steps beside the console row already there, maps the connect and backup shim entries to that row too, and adds eight restore source-mutant shards (restore-0 to restore-7) to the nightly-only source-mutants job; no other shard's steps changed. Measured locally on the Windows workstation on 2026-11-13 at the branch merged with master: the row's live pass took 94 s and its golden replay 14 s, so the windows-latest w1c-connection shard grows by about 2 minutes, inside its 26-minute harness step budget; its measured minutes hold within that margin until the batch run re-measures them."
+}

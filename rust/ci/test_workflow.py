@@ -127,7 +127,7 @@ STATIC_EXCLUDE = WINDOWS_LIVE_EXCLUDE + [{"os": "windows-latest", "suite": "h5-l
 # row_commands() sees no --row there: the row list and how both passes are
 # built from it are pinned here instead.
 W1C_ROWS = ("transfer", "test_login", "doctor", "connect", "maintainer", "invite", "pair",
-            "move", "tunnel", "console", "conductor_watch", "coordination_recovery", "maintainer_setup")
+            "move", "tunnel", "console", "conductor_watch", "coordination_recovery", "maintainer_setup", "restore")
 W1C_LINES = (
     "$live = $rows | ForEach-Object { '--row'; $_ }",
     "$replayed = $rows | Where-Object { $_ -ne 'test_login' -or "

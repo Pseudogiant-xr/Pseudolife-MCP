@@ -154,6 +154,7 @@ PLATFORM_EXCLUSIONS = {
     'linux': {
         'backup-dotfile-suffix-windows': 'Registered only by the Windows backup source branch.',
         'console-winerror-full-stop': 'Declared Windows-only: only FormatMessageW text ends in a full stop.',
+        'restore-desktop-unmapped': "Declared Windows-only: only Windows maps Docker Desktop's host-mount source paths.",
         'backup-member-mode-windows': 'Registered only by the Windows backup source branch.',
         'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
         'backup-owner-name-windows': 'Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.',

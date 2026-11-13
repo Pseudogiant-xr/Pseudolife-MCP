@@ -23,7 +23,7 @@ const DOCKER_OPTIONS: [&str; 5] = [
     "--db-port",
 ];
 
-pub(super) fn columns_supported() -> bool {
+pub(in crate::cli) fn columns_supported() -> bool {
     let Some(value) = std::env::var("COLUMNS")
         .ok()
         .and_then(|raw| normalized_number(&raw))
@@ -34,7 +34,7 @@ pub(super) fn columns_supported() -> bool {
     !(digits.bytes().all(|byte| byte.is_ascii_digit()) && digits.len() > 4300)
 }
 
-pub(super) fn width() -> usize {
+pub(in crate::cli) fn width() -> usize {
     std::env::var("COLUMNS")
         .ok()
         .and_then(|raw| {
@@ -444,7 +444,7 @@ pub(super) fn join(base: &Path, name: &str) -> PathBuf {
     pathlib(&base.join(name))
 }
 
-pub(super) fn pathlib(path: &Path) -> PathBuf {
+pub(in crate::cli) fn pathlib(path: &Path) -> PathBuf {
     #[cfg(windows)]
     let normalized = {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
