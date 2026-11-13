@@ -293,6 +293,7 @@ impl Setup {
             plan: &self.plan,
             backup_file: self.args.backup_file.clone(),
             state_archive: self.args.state_archive.clone(),
+            state_size: 4096,
             data_dir: self.data_dir(),
         };
         execute::execute(docker, host, &cx)
@@ -671,7 +672,7 @@ fn a_rerun_after_an_interrupted_replay_keeps_the_first_safety_backup() {
     );
     assert!(
         text.contains(&format!(
-            "If you have repaired it since, this run changed nothing: start the daemon with:\n  docker start d\nthen delete {}",
+            "If you have repaired it since, this run changed nothing: start the daemon with:\n  docker start d\nthen delete {}; then retry this restore with:\n  pseudolife-mcp restore --backup-file=",
             setup.journal().display()
         )),
         "{text}"

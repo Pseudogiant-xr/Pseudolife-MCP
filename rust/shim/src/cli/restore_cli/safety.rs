@@ -153,7 +153,7 @@ pub(super) fn backup<D: Docker>(bank: &mut Bank<'_, D>, plan: &Plan, stamp: &str
             ));
         }
         match state::validate(&state_part) {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(state::Refusal::Unsafe) => {
                 return Err(Stop(
                     format!(

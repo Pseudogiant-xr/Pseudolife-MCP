@@ -69,6 +69,8 @@ pub(super) struct Context<'a> {
     /// The backup and archive as absolute paths.
     pub backup_file: PathBuf,
     pub state_archive: Option<PathBuf>,
+    /// The bytes the state archive unpacks to (the state check's estimate).
+    pub state_size: u128,
     /// Where the journal lives (the update lock's directory).
     pub data_dir: PathBuf,
 }
@@ -720,7 +722,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                 format!("delete {}", journal.display())
             };
             format!(
-                "An earlier restore of this bank ({started}) stopped after it began replacing it. If you have not repaired the bank since {started}, it is still incomplete; recover it as it was before that restore with:\n  {}{missing}\nIf you have repaired it since, this run changed nothing: {repaired}",
+                "An earlier restore of this bank ({started}) stopped after it began replacing it. If you have not repaired the bank since {started}, it is still incomplete; recover it as it was before that restore with:\n  {}{missing}\nIf you have repaired it since, this run changed nothing: {repaired}; then retry this restore with:\n  {retry}",
                 earlier_command.clone().unwrap_or_else(|| retry.clone()),
                 started = earlier.started,
             )

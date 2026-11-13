@@ -35,6 +35,8 @@ struct Member {
     kind: u8,
     name: Vec<u8>,
     linkname: Vec<u8>,
+    /// The bytes of data a plain file holds (0 for every other member).
+    size: u128,
 }
 
 impl Member {
@@ -253,6 +255,7 @@ fn parse_header(header: &[u8]) -> Header {
             kind,
             name,
             linkname,
+            size: 0,
         },
         size,
     )
@@ -296,6 +299,7 @@ fn pax_size(value: &[u8]) -> Option<u128> {
 fn pax(kind: u8, data: &[u8]) -> Result<Option<Pax>, Refusal> {
     let records = pax_records(data).ok_or(Refusal::Unsafe)?;
     let mut fields = Pax::default();
+    let mut given: Vec<Vec<u8>> = Vec::new();
     for (key, value) in records {
         if key.starts_with(b"GNU.sparse.") {
             return Err(Refusal::Unsupported("a sparse member"));
@@ -313,11 +317,25 @@ fn pax(kind: u8, data: &[u8]) -> Result<Option<Pax>, Refusal> {
         if matches!(&key[..], b"path" | b"linkpath") && value.contains(&0) {
             return Err(Refusal::Unsafe);
         }
-        // An empty value deletes the keyword: the header's own field stands.
+        // GNU tar 1.34 reads an empty `path` as `.` and keeps an earlier
+        // `size` over an empty one (probed 14 November 2026); real archives
+        // write neither shape, nor a key twice, so both are refused.
+        if changes {
+            if value.is_empty() {
+                return Err(Refusal::Unsupported(
+                    "an extended header with an empty path, linkpath or size",
+                ));
+            }
+            if given.contains(&key) {
+                return Err(Refusal::Unsupported(
+                    "an extended header that gives a path, linkpath or size twice",
+                ));
+            }
+            given.push(key.clone());
+        }
         match &key[..] {
-            b"path" => fields.path = (!value.is_empty()).then_some(value),
-            b"linkpath" => fields.linkpath = (!value.is_empty()).then_some(value),
-            b"size" if value.is_empty() => fields.size = None,
+            b"path" => fields.path = Some(value),
+            b"linkpath" => fields.linkpath = Some(value),
             b"size" => fields.size = Some(pax_size(&value).ok_or(Refusal::Unsafe)?),
             _ => {}
         }
@@ -415,6 +433,7 @@ impl Reader {
                 } else {
                     0
                 };
+                member.size = data;
                 self.members.push(member);
                 self.next += BLOCK + round_up(data);
             }
@@ -422,6 +441,11 @@ impl Reader {
                 let pax = matches!(kind, b'x' | b'g');
                 if pax && (length > MAX_PAX || self.pax.is_some()) {
                     return self.refuse(Refusal::Unsafe);
+                }
+                // Real long names are under 4 KiB; a longer record is not
+                // buffered.
+                if !pax && length > MAX_PAX {
+                    return self.refuse(Refusal::Unsupported("a GNU long name or link over 1 MiB"));
                 }
                 if !pax && self.pending.iter().any(|(pending, _)| *pending == kind) {
                     // GNU tar takes the last of two such records, which a
@@ -718,7 +742,17 @@ fn check_members(members: &[Member]) -> Result<(), Refusal> {
     result.map_err(|Escape| Refusal::Unsafe)
 }
 
-pub(super) fn validate(path: &Path) -> Result<(), Refusal> {
+/// The disk the extracted members take, rounded up to whole 4 KiB blocks
+/// with at least one block each (an estimate for the free-space check).
+fn unpacked(members: &[Member]) -> u128 {
+    members
+        .iter()
+        .map(|member| member.size.div_ceil(4096).max(1) * 4096)
+        .sum()
+}
+
+/// The archive's verdict; `Ok` carries the bytes it unpacks to.
+pub(super) fn validate(path: &Path) -> Result<u128, Refusal> {
     let mut reader = Reader::new();
     let read = gzip::stream(path, |chunk| {
         reader.feed(chunk);
@@ -729,7 +763,7 @@ pub(super) fn validate(path: &Path) -> Result<(), Refusal> {
     }
     reader.finish();
     match reader.end {
-        End::Done => check_members(&reader.members),
+        End::Done => check_members(&reader.members).map(|()| unpacked(&reader.members)),
         End::Error(refusal) => Err(refusal),
         End::Open => unreachable!("finish settles the reader"),
     }
@@ -1265,6 +1299,90 @@ mod tests {
                 "{kind}"
             );
         }
+    }
+
+    #[test]
+    fn an_extended_header_that_repeats_or_empties_a_name_or_size_is_refused() {
+        // GNU tar 1.34 reads an empty `path` as `.`, keeps an earlier `size`
+        // over an empty one and takes the last of two (probed): none is
+        // modelled here.
+        let file = || [header(b"hdr", b'0', 1, b""), data(b"z"), END.to_vec()];
+        for key in ["path", "linkpath", "size"] {
+            let value: &[u8] = if key == "size" { b"1" } else { b"x" };
+            let twice = [pax(b'x', &[(key, value), (key, value)])]
+                .into_iter()
+                .chain(file())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                verdict(&twice),
+                Err(Refusal::Unsupported(
+                    "an extended header that gives a path, linkpath or size twice"
+                )),
+                "{key} twice"
+            );
+            let emptied = [pax(b'x', &[(key, value), (key, b"")])]
+                .into_iter()
+                .chain(file())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                verdict(&emptied),
+                Err(Refusal::Unsupported(
+                    "an extended header with an empty path, linkpath or size"
+                )),
+                "{key} emptied"
+            );
+            let empty = [pax(b'x', &[(key, b"")])]
+                .into_iter()
+                .chain(file())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                verdict(&empty),
+                Err(Refusal::Unsupported(
+                    "an extended header with an empty path, linkpath or size"
+                )),
+                "{key} empty"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_name_record_over_one_mib_is_refused_before_it_is_read() {
+        for kind in [b'L', b'K'] {
+            let record = header(b"././@LongLink", kind, 1024 * 1024 + 1, b"");
+            assert_eq!(
+                verdict(&[record]),
+                Err(Refusal::Unsupported("a GNU long name or link over 1 MiB")),
+                "{}",
+                kind as char
+            );
+        }
+        // 1 MiB itself is read.
+        let mut name = vec![b'n'; 1024 * 1024 - 1];
+        name.push(0);
+        let record = [header(b"././@LongLink", b'L', name.len(), b""), data(&name)].concat();
+        let reader = read(&[record, header(b"short", b'0', 0, b""), END.to_vec()]);
+        assert_eq!(reader.end, End::Done);
+    }
+
+    #[test]
+    fn a_pax_path_ending_in_a_slash_makes_a_directory_with_no_data() {
+        let fifo = header(b"hidden-fifo", b'6', 0, b"");
+        assert_eq!(
+            verdict(&[
+                pax(b'x', &[("path", b"dir/")]),
+                header(b"short", 0, 512, b""),
+                fifo,
+                END.to_vec()
+            ]),
+            Err(Refusal::Unsafe)
+        );
+        let reader = read(&[
+            pax(b'x', &[("path", b"dir/")]),
+            header(b"short", 0, 0, b""),
+            END.to_vec(),
+        ]);
+        assert_eq!((reader.end, reader.members[0].kind), (End::Done, b'5'));
+        assert_eq!(reader.members[0].name, b"dir");
     }
 
     #[test]

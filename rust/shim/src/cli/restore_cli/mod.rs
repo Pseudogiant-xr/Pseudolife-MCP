@@ -97,9 +97,10 @@ fn main(arguments: Vec<OsString>) -> ExitCode {
     if dump::complete(&args.backup_file) != Verdict::Pass {
         return refuse(INCOMPLETE_DUMP);
     }
+    let mut state_size = 0;
     if let Some(archive) = &args.state_archive {
         match state::validate(archive) {
-            Ok(()) => {}
+            Ok(size) => state_size = size,
             Err(state::Refusal::Unsafe) => return refuse(UNSAFE_STATE),
             Err(state::Refusal::Unsupported(what)) => {
                 return refuse(&format!(
@@ -143,7 +144,7 @@ fn main(arguments: Vec<OsString>) -> ExitCode {
     let holder = directory.join("update.lock.pid");
     let newline = if cfg!(windows) { "\r\n" } else { "\n" };
     let _ = std::fs::write(&holder, format!("{}{newline}", process::id()));
-    let code = locked(&args, &directory);
+    let code = locked(&args, &directory, state_size);
     let _ = std::fs::remove_file(&holder);
     lock.release();
     code
@@ -212,7 +213,7 @@ fn lite_refusal(dir: &Path) -> ExitCode {
 }
 
 /// The rest of the run, under the update lock.
-fn locked(args: &args::Args, directory: &Path) -> ExitCode {
+fn locked(args: &args::Args, directory: &Path, state_size: u128) -> ExitCode {
     let program = match docker::program() {
         Ok(program) => program,
         Err(message) => {
@@ -263,6 +264,7 @@ fn locked(args: &args::Args, directory: &Path) -> ExitCode {
         plan: &plan,
         backup_file: absolute(&args.backup_file),
         state_archive: args.state_archive.as_deref().map(absolute),
+        state_size,
         data_dir: directory.to_path_buf(),
     };
     ExitCode::from(execute::execute(&mut runner, &mut host, &cx))
