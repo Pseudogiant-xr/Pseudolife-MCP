@@ -320,6 +320,49 @@ def next_batch(found: list[str]) -> tuple[str, list[str], list[str]]:
 
 # ── the sources ──────────────────────────────────────────────────────────────
 
+# The fields the classifiers read from gh's JSON, and the types they can
+# read; null (or absent) is always allowed except where a type list omits it.
+_TEXT = (str, type(None))
+PR_TYPES = {"number": (int,), "title": _TEXT, "headRefOid": _TEXT, "mergeable": _TEXT,
+            "mergeStateStatus": _TEXT, "statusCheckRollup": (list, type(None))}
+CHECK_TYPES = {"__typename": _TEXT, "state": _TEXT, "context": _TEXT, "status": _TEXT,
+               "conclusion": _TEXT, "name": _TEXT, "workflowName": _TEXT}
+RUN_TYPES = {"databaseId": (int, type(None)), "workflowDatabaseId": (int, str, type(None)),
+             "workflowName": _TEXT, "status": _TEXT, "conclusion": _TEXT, "headSha": _TEXT,
+             "event": _TEXT}
+# What a person can do about gh printing something this watcher cannot read.
+_GH_FIX = " (check that the gh on PATH is the GitHub CLI and current: gh --version)"
+
+
+def _json_kind(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return {dict: "a JSON object", list: "a list", str: "a string"}.get(type(value), "a number")
+
+
+def _gh_records(value, what: str, types: dict, *, holder: str = "a list") -> list:
+    """``value`` when it is a list of objects whose fields in ``types`` have
+    those types; otherwise GhError saying what ``what`` printed instead."""
+    if not isinstance(value, list):
+        raise GhError(f"{what} printed {_json_kind(value)}, not a list of objects{_GH_FIX}")
+    for item in value:
+        if not isinstance(item, dict):
+            raise GhError(f"{what} printed {holder} holding {_json_kind(item)}, "
+                          f"not objects{_GH_FIX}")
+        for key, allowed in types.items():
+            if key not in item and type(None) not in allowed:
+                raise GhError(f"{what} printed an item with no {key}{_GH_FIX}")
+            field = item.get(key)
+            if isinstance(field, bool) or not isinstance(field, allowed):
+                raise GhError(f"{what} printed {key} as {_json_kind(field)}{_GH_FIX}")
+        if types is PR_TYPES:
+            _gh_records(item.get("statusCheckRollup") or [], what, CHECK_TYPES,
+                        holder="a statusCheckRollup")
+    return value
+
+
 class Watcher:
     def __init__(self, args, runner):
         self.args = args
@@ -339,21 +382,26 @@ class Watcher:
         if code != 0:
             lines = (err or out).strip().splitlines()
             raise GhError(lines[-1] if lines else f"gh exited {code}")
-        return json.loads(out or "null")
+        try:
+            return json.loads(out or "null")
+        except (ValueError, RecursionError):
+            raise GhError(f"gh {' '.join(argv[:2])} printed output that is not JSON"
+                          f"{_GH_FIX}") from None
 
     def prs(self, old):
         args = ["pr", "list", "--state", "open", "--limit", str(PR_LIMIT), "--json", PR_FIELDS]
         if self.args.author:
             args += ["--author", self.args.author]
-        snap = pr_snapshot(old, self.gh(*args))
+        snap = pr_snapshot(old, _gh_records(self.gh(*args), "gh pr list", PR_TYPES))
         for number, p in snap.items():
             # Only a head about to be reported green or cancelled is looked
             # up, so a poll with nothing new costs no extra gh calls.
             before = (old or {}).get(number)
             if p["checks"] in {"green", "cancelled"} and not (
                     before and before["head"] == p["head"] and before["checks"] == p["checks"]):
-                runs, names = runs_state(self.gh("run", "list", "--commit", p["head"], "--limit", "100",
-                                                 "--json", RUN_FIELDS))
+                runs, names = runs_state(_gh_records(
+                    self.gh("run", "list", "--commit", p["head"], "--limit", "100",
+                            "--json", RUN_FIELDS), "gh run list", RUN_TYPES))
                 # The runs can only hold or worsen what the rollup says:
                 # pending, then failing, then cancelled over green.
                 if runs == "pending":
@@ -363,8 +411,9 @@ class Watcher:
         return snap
 
     def master(self, old):
-        return master_snapshot(old, self.gh("run", "list", "--branch", "master", "--limit", "30",
-                                            "--json", RUN_FIELDS))
+        return master_snapshot(old, _gh_records(
+            self.gh("run", "list", "--branch", "master", "--limit", "30", "--json", RUN_FIELDS),
+            "gh run list", RUN_TYPES))
 
     def suites(self, old):
         """Readable result files. One that does not parse yet (still being
@@ -400,9 +449,12 @@ class Watcher:
                     _say(f"{self.args.lease_cli} not found; leases unknown")
                     self.warned_cli = True
                 continue
-            except (OSError, subprocess.TimeoutExpired, ValueError):
+            except (OSError, subprocess.TimeoutExpired, ValueError, RecursionError):
                 continue
-            board_up = (body.get("board") or {}).get("available") is True
+            if not isinstance(body, dict):
+                continue
+            board = body.get("board")
+            board_up = isinstance(board, dict) and board.get("available") is True
             if code == 1 and body.get("held") is True:
                 snap[name] = "held"
             elif code == 0 and body.get("held") is False and board_up:
@@ -413,12 +465,14 @@ class Watcher:
         """``merged`` or ``closed``, or None while that is not known: the
         lookup failed, or the pull request is still open (it fell off the
         list). None keeps it tracked and asks again next poll (Codex review,
-        2026-10-14)."""
+        2026-10-14). gh missing reads as unknown too: the next poll's
+        snapshot raises it, where the watcher tells its owner."""
         try:
-            state = self.gh("pr", "view", number, "--json", "state").get("state", "")
-        except (GhError, ValueError, AttributeError):
+            body = self.gh("pr", "view", number, "--json", "state")
+        except (GhError, GhMissing):
             return None
-        return {"MERGED": "merged", "CLOSED": "closed"}.get(state)
+        state = body.get("state") if isinstance(body, dict) else None
+        return {"MERGED": "merged", "CLOSED": "closed"}.get(state) if isinstance(state, str) else None
 
     def snapshot(self, old):
         """Every source, keeping the old value of a source whose gh call
@@ -911,7 +965,10 @@ class _Loop:
         leases, _ = self.call(lambda: self.board.leases(name))
         for lease in leases:
             if lease.get("name") == name:
-                return (lease.get("holder") or {}).get("agent_id") == self.owner
+                holder = lease.get("holder")
+                if holder is not None and not isinstance(holder, dict):
+                    raise _Refused("the daemon's leases reply was not understood")
+                return (holder or {}).get("agent_id") == self.owner
         return False
 
     def send(self, text, request_id=None):

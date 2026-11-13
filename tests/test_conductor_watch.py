@@ -49,11 +49,17 @@ class World:
         self.pr_states = {}
         self.fail_gh = False
         self.calls = []
+        # A function of the command: raw stdout to answer with (exit 0, or 1
+        # for a lease check whose answer says held), or None to answer as usual.
+        self.override = None
         self.suites = tmp_path / "suite-results"
         self.suites.mkdir(exist_ok=True)
 
     def __call__(self, cmd):
         self.calls.append(cmd)
+        raw = self.override(cmd) if self.override else None
+        if raw is not None:
+            return (1 if cmd[0] != "gh" and '"held": true' in raw else 0), raw, ""
         if cmd[0] == "gh":
             if self.gh_missing:
                 raise FileNotFoundError(cmd[0])
@@ -715,6 +721,158 @@ def test_a_max_age_past_the_clocks_range_is_capped_not_a_crash(h):
     assert code == watch.EXIT_OK
     assert "exiting: max age" in h.capsys.readouterr().err
     assert 0 < h.clock.t <= watch.MAX_DEADLINE
+
+
+# ── gh output of the wrong shape (2026-11-13) ─────────────────────────────
+
+def _pr_list(raw):
+    return lambda cmd: raw if cmd[1:3] == ["pr", "list"] else None
+
+
+def _master_runs(raw):
+    return lambda cmd: raw if cmd[1:3] == ["run", "list"] and "--branch" in cmd else None
+
+
+def _head_runs(raw):
+    return lambda cmd: raw if cmd[1:3] == ["run", "list"] and "--commit" in cmd else None
+
+
+WRONG_SHAPES = [
+    ("pr-list-object", _pr_list, "{}", "gh pr list printed a JSON object, not a list of objects"),
+    ("pr-list-null", _pr_list, "null", "gh pr list printed null, not a list of objects"),
+    ("pr-list-number-items", _pr_list, "[1]", "gh pr list printed a list holding a number"),
+    ("pr-list-not-json", _pr_list, "<html>", "gh pr list printed output that is not JSON"),
+    ("pr-number-text", _pr_list, '[{"number": "7"}]', "gh pr list printed number as a string"),
+    ("pr-number-missing", _pr_list, '[{"title": "t"}]', "gh pr list printed an item with no number"),
+    ("pr-number-null", _pr_list, '[{"number": null}]', "gh pr list printed number as null"),
+    ("pr-number-bool", _pr_list, '[{"number": true}]', "gh pr list printed number as true"),
+    ("pr-head-number", _pr_list, '[{"number": 7, "headRefOid": 5}]',
+     "gh pr list printed headRefOid as a number"),
+    ("pr-title-list", _pr_list, '[{"number": 7, "title": ["t"]}]',
+     "gh pr list printed title as a list"),
+    ("pr-rollup-object", _pr_list, '[{"number": 7, "statusCheckRollup": {}}]',
+     "gh pr list printed statusCheckRollup as a JSON object"),
+    ("pr-rollup-text-items", _pr_list, '[{"number": 7, "statusCheckRollup": ["x"]}]',
+     "gh pr list printed a statusCheckRollup holding a string"),
+    ("pr-check-status-number", _pr_list, '[{"number": 7, "statusCheckRollup": [{"status": 1}]}]',
+     "gh pr list printed status as a number"),
+    ("master-runs-object", _master_runs, '{"runs": []}',
+     "gh run list printed a JSON object, not a list of objects"),
+    ("master-runs-list-items", _master_runs, "[[]]", "gh run list printed a list holding a list"),
+    ("master-run-id-text", _master_runs,
+     '[{"databaseId": "5", "event": "push", "status": "completed", "conclusion": "success"}]',
+     "gh run list printed databaseId as a string"),
+    ("master-run-event-list", _master_runs, '[{"databaseId": 5, "event": ["push"]}]',
+     "gh run list printed event as a list"),
+]
+
+
+@pytest.mark.parametrize("case", WRONG_SHAPES, ids=lambda c: c[0])
+def test_gh_output_of_the_wrong_shape_is_a_failed_poll(h, case):
+    """JSON that is not a list of objects, or a field of the wrong type,
+    ended the watcher in a traceback; it is a failed gh poll naming what
+    was wrong, and the watcher keeps going."""
+    _, source, raw, reason = case
+    h.world.prs = [pr(1)]
+    h.main(max_age="60")
+    h.world.override = source(raw)
+    code, texts, _ = h.main(max_age="60")
+    err = h.capsys.readouterr().err
+    assert code == watch.EXIT_OK and texts == []
+    assert f"gh failed (1/{watch.MAX_GH_FAILURES}): {reason}" in err, err
+    assert "gh --version" in err and "Traceback" not in err
+
+
+def test_a_head_lookup_of_the_wrong_shape_is_a_failed_poll(h):
+    h.world.prs = [pr(1, checks=[run_("a", status="QUEUED", conclusion="")])]
+    h.main(max_age="60")
+    h.world.prs = [pr(1, checks=[run_("a")])]
+    h.world.override = _head_runs('{"runs": []}')
+    code, texts, _ = h.main(max_age="60")
+    assert code == watch.EXIT_OK and texts == []
+    assert "gh failed (1/5): gh run list printed a JSON object" in h.capsys.readouterr().err
+    h.world.override = None                 # the head is reported once gh answers again
+    assert lines(h.main("--settle", "0")[1]) == ["PR #1 green at aaaaaaaa, merge state clean"]
+
+
+def test_gh_output_of_the_wrong_shape_on_five_polls_tells_the_owner_why(h):
+    h.main(max_age="60")
+    h.world.override = _pr_list("{}")
+    code, _, _ = h.main(max_age="3300")
+    assert code == watch.EXIT_SETUP
+    assert len(h.board.sent) == 1
+    text = h.board.sent[0]["text"]
+    assert text.startswith("conductor-watch stopped: gh failed on 5 polls in a row; last: "
+                           "gh pr list printed a JSON object, not a list of objects")
+
+
+@pytest.mark.parametrize("raw", ["{}", "[]", '{"state": ["MERGED"]}', '{"state": 1}', "<html>"])
+def test_a_closure_lookup_of_the_wrong_shape_keeps_tracking(h, raw):
+    h.world.prs = [pr(8, title="fix: x")]
+    h.main(max_age="60")
+    h.world.prs = []
+    h.world.override = lambda cmd: raw if cmd[1:3] == ["pr", "view"] else None
+    assert h.main(max_age="120")[1] == []
+    h.world.override = None
+    assert lines(h.main("--settle", "0")[1]) == ["PR #8 merged: fix: x"]
+
+
+def test_gh_vanishing_during_a_closure_lookup_tells_the_owner(h):
+    """A closure lookup runs outside the poll's gh handling; gh going
+    missing there ended the watcher in a traceback."""
+    h.world.prs = [pr(8)]
+    h.main(max_age="60")
+    h.world.prs = []
+
+    def gone(cmd):
+        if cmd[1:3] == ["pr", "view"]:
+            h.world.gh_missing = True
+            raise FileNotFoundError(cmd[0])
+    h.world.override = gone
+    code, _, _ = h.main(max_age="600")
+    assert code == watch.EXIT_SETUP
+    assert "gh is not installed" in h.board.sent[-1]["text"]
+
+
+@pytest.mark.parametrize("raw", ["[]", "null", '{"held": true, "board": "up"}',
+                                 '{"held": false, "board": [true]}', "1"])
+def test_lease_check_output_of_the_wrong_shape_leaves_the_lease_unknown(h, raw):
+    h.world.leases["full-suite"] = 1
+    h.main(max_age="60")
+    h.world.override = lambda cmd: raw if cmd[0] != "gh" and cmd[-1] == "full-suite" else None
+    code, texts, _ = h.main(max_age="120")
+    assert code == watch.EXIT_OK and texts == []
+    assert "Traceback" not in h.capsys.readouterr().err
+    h.world.override = None
+    h.world.leases["full-suite"] = 0
+    assert lines(h.main("--settle", "0")[1]) == ["full-suite free"]
+
+
+@pytest.mark.parametrize("holder", ["x", ["a"], 5])
+def test_a_lease_holder_of_the_wrong_shape_is_a_refusal_not_a_crash(h, holder):
+    h.board.leases = lambda name=None: ([{"name": name, "holder": holder}], False)
+    code, _, _ = h.main("--until-lease", "conductor:x")
+    assert code == watch.EXIT_SETUP
+    assert "the daemon's leases reply was not understood" in h.capsys.readouterr().err
+
+
+def _fixture_inputs():
+    for key, field in (("checks_state", "rollup"), ("runs_state", "runs"),
+                       ("pr_snapshot", "prs"), ("master_snapshot", "runs")):
+        for case in FIXTURE[key]:
+            yield pytest.param(key, case[field], id=f"{key}-{case['name']}")
+
+
+@pytest.mark.parametrize(("key", "value"), _fixture_inputs())
+def test_every_fixture_input_passes_the_shape_checks(key, value):
+    """The shape checks refuse only what the classifiers cannot read: every
+    gh answer the shared fixture holds is accepted."""
+    if key == "checks_state":
+        watch._gh_records([{"number": 1, "statusCheckRollup": value}], "gh pr list", watch.PR_TYPES)
+    elif key == "pr_snapshot":
+        watch._gh_records(value, "gh pr list", watch.PR_TYPES)
+    else:
+        watch._gh_records(value or [], "gh run list", watch.RUN_TYPES)
 
 
 # ── review findings, 2026-10-14 ────────────────────────────────────────────
