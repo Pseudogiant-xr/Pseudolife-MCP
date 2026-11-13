@@ -120,12 +120,21 @@ fn python_float(text: &str) -> Result<Option<f64>, ()> {
     text.parse::<f64>().map(Some).map_err(|_| ())
 }
 
+/// CPython applies its integer digit limit only to texts longer than this
+/// (`sys.int_info.str_digits_check_threshold`).
+const INT_LIMIT_FREE: usize = 640;
+
 /// `lease_cli.parse_duration` then `_age`'s check, over ASCII text.
 fn age(text: &str) -> Result<Result<(), String>, ()> {
     if !text.is_ascii() {
         return Err(());
     }
     let stripped = super::super::pyjson::py_strip(text);
+    // Past this length CPython's integer digit limit (4300 by default,
+    // moved by PYTHONINTMAXSTRDIGITS) may refuse the count: not decided here.
+    if stripped.len() > INT_LIMIT_FREE {
+        return Err(());
+    }
     // `([0-9]+)([smhd]?)` under IGNORECASE: the unit is one optional letter.
     let number = stripped
         .strip_suffix(|c: char| "smhdSMHD".contains(c))
@@ -181,9 +190,36 @@ fn store(args: &mut Args, option: &str, value: &str) {
     }
 }
 
+/// Whether argparse classifies `token` in a way this port reproduces: a
+/// word, an option spelled in full (alone or as `--opt=V`), or an unknown
+/// `--word` no option starts with.
+fn classified(token: &str) -> bool {
+    if !token.starts_with('-')
+        || matches!(token, "-h" | "--help")
+        || FLAGS.contains(&token)
+        || kind(token).is_some()
+    {
+        return true;
+    }
+    if let Some((option, _)) = token.split_once('=') {
+        return kind(option).is_some() || FLAGS.contains(&option);
+    }
+    token.len() > 2
+        && token.starts_with("--")
+        && !token.contains(' ')
+        && !known().any(|option| option.starts_with(token))
+}
+
 /// argparse's consumption order: options act as they are met; words
 /// collect as extras, reported once every option has been consumed.
 pub(super) fn parse(argv: &[String]) -> Parsed {
+    // argparse classifies every argument before it runs any action, so a
+    // token it settles its own way (an abbreviation, an ambiguous prefix,
+    // `--`, `-x`, an unknown `--word=V`) defers the whole argv, even after
+    // a --help or a type error that would otherwise act first.
+    if !argv.iter().all(|token| classified(token)) {
+        return Parsed::Defer;
+    }
     let mut args = Args::default();
     let mut extras: Vec<&str> = Vec::new();
     let mut tokens = argv.iter().peekable();
@@ -268,6 +304,35 @@ mod tests {
 
     fn error(text: &str) -> Parsed {
         Parsed::Error(text.into())
+    }
+
+    #[test]
+    fn a_token_argparse_settles_itself_defers_before_help_or_an_error() {
+        // argparse classifies every argument before it runs any action: a
+        // later abbreviation or ambiguous prefix is settled (or refused)
+        // before an earlier --help or type error acts.
+        for argv in [
+            &["--help", "--s"][..],
+            &["-h", "--sto"],
+            &["--interval", "x", "--s"],
+            &["--help", "--zz=1"],
+            &["zz", "--help", "-x"],
+            &["--stop=1", "--"],
+        ] {
+            assert_eq!(run(argv), Parsed::Defer, "{argv:?}");
+        }
+        // Options spelled in full and unknown words still let help act.
+        assert_eq!(run(&["--help", "--stop", "--zz", "word"]), Parsed::Help);
+    }
+
+    #[test]
+    fn a_duration_long_enough_for_the_integer_digit_limit_defers() {
+        let long = "1".repeat(641);
+        assert_eq!(run(&["--max-age", &long]), Parsed::Defer);
+        assert!(matches!(
+            run(&["--max-age", &"1".repeat(640)]),
+            Parsed::Args(_)
+        ));
     }
 
     #[test]

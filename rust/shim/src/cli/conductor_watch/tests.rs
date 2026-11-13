@@ -99,6 +99,10 @@ fn record_pids_read_as_int_does() {
         ("[1]", None),
         ("{}", None),
         ("\" 12 \"", Some(12)),
+        ("\"\\u000b12\\u000c\"", Some(12)),
+        // int() strips C isspace only: U+001C..U+001F make it raise.
+        ("\"\\u001c12\"", None),
+        ("\"12\\u001f\"", None),
         ("\"+7\"", Some(7)),
         ("\"007\"", Some(7)),
         ("\"12x\"", None),

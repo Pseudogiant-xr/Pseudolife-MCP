@@ -68,6 +68,21 @@ def conductor_watch_deferral(obs: dict) -> None:
     obs["modes"] = obs.get("setup_modes", {})
 
 
+@normalize.rule("conductor-watch-notice-unwritten")
+def conductor_watch_notice_unwritten(obs: dict) -> None:
+    """Declared: the deprecation notice cannot be written (stderr is a pipe
+    whose reader has gone). The oracle dies in that print, before it asks the
+    watcher to stop, with an exit status of its interpreter's choosing (1, or
+    120 from its shutdown flush); the candidate writes nothing and exits 1.
+    Both must leave the home as setup left it: no stop request was made."""
+    if obs.get("arm") != "python":
+        return
+    assert obs["exit"] in (1, 120), obs["exit"]
+    obs["exit"] = 1
+    obs["files"] = obs.get("setup_files", {})
+    obs["modes"] = obs.get("setup_modes", {})
+
+
 # --- fixtures --------------------------------------------------------------------
 
 class _Sleeper:
@@ -167,15 +182,19 @@ def _after(arm, obs):
 SESSION_ENV = {"CLAUDE_CODE_SESSION_ID": SESSION, "PSEUDOLIFE_DIGEST_DIR": "{HOME}/digests"}
 
 
+KEEP = ("conductor-watch-deferral", "conductor-watch-notice-unwritten")
+
+
 def case(case_id: str, argv: list[str], *, env=None, steps=(), rules=(), mode="conductor-watch",
-         platforms=("windows", "linux")) -> Case:
+         platforms=("windows", "linux"), stderr_closed: bool = False) -> Case:
     environment = {"PATH": NOBIN, "CLAUDE_CODE_SESSION_ID": None, "CLAUDE_PID": None,
                    "PSEUDOLIFE_DIGEST_DIR": None, "PSEUDOLIFE_MCP_TOKEN": None,
                    "PSEUDOLIFE_MCP_TOKEN_FILE": None, **(env or {})}
     return Case(case_id, [mode, *argv], env=environment,
                 setup=_steps(lambda arm: (arm.home / "nobin").mkdir(), *steps,
-                             keep="conductor-watch-deferral" in rules),
-                after=_after, rules=rules, platforms=platforms, programs=PROGRAMS)
+                             keep=any(rule in KEEP for rule in rules)),
+                after=_after, rules=rules, platforms=platforms, programs=PROGRAMS,
+                stderr_closed=stderr_closed)
 
 
 def cases() -> list[Case]:
@@ -288,6 +307,11 @@ def cases() -> list[Case]:
              steps=(_record("w/s.json", raw=b'{"pid": "\xff"}'),)))
     add(case("stop-deprecated-name", ["--stop", "--state", STATE], mode="delegate-watch",
              steps=(_record("w/s.json", pid="live", agent_id=WATCHER),)))
+    # The notice comes before the stop request: when it cannot be written,
+    # the watcher is not asked to stop.
+    add(case("stop-deprecated-name-stderr-closed", ["--stop", "--state", STATE],
+             mode="delegate-watch", steps=(_record("w/s.json", pid="live", agent_id=WATCHER),),
+             rules=("conductor-watch-notice-unwritten",), stderr_closed=True))
 
     # A start that finds a watcher on its state.
     running = _record("w/s.json", pid="live", process_start="live", agent_id=WATCHER, owner=OWNER)
@@ -317,6 +341,14 @@ def cases() -> list[Case]:
     add(case("defer-abbreviation", ["--sto", "--state", STATE], rules=("conductor-watch-deferral",)))
     add(case("defer-dash-value", ["--state", "-x", "--stop"], rules=("conductor-watch-deferral",)))
     add(case("defer-infinite-interval", ["--interval", "inf", "--stop", "--state", STATE],
+             rules=("conductor-watch-deferral",)))
+    # argparse classifies every argument before it runs any action, so an
+    # ambiguous prefix later in argv wins over an earlier --help or type error.
+    add(case("defer-help-before-ambiguous", ["--help", "--s"], rules=("conductor-watch-deferral",)))
+    add(case("defer-error-before-ambiguous", ["--interval", "x", "--s"],
+             rules=("conductor-watch-deferral",)))
+    # Past 640 characters the oracle's integer digit limit decides the count.
+    add(case("defer-age-digit-limit", ["--stop", "--state", STATE, "--max-age", "1" * 4301],
              rules=("conductor-watch-deferral",)))
     return c
 

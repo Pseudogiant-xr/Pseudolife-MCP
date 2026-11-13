@@ -211,7 +211,10 @@ fn record_pid(value: Option<&J>) -> Res<Option<i64>> {
             if !text.is_ascii() || text.contains('_') {
                 return Err(Defer);
             }
-            let digits = pyjson::py_strip(text);
+            // An ASCII str reaches `PyLong_FromString` unchanged, which
+            // strips C `isspace` only; U+001C..U+001F stay and raise.
+            let digits = text
+                .trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'));
             let unsigned = digits.strip_prefix(['+', '-']).unwrap_or(digits);
             if unsigned.is_empty() || !unsigned.bytes().all(|b| b.is_ascii_digit()) {
                 None
@@ -503,15 +506,6 @@ pub(super) fn run(mode: &str, values: Vec<OsString>) -> Option<ExitCode> {
         utf8_argv: super::move_cli::utf8_argv(),
     };
     let out = decide(&argv, &context).ok()?;
-    let effect = match &out.stop_file {
-        // The pid file was just read beside it, so its directory exists
-        // (the oracle's mkdir is a no-op); a refused write changed nothing.
-        Some(path) => {
-            fs::write(path, b"").ok()?;
-            true
-        }
-        None => false,
-    };
     let notice = if mode == "delegate-watch" {
         format!(
             "{DEPRECATED_MODE}
@@ -520,9 +514,26 @@ pub(super) fn run(mode: &str, values: Vec<OsString>) -> Option<ExitCode> {
     } else {
         String::new()
     };
-    let mut wrote = effect;
+    // The oracle prints the deprecation notice before it does anything
+    // else: a notice that cannot be written stops it before the stop
+    // request, so the request must not have been made by then.
+    let mut wrote = match emit(&mut io::stderr().lock(), &notice) {
+        Ok(()) => !notice.is_empty(),
+        Err(0) => return None,
+        Err(_) => return Some(ExitCode::from(1)),
+    };
+    if let Some(path) = &out.stop_file {
+        // The pid file was just read beside it, so its directory exists
+        // (the oracle's mkdir is a no-op). A refused write changed nothing:
+        // with nothing printed yet it defers; after the notice the oracle's
+        // uncaught OSError exits 1, its traceback not reproduced.
+        if fs::write(path, b"").is_err() {
+            return wrote.then(|| ExitCode::from(1));
+        }
+        wrote = true;
+    }
     let mut failed = false;
-    for (stderr, text) in [(true, &notice), (false, &out.stdout), (true, &out.stderr)] {
+    for (stderr, text) in [(false, &out.stdout), (true, &out.stderr)] {
         if failed || text.is_empty() {
             continue;
         }

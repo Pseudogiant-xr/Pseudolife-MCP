@@ -78,10 +78,16 @@ Every deferral is decided before any effect.
   `defer-dash-value`), an unknown `--word=V`, any other token starting with
   `-`; help or usage at a width other than `COLUMNS=80`, with `FORCE_COLOR`
   / `PYTHON_COLORS` / `NO_COLOR` set or on a terminal; non-UTF-8 argv.
+  argparse classifies every argument before it runs any action, so one such
+  token anywhere defers the whole argv, even after a `--help` or a type
+  error that would otherwise act first (cases `defer-help-before-ambiguous`,
+  `defer-error-before-ambiguous`).
 - Number spellings outside plain ASCII decimal (`inf`, `nan`, `1_0`,
   surrounding spaces, other digits: case `defer-infinite-interval`); a
   non-ASCII `--max-age` (IGNORECASE matches `ſ` as `s`, and the unit lookup
-  then raises).
+  then raises); a `--max-age` longer than 640 characters, where the
+  oracle's integer digit limit decides the count (case
+  `defer-age-digit-limit`).
 - A state whose last component pathlib's `with_suffix` refuses or treats
   differently across versions (empty, `.`, `..`, ending in a dot), a
   non-UTF-8 path or session id, an empty POSIX `HOME`.
@@ -95,9 +101,22 @@ Every deferral is decided before any effect.
 
 ## Declared divergences
 
-None in the compared shapes. The row's own pid files (each arm's sleeper
-has its own pid and start time) are checked unchanged after each arm and
-then taken out of the snapshot; every other byte of the home is compared.
+- `conductor-watch-notice-unwritten` (case
+  `stop-deprecated-name-stderr-closed`): under the deprecated name the
+  oracle prints its notice before anything else, so when stderr cannot be
+  written it dies in that print before it asks the watcher to stop, with an
+  exit status of its interpreter's choosing (1, or 120 from its shutdown
+  flush). The candidate writes nothing and exits 1. Both must leave the
+  home as setup left it: no stop request.
+- Not cased: under the deprecated name, a stop request that cannot be
+  written after the notice was printed. The oracle's uncaught `OSError`
+  exits 1 after a traceback; the candidate exits 1 and prints nothing more.
+
+The row's own pid files (each arm's sleeper has its own pid and start time)
+are checked unchanged after each arm and then taken out of the snapshot;
+every other byte of the home is compared. A pid given as text is read as
+`int()` reads it: C `isspace` is stripped, U+001C..U+001F are not, and such
+a record names no watcher (unit test `record_pids_read_as_int_does`).
 
 ## Hosted CI and goldens
 
