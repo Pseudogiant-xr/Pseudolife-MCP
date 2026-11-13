@@ -826,7 +826,7 @@
           "stdin": null,
           "exit": 1,
           "stdout": "",
-          "stderr": "This host runs a Rust daemon selected by checkout-mode update, which the installer does not rebuild. Update it with pseudolife-mcp update --checkout {HOME}\\repo, or switch it back with pseudolife-mcp update --engine python --checkout {HOME}\\repo and rerun the installer. Nothing was started.\n"
+          "stderr": "This host runs a Rust daemon selected by checkout-mode update, which the installer does not rebuild. Update it with pseudolife-mcp update --checkout {HOME}/repo, or switch it back with pseudolife-mcp update --engine python --checkout {HOME}/repo and rerun the installer. Nothing was started.\n"
         },
         {
           "argv": [
@@ -867,7 +867,8 @@
       ],
       "files_after": {
         ".pseudolife-mcp/update-engine/engine-choice.json": "{\"engine\": \"python\"}\n"
-      }
+      },
+      "paths": true
     },
     {
       "name": "volume-names-without-docker",
