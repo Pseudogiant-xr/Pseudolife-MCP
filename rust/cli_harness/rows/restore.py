@@ -545,6 +545,11 @@ def _case(case_id: str, argv: list[str], *, dump: str | None = "good", state: st
     return case
 
 
+def _null_console(case: Case) -> Case:
+    case.null_stdin_stdout = True
+    return case
+
+
 def _deferred(case_id: str, argv: list[str], **kwargs) -> Case:
     return _case(case_id, argv, rules=("restore-declared-deferral",), **kwargs)
 
@@ -626,6 +631,8 @@ def cases() -> list[Case]:
         # the refusal without --yes (stdin is a pipe in both arms)
         _case("no-yes", DUMP),
         _case("no-yes-every-option", DUMP + STATE + EVERY_OPTION, state="plain"),
+        # stdin and stdout the null device: a character device, never a console
+        _null_console(_case("no-yes-null-device", DUMP)),
         # the oracle answers before any effect; the candidate defers by design
         _deferred("defer-help-columns", ["--help"], dump=None, columns="100"),
         _deferred("defer-usage-columns", [], dump=None, columns="120"),
@@ -815,6 +822,9 @@ MUTANTS = [
     Mutant("restore-refusal-exit", "restore", FILE, "Some(ExitCode::from(2))\n}", "Some(ExitCode::from(1))\n}",
            ("no-yes",)),
     Mutant("restore-yes-ignored", "restore", FILE, "    if !args.yes {", "    if true {", ("valid-yes",)),
+    Mutant("restore-null-device-terminal", "restore", "shim/src/cli/connect/mod.rs",
+           "        && std::io::stdin().is_terminal()\n        && std::io::stdout().is_terminal()\n", "\n",
+           ("no-yes-null-device",), platforms=("windows",)),
     Mutant("restore-state-skipped", "restore", FILE, "if let Some(archive) = &args.state_archive {",
            "if let Some(archive) = None::<&std::path::PathBuf> {", ("state-symlink-escape",)),
     Mutant("restore-dump-after-state", "restore", FILE, "        Verdict::Refuse => return refuse(INCOMPLETE_DUMP),",

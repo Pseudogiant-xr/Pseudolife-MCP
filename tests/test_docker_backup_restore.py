@@ -611,6 +611,42 @@ def test_unattended_restore_needs_yes_before_docker(tmp_path, monkeypatch):
     assert restore_cli.main(["--backup-file", str(_input_dump(tmp_path))]) == 2
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows' CRT isatty() is true for the null device")
+def test_a_null_device_is_not_a_person_at_a_terminal(tmp_path, monkeypatch, capsys):
+    import os
+    from pseudolife_memory import restore_cli
+    with open(os.devnull, encoding="utf-8") as stdin, open(os.devnull, "w", encoding="utf-8") as stdout:
+        assert stdin.isatty() and stdout.isatty()  # what the old check read as a terminal
+        monkeypatch.setattr(sys, "stdin", stdin)
+        monkeypatch.setattr(sys, "stdout", stdout)
+        assert up.interactive() is False
+        monkeypatch.setattr(up, "ask", lambda question: pytest.fail("no prompt without a console"))
+        monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("no Docker call without confirmation"))
+        assert restore_cli.main(["--backup-file", str(_input_dump(tmp_path))]) == 2
+    assert capsys.readouterr().err.strip() == (
+        "restore failed: restore replaces the existing bank; rerun with --yes to confirm. Nothing was restored")
+
+
+def test_interactive_needs_both_streams_to_be_terminals(monkeypatch):
+    class Stream:
+        def __init__(self, tty):
+            self.tty = tty
+
+        def isatty(self):
+            return self.tty
+
+        def fileno(self):
+            raise ValueError("no descriptor")  # a console check must fail closed
+
+    for stdin, stdout in ((False, True), (True, False)):
+        monkeypatch.setattr(sys, "stdin", Stream(stdin))
+        monkeypatch.setattr(sys, "stdout", Stream(stdout))
+        assert up.interactive() is False
+    monkeypatch.setattr(sys, "stdin", Stream(True))
+    monkeypatch.setattr(sys, "stdout", Stream(True))
+    assert up.interactive() is (sys.platform != "win32")
+
+
 @pytest.mark.parametrize("name", ["../escape", "/absolute", "dir/../../escape"])
 def test_unsafe_state_refuses_before_stopping(docker_bank, tmp_path, name):
     bank, world = docker_bank

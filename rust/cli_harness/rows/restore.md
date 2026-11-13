@@ -60,7 +60,7 @@ is answered, before any Docker call, as the oracle answers it.
 | Paths are pathlib's spelling (`dump.sql.gz/` and `./dump.sql.gz` name the file, `''` is `.`) | `type=Path` |
 | The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, truncation, a CRC or length mismatch, a deflate error: each a refusal); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
 | The state archive: the gzip check, then members as CPython 3.11 `tarfile` reads them (`frombuf`, `nti` with Python `int(..., 8)`, both checksums, the ustar prefix, the V7 trailing-slash directory, GNU long names and links (`L`, `K`: each record's data up to its first NUL patches the header after it, a directory losing one trailing slash per record, and any header problem after a record a `ReadError`), a bad or short header after the first ending the archive quietly, a member's data present to the end of its last block, non-regular supported types skipping no data, unknown types skipping theirs), then every `validate_state` check: absolute, `..` or backslash names, devices and FIFOs, absolute or backslash link targets, escaping links through the final and the transient link graph, and a link loop ending the walk | `validate_state` |
-| The confirmation gate: on Windows a character device counts as a terminal (the CRT's `isatty`, so `NUL` does) | `update_cli.interactive` |
+| The confirmation gate: stdin and stdout must both be terminals, and on Windows consoles too (`GetConsoleMode`), so `NUL`, a character device the CRT's `isatty` accepts, is refused (`no-yes-null-device`) | `update_cli.interactive` |
 | A held update lock: `another pseudolife-mcp update is running (pid N); nothing was changed. Run this again when it has finished`, exit 2, the pid read from `update.lock.pid` (`unknown` unless digits), no Docker call; otherwise the lock file under `PSEUDOLIFE_MCP_DATA_DIR` or `<USERPROFILE or HOME>/.pseudolife-mcp` stays after a refusal and its pid file does not | `UpdateLock`, `os_lock.OsLock` |
 | Docker commands: `PSEUDOLIFE_DOCKER` or `docker`, stdin closed, the oracle's argv, order and timeouts; the text read is stdout only, with stderr added for a failed `inspect` or `psql`; a command that cannot start or times out reads as exit 1 | `run_cli`, `DockerBank.command`, `disk_space` |
 | `inspect`: a failure is `Docker inspect failed for the backup/restore; check the containers with docker logs <pg> and docker logs <daemon>, then retry`, exit 1; output that is not a JSON list whose first item is an object is `cannot inspect <name>; restore its Docker container configuration and retry`, exit 2 | `DockerBank.inspect` |
@@ -97,8 +97,8 @@ is answered, before any Docker call, as the oracle answers it.
   in a dot or space, reserved device names, a result that keeps the `\\?\`
   prefix); a `.git` probe whose error pathlib would raise; no
   `USERPROFILE` or `HOME`; a lock probe that fails.
-- Without `--yes` at a terminal (stdin and stdout both terminals, or on
-  Windows character devices): the oracle prompts.
+- Without `--yes` at a terminal (stdin and stdout both terminals, on
+  Windows both consoles): the oracle prompts.
 - Argparse shapes: abbreviations (`--back`), `--`, single-dash arguments
   other than `-h`, `-` and negative numbers (option clusters such as `-hx`,
   `-h=x`), non-Unicode argv, non-ASCII in a single-dash argument or a
@@ -170,8 +170,8 @@ non-test source: only `docker.rs` starts processes, only `mod.rs` writes
 
 ## Mutants
 
-64 source mutants, one per decision the row pins. The gates (27): exit code,
-`--yes`, the state check and its order after the dump check, argparse's error
+65 source mutants, one per decision the row pins. The gates (28): exit code,
+`--yes`, the null device read as no terminal (Windows), the state check and its order after the dump check, argparse's error
 order and negative numbers, the 80-column guard, the COPY pattern, lone `\r`,
 gzip padding, the CRC check and its refusal, the deflate error's refusal, tar
 header and data handling, the transient pass, FIFOs, loop handling, the ustar

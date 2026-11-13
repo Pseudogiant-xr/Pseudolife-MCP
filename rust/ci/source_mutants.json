@@ -338,6 +338,7 @@
     "restore-negative-as-option",
     "restore-no-transient-pass",
     "restore-non-ascii-read",
+    "restore-null-device-terminal",
     "restore-octal-prefix",
     "restore-padding-unchecked",
     "restore-pg-running-unchecked",
