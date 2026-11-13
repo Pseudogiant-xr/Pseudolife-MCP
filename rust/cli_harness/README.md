@@ -176,7 +176,10 @@ labelled `golden`), or `new`. Recording a whole row also lists the recorded
 cases the row no longer defines as `removed`; `--case` never removes
 anything. Without `--write` nothing is written, and the run exits 1 when
 anything would change. With `--write` only changed and new cases are
-replaced; unchanged and unselected cases keep their committed bytes.
+replaced; unchanged and unselected cases keep their committed entries (the
+file lists cases in the row's order, so a new case lands in its place).
+Replay the written golden once more with `--golden` before committing: the
+recorder compares each entry only with the single run it came from.
 
 A case to be written is refused, and nothing in its row is written, when:
 

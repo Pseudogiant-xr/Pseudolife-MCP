@@ -1321,7 +1321,7 @@ def _w1a(monkeypatch, tmp_path):
 def _w1a_record(w1a, binary, golden, raw, *, write, case=None, diffs=()):
     case = case or _w1a_case()
     rows = [{"case": case["name"], "diffs": list(diffs), "_candidate": (case, raw)}]
-    return w1a.record_from_candidate(None, "probe", golden, rows, [], None, False, binary, write)
+    return w1a.record_from_candidate(None, "probe", golden, rows, [], [], None, False, binary, write)
 
 
 def test_w1a_candidate_recording_writes_a_golden_replay_accepts(monkeypatch, tmp_path):
@@ -1361,7 +1361,8 @@ def test_w1a_candidate_recording_classes_changes_and_refuses_undeclared_deferral
 
 def test_record_candidate_flags_belong_to_golden_mode(monkeypatch, tmp_path):
     w1a, binary = _w1a(monkeypatch, tmp_path)
-    for argv in (["live", "--record-candidate"], ["golden", "--write"]):
+    for argv in (["live", "--record-candidate"], ["golden", "--write"],
+                 ["golden", "--record-candidate", "--record"]):
         monkeypatch.setattr(sys, "argv", ["run.py", *argv, "--rust-bin", str(binary)])
         with pytest.raises(SystemExit) as refused:
             w1a.main()
@@ -1377,3 +1378,39 @@ def test_golden_replay_treats_extension_versions_as_fixture_metadata(harness):
     moved = {"rows": {}, "catalog": {"extensions": [["vector", "0.8.6", "elsewhere"]]}}
     assert harness.state_and_events_diff(harness.fixture_extension_versions(recorded),
                                          harness.fixture_extension_versions(moved))
+
+
+def test_w2e_candidate_recording_refuses_a_run_whose_boot_probes_did_not_land(
+        harness, monkeypatch, tmp_path):
+    path, _, _ = _w2e_rig(harness, monkeypatch, tmp_path, [_answer(1)])
+    monkeypatch.setattr(harness, "settle_boot_probes",
+                        lambda dsn, boots: ["warmup: 1 of 2 boots' startup probe events landed"])
+    r = _golden_run(harness, tmp_path, candidate={"write": True})
+    assert "fails a check replay makes regardless" in r["refused"] and not path.exists()
+
+
+def test_w1a_candidate_recording_classes_an_added_case_and_refuses_independent_failures(
+        monkeypatch, tmp_path):
+    w1a, binary = _w1a(monkeypatch, tmp_path)
+    one = {"responses": [], "db_state": None}  # the golden predates the case
+    rows = [{"case": "thing", "diffs": [], "_candidate": (_w1a_case(), _w1a_raw())}]
+    out = w1a.record_from_candidate(None, "probe", one, rows, [], [], None, False, binary, True)
+    assert out == {"recorded": "changed", "written": True}
+    rows = [{"case": "thing", "diffs": [], "_candidate": (_w1a_case(), _w1a_raw())}]
+    bad = w1a.record_from_candidate(None, "probe", one, rows, ["rust changed bank: x"],
+                                    ["rust changed bank: x"], None, False, binary, True)
+    assert "fails a check replay makes regardless" in bad["refused"]
+
+
+def test_w1a_candidate_recording_keeps_the_fixed_session_end_contract(monkeypatch, tmp_path):
+    w1a, binary = _w1a(monkeypatch, tmp_path)
+    oracle, want = w1a.session_end_contract()
+    case = {**_w1a_case("/api/hooks/session-end"), "method": "POST",
+            "session_end_invalid_json": True}
+    rows = [{"case": "thing", "diffs": [], "_candidate": (case, want)}]
+    out = w1a.record_from_candidate(None, "probe", None, rows, [], [], None, False, binary, True)
+    assert out == {"recorded": "new", "written": True}
+    golden = w1a.load_golden("probe")
+    assert golden["responses"][0]["status"] == 200  # the oracle side of the contract
+    assert w1a.compare_case(case, golden["responses"][0], w1a.golden_scrub(want),
+                            golden=True)["diffs"] == []

@@ -452,17 +452,20 @@ CANDIDATE_PROVENANCE = "recorded_from_candidate"
 # What every native deferral says (rust/shim/src/cli.rs); a recording that
 # snapshots it would assert "not ported" as the expected behaviour.
 DEFERRAL_MARK = b"is deferred in this candidate"
+# Paths whose change makes the binary differ from the commit: Rust sources
+# and the build inputs, not the harness, goldens or docs under rust/.
+RUST_SOURCES = (":(glob)rust/**/*.rs", ":(glob)rust/**/Cargo.toml", "rust/Cargo.lock",
+                ":(glob)rust/**/build.rs", "rust/rust-toolchain.toml")
 _OTHER_OS = {"windows": ("linux", "Linux (WSL or the Linux dev box)"),
              "linux": ("windows", "Windows")}
 
 
 def checkout_provenance(candidate: Path, repo: Path = REPO) -> dict:
     """Where a candidate recording comes from: this checkout's commit, whether
-    its Rust sources differ from that commit (goldens excluded, since the
-    recording itself rewrites them), the platform and the binary's digest."""
+    its Rust sources and build inputs differ from that commit
+    (``RUST_SOURCES``), the platform and the binary's digest."""
     head = _git(repo, "rev-parse", "--verify", "HEAD^{commit}")
-    status = _git(repo, "status", "--porcelain", "--", "rust",
-                  ":(exclude)rust/cli_harness/goldens", ":(exclude)rust/daemon/harness/goldens")
+    status = _git(repo, "status", "--porcelain", "--", *RUST_SOURCES)
     if head.returncode != 0 or status.returncode != 0:
         tree = "unknown"
     else:
@@ -612,8 +615,9 @@ def record_candidate(row: str, loaded: list[core.Case], cases: list[core.Case],
     write_golden(path, golden, rows.fixture_login_secrets(row))
     report["written"] = True
     _print(f"  wrote {path} ({len(updates)} case(s) from the candidate at "
-           f"{(stamp['commit'] or 'an unknown commit')[:12]}, Rust tree {stamp['rust_tree']})",
-           flush=True)
+           f"{(stamp['commit'] or 'an unknown commit')[:12]}, Rust tree {stamp['rust_tree']}); "
+           f"replay it once more with --golden before committing, since the check above "
+           f"compared each entry with the single run it came from", flush=True)
     return report
 
 

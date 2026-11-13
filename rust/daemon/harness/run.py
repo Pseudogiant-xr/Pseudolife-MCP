@@ -2017,6 +2017,16 @@ def settle_before_cases(scn: Scenario, ports: list[int]) -> None:
         wait_settled(ports, token=scn.env.get("PSEUDOLIFE_MCP_TOKEN"), check_db=not scn.settle_with_search)
 
 
+def session_end_contract() -> tuple[dict, dict]:
+    """(oracle, candidate) answers the invalid-SessionEnd case requires."""
+    headers = {"content-type": "application/json; charset=utf-8",
+               "cache-control": "no-store", "x-content-type-options": "nosniff"}
+    oracle = {"status": 200, "headers": headers, "json": {"ok": True}, "raw": '{"ok": true}'}
+    want = {"status": 400, "headers": dict(headers), "json": {"error": "invalid_json"},
+            "raw": '{"error": "invalid_json"}'}
+    return oracle, want
+
+
 def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) -> dict:
     declared: list[str] = []
     # A replayed early refusal (call) is evidence, never part of the comparison.
@@ -2048,11 +2058,7 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
                     row["diffs"].append(f"{side}: snapshot_at is outside its captured request window")
     if c.get("session_end_invalid_json"):
         row["declared"] = "invalid SessionEnd: Python succeeds without closing; Rust refuses"
-        headers = {"content-type": "application/json; charset=utf-8",
-                   "cache-control": "no-store", "x-content-type-options": "nosniff"}
-        oracle = {"status": 200, "headers": headers, "json": {"ok": True}, "raw": '{"ok": true}'}
-        want = {"status": 400, "headers": headers, "json": {"error": "invalid_json"},
-                "raw": '{"error": "invalid_json"}'}
+        oracle, want = session_end_contract()
         if golden:
             oracle, want = golden_scrub(oracle), golden_scrub(want)
         row["diffs"] = diff_values(oracle, py) + diff_values(want, rs)
@@ -2192,8 +2198,16 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         if scn.name in {"static-build", "static-paths", "static-root-link"}:
             golden_name += "-windows" if os.name == "nt" else "-linux"
         # A candidate recording may create a golden the scenario never had.
-        golden = (load_golden(golden_name) if mode == "golden" and (
-            candidate is None or (GOLDENS / f"{golden_name}.json").is_file()) else None)
+        golden = None
+        if mode == "golden" and candidate is None:
+            golden = load_golden(golden_name)
+        elif mode == "golden" and (GOLDENS / f"{golden_name}.json").is_file():
+            try:
+                golden = load_golden(golden_name)
+            except ValueError:
+                # A host adjustment zips cases with responses strictly; a
+                # changed case list is the recording's to report, not a crash.
+                golden = json.loads((GOLDENS / f"{golden_name}.json").read_text(encoding="utf-8"))
         recorded = golden["responses"] if golden else None
         cases = scn.timeline(procs, holders) or scn.cases()
         for i, c in enumerate(cases):
@@ -2202,14 +2216,14 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
                 py_r, rs_r = c["_answers"]
                 rs_raw = rs_r
                 if py_r is None and mode == "golden":
-                    py_r, rs_r = (recorded[i] if recorded else None), golden_scrub(rs_r)
+                    py_r, rs_r = (recorded[i] if recorded and i < len(recorded) else None), golden_scrub(rs_r)
             else:
                 # The empty root redirect is chunked by uvicorn, fixed-length
                 # by hyper. Static entities use fixed lengths in both arms.
                 compare_length = isinstance(scn, StaticBuild) and c["path"] != "/"
                 py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"],
                             compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
-                            chunked=c.get("chunked", False), headers_only=c.get("headers_only", False)) if "python" in procs else (recorded[i] if recorded else None)
+                            chunked=c.get("chunked", False), headers_only=c.get("headers_only", False)) if "python" in procs else (recorded[i] if recorded and i < len(recorded) else None)
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"],
                             compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
                             chunked=c.get("chunked", False), headers_only=c.get("headers_only", False))
@@ -2221,10 +2235,13 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
                         py_r, rs_r = (seed_clock_scrub(py_r) if py_r is not None else None,
                                       seed_clock_scrub(rs_r))
             if py_r is None and mode == "golden":
-                # A candidate recording's new scenario: nothing to compare yet.
+                # No recorded response: a new case for a candidate recording
+                # (classed by its case count), a difference for a replay.
+                missing = [] if candidate is not None else [
+                    "no recorded response for this case: the golden predates it"]
                 rows.append({"case": c["name"], "method": c["method"], "path": c["path"][:120],
-                             "python_status": None, "rust_status": rs_r["status"], "diffs": [],
-                             "declared": c["declared"]})
+                             "python_status": None, "rust_status": rs_r["status"],
+                             "diffs": missing, "declared": c["declared"]})
             else:
                 rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
             if candidate is not None:
@@ -2278,6 +2295,9 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         db_diffs = [f"{side} changed bank: {d}" for side in sorted(states)
                     for d in dbstate.diff(prepared, states[side])]
     db_diffs += unchanged_diffs
+    # Checks a replay makes whatever the golden says; a candidate recording
+    # never snapshots a run that fails them.
+    independent_db = list(db_diffs) if mode == "golden" else []
     # A template seeded at record time holds run-specific values (pairing
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode
     # checks bank state only for scenarios whose bank starts empty.
@@ -2287,7 +2307,7 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         db_diffs += dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
     result = {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared_db_writes": scrubbed}
     if candidate is not None:
-        result.update(record_from_candidate(scn, golden_name, golden, rows, db_diffs,
+        result.update(record_from_candidate(scn, golden_name, golden, rows, db_diffs, independent_db,
                                             states.get("rust") if checks_db else None,
                                             seeded_template, binary, candidate.get("write", False)))
     if record:
@@ -2550,8 +2570,8 @@ def save_golden(name: str, rows: list[dict], state: dict | None) -> None:
 
 
 def record_from_candidate(scn: "Scenario", name: str, golden: dict | None, rows: list[dict],
-                          db_diffs: list[str], state: dict | None, seeded_template: bool,
-                          binary: Path, write: bool) -> dict:
+                          db_diffs: list[str], independent_db: list[str], state: dict | None,
+                          seeded_template: bool, binary: Path, write: bool) -> dict:
     """The candidate golden a golden-mode run just observed, classed against
     the committed one (``candidate_record``) and written only when asked.
 
@@ -2564,16 +2584,28 @@ def record_from_candidate(scn: "Scenario", name: str, golden: dict | None, rows:
     captured = [row.pop("_candidate") for row in rows if "_candidate" in row]
     diffs = [f"{row['case']}: {d}" for row in rows for d in row["diffs"]]
     diffs += [f"db {d}" for d in db_diffs]
+    if golden is not None and len(golden.get("responses", [])) != len(captured):
+        diffs.append(f"the scenario has {len(captured)} cases; its golden recorded "
+                     f"{len(golden.get('responses', []))}")
     kind = candidate_record.classify(golden is not None, diffs)
+    recorded = (golden or {}).get("responses", [])
     new = golden_scrub({
         "normalizers": {"db_nondeterministic": [list(k) + [v] for k, v in DB_NONDETERMINISTIC.items()],
                         "db_declared": [list(r) for r in DB_DECLARED],
                         "health": "normalize_health in run.py",
                         "golden": "golden_scrub in run.py"},
-        "responses": [normalize_response(raw, c["path"], []) for c, raw in captured],
+        # A case whose comparator holds its own fixed oracle contract keeps
+        # that contract as its expected side, not the candidate's answer.
+        "responses": [(recorded[i] if i < len(recorded) else golden_scrub(session_end_contract()[0]))
+                      if c.get("session_end_invalid_json")
+                      else normalize_response(raw, c["path"], [])
+                      for i, (c, raw) in enumerate(captured)],
         "db_state": state if state is not None else (golden or {}).get("db_state")})
     new[candidate_record.PROVENANCE_KEY] = candidate_record.provenance(binary)
     out = {"recorded": kind, "written": False}
+    if independent_db:
+        out["refused"] = f"the run fails a check replay makes regardless: {'; '.join(independent_db[:3])}"
+        return out
     for c, raw in captured:
         mark = None if c["declared"] else candidate_record.deferral(raw)
         if mark:
@@ -2643,6 +2675,8 @@ def main() -> int:
         ap.error("--record-candidate belongs to golden mode")
     if args.write and not args.record_candidate:
         ap.error("--write needs --record-candidate")
+    if args.record_candidate and args.record:
+        ap.error("--record records the oracle; --record-candidate the candidate: choose one")
     if args.record_candidate and os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"):
         ap.error("never record a golden from a mutant: unset PSEUDOLIFE_DAEMON_MUTANT")
     if args.golden_dir:

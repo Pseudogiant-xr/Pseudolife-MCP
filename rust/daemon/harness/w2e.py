@@ -6861,6 +6861,9 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str],
         for i, op in enumerate(ops):
             rec = recs[i] if recs and i < len(recs) else None
             row = {"step": i, "op": op, "diffs": [] if i else list(boot_diffs)}
+            # Checks replay makes whatever the golden says (the boots' probes,
+            # the stub table): a candidate recording refuses a run failing them.
+            row["_independent"] = list(row["diffs"])
             if op["op"] == "console_dream_concurrent":
                 rs = w2e_console_dream.concurrent(d.port, dsn, client, stubs["rust"],
                                                   sys.modules[__name__])
@@ -6874,7 +6877,9 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str],
                 # and report what the table left unanswered.
                 sent = stubs["rust"].drain()
                 row["extractor"] = {"rust": extractor_summary(sent)}
-                row["diffs"] += extractor_unanswered("rust", sent)
+                unanswered = extractor_unanswered("rust", sent)
+                row["diffs"] += unanswered
+                row["_independent"] += unanswered
             raw = dbstate.dump(dsn)
             sr, nr, er = normalize_state(raw, before, ts_tokens(raw) if console_dream else None)
             if rs is not None and w2e_documents.is_search(op):
@@ -6905,7 +6910,10 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str],
         d.stop()
         close_stubs(stubs)
     result = {"scenario": name, "steps": steps, "stats": stats}
-    if candidate is not None:
+    if candidate is None:
+        for s in steps:
+            s.pop("_independent", None)
+    else:
         result.update(record_from_candidate(name, path, golden, steps, tol, binary,
                                             candidate.get("write", False), ops_changed))
     return result
@@ -6929,7 +6937,10 @@ def record_from_candidate(name: str, path: Path, golden: dict | None, steps: lis
            "steps": [{"op": s["op"], "response": s.get("rust"), "state": s["_state"],
                       "numeric_new": pack_numeric(s["_numeric"], seen)} for s in steps]}
     refused = None
-    for s in steps:
+    independent = [f"step {s['step']}: {d}" for s in steps for d in s.get("_independent", [])]
+    if independent:
+        refused = f"the run fails a check replay makes regardless: {'; '.join(independent[:3])}"
+    for s in steps if refused is None else []:
         mark = candidate_record.deferral(s.get("rust"))
         if mark:
             refused = f"step {s['step']} answered a deferral ({mark})"
@@ -6953,6 +6964,7 @@ def record_from_candidate(name: str, path: Path, golden: dict | None, steps: lis
     for s in steps:
         s.pop("_state", None)
         s.pop("_numeric", None)
+        s.pop("_independent", None)
     out = {"recorded": kind, "written": False, "differences": len(diffs)}
     if ops_changed is not None:
         out["ops_changed"] = diffs[0]
@@ -7067,8 +7079,11 @@ def main() -> int:
         if args.record_candidate:
             if r.get("ops_changed"):
                 print(f"DIFF [{n}] {r['ops_changed']}")
-            print(candidate_record.summary_line(n, r.get("recorded", "skipped"), args.write,
-                                                r.get("refused") or r.get("skipped")), flush=True)
+            if r.get("skipped"):
+                print(f"  skipped {n}: {r['skipped']}", flush=True)
+            else:
+                print(candidate_record.summary_line(n, r.get("recorded", "error"), args.write,
+                                                    r.get("refused")), flush=True)
     steps = sum(len(r["steps"]) for r in results)
     diff_steps = sum(1 for r in results for s in r["steps"] if s["diffs"])
     stats = {}

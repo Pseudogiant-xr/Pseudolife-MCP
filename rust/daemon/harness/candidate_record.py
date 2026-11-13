@@ -26,6 +26,10 @@ PROVENANCE_KEY = "recorded_from_candidate"
 # (``http.rs``) and the CLI's deferral line.
 DEFERRAL_MARKS = ('"not_implemented"', "is deferred in this candidate")
 PLATFORM = "windows" if os.name == "nt" else "linux"
+# Paths whose change makes the binary differ from the commit: Rust sources
+# and the build inputs, not the harness, goldens or docs under rust/.
+RUST_SOURCES = (":(glob)rust/**/*.rs", ":(glob)rust/**/Cargo.toml", "rust/Cargo.lock",
+                ":(glob)rust/**/build.rs", "rust/rust-toolchain.toml")
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -33,12 +37,10 @@ def _git(*args: str) -> subprocess.CompletedProcess:
 
 
 def provenance(binary: Path) -> dict:
-    """This checkout's commit, whether its Rust sources differ from it
-    (goldens excluded: the recording rewrites them), the platform and the
-    binary's digest."""
+    """This checkout's commit, whether its Rust sources and build inputs
+    differ from it (``RUST_SOURCES``), the platform and the binary's digest."""
     head = _git("rev-parse", "--verify", "HEAD^{commit}")
-    status = _git("status", "--porcelain", "--", "rust",
-                  ":(exclude)rust/cli_harness/goldens", ":(exclude)rust/daemon/harness/goldens")
+    status = _git("status", "--porcelain", "--", *RUST_SOURCES)
     if head.returncode != 0 or status.returncode != 0:
         tree = "unknown"
     else:
