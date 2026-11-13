@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import shlex
 import sys
@@ -385,6 +386,17 @@ def cases() -> list[Case]:
     # status: no tailscale CLI.
     add(case("status-not-installed", ["status"]))
     add(case("status-not-installed-json", ["status", "--json"]))
+    # The lookup never searches the current directory or a relative PATH
+    # entry: a decoy there (exit 99 if run) is never found.
+    decoy = ("tailscale.cmd", b"@exit /b 99\r\n") if core.WINDOWS else (
+        "tailscale", b"#!/bin/sh\nexit 99\n")
+    add(case("status-cwd-not-searched", ["status"], extra={f"cwd/{decoy[0]}": decoy[1]}))
+    add(case("status-relative-path-skipped", ["status", "--json"], scenario_=s(),
+             env={"PATH": os.pathsep.join([".", "bin", "", TS_PATH])},
+             extra={f"cwd/{decoy[0]}": decoy[1], f"cwd/bin/{decoy[0]}": decoy[1]}))
+    add(case("off-relative-path-skipped", ["off"], scenario_=s(serve=OURS),
+             env={"PATH": os.pathsep.join(["", ".", TS_PATH])},
+             extra={f"cwd/{decoy[0]}": decoy[1]}))
     # status: the backend.
     add(case("status-not-running", ["status"], scenario_=s(status={
         "code": 1, "err": "\nfailed to connect to local tailscaled; it doesn't appear to be "
@@ -567,6 +579,8 @@ def cases() -> list[Case]:
 MUTANTS = [
     Mutant("expose-funnel-ignored", "expose", TS_FILE,
            "if funnelled(Some(config), port) ||", "if false ||", ("status-funnel",)),
+    Mutant("expose-relative-path-searched", "expose", TS_FILE,
+           "if known == Some(false) {", "if known.is_none() {", ("status-relative-path-skipped",)),
     Mutant("expose-yes-skips-tty-check", "expose", FILE,
            "if !args.yes {", "if false {", ("off-no-terminal",)),
     Mutant("expose-first-line-unstripped", "expose", TS_FILE,

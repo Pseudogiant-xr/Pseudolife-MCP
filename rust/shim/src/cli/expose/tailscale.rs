@@ -1,5 +1,6 @@
 //! `expose_cli`'s seams and readers over the `tailscale` CLI: the lookup
-//! (`find_tailscale`: `shutil.which`, then the default install locations),
+//! (`find_tailscale`: `program_lookup.find_program`, absolute `PATH`
+//! directories only, then the default install locations),
 //! the runner (`run_tailscale`: `subprocess.run(capture_output=True,
 //! text=True, stdin=DEVNULL, timeout=30)`), and what the oracle reads from
 //! it (`_running`, `_serve_config`, `_tailnet_ipv4`, `_port_state`).
@@ -38,13 +39,13 @@ fn join(dir: &str, name: &str) -> String {
     }
 }
 
-/// `_access_check(path, os.X_OK)`: exists (following links), executable for
-/// this user (POSIX), and not a directory.
+/// `program_lookup.is_program(path)`: a regular file (following links),
+/// executable for this user outside Windows.
 fn usable(path: &str) -> bool {
     let Ok(meta) = std::fs::metadata(path) else {
         return false;
     };
-    if meta.is_dir() {
+    if !meta.is_file() {
         return false;
     }
     #[cfg(unix)]
@@ -54,46 +55,64 @@ fn usable(path: &str) -> bool {
     true
 }
 
-/// CPython 3.11's `_WIN_DEFAULT_PATHEXT`.
-const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC";
+/// `program_lookup.DEFAULT_PATHEXT`.
+const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+/// `program_lookup.WINDOWS_LAUNCHABLE`: what `CreateProcess` starts.
+const LAUNCHABLE: [&str; 4] = [".com", ".exe", ".bat", ".cmd"];
 
-/// `shutil.which("tailscale")` (CPython 3.11): `Err` defers (an unset or
-/// non-UTF-8 `PATH`, an entry this port does not join as `ntpath` does).
-fn which(path: Option<OsString>, pathext: Option<OsString>) -> Result<Option<String>, ()> {
-    let path = path.ok_or(())?.into_string().map_err(|_| ())?;
-    if path.is_empty() {
-        return Ok(None);
+/// `Path(entry).is_absolute()`: `Some(answer)`, or `None` for a spelling
+/// this port does not classify as pathlib does (Windows UNC and device
+/// paths, which start with two separators).
+fn absolute(entry: &str) -> Option<bool> {
+    if !cfg!(windows) {
+        return Some(entry.starts_with('/'));
     }
+    let sep = |b: u8| b == b'\\' || b == b'/';
+    let bytes = entry.as_bytes();
+    if bytes.len() >= 2 && sep(bytes[0]) && sep(bytes[1]) {
+        return None;
+    }
+    // A drive is an ASCII letter and a colon; it is absolute with a root.
+    Some(bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && sep(bytes[2]))
+}
+
+/// `program_lookup.find_program("tailscale")`: only absolute `PATH`
+/// directories, never the current directory. `Err` defers: a `PATH` or
+/// `PATHEXT` that is not UTF-8, or a program found under an entry
+/// [`absolute`] cannot classify.
+fn which(path: Option<OsString>, pathext: Option<OsString>) -> Result<Option<String>, ()> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let path = path.into_string().map_err(|_| ())?;
     let separator = if cfg!(windows) { ';' } else { ':' };
-    let mut dirs: Vec<&str> = path.split(separator).collect();
-    let mut names = vec!["tailscale".to_owned()];
-    if cfg!(windows) {
-        // The current directory comes first on Windows.
-        if !dirs.contains(&".") {
-            dirs.insert(0, ".");
-        }
+    let names: Vec<String> = if cfg!(windows) {
         let pathext = pathext
             .map(|value| value.into_string().map_err(|_| ()))
             .transpose()?
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| DEFAULT_PATHEXT.to_owned());
-        names = pathext
+        pathext
             .split(';')
-            .filter(|ext| !ext.is_empty())
+            .filter(|ext| LAUNCHABLE.contains(&ext.to_lowercase().as_str()))
             .map(|ext| format!("tailscale{ext}"))
-            .collect();
-    }
-    for dir in dirs {
-        // An empty entry yields a bare name, which the oracle's spawn then
-        // searches for again; a bare drive joins without a separator.
-        let bare_drive = cfg!(windows) && dir.len() == 2 && dir.as_bytes()[1] == b':';
+            .collect()
+    } else {
+        vec!["tailscale".to_owned()]
+    };
+    for entry in path.split(separator) {
+        let dir = pyjson::py_strip(entry).trim_matches('"');
+        if dir.is_empty() {
+            continue;
+        }
+        let known = absolute(dir);
+        if known == Some(false) {
+            continue;
+        }
         for name in &names {
             let candidate = join(dir, name);
             if usable(&candidate) {
-                if dir.is_empty() || bare_drive {
-                    return Err(());
-                }
-                return Ok(Some(candidate));
+                return known.map(|_| Some(candidate)).ok_or(());
             }
         }
     }
@@ -117,18 +136,30 @@ fn program_files_exe(base: &str) -> Result<String, ()> {
     Ok(join(base, "Tailscale\\tailscale.exe"))
 }
 
+/// `default_locations()`'s Windows base: the first of `ProgramW6432` and
+/// `ProgramFiles` that is set and absolute (a relative one would resolve
+/// against the current directory), else `C:\Program Files`. `Err` defers:
+/// a value that is not UTF-8, or one [`absolute`] cannot classify.
+fn program_files_base(values: [Option<OsString>; 2]) -> Result<String, ()> {
+    for value in values.into_iter().flatten() {
+        let value = value.into_string().map_err(|_| ())?;
+        if !value.is_empty() && absolute(&value).ok_or(())? {
+            return Ok(value);
+        }
+    }
+    Ok(r"C:\Program Files".to_owned())
+}
+
 /// `find_tailscale()`: `Ok(None)` when it is nowhere, `Err` defers.
 pub(super) fn find() -> Result<Option<String>, ()> {
     if let Some(found) = which(std::env::var_os("PATH"), std::env::var_os("PATHEXT"))? {
         return Ok(Some(found));
     }
     let candidate = if cfg!(windows) {
-        let var = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
-        let base = match var("ProgramW6432").or_else(|| var("ProgramFiles")) {
-            Some(value) => value.into_string().map_err(|_| ())?,
-            None => r"C:\Program Files".to_owned(),
-        };
-        program_files_exe(&base)?
+        program_files_exe(&program_files_base([
+            std::env::var_os("ProgramW6432"),
+            std::env::var_os("ProgramFiles"),
+        ])?)?
     } else if cfg!(target_os = "macos") {
         "/Applications/Tailscale.app/Contents/MacOS/Tailscale".to_owned()
     } else {
@@ -739,9 +770,97 @@ mod tests {
             assert_eq!(join("/x", "t"), "/x/t");
             assert_eq!(join("/x/", "t"), "/x/t");
         }
-        // An empty PATH finds nothing without touching the disk.
+        // An empty or unset PATH finds nothing without touching the disk.
         assert_eq!(which(Some(OsString::new()), None), Ok(None));
-        assert_eq!(which(None, None), Err(()));
+        assert_eq!(which(None, None), Ok(None));
+    }
+
+    /// A directory of its own under the system temporary directory.
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        let dir = std::env::temp_dir().join(format!(
+            "expose-lookup-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A stand-in program file (never run: the lookup only finds it).
+    fn plant(dir: &std::path::Path) -> String {
+        let path = dir.join(if cfg!(windows) {
+            "tailscale.cmd"
+        } else {
+            "tailscale"
+        });
+        std::fs::write(&path, "exit 99\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path.to_str().unwrap().to_owned()
+    }
+
+    fn path_of(entries: &[&str]) -> Option<OsString> {
+        Some(OsString::from(entries.join(if cfg!(windows) {
+            ";"
+        } else {
+            ":"
+        })))
+    }
+
+    #[test]
+    fn relative_and_empty_path_entries_are_never_searched() {
+        let dir = scratch("relative");
+        let real = dir.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let found = plant(&real);
+        let real = real.to_str().unwrap();
+        let pathext = Some(OsString::from(".EXE;.CMD"));
+        // Relative entries name a directory under the test's current one,
+        // which holds no stand-in: skipping them is what is checked.
+        for entry in ["", ".", "bin", "\"\"", "  "] {
+            assert_eq!(
+                which(path_of(&[entry]), pathext.clone()),
+                Ok(None),
+                "{entry:?}"
+            );
+            let got = which(path_of(&[entry, real]), pathext.clone())
+                .unwrap()
+                .unwrap();
+            assert!(got.eq_ignore_ascii_case(&found), "{entry:?}: {got}");
+        }
+        if cfg!(windows) {
+            for entry in ["C:bin", r"\bin", "/bin"] {
+                assert_eq!(absolute(entry), Some(false), "{entry}");
+            }
+            assert_eq!(absolute("C:/x"), Some(true));
+            // A relative Program Files base is passed over.
+            let base = |a: &str, b: &str| program_files_base([Some(a.into()), Some(b.into())]);
+            assert_eq!(base("Program Files", r"D:\pf"), Ok(r"D:\pf".into()));
+            assert_eq!(base("", "C:pf"), Ok(r"C:\Program Files".into()));
+            assert_eq!(base(r"E:\pf64", r"D:\pf"), Ok(r"E:\pf64".into()));
+            assert_eq!(base(r"\\server\pf", r"D:\pf"), Err(()));
+            assert_eq!(absolute(r"\\server\share"), None);
+            assert_eq!(absolute("//server/share"), None);
+            // Quotes and space around an entry are removed; the extension
+            // is spelled as PATHEXT spells it.
+            let quoted = format!(" \"{real}\" ");
+            assert_eq!(
+                which(path_of(&[&quoted]), pathext.clone()),
+                Ok(Some(format!(r"{real}\tailscale.CMD")))
+            );
+            // Only what CreateProcess starts.
+            std::fs::write(dir.join("real").join("tailscale.js"), "").unwrap();
+            assert_eq!(which(path_of(&[real]), Some(".JS".into())), Ok(None));
+        } else {
+            assert_eq!(absolute("bin"), Some(false));
+            assert_eq!(absolute("/bin"), Some(true));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

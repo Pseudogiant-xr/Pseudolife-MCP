@@ -696,3 +696,71 @@ def test_the_cli_dispatches_expose(monkeypatch, tailscale, capsys):
         cli.main()
     assert exit_info.value.code == 0
     assert json.loads(capsys.readouterr().out)["action"] == "status"
+
+
+# -- the lookup: never the current directory --------------------------------------
+
+def _plant(directory: Path, stem: str = "tailscale") -> Path:
+    """A stand-in program file (never run: these tests only look it up)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    planted = directory / (f"{stem}.cmd" if os.name == "nt" else stem)
+    planted.write_text("exit 99\n", encoding="utf-8")
+    planted.chmod(0o755)
+    return planted
+
+
+@pytest.fixture
+def lookup(tmp_path, monkeypatch):
+    """Nothing at the default install location; the current directory is a
+    work directory inside the test's own temporary directory."""
+    monkeypatch.setattr(expose_cli, "default_locations", lambda: [tmp_path / "none" / "tailscale"])
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return work
+
+
+def test_a_tailscale_in_the_current_directory_is_never_found(tmp_path, monkeypatch, lookup):
+    _plant(lookup)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    assert expose_cli.find_tailscale() is None
+
+
+@pytest.mark.parametrize("entry", ["", ".", "bin", os.path.join(".", "bin")])
+def test_a_relative_or_empty_path_entry_is_skipped(tmp_path, monkeypatch, lookup, entry):
+    _plant(lookup)
+    _plant(lookup / "bin")
+    monkeypatch.setenv("PATH", entry)
+    assert expose_cli.find_tailscale() is None
+    real = tmp_path / "real"
+    found = _plant(real)
+    monkeypatch.setenv("PATH", os.pathsep.join([entry, str(real)]))
+    assert os.path.normcase(expose_cli.find_tailscale()) == os.path.normcase(str(found))
+
+
+def test_an_absolute_path_entry_is_found_as_pathext_spells_it(tmp_path, monkeypatch, lookup):
+    real = tmp_path / "real"
+    found = _plant(real)
+    monkeypatch.setenv("PATH", f' "{real}" ' if os.name == "nt" else str(real))
+    if os.name == "nt":
+        monkeypatch.setenv("PATHEXT", ".EXE;.CMD")
+        assert expose_cli.find_tailscale() == os.path.join(str(real), "tailscale.CMD")
+        # Only what CreateProcess starts: a PATHEXT script type is not a program.
+        monkeypatch.setenv("PATHEXT", ".JS;.VBS")
+        (real / "tailscale.js").write_text("", encoding="utf-8")
+        assert expose_cli.find_tailscale() is None
+    else:
+        assert expose_cli.find_tailscale() == str(found)
+        found.chmod(0o644)
+        assert expose_cli.find_tailscale() is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows default install location")
+def test_a_relative_program_files_base_is_never_used(monkeypatch, tmp_path):
+    monkeypatch.setenv("ProgramW6432", "Program Files")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "pf"))
+    assert expose_cli.default_locations() == [tmp_path / "pf" / "Tailscale" / "tailscale.exe"]
+    monkeypatch.setenv("ProgramFiles", "C:relative")
+    assert expose_cli.default_locations() == [Path(r"C:\Program Files") / "Tailscale" / "tailscale.exe"]

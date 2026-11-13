@@ -9,8 +9,8 @@ Runs on the daemon host and drives the ``tailscale`` CLI. ``tailscale``:
 1. ``GET http://127.0.0.1:<port>/health`` must answer ``status: ok`` and
    ``"auth": true``: an unauthenticated bank is never exposed, because a
    tunnel to loopback looks local to the daemon and bypasses its bind guard.
-2. The ``tailscale`` CLI is found (PATH, then the Windows and macOS default
-   install locations) and ``tailscale status --json`` must report
+2. The ``tailscale`` CLI is found (an absolute PATH directory, never the
+   current directory, then the Windows and macOS default install locations) and ``tailscale status --json`` must report
    ``BackendState: Running``.
 3. ``tailscale serve status --json`` is read. A TCP forward on the port to
    ``127.0.0.1:<port>`` is "already exposed" (exit 0, nothing run); any
@@ -45,11 +45,12 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+from pseudolife_memory.program_lookup import find_program
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -85,8 +86,9 @@ def default_locations() -> list[Path]:
     On Windows the 64-bit Program Files (``ProgramW6432``) first: under a
     32-bit Python, ``ProgramFiles`` names the x86 folder instead."""
     if os.name == "nt":
-        base = (os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles")
-                or r"C:\Program Files")
+        # A relative base would resolve against the current directory.
+        bases = [os.environ.get("ProgramW6432"), os.environ.get("ProgramFiles")]
+        base = next((b for b in bases if b and Path(b).is_absolute()), r"C:\Program Files")
         return [Path(base) / "Tailscale" / "tailscale.exe"]
     if platform() == "darwin":
         return [Path("/Applications/Tailscale.app/Contents/MacOS/Tailscale")]
@@ -147,7 +149,9 @@ def probe_health(url: str, timeout: float) -> dict | None:
 
 
 def find_tailscale() -> str | None:
-    found = shutil.which("tailscale")
+    """An absolute PATH directory's ``tailscale``, never the current
+    directory's (``program_lookup``), then the default install location."""
+    found = find_program("tailscale")
     if found:
         return found
     for path in default_locations():

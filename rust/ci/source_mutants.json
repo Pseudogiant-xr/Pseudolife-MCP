@@ -130,6 +130,7 @@
     "expose-funnel-ignored",
     "expose-pathext-lowercased",
     "expose-port-range-off-by-one",
+    "expose-relative-path-searched",
     "expose-winerror-full-stop",
     "expose-yes-skips-tty-check"
   ],

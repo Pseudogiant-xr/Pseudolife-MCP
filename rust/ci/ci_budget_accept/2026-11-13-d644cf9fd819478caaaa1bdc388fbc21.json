@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "71cde5ebe83b5b36",
-  "fingerprint": "63e02e2b847c0a3a",
-  "reason": "Adds the expose CLI harness row (CLI-EXPOSE, 134 cases) to the existing w1c-connection shard's live and golden passes and one expose-0 source-mutant shard to the nightly-only source-mutants job, and widens the connect and expose shim entries' row scope (connect's stdin check and a help-text match make move and console users of them); no other suite, case or step changes. Measured locally 2026-11-13: Windows workstation live pass 1.5 min and golden pass 0.5 min, WSL Ubuntu live 0.9 min and golden 0.3 min, so the windows-latest w1c-connection shard grows by about 2 to 4 minutes hosted (inside its 26-minute step and 50-minute job limits) and the ubuntu one by about 1 to 2; the full run stays under its 410 runner-minute limit. Re-measure from the first hosted runs."
-}
