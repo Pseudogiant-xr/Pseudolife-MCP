@@ -12,17 +12,20 @@
   left stopped, the safety backup's recovery command is printed and also
   written beside the safety pair (`pseudolife_restore-<timestamp>.txt`),
   and a `restore-in-progress-<bank>.json` journal in the data directory
-  keeps a later run naming the first safety backup rather than one of a
-  half-restored bank.
+  makes a later run of that bank name both safety backups with their
+  dates: as before the interrupted restore, and as immediately before it.
   This covers the restore items of #1497 (an interrupt after the drop now
   prints the recovery command; a corrupt deflate stream is refused) and of
   #1507 (a wrong-typed `docker inspect` field is the `cannot inspect`
   refusal; a Ctrl-C at the confirmation prompt ends the run with nothing
   changed).
 - The state archive check is never more permissive than the `tar` that
-  extracts it: POSIX extended headers are now read, while a sparse member,
-  a global extended header that sets a name or size, a damaged header
-  anywhere and data after the end marker are refused with their reason.
+  extracts it (probed against GNU tar 1.34 in the daemon image): POSIX
+  extended headers are now read, numeric fields and the ustar prefix are
+  read as tar reads them, while a sparse member, a global extended header
+  that sets a name or size, a damaged header anywhere, a `move.json` that
+  is not a plain file and data after the end marker are refused with their
+  reason.
 - A lite bank is refused with a line naming the Docker install; restore
   runs `docker` only from absolute `PATH` entries or `PSEUDOLIFE_DOCKER`'s
   full path; the restarted daemon gets up to ten minutes to report ready.

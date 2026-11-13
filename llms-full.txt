@@ -9269,9 +9269,10 @@ published health port needs `--daemon-url <http://...>` or
 Before it stops anything, restore reads the dump and the state archive to
 their ends. The archive must be one GNU `tar` extracts exactly as restore
 checks it: POSIX extended headers (`path`, `linkpath`, `size`) and GNU long
-names are read; a sparse member, a global extended header that sets a name
-or size, a damaged header anywhere, or anything but zeros after the end
-marker is refused, with the reason. A lite (embedded PostgreSQL) bank is
+names are read, and numeric fields and the ustar prefix are read as tar
+reads them; a sparse member, a global extended header that sets a name or
+size, a damaged header anywhere, a `move.json` that is not a plain file,
+or anything but zeros after the end marker is refused, with the reason. A lite (embedded PostgreSQL) bank is
 refused: restore replaces a Docker bank only, so install the Docker bank
 first ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)).
 Restore runs the `docker` it finds on an absolute `PATH` entry (never the
@@ -9289,10 +9290,12 @@ The same recovery command is written beside the safety pair as
 `pseudolife_restore-<timestamp>.txt` before the drop, for a run killed
 outright. Restore also records `restore-in-progress-<bank>.json` in
 `~/.pseudolife-mcp` (or `PSEUDOLIFE_MCP_DATA_DIR`) before the drop and
-removes it once the database and state are restored: a later restore of
-the same bank sees it, keeps naming the first safety backup as the
-recovery point (not a safety backup of the half-restored bank), and leaves
-the daemon stopped if it fails before its own drop. Rerunning either
+removes it once the database and state are restored (a journal it cannot
+remove is reported, to delete by hand). A later restore of the same bank
+sees it and leaves the daemon stopped if it fails before its own drop;
+every message after its drop names both safety backups with their dates:
+the bank as it was before the interrupted restore, and as it was
+immediately before this run. Rerunning either
 command after an interruption at any step is safe. Safety backups are
 never rotated.
 
