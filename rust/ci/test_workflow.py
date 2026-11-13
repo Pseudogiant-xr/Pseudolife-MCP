@@ -1540,6 +1540,33 @@ def test_board_runner_checks_execute_on_both_platforms():
                      "rust/daemon/harness/test_pgdisposable_slices.py"), PYTEST_FILTERS)
 
 
+def test_binaryless_harness_units_run_on_both_platforms():
+    # The Python half of the shared Codex consent cases (issue #1500: broken
+    # on master with no lane running it). It needs no built binary, so it
+    # runs where any pull request that touches the oracle reaches it.
+    # The harness unit tests beside it need no binary or extra install either
+    # and were run by no lane before (found in the same sweep).
+    job = workflow()["jobs"]["rust"]
+    assert set(job["strategy"]["matrix"]["os"]) == {"ubuntu-latest", "windows-latest"}
+    step = next(step for step in job["steps"] if step.get("name") == "Check port inventories and producer census")
+    assert "if" not in step
+    assert step["working-directory"] == "."
+    require_command(commands(step["run"]), ("python", "-m", "pytest"),
+                    ("rust/cli_harness/test_native_runtime_contract.py",
+                     "rust/daemon/harness/test_json_fidelity.py",
+                     "rust/daemon/harness/test_recall_mentions_generation.py",
+                     "rust/daemon/harness/test_schema_clocks.py",
+                     "rust/daemon/harness/test_schema_generation.py",
+                     "rust/daemon/harness/test_schema_guards.py",
+                     "rust/daemon/harness/test_shadow_compare.py",
+                     "rust/daemon/harness/test_startup_ci.py",
+                     "rust/daemon/harness/test_startup_parts.py",
+                     "rust/daemon/harness/test_stub_extractor.py",
+                     "rust/daemon/harness/test_w2d_rerank_check.py",
+                     "rust/daemon/harness/test_w2d_trace_compare.py",
+                     "rust/cli_harness/test_update_row.py",), PYTEST_FILTERS)
+
+
 def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
     job = workflow()["jobs"]["rust"]
     override = next(step for step in job["steps"] if step.get("name") == "Daemon override build configurations")
