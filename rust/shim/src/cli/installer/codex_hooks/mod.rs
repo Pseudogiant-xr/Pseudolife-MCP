@@ -123,6 +123,8 @@ pub struct Report {
     pub mailbox_approval_detail: Option<String>,
     pub mailbox_approval_notice: Option<String>,
     pub instructions_path: Option<PathBuf>,
+    /// The standing-instructions file that was not written, and why.
+    pub instructions_error: Option<(PathBuf, String)>,
 }
 
 impl Report {
@@ -148,6 +150,13 @@ impl Report {
                 json!(self.mailbox_approval_notice),
             ),
             ("instructions_path", json!(self.instructions_path)),
+            (
+                "instructions_error",
+                self.instructions_error
+                    .as_ref()
+                    .map(|(file, cause)| json!({"file": file, "cause": cause}))
+                    .unwrap_or(Value::Null),
+            ),
         ] {
             if !value.is_null() {
                 out.insert(key.into(), value);
@@ -383,8 +392,9 @@ pub async fn setup<H: Host>(
         &mut report,
     ) {
         Ok(state) => report.instructions = state.into(),
-        Err(error) => {
+        Err((file, error)) => {
             report.instructions = "skipped".into();
+            report.instructions_error = Some((file, error.to_string()));
             let lead = report
                 .recovery
                 .take()
@@ -642,12 +652,33 @@ pub(super) fn run(arguments: &[String]) -> u8 {
     if writeln!(io::stdout().lock(), "{}", report.json()).is_err() {
         return 1;
     }
+    let mut err = io::stderr().lock();
+    for line in stderr_lines(&report) {
+        let _ = writeln!(err, "{line}");
+    }
+    report.exit()
+}
+
+/// What the step says on stderr after its report.
+fn stderr_lines(report: &Report) -> Vec<String> {
+    let mut lines = Vec::new();
     if report.status == "ready"
         && let Some(notice) = &report.mailbox_approval_notice
     {
-        let _ = writeln!(io::stderr().lock(), "{notice}");
+        lines.push(notice.clone());
     }
-    report.exit()
+    if let Some((file, cause)) = &report.instructions_error {
+        lines.push(format!(
+            "Codex standing instructions were not written to {}: {cause} Fix that, then rerun the installer{}.",
+            file.display(),
+            if report.status == "ready" {
+                " (the hooks are set up either way)"
+            } else {
+                ""
+            }
+        ));
+    }
+    lines
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //! `AGENTS.md` (or a non-empty `AGENTS.override.md`, which Codex reads
 //! first) when hooks cannot deliver it, never twice.
 use super::{Fail, Report};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MARKERS: [&[u8]; 5] = [
     b"## Memory",
@@ -16,8 +16,19 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
+/// The file Codex reads standing instructions from: a non-empty
+/// `AGENTS.override.md` first, else `AGENTS.md`.
+fn target(home: &Path) -> PathBuf {
+    let override_path = home.join("AGENTS.override.md");
+    if std::fs::read_to_string(&override_path).is_ok_and(|t| !t.trim().is_empty()) {
+        override_path
+    } else {
+        home.join("AGENTS.md")
+    }
+}
+
 /// "present", "skipped", "covered-by-hooks" or "appended" (the states both
-/// installers print).
+/// installers print); on failure, the file that was not written and why.
 pub fn standing(
     home: &Path,
     checkout: &Path,
@@ -25,13 +36,30 @@ pub fn standing(
     fallback_allowed: bool,
     ready: bool,
     report: &mut Report,
+) -> Result<&'static str, (PathBuf, Fail)> {
+    let path = target(home);
+    write(
+        &path,
+        home,
+        checkout,
+        choice,
+        fallback_allowed,
+        ready,
+        report,
+    )
+    .map_err(|error| (path, error))
+}
+
+fn write(
+    path: &Path,
+    home: &Path,
+    checkout: &Path,
+    choice: &str,
+    fallback_allowed: bool,
+    ready: bool,
+    report: &mut Report,
 ) -> Result<&'static str, Fail> {
-    let override_path = home.join("AGENTS.override.md");
-    let path = if std::fs::read_to_string(&override_path).is_ok_and(|t| !t.trim().is_empty()) {
-        override_path
-    } else {
-        home.join("AGENTS.md")
-    };
+    let path = path.to_path_buf();
     let old = crate::runtime::registrations::read_optional(&path).map_err(|error| {
         Fail::detail(format!("{} could not be read ({error}).", path.display()))
     })?;

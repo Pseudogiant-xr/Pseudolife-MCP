@@ -354,7 +354,8 @@ pub fn replace_snapshot(
                     path.display()
                 ))
             })?;
-    Ok(before.map(|_| backup))
+    // Reported in the ordinary spelling, not the writer's verbatim one.
+    Ok(before.map(|_| crate::setup::codex::resolved_path(&backup).unwrap_or(backup)))
 }
 
 fn launched(root: &Path) -> Vec<String> {
