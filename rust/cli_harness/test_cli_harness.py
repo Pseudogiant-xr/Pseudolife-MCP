@@ -2426,3 +2426,21 @@ def test_the_runner_pins_the_umask_before_recording_or_replaying(monkeypatch):
     for mode in (["--record"], ["--golden"]):
         with pytest.raises(Pinned):
             runner.main(["--row", "invite", *mode])
+
+
+def test_every_source_mutant_matches_its_source_exactly_once():
+    """A mutant is applied by replacing its ``old`` text, which must match
+    its file exactly once. A pull request runs only the mutant shards of the
+    rows its diff reaches, so an edit to a file another row's mutant names
+    used to fail that shard in the nightly run and nowhere else."""
+    from cli_harness import rows
+
+    root = Path(__file__).resolve().parent.parent
+    stale = []
+    for row in rows.ROWS:
+        for mutant in rows.mutants(row):
+            data = (root / mutant.file).read_bytes()
+            counts = [data.count(mutant.old.replace("\n", eol).encode()) for eol in ("\n", "\r\n")]
+            if 1 not in counts:
+                stale.append(f"{mutant.id}: {max(counts)} matches in {mutant.file}")
+    assert stale == []
