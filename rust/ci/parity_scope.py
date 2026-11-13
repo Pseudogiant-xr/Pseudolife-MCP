@@ -164,9 +164,11 @@ SHIM_COMMANDS = {
     "migrate_flat.rs": ("migrate_flat",),
     "update": ("update", "doctor", "console"),
     # console and expose also read move's argv helpers; expose reads
-    # connect's stdin check.
-    "connect": ("connect", "expose"), "doctor": ("doctor", "console"), "console": ("console",),
-    "expose": ("expose",),
+    # connect's stdin check, so connect's rows include expose's.
+    "connect": ("connect", "expose", "move", "console"), "doctor": ("doctor", "console"), "console": ("console",),
+    # The import scan also reads move's help text ("use `expose status`")
+    # as a use of expose, so expose's rows include move's.
+    "expose": ("expose", "move", "console"),
     "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move", "console", "expose"), "test_login": ("test_login",),
