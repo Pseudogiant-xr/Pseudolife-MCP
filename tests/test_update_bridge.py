@@ -148,7 +148,9 @@ def test_the_bridge_runs_the_native_client_steps_with_the_handoff_unchanged(rele
         assert child_env[key] == value, key
         # Not consumed before the child starts.
         assert process_env[key] == value, key
-    assert len(lines) == 1 and "moving this machine to the native client" in lines[0]
+    assert "moving this machine to the native client" in lines[0]
+    # A failed native run names the way back to Python (Opus review).
+    assert len(lines) == 2 and "PSEUDOLIFE_SHIM_ENGINE=python" in lines[1]
     # The private scratch copy is gone once the child ended.
     assert not Path(argv[0]).exists()
 
@@ -205,6 +207,8 @@ def test_no_release_assets_keeps_python(release):
     native = Native()
     note = kept(bridge(handed(release), native))
     assert f"no native client is published in release v{__version__}" in note
+    # The override that chose the source is named (as install.rs override_note).
+    assert f"from {update_bridge.ARCHIVE_URL_ENV}={release.base}, unset it" in note
     assert native.started == []
 
 
@@ -369,3 +373,112 @@ def test_main_records_why_python_was_kept(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     assert update_cli.main(list(ARGS)) == 0
     assert recorded == ["the native client was not installed (x); kept"]
+
+
+def test_a_truncated_download_keeps_python(release):
+    # Codex review: http.client.IncompleteRead escaped fetch().
+    import socket
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def serve():
+        conn, _ = listener.accept()
+        conn.recv(4096)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n10\r\nshort")
+        conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    base = f"http://127.0.0.1:{listener.getsockname()[1]}/v{__version__}"
+    native = Native()
+    note = kept(bridge({**HANDOFF, update_bridge.ARCHIVE_URL_ENV: base}, native))
+    assert "SHA256SUMS" in note
+    assert native.started == []
+    listener.close()
+
+
+@pytest.mark.parametrize("stage", ["mkdtemp", "write"])
+def test_a_staging_failure_keeps_python(release, monkeypatch, stage):
+    # Codex review: an OSError while staging the binary aborted the run.
+    release.publish()
+    if stage == "mkdtemp":
+        def mkdtemp(*a, **k):
+            raise OSError(28, "No space left on device")
+        monkeypatch.setattr(update_bridge.tempfile, "mkdtemp", mkdtemp)
+    else:
+        def write_bytes(self, data):
+            raise OSError(28, "No space left on device")
+        monkeypatch.setattr(update_bridge.Path, "write_bytes", write_bytes)
+    native = Native()
+    assert "No space left on device" in kept(bridge(handed(release), native))
+    assert native.started == []
+
+
+def test_a_successful_native_run_says_nothing_more(release):
+    release.publish()
+    lines: list[str] = []
+    assert bridge(handed(release), Native(exit_code=0), lines=lines) == 0
+    assert len(lines) == 1
+
+
+@pytest.mark.parametrize("sums, why", [
+    ("{digest}  {name}\nnot a record\n", "invalid record"),
+    ("{digest} {name}\n", "invalid record"),
+    ("{digest}  dir/{name}\n", "invalid record"),
+    ("{upper}  {name}\n", "invalid record"),
+    ("{digest}  {name}\n{digest}  {name}\n", "lists the archive twice"),
+])
+def test_the_checksum_file_follows_the_native_installers_rules(release, sums, why):
+    name = release.publish()
+    _, archive, _ = release.files[f"/v{__version__}/{name}"]
+    digest = hashlib.sha256(archive).hexdigest()
+    body = sums.format(digest=digest, upper=digest.upper(), name=name)
+    release.files[f"/v{__version__}/SHA256SUMS"] = (200, body.encode(), {})
+    native = Native()
+    assert why in kept(bridge(handed(release), native))
+    assert native.probes == []
+
+
+def test_an_override_redirect_never_leaves_http_or_drops_to_http():
+    handler = update_bridge._Redirects("mirror.example.com")
+    import urllib.request
+    https = urllib.request.Request("https://mirror.example.com/v1/SHA256SUMS")
+    for refused in ("http://mirror.example.com/x", "ftp://mirror.example.com/x", "https://other.example.com/x"):
+        with pytest.raises(Exception, match="refused a redirect"):
+            handler.redirect_request(https, None, 302, "Found", {}, refused)
+    assert handler.redirect_request(https, None, 302, "Found", {}, "https://mirror.example.com/y") is not None
+    http = urllib.request.Request("http://mirror.example.com/v1/SHA256SUMS")
+    assert handler.redirect_request(http, None, 302, "Found", {}, "https://mirror.example.com/y") is not None
+
+
+def test_only_an_ascii_pid_and_the_exact_engine_value_count(release):
+    release.publish()
+    native = Native()
+    assert bridge({**handed(release), "PSEUDOLIFE_UPDATE_HANDOFF": "\u0664\u0662"}, native) is None
+    # runtimes.py honours exactly "python"; anything else is not a choice.
+    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE="Python"), Native()) == 7
+
+
+def test_interrupt_stops_the_native_child_even_on_a_second_interrupt():
+    calls = []
+
+    class Proc:
+        def __init__(self):
+            self.waits = 0
+
+        def wait(self, timeout=None):
+            calls.append(("wait", timeout))
+            self.waits += 1
+            if self.waits <= 2:
+                raise KeyboardInterrupt
+            return -9
+
+        def kill(self):
+            calls.append(("kill", None))
+
+    with pytest.raises(KeyboardInterrupt):
+        update_bridge._wait(Proc())
+    assert calls == [("wait", None), ("wait", update_bridge.INTERRUPT_GRACE), ("kill", None), ("wait", None)]
+    # Shorter than the Python parent's own 10 s wait for this process.
+    assert update_bridge.INTERRUPT_GRACE < 10

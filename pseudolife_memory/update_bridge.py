@@ -27,6 +27,7 @@ carries ``runtimes.SHIM_REQUIREMENTS`` and nothing else.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
 import os
 import platform
@@ -124,8 +125,13 @@ class _Redirects(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         target_url = urllib.parse.urlsplit(newurl)
-        allowed = (target_url.hostname == self.own_host if self.own_host is not None
-                   else target_url.scheme == "https" and target_url.hostname in GITHUB_HOSTS)
+        if self.own_host is not None:
+            # The override's own host, never off http(s), never from https down to http.
+            source = urllib.parse.urlsplit(req.full_url).scheme
+            allowed = (target_url.hostname == self.own_host and target_url.scheme in ("http", "https")
+                       and not (source == "https" and target_url.scheme == "http"))
+        else:
+            allowed = target_url.scheme == "https" and target_url.hostname in GITHUB_HOSTS
         if not allowed:
             raise urllib.error.URLError(f"refused a redirect to {target_url.scheme}://{target_url.hostname}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
@@ -146,7 +152,7 @@ def fetch(url: str, limit: int, *, overridden: bool, timeout: float = 300) -> by
         if exc.code == 404:
             raise Kept("not published") from None
         raise Kept(f"HTTP {exc.code} from {parsed.hostname}") from None
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         raise Kept(f"download from {parsed.hostname} failed: {reason}") from None
     if len(data) > limit:
@@ -155,16 +161,22 @@ def fetch(url: str, limit: int, *, overridden: bool, timeout: float = 300) -> by
 
 
 def checksum(sums: str, name: str) -> str | None:
-    """The SHA-256 ``SHA256SUMS`` lists for ``name``, or ``None``."""
+    """The SHA-256 ``SHA256SUMS`` lists for ``name``, or ``None`` when it
+    names no such file; raises ``Kept`` for a file the native installer
+    would refuse (``install.rs`` ``checksum``: every record "<64 lowercase
+    hex>  <bare name>", no duplicate for the archive)."""
+    lines = sums.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
     found = None
-    for line in sums.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[1].lstrip("*") == name:
-            digest = parts[0].lower()
-            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
-                return None
-            if found is not None and found != digest:
-                return None
+    for line in lines:
+        digest, sep, file = line.removesuffix("\r").partition("  ")
+        if not sep or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) \
+                or not file or "/" in file or "\\" in file:
+            raise Kept("its SHA256SUMS holds an invalid record")
+        if file == name:
+            if found is not None:
+                raise Kept("its SHA256SUMS lists the archive twice")
             found = digest
     return found
 
@@ -224,15 +236,22 @@ def _probe(binary: Path, version: str, run: Runner) -> None:
         raise Kept(f"the native binary is not release {version} with the client hand-off")
 
 
+# Shorter than the 10 s the handing-off Python parent waits for this
+# process after Ctrl+C (update_cli.run_handoff), so the native child is
+# stopped here, never left running after the parent released the lock.
+INTERRUPT_GRACE = 6
+
+
 def _wait(proc: subprocess.Popen) -> int:
     try:
         return proc.wait()
     except BaseException:
         # Ctrl+C reaches the child through the shared console too: give it
-        # a moment to stop between steps before it is killed.
+        # a moment to stop between steps before it is killed, and kill it
+        # even when a second interrupt cuts the moment short.
         try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
+            proc.wait(timeout=INTERRUPT_GRACE)
+        except BaseException:
             proc.kill()
             proc.wait()
         raise
@@ -248,7 +267,7 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
     hand-off child (nothing looked at, nothing said)."""
     env = os.environ if env is None else env
     marker = env.get(HANDOFF_ENV) or ""
-    if not marker.isdigit():
+    if not (marker.isascii() and marker.isdigit()):
         return None
     try:
         parser = parser_factory()
@@ -262,7 +281,7 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
     if not args.clients_only or args.tag is None or any(
             value != defaults[key] for key, value in vars(args).items() if key not in sent):
         return None
-    if (env.get(ENGINE_ENV) or "").strip().lower() == "python":
+    if env.get(ENGINE_ENV) == "python":     # the exact value runtimes.py honours
         return f"{ENGINE_ENV}=python keeps the Python client; this run's own code finishes the client steps"
     version = __version__
     kept = "the Python client was kept and this run's own code finishes the client steps"
@@ -272,9 +291,10 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
     if triple is None:
         return (f"the native client was not installed (no native client is built for "
                 f"{platform.system()} {platform.machine()}); {kept}")
-    scratch = Path(tempfile.mkdtemp(prefix="pseudolife-bridge-"))
+    scratch: Path | None = None
     try:
         try:
+            scratch = Path(tempfile.mkdtemp(prefix="pseudolife-bridge-"))
             base, overridden = release_base(env, version)
             name = archive_name(version, triple)
             try:
@@ -295,11 +315,16 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
             binary = extract(data, triple, scratch)
             _probe(binary, version, run)
         except Kept as exc:
-            return f"the native client was not installed ({exc}); {kept}"
+            note = (f"; from {ARCHIVE_URL_ENV}={env.get(ARCHIVE_URL_ENV, '').strip()}, unset it to use the "
+                    f"GitHub release" if (env.get(ARCHIVE_URL_ENV) or "").strip() else "")
+            return f"the native client was not installed ({exc}{note}); {kept}"
+        except Exception as exc:  # noqa: BLE001 - nothing has changed yet: Python is always a safe fallback
+            return f"the native client was not installed ({type(exc).__name__}: {exc}); {kept}"
         argv = [str(binary), "update", "--clients-only", "--tag", version, "--daemon-url", args.daemon_url]
         if args.allow_downgrade:
             argv.append("--allow-downgrade")
-        (out or (lambda line: print(line, flush=True)))(
+        say = out or (lambda line: print(line, flush=True))
+        say(
             f"==> moving this machine to the native client: native {version} ({triple}) runs the client steps")
         sys.stdout.flush()
         sys.stderr.flush()
@@ -309,6 +334,11 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
             proc = popen(argv, stdin=subprocess.DEVNULL, env=dict(env))
         except OSError as exc:
             return f"the native client was not installed (it did not start: {exc}); {kept}"
-        return _wait(proc)
+        code = _wait(proc)
+        if code != 0:
+            say(f"==> the native client steps ended with exit {code}; to keep the Python client instead, rerun "
+                f"with {ENGINE_ENV}=python set")
+        return code
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
