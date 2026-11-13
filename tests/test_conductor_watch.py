@@ -695,6 +695,7 @@ def test_each_message_appends_one_ledger_line(h):
 
 
 @pytest.mark.parametrize("bad", [["--quiet-after", "0"], ["--interval", "0"], ["--settle", "-1"],
+                                 ["--settle", "nan"], ["--interval", "nan"], ["--quiet-after", "nan"],
                                  ["--max-age", "0"], ["--max-age", "soon"]])
 def test_bad_arguments_are_refused(h, bad):
     with pytest.raises(SystemExit) as exc:

@@ -768,7 +768,7 @@ def _positive(text):
 
 def _non_negative(text):
     value = float(text)
-    if value < 0:
+    if not value >= 0:                    # NaN too: a NaN settle never sent a batch
         raise argparse.ArgumentTypeError("must be 0 or more")
     return value
 
