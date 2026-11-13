@@ -123,6 +123,7 @@ RUST_HARNESS = (
     "rust/daemon/harness/test_startup_ci.py", "rust/daemon/harness/test_startup_parts.py",
     "rust/daemon/harness/test_w2d_rerank_check.py",
     "rust/daemon/harness/test_w2d_trace_compare.py", "rust/cli_harness/test_update_row.py",
+    "rust/cli_harness/test_cli_harness.py",
     "rust/ci",
 )
 RUST_HARNESS_COMMAND = ("python -m pytest -q -p no:cacheprovider --require-databases "
@@ -190,7 +191,8 @@ class Member:
     checks: str
     labeled_at: str | None = None
     draft: bool = False
-    checks_why: str = ""   # for `unverified`: the read that failed
+    checks_why: str = ""   # for `unverified`: the read that failed; for `failing`: the red checks
+    report_only_red: tuple[str, ...] = ()   # red REPORT_ONLY_CHECK runs, shown, not counted
     snapshot_required: bool | None = None
     snapshot: str = "not required"
     snapshot_why: str = ""
@@ -273,6 +275,13 @@ _clock = time.monotonic
 # (PASSING, above).
 FAILED = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
 CANCELLED = "CANCELLED"
+# (workflow name, check-name prefix) of the one report-only check on a
+# member's head: rust.yml's frozen-probes job, "Frozen judge probes (report
+# only) / <os>", which runs only on ordinary pull requests, gates nothing
+# and is shown but never counted, because a lost probe runner (issue #1519)
+# says nothing about the change. A test pins that only that job produces
+# the prefix. `merge` does not use it: the probe never runs in a batch.
+REPORT_ONLY_CHECK = ("Rust shim", "Frozen judge probes (report only) / ")
 # GitHub reports a job that ran past its timeout-minutes as CANCELLED, not
 # TIMED_OUT, and the runner annotates it with this message (jobs
 # 116301727515 and 116323387861, 2026-10-15: "The job has exceeded the
@@ -445,7 +454,35 @@ def _checks(rollup: list[dict] | None) -> str:
     return _checks_why(rollup)[0]
 
 
+def _report_only(check: dict) -> bool:
+    """Whether a rollup entry is the report-only check: an Actions check run
+    of exactly REPORT_ONLY_CHECK's workflow whose name starts with its prefix."""
+    workflow, prefix = REPORT_ONLY_CHECK
+    return (check.get("__typename") != "StatusContext" and "context" not in check
+            and check.get("workflowName") == workflow
+            and str(check.get("name") or "").startswith(prefix))
+
+
+def _report_only_red(rollup: list[dict] | None) -> tuple[str, ...]:
+    """The report-only checks whose latest run did not pass, by name."""
+    return tuple(sorted({_check_name(check) for check in _latest_checks(rollup)
+                         if _report_only(check) and not _unfinished(check)
+                         and _check_state(check) not in PASSING}))
+
+
 def _checks_why(rollup: list[dict] | None) -> tuple[str, str]:
+    """(one word for a head's CI, why) over every check but the report-only
+    one (REPORT_ONLY_CHECK, which `_report_only_red` lists separately); for
+    `failing` the why names the red checks."""
+    counted = [check for check in rollup or [] if not _report_only(check)]
+    word, why = _counted_checks_why(counted if rollup else rollup)
+    if word == "failing" and not why:
+        red = sorted({_check_name(check) for check in counted if _check_state(check) in FAILED})
+        why = ", ".join(red)
+    return word, why
+
+
+def _counted_checks_why(rollup: list[dict] | None) -> tuple[str, str]:
     """(one word for a head's CI, why): green, pending, cancelled,
     unverified, failing or none; `failing` and `unverified` keep a member
     out of a batch, and for `unverified` the why names the read that failed.
@@ -711,8 +748,9 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
       whether the rollup lists that leg or not (`_failed_at_cancel_step`),
       or the leg ran no step at all in an attempt that itself concluded
       `cancelled` (cancelled while starting, so it gave no verdict);
-    - no other job in the run attempt failed, timed out or needs action,
-      and none the gate needs is unfinished;
+    - no other job in the run attempt failed, timed out or needs action
+      (the report-only check aside, REPORT_ONLY_CHECK), and none the gate
+      needs is unfinished;
     - a job it needs, and nothing outside its needs, was cancelled, and no
       such job ran past its timeout.
 
@@ -797,6 +835,9 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
             named = owners(str(other["name"]))
             if other.get("id") == meta.get("id") or named == {gate_id}:
                 continue                    # a leg of this gate, read above
+            if _report_only({"workflowName": check.get("workflowName"),
+                             "name": other.get("name")}):
+                continue                    # shown, never counted (REPORT_ONLY_CHECK)
             conclusion = other.get("conclusion")
             if conclusion is not None and conclusion not in _NO_VERDICT:
                 return False, ""            # a job of the run failed
@@ -857,7 +898,8 @@ def ready(label: str, base_sha: str | None = None) -> list[Member]:
         checks, why = _checks_why(r.get("statusCheckRollup"))
         members.append(Member(number=r["number"], title=r["title"], sha=r["headRefOid"],
                               url=r["url"], review=r.get("reviewDecision") or "NONE",
-                              checks=checks, draft=bool(r.get("isDraft")), checks_why=why))
+                              checks=checks, draft=bool(r.get("isDraft")), checks_why=why,
+                              report_only_red=_report_only_red(r.get("statusCheckRollup"))))
     base_sha = base_sha or _out("rev-parse", f"{REMOTE}/{BASE}")
     for m, row in zip(members, rows):
         if not m.draft and m.checks not in ("failing", "unverified"):
@@ -965,7 +1007,8 @@ def _not_ready(m: Member) -> str | None:
     if m.draft:
         return "is a draft"
     if m.checks == "failing":
-        return ("CI on its head is failing; it joins a batch once a rerun of "
+        red = f" ({m.checks_why})" if m.checks_why else ""
+        return (f"CI on its head is failing{red}; it joins a batch once a rerun of "
                 "the failed job passes or a push replaces that head")
     if m.checks == "unverified":
         why = m.checks_why or "GitHub's record of its CI could not be read"
@@ -2164,7 +2207,9 @@ def status(args: argparse.Namespace) -> int:
         clean, files = _merge_tree(base_sha, head)
         merge = "merges cleanly" if clean else f"conflicts with master in {', '.join(files)}"
         draft = " draft," if m.draft else ""
-        print(f"#{m.number} {m.sha[:12]}{moved}:{draft} {merge}; CI {m.checks}; "
+        shown = (f" (report-only red, not counted: {', '.join(m.report_only_red)})"
+                 if m.report_only_red else "")
+        print(f"#{m.number} {m.sha[:12]}{moved}:{draft} {merge}; CI {m.checks}{shown}; "
               f"review {m.review}; labelled {m.labeled_at or 'at an unknown time'} "
               f"- {m.title}")
     return 0

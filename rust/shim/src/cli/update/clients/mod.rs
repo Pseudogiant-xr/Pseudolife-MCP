@@ -1,12 +1,13 @@
 //! Native client update ladder; user approvals remain user-owned.
 mod codex;
 mod command;
+pub(crate) mod handoff;
 mod plugin;
 #[cfg(test)]
 mod tests;
 
 use crate::runtime::{self, registrations};
-use command::{NativeRunner, Runner};
+pub(crate) use command::{NativeRunner, Runner};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -17,16 +18,28 @@ use std::{
 pub use codex::{check_codex_hooks, codex_reapproval_text, runtime_hook_line, runtime_hook_status};
 use plugin::update_plugin;
 
+/// Sees the shim step's result; a returned report replaces the rest of the ladder.
+pub type AfterShim<'a> = dyn FnMut(&Value) -> Option<Value> + 'a;
+
+/// The client-side ladder. `after_shim` sees the shim step's result; when it
+/// returns a report, that report is the ladder's and no later step runs here
+/// (the release updater handed them to the runtime just installed).
 pub fn run_steps(
     steps: &[&str],
     repo: Option<&Path>,
     source: &str,
     daemon_digest: Option<&str>,
     reinstall: bool,
+    after_shim: Option<&mut AfterShim>,
 ) -> Value {
     let mut report = json!({});
     if steps.contains(&"shim") {
         report["shim"] = runtime::update_shim(source, repo, reinstall);
+        if let Some(after_shim) = after_shim
+            && let Some(taken) = after_shim(&report["shim"])
+        {
+            return taken;
+        }
     }
     if steps.contains(&"plugin") {
         report["plugin"] = update_plugin(repo);

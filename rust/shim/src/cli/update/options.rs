@@ -32,6 +32,9 @@ pub(crate) struct Options {
     pub unschedule: bool,
     pub as_json: bool,
     pub daemon_url: String,
+    /// Set from the hand-off environment, never from the command line: the
+    /// updater that handed this run its client steps (`clients::handoff`).
+    pub handoff: super::clients::handoff::Inherited,
 }
 
 impl Default for Options {
@@ -69,6 +72,7 @@ impl Default for Options {
                 .ok()
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "http://127.0.0.1:8765".into()),
+            handoff: Default::default(),
         }
     }
 }
