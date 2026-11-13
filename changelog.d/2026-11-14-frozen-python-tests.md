@@ -1,0 +1,4 @@
+### Changed (2026-11-14 — the frozen Python package's tests stop running by default)
+- Every `tests/test_*.py` file is classified `live` or `frozen` in `tests/suite_classes.txt`. A test run, local or CI, collects only the live ones (the installers and update path, `ops/` tooling, plugin hooks, docs, release and repository guards, CI tooling, images, eval tooling); `pytest --include-frozen` adds the 296 files that test only the frozen `pseudolife_memory` package, and naming one without it is refused with that switch. `tests/test_suite_classes.py` fails when a test file is unclassified.
+- The suite lock counts a run as full against the live files.
+- CI: `test-lite-linux` (the whole suite on embedded PostgreSQL) is gone with the lite tier; the Windows and macOS lanes run the live files of their selections; a Rust-only batch's master push skips the Python lanes too, and the nightly runs them on that commit (`ops/ci_push_passed.py --require-job test`).

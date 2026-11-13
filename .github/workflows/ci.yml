@@ -1,15 +1,10 @@
 # CI (P2, 2026-07-02 review; lite-tier lanes added 2026-08-14): the full
 # suite runs on every merge instead of only when someone remembers.
-# Suite lanes:
+# Suite lanes (every lane runs only live test files, tests/suite_classes.txt):
 #   * test            — full suite vs the production-parity PG 18 service
 #                       container (pgvector image, same as the Docker tier
 #                       since the 2026-08-14 16→18 bump), every test on the
 #                       real embedding weights (PSEUDOLIFE_TEST_EMBEDDER=real);
-#   * test-lite-linux — full suite vs the [lite] extra's embedded
-#                       PostgreSQL 18 (no service container): covers the
-#                       lite provider itself on a Linux runner, and the
-#                       local default (tests/fake_embedder.py for every test
-#                       not marked real_model);
 #   * test-lite-windows — the product paths that differ on Windows (embedded
 #                       provider, backup round trip, shim daemon spawn,
 #                       credential ACLs, tunnel DPAPI and process handling,
@@ -31,13 +26,20 @@
 #
 # Rust-only pull requests (maintainer decision 2026-10-09): a PR that touches
 # rust/ and whose every other changed file is .github/workflows/rust.yml,
-# CHANGELOG.md or a changelog.d/ fragment changes no Python, so the four
-# Python suite lanes are skipped for it and the `guards` job runs the
+# CHANGELOG.md or a changelog.d/ fragment changes no Python, so the Python
+# suite lanes are skipped for it and the `guards` job runs the
 # tree-wide and release-doc guards
 # instead (tracked-tree identifiers and control bytes, CHANGELOG and release
-# pins, committed eval evidence). The Rust workflow is that PR's gate. The
-# full suite still runs on the master push that merges it (its batch skipped
-# the suite, so the push cannot skip it) and nightly.
+# pins, committed eval evidence). The Rust workflow is that PR's gate. Since
+# the Python freeze (14 November 2026) the master push that merges such a
+# batch skips them too, and the nightly runs them on that commit
+# (ops/ci_push_passed.py --require-job test).
+#
+# The Python freeze also split tests/ (tests/suite_classes.txt): a run
+# collects only the live files unless pytest gets --include-frozen, and no
+# lane passes it. The lite tier is dropped, and with it test-lite-linux (the
+# whole suite on embedded PostgreSQL); the Windows and macOS lanes keep their
+# names and run the live files of their selections.
 #
 # Ordinary pull requests (2026-10-21): a PR merges through
 # an integration batch (docs/dev/merge-batches.md), whose own PR from an
@@ -142,7 +144,9 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 -m ops.ci_push_passed --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT"
+        # A push that skipped `test` (a Rust-only batch's, below) still
+        # concludes success; the nightly runs the Python lanes then.
+        run: python3 -m ops.ci_push_passed --workflow .github/workflows/ci.yml --github-output "$GITHUB_OUTPUT" --require-job test
 
       - name: Classify the change
         id: scope
@@ -154,6 +158,11 @@ jobs:
         run: |
           case "$EVENT_NAME" in
             pull_request) base=HEAD^1 ;;
+            # A master push is classified by the merge it pushes (its first
+            # parent is master before it): a Rust-only batch skips the Python
+            # lanes on its push too, since the Python freeze (maintainer,
+            # 14 November 2026), and the nightly runs them on that commit.
+            push) base=HEAD^1 ;;
             merge_group)
               # Master's current tip, not merge_group.base_sha: that may be the
               # queue entry ahead, which need not pass on its own, so every
@@ -396,98 +405,6 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-  test-lite-linux:
-    needs: scope
-    # Fail-safe: run unless scope affirmatively says skip, so a failed or
-    # empty scope runs the suite instead of skipping it.
-    if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-linux') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-
-      - name: Install (CPU torch first, plus the lite extra)
-        run: |
-          python -m pip install -U pip
-          pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
-          pip install -e .[dev,lite]
-
-      - name: Restore HuggingFace cache
-        id: hf-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/huggingface
-          key: hf-minilm-l6-v2-qwen3-embedding-0.6b
-
-      - name: Warm the embedders (downloads only on cache miss)
-        run: |
-          for attempt in 1 2 3; do
-            if python - <<'PY'
-          from sentence_transformers import SentenceTransformer
-          for repo in ("all-MiniLM-L6-v2", "Qwen/Qwen3-Embedding-0.6B"):
-              SentenceTransformer(repo)
-              print("warmed", repo, flush=True)
-          PY
-            then
-              echo "warm ok on attempt $attempt"; exit 0
-            fi
-            echo "warm attempt $attempt failed; backing off"; sleep $((attempt * 60))
-          done
-          echo "::error::could not warm the embedders after 3 attempts (Hub rate limit?)"
-          exit 1
-
-      - name: Save HuggingFace cache
-        if: always() && steps.hf-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/huggingface
-          key: hf-minilm-l6-v2-qwen3-embedding-0.6b
-
-      - name: Start embedded PostgreSQL (the [lite] path under test)
-        # attach_or_start, NOT start_embedded: the latter registers an
-        # atexit stop, and this helper interpreter exiting would take the
-        # server down with it. pg0's server is detached and outlives the
-        # step; the runner VM is discarded at job end, so no teardown.
-        # tests/pg_fixtures.py treats the exported URL's db as the target
-        # and provisions it itself via the sibling /postgres admin db.
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          from pseudolife_memory.storage.embedded_pg import attach_or_start
-
-          dsn, _ = attach_or_start(Path.home() / "pl-ci-lite-bank")
-          base = dsn.rsplit("/", 1)[0]
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-              fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
-          print("embedded PG up:", base)
-          PY
-
-      - name: Tests (full suite vs embedded PG 18, 2 xdist workers)
-        # Same sharding rationale as the `test` lane above.
-        env:
-          HF_HUB_OFFLINE: "1"
-          TRANSFORMERS_OFFLINE: "1"
-          OMP_NUM_THREADS: "2"
-          PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
-        run: bash ops/ci_tests.sh
-
-      - name: Upload test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-lite-linux-diagnostics
-          path: ci-results/
-          retention-days: 14
-          if-no-files-found: warn
-
   test-lite-windows:
     needs: scope
     # Fail-safe: run unless scope affirmatively says skip, so a failed or
@@ -527,7 +444,7 @@ jobs:
           Write-Output $facts
           if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
 
-      - name: Start embedded PostgreSQL (the [lite] path, as test-lite-linux does)
+      - name: Start embedded PostgreSQL (test infrastructure; the lite tier itself is dropped)
         # Without it the shim-to-daemon tests and the PG-backed coordination
         # tests skip silently: hosted Windows has no service containers.
         # attach_or_start, not start_embedded (whose atexit stop would end the
@@ -550,54 +467,38 @@ jobs:
         # A merge gate: product paths only, no retries. The process-spawning
         # plumbing runs in test-windows-nightly; tests/test_ci_windows_lanes.py
         # keeps every test in one lane and every Windows-only test in some lane.
-        # These start their own embedded instances: no pre-started server, no
-        # service container (unsupported on Windows runners), no HF download.
-        # - test_embedded_pg, test_backup_cli: the embedded provider's attach,
-        #   crash and msvcrt start-lock paths, and the backup round trip.
+        # Since the Python freeze (14 November 2026) only its live files run
+        # (tests/suite_classes.txt): the frozen package's own Windows paths
+        # (embedded provider, backup, credentials, repository claims, tunnel
+        # runtime, conductor watcher, flat migration, child re-run) left.
+        # No service container (unsupported on Windows runners), no HF download.
         # - test_shim (picks): the Windows daemon spawn (creationflags, no
         #   console window), its msvcrt spawn lock, and one real shim-to-daemon
         #   handshake.
-        # - test_credentials, test_coordination_credentials: the token files'
-        #   Windows owner and explicit-ACL checks.
         # - test_prune_worktrees, test_ops_install_worktree_retention: the
         #   retention script's junction and reparse-point refusal, its
         #   Win32_Process listing, and the weekly task's registration.
-        # - test_repository_claims: file claims refuse Windows junctions and
-        #   reserved names (CON, trailing dots and spaces).
-        # - test_tunnel_*: the tunnel's DPAPI key storage, owner-only ACLs and
-        #   Windows process handling, which no other lane reaches; the three
-        #   cancellation tests that reap real children run nightly.
+        # - test_tunnel_cli: the tunnel CLI's Windows handling.
         # - test_suite_lock (picks): the only CI coverage of the msvcrt lock
         #   backend, crash release and the native-Windows full-run refusal,
         #   and of ops/wsl-suite.ps1 forwarding a held lease's marker.
-        # - test_conductor_watch (picks): the watcher's detach flags, its
-        #   GetProcessTimes start-time check and its lifetime lock.
         # - test_client_install_ux, test_installer_plugin, test_codex_hooks
         #   (picks): a smoke of install.ps1 and the native Windows hooks; the
         #   full installer and hook matrix runs nightly.
         # - test_installer_client_update_schedule: install.ps1's offer of the
         #   daily client update task (Task Scheduler, schtasks) on a
         #   client-only install, Windows-only installer code.
-        # - test_schema_version, test_doctor_cli, test_tool_annotations (one
-        #   test): schema pins and doctor, cheap and platform-sensitive.
-        # - test_migrate_flat: interrupted config replacement, file handling,
-        #   and recovery refusals on native Windows.
+        # - test_schema_version, test_doctor_cli: schema pins and doctor,
+        #   cheap and platform-sensitive.
         # - test_runner_cleanup: the parity runners' disk cleanup treats a
         #   directory junction as a link, which only Windows can make.
         # - test_selfhosted_windows_scripts: the Windows parity runner's hook
         #   refuses a job when the account's LAN block does not bind.
-        # - test_child_python: a child re-run of the package from inside an
-        #   older checkout imports the installed package (`-P`), with real
-        #   Windows interpreter spawns.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-
           python -m pytest -ra --durations=30
           --junitxml=ci-results/test-lite-windows.xml
-          tests/test_embedded_pg.py
-          tests/test_backup_cli.py
-          tests/test_docker_backup_restore.py
-          tests/test_migrate_flat.py
           tests/test_schema_version.py
           tests/test_doctor_cli.py
           tests/test_installer_claude_profile.py
@@ -609,15 +510,10 @@ jobs:
           tests/test_shim_autostart_refs.py
           tests/test_unattended_update.py
           tests/test_update_engine.py
-          tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints
-          tests/test_credentials.py
-          tests/test_coordination_credentials.py
-          tests/test_repository_claims.py
           tests/test_prune_worktrees.py
           tests/test_ops_install_worktree_retention.py
           tests/test_runner_cleanup.py
           tests/test_selfhosted_windows_scripts.py
-          tests/test_child_python.py
           tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve
           tests/test_move_cli.py::test_a_new_target_expose_is_undone_on_move_failure
           tests/test_move_cli.py::test_failed_exposure_cleanup_is_recorded_for_manual_recovery
@@ -643,14 +539,7 @@ jobs:
           tests/test_installer_lite.py
           rust/ci/test_pr_precheck.py
           rust/ci/test_pr_precheck_run.py
-          tests/test_tunnel_profiles.py
-          tests/test_tunnel_service.py
           tests/test_tunnel_cli.py
-          tests/test_tunnel_bridge.py
-          tests/test_tunnel_runtime.py
-          --deselect tests/test_tunnel_runtime.py::test_refresh_cancellation_reaps_actual_children_and_private_launch
-          --deselect tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
-          --deselect tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child
           tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations
           tests/test_claude_shim_windows_prompt.py
           tests/test_shim.py::test_spawn_daemon_never_allocates_a_console_window
@@ -668,16 +557,6 @@ jobs:
           tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
           tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
           tests/test_suite_lock.py::test_wsl_suite_forwards_a_lease_marker_only_while_its_windows_lock_is_held
-          tests/test_conductor_watch.py::test_detach_starts_the_watcher_and_prints_its_address
-          tests/test_conductor_watch.py::test_detach_reports_one_already_running
-          tests/test_conductor_watch.py::test_detach_reports_a_child_that_never_came_up
-          tests/test_conductor_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
-          tests/test_conductor_watch.py::test_detach_that_lost_a_race_reports_the_winner
-          tests/test_conductor_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
-          tests/test_conductor_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
-          tests/test_conductor_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
-          tests/test_conductor_watch.py::test_a_state_held_for_another_owner_is_refused
-          tests/test_conductor_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
           tests/test_client_install_ux.py::test_installer_ps1_parses
           tests/test_client_install_ux.py::test_install_ps1_update_line_names_the_launcher_until_path_finds_it
           tests/test_client_install_ux.py::test_installers_support_codex_hook_on_windows
@@ -733,15 +612,13 @@ jobs:
         # store tests in test_coordination_turn_digest.py skip; the Linux
         # lanes run them. -rs prints every skip reason, so a platform skip
         # cannot pass for coverage.
-        # The test_tunnel_*.py files run the tunnel's owner-only files and
-        # process handling on macOS; test_conductor_watch.py runs the
-        # watcher's `ps` start-time check there, test_prune_worktrees.py
-        # the retention script's `ps` process listing, and
-        # test_child_python.py a child re-run of the package from inside an
-        # older checkout.
+        # test_tunnel_cli.py runs the tunnel CLI on macOS and
+        # test_prune_worktrees.py the retention script's `ps` process
+        # listing. Only live files run (tests/suite_classes.txt): the frozen
+        # package's own macOS paths left with the Python freeze.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py tests/test_child_python.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
+        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_tunnel_cli.py tests/test_prune_worktrees.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
@@ -785,7 +662,7 @@ jobs:
           Write-Output $facts
           if ($env:GITHUB_STEP_SUMMARY) { $facts | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append }
 
-      - name: Start embedded PostgreSQL (the [lite] path, as test-lite-linux does)
+      - name: Start embedded PostgreSQL (test infrastructure; the lite tier itself is dropped)
         # Without it the shim-to-daemon tests and the PG-backed coordination
         # tests skip silently: hosted Windows has no service containers.
         # attach_or_start, not start_embedded (whose atexit stop would end the
@@ -816,12 +693,10 @@ jobs:
           -ra --durations=30
           tests/test_memory_changes_hook.py
           tests/test_coordination_turn_digest.py
-          tests/test_coordination_adapter.py
           tests/test_wait_mail_cli.py
           tests/test_subagent_board_guard.py
           tests/test_codex_hook_setup.py
           tests/test_codex_hook_setup_edges.py
-          tests/test_codex_doorbell.py
           tests/test_update_cli.py
           tests/test_ops_update_wrappers.py
           tests/test_register_claude_desktop.py
@@ -855,27 +730,11 @@ jobs:
           --deselect tests/test_suite_lock.py::test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured
           --deselect tests/test_suite_lock.py::test_the_windows_policy_comes_from_the_env_then_the_file_then_allow
           --deselect tests/test_suite_lock.py::test_wsl_suite_forwards_a_lease_marker_only_while_its_windows_lock_is_held
-          tests/test_conductor_watch.py
-          --deselect tests/test_conductor_watch.py::test_detach_starts_the_watcher_and_prints_its_address
-          --deselect tests/test_conductor_watch.py::test_detach_reports_one_already_running
-          --deselect tests/test_conductor_watch.py::test_detach_reports_a_child_that_never_came_up
-          --deselect tests/test_conductor_watch.py::test_detach_says_still_starting_while_the_child_runs_without_a_record
-          --deselect tests/test_conductor_watch.py::test_detach_that_lost_a_race_reports_the_winner
-          --deselect tests/test_conductor_watch.py::test_the_state_lock_excludes_a_watcher_in_another_process
-          --deselect tests/test_conductor_watch.py::test_a_second_watcher_on_the_same_state_exits_quietly
-          --deselect tests/test_conductor_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
-          --deselect tests/test_conductor_watch.py::test_a_state_held_for_another_owner_is_refused
-          --deselect tests/test_conductor_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
-          tests/test_tunnel_runtime.py::test_refresh_cancellation_reaps_actual_children_and_private_launch
-          tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
-          tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child
           tests/test_stop_wake_hook.py
           tests/test_codex_shim_health.py
           tests/test_connect.py
-          tests/test_expose_cli.py
           tests/test_shim_runtimes.py
           tests/test_wake_defaults.py
-          tests/test_codex_doorbell_revision.py
           tests/test_installer_legacy_hooks.py
           tests/test_ops_install_cache_retention.py
 

@@ -31,7 +31,8 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 REQUIRED_CHECKS = {"test", "Parity / ubuntu-latest", "Parity / windows-latest"}
 # The checks docs/specs/2026-10-19-merge-queue.md asks the maintainer to add
 # before enabling the queue, which waits only for required checks.
-ADDED_CHECKS = {"guards", "test-lite-linux", "test-lite-windows", "test-lite-macos",
+# test-lite-linux left with the lite tier (the Python freeze, 14 November 2026).
+ADDED_CHECKS = {"guards", "test-lite-windows", "test-lite-macos",
                 "frontend", "lock-resolve", "Rust daemon / disposable image"}
 SPEC = ROOT / "docs" / "specs" / "2026-10-19-merge-queue.md"
 
@@ -194,9 +195,17 @@ def test_a_mixed_or_non_rust_merge_group_runs_the_python_lanes(tmp_path, group):
     assert run_scope(tmp_path, "merge_group", group) == ["python=true"]
 
 
-@pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch"])
+@pytest.mark.parametrize("event", ["schedule", "workflow_dispatch"])
 def test_other_events_always_run_the_python_lanes(tmp_path, event):
     assert run_scope(tmp_path, event, RUST_ONLY) == ["python=true"]
+
+
+def test_a_rust_only_master_push_skips_the_python_lanes(tmp_path):
+    # Since the Python freeze: the push of a Rust-only batch is classified by
+    # its merge, as the batch was; the nightly runs the lanes on that commit
+    # (ops/ci_push_passed.py --require-job test).
+    assert run_scope(tmp_path, "push", RUST_ONLY) == ["python=false"]
+    assert run_scope(tmp_path, "push", PYTHON_CHANGE) == ["python=true"]
 
 
 @pytest.mark.parametrize("base_ref, fetch_exit", [
@@ -275,7 +284,8 @@ BATCH_PASSED = "fromJSON(needs.scope.outputs.batch_passed || '[]')"
 
 def test_the_fast_lanes_skip_every_suite_lane_and_keep_guards():
     jobs = load("ci.yml")["jobs"]
-    for name in ("test", "test-lite-linux", "test-lite-windows", "test-lite-macos"):
+    assert "test-lite-linux" not in jobs
+    for name in ("test", "test-lite-windows", "test-lite-macos"):
         assert jobs[name]["needs"] == "scope", name
         assert jobs[name]["if"] == ("${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' "
                                     f"&& !contains({BATCH_PASSED}, '{name}') }}}}"), name

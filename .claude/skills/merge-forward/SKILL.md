@@ -24,7 +24,7 @@ Added after #592 waited 25 minutes on a CHANGELOG-only conflict. All of
 these must hold:
 
 1. **The previous batch head passed** every lane a batch runs: `test`,
-   `test-lite-linux`, `test-lite-windows`, `test-lite-macos`, `frontend`,
+   `test-lite-windows`, `test-lite-macos`, `frontend`,
    CodeQL and both `Parity` gates. The merge-forward commit is the only
    commit pushed since, since nothing is fixed inside a batch.
 2. **The two sides share no file except docs-only files** (as CLAUDE.md's

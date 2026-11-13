@@ -101,9 +101,13 @@ def test_every_listed_file_and_test_exists():
             assert tests <= top_level_tests(path), (path, tests - top_level_tests(path))
 
 
-def test_docker_restore_safety_runs_in_required_windows_lane():
+def test_docker_restore_safety_left_the_lane_with_the_python_freeze():
+    # The Python Docker restore is frozen (tests/suite_classes.txt); the
+    # native restore's Windows tests run in the Rust workflow.
+    from tests import suite_classes
     files, _, _ = selection(lane_argv(REQUIRED))
-    assert "tests/test_docker_backup_restore.py" in files
+    assert "tests/test_docker_backup_restore.py" not in files
+    assert "test_docker_backup_restore.py" in suite_classes.frozen()
 
 
 def listed_files():
@@ -141,16 +145,22 @@ def test_a_split_names_no_test_that_prefixes_another():
 
 
 def test_no_file_lost_its_windows_coverage_in_the_split():
+    # Frozen files left every lane with the Python freeze (tests/suite_classes.txt).
+    from tests import suite_classes
     listed = {Path(p).stem for p in listed_files()}
-    present = {stem for stem in LANE_ON_2026_10_20 if (ROOT / "tests" / f"{stem}.py").exists()}
+    frozen = {Path(name).stem for name in suite_classes.frozen()}
+    present = {stem for stem in LANE_ON_2026_10_20
+               if (ROOT / "tests" / f"{stem}.py").exists() and stem not in frozen}
     assert present <= listed, sorted(present - listed)
 
 
 def test_every_file_with_a_windows_only_test_runs_in_a_windows_lane():
+    from tests import suite_classes
     listed = listed_files()
+    frozen = suite_classes.frozen()  # collected nowhere since the Python freeze
     missing = sorted(
         path.relative_to(ROOT).as_posix() for path in (ROOT / "tests").glob("test_*.py")
-        if WINDOWS_ONLY.search(path.read_text(encoding="utf-8"))
+        if path.name not in frozen and WINDOWS_ONLY.search(path.read_text(encoding="utf-8"))
         and path.relative_to(ROOT).as_posix() not in listed)
     assert not missing, (
         f"{missing} hold Windows-only tests that no Windows lane runs; add each to "

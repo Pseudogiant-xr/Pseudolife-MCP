@@ -84,10 +84,53 @@ def test_missing_token_writes_an_explicit_false(tmp_path, monkeypatch):
     assert output.read_text() == "passed=false\n"
 
 
+def jobs_decide(runs, jobs, required=("test",)):
+    calls = []
+
+    def get(path):
+        calls.append(path)
+        if "/jobs" in path:
+            return {"jobs": jobs}
+        return {"workflow_runs": runs}
+
+    return push.decide(get, repo=REPO, event="schedule", ref="refs/heads/master", sha=SHA,
+                       workflow=".github/workflows/ci.yml", required_jobs=required), calls
+
+
+CI_RUN = {**RUN, "path": ".github/workflows/ci.yml"}
+
+
+@pytest.mark.parametrize("conclusion, reused", [("success", True), ("skipped", False), ("failure", False),
+                                                (None, False)])
+def test_a_push_that_skipped_a_required_job_is_not_reused(conclusion, reused):
+    # A Rust-only batch's master push skips the Python lanes since the
+    # Python freeze; its run still succeeds, but the nightly must run them.
+    (passed, reason), calls = jobs_decide([CI_RUN], [{"name": "test", "conclusion": conclusion},
+                                                     {"name": "guards", "conclusion": "success"}])
+    assert passed is reused, reason
+    assert any(path.endswith("/actions/runs/123/jobs?per_page=100") for path in calls)
+
+
+def test_a_push_without_the_required_job_is_not_reused():
+    (passed, reason), _ = jobs_decide([CI_RUN], [{"name": "tests", "conclusion": "success"}])
+    assert passed is False and "test" in reason
+
+
+def test_an_unreadable_job_listing_runs_everything():
+    (passed, _), _ = jobs_decide([CI_RUN], "not a list")
+    assert passed is False
+
+
+def test_ci_yml_asks_for_its_test_job():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]
+    step = next(s for s in jobs["scope"]["steps"] if s.get("id") == "push")
+    assert step["run"].split()[-2:] == ["--require-job", "test"]
+
+
 @pytest.mark.parametrize("workflow,skips,keeps", [
     ("rust.yml", ["rust", "parity-checks", "daemon-image"],
      ["candidate", "candidate-harness", "fixtures", "source-mutants", "parity-live", "parity-selfhosted", "body-evidence"]),
-    ("ci.yml", ["test", "test-lite-linux", "test-lite-windows", "test-lite-macos", "frontend", "lock-resolve"],
+    ("ci.yml", ["test", "test-lite-windows", "test-lite-macos", "frontend", "lock-resolve"],
      ["test-windows-nightly"]),
 ])
 def test_workflows_preserve_nightly_only_evidence_and_its_builds(workflow, skips, keeps):
@@ -97,8 +140,8 @@ def test_workflows_preserve_nightly_only_evidence_and_its_builds(workflow, skips
     assert scope["permissions"]["actions"] == "read"
     assert step["if"] == "github.event_name == 'schedule' && github.ref == 'refs/heads/master'"
     assert step["continue-on-error"] is True
-    assert step["run"].split() == ["python3", "-m", "ops.ci_push_passed", "--workflow",
-                                  f".github/workflows/{workflow}", "--github-output", '"$GITHUB_OUTPUT"']
+    assert step["run"].split()[:7] == ["python3", "-m", "ops.ci_push_passed", "--workflow",
+                                      f".github/workflows/{workflow}", "--github-output", '"$GITHUB_OUTPUT"']
     assert scope["outputs"]["push_passed"] == "${{ steps.push.outputs.passed }}"
     for name in skips:
         assert "needs.scope.outputs.push_passed != 'true'" in jobs[name]["if"]

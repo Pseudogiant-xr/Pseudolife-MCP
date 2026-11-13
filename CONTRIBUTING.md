@@ -180,11 +180,13 @@ owns the merge.
 These validation rules began as a trial on 2026-09-28 and have been
 permanent since 2026-10-19.
 
-CI's two full-suite lanes run this exact invocation
+CI's full-suite lane runs this exact invocation
 (`-n 2 --dist loadfile` shards whole files across two workers so
 module-scoped fixtures keep their semantics): the `test` lane with
 `PSEUDOLIFE_TEST_EMBEDDER=real`, so every test also runs on the real
-weights for each PR, and `test-lite-linux` with the default. Two more
+weights. Since the Python freeze (14 November 2026) a run collects only
+the live test files (`tests/suite_classes.txt`; `--include-frozen` adds the
+frozen package's own), and a new test file adds its line there. Two more
 lanes run narrower fixed file lists: `test-lite-windows` for the product
 paths that differ on Windows, and `test-lite-macos` for the plugin hooks
 and installers under macOS's bash 3.2 and BSD tools. The process-spawning

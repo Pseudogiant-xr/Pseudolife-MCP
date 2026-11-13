@@ -376,7 +376,7 @@ def native_windows_refusal(kind: str, environ, directory: Path, *,
 
 def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
                 keyword: str = "", markexpr: str = "",
-                listing_only: bool = False) -> bool:
+                listing_only: bool = False, excluded: frozenset[str] = frozenset()) -> bool:
     """Whether a run covers the whole ``tests/`` tree, or most of it.
 
     Full: some path argument is ``tests/`` itself or one of its ancestors
@@ -386,6 +386,10 @@ def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
     files or node ids, a ``-k``/``-m`` selection — unless it only excludes
     (``-k "not x"``) — or a run that executes no test (``--collect-only``,
     ``--fixtures``, ``--help``).
+
+    ``excluded`` names test files the run does not collect (the frozen ones,
+    tests/suite_classes.py, unless ``--include-frozen``): they count toward
+    neither side of the share, so "half" means half of what a run can run.
     """
     if listing_only:
         return False
@@ -410,11 +414,11 @@ def is_full_run(args, invocation_dir: Path, tests_root: Path, *,
         # Only real test modules count toward the share: not conftest.py,
         # helpers or a mistyped path.
         if (path.parent == root and fnmatch(path.name, "test_*.py")
-                and path.is_file()):
+                and path.is_file() and path.name not in excluded):
             named.add(path)
     if not named:
         return False
-    return 2 * len(named) >= sum(1 for _ in root.glob("test_*.py"))
+    return 2 * len(named) >= sum(1 for path in root.glob("test_*.py") if path.name not in excluded)
 
 
 def _try_lock(handle: IO[bytes]) -> bool:
@@ -958,12 +962,15 @@ def session_kind(config, environ, tests_root: Path) -> str:
     if lock_mode(environ) == "off":
         return "off"
     option = config.option
+    from tests import suite_classes
+    excluded = frozenset() if getattr(option, "include_frozen", False) else suite_classes.frozen()
     full = is_full_run(
         config.args, config.invocation_params.dir, tests_root,
         keyword=getattr(option, "keyword", "") or "",
         markexpr=getattr(option, "markexpr", "") or "",
         listing_only=any(getattr(option, name, False)
-                         for name in LISTING_OPTIONS))
+                         for name in LISTING_OPTIONS),
+        excluded=excluded)
     return "full" if full else "targeted"
 
 

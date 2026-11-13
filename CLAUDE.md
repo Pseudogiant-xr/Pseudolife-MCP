@@ -52,8 +52,9 @@ each exists because it was violated at least once.
    - The `merge-forward` skill and item 11 are the only exceptions.
    - Read `docs/dev/merge-batches.md` before building, opening or merging a
      batch.
-5. **Rust-only batches skip the Python suite lanes** and the master push
-   runs them, because the workflows decide lanes from the diff
+5. **Rust-only batches skip the Python suite lanes**, on their master push
+   too, and the nightly runs them, because the workflows decide lanes from
+   the diff
    (`docs/dev/merge-batches.md` "What CI runs where", read when a batch's
    lane set looks wrong).
 6. **Deploy only via `pseudolife-mcp update`** (backup → rollback tag →
@@ -147,6 +148,10 @@ touched, with no retrofit sweep.
 
 ## Running tests
 
+- **Frozen test files:** a run collects only the live files of
+  `tests/suite_classes.txt` (a new test file adds its line there;
+  `--include-frozen` adds the rest), because the frozen package's own tests
+  can no longer find a regression and no lane runs them.
 - **Exit codes:** never pipe a test run through a pager, since the pipe
   replaces pytest's exit code; redirect, or use `set -o pipefail; ... | tee
   log | tail -60`:

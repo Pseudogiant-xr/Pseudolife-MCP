@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "f3e61581c78da942",
+  "fingerprint": "8585b161ca816f32",
+  "reason": "Python freeze (2026-11-14): the lane runs only the live files of its selection (11 frozen files left: embedded provider, tunnel, conductor watcher, coordination adapter and credentials, doorbell, lease CLI, child re-run), so it can only shorten; setup is unchanged."
+}

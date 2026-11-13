@@ -198,11 +198,11 @@
   },
   "ci.yml": {
     "limits": {
-      "jobs": 8,
+      "jobs": 7,
       "runner_minutes": 67,
       "longest_job_minutes": 25,
       "critical_path_minutes": 27,
-      "why": "2026-10-24: measured on the runs below, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above"
+      "why": "2026-10-24: measured on the runs below, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above 2026-11-14 (the Python freeze): test-lite-linux, the whole suite on embedded PostgreSQL, left with the lite tier, so the job limit falls to 7; the other limits are unchanged."
     },
     "pip_no_compile": false,
     "needs_without_data": {},
@@ -225,9 +225,6 @@
       },
       "test": {
         "minutes": 22.4
-      },
-      "test-lite-linux": {
-        "minutes": 21.7
       },
       "test-lite-windows": {
         "minutes": 5.0

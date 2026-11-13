@@ -36,6 +36,12 @@ sys.path.insert(0, str(ROOT))
 # measurements. The GPU is hidden here,
 # before anything can import torch; the lock is taken in pytest_configure.
 from tests import suite_lock  # noqa: E402
+from tests import suite_classes  # noqa: E402
+
+# The frozen package's test files (tests/suite_classes.py): left out of a
+# run unless --include-frozen; a malformed list stops the session here.
+_TESTS_DIR = Path(__file__).resolve().parent
+_FROZEN = suite_classes.frozen()
 
 suite_lock.hide_cuda(os.environ)
 
@@ -324,6 +330,41 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         raise pytest.UsageError(str(exc)) from None
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        suite_classes.SWITCH, action="store_true", dest="include_frozen",
+        help="also collect the test files of the frozen Python package "
+             "(tests/suite_classes.txt), which a run leaves out by default since 14 November 2026")
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """Leave the frozen package's test files out unless --include-frozen."""
+    if (not config.getoption("include_frozen") and collection_path.parent == _TESTS_DIR
+            and collection_path.name in _FROZEN):
+        return True
+    return None
+
+
+def _refuse_named_frozen_files(config: pytest.Config) -> None:
+    """A frozen file named on the command line is refused, naming the switch,
+    rather than silently collecting nothing."""
+    if config.getoption("include_frozen"):
+        return
+    named = []
+    for arg in config.args:
+        path = Path(str(arg).split("::", 1)[0])
+        if not path.is_absolute():
+            path = Path(config.invocation_params.dir) / path
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if path.parent == _TESTS_DIR and path.name in _FROZEN:
+            named.append(path.name)
+    if named:
+        raise pytest.UsageError(suite_classes.refusal(sorted(set(named))))
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Load each distinct embedding model once per session, not per module.
 
@@ -369,6 +410,8 @@ def pytest_configure(config: pytest.Config) -> None:
     # suite lock below, as a server that refused the first connection may be
     # up by then. Only in the process that started the run: xdist workers
     # inherit its settings.
+    _refuse_named_frozen_files(config)  # before anything queues or loads
+
     def refuse_live_bank() -> None:
         if os.environ.get("PYTEST_XDIST_WORKER"):
             return
@@ -429,7 +472,8 @@ def pytest_configure(config: pytest.Config) -> None:
             raise pytest.UsageError(refusal)
 
     held = suite_lock.take_for_session(
-        config, os.environ, ROOT / "tests", read_files=(ENV_FILE, login_file_path()),
+        config, os.environ, ROOT / "tests",
+        read_files=(ENV_FILE, login_file_path(), suite_classes.CLASSES_FILE),
         preflight=preflight,
         mirror=lambda: suite_lock.board_mirror(
             suite_lock.lock_dir(os.environ), ROOT, _BOARD_ENV,
