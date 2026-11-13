@@ -39,7 +39,8 @@ fn c_space(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
-/// The minutes the oracle prints, or the exception line it dies with.
+/// The minutes the oracle prints, or the line of the exception `int()`
+/// raises (the oracle's `no usable expiry time` refusal).
 pub(super) fn minutes(value: Option<&J>) -> Result<String, String> {
     let Some(value) = value.filter(|value| value.truthy()) else {
         return Ok("5".to_owned());

@@ -9,9 +9,9 @@
 //! `webbrowser.get()` as no browser: both print the link. The reproduced
 //! launchers are a `BackgroundBrowser` (from `BROWSER` or the standard X
 //! list) and, on Windows, `WindowsDefault` (`os.startfile`). Every other
-//! controller (the `UnixBrowser` family, Konqueror, Grail, the macOS
-//! AppleScript launchers) and a clone `_synthesize` could make of one
-//! defers.
+//! controller (the `UnixBrowser` family but Elinks, which `open_browser`
+//! refuses, Konqueror, Grail, the macOS AppleScript launchers) and a clone
+//! `_synthesize` could make of one defers.
 use std::ffi::OsString;
 
 /// Which `sys.platform` branch of `webbrowser` runs.

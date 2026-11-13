@@ -5,8 +5,8 @@
 //! `has_display`) with CPython 3.11's `webbrowser`. Answered natively: help
 //! and argparse's errors (at `COLUMNS=80`), `--list [--json]`, `--revoke ID
 //! [--json]`, the sign-in (`[--no-open] [--to PAGE] [--json]
-//! [--unless-signed-in]`, an empty `--revoke` included) and every refusal
-//! those reach. Which browser the sign-in would start is decided before the
+//! [--unless-signed-in]`), the empty `--revoke` usage error and every
+//! refusal those reach. Which browser the sign-in would start is decided before the
 //! code is minted (`browser.rs`), so a launcher this port does not
 //! reproduce defers before any effect; once the daemon answers the sign-in
 //! with a 200 object the command answers every branch itself, each

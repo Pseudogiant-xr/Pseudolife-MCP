@@ -230,8 +230,8 @@ def _settle(arm, obs, launches=0):
     can exit before one has written its record), give any other a moment to
     show, then wait for each started one to finish and exit. The count is
     ``launches``, which a case declares when the CLI starts the stand-in and
-    then says nothing about it (the oracle dies after ``open_browser``), or
-    one when the CLI reports it opened. An arm that starts fewer waits out
+    then says nothing about it (none does now: the oracle no longer dies
+    after ``open_browser``), or one when the CLI reports it opened. An arm that starts fewer waits out
     the 30 seconds and then differs. A stand-in that never finished leaves
     ``launched/unfinished-N`` behind, which no arm matches."""
     _arm(arm, obs)
