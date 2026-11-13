@@ -960,7 +960,9 @@ def test_a_slice_of_the_suite_passes_under_the_login(provisioned, tmp_path):
     log = tmp_path / "slice.log"
     with log.open("w", encoding="utf-8") as fh:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", *SLICE, "-q", "-p", "no:cacheprovider",
+            # The slice names frozen files on purpose (the storage paths the
+            # login must be able to run), so it opts back in to them.
+            [sys.executable, "-m", "pytest", "--include-frozen", *SLICE, "-q", "-p", "no:cacheprovider",
              "-p", "no:xdist", "-rs"],
             cwd=ROOT, env=env, stdout=fh, stderr=subprocess.STDOUT, timeout=1800)
     text = log.read_text(encoding="utf-8", errors="replace")

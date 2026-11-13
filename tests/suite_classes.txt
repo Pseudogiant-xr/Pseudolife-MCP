@@ -9,7 +9,11 @@
 # compose file); live otherwise, plus the update CLI path the last release's
 # bridge ships, the guards job's files, test_pg_run_isolation.py (the suite's
 # own PostgreSQL fixtures), and test_rust_mcp_catalogue.py while
-# rust.yml still names it. A new or deleted test file edits its own line.
+# rust.yml still names it; also the tests of tooling the repository still runs
+# (evals/regression_gate.ps1, tests/report_redaction.py, the suite profiler)
+# and of an ops/ script beside the package (trace invalidations, writer
+# keying). Eval benches that drive the frozen engine stay frozen. A new or
+# deleted test file edits its own line.
 
 frozen test_abstain.py
 frozen test_access_count_semantics.py
@@ -393,12 +397,12 @@ frozen test_reference_bank.py
 live test_refind_arm.py
 live test_register_claude_desktop.py
 live test_regression_gate_defaults.py
-frozen test_regression_gate_inputs.py
+live test_regression_gate_inputs.py
 live test_rehearse_activation.py
 frozen test_relation_bench.py
 live test_relation_quality.py
 live test_release_ux.py
-frozen test_report_redaction.py
+live test_report_redaction.py
 frozen test_repository_claims.py
 frozen test_reranker.py
 frozen test_reranker_margin_gate.py
@@ -473,7 +477,7 @@ live test_subagent_tier_bench.py
 live test_suite_classes.py
 live test_suite_cost.py
 live test_suite_lock.py
-frozen test_suite_profile_plugin.py
+live test_suite_profile_plugin.py
 live test_suite_profile_summary.py
 frozen test_superseded_visibility.py
 frozen test_tag_filters.py
@@ -484,7 +488,7 @@ live test_test_login_cli.py
 frozen test_tool_annotations.py
 frozen test_tool_consolidation.py
 frozen test_toolset_tiers.py
-frozen test_trace_invalidations_storage.py
+live test_trace_invalidations_storage.py
 live test_transfer_cli.py
 frozen test_tunnel_bridge.py
 live test_tunnel_cli.py
@@ -512,6 +516,6 @@ frozen test_wiki_page.py
 frozen test_world_cortex.py
 frozen test_write_through.py
 frozen test_writer_context.py
-frozen test_writer_keying.py
+live test_writer_keying.py
 live test_writer_lease.py
 live test_wsl_suite_launcher.py

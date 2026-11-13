@@ -46,7 +46,8 @@ def test_a_full_rust_run_is_what_a_batch_starts():
     assert "Parity checks / ubuntu-latest / h5-light" in names
     assert "Parity checks / windows-latest / h5-light" not in names
     assert "Parity checks / windows-latest / cli-live" not in names
-    assert pull_request_reachable(load("ci.yml")) == ["scope", "guards", "lock-resolve", "test", "test-lite-linux",
+    # test-lite-linux left with the lite tier (the Python freeze, 14 November 2026).
+    assert pull_request_reachable(load("ci.yml")) == ["scope", "guards", "lock-resolve", "test",
                                                       "test-lite-windows", "test-lite-macos", "frontend"]
 
 
