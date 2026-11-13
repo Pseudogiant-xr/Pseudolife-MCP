@@ -66,5 +66,12 @@
     "restore-unsure-url-read",
     "restore-yes-ignored",
     "restore-zlib-deferred"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "restore-desktop-unmapped": "Declared Windows-only: only Windows maps Docker Desktop's host-mount source paths.",
+      "restore-null-device-terminal": "Declared Windows-only: only Windows' CRT isatty() reads the null device as a terminal."
+    },
+    "windows": {}
+  }
 }

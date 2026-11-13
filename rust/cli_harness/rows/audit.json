@@ -21,5 +21,9 @@
     "audit-read-message",
     "audit-payload-depth-capped",
     "audit-decode-one-byte"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

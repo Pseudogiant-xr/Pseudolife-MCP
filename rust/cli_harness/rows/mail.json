@@ -10,5 +10,9 @@
     "mail-ring-13-digits",
     "mail-skip-seen-advance",
     "mail-timeout-exit-4"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

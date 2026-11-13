@@ -9,5 +9,9 @@
     "lease-conductor-commit-ignored",
     "lease-commit-unknown-certain",
     "lease-commit-refused-unknown"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

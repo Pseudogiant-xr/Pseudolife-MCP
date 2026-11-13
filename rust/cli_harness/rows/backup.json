@@ -23,5 +23,19 @@
     "backup-dot-join-keeps-prefix",
     "backup-discovery-generic-errno-class",
     "backup-owner-name-windows"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "backup-dotfile-suffix-windows": "Registered only by the Windows backup source branch.",
+      "backup-member-mode-windows": "Registered only by the Windows backup source branch.",
+      "backup-owner-name-windows": "Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.",
+      "backup-top-order-windows": "Registered only by the Windows backup source branch."
+    },
+    "windows": {
+      "backup-discovery-generic-errno-class": "Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.",
+      "backup-member-mode-posix": "Registered only by the POSIX backup source branch.",
+      "backup-omits-fifo": "Declared Linux-only FIFO member witness.",
+      "backup-raw-member-name": "Declared Linux-only raw-byte member name witness."
+    }
+  }
 }

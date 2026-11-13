@@ -11,5 +11,9 @@
     "conductor-watch-stop-before-owner",
     "conductor-watch-stop-file-kept",
     "conductor-watch-stop-refusal-exit-0"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

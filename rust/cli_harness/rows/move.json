@@ -13,5 +13,9 @@
     "move-url-checked-after-to",
     "move-url-message",
     "move-valid-refused"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

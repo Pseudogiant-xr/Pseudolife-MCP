@@ -64,6 +64,11 @@ def test_a_row_dropped_with_its_module_leaves_its_spec_and_goldens_failing(tree)
     (lambda data: data.update(source_mutants=[]), "source_mutants is not a list of mutant ids"),
     (lambda data: data.update(source_mutants=[1]), "source_mutants is not a list of mutant ids"),
     (lambda data: data["source_mutants"].append(data["source_mutants"][0]), "source_mutants repeats an id"),
+    (lambda data: data["platform_exclusions"].pop("windows"), "platform_exclusions does not give a reason"),
+    (lambda data: data["platform_exclusions"]["linux"].update({"restore-yes-ignored": " "}),
+     "platform_exclusions does not give a reason"),
+    (lambda data: data["platform_exclusions"]["windows"].update({"backup-omits-fifo": "x"}),
+     "platform_exclusions names a mutant the row does not declare"),
 ])
 def test_a_malformed_declaration_is_refused_by_name(tree, change, message):
     path = tree / row_ci.ROWS_DIR / "restore.json"
@@ -82,3 +87,20 @@ def test_source_mutants_keep_their_declared_order():
     for name, (row, ids) in SOURCE_SHARDS.items():
         index = int(name.rsplit("-", 1)[1])
         assert ids == SOURCE_MUTANTS[row][index * 8:index * 8 + 8]
+
+
+def test_a_dropped_platform_exclusion_fails_the_runtime_registration_check(monkeypatch):
+    # The declaration and each Mutant's own platforms state the same fact;
+    # dropping the declared exclusion makes the registered roster disagree.
+    import copy
+    import control_selection
+    from rust.cli_harness import core
+    excluded = row_ci.platform_exclusions()
+    owners = {name: row for row, ids in row_ci.source_mutants().items() for name in ids}
+    name = sorted(excluded[core.PLATFORM])[0]
+    control_selection.runtime_controls(owners[name], core.PLATFORM)
+    reduced = copy.deepcopy(excluded)
+    del reduced[core.PLATFORM][name]
+    monkeypatch.setattr(control_selection, "PLATFORM_EXCLUSIONS", reduced)
+    with pytest.raises(AssertionError, match="eligibility drift"):
+        control_selection.runtime_controls(owners[name], core.PLATFORM)

@@ -17,5 +17,13 @@
     "console-unless-skips-the-list",
     "console-unsafe-link-launched",
     "console-winerror-full-stop"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "console-winerror-full-stop": "Declared Windows-only: only FormatMessageW text ends in a full stop."
+    },
+    "windows": {
+      "console-display-ignored": "Declared Linux-only: only Linux gates the browser on DISPLAY or WAYLAND_DISPLAY."
+    }
+  }
 }

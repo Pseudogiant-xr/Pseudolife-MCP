@@ -22,5 +22,11 @@
     "tunnel-tunnel-id-class",
     "tunnel-update-exit-3",
     "tunnel-verify-message"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "tunnel-dangling-junction-answered": "Registered only by the Windows junction source branch."
+    },
+    "windows": {}
+  }
 }

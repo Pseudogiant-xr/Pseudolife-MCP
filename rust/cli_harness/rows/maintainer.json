@@ -17,5 +17,9 @@
     "maint-secret-kept",
     "maint-unused-codes-kept",
     "maint-waiting-stdout-error-dropped"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

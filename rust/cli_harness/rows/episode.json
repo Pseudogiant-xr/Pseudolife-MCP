@@ -6,5 +6,11 @@
     "episode-home-drive-insensitive",
     "episode-start-path",
     "episode-system-dir-titled"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "episode-home-drive-insensitive": "Declared Windows-only drive spelling witness."
+    },
+    "windows": {}
+  }
 }

@@ -25,5 +25,9 @@
     "transfer-stdout-refusal-ignored",
     "transfer-timestamp-range",
     "transfer-utc-precheck"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

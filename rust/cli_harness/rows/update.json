@@ -2,5 +2,9 @@
   "parity": "CLI-UPDATE",
   "source_mutants": [
     "update-current-exit"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

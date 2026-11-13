@@ -20,5 +20,9 @@
     "connect-stdout-refusal-ignored",
     "connect-user-agent-changed",
     "connect-verify-reverse-order"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

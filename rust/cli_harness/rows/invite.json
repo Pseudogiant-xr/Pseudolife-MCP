@@ -9,5 +9,9 @@
     "invite-refusal-exit",
     "invite-revoke-dropped",
     "invite-ttl-shortened"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

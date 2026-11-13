@@ -10,5 +10,11 @@
     "hook-since-dropped",
     "hook-token-dropped",
     "hook-whole-reply-budget"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "hook-first-address-only": "Declared Windows-only resolver witness."
+    },
+    "windows": {}
+  }
 }

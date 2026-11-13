@@ -34,5 +34,13 @@
     "doctor-wake-hook-flag",
     "doctor-which-skips-cwd",
     "doctor-wire-keep-alive"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {
+      "doctor-json-depth-off-by-one": "Registered only by the Windows doctor source branch.",
+      "doctor-pathlib-keeps-dot-parts": "Registered only by the Windows doctor source branch.",
+      "doctor-which-skips-cwd": "Registered only by the Windows doctor source branch."
+    },
+    "windows": {}
+  }
 }

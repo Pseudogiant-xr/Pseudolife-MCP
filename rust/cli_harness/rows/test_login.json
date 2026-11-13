@@ -22,5 +22,9 @@
     "tl-stdout-exit-ignored",
     "tl-stdout-refusal-ignored",
     "tl-verify-owner-connect"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

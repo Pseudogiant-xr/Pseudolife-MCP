@@ -31,7 +31,11 @@ FIELDS = {
     # The row's source mutants (the Mutant(...) ids in rows/<row>.py), in
     # the order coverage_plan cuts them into eight-mutant nightly shards.
     "source_mutants": list,
+    # The row's source mutants that one platform never registers, by
+    # platform ("linux", "windows"), each with its reason.
+    "platform_exclusions": dict,
 }
+PLATFORMS = ("linux", "windows")
 # The modules under rows/ that are not rows: a shared helper and a test
 # module. Every other rows/<name>.py, less _private ones, declares
 # rows/<name>.json.
@@ -57,6 +61,14 @@ def problems(data) -> list[str]:
         found.append("source_mutants is not a list of mutant ids")
     elif len(set(mutants)) != len(mutants):
         found.append("source_mutants repeats an id")
+    excluded = data["platform_exclusions"]
+    if set(excluded) != set(PLATFORMS) or any(
+            not isinstance(names, dict) or any(
+                not isinstance(reason, str) or not reason.strip() for reason in names.values())
+            for names in excluded.values()):
+        found.append("platform_exclusions does not give a reason by mutant for linux and windows")
+    elif any(name not in mutants for names in excluded.values() for name in names):
+        found.append("platform_exclusions names a mutant the row does not declare")
     return found
 
 
@@ -85,6 +97,16 @@ def rows(root: Path = ROOT) -> tuple[str, ...]:
 def source_mutants(root: Path = ROOT) -> dict[str, list[str]]:
     """Each row's source mutant ids, in its declared order."""
     return {row: list(data["source_mutants"]) for row, data in declarations(root).items()}
+
+
+def platform_exclusions(root: Path = ROOT) -> dict[str, dict[str, str]]:
+    """The source mutants each platform never registers, with reasons, from
+    every row's declaration."""
+    found = {platform: {} for platform in PLATFORMS}
+    for data in declarations(root).values():
+        for platform in PLATFORMS:
+            found[platform].update(data["platform_exclusions"][platform])
+    return found
 
 
 def roster_problems(root: Path = ROOT) -> list[str]:

@@ -2,5 +2,9 @@
   "parity": "CLI-COORDINATION-RECOVERY",
   "source_mutants": [
     "recovery-stop-gate-dropped"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }

@@ -9,5 +9,9 @@
     "lease-stale-mirror",
     "lease-timeout-status",
     "lease-gated-refusal"
-  ]
+  ],
+  "platform_exclusions": {
+    "linux": {},
+    "windows": {}
+  }
 }
