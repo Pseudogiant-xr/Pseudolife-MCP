@@ -843,8 +843,13 @@ mod runtime_trust_tests {
     }
     #[test]
     fn runtime_expects_no_handler_for_the_shipped_claude_only_stop_failure() {
-        let shipped = include_bytes!("../../../../../../plugin/hooks/hooks.json");
-        let keys = handler_keys(&manifest(shipped).unwrap()).unwrap();
+        // Read at run time: a compile-time include would name a file the
+        // daemon image's builder stage does not copy.
+        let shipped = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugin/hooks/hooks.json"),
+        )
+        .unwrap();
+        let keys = handler_keys(&manifest(&shipped).unwrap()).unwrap();
         assert!(!keys.is_empty());
         assert!(
             keys.iter().all(|key| !key.contains(":stop_failure:")),
