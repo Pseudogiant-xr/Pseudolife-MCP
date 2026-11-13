@@ -38,8 +38,9 @@ const DEPRECATED_MODE: &str =
     "pseudolife-mcp delegate-watch is deprecated: use pseudolife-mcp conductor-watch";
 const CLEARS: &str = "decision events";
 /// Pid records nested deeper defer: the oracle's `json.loads` raises
-/// RecursionError (uncaught) somewhere past 900 levels on this path, which
-/// was not measured; this stays far inside it.
+/// RecursionError (read as no watcher) somewhere past 900 levels on this
+/// path, which was not measured, and parses anything shallower, where the
+/// record may still name a live watcher; this stays far inside it.
 const DEPTH: usize = 500;
 
 /// Python `repr()` of a str.
@@ -167,8 +168,8 @@ fn process_start(pid: u32) -> Res<Option<String>> {
     }
     #[cfg(target_os = "linux")]
     {
-        // read_text decodes strictly (a failure is uncaught there); a stat
-        // without field 22 falls through to `ps` there: both defer here.
+        // A stat that cannot be read, does not decode or has no field 22
+        // falls through to `ps` there, which this port does not run: defer.
         let raw = fs::read(format!("/proc/{pid}/stat")).map_err(|_| Defer)?;
         let text = String::from_utf8(raw).map_err(|_| Defer)?;
         let tail = text.rsplit_once(')').ok_or(Defer)?.1;
@@ -185,22 +186,22 @@ fn process_start(pid: u32) -> Res<Option<String>> {
 }
 
 /// `int(record["pid"])`: `Ok(None)` where the oracle's `_running` catches
-/// the failure (ValueError, KeyError, TypeError) and reads no watcher.
+/// the failure (ValueError, KeyError, TypeError, OverflowError) or refuses
+/// the pid (at or past `_PID_LIMIT`, 2**31, or at or below 0 for
+/// `_pid_alive`), and so reads no watcher.
 fn record_pid(value: Option<&J>) -> Res<Option<i64>> {
-    let small = |text: &str| -> Res<i64> {
-        // Beyond i32 the oracle's process probes overflow or wrap.
-        text.parse::<i32>().map(i64::from).map_err(|_| Defer)
-    };
+    // Decimal digits with an optional sign: outside i32 the pid is past
+    // the limit or not positive, no watcher either way.
+    let small = |text: &str| text.parse::<i32>().ok().map(i64::from);
     Ok(match value {
         None | Some(J::Null | J::List(_) | J::Dict(_)) => None,
         Some(J::Bool(flag)) => Some(i64::from(*flag)),
-        Some(J::Int(text)) => Some(small(text)?),
-        Some(J::Float(number)) if number.is_nan() => None,
-        Some(J::Float(number)) if number.is_infinite() => return Err(Defer),
+        Some(J::Int(text)) => small(text),
+        Some(J::Float(number)) if !number.is_finite() => None,
         Some(J::Float(number)) => {
             let whole = number.trunc();
             if whole.abs() > f64::from(i32::MAX) {
-                return Err(Defer);
+                return Ok(None);
             }
             // Bounded above: the cast is exact.
             #[allow(clippy::cast_possible_truncation)]
@@ -219,7 +220,7 @@ fn record_pid(value: Option<&J>) -> Res<Option<i64>> {
             if unsigned.is_empty() || !unsigned.bytes().all(|b| b.is_ascii_digit()) {
                 None
             } else {
-                Some(small(digits.strip_prefix('+').unwrap_or(digits))?)
+                small(digits.strip_prefix('+').unwrap_or(digits))
             }
         }
     })
@@ -480,6 +481,62 @@ fn stop(state: &Path) -> Res<Out> {
     Ok(out)
 }
 
+/// `exc.strerror` of the `OSError` Python's `open(path, "w")` raises for
+/// the failure `error` stands for, `None` where it is not reproduced.
+/// POSIX: the C library's `strerror`, the text Rust prints before ` (os
+/// error N)`. Windows: Python's `open` reports the C runtime's errno for the
+/// Win32 code (`_dosmaperr`), then that errno's message; only the codes
+/// whose mapping is certain are listed.
+fn strerror(error: &io::Error) -> Option<String> {
+    let code = error.raw_os_error()?;
+    if cfg!(windows) {
+        let text = match code {
+            2 | 3 => "No such file or directory",
+            // ERROR_ACCESS_DENIED, and the CRT's EACCES range from
+            // ERROR_WRITE_PROTECT to ERROR_SHARING_BUFFER_EXCEEDED.
+            5 | 19..=36 => "Permission denied",
+            112 => "No space left on device",
+            _ => return None,
+        };
+        return Some(text.to_owned());
+    }
+    error
+        .to_string()
+        .strip_suffix(&format!(" (os error {code})"))
+        .map(str::to_owned)
+}
+
+/// `_stop`'s refusal when its request file cannot be written: `reason` is
+/// the error's `strerror`.
+fn stop_refusal(stop: &Path, reason: &str) -> Res<String> {
+    // pathlib's parent of a bare name is ".".
+    let parent = stop
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    Ok(format!(
+        "cannot write {} ({reason}); nothing changed. Make {} writable, then run --stop again",
+        shown(stop)?,
+        shown(parent)?
+    ))
+}
+
+/// `stop.write_text("")`: create or empty the request file.
+fn write_stop(stop: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // The C runtime opens with CREATE_ALWAYS, which Windows refuses
+        // (ERROR_ACCESS_DENIED) over a hidden or system file; Rust's
+        // `File::create` empties one in place.
+        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+        if fs::metadata(stop).is_ok_and(|info| info.file_attributes() & HIDDEN_OR_SYSTEM != 0) {
+            return Err(io::Error::from_raw_os_error(5));
+        }
+    }
+    fs::write(stop, b"")
+}
+
 /// Write `text` whole; `Err(written)` with how much left before failing.
 fn emit(stream: &mut impl io::Write, text: &str) -> Result<(), usize> {
     if text.is_empty() {
@@ -522,15 +579,25 @@ pub(super) fn run(mode: &str, values: Vec<OsString>) -> Option<ExitCode> {
         Err(0) => return None,
         Err(_) => return Some(ExitCode::from(1)),
     };
-    if let Some(path) = &out.stop_file {
+    let mut out = out;
+    if let Some(path) = out.stop_file.take() {
         // The pid file was just read beside it, so its directory exists
         // (the oracle's mkdir is a no-op). A refused write changed nothing:
-        // with nothing printed yet it defers; after the notice the oracle's
-        // uncaught OSError exits 1, its traceback not reproduced.
-        if fs::write(path, b"").is_err() {
-            return wrote.then(|| ExitCode::from(1));
+        // `_stop` says why and exits 2. A reason not reproduced defers while
+        // nothing is printed; after the notice it is Rust's own text
+        // (declared in the row's notes).
+        match write_stop(&path) {
+            Ok(()) => wrote = true,
+            Err(error) => {
+                let reason = match strerror(&error) {
+                    Some(reason) => reason,
+                    None if !wrote => return None,
+                    None => error.to_string(),
+                };
+                // The state was printable, so its sibling and directory are.
+                out = Out::say(&stop_refusal(&path, &reason).ok()?, EXIT_SETUP);
+            }
         }
-        wrote = true;
     }
     let mut failed = false;
     for (stderr, text) in [(false, &out.stdout), (true, &out.stderr)] {
