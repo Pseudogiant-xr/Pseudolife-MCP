@@ -906,6 +906,70 @@ mod tests {
         assert_eq!(marker_distrust_sddl("O:SYD:(A;;FA;;;SY)", None), None);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_rule_refuses_a_malformed_access_list() {
+        use crate::credentials::windows_security::{MarkerDistrust, marker_distrust_raw};
+        // ACL (revision 2, size 28, one entry) holding ACCESS_ALLOWED_ACE
+        // (size 20, FILE_ALL_ACCESS) for Everyone (S-1-1-0), little-endian.
+        let well_formed = || {
+            vec![
+                0x001C_0002u32,
+                0x0000_0001,
+                0x0014_0000,
+                0x001F_01FF,
+                0x0000_0101,
+                0x0100_0000,
+                0x0000_0000,
+            ]
+        };
+        match marker_distrust_raw(&mut well_formed()) {
+            Some(MarkerDistrust::Writer(name)) => assert!(name.contains("Everyone"), "{name}"),
+            other => panic!("{other:?}"),
+        }
+        let unreadable = Some(MarkerDistrust::Writer(
+            "an access rule that cannot be read".into(),
+        ));
+        // More entries counted than the list holds.
+        let mut counted = well_formed();
+        counted[1] = 0x0000_0002;
+        assert_eq!(marker_distrust_raw(&mut counted), unreadable);
+        // An entry shorter than its own header.
+        let mut short = well_formed();
+        short[2] = 0x0002_0000;
+        assert_eq!(marker_distrust_raw(&mut short), unreadable);
+    }
+
+    /// A folder whose children inherit their access, as in a user profile:
+    /// the profile's own entries (SYSTEM, Administrators and this account,
+    /// inherited by everything below). The temporary folder itself can carry
+    /// more: on a host with the Codex sandbox its sandbox accounts may modify
+    /// everything under %TEMP%, which the marker rule rightly refuses.
+    #[cfg(windows)]
+    fn inheriting_folder(tag: &str) -> Dir {
+        let path = std::env::temp_dir().join(format!(
+            "pseudolife-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&path).unwrap();
+        let me = crate::credentials::windows_security::current_user_name().unwrap();
+        let status = std::process::Command::new("icacls")
+            .arg(&path)
+            .args([
+                "/inheritance:r",
+                "/grant:r",
+                "*S-1-5-18:(OI)(CI)F",
+                "*S-1-5-32-544:(OI)(CI)F",
+            ])
+            .arg(format!("{me}:(OI)(CI)F"))
+            .arg("/Q")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "icacls on {}", path.display());
+        Dir(path)
+    }
+
     /// Git Bash, as Claude Code runs the `.sh` hooks on Windows.
     #[cfg(windows)]
     fn git_bash() -> PathBuf {
@@ -969,12 +1033,8 @@ mod tests {
         private_dir(&private).unwrap();
         let hooked = root.0.join("hooked");
         bash(r#"umask 077; mkdir -p "$1""#, &[&hooked]);
-        let inherited = std::env::temp_dir().join(format!(
-            "pseudolife-markers-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir(&inherited).unwrap();
-        let _inherited = Dir(inherited.clone());
+        let _inherited = inheriting_folder("markers");
+        let inherited = _inherited.0.clone();
         for folder in [&private, &hooked, &inherited] {
             for marker in MARKERS {
                 let bashed = folder.join(format!("bash-{marker}"));

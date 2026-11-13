@@ -380,31 +380,23 @@ pub(crate) unsafe fn marker_distrust(
         {
             return Some(MarkerDistrust::Owner(sid_name(owner)));
         }
-        if dacl.is_null() {
+        let Some(acl) = dacl.as_ref() else {
             return Some(MarkerDistrust::NoDacl);
-        }
+        };
         let unreadable = || {
             Some(MarkerDistrust::Writer(
                 "an access rule that cannot be read".into(),
             ))
         };
-        let acl_start = dacl as usize;
-        let acl_end = acl_start + (*dacl).AclSize as usize;
-        for index in 0..(*dacl).AceCount as u32 {
-            let mut ace = ptr::null_mut();
-            if Security::GetAce(dacl, index, &mut ace) == 0 || ace.is_null() {
+        // A malformed list (an entry count or size its entries do not
+        // match) is refused before any entry is read.
+        if Security::IsValidAcl(dacl) == 0 {
+            return unreadable();
+        }
+        for index in 0..acl.AceCount as u32 {
+            let Some((header, bytes)) = ace_at(acl, index) else {
                 return unreadable();
-            }
-            let start = ace as usize;
-            if start < acl_start + mem::size_of::<Security::ACL>()
-                || start + mem::size_of::<Security::ACE_HEADER>() > acl_end
-            {
-                return unreadable();
-            }
-            let header = &*ace.cast::<Security::ACE_HEADER>();
-            if start + header.AceSize as usize > acl_end {
-                return unreadable();
-            }
+            };
             // An inherit-only entry grants nothing on this file; a deny
             // entry takes rights away.
             if header.AceFlags as u32 & Security::INHERIT_ONLY_ACE != 0 || header.AceType == 1 {
@@ -412,16 +404,21 @@ pub(crate) unsafe fn marker_distrust(
             }
             // Any other allow form (callback, object) is not read here, so
             // it fails closed rather than being guessed at.
-            if header.AceType != 0 || header.AceSize < 16 {
+            if header.AceType != 0 || bytes.len() < 16 {
                 return unreadable();
             }
-            let mask = *ace.cast::<u8>().add(4).cast::<u32>();
+            // ACCESS_ALLOWED_ACE: header (4), mask (4), then the SID.
+            let mask = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
             if mask & MARKER_WRITE_RIGHTS == 0 {
                 continue;
             }
-            let sid = ace.cast::<u8>().add(8).cast::<c_void>();
-            let sid_size = 8 + (*ace.cast::<u8>().add(9) as usize) * 4;
-            if 8 + sid_size > header.AceSize as usize || Security::IsValidSid(sid) == 0 {
+            // A SID has an 8-byte header and four bytes per subauthority.
+            let sid_size = 8 + bytes[9] as usize * 4;
+            if 8 + sid_size > bytes.len() {
+                return unreadable();
+            }
+            let sid = bytes[8..].as_ptr().cast_mut().cast::<c_void>();
+            if Security::IsValidSid(sid) == 0 {
                 return unreadable();
             }
             if !trusted_marker_principal(sid, user) {
@@ -429,6 +426,47 @@ pub(crate) unsafe fn marker_distrust(
             }
         }
         None
+    }
+}
+
+/// The entry at `index` of `acl` as its header and its bytes, when it lies
+/// wholly inside the list and is at least a header long; `None` otherwise.
+///
+/// # Safety
+/// `acl` must be an ACL that `IsValidAcl` accepted, live for `'a`.
+unsafe fn ace_at(acl: &Security::ACL, index: u32) -> Option<(&Security::ACE_HEADER, &[u8])> {
+    unsafe {
+        let start = acl as *const Security::ACL as usize;
+        let end = start + acl.AclSize as usize;
+        let mut ace = ptr::null_mut();
+        if Security::GetAce(acl, index, &mut ace) == 0 {
+            return None;
+        }
+        let at = ace as usize;
+        if at < start + mem::size_of::<Security::ACL>()
+            || at + mem::size_of::<Security::ACE_HEADER>() > end
+        {
+            return None;
+        }
+        let header = ace.cast::<Security::ACE_HEADER>().as_ref()?;
+        let size = header.AceSize as usize;
+        if size < mem::size_of::<Security::ACE_HEADER>() || at + size > end {
+            return None;
+        }
+        Some((header, std::slice::from_raw_parts(ace.cast::<u8>(), size)))
+    }
+}
+
+/// [`marker_distrust`] over raw ACL bytes, with this token's user as owner
+/// and user: lets tests hand the rule a malformed list.
+#[cfg(test)]
+pub(crate) fn marker_distrust_raw(acl: &mut [u32]) -> Option<MarkerDistrust> {
+    // SAFETY: the buffer is live and u32-aligned for the call; the token
+    // buffer outlives the SID it holds.
+    unsafe {
+        let token = token_user().expect("token user");
+        let user = (*(token.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
+        marker_distrust(user, acl.as_mut_ptr().cast(), user)
     }
 }
 
