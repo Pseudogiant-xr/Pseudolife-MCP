@@ -1,3 +1,15 @@
 {
-  "parity": "CLI-PAIRING"
+  "parity": "CLI-PAIRING",
+  "source_mutants": [
+    "pair-cleanup-error-swallowed",
+    "pair-constant-digest",
+    "pair-file-kept-on-refusal",
+    "pair-hash-of-wrong-text",
+    "pair-message-token",
+    "pair-mode-not-owner-only",
+    "pair-not-owner-only",
+    "pair-reserved-name-moves",
+    "pair-retry-flipped",
+    "pair-unknown-exit"
+  ]
 }

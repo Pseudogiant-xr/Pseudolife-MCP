@@ -2,7 +2,6 @@
 
 import ast
 from collections import Counter
-import json
 import re
 import sys
 from pathlib import Path
@@ -44,6 +43,12 @@ def cli_controls():
         if ids:
             result[path.stem] = ids
     return result
+
+
+def source_mutant_roster():
+    """The accepted source mutants by row: each row's rows/<row>.json."""
+    import row_ci
+    return {row: list(ids) for row, ids in row_ci.source_mutants().items()}
 
 
 def assigned_list(path, name):
@@ -115,7 +120,7 @@ def check(workflow):
     # pairs its merged batch passed; parity_scope.pruned).
     workflow = resolve(workflow)
     declared = cli_controls()
-    selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
+    selected = source_mutant_roster()
     assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
     exception_reasons(EXCEPTIONS)
     backup_zero_retention_scope(EXCEPTIONS)

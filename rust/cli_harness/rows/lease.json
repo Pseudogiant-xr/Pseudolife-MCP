@@ -1,3 +1,13 @@
 {
-  "parity": "CLI-LEASE-core"
+  "parity": "CLI-LEASE-core",
+  "source_mutants": [
+    "lease-child-status",
+    "lease-list-filter",
+    "lease-lock-name",
+    "lease-os-truth",
+    "lease-release-mirror",
+    "lease-stale-mirror",
+    "lease-timeout-status",
+    "lease-gated-refusal"
+  ]
 }

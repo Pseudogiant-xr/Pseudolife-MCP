@@ -28,6 +28,9 @@ ROWS_DIR = "rust/cli_harness/rows"
 # a value of another type, is refused rather than read in part.
 FIELDS = {
     "parity": str,
+    # The row's source mutants (the Mutant(...) ids in rows/<row>.py), in
+    # the order coverage_plan cuts them into eight-mutant nightly shards.
+    "source_mutants": list,
 }
 # The modules under rows/ that are not rows: a shared helper and a test
 # module. Every other rows/<name>.py, less _private ones, declares
@@ -45,8 +48,15 @@ def problems(data) -> list[str]:
     for name, kind in FIELDS.items():
         if type(data[name]) is not kind:
             found.append(f"{name} is not a {kind.__name__}")
-    if not found and not data["parity"].strip():
+    if found:
+        return found
+    if not data["parity"].strip():
         found.append("parity is empty")
+    mutants = data["source_mutants"]
+    if not mutants or any(type(name) is not str or not name for name in mutants):
+        found.append("source_mutants is not a list of mutant ids")
+    elif len(set(mutants)) != len(mutants):
+        found.append("source_mutants repeats an id")
     return found
 
 
@@ -70,6 +80,11 @@ def declarations(root: Path = ROOT) -> dict[str, dict]:
 def rows(root: Path = ROOT) -> tuple[str, ...]:
     """The declared rows, in name order."""
     return tuple(declarations(root))
+
+
+def source_mutants(root: Path = ROOT) -> dict[str, list[str]]:
+    """Each row's source mutant ids, in its declared order."""
+    return {row: list(data["source_mutants"]) for row, data in declarations(root).items()}
 
 
 def roster_problems(root: Path = ROOT) -> list[str]:

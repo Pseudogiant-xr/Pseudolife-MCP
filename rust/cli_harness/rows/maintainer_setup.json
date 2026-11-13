@@ -1,3 +1,6 @@
 {
-  "parity": "CLI-MAINTAINER-SETUP"
+  "parity": "CLI-MAINTAINER-SETUP",
+  "source_mutants": [
+    "setup-consent-bypassed"
+  ]
 }

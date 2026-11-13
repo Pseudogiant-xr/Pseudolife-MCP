@@ -1,3 +1,6 @@
 {
-  "parity": "CLI-MIGRATE-FLAT"
+  "parity": "CLI-MIGRATE-FLAT",
+  "source_mutants": [
+    "migrate-flat-apply-fence"
+  ]
 }

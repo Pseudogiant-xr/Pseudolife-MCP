@@ -1,3 +1,15 @@
 {
-  "parity": "CLI-CONDUCTOR-WATCH-SETUP"
+  "parity": "CLI-CONDUCTOR-WATCH-SETUP",
+  "source_mutants": [
+    "conductor-watch-age-zero-admitted",
+    "conductor-watch-cr-kept",
+    "conductor-watch-foreign-exit-0",
+    "conductor-watch-pid-limit-deferred",
+    "conductor-watch-settle-nan-admitted",
+    "conductor-watch-start-ignored",
+    "conductor-watch-state-parent-admitted",
+    "conductor-watch-stop-before-owner",
+    "conductor-watch-stop-file-kept",
+    "conductor-watch-stop-refusal-exit-0"
+  ]
 }

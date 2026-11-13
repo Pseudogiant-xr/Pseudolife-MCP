@@ -1,3 +1,14 @@
 {
-  "parity": "CLI-MAIL"
+  "parity": "CLI-MAIL",
+  "source_mutants": [
+    "mail-any-decision-rings",
+    "mail-expired-listener",
+    "mail-help-token",
+    "mail-keeps-leading-dot",
+    "mail-ledger-kind",
+    "mail-no-listener",
+    "mail-ring-13-digits",
+    "mail-skip-seen-advance",
+    "mail-timeout-exit-4"
+  ]
 }

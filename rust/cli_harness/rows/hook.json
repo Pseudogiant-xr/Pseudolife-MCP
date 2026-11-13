@@ -1,3 +1,14 @@
 {
-  "parity": "CLI-HOOK"
+  "parity": "CLI-HOOK",
+  "source_mutants": [
+    "hook-briefing-cap-order",
+    "hook-cursor-not-saved",
+    "hook-doorbell-receipt-inverted",
+    "hook-event-name",
+    "hook-first-address-only",
+    "hook-redirect-repeat-limit",
+    "hook-since-dropped",
+    "hook-token-dropped",
+    "hook-whole-reply-budget"
+  ]
 }

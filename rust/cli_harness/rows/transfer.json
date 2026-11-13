@@ -1,3 +1,29 @@
 {
-  "parity": "CLI-TRANSFER-DSN"
+  "parity": "CLI-TRANSFER-DSN",
+  "source_mutants": [
+    "transfer-cast-check",
+    "transfer-commit-error-uncertain",
+    "transfer-commit-fatal-certain",
+    "transfer-drop-inverses",
+    "transfer-entry-sequence",
+    "transfer-float-ties",
+    "transfer-float-window",
+    "transfer-float4-loads",
+    "transfer-int-type",
+    "transfer-jsonb-precheck",
+    "transfer-meta-skip",
+    "transfer-nonempty-wording",
+    "transfer-null-stamps",
+    "transfer-numeric-strings",
+    "transfer-order-flip",
+    "transfer-part-guard",
+    "transfer-refusal-exit",
+    "transfer-roster-guard",
+    "transfer-schema-guard",
+    "transfer-schema-lock-deferred",
+    "transfer-server-encoding",
+    "transfer-stdout-refusal-ignored",
+    "transfer-timestamp-range",
+    "transfer-utc-precheck"
+  ]
 }

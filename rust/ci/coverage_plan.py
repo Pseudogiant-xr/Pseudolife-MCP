@@ -3,8 +3,11 @@
 import json
 from pathlib import Path
 
+import row_ci
+
 HERE = Path(__file__).resolve().parent
-SOURCE_MUTANTS = json.loads((HERE / 'source_mutants.json').read_text(encoding="utf-8"))
+# Each row's ids, from its own rust/cli_harness/rows/<row>.json (row_ci.py).
+SOURCE_MUTANTS = row_ci.source_mutants()
 # Linux 2026-10-11: the slowest eight-control selection took 81s;
 # the first cold compile added 65s. Keep that bound on each parallel job.
 SOURCE_SHARDS = {f'{row}-{index // 8}': (row, ids[index:index + 8])

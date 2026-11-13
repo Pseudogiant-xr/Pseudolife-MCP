@@ -1,3 +1,13 @@
 {
-  "parity": "CLI-LEASE"
+  "parity": "CLI-LEASE",
+  "source_mutants": [
+    "lease-hold-status",
+    "lease-break-holder",
+    "lease-conductor-duration",
+    "lease-deprecated-warning",
+    "lease-break-audit-swallowed",
+    "lease-conductor-commit-ignored",
+    "lease-commit-unknown-certain",
+    "lease-commit-refused-unknown"
+  ]
 }

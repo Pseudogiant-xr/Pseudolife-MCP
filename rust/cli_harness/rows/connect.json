@@ -1,3 +1,24 @@
 {
-  "parity": "CLI-CONNECT"
+  "parity": "CLI-CONNECT",
+  "source_mutants": [
+    "connect-backup-stamp-millis",
+    "connect-cache-url-last",
+    "connect-changes-reverse-sort",
+    "connect-config-not-private",
+    "connect-exit-nothing-4",
+    "connect-float-ties",
+    "connect-header-utf8",
+    "connect-json-indent-4",
+    "connect-latin-1-credential-as-utf8",
+    "connect-message-token",
+    "connect-no-backup",
+    "connect-no-credential-check",
+    "connect-remote-keeps-spawn",
+    "connect-rollback-keeps-writes",
+    "connect-skip-settings-write",
+    "connect-stderr-warning-ignored",
+    "connect-stdout-refusal-ignored",
+    "connect-user-agent-changed",
+    "connect-verify-reverse-order"
+  ]
 }

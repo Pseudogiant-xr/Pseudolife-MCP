@@ -1,3 +1,6 @@
 {
-  "parity": "CLI-UPDATE"
+  "parity": "CLI-UPDATE",
+  "source_mutants": [
+    "update-current-exit"
+  ]
 }

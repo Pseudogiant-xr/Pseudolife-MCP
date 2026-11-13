@@ -1,3 +1,17 @@
 {
-  "parity": "CLI-MOVE-REFUSALS"
+  "parity": "CLI-MOVE-REFUSALS",
+  "source_mutants": [
+    "move-checkout-cr",
+    "move-dash-value-admitted",
+    "move-direct-socket",
+    "move-help-any-width",
+    "move-isspace-separators",
+    "move-json-control",
+    "move-refusal-exit",
+    "move-scheme-case-sensitive",
+    "move-unsure-as-valid",
+    "move-url-checked-after-to",
+    "move-url-message",
+    "move-valid-refused"
+  ]
 }

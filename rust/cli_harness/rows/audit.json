@@ -1,3 +1,25 @@
 {
-  "parity": "CLI-AUDIT"
+  "parity": "CLI-AUDIT",
+  "source_mutants": [
+    "audit-body-reason-swap",
+    "audit-broken-exit-3",
+    "audit-duplicate-eager",
+    "audit-exists-token",
+    "audit-export-agent-filter-dropped",
+    "audit-export-order-flipped",
+    "audit-least-dropped",
+    "audit-printed-hash-token",
+    "audit-redact-body-kept",
+    "audit-redact-stdout-closed-exit-1",
+    "audit-siblings-dropped",
+    "audit-start-cut-dropped",
+    "audit-vacuum-warnings-dropped",
+    "audit-verify-stdout-closed-exit-1",
+    "audit-iso-conversion-admitted",
+    "audit-repeat-first-wins",
+    "audit-create-message",
+    "audit-read-message",
+    "audit-payload-depth-capped",
+    "audit-decode-one-byte"
+  ]
 }

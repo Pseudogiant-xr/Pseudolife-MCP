@@ -1,3 +1,6 @@
 {
-  "parity": "CLI-COORDINATION-RECOVERY"
+  "parity": "CLI-COORDINATION-RECOVERY",
+  "source_mutants": [
+    "recovery-stop-gate-dropped"
+  ]
 }

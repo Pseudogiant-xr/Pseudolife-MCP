@@ -1,3 +1,10 @@
 {
-  "parity": "CLI-EPISODE"
+  "parity": "CLI-EPISODE",
+  "source_mutants": [
+    "episode-body-spacing",
+    "episode-default-name",
+    "episode-home-drive-insensitive",
+    "episode-start-path",
+    "episode-system-dir-titled"
+  ]
 }

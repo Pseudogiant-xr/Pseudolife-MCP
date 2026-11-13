@@ -61,6 +61,9 @@ def test_a_row_dropped_with_its_module_leaves_its_spec_and_goldens_failing(tree)
     (lambda data: data.update(extra=1), "declares"),
     (lambda data: data.update(parity=1), "parity is not a str"),
     (lambda data: data.update(parity=" "), "parity is empty"),
+    (lambda data: data.update(source_mutants=[]), "source_mutants is not a list of mutant ids"),
+    (lambda data: data.update(source_mutants=[1]), "source_mutants is not a list of mutant ids"),
+    (lambda data: data["source_mutants"].append(data["source_mutants"][0]), "source_mutants repeats an id"),
 ])
 def test_a_malformed_declaration_is_refused_by_name(tree, change, message):
     path = tree / row_ci.ROWS_DIR / "restore.json"
@@ -69,3 +72,13 @@ def test_a_malformed_declaration_is_refused_by_name(tree, change, message):
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match=f"restore.json: {message}"):
         row_ci.declarations(tree)
+
+
+def test_source_mutants_keep_their_declared_order():
+    # coverage_plan cuts each row's list into eight-mutant shards in this
+    # order, so a reordering would move mutants between shards.
+    from coverage_plan import SOURCE_MUTANTS, SOURCE_SHARDS
+    assert SOURCE_MUTANTS == row_ci.source_mutants()
+    for name, (row, ids) in SOURCE_SHARDS.items():
+        index = int(name.rsplit("-", 1)[1])
+        assert ids == SOURCE_MUTANTS[row][index * 8:index * 8 + 8]
