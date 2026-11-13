@@ -100,6 +100,7 @@ fn absolute(entry: &str) -> Option<bool> {
 
 /// `Path(value).is_absolute()` for a directory setting, `False` where this
 /// port does not answer (see [`absolute`]).
+#[cfg(windows)]
 pub(crate) fn absolute_dir(value: &str) -> bool {
     !value.is_empty() && absolute(value) == Some(true)
 }
