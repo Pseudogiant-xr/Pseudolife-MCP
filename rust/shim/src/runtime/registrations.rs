@@ -613,13 +613,10 @@ fn migrate_codex(text: &str, launcher: &Path, args: &[String]) -> Result<Vec<u8>
 }
 
 /// `name` in an absolute `PATH` directory, never the current directory:
-/// `program_lookup.find_program` (PATHEXT's launchable extensions in its
-/// order on Windows). A `PATH` the lookup cannot answer for finds nothing.
+/// `program_lookup.find_program`'s rule (PATHEXT's launchable extensions in
+/// its order on Windows). An entry that is not UTF-8 is still searched.
 pub fn absolute_command(name: &str) -> Option<PathBuf> {
-    crate::cli::program_lookup::find_program(name)
-        .ok()
-        .flatten()
-        .map(PathBuf::from)
+    crate::cli::program_lookup::find_program_path(name)
 }
 pub fn expose_launcher(layout: &Layout) -> Value {
     #[cfg(unix)]

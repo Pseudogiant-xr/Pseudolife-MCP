@@ -208,3 +208,17 @@ def test_codex_setup_never_finds_a_desktop_build_under_the_current_directory(tmp
         monkeypatch.setenv("LOCALAPPDATA", local)
     with pytest.raises(codex_connection.SetupError):
         codex_connection.resolve_codex()
+
+
+def test_an_unfound_interpreter_name_never_reads_a_pyvenv_cfg_in_the_current_directory(tmp_path, work,
+                                                                                       monkeypatch):
+    """``base_interpreter("python3")`` with no python3 on an absolute PATH
+    entry keeps the bare name: it never follows a ``pyvenv.cfg`` that sits in
+    the current directory to an interpreter there."""
+    from pseudolife_memory import runtimes
+
+    evil = _plant(work / "evil-home", "python3")
+    (work / "pyvenv.cfg").write_text(f"executable = {evil}\nhome = {evil.parent}\n", encoding="utf-8")
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert runtimes.base_interpreter("python3") == "python3"
+

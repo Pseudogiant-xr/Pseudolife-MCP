@@ -341,8 +341,12 @@ def base_interpreter(python: str | None = None) -> str:
         # a bare name is looked up on PATH only, never in the current
         # directory.
         named = os.sep in python or bool(os.altsep and os.altsep in python)
-        resolved = python if named else (_find_program(python) or python)
-        return _base_of(Path(resolved))
+        if named:
+            return _base_of(Path(python))
+        found = _find_program(python)
+        # Not found: the bare name as given. Reading it as a path would look
+        # for a pyvenv.cfg in the current directory and follow it.
+        return _base_of(Path(found)) if found else python
     base = getattr(sys, "_base_executable", None)
     if base and Path(base).is_file():
         return _base_of(Path(base))

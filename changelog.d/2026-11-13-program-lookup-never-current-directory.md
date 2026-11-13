@@ -16,12 +16,14 @@
   `maintainer setup` and the address `invite` prints, `git`, `pipx`, `pwsh`
   and `bash` for `update`, `claude`, `pipx` and Python for the client
   updates, the `pseudolife-mcp` launcher a tunnel service is registered
-  with, and the interpreter new shim runtimes are built from. In the native
-  (Rust) commands: `pg_dump` for `backup`, `codex` for Codex setup (the same
-  `LOCALAPPDATA` rule), `tailscale` for `expose`, `maintainer setup` and
-  `invite`, and `git` and `claude` for the client updates. The checks of
-  whether `docker` is installed (`update`, `maintainer setup`) follow it in
-  both.
+  with, and the interpreter new shim runtimes are built from (a name that
+  is not found stays a bare name, never a file or `pyvenv.cfg` in the
+  current directory). In the native (Rust) commands: `pg_dump` for
+  `backup`, `codex` for Codex setup (the same `LOCALAPPDATA` rule), and
+  `tailscale` for `expose`, `maintainer setup` and `invite`; the client
+  updates' `git` and `claude`, already looked for in absolute directories
+  only, now follow `PATHEXT`'s order. The checks of whether `docker` is
+  installed (`update`, `maintainer setup`) follow it in both.
 - Not covered yet: a program started by its bare name, such as `docker`
   (and `git`, `pwsh` and `bash` in the native `update`), is still found by
   the operating system's or runtime's own search, which on Windows

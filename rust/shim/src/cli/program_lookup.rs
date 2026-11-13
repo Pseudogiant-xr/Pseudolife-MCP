@@ -7,6 +7,7 @@
 //! and `expose_cli._is_ipv4`.
 use super::pyjson;
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 /// `os.path.join(dir, name)` for a relative `name` with no drive.
 fn join(dir: &str, name: &str) -> String {
@@ -20,7 +21,7 @@ fn join(dir: &str, name: &str) -> String {
 
 /// `program_lookup.is_program(path)`: a regular file (following links),
 /// executable for this user outside Windows.
-fn usable(path: &str) -> bool {
+fn usable(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else {
         return false;
     };
@@ -127,44 +128,148 @@ fn names(name: &str, pathext: Option<OsString>) -> Result<Vec<String>, ()> {
         .collect())
 }
 
-/// `program_lookup.find_program(name, environ)` with `PATH` and `PATHEXT`
-/// given. `Err` defers: a `PATH` or `PATHEXT` that is not UTF-8, or a
-/// program found under an entry [`absolute`] cannot answer for.
-fn which(
+/// One `PATH` entry: its text, or (not UTF-8) the raw entry.
+enum Entry {
+    Text(String),
+    Raw(OsString),
+}
+
+/// `PATH` split on its separator, entry by entry, so one entry that is not
+/// UTF-8 does not hide the others.
+fn entries(path: &OsString) -> Vec<Entry> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        path.as_bytes()
+            .split(|byte| *byte == b':')
+            .map(|part| match std::str::from_utf8(part) {
+                Ok(text) => Entry::Text(text.to_owned()),
+                Err(_) => Entry::Raw(OsString::from_vec(part.to_vec())),
+            })
+            .collect()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        let wide: Vec<u16> = path.encode_wide().collect();
+        wide.split(|unit| *unit == u16::from(b';'))
+            .map(|part| match String::from_utf16(part) {
+                Ok(text) => Entry::Text(text),
+                Err(_) => Entry::Raw(OsString::from_wide(part)),
+            })
+            .collect()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        match path.clone().into_string() {
+            Ok(text) => text
+                .split(':')
+                .map(|part| Entry::Text(part.to_owned()))
+                .collect(),
+            Err(raw) => vec![Entry::Raw(raw)],
+        }
+    }
+}
+
+/// Where a search found the program: `text` when the oracle's string for it
+/// is reproduced (an entry this port classifies), and the path to run.
+struct Found {
+    text: Option<String>,
+    path: PathBuf,
+}
+
+/// The search behind [`which`] and [`find_program_path`]. `Err` only for a
+/// `PATHEXT` that is not UTF-8.
+fn search(
     name: &str,
     path: Option<OsString>,
     pathext: Option<OsString>,
-) -> Result<Option<String>, ()> {
+) -> Result<Option<Found>, ()> {
     if name.is_empty() {
         return Ok(None);
     }
     let separators: &[char] = if cfg!(windows) { &['\\', '/'] } else { &['/'] };
     if name.contains(separators) {
-        return Ok(usable(name).then(|| name.to_owned()));
+        return Ok(usable(Path::new(name)).then(|| Found {
+            text: Some(name.to_owned()),
+            path: PathBuf::from(name),
+        }));
     }
     let Some(path) = path else {
         return Ok(None);
     };
-    let path = path.into_string().map_err(|_| ())?;
     let names = names(name, pathext)?;
-    let separator = if cfg!(windows) { ';' } else { ':' };
-    for entry in path.split(separator) {
-        let dir = pyjson::py_strip(entry).trim_matches('"');
-        if dir.is_empty() {
-            continue;
-        }
-        let known = absolute(dir);
-        if known == Some(false) {
-            continue;
-        }
-        for file in &names {
-            let candidate = join(dir, file);
-            if usable(&candidate) {
-                return known.map(|_| Some(candidate)).ok_or(());
+    for entry in entries(&path) {
+        match entry {
+            Entry::Text(entry) => {
+                let dir = pyjson::py_strip(&entry).trim_matches('"');
+                if dir.is_empty() {
+                    continue;
+                }
+                let known = absolute(dir);
+                if known == Some(false) {
+                    continue;
+                }
+                for file in &names {
+                    let candidate = join(dir, file);
+                    if usable(Path::new(&candidate)) {
+                        let path = PathBuf::from(&candidate);
+                        return Ok(Some(Found {
+                            text: known.map(|_| candidate),
+                            path,
+                        }));
+                    }
+                }
+            }
+            Entry::Raw(entry) => {
+                // Not text: searched only when it is an absolute directory;
+                // the string the oracle would report is not reproduced.
+                let dir = PathBuf::from(entry);
+                if !dir.is_absolute() {
+                    continue;
+                }
+                for file in &names {
+                    let candidate = dir.join(file);
+                    if usable(&candidate) {
+                        return Ok(Some(Found {
+                            text: None,
+                            path: candidate,
+                        }));
+                    }
+                }
             }
         }
     }
     Ok(None)
+}
+
+/// `program_lookup.find_program(name, environ)` with `PATH` and `PATHEXT`
+/// given. `Err` defers: a `PATHEXT` that is not UTF-8, or a program found
+/// under an entry whose text this port does not reproduce (one that is not
+/// UTF-8, or a bare share root such as `\\server\`).
+fn which(
+    name: &str,
+    path: Option<OsString>,
+    pathext: Option<OsString>,
+) -> Result<Option<String>, ()> {
+    match search(name, path, pathext)? {
+        None => Ok(None),
+        Some(Found {
+            text: Some(text), ..
+        }) => Ok(Some(text)),
+        Some(Found { text: None, .. }) => Err(()),
+    }
+}
+
+/// The program `find_program` would find, as a path to run, for a caller
+/// that does not print it: never defers on an entry whose text the port
+/// does not reproduce; `None` when nothing is found (or `PATHEXT` is not
+/// UTF-8).
+pub(crate) fn find_program_path(name: &str) -> Option<PathBuf> {
+    search(name, std::env::var_os("PATH"), std::env::var_os("PATHEXT"))
+        .ok()
+        .flatten()
+        .map(|found| found.path)
 }
 
 /// `program_lookup.find_program(name)` over this process's `PATH` and
@@ -410,6 +515,45 @@ mod tests {
             assert_eq!(absolute("bin"), Some(false));
             assert_eq!(absolute("/bin"), Some(true));
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An entry that is not UTF-8 does not hide the others: the program in a
+    /// later absolute entry is still found, and one found under the
+    /// unreadable entry itself defers (`which`) or is returned as a path
+    /// (`find_program_path`).
+    #[test]
+    fn an_entry_that_is_not_text_does_not_hide_the_others() {
+        let dir = scratch("raw-entry");
+        let real = dir.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let found = plant(&real);
+        let pathext = Some(OsString::from(".EXE;.CMD"));
+        #[cfg(unix)]
+        let raw = {
+            use std::os::unix::ffi::OsStringExt;
+            let mut bytes = b"/nonexistent-\xff:".to_vec();
+            bytes.extend_from_slice(real.to_str().unwrap().as_bytes());
+            OsString::from_vec(bytes)
+        };
+        #[cfg(windows)]
+        let raw = {
+            use std::os::windows::ffi::OsStringExt;
+            let mut wide: Vec<u16> = r"C:\nonexistent-".encode_utf16().collect();
+            wide.push(0xD800);
+            wide.push(u16::from(b';'));
+            wide.extend(real.to_str().unwrap().encode_utf16());
+            OsString::from_wide(&wide)
+        };
+        let got = which("tailscale", Some(raw.clone()), pathext.clone())
+            .unwrap()
+            .unwrap();
+        assert!(got.eq_ignore_ascii_case(&found), "{got}");
+        let path = search("tailscale", Some(raw), pathext)
+            .unwrap()
+            .unwrap()
+            .path;
+        assert!(path.to_str().unwrap().eq_ignore_ascii_case(&found));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

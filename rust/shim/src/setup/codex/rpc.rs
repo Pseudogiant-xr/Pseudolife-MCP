@@ -309,14 +309,8 @@ pub fn resolve_codex() -> Result<PathBuf, SetupError> {
     // only an absolute PATH directory, never the current directory.
     // std::process handles .cmd/.bat quoting; never construct a shell command
     // string from configuration or override values.
-    match crate::cli::program_lookup::find_program("codex") {
-        Ok(Some(found)) => return Ok(PathBuf::from(found)),
-        Ok(None) => {}
-        Err(()) => {
-            return Err(SetupError(
-                "PATH or PATHEXT holds an entry setup cannot read (text that is not UTF-8, or a bare share root such as \\\\server\\); set them to plain directories and extensions, then rerun setup.",
-            ));
-        }
+    if let Some(found) = crate::cli::program_lookup::find_program_path("codex") {
+        return Ok(found);
     }
     #[cfg(windows)]
     if let Some(local) = std::env::var_os("LOCALAPPDATA")

@@ -67,6 +67,19 @@ pub(super) async fn exposed_url(port: u32) -> Result<Option<String>, Defer> {
     Ok(exposed_url_with(&binary, port).await)
 }
 
+/// What `expose status` reads from a `tailscale ... --json` answer: `None`
+/// (no URL) for output that is not UTF-8 or nests more than
+/// `expose_cli.JSON_DEPTH_LIMIT` brackets at once (`_read`, `_json`), else
+/// the parsed value when it is JSON.
+fn tailscale_json(output: &Output) -> Option<serde_json::Value> {
+    if !output.utf8
+        || crate::cli::pyjson::brackets_past(&output.stdout, crate::cli::pyjson::EXPOSE_DEPTH)
+    {
+        return None;
+    }
+    serde_json::from_str(&output.stdout).ok()
+}
+
 async fn exposed_url_with(binary: &std::path::Path, port: u32) -> Option<String> {
     let binary = binary.to_path_buf();
     let query = |args: &[&str]| {
@@ -74,8 +87,7 @@ async fn exposed_url_with(binary: &std::path::Path, port: u32) -> Option<String>
         command.extend(args.iter().map(|arg| OsString::from(*arg)));
         command
     };
-    let status = capture(&query(&["status", "--json"]), None).await;
-    let status: serde_json::Value = serde_json::from_str(&status.stdout).ok()?;
+    let status = tailscale_json(&capture(&query(&["status", "--json"]), None).await)?;
     if status["BackendState"] != "Running" {
         return None;
     }
@@ -83,12 +95,13 @@ async fn exposed_url_with(binary: &std::path::Path, port: u32) -> Option<String>
     if serve.code != 0 {
         return None;
     }
-    let serve: serde_json::Value = serde_json::from_str(&serve.stdout).ok()?;
+    let serve = tailscale_json(&serve)?;
     if !ours(&serve, port) {
         return None;
     }
     let ip = capture(&query(&["ip", "-4"]), None).await;
-    let mut ips: Vec<&str> = if ip.code == 0 {
+    // `expose_cli._tailnet_ipv4`: an `ip -4` that is not UTF-8 counts as failed.
+    let mut ips: Vec<&str> = if ip.code == 0 && ip.utf8 {
         ip.stdout.split_whitespace().collect()
     } else {
         Vec::new()
@@ -138,6 +151,9 @@ struct Output {
     code: i32,
     stdout: String,
     stderr: String,
+    /// Both streams were UTF-8 (`expose_cli.run_tailscale`'s `unreadable`
+    /// flag is the opposite); the text above is decoded lossily either way.
+    utf8: bool,
 }
 
 async fn capture(command: &[OsString], input: Option<&str>) -> Output {
@@ -170,6 +186,8 @@ async fn capture(command: &[OsString], input: Option<&str>) -> Output {
             code: resolution::exit_code(output.status),
             stdout: text(&output.stdout),
             stderr: text(&output.stderr),
+            utf8: std::str::from_utf8(&output.stdout).is_ok()
+                && std::str::from_utf8(&output.stderr).is_ok(),
         },
         other => Output {
             code: 127,
@@ -185,6 +203,7 @@ async fn capture(command: &[OsString], input: Option<&str>) -> Output {
                 _ => "OSError",
             }
             .into(),
+            utf8: true,
         },
     }
 }
@@ -735,6 +754,24 @@ mod tests {
             owner,
             [("env", None), ("guest", Some(false)), ("mine", Some(true))]
         );
+    }
+
+    #[test]
+    fn tailscale_answers_expose_cannot_read_give_no_url() {
+        let output = |stdout: &str, utf8: bool| Output {
+            code: 0,
+            stdout: stdout.into(),
+            stderr: String::new(),
+            utf8,
+        };
+        let nest = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        assert!(tailscale_json(&output(r#"{"BackendState": "Running"}"#, true)).is_some());
+        assert!(tailscale_json(&output(&nest(100), true)).is_some());
+        // serde_json reads 101 to 127 levels; expose_cli refuses them.
+        assert!(tailscale_json(&output(&nest(101), true)).is_none());
+        assert!(tailscale_json(&output(&nest(120), true)).is_none());
+        assert!(tailscale_json(&output(r#"{"BackendState": "Running"}"#, false)).is_none());
+        assert!(tailscale_json(&output("{oops", true)).is_none());
     }
 
     #[test]

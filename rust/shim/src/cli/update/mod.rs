@@ -260,7 +260,7 @@ impl Update {
         // is a client install; `which` finds only an absolute PATH entry's
         // docker, never one in the current directory.
         if self.docker == "docker"
-            && matches!(crate::cli::program_lookup::find_program("docker"), Ok(None))
+            && crate::cli::program_lookup::find_program_path("docker").is_none()
         {
             return Ok(false);
         }

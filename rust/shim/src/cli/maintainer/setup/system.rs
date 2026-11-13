@@ -10,29 +10,23 @@ pub(super) enum Tier {
     Docker(OsString, String),
 }
 
-/// The refusal when `PATH` or `PATHEXT` is not text, or names a share
-/// root (`\\server\`) the lookup does not read.
-fn unreadable_path() -> Error {
-    Error::refused(
-        "PATH or PATHEXT holds an entry this command cannot read (text that is not UTF-8, or a bare share root such as \\\\server\\): set them to plain directories and extensions, then retry",
-    )
-}
-
 /// `maintainer_setup.which(name)`, `program_lookup.find_program`: only an
 /// absolute `PATH` directory, never the current directory.
-pub(super) fn which(name: &str) -> Result<Option<PathBuf>> {
-    crate::cli::program_lookup::find_program(name)
-        .map(|found| found.map(PathBuf::from))
-        .map_err(|()| unreadable_path())
+pub(super) fn which(name: &str) -> Option<PathBuf> {
+    crate::cli::program_lookup::find_program_path(name)
 }
 
 /// `expose_cli.find_tailscale()`: `which("tailscale")`, then the default
 /// install location (a relative Program Files value is passed over).
 pub(super) fn tailscale() -> Result<Option<PathBuf>> {
-    if let Some(found) = which("tailscale")? {
+    if let Some(found) = which("tailscale") {
         return Ok(Some(found));
     }
-    crate::cli::program_lookup::tailscale_install_location().map_err(|()| unreadable_path())
+    crate::cli::program_lookup::tailscale_install_location().map_err(|()| {
+        Error::refused(
+            "ProgramW6432 or ProgramFiles holds a value this command cannot read (text that is not UTF-8, or a bare share root such as \\\\server\\): set it to the Program Files folder (C:\\Program Files), then retry",
+        )
+    })
 }
 
 pub(super) struct Output {
@@ -144,7 +138,7 @@ pub(super) async fn tier(selected: Option<&str>) -> Result<Tier> {
     let docker = std::env::var_os("PSEUDOLIFE_DOCKER")
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "docker".into());
-    if docker == "docker" && which("docker")?.is_none() {
+    if docker == "docker" && which("docker").is_none() {
         if selected.is_some() {
             return Err(scoped_refusal());
         }
