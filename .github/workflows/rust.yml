@@ -2066,8 +2066,15 @@ jobs:
       - name: CLI source mutants
         # Linux 2026-10-11: slowest eight-control selection 81s plus
         # 65s cold compile; six minutes is about twice that cold bound.
-        # Windows is provisional, with startup headroom inside 56m.
-        timeout-minutes: ${{ runner.os == 'Linux' && 6 || 30 }}
+        # Linux 2026-11-13 (nightly run 43414735492): move-0 caught all 8
+        # mutants at 6m05s and was killed at 6m06s (job 131853444061;
+        # 2m04s to the first verdict, then about 34s per mutant); audit-0,
+        # transfer-0/1, maintainer-1 and test_login-0 took 5m38s-5m43s,
+        # and the night before (run 43209050039) audit-1 and maintainer-0
+        # took 5m42s-5m46s. One limit covers every Linux shard: ten minutes.
+        # Windows is provisional, with startup headroom inside 56m; its
+        # slowest shards took 11m21s-11m52s on those two nights.
+        timeout-minutes: ${{ runner.os == 'Linux' && 10 || 30 }}
         shell: pwsh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/source-mutants-target
