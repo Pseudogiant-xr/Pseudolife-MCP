@@ -103,6 +103,11 @@ env vars: `Qwen/Qwen3-Embedding-0.6B` (the default since schema v25) and
 paths). A first run *without* the offline vars downloads both — budget about
 1.2 GB.
 
+CI and a local run differ on the embedder: CI's `test` lane runs every
+test on the real weights (`PSEUDOLIFE_TEST_EMBEDDER=real`), while a local
+run, the batch gate's included, uses the default below; CI's one run of the
+default mode is `tests/test_fake_embedder.py` in the `guards` job.
+
 Most tests do not depend on what the embedding model thinks is similar, so
 by default they embed through `tests/fake_embedder.py`: a deterministic,
 weight-free stand-in (hashed words and character trigrams, 1024-d like the

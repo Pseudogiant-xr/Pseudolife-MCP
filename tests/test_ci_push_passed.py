@@ -140,7 +140,11 @@ def test_workflows_preserve_nightly_only_evidence_and_its_builds(workflow, skips
     scope = jobs["scope"]
     step = next(s for s in scope["steps"] if s.get("id") == "push")
     assert scope["permissions"]["actions"] == "read"
-    assert step["if"] == "github.event_name == 'schedule' && github.ref == 'refs/heads/master'"
+    expected = "github.event_name == 'schedule' && github.ref == 'refs/heads/master'"
+    if workflow == "ci.yml":
+        # The weekly frozen run never reuses the push (tests/test_ci_merge_queue.py).
+        expected += " && steps.weekly.outputs.frozen != 'true'"
+    assert step["if"] == expected
     assert step["continue-on-error"] is True
     assert step["run"].split()[:7] == ["python3", "-m", "ops.ci_push_passed", "--workflow",
                                       f".github/workflows/{workflow}", "--github-output", '"$GITHUB_OUTPUT"']

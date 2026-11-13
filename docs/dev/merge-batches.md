@@ -110,13 +110,21 @@ Each change waits for hosted CI once, on its batch:
   whose own conclusion there was `success` is skipped; a skipped, failed or
   cancelled one runs. A Rust-only batch skipped the Python suite lanes, and
   since the Python freeze its master push skips them too (`ci.yml`'s scope
-  classifies the push by its merge); the nightly then runs them on that
-  commit, because `ops/ci_push_passed.py --not-if-job-passed guards` does
+  classifies the push by its merge); the next nightly (on master's tip,
+  which contains it) then runs them, because `ops/ci_push_passed.py
+  --not-if-job-passed guards` does
   not reuse a push whose `guards` job ran (which it does exactly when scope
   skipped the Python lanes); a push whose lanes its batch had passed stays
-  reusable. Every Python lane runs only the
-  live test files (`tests/suite_classes.txt`): `test-lite-linux`, the
-  whole suite on embedded PostgreSQL, left with the lite tier. Anything doubtful skips nothing and logs
+  reusable. Meanwhile `guards`, which runs exactly on such a push, runs
+  every live test that reads a `rust/` file, with a throwaway PostgreSQL
+  (`tests/test_suite_classes.py` keeps that list complete). Every Python
+  lane runs only the live test files (`tests/suite_classes.txt`):
+  `test-lite-linux`, the whole suite on embedded PostgreSQL, left with the
+  lite tier. The frozen files run too (`--include-frozen`, as scope's
+  `pytest_addopts`) when a change touches `pseudolife_memory/` outside the
+  Console build, which only a freeze-exception change can, when the diff is
+  unreadable, and in the weekly nightly (Sunday UTC, 02:17 AEDT Monday),
+  since the package still ships with floor-only dependencies. Anything doubtful skips nothing and logs
   one line saying why: not exactly one merged `integrate/*` pull request
   into master with this commit as its merge commit, a different tree, the
   newest batch run not completed, or an API error. In `ci.yml` that covers
