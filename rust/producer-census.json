@@ -353,7 +353,7 @@
     "rust/shim/src/board/state.rs": "06a7d9c84865f58cf39b494db29adf621ca55decc125baf153736efc717f997f",
     "rust/shim/src/board/unicode14.rs": "0305821a91aedd6cbebec63cefcaa76cb70b96f3b77aff8589013cca073dfbbb",
     "rust/shim/src/cache.rs": "12f79ec63ebb7ef019cc7897d56bc78e2b752e3fecb327e495e6936a0fa41753",
-    "rust/shim/src/cli.rs": "495e08323f2e8dc093e54cef2e0196f118e3d420c7ed9a632fc200444d316d67",
+    "rust/shim/src/cli.rs": "2601496b1acdf6dce25b63cdb59b8b3edaa23280445b0b13a52781c5772283f5",
     "rust/shim/src/cli/backup/archive.rs": "546bc6a8e9d6dd2368070fa3cf541ccfadeca545576b549685b7bd234f9ca1ef",
     "rust/shim/src/cli/backup/args.rs": "107d13a29c64a2e37707bf287b3888a444bcd29c31e419f76fc78d4f931af0e8",
     "rust/shim/src/cli/backup/dump.rs": "d913b521ee145a28fa776c875f3b4d9d4a5116a882b648cb7b627c61b6a86358",
@@ -374,6 +374,10 @@
     "rust/shim/src/cli/board_audit/transport.rs": "f648711999282c0e9373824826c54a05b61db4ebaf5ffe73d6a247e16f93694d",
     "rust/shim/src/cli/briefing_help.txt": "443e8b51f02b3a1ac9c381d3653ceb9a6a6e5142398fe992c29edd3b523ee638",
     "rust/shim/src/cli/briefing_hook.rs": "8bf7c0f73f5377078155f42c08e44c13faaf880f7fe52170b164966e61d2faa5",
+    "rust/shim/src/cli/conductor_watch/args.rs": "5371c912d11e6a035ac42bcd4a6cc25687ac886eee66d6a568ff953abdfdbe3e",
+    "rust/shim/src/cli/conductor_watch/help.txt": "468959b8c93dbafe83667555307c315f429e07e4b851c799c63cd323f73bb41f",
+    "rust/shim/src/cli/conductor_watch/mod.rs": "c0e41ff529d02c30024f01137b396bf7c3424dcc715511531e94c313e63a5cbe",
+    "rust/shim/src/cli/conductor_watch/tests.rs": "0862595e60a259979d38ee8022a02edc2a458492e5285d5716af1658aea9e19a",
     "rust/shim/src/cli/connect/args.rs": "309738853da64a4e56da43f5b7d80d5a11615cb8d95cf58a13e815bc42cb3de8",
     "rust/shim/src/cli/connect/discover.rs": "2a4f4639b13cbb606eba7834074bc837468a70efb26a0f3708847d1f47a6d5a5",
     "rust/shim/src/cli/connect/files.rs": "cb4e42e280a5cffa1e460d2186223503303e7fa5f347de626cb28fc7a4d8df8f",
@@ -423,10 +427,10 @@
     "rust/shim/src/cli/lease/assets/top_help.txt": "cb325aaf60deb4371fae7025625010c279f260db6513cecc09cb5e7f6612e69c",
     "rust/shim/src/cli/lease/assets/top_usage.txt": "7c708f152673f52e4eb0f75adfc0afe89d5fbef07b76de7b2dd7894c88cd018f",
     "rust/shim/src/cli/lease/board.rs": "ed69a24e1334cd7c558a92c74b4d95212b132d3fcc7e9b3391443291ed6be7c2",
-    "rust/shim/src/cli/lease/hold.rs": "329624da0a978adcbb1508b3294151bae3d9c2f743a47f8c3085c5c37459376a",
+    "rust/shim/src/cli/lease/hold.rs": "a10d651fbc081927163e9ea0530a0668fc075ed0ab1bedb30c09347769e8a17e",
     "rust/shim/src/cli/lease/json.rs": "962352d5b0b8ac4252728d7f8c6bee6f7082fdf75a3ae24b4cd4c202f35d521b",
     "rust/shim/src/cli/lease/lock.rs": "21b176d1d8ab775315a3fad95751d564710613de991c2019cdf3af012b308de5",
-    "rust/shim/src/cli/lease/mod.rs": "6584af941f84d5c359cfa85237e8ecf84540b55440d43dda1de84e77c7f62719",
+    "rust/shim/src/cli/lease/mod.rs": "d81752eb82517371a1b2d3af623bedee278927af8df5448f107a811376f55953",
     "rust/shim/src/cli/lease/operator/mod.rs": "e1861059f1eac64f327d3b3bd4691a1fb77c43e2ec1f775df9459011e5bb83ea",
     "rust/shim/src/cli/lease/operator/secrets.rs": "7156f1498e15f7fd9417f42ceb0de45834ea28d5deda02da8d1010a90a707b34",
     "rust/shim/src/cli/lease/operator/store.rs": "1ce77b9a2f4446565e9a88765520d57da65a8d2f12ff1dccf91ffdb68f6545a9",
@@ -512,8 +516,8 @@
     "rust/shim/src/cli/update/unattended/tests.rs": "b79b8350dbd19bb20cc63b287e49bb93a6498f7d4e2a05931835efd5c40bd77f",
     "rust/shim/src/cli/update/windows_job.rs": "5225ea5f3668f836fb243549954fb8ab04258358ad9ab84447c4f4982e7ca377",
     "rust/shim/src/cli/version.rs": "8d866132b0855fa5603e9989746d5fdc7e8bb0ef581c76db8823aac723743b9d",
-    "rust/shim/src/cli/wait_mail.rs": "9e865d52ce431c88bd3fea266cf9c80a5a1d853ef830545708d0ca85a6f6fff9",
-    "rust/shim/src/cli/wait_mail_args.rs": "e82e0e78f3377a6a981cfd5ba133578be6ac6cdc0975a550233b38cc6fb2ba4b",
+    "rust/shim/src/cli/wait_mail.rs": "9d9f7861b0bdf715b2e562ed964b7098f8e5ef1457ab436ba1bb2ad4fe9e12d5",
+    "rust/shim/src/cli/wait_mail_args.rs": "e54e562cea8fc2ba71daeefa9fc164fecc0baa1499962695547329672efb118f",
     "rust/shim/src/cli/wait_mail_help.txt": "d6ee2b145e55e105a7885b653fcc88f56eabacf1c4626fd8675cd17258b8c60e",
     "rust/shim/src/cli_help.txt": "5806d34185cdd94f2c83af42426d2954a6202abd10aba75d6dcfd9e53a65b0ef",
     "rust/shim/src/credentials.rs": "0d883c63184cc74f92b304dbf066b207837f16452f61f41d2503d18ce8c7237a",
@@ -3613,7 +3617,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli.rs:230",
+          "location": "rust/shim/src/cli.rs:236",
           "shape": {
             "argv_source": "--help \\n\",",
             "channel": "argv",
@@ -68351,6 +68355,69 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
+      "location": "rust/shim/src/cli/conductor_watch/help.txt:1",
+      "name": "conductor-watch",
+      "shape": {
+        "argv_source": "conductor-watch [-h] [--owner OWNER] [--detach] [--stop]",
+        "channel": "argv",
+        "complete": false,
+        "expression": "[-h] [--owner OWNER] [--detach] [--stop]",
+        "parameters": {
+          "--detach": {
+            "expression": "[--stop]"
+          },
+          "--owner": {
+            "expression": "OWNER]"
+          }
+        }
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:35",
+      "name": "conductor-watch",
+      "shape": {
+        "argv_source": "conductor-watch \";",
+        "channel": "argv",
+        "complete": false,
+        "expression": "\";",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
+      "name": "delegate-watch",
+      "shape": {
+        "argv_source": "delegate-watch is deprecated: use pseudolife-mcp conductor-watch\";",
+        "channel": "argv",
+        "complete": false,
+        "expression": "is deprecated: use pseudolife-mcp conductor-watch\";",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/conductor_watch/tests.rs:142",
+      "name": "conductor-watch",
+      "shape": {
+        "argv_source": "conductor-watch : error: unrecognized arguments: --bogus\\n\")",
+        "channel": "argv",
+        "complete": false,
+        "expression": ": error: unrecognized arguments: --bogus\\n\")",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
       "location": "rust/shim/src/cli/console/args.rs:13",
       "name": "console",
       "shape": {
@@ -101339,7 +101406,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli.rs:230",
+      "location": "rust/shim/src/cli.rs:236",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:help"
     },
@@ -101562,6 +101629,30 @@
       "dynamic": "unresolved",
       "location": "rust/shim/src/cli/briefing_hook.rs:846",
       "reason": "built URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/conductor_watch/help.txt:1",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:conductor-watch"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:35",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:conductor-watch"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/conductor_watch/mod.rs:38",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:delegate-watch"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/conductor_watch/tests.rs:142",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:conductor-watch"
     },
     {
       "dynamic": "unresolved",

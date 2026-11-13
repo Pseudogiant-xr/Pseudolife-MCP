@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "fe87901d0f5022fd",
+  "fingerprint": "b280739891b6e09e",
+  "reason": "Adds the conductor_watch CLI row (CLI-CONDUCTOR-WATCH-SETUP, 83 cases on Windows, 85 on Linux) to the w1c-connection shard's live and golden harness steps beside the console and restore rows already there, and one conductor_watch-0 source-mutant shard to the nightly-only source-mutants job; no other shard's steps changed. Measured locally on the Windows workstation on 2026-11-13 at the branch merged with master: the row's live pass took 22 s and its golden replay 3 s, so the windows-latest w1c-connection shard grows by under half a minute, inside its 26-minute harness step budget; its measured minutes hold within that margin until the batch run re-measures them."
+}
