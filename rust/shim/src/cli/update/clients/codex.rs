@@ -545,9 +545,7 @@ fn offered_manifest(home: &Path, runner: &impl Runner) -> Result<Value, String> 
         .get("ref")
         .or_else(|| table.get("ref_name"))
         .and_then(Value::as_str);
-    let scratch =
-        std::env::temp_dir().join(format!("pseudolife-native-codex-{}", uuid::Uuid::new_v4()));
-    crate::board::state::private_dir(&scratch).map_err(str::to_owned)?;
+    let scratch = super::super::seams::private_scratch("pseudolife-native-codex")?;
     let outcome = (|| {
         let clone = scratch.join("m");
         let clone_text = clone.to_str().ok_or("temporary directory is not Unicode")?;
