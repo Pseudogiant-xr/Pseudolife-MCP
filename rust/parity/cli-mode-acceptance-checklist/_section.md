@@ -41,12 +41,19 @@ or `defers` (every invocation prints the deferral and exits 1: the mode is in
 sub-rows' own status is in Parity rows. Audited at `75a8015e` (2026-11-01): 9
 modes native, 15 partly and 5 defer. The count is of 29 logical modes, with
 `conductor-watch` and its deprecated `delegate-watch` spelling sharing the
-existing `delegate-watch` row; both deferred with no native leaf at that audit,
-and both are partly native since CLI-CONDUCTOR-WATCH-SETUP (2026-11-13). Check `shim/src/main.rs` as well as `shim/src/cli.rs`: the former
-dispatches the native lease, board-audit, maintainer and sent-serve paths
-before the latter's deferral list. `restore` (added by d3d3899c,
-2026-11-04, after this audit and outside its count) has its own entry and
-is partly native: its gates before Docker.
+existing `delegate-watch` row. Check `shim/src/main.rs` as well as
+`shim/src/cli.rs`: the former dispatches the native lease, board-audit,
+maintainer and sent-serve paths before the latter's deferral list.
+
+Changes since that audit, one entry per mode in mode order (a port adds or
+edits only its own):
+
+- `conductor-watch` / `delegate-watch`: both deferred with no native leaf at
+  that audit, and both are partly native since CLI-CONDUCTOR-WATCH-SETUP
+  (2026-11-13).
+
+- `restore` (added by d3d3899c, 2026-11-04, after this audit and outside its
+  count) has its own entry and is partly native: its gates before Docker.
 
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
