@@ -21,7 +21,7 @@ from tests.test_installer_client_only import BASH, REMOTE, ROOT, _Shell, _mode, 
 from tests.test_installer_client_only_ps import _PowerShell, _output
 from tests.test_installer_client_only_ps import _block as _ps_block
 
-MODULE = "-m pseudolife_memory.test_login_cli create"
+COMMAND = "test-login create"
 
 
 def _text(name: str) -> str:
@@ -93,25 +93,27 @@ def test_ps_client_only_refuses_the_switch(tmp_path):
 
 # -- install.sh ----------------------------------------------------------------
 
-def _sh(shell: _Shell, *, python_exit: int = 0, python: bool = True):
-    _stub(shell.bin / "fakepy",
-          "printf 'python|%s|PYTHONPATH=%s\\n' \"$*\" \"$PYTHONPATH\" >>\"$CALL_LOG\"\n"
-          "exit \"$FAKE_PY_EXIT\"\n")
+def _sh(shell: _Shell, *, shim_exit: int = 0, shim: bool = True):
+    _stub(shell.bin / "fakeshim",
+          "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+          "exit \"$FAKE_SHIM_EXIT\"\n")
+    ensure = ("ensure_shim() { SHIM_OK=1; SHIM_PATH=fakeshim; }\n" if shim
+              else "ensure_shim() { SHIM_OK=''; SHIM_PATH=''; }\n")
     return shell.run(
         "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
-        f"installer_python() {{ {'echo fakepy' if python else ':'}; }}\n"
+        + ensure
         + _block("test login", "install.sh")
         + "\nsetup_test_login\necho DONE\n",
-        extra_env={"FAKE_PY_EXIT": str(python_exit)})
+        extra_env={"FAKE_SHIM_EXIT": str(shim_exit)})
 
 
 @BASH
-def test_sh_calls_the_checkouts_module(bash, tmp_path):
+def test_sh_calls_the_native_client(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     proc = _sh(shell)
     assert proc.returncode == 0, proc.stderr
-    [call] = [line for line in shell.logged() if line.startswith("python|")]
-    assert MODULE in call
+    assert [line for line in shell.logged() if line.startswith("shim|")] == ["shim|" + COMMAND]
+    assert not [line for line in shell.logged() if "python" in line]
     assert "WARNING" not in proc.stderr
     assert "DONE" in proc.stdout
 
@@ -119,54 +121,55 @@ def test_sh_calls_the_checkouts_module(bash, tmp_path):
 @BASH
 def test_sh_a_failure_warns_and_the_install_goes_on(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = _sh(shell, python_exit=4)
+    proc = _sh(shell, shim_exit=4)
     assert proc.returncode == 0, proc.stderr
-    assert "WARNING" in proc.stderr and "test_login_cli create" in proc.stderr
+    assert "WARNING" in proc.stderr and COMMAND in proc.stderr
     assert "DONE" in proc.stdout
 
 
 @BASH
-def test_sh_without_python_it_says_so_and_goes_on(bash, tmp_path):
+def test_sh_without_the_native_client_it_says_so_and_goes_on(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = _sh(shell, python=False)
+    proc = _sh(shell, shim=False)
     assert proc.returncode == 0, proc.stderr
-    assert not [line for line in shell.logged() if line.startswith("python|")]
-    assert "WARNING" in proc.stderr and "test-login create" in proc.stderr
+    assert not [line for line in shell.logged() if line.startswith("shim|")]
+    assert "WARNING" in proc.stderr and COMMAND in proc.stderr
     assert "DONE" in proc.stdout
 
 
 # -- install.ps1 ---------------------------------------------------------------
 
-def _ps(ps: _PowerShell, *, python_exit: int = 0, python: bool = True):
+def _ps(ps: _PowerShell, *, shim_exit: int = 0, shim: bool = True):
+    ensure = ("function Install-ShimOnce { $script:shimInstallPath = 'fakeshim'; return $true }\n" if shim
+              else "function Install-ShimOnce { $script:shimInstallPath = $null; return $false }\n")
     return ps.run(
-        ps.stub_function("fakepy", f"$global:LASTEXITCODE = {python_exit}")
-        + ("function Get-InstallerPython { 'fakepy' }\n" if python
-           else "function Get-InstallerPython { $null }\n")
+        ps.stub_function("fakeshim", f"$global:LASTEXITCODE = {shim_exit}")
+        + ensure
         + _block("test login", "install.ps1")
         + "\nInvoke-TestLoginSetup\nWrite-Output DONE\n")
 
 
-def test_ps_calls_the_checkouts_module(tmp_path):
+def test_ps_calls_the_native_client(tmp_path):
     ps = _PowerShell(tmp_path)
     proc = _ps(ps)
     assert proc.returncode == 0, _output(proc)
-    [call] = [line for line in ps.logged() if line.startswith("fakepy|")]
-    assert MODULE in call
+    [call] = [line for line in ps.logged() if line.startswith("fakeshim|")]
+    assert call == "fakeshim|" + COMMAND
     assert "WARNING" not in _output(proc)
     assert "DONE" in proc.stdout
 
 
 def test_ps_a_failure_warns_and_the_install_goes_on(tmp_path):
-    proc = _ps(_PowerShell(tmp_path), python_exit=4)
+    proc = _ps(_PowerShell(tmp_path), shim_exit=4)
     assert proc.returncode == 0, _output(proc)
-    assert "WARNING" in _output(proc) and "test_login_cli create" in _output(proc)
+    assert "WARNING" in _output(proc) and COMMAND in _output(proc)
     assert "DONE" in proc.stdout
 
 
-def test_ps_without_python_it_says_so_and_goes_on(tmp_path):
+def test_ps_without_the_native_client_it_says_so_and_goes_on(tmp_path):
     ps = _PowerShell(tmp_path)
-    proc = _ps(ps, python=False)
+    proc = _ps(ps, shim=False)
     assert proc.returncode == 0, _output(proc)
-    assert not [line for line in ps.logged() if line.startswith("fakepy|")]
-    assert "WARNING" in _output(proc) and "test-login create" in _output(proc)
+    assert not [line for line in ps.logged() if line.startswith("fakeshim|")]
+    assert "WARNING" in _output(proc) and COMMAND in _output(proc)
     assert "DONE" in proc.stdout

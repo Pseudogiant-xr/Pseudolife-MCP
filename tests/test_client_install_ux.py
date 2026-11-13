@@ -161,7 +161,7 @@ def test_installers_offer_dreamer_model_choice() -> None:
                       "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5",
                       "claude-fable-5-1", "claude-fable-5"):
             assert model in text, f"missing model option: {model}"
-    assert "-Model $Model" in ps          # choice forwarded to autostart
+    assert '"--model", $Model' in ps     # choice forwarded to autostart
     assert '--model "$MODEL"' in sh
 
 
@@ -240,8 +240,9 @@ def test_installer_env_block_covers_codex_modes() -> None:
         assert "managed override (sonnet-only)" in text     # legacy accepted
     # codex modes reach the autostart stage with the codex script, not the
     # claude one.
-    assert "install-codex-shim-autostart.ps1" in ps
-    assert "install-codex-shim-autostart.sh" in sh
+    assert '@("extractor-shim", "install-autostart", $shimAutostartFamily' in ps
+    assert '(extractor-shim install-autostart "$shim_autostart_family"' in sh
+    assert "shim_autostart_family=codex" in sh and 'elseif ($codexShimMode) { "codex" }' in ps
 
 
 def test_mode_switch_tears_down_the_sibling_shim_autostart() -> None:
@@ -703,7 +704,7 @@ def test_installers_register_the_shim_autostart_after_installing_the_shim() -> N
         assert text.count("# >>> shim autostart >>>") == 1
         assert text.index(health) < start < text.index("# <<< shim autostart <<<") < text.index(wait)
     # The failure hint names the interpreter refusal beside the systemd one.
-    assert "imports pseudolife_memory" in sh.split("CLI shim autostart (Claude / Codex modes)", 1)[1]
+    assert "extractor-shim install-autostart" in sh.split("CLI shim autostart (Claude / Codex modes)", 1)[1]
 
 
 def test_a_mode_switch_says_which_shim_autostart_it_removed_and_why() -> None:

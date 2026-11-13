@@ -3332,7 +3332,7 @@ function Show-EndpointContainer {
 
 # >>> test login >>>
 # The test suite's own Postgres login (`pseudolife-mcp test-login create`,
-# pseudolife_memory/test_login_cli.py): a role that creates and drops its own
+# run by the installed native client): a role that creates and drops its own
 # databases and cannot connect to the bank, written to
 # ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
 # ops/.env. So no checkout or agent session needs ops/.env, which holds the
@@ -3342,28 +3342,18 @@ function Show-EndpointContainer {
 # Postgres container as its own superuser; a failure leaves the install
 # working.
 function Invoke-TestLoginSetup {
-    $py = Get-InstallerPython
-    if (-not $py) {
-        Write-Warning "No Python 3.10+ found, so the test suite's Postgres login was not set up. Later, from ${repo}: python -m pseudolife_memory.cli test-login create"
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        Write-Warning "The native client is unavailable (see above), so the test suite's Postgres login was not set up. Later: pseudolife-mcp test-login create"
         return
     }
     Step "Setting up the test suite's Postgres login (it cannot open the bank)..."
-    $savedPath = $env:PYTHONPATH
     $code = 1
     try {
-        $env:PYTHONPATH = if ($savedPath) { "$repo$([IO.Path]::PathSeparator)$savedPath" } else { "$repo" }
-        Push-Location $repo
-        try {
-            & $py -m pseudolife_memory.test_login_cli create
-            $code = $LASTEXITCODE
-        } finally { Pop-Location }
-    } catch {
-        $code = 1
-    } finally {
-        $env:PYTHONPATH = $savedPath
-    }
+        & $script:shimInstallPath test-login create
+        $code = $LASTEXITCODE
+    } catch { $code = 1 }
     if ($code -ne 0) {
-        Write-Warning "The test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later from ${repo}: python -m pseudolife_memory.test_login_cli create"
+        Write-Warning "The test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later: & `"$($script:shimInstallPath)`" test-login create"
     }
 }
 # <<< test login <<<
@@ -3376,10 +3366,10 @@ function Invoke-TestLoginSetup {
 # stages 9 through the '12. health' header), so no test ever reaches the
 # real systemctl / Task Scheduler calls below.
 # >>> shim autostart >>>
-# Runs after stage 11 on purpose: the shim install there (pipx, or pip
-# --user) is what puts the package where an interpreter imports it on a
-# host without a checkout venv, and the autostart script's interpreter pick
-# (ops\shim_python.py) finds it there instead of building a venv of its own.
+# Runs after stage 11 on purpose: the native client installed there runs
+# the extractor shim (`pseudolife-mcp extractor-shim`), so no interpreter is
+# involved. Its default prompt is evals\prompts\sonnet_extractor_v5.md
+# (rust/shim/src/extractor_shim/config.rs), read from this checkout via --repo.
 # A mode switch must tear down the OTHER family's autostart: an abandoned
 # shim task keeps making real CLI calls at every /health refresh, forever,
 # on a plan whose owner believes it is turned off. Best-effort like the
@@ -3399,25 +3389,26 @@ if (-not $claudeShimMode -and -not $ClientOnly) {
     Remove-ShimTask "Pseudolife Claude Shim" "Claude"
     Remove-ShimTask "Pseudolife Sonnet Shim" "Claude"   # pre-rename installs
 }
-if ($claudeShimMode) {
-    Step "Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
-    try {
-        & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
-    } catch {
-        Write-Warning "Shim autostart registration or start failed (registration: usually elevation; or no interpreter imports pseudolife_memory for the task - see the message above): $_"
-        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-shim-autostart.ps1):"
-        Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v5.md"
-    }
-} elseif ($codexShimMode) {
-    Step "Registering the Codex shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
-    try {
-        & (Join-Path $PSScriptRoot "install-codex-shim-autostart.ps1") -Port $ShimPort -Model $Model
-    } catch {
-        Write-Warning "Shim autostart registration failed (usually elevation; or no interpreter imports pseudolife_memory for the task - see the message above): $_"
-        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-codex-shim-autostart.ps1):"
-        Write-Host "    ops\install-codex-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-        Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
+$shimAutostartFamily = if ($claudeShimMode) { "claude" } elseif ($codexShimMode) { "codex" } else { $null }
+if ($shimAutostartFamily) {
+    $familyLabel = if ($shimAutostartFamily -eq "claude") { "Claude" } else { "Codex" }
+    Step "Registering the $familyLabel shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
+    $autostartArgs = @("extractor-shim", "install-autostart", $shimAutostartFamily, "--repo", $repo, "--port", "$ShimPort", "--model", $Model)
+    $rerun = "pseudolife-mcp " + ($autostartArgs -join " ")
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        Write-Warning "Shim autostart was not registered: the native client is unavailable (see above)."
+        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu: $rerun"
+    } else {
+        $autostartCode = 1
+        try {
+            & $script:shimInstallPath @autostartArgs
+            $autostartCode = $LASTEXITCODE
+        } catch { $autostartCode = 1 }
+        if ($autostartCode -ne 0) {
+            Write-Warning "Shim autostart registration or start failed (usually elevation - see the message above)."
+            Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop): & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
+            Write-Host "  Or start it manually: & `"$($script:shimInstallPath)`" extractor-shim $shimAutostartFamily --repo `"$repo`" --port $ShimPort --model $Model"
+        }
     }
 }
 # <<< shim autostart <<<

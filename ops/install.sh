@@ -3539,7 +3539,7 @@ describe_endpoint_container() {
 
 # >>> test login >>>
 # The test suite's own Postgres login (`pseudolife-mcp test-login create`,
-# pseudolife_memory/test_login_cli.py): a role that creates and drops its own
+# run by the installed native client): a role that creates and drops its own
 # databases and cannot connect to the bank, written to
 # ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
 # ops/.env. So no checkout or agent session needs ops/.env, which holds the
@@ -3549,15 +3549,14 @@ describe_endpoint_container() {
 # Postgres container as its own superuser; a failure leaves the install
 # working.
 setup_test_login() {
-    local py
-    py="$(installer_python)"
-    if [ -z "$py" ]; then
-        echo "WARNING: no Python 3.10+ found, so the test suite's Postgres login was not set up. Later, from $repo: python3 -m pseudolife_memory.cli test-login create" >&2
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: the native client is unavailable (see above), so the test suite's Postgres login was not set up. Later: pseudolife-mcp test-login create" >&2
         return 0
     fi
     step "Setting up the test suite's Postgres login (it cannot open the bank)..."
-    if ! (cd "$repo" && PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$py" -m pseudolife_memory.test_login_cli create); then
-        echo "WARNING: the test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later from $repo: $py -m pseudolife_memory.test_login_cli create" >&2
+    if ! "$SHIM_PATH" test-login create </dev/null; then
+        echo "WARNING: the test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later: $SHIM_PATH test-login create" >&2
     fi
     return 0
 }
@@ -3574,10 +3573,10 @@ setup_test_login() {
 # Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
 # must not abort the install after `compose up` — that strands a running
 # stack that was never wired into Claude Code. Runs after stage 11 on
-# purpose: the shim install there (pipx, or pip --user) is what puts the
-# package where an interpreter imports it on a host without a checkout
-# venv, and the autostart script's interpreter pick (ops/shim_python.py)
-# finds it there instead of building a venv of its own.
+# purpose: the native client installed there runs the extractor shim
+# (`pseudolife-mcp extractor-shim`), so no interpreter is involved. Its
+# default prompt is evals/prompts/sonnet_extractor_v5.md
+# (rust/shim/src/extractor_shim/config.rs), read from this checkout via --repo.
 # A mode switch must tear down the OTHER family's autostart: an abandoned
 # shim unit keeps making real CLI calls at every /health refresh, forever,
 # on a plan whose owner believes it is turned off.
@@ -3594,19 +3593,20 @@ remove_shim_unit() {  # $1 = unit, $2 = the shim family it runs
 # own under `set -u`, the way tests extract stage ranges.)
 [ -n "${codex_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-codex-shim.service Codex
 [ -n "${claude_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-sonnet-shim.service Claude
-if [ -n "${claude_shim_mode:-}" ]; then
-    step "Registering the Claude shim autostart (systemd --user)..."
-    if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
-        echo "WARNING: shim autostart registration failed (see above: no systemd --user on this host, or no interpreter that imports pseudolife_memory for the unit)" >&2
-        echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL (add --python <interpreter> to name one)" >&2
-        echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v5.md" >&2
-    fi
-elif [ -n "${codex_shim_mode:-}" ]; then
-    step "Registering the Codex shim autostart (systemd --user)..."
-    if ! "$repo/ops/install-codex-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
-        echo "WARNING: shim autostart registration failed (see above: no systemd --user on this host, or no interpreter that imports pseudolife_memory for the unit)" >&2
-        echo "  Re-run later: ops/install-codex-shim-autostart.sh --port $SHIM_PORT --model $MODEL (add --python <interpreter> to name one)" >&2
-        echo "  Or start it manually: python evals/codex_shim.py --port $SHIM_PORT --model $MODEL" >&2
+shim_autostart_family=""
+if [ -n "${claude_shim_mode:-}" ]; then shim_autostart_family=claude
+elif [ -n "${codex_shim_mode:-}" ]; then shim_autostart_family=codex; fi
+if [ -n "$shim_autostart_family" ]; then
+    case "$shim_autostart_family" in claude) step "Registering the Claude shim autostart (systemd --user)..." ;; *) step "Registering the Codex shim autostart (systemd --user)..." ;; esac
+    ensure_shim
+    shim_autostart_args=(extractor-shim install-autostart "$shim_autostart_family" --repo "$repo" --port "$SHIM_PORT" --model "$MODEL")
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: shim autostart was not registered: the native client is unavailable (see above)" >&2
+        echo "  Re-run later: pseudolife-mcp ${shim_autostart_args[*]}" >&2
+    elif ! "$SHIM_PATH" "${shim_autostart_args[@]}"; then
+        echo "WARNING: shim autostart registration failed (see above: usually no systemd --user on this host)" >&2
+        echo "  Re-run later: $SHIM_PATH ${shim_autostart_args[*]}" >&2
+        echo "  Or start it manually: $SHIM_PATH extractor-shim $shim_autostart_family --repo $repo --port $SHIM_PORT --model $MODEL" >&2
     fi
 fi
 # <<< shim autostart <<<
