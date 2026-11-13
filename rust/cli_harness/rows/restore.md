@@ -5,8 +5,10 @@ Oracle: `pseudolife_memory/restore_cli.py`, `docker_backup_restore.py`
 `database_exists`, `_backup_space`, `_restore_space` and the start of
 `restore`), `disk_space.py`, and `update_cli` (`_dump_complete`,
 `interactive`, `UpdateLock`, `_backup_connection_details`, `run_cli`,
-`docker_cmd`, `data_dir`, `home`) at origin/master 01fba4b6, under CPython
-3.11 (the CI interpreter) with psycopg 3's `conninfo_to_dict` and
+`docker_cmd`, `data_dir`, `home`) at origin/master 01fba4b6, with the
+2026-11-13 fixes (a corrupt deflate stream refused, an `inspect` object
+refused, a console required on Windows), under CPython 3.11 (the CI
+interpreter) with psycopg 3's `conninfo_to_dict` and
 `make_conninfo`. Candidate: `rust/shim/src/cli/restore_cli/`. Harness row:
 `restore` (`rust/cli_harness/rows/restore.py`). Rust contract test:
 `rust/shim/tests/cli_restore_contract.rs`.
