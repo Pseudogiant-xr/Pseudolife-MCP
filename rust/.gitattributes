@@ -1,12 +1,16 @@
-# The embedded help asset is translated to platform newlines by the dispatcher.
-shim/src/cli_help.txt text eol=lf
-# The wait-mail formatter compares its LF template before stream translation.
-shim/src/cli/wait_mail_help.txt text eol=lf
-# The briefing help asset is translated to platform newlines by its formatter.
-shim/src/cli/briefing_help.txt text eol=lf
-shim/src/cli/lease/assets/*.txt text eol=lf
+# Help assets the shim's CLI commands embed and translate to platform
+# newlines themselves (the wait-mail formatter compares its LF template
+# before stream translation). One line per asset or command directory, in
+# byte order of the path (`cli/` sorts before `cli_`), so ports adding their
+# own touch different lines.
 shim/src/cli/backup_help.txt text eol=lf
+shim/src/cli/briefing_help.txt text eol=lf
+shim/src/cli/conductor_watch/help.txt text eol=lf
+shim/src/cli/lease/assets/*.txt text eol=lf
 shim/src/cli/restore_cli/*.txt text eol=lf
+shim/src/cli/transfer/*.txt text eol=lf
+shim/src/cli/wait_mail_help.txt text eol=lf
+shim/src/cli_help.txt text eol=lf
 # The daemon embeds the Python schema DDL byte for byte (harness/gen_schema_sql.py).
 daemon/src/storage/schema.sql text eol=lf
 daemon/src/storage/schema_plan.json text eol=lf
@@ -16,6 +20,3 @@ daemon/harness/goldens/checkin.txt text eol=lf
 daemon/harness/goldens/memory-loop-block.txt text eol=lf
 daemon/harness/goldens/startup-memory-core.txt text eol=lf
 daemon/harness/goldens/onboarding-block.txt text eol=lf
-shim/src/cli/transfer/*.txt text eol=lf
-# The conductor-watch help asset is translated to platform newlines by the dispatcher.
-shim/src/cli/conductor_watch/help.txt text eol=lf
