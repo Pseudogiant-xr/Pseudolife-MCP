@@ -92,7 +92,13 @@ fn route_ids_are_whole_lowercase_words() {
 #[test]
 fn argument_answers_match_the_oracle() {
     let usage = args::usage();
-    let cases: [(&[&str], Out); 6] = [
+    let empty = || Out::stderr(EMPTY_REVOKE.into(), 2);
+    let cases: [(&[&str], Out); 10] = [
+        (&["--revoke", ""], empty()),
+        (&["--no-open", "--revoke="], empty()),
+        // Before the --list and --to checks.
+        (&["--list", "--revoke="], empty()),
+        (&["--revoke", "", "--to", "Bad"], empty()),
         (
             &["--to"],
             Out::stderr(
@@ -168,7 +174,7 @@ fn help_and_usage_need_the_reproduced_width_and_no_colour() {
 
 #[test]
 fn every_sign_in_shape_makes_its_call() {
-    let calls: [(&[&str], &str); 11] = [
+    let calls: [(&[&str], &str); 8] = [
         (&[], "link open"),
         (&["--to", "board"], "link board open"),
         (&["--json"], "link open json"),
@@ -176,10 +182,6 @@ fn every_sign_in_shape_makes_its_call() {
         (&["--no-open", "--to", "board", "--json"], "link board json"),
         (&["--no-open", "--unless-signed-in"], "link unless"),
         (&["--unless-signed-in"], "link open unless"),
-        // `elif args.revoke:` is false for an empty id.
-        (&["--revoke", ""], "link open"),
-        (&["--no-open", "--revoke="], "link"),
-        (&["--list", "--revoke="], "list"),
         (&["--revoke", "s-1", "--to", "board"], "revoke s-1"),
     ];
     for (items, want) in calls {
@@ -267,10 +269,20 @@ fn refusals_read_as_the_oracle_reads_them() {
             .starts_with("the daemon refused this machine's token")
     );
     assert_eq!(text(200, None), "the daemon answered HTTP 200");
-    // `code in _REFUSALS` raises for an unhashable code.
-    for body in [r#"{"error": ["x"]}"#, r#"{"error": {"a": 1}}"#] {
-        assert!(refusal(403, Some(&read(body))).is_err(), "{body}");
-    }
+    // An unhashable code reads as an unknown one.
+    assert_eq!(
+        text(403, Some(r#"{"error": ["x"]}"#)),
+        "the daemon answered HTTP 403 (['x'])"
+    );
+    assert_eq!(
+        text(403, Some(r#"{"error": {"a": 1}}"#)),
+        "the daemon answered HTTP 403 ({'a': 1})"
+    );
+    assert_eq!(text(403, Some(r#"{"error": [], "hint": "h"}"#)), "h");
+    assert_eq!(
+        text(404, Some(r#"{"error": {}}"#)).get(..14),
+        Some("this daemon do")
+    );
     // The JSON detail keeps the hint's type.
     assert_eq!(
         refusal(403, Some(&read(r#"{"hint": 7}"#))).unwrap(),
@@ -308,20 +320,73 @@ fn the_session_list_renders_as_the_oracle_prints_it() {
         .text,
         "{\"state\": \"listed\", \"sessions\": [{\"x\": NaN}], \"operator\": true}\n"
     );
-    // The oracle raises on these rows (after printing the header).
-    for body in [
-        r#"{"sessions": [{"created_at": NaN}]}"#,
-        r#"{"sessions": [{"last_used_at": 1e20}]}"#,
-        r#"{"sessions": [{"created_at": 123456789012345678901234567890}]}"#,
-        r#"{"sessions": [{"label": "\udc80"}]}"#,
+    // A time localtime refuses is the list's refusal, before any line.
+    let unshowable = |field: &str| {
+        Out::stderr(
+            format!(
+                "pseudolife-mcp console: the daemon's session list had a time this machine cannot show ({field})\n"
+            ),
+            4,
+        )
+    };
+    for (body, field) in [
+        (r#"{"sessions": [{"created_at": NaN}]}"#, "created_at"),
+        (r#"{"sessions": [{"created_at": Infinity}]}"#, "created_at"),
+        (r#"{"sessions": [{"created_at": -Infinity}]}"#, "created_at"),
+        (r#"{"sessions": [{"last_used_at": 1e20}]}"#, "last_used_at"),
+        (
+            r#"{"sessions": [{"last_used_at": 9223372036854775808.0}]}"#,
+            "last_used_at",
+        ),
+        (
+            r#"{"sessions": [{"created_at": 123456789012345678901234567890}]}"#,
+            "created_at",
+        ),
+        (
+            r#"{"sessions": [{"created_at": -123456789012345678901234567890}]}"#,
+            "created_at",
+        ),
+        (
+            r#"{"sessions": [{"created_at": 1}, {"last_used_at": NaN, "created_at": 2}]}"#,
+            "last_used_at",
+        ),
+        (
+            r#"{"sessions": [{"created_at": NaN, "last_used_at": NaN}]}"#,
+            "created_at",
+        ),
     ] {
-        assert!(listed(&read(body), false).is_err(), "{body}");
+        assert_eq!(
+            listed(&read(body), false).unwrap(),
+            unshowable(field),
+            "{body}"
+        );
     }
-    // Windows' CRT refuses a negative time; glibc converts it.
-    assert_eq!(
-        listed(&read(r#"{"sessions": [{"created_at": -5}]}"#), false).is_ok(),
-        cfg!(not(windows))
+    // A lone surrogate the list would print is its refusal too.
+    for body in [
+        r#"{"sessions": [{"label": "\udc80"}]}"#,
+        r#"{"sessions": [{"session_id": "a"}, {"principal": "x\ud800"}]}"#,
+    ] {
+        assert_eq!(
+            listed(&read(body), false).unwrap(),
+            Out::stderr(format!("pseudolife-mcp console: {LIST_TEXT}\n"), 4),
+            "{body}"
+        );
+    }
+    // A time localtime converts past the formatted range defers.
+    assert!(
+        listed(
+            &read(r#"{"sessions": [{"created_at": 32510000000}]}"#),
+            false
+        )
+        .is_err()
     );
+    // Windows' CRT refuses a negative time; glibc converts it.
+    let negative = listed(&read(r#"{"sessions": [{"created_at": -5}]}"#), false).unwrap();
+    if cfg!(windows) {
+        assert_eq!(negative, unshowable("created_at"));
+    } else {
+        assert_eq!(negative.code, 0);
+    }
     // Code points, not UTF-16 units, pad a cell.
     assert_eq!(
         String::from_utf16(&padded(units("\u{1f600}"), 3)).unwrap(),
@@ -353,55 +418,161 @@ fn a_printed_link_matches_the_oracle() {
         (r#", "expires_in": 7200"#, 120),
     ] {
         assert_eq!(
-            opened(&link(extra), false, None),
+            opened(&link(extra), false, None, None),
             Out::stdout(text(minutes), 0),
             "{extra}"
         );
     }
     assert_eq!(
-        opened(&link(r#", "expires_in": 300"#), true, None).text,
+        opened(&link(r#", "expires_in": 300"#), true, None, None).text,
         "{\"state\": \"printed\", \"url\": \"http://127.0.0.1:1/ui/#/signin?code=ABCD\", \"code\": \"ABCD\", \"origin\": \"http://127.0.0.1:1\", \"principal\": \"p\", \"expires_in\": 300}\n"
     );
-    // int() raises on these: nothing is printed, the exception ends it.
-    for (extra, line) in [
-        (
-            r#", "expires_in": "abc""#,
-            "ValueError: invalid literal for int() with base 10: 'abc'",
-        ),
-        (
-            r#", "expires_in": [1]"#,
-            "TypeError: int() argument must be a string, a bytes-like object or a real number, not 'list'",
-        ),
-        (
-            r#", "expires_in": NaN"#,
-            "ValueError: cannot convert float NaN to integer",
-        ),
+    // An expiry int() refuses is the answer's refusal, in both modes.
+    for extra in [
+        r#", "expires_in": "abc""#,
+        r#", "expires_in": [1]"#,
+        r#", "expires_in": {"a": 1}"#,
+        r#", "expires_in": NaN"#,
+        r#", "expires_in": Infinity"#,
     ] {
         assert_eq!(
-            opened(&link(extra), false, None),
-            Out::crashed(String::new(), line.to_owned()),
+            opened(&link(extra), false, None, None),
+            Out::stderr(format!("pseudolife-mcp console: {BAD_EXPIRY}\n"), 4),
             "{extra}"
         );
-        // The JSON answer never converts it.
-        assert_eq!(opened(&link(extra), true, None).code, 0, "{extra}");
+        assert_eq!(
+            opened(&link(extra), true, None, None),
+            Out::stdout(
+                format!(
+                    "{{\"state\": \"refused\", \"error\": \"bad_answer\", \"detail\": \"{BAD_EXPIRY}\"}}\n"
+                ),
+                4
+            ),
+            "{extra}"
+        );
     }
-    let refused = Out::stderr(format!("{NO_LINK}\n"), 4);
+    let refused = Out::stderr(format!("pseudolife-mcp console: {NO_LINK}\n"), 4);
     for body in [
         r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A", "origin": "http://127.0.0.1:1"}"#,
         r#"{"url": "http://127.0.0.1:2/ui/#/signin?code=A", "code": "A", "origin": "http://127.0.0.1:1"}"#,
         r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A B", "code": "A", "origin": "http://127.0.0.1:1"}"#,
         r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A", "code": "A", "origin": "ftp://h"}"#,
         r#"{"url": 5, "code": "A", "origin": "http://127.0.0.1:1"}"#,
-        // Declared: refused where the oracle may accept (fail-safe).
+        // The oracle refuses these as well: no plain host, a surrogate.
         r#"{"url": "http://é/ui/#/signin?code=A", "code": "A", "origin": "http://é"}"#,
         r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=\udc80", "code": "A", "origin": "http://127.0.0.1:1"}"#,
+        // Shell syntax after the code (a batch-file browser runs cmd.exe).
+        r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A&calc", "code": "A", "origin": "http://127.0.0.1:1"}"#,
+        r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A&to=board", "code": "A", "origin": "http://127.0.0.1:1"}"#,
     ] {
-        assert_eq!(opened(&read(body), false, None), refused, "{body}");
+        assert_eq!(opened(&read(body), false, None, None), refused, "{body}");
     }
     assert_eq!(
-        opened(&read(r#"{"code": 1}"#), true, None).text,
-        "{\"state\": \"refused\", \"error\": \"bad_answer\"}\n"
+        opened(&read(r#"{"code": 1}"#), true, None, None).text,
+        "{\"state\": \"refused\", \"error\": \"bad_answer\", \"detail\": \"the daemon's answer had no sign-in link\"}\n"
     );
+    // The page asked for may follow the code.
+    let paged = read(
+        r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=A&to=board", "code": "A", "origin": "http://127.0.0.1:1"}"#,
+    );
+    assert_eq!(opened(&paged, false, Some("board"), None).code, 0);
+    assert_eq!(opened(&paged, false, Some("other"), None), refused);
+}
+
+#[test]
+fn a_link_holds_nothing_but_the_origin_the_code_and_the_page_asked_for() {
+    let origin = J::from("http://127.0.0.1:8765");
+    let safe = |url: &str, to: Option<&str>| link_is_safe(Some(&J::from(url)), Some(&origin), to);
+    let base = "http://127.0.0.1:8765/ui/#/signin?code=";
+    for tail in [
+        "ABCD&calc",
+        "ABCD|calc",
+        "ABCD^calc",
+        "ABCD\"calc",
+        "ABCD%PATH%",
+        "ABCD>out",
+        "ABCD<in",
+        "ABCD(x)",
+        "ABCD!x!",
+        "abcd",
+        "ABCI",
+        "ABCL",
+        "ABCO",
+        "ABCU",
+        "",
+        "ABCD&to=Board",
+        "ABCD&to=board&x",
+        "ABCD&to=",
+        "ABCD\u{660}",
+        "ABCD#x",
+        "ABCD?x",
+        "ABCD/x",
+    ] {
+        assert!(!safe(&format!("{base}{tail}"), Some("board")), "{tail}");
+    }
+    for code in ["0123-4567-89AB", "CDEF-GHJK-MNPQ", "RSTV-WXYZ-0000"] {
+        assert!(safe(&format!("{base}{code}"), None), "{code}");
+        assert!(safe(&format!("{base}{code}"), Some("board")), "{code}");
+        assert!(
+            safe(&format!("{base}{code}&to=board"), Some("board")),
+            "{code}"
+        );
+        assert!(!safe(&format!("{base}{code}&to=board"), None), "{code}");
+    }
+    // Hosts normalize_origin lets through but no plain link holds.
+    for host in [
+        "a&calc:8765",
+        "a|b",
+        "a^b",
+        "a\"b",
+        "a%25b",
+        "[fe80::1%25eth0]:8765",
+        "a!b",
+        "a$b",
+        "a'b",
+        "a(b)",
+        "a*b",
+        "a,b",
+        "a;b",
+        "a=b",
+        "a<b",
+        "a>b",
+        "a`b",
+        "a{b}",
+    ] {
+        let raw = format!("http://{host}");
+        // A zone id does not normalize here (the oracle's does, then
+        // refuses its host): unsafe either way.
+        let normal = normalize_origin(&raw)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| raw.clone());
+        let url = J::from(format!("{normal}/ui/#/signin?code=ABCD").as_str());
+        assert!(
+            !link_is_safe(Some(&url), Some(&J::from(raw.as_str())), None),
+            "{raw}"
+        );
+    }
+    for (raw, normal) in [
+        ("http://localhost:8765", "http://localhost:8765"),
+        ("http://[::1]:8765", "http://[::1]:8765"),
+        ("https://console.example.com", "https://console.example.com"),
+        (
+            "HTTPS://Console.Example.COM:443/",
+            "https://console.example.com",
+        ),
+        (
+            "https://my_host.example:8443",
+            "https://my_host.example:8443",
+        ),
+        (
+            "http://[::ffff:127.0.0.1]:8765",
+            "http://[::ffff:127.0.0.1]:8765",
+        ),
+    ] {
+        let url = J::from(format!("{normal}/ui/#/signin?code=ABCD").as_str());
+        assert!(link_is_safe(Some(&url), Some(&J::from(raw)), None), "{raw}");
+    }
 }
 
 #[test]
@@ -419,7 +590,7 @@ fn the_browser_starts_only_for_a_safe_link_and_before_anything_prints() {
             answer
         }
     };
-    let out = opened(&link(""), false, Some(&mut start(true)));
+    let out = opened(&link(""), false, None, Some(&mut start(true)));
     assert_eq!(
         out,
         Out::stdout(
@@ -427,65 +598,57 @@ fn the_browser_starts_only_for_a_safe_link_and_before_anything_prints() {
             0
         )
     );
-    let out = opened(&link(""), true, Some(&mut start(false)));
+    let out = opened(&link(""), true, None, Some(&mut start(false)));
     assert!(
         out.text.starts_with("{\"state\": \"printed\", "),
         "{}",
         out.text
     );
-    let out = opened(&link(""), true, Some(&mut start(true)));
+    let out = opened(&link(""), true, None, Some(&mut start(true)));
     assert!(
         out.text.starts_with("{\"state\": \"opened\", "),
         "{}",
         out.text
     );
-    // The oracle opens the browser, then dies converting expires_in.
-    let out = opened(
-        &link(r#", "expires_in": "x""#),
-        false,
-        Some(&mut start(true)),
-    );
-    assert_eq!(out.code, 1);
-    // An unsafe link starts nothing.
-    let out = opened(
-        &read(r#"{"url": "file:///etc/passwd", "code": "AB", "origin": "http://127.0.0.1:1"}"#),
-        false,
-        Some(&mut start(true)),
-    );
-    assert_eq!(out.code, 4);
+    // An unusable expiry, a code other than the link's and an unsafe link
+    // start nothing.
+    for body in [
+        r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=AB", "code": "AB", "origin": "http://127.0.0.1:1", "expires_in": "x"}"#,
+        r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=AB", "code": "AC", "origin": "http://127.0.0.1:1"}"#,
+        r#"{"url": "file:///etc/passwd", "code": "AB", "origin": "http://127.0.0.1:1"}"#,
+    ] {
+        let out = opened(&read(body), false, None, Some(&mut start(true)));
+        assert_eq!(out.code, 4, "{body}");
+    }
     assert_eq!(
         started.into_inner(),
-        vec!["http://127.0.0.1:1/ui/#/signin?code=AB"; 4],
-        "one start per safe link"
+        vec!["http://127.0.0.1:1/ui/#/signin?code=AB"; 3],
+        "one start per usable answer"
     );
 }
 
 #[test]
-fn a_lone_surrogate_in_the_code_kills_the_printout_where_the_oracle_dies() {
+fn a_code_other_than_the_links_is_refused_in_both_modes() {
     let body = |code: &str| {
         read(&format!(
             r#"{{"url": "http://127.0.0.1:1/ui/#/signin?code=A", "code": "{code}", "origin": "http://127.0.0.1:1"}}"#
         ))
     };
-    let printed =
-        "Open this link to sign in to the Console:\n  http://127.0.0.1:1/ui/#/signin?code=A\n";
-    assert_eq!(
-        opened(&body(r"x\udc80y"), false, None),
-        Out::crashed(
-            printed.into(),
-            "UnicodeEncodeError: 'utf-8' codec can't encode character '\\udc80' in position 18: surrogates not allowed".into()
-        )
-    );
-    // Code points, not UTF-16 units, count; a run is reported whole.
-    assert_eq!(
-        opened(&body(r"😀\ud800\udbff"), false, None),
-        Out::crashed(
-            printed.into(),
-            "UnicodeEncodeError: 'utf-8' codec can't encode characters in position 18-19: surrogates not allowed".into()
-        )
-    );
-    // JSON escapes it.
-    assert_eq!(opened(&body(r"x\udc80"), true, None).code, 0);
+    for code in [
+        r"x\udc80y",
+        r"😀\ud800\udbff",
+        r"\udc80",
+        "B",
+        "näme ✓",
+        r"\u001b[2J",
+    ] {
+        assert_eq!(
+            opened(&body(code), false, None, None),
+            Out::stderr(format!("pseudolife-mcp console: {MISMATCH}\n"), 4),
+            "{code}"
+        );
+        assert_eq!(opened(&body(code), true, None, None).code, 4, "{code}");
+    }
 }
 
 #[test]

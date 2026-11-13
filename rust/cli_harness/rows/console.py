@@ -22,7 +22,6 @@ import base64
 import functools
 import json
 import os
-import re
 import shlex
 import shutil
 import sys
@@ -65,63 +64,6 @@ def console_deferral(obs: dict) -> None:
         obs["requests"] = []
 
 
-_TRACEBACK = re.compile(rb"\ATraceback \(most recent call last\):\r?\n.*\n(?P<last>[A-Za-z]+"
-                        rb"Error: [^\r\n]*)\r?\n\Z", re.DOTALL)
-HEADER = "ID                SIGNED IN AS         HOW      SINCE             LAST USED         BROWSER\n"
-DECLARED_CRASHES = {
-    # `code in _REFUSALS` with a list or dict code.
-    "console-unhashable-traceback": (rb"TypeError: unhashable type: ", ""),
-    # `time.localtime` on NaN, after the list's header line.
-    "console-stamp-nan-traceback": (rb"ValueError: Invalid value NaN (not a number)", HEADER),
-    # `time.localtime` past time_t, after the header.
-    "console-stamp-overflow-traceback": (
-        rb"OverflowError: timestamp out of range for platform time_t", HEADER),
-    # Windows' CRT refuses a negative time, after the header.
-    "console-stamp-negative-traceback": (rb"OSError: [Errno 22] Invalid argument", HEADER),
-    # A lone surrogate printed to strict UTF-8 stdout, after the header.
-    "console-surrogate-traceback": (rb"UnicodeEncodeError: 'utf-8' codec can't encode", HEADER),
-}
-
-
-def _declared_crash(name: str, marker: bytes, stdout: str):
-    def rule(obs: dict) -> None:
-        """Declared: the oracle dies with this uncaught exception (exit 1, a
-        traceback naming its own source files, after ``stdout`` if any);
-        the candidate prints its deferral line, exit 1, after the same
-        request. Only that traceback with exit 1 maps; requests stay
-        compared."""
-        if obs.get("arm") != "python" or obs["exit"] != 1:
-            return
-        match = _TRACEBACK.match(normalize._get(obs, "stderr"))
-        if (match and match.group("last").startswith(marker)
-                and normalize._get(obs, "stdout") == _native(stdout)):
-            normalize._put(obs, "stdout", b"")
-            normalize._put(obs, "stderr", _native(DEFERRAL))
-    normalize.rule(name)(rule)
-
-
-for _name, (_marker, _stdout) in DECLARED_CRASHES.items():
-    _declared_crash(_name, _marker, _stdout)
-
-
-_TERMINAL = re.compile(rb"\ATraceback \(most recent call last\):\r?\n(?:[^\r\n]*\r?\n)*?"
-                       rb"(?P<last>[A-Za-z]+Error: [^\r\n]*\r?\n)\Z")
-
-
-@normalize.rule("console-terminal-traceback")
-def console_terminal_traceback(obs: dict) -> None:
-    """``python-traceback-not-contract``: the oracle dies with an uncaught
-    exception (exit 1) after the sign-in code was minted, and the candidate
-    answers that branch itself. Only the traceback header and frames leave
-    the oracle's stderr; its terminal ``ExceptionType: message`` line, exit,
-    stdout, requests and files stay compared."""
-    if obs.get("arm") != "python" or obs["exit"] != 1:
-        return
-    match = _TERMINAL.match(normalize._get(obs, "stderr"))
-    if match:
-        normalize._put(obs, "stderr", match.group("last"))
-
-
 @normalize.rule("console-deferral-after-read")
 def console_deferral_after_read(obs: dict) -> None:
     """A declared deferral that comes after ``--unless-signed-in``'s session
@@ -146,9 +88,11 @@ def link(shape=None, status: int = 200):
     """``/api/console/link`` answering for the origin the request names;
     ``shape(origin)`` returns the fields to change."""
     def route(request):
-        origin = json.loads(request["body"])["origin"]
-        value = {"url": f"{origin}/ui/#/signin?code={CODE}", "code": CODE, "origin": origin,
-                 "principal": "fixture", "expires_in": 300}
+        body = json.loads(request["body"])
+        origin = body["origin"]
+        page = f"&to={body['to']}" if body.get("to") else ""
+        value = {"url": f"{origin}/ui/#/signin?code={CODE}{page}", "code": CODE,
+                 "origin": origin, "principal": "fixture", "expires_in": 300}
         if shape is not None:
             value.update(shape(origin))
         return json_body(value, status)
@@ -321,16 +265,12 @@ def _settle(arm, obs, launches=0):
 
 def _reaches_browser(argv: list[str]) -> bool:
     """The oracle reaches ``open_browser`` only on the sign-in path (no
-    ``--list``, no non-empty ``--revoke``) without ``--no-open``."""
+    ``--list``, no ``--revoke``: an empty one is a usage error) without
+    ``--no-open``."""
     words = argv[1:]
     if "--list" in words or "--no-open" in words:
         return False
-    for index, word in enumerate(words):
-        if word == "--revoke" and index + 1 < len(words) and words[index + 1]:
-            return False
-        if word.startswith("--revoke=") and word != "--revoke=":
-            return False
-    return True
+    return not any(word == "--revoke" or word.startswith("--revoke=") for word in words)
 
 
 def _check_browser_env(case_id: str, env: dict, served: bool) -> None:
@@ -471,19 +411,49 @@ def cases() -> list[Case]:
         add(case(f"link-expires-{name}", ["--no-open"],
                  routes={"/api/console/link": link(lambda _o, v=value: {"expires_in": v})}))
     add(case("link-principal-object", ["--no-open", "--json"],
-             routes={"/api/console/link": link(lambda _o: {"principal": {"a": [1, None]},
-                                                            "code": "ü-1"})}))
-    add(case("link-unicode-code", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"principal": {"a": [1, None]}})}))
+    add(case("link-to-board-text", ["--no-open", "--to", "board"],
+             routes={"/api/console/link": link()}))
+    # Old daemons answer without the page: still a link.
+    add(case("link-to-board-no-page", ["--no-open", "--to", "board"],
+             routes={"/api/console/link": link(lambda o: {
+                 "url": f"{o}/ui/#/signin?code={CODE}"})}))
+    # The code must be the link's.
+    add(case("link-bad-unicode-code", ["--no-open"],
              routes={"/api/console/link": link(lambda _o: {"code": "näme ✓"})}))
+    add(case("link-bad-other-code", ["--no-open", "--json"],
+             routes={"/api/console/link": link(lambda _o: {"code": "ABCD-1235"})}))
     for name, shape in (("no-code", lambda _o: {"code": None}),
                         ("code-number", lambda _o: {"code": 5}),
                         ("other-origin", lambda o: {"url": "http://127.0.0.1:2/ui/#/signin?code=A"}),
                         ("control-url", lambda o: {"url": f"{o}/ui/#/signin?code=A B"}),
                         ("origin-not-http", lambda o: {"origin": "ftp://h"}),
-                        ("no-url", lambda _o: {"url": None})):
+                        ("no-url", lambda _o: {"url": None}),
+                        # Nothing but the code may follow `code=`: a batch-file
+                        # browser runs through cmd.exe.
+                        ("ampersand", lambda o: {"url": f"{o}/ui/#/signin?code={CODE}&calc"}),
+                        ("pipe", lambda o: {"url": f"{o}/ui/#/signin?code={CODE}|calc",
+                                            "code": f"{CODE}|calc"}),
+                        ("caret-quote", lambda o: {"url": f'{o}/ui/#/signin?code=A^"B',
+                                                   "code": 'A^"B'}),
+                        ("percent", lambda o: {"url": f"{o}/ui/#/signin?code=%PATH%",
+                                               "code": "%PATH%"}),
+                        ("lowercase", lambda o: {"url": f"{o}/ui/#/signin?code=abcd",
+                                                 "code": "abcd"}),
+                        ("unasked-page", lambda o: {
+                            "url": f"{o}/ui/#/signin?code={CODE}&to=board"}),
+                        ("origin-ampersand", lambda _o: {
+                            "origin": "http://a&calc:8765",
+                            "url": f"http://a&calc:8765/ui/#/signin?code={CODE}"}),
+                        ("origin-zone", lambda _o: {
+                            "origin": "http://[fe80::1%25eth0]:8765",
+                            "url": f"http://[fe80::1%25eth0]:8765/ui/#/signin?code={CODE}"})):
         add(case(f"link-bad-{name}", ["--no-open"], routes={"/api/console/link": link(shape)}))
     add(case("link-bad-json", ["--no-open", "--json"],
              routes={"/api/console/link": link(lambda _o: {"origin": None})}))
+    add(case("link-bad-page-json", ["--no-open", "--to", "board", "--json"],
+             routes={"/api/console/link": link(lambda o: {
+                 "url": f"{o}/ui/#/signin?code={CODE}&to=settings"})}))
 
     # Refusals.
     def refuse(case_id, argv, route, path="/api/console/link"):
@@ -514,6 +484,12 @@ def cases() -> list[Case]:
     refuse("refused-redirect", ["--no-open", "--json"], redirect("/api/console/elsewhere"))
     refuse("refused-surrogate-hint", ["--no-open"],
            json_body({"error": "signin_unavailable", "hint": "\udc80 x"}, 403))
+    # An `error` that is a list or object reads as an unknown code.
+    refuse("refused-error-list", ["--no-open"], json_body({"error": ["x"]}, 403))
+    refuse("refused-error-object", ["--list", "--json"], json_body({"error": {"a": 1}}, 403),
+           "/api/console/sessions")
+    refuse("refused-error-list-hint", ["--revoke", "s-1"],
+           json_body({"error": [], "hint": "try later"}, 409), "/api/console/sessions/revoke")
 
     # The session list.
     add(case("list", ["--list"], env=ZONE, routes=sessions()))
@@ -533,6 +509,12 @@ def cases() -> list[Case]:
     add(case("revoke-not-found", ["--revoke", "s-1"], routes=revoked(False)))
     add(case("revoke-not-found-json", ["--revoke=s-1", "--json"], routes=revoked(None)))
     add(case("revoke-unicode-id", ["--revoke", "s-ü ✓"], routes=revoked(True)))
+    # An empty id is a usage error, before any credential is read.
+    add(case("revoke-empty", ["--revoke", ""], routes={"/api/console/link": link()}))
+    add(case("revoke-empty-joined", ["--no-open", "--revoke=", "--json"],
+             routes={"/api/console/link": link()}))
+    add(case("revoke-empty-list", ["--list", "--revoke="], routes=sessions()))
+    add(case("revoke-empty-bad-page", ["--revoke", "", "--to", "Bad"]))
 
     # Credentials from a token file and from a client registration.
     add(case("token-file", ["--list"], env={"PSEUDOLIFE_MCP_TOKEN_FILE": "{HOME}/console.token"},
@@ -554,42 +536,51 @@ def cases() -> list[Case]:
     add(case("defer-https-untrusted", ["--list"], routes=sessions(), tls=True,
              rules=("console-deferral",)))
 
-    # Declared oracle crashes after the request: the candidate defers.
-    add(case("crash-unhashable-error", ["--no-open"],
-             routes={"/api/console/link": json_body({"error": ["x"]}, 403)},
-             rules=("console-unhashable-traceback",)))
-    # From the 200 answer on the candidate owns every branch: the oracle's
-    # own crash is reproduced (its terminal line; header and frames are not
-    # compared, python-traceback-not-contract).
-    add(case("crash-expires-text", ["--no-open"],
-             routes={"/api/console/link": link(lambda _o: {"expires_in": "abc"})},
-             rules=("console-terminal-traceback",)))
-    add(case("crash-expires-list", ["--no-open", "--revoke="],
-             routes={"/api/console/link": link(lambda _o: {"expires_in": {"a": 1}})},
-             rules=("console-terminal-traceback",)))
-    add(case("crash-expires-nan", ["--no-open"],
-             routes={"/api/console/link": link(lambda _o: {"expires_in": float("nan")})},
-             rules=("console-terminal-traceback",)))
-    add(case("crash-surrogate-code", ["--no-open"],
-             routes={"/api/console/link": link(lambda _o: {"code": "\U0001f600\udc80\ud800"})},
-             rules=("console-terminal-traceback",)))
+    # An expiry int() refuses, and a code other than the link's (a lone
+    # surrogate included), are the answer's refusals, in both modes.
+    add(case("bad-expires-text", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": "abc"})}))
+    add(case("bad-expires-object", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": {"a": 1}})}))
+    add(case("bad-expires-nan", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": float("nan")})}))
+    add(case("bad-expires-json", ["--no-open", "--json"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": [1]})}))
+    add(case("bad-expires-digits", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"expires_in": "1" * 4301})}))
+    add(case("bad-code-surrogate", ["--no-open"],
+             routes={"/api/console/link": link(lambda _o: {"code": "\U0001f600\udc80\ud800"})}))
     add(case("link-expires-digits", ["--no-open"],
              routes={"/api/console/link": link(lambda _o: {"expires_in": "١_2٠٠ "})}))
     add(case("link-expires-huge", ["--no-open"],
              routes={"/api/console/link": link(lambda _o: {"expires_in": 1.5e308})}))
-    add(case("link-surrogate-code-json", ["--no-open", "--json"],
+    add(case("bad-code-surrogate-json", ["--no-open", "--json"],
              routes={"/api/console/link": link(lambda _o: {"code": "\udc80"})}))
 
     c.extend(browser_cases())
-    add(case("crash-stamp-nan", ["--list"],
-             routes=sessions(rows=[{"created_at": float("nan")}]),
-             rules=("console-stamp-nan-traceback",)))
-    add(case("crash-stamp-overflow", ["--list"], routes=sessions(rows=[{"last_used_at": 1e20}]),
-             rules=("console-stamp-overflow-traceback",)))
-    add(case("crash-stamp-negative", ["--list"], routes=sessions(rows=[{"created_at": -5}]),
-             rules=("console-stamp-negative-traceback",), platforms=("windows",)))
-    add(case("crash-surrogate-label", ["--list"], routes=sessions(rows=[{"label": "\udc80"}]),
-             rules=("console-surrogate-traceback",)))
+    # A time localtime refuses, or a lone surrogate the list would print, is
+    # the list's refusal, before any line.
+    add(case("list-bad-stamp-nan", ["--list"],
+             routes=sessions(rows=[{"created_at": float("nan")}])))
+    add(case("list-bad-stamp-overflow", ["--list"],
+             routes=sessions(rows=[{"last_used_at": 1e20}])))
+    add(case("list-bad-stamp-huge-int", ["--list"],
+             routes=sessions(rows=[{"created_at": 10 ** 30}])))
+    # Inside time_t, past any year localtime holds (glibc's EOVERFLOW, the
+    # CRT's EINVAL).
+    add(case("list-bad-stamp-far", ["--list"],
+             routes=sessions(rows=[{"created_at": 9 * 10 ** 18}])))
+    add(case("list-bad-stamp-later-row", ["--list"], env=ZONE,
+             routes=sessions(rows=[{"session_id": "s-1", "created_at": 1700000000},
+                                   {"session_id": "s-2", "last_used_at": float("-inf")}])))
+    add(case("list-bad-stamp-negative", ["--list"], routes=sessions(rows=[{"created_at": -5}]),
+             platforms=("windows",)))
+    add(case("list-bad-surrogate-label", ["--list"],
+             routes=sessions(rows=[{"label": "\udc80"}])))
+    add(case("list-bad-surrogate-later-row", ["--list"],
+             routes=sessions(rows=[{"session_id": "s-1"}, {"principal": "x\ud800"}])))
+    add(case("list-surrogate-json", ["--list", "--json"],
+             routes=sessions(rows=[{"label": "\udc80", "created_at": float("nan")}])))
     return c
 
 
@@ -619,9 +610,9 @@ def browser_cases() -> list[Case]:
     add(browser_case("open-first-entry", ["--json"], routes=signin,
                      browser=os.pathsep + standin_browser() + os.pathsep
                      + f"'{BIN}{SEP}other{exe}' %s &"))
-    add(browser_case("open-empty-revoke", ["--revoke", ""], routes=signin))
-    add(browser_case("open-unicode-code", [], routes={"/api/console/link": link(
-        lambda _o: {"code": "näme ✓", "expires_in": 7200})}))
+    add(browser_case("open-hours", [], routes={"/api/console/link": link(
+        lambda _o: {"expires_in": 7200})}))
+    add(browser_case("open-to-board-text", ["--to", "board"], routes=signin))
     # open_browser returns False: the link is printed.
     add(browser_case("open-generic", [], routes=signin, browser=f"{interpreter} %s"))
     add(browser_case("open-generic-name", ["--json"], routes=signin,
@@ -644,13 +635,18 @@ def browser_cases() -> list[Case]:
     add(browser_case("open-refused", [], routes={"/api/console/link": json_body(
         {"error": "unauthorized"}, 401)}))
     add(browser_case("open-unreachable", ["--to", "board"]))
-    # The oracle opens the browser, then dies: reproduced, launch included.
-    add(browser_case("open-crash-expires", [], routes={"/api/console/link": link(
-        lambda _o: {"expires_in": "5 minutes"})}, rules=("console-terminal-traceback",),
-        launches=1))
-    add(browser_case("open-crash-surrogate-code", [], routes={"/api/console/link": link(
-        lambda _o: {"code": "a\udc80"})}, rules=("console-terminal-traceback",),
-        launches=1))
+    # A malformed answer is refused before the browser starts.
+    add(browser_case("open-bad-expires", [], routes={"/api/console/link": link(
+        lambda _o: {"expires_in": "5 minutes"})}))
+    add(browser_case("open-bad-code-surrogate", [], routes={"/api/console/link": link(
+        lambda _o: {"code": "a\udc80"})}))
+    add(browser_case("open-bad-unicode-code", ["--json"], routes={"/api/console/link": link(
+        lambda _o: {"code": "näme ✓"})}))
+    # Shell syntax after the code (with the code to match) starts nothing.
+    add(browser_case("open-shell-pipe", [], routes={"/api/console/link": link(
+        lambda o: {"url": f"{o}/ui/#/signin?code={CODE}|calc", "code": f"{CODE}|calc"})}))
+    add(browser_case("open-shell-ampersand", ["--json"], routes={"/api/console/link": link(
+        lambda o: {"url": f"{o}/ui/#/signin?code={CODE}&echo.>x"})}))
 
     # --unless-signed-in: the session list first (a read), then the sign-in.
     add(browser_case("unless-signed-in", ["--unless-signed-in"],
@@ -670,7 +666,6 @@ def browser_cases() -> list[Case]:
              routes=signed_in([], **signin)))
     add(case("unless-no-open-signed-in", ["--no-open", "--unless-signed-in", "--json"],
              routes=signed_in([1], **signin)))
-    add(case("empty-revoke-no-open", ["--no-open", "--revoke="], routes=signin))
 
     # Deferred before any request: a launcher this port does not start.
     add(deferred_browser("defer-browser-standard-name", [], browser="firefox"))
@@ -698,14 +693,27 @@ MUTANTS = [
            "            if *unless {", "            if false && *unless {",
            ("unless-signed-in",)),
     Mutant("console-unsafe-link-launched", "console", FILE,
-           "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin);",
+           "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin, to);",
            "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_)));", ("open-unsafe-link",)),
     Mutant("console-generic-launched", "console", BROWSER_FILE,
            'if words.last().map(String::as_str) != Some("&") {',
            'if words.last().map(String::as_str) == Some("") {', ("open-generic",)),
-    Mutant("console-expiry-crash-swallowed", "console", FILE,
-           "        Err(line) => return Out::crashed(String::new(), line),",
-           '        Err(_) => "5".to_owned(),', ("open-crash-expires",)),
+    Mutant("console-expiry-refusal-swallowed", "console", FILE,
+           "    let Ok(minutes) = pyint::minutes(expires_in) else {",
+           '    let Ok(minutes) = pyint::minutes(expires_in).or(Ok::<_, ()>("5".to_owned())) else {',
+           ("open-bad-expires",)),
+    Mutant("console-code-any-character", "console", FILE,
+           "        && code.chars().all(|c| CODE_CHARS.contains(c))",
+           "        && code.chars().all(|c| c != ' ')", ("open-shell-pipe",)),
+    Mutant("console-code-unchecked", "console", FILE,
+           "    if code.as_str() != Some(shown) {", "    if code.as_str().is_none() {",
+           ("link-bad-other-code",)),
+    Mutant("console-empty-revoke-signs-in", "console", FILE,
+           '    if args.revoke.as_deref() == Some("") {',
+           '    if args.revoke.as_deref() == Some("-") {', ("revoke-empty",)),
+    Mutant("console-localtime-refusal-deferred", "console", FILE,
+           "        stamp::Minute::Refused => Ok(None),",
+           "        stamp::Minute::Refused => Err(Defer),", ("list-bad-stamp-far",)),
     # Only Linux gates the browser on a display.
     Mutant("console-display-ignored", "console", BROWSER_FILE,
            "    platform != Platform::Posix || display(host)", "    true",

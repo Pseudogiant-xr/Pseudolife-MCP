@@ -154,13 +154,14 @@ fn x_browsers(host: &dyn Host) -> Vec<(&'static str, Controller)> {
 }
 
 /// The console browsers registered when `TERM` is set. `Elinks` is a
-/// `UnixBrowser`, not a `GenericBrowser`, so `open_browser` would run it.
+/// `UnixBrowser`, not a `GenericBrowser`, but `open_browser` refuses it by
+/// name, so it reads as one here.
 fn console_browsers(host: &dyn Host) -> Vec<(&'static str, Controller)> {
-    use Controller::{Generic, Other};
+    use Controller::Generic;
     [
         ("www-browser", Generic),
         ("links", Generic),
-        ("elinks", Other),
+        ("elinks", Generic),
         ("lynx", Generic),
         ("w3m", Generic),
     ]

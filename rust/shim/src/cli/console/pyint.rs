@@ -1,8 +1,8 @@
 //! `max(1, int(payload.get("expires_in") or 300) // 60)` as CPython 3.11
 //! computes it, for every value `json.loads` can produce: the minutes as
-//! decimal text, or the terminal `ExceptionType: message` line of the
-//! exception `int()` raises (the oracle dies there, after the browser was
-//! opened and before anything is printed).
+//! decimal text, or the `ExceptionType: message` line of the exception
+//! `int()` raises (the oracle then refuses the answer before the browser
+//! opens: `no usable expiry time`).
 use super::pyjson::{self, J};
 
 /// `sys.get_int_max_str_digits()` with `PYTHONINTMAXSTRDIGITS` unset (the

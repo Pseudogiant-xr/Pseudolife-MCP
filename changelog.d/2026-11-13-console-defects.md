@@ -1,0 +1,5 @@
+### Fixed (2026-11-13 — `pseudolife-mcp console` refuses a malformed answer instead of crashing)
+
+- `pseudolife-mcp console` no longer ends in a Python traceback when whatever answers at the daemon's address sends something malformed: an `error` that is a list or object, an expiry time that is not a number, a sign-in code other than the one in its link, a session-list time this machine cannot show, text with a lone surrogate, nesting too deep to parse, or a reply that is not readable HTTP. Each is now refused with a message naming the problem (exit 4), before any browser opens or any line of the list prints. The native command (`pseudolife-stdio`) answers the same way.
+- `pseudolife-mcp console --revoke ""` is now a usage error (exit 2) instead of signing a browser in.
+- The command no longer starts the Elinks terminal browser, which takes over the terminal when no Elinks window is open; it prints the link instead, as it already did for lynx, links and w3m.

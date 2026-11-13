@@ -222,13 +222,18 @@ fn without_a_browser_variable_the_platform_default_decides() {
         choose(&x().found(&["google-chrome"]), Posix),
         Err(Unsupported)
     );
-    // Console browsers, with TERM: terminal ones are refused, elinks is not one.
+    // Console browsers, with TERM: every one is refused, elinks (a
+    // UnixBrowser that falls back to the terminal) by name.
     let term = || Fake::default().with("TERM", "xterm");
     assert_eq!(
         choose(&term().found(&["lynx", "w3m"]), Posix),
         Ok(Plan::Refused)
     );
-    assert_eq!(choose(&term().found(&["elinks"]), Posix), Err(Unsupported));
+    assert_eq!(choose(&term().found(&["elinks"]), Posix), Ok(Plan::Refused));
+    assert_eq!(
+        choose(&term().found(&["elinks", "lynx"]), Posix),
+        Ok(Plan::Refused)
+    );
     // With no display the X list is never registered.
     assert_eq!(
         choose(&term().found(&["xdg-open"]), Posix),
