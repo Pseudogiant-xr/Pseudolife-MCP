@@ -1519,6 +1519,14 @@ def test_the_dump_marker_is_only_read_outside_copy_data(tmp_path):
     assert not up._dump_complete(path)
 
 
+def test_a_corrupt_deflate_stream_is_an_incomplete_dump_not_a_traceback(tmp_path):
+    # A stored block whose length and complement disagree: zlib.error, which
+    # is neither OSError nor EOFError.
+    path = tmp_path / "d.sql.gz"
+    path.write_bytes(bytes([0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 0xFF, 0x01, 0x05, 0x00, 0x00, 0x00]))
+    assert not up._dump_complete(path)
+
+
 def test_the_cli_mode_and_the_checkout_script_reach_the_same_code(tmp_path):
     proc = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", "update", "--help"],
                           capture_output=True, text=True, timeout=60, cwd=str(ROOT))
