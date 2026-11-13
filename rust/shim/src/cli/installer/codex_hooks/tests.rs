@@ -1278,3 +1278,84 @@ fn a_replacement_refuses_a_file_changed_since_it_was_read() {
         b"{\"hooks\": {\"SessionStart\": []}}\n"
     );
 }
+
+#[test]
+fn a_new_release_moves_the_bundle_and_leaves_the_approved_commands_alone() {
+    // The every-release path: new scripts, the same commands, so Codex keeps
+    // its approval; the superseded launcher bundle goes, a bundle from before
+    // the launcher (which a running session's commands may name) stays.
+    let world = World::new();
+    let legacy = legacy_commands(&checkout()).unwrap();
+    let root = hooks_root(&world.home);
+    let older = world.home.parent().unwrap().join("older-scripts");
+    copy_dir(&checkout().join("plugin/hooks"), &older);
+    let end = older.join("session-end.sh");
+    let mut bytes = fs::read(&end).unwrap();
+    bytes.extend_from_slice(b"\n# an older release\n");
+    fs::write(&end, bytes).unwrap();
+    // A pre-launcher bundle and the commands that name it.
+    let files = bundle_bytes(&older, &SCRIPTS).unwrap();
+    let mut tweaked = files.clone();
+    tweaked[0].1.extend_from_slice(b"\n# pre-launcher\n");
+    let pre = root.join(bundle_digest(&tweaked));
+    fs::create_dir_all(&pre).unwrap();
+    for (name, data) in &tweaked {
+        fs::write(pre.join(name), data).unwrap();
+    }
+    let old = manual_definitions(&pre, true);
+    let hooks = json!({"hooks": {
+        "SessionStart": manual_roles("sessionStart").iter().map(|r| json!({"hooks": [old[*r]]})).collect::<Vec<_>>(),
+        "UserPromptSubmit": manual_roles("userPromptSubmit").iter().map(|r| json!({"hooks": [old[*r]]})).collect::<Vec<_>>(),
+        "SessionEnd": [{"hooks": [old["SessionEnd"]]}],
+    }});
+    fs::write(
+        world.home.join("hooks.json"),
+        serde_json::to_vec(&hooks).unwrap(),
+    )
+    .unwrap();
+
+    manual::install(&world.home, &mut Report::default(), false, &older, &legacy).unwrap();
+    let first = fs::read_to_string(root.join(POINTER))
+        .unwrap()
+        .trim()
+        .to_owned();
+    assert_eq!(first, bundle_digest(&files));
+    let approved = fs::read(world.home.join("hooks.json")).unwrap();
+
+    manual::install(
+        &world.home,
+        &mut Report::default(),
+        false,
+        &checkout().join("plugin/hooks"),
+        &legacy,
+    )
+    .unwrap();
+    let second = fs::read_to_string(root.join(POINTER))
+        .unwrap()
+        .trim()
+        .to_owned();
+    assert_ne!(second, first, "the pointer moved to the new bundle");
+    assert_eq!(
+        second,
+        bundle_digest(&bundle_bytes(&checkout().join("plugin/hooks"), &SCRIPTS).unwrap())
+    );
+    assert_eq!(
+        fs::read(world.home.join("hooks.json")).unwrap(),
+        approved,
+        "approved commands unchanged"
+    );
+    assert!(
+        !root.join(&first).exists(),
+        "the superseded launcher bundle was pruned"
+    );
+    assert!(pre.is_dir(), "the pre-launcher bundle stays");
+    assert_eq!(
+        fs::read_to_string(root.join(LAUNCHED))
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        [second.as_str()]
+    );
+    let listed = listed_manual(&world);
+    manual::vet(&listed.iter().collect::<Vec<_>>(), &world.home, true).unwrap();
+}
