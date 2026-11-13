@@ -288,6 +288,16 @@ def test_every_row_has_a_suite_and_w1c_rows_match_their_shards():
     assert set(ROW_SUITES.values()) <= set(SUITES)
 
 
+def test_each_w1c_shard_lists_its_rows_once_in_name_order():
+    # One row per line in name order: two ports adding rows to one shard
+    # then touch different lines unless their names sort next to each other.
+    for shard in SHARDS:
+        if shard["suite"] in W1C_SUITES:
+            names = re.findall(r"'([a-z_]+)'", shard["w1c_rows"])
+            assert names == sorted(set(names)), shard["suite"]
+    assert list(parity_scope.NAMED_ROW_SUITES) == sorted(parity_scope.NAMED_ROW_SUITES)
+
+
 SHIM_SOURCE = ROOT / "rust/shim/src"
 # Files that declare and dispatch every command; a reference there is not a use.
 DISPATCH = {"cli.rs", "main.rs", "lib.rs"}

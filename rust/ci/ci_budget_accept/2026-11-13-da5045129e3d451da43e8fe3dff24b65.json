@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "b280739891b6e09e",
+  "fingerprint": "e626539921eebf04",
+  "reason": "rust/ci/parity_scope.py lists each W1-C shard's rows one per line in name order (w1c_rows()) and derives ROW_SUITES' W1-C part from those lists, so ports adding rows touch different lines. Each shard keeps exactly the same rows, timeouts and job budgets; only the order the rows are listed in, and so run in, within a shard changes (w1c-pairing invite, pair, transfer; w1c-connection conductor_watch, console, move, restore, test_login, tunnel; w1c-connect connect, coordination_recovery, maintainer, maintainer_setup). The rows' step and job minutes are the sum of the same rows, so the measured minutes still hold."
+}

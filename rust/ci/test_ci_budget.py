@@ -571,7 +571,10 @@ def test_a_run_with_another_parity_scope_ran_other_shards(monkeypatch):
     monkeypatch.setattr(ci_budget, "_contents", lambda path, sha: files[path])
     current = ci_budget.current_definitions("rust.yml")
     assert ci_budget.definitions_at("rust.yml", "same") == current
-    files["rust/ci/parity_scope.py"] = scope_text.replace("'connect', 'maintainer'", "'connect'")
+    # Drop one row from its W1-C shard (one row per line, parity_scope.w1c_rows).
+    moved_text = scope_text.replace('        "maintainer",' + chr(10), "", 1)
+    assert moved_text != scope_text
+    files["rust/ci/parity_scope.py"] = moved_text
     moved = ci_budget.definitions_at("rust.yml", "moved")
     assert moved["parity-checks"] == ci_budget.UNRESOLVED and moved["candidate"] == current["candidate"]
 
