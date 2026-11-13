@@ -335,13 +335,19 @@ jobs:
         run: |
           python rust/daemon/harness/gen_schema_sql.py --check
           exit $LASTEXITCODE
+      # rust/cli_harness/test_cli_harness.py is the harness's offline
+      # self-test (no CLI runs; its source-mutant anchor check reads files
+      # only), run here so a pull request's own checks see it rather than
+      # only the batch's cli shard: 182 passed in 25 s on a Windows desktop,
+      # 0.5 min hosted (2026-11-14). Two of its mail-row cases import
+      # pseudolife_memory.coordination_adapter, which needs httpx.
       - name: Check port inventories and producer census
         working-directory: .
         shell: pwsh
         run: |
-          python -m pip install pytest pyyaml "psycopg[binary]" psutil
+          python -m pip install pytest pyyaml "psycopg[binary]" psutil httpx
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py rust/daemon/harness/test_w2e_recall_llm.py rust/daemon/harness/test_real_bank_timer_env.py rust/cli_harness/test_native_runtime_contract.py rust/daemon/harness/test_json_fidelity.py rust/daemon/harness/test_schema_clocks.py rust/daemon/harness/test_schema_generation.py rust/daemon/harness/test_schema_guards.py rust/daemon/harness/test_shadow_compare.py rust/daemon/harness/test_startup_ci.py rust/daemon/harness/test_startup_parts.py rust/daemon/harness/test_w2d_rerank_check.py rust/daemon/harness/test_w2d_trace_compare.py rust/cli_harness/test_update_row.py
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/cli_harness/test_cli_harness.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py rust/daemon/harness/test_w2e_recall_llm.py rust/daemon/harness/test_real_bank_timer_env.py rust/cli_harness/test_native_runtime_contract.py rust/daemon/harness/test_json_fidelity.py rust/daemon/harness/test_schema_clocks.py rust/daemon/harness/test_schema_generation.py rust/daemon/harness/test_schema_guards.py rust/daemon/harness/test_shadow_compare.py rust/daemon/harness/test_startup_ci.py rust/daemon/harness/test_startup_parts.py rust/daemon/harness/test_w2d_rerank_check.py rust/daemon/harness/test_w2d_trace_compare.py rust/cli_harness/test_update_row.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE

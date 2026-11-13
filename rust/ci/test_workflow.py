@@ -1563,7 +1563,12 @@ def test_binaryless_harness_units_run_on_both_platforms():
                      "rust/daemon/harness/test_startup_parts.py",
                      "rust/daemon/harness/test_w2d_rerank_check.py",
                      "rust/daemon/harness/test_w2d_trace_compare.py",
-                     "rust/cli_harness/test_update_row.py",), PYTEST_FILTERS)
+                     "rust/cli_harness/test_update_row.py",
+                     # The harness's offline self-test, source-mutant anchors
+                     # included: on a pull request's own checks, not only in
+                     # the batch's cli shard.
+                     "rust/cli_harness/test_cli_harness.py",), PYTEST_FILTERS)
+    assert "httpx" in step["run"]  # test_cli_harness.py's mail cases import it
 
 
 def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
