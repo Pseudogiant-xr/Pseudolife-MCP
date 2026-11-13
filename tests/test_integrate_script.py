@@ -3552,3 +3552,20 @@ def test_a_second_cut_is_still_batched_alone_when_the_first_leaves_a_fragment_un
     out = capsys.readouterr().out
     assert "merged #10 " not in out and "merged #11 " in out and "merged #12 " not in out, out
     assert "#11 is a release cut; it is batched alone" in out
+
+
+@pytest.mark.parametrize("labelled", [False, True])
+def test_a_release_cut_editing_the_packaged_compose_needs_only_the_label(world, capsys, labelled):
+    # The dry run of a real cut showed the guard's "make the change in Rust"
+    # advice, which a cut cannot follow: its next step is the label.
+    world.advance_master({"pyproject.toml": _cut("0.19.0"),
+                          "pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.0\n"})
+    sha = _fold_cut(world, 10, "0.19.1", add={"pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.1\n"})
+    world.gh.add(10, sha, labels=[{"name": "freeze-exception"}] if labelled else [])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert ("merged #10 " in out) is labelled, out
+    if not labelled:
+        assert "This is a release cut" in out and "freeze-exception" in out

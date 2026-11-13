@@ -1052,6 +1052,12 @@ def _fragments(rev: str) -> set[str]:
             if path.endswith(".md") and path != f"{CHANGELOG_FRAGMENTS}/README.md"}
 
 
+def _is_release_cut(base_sha: str, m: Member) -> bool:
+    """A member whose own diff changes project.version."""
+    common = git("merge-base", base_sha, m.sha, check=False)
+    return common.returncode == 0 and _project_version(m.sha) != _project_version(common.stdout.strip())
+
+
 def _release_cut_alone(plan: Plan, members: list[Member]) -> list[Member]:
     """The members to merge: all of them, or only the first ready release cut
     (a member whose own diff changes project.version), with the others
@@ -1495,6 +1501,12 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
         if git("cat-file", "-e", f"{m.sha}^{{commit}}", check=False).returncode != 0:
             git("fetch", "-q", REMOTE, f"pull/{m.number}/head", check=False)
         refused = _own_frozen_refusal(freeze, plan.base_sha, m, m.labels)
+        if refused and _is_release_cut(plan.base_sha, m):
+            # Not "do it in Rust": a cut that still edits the packaged
+            # compose copy is the ruled exception, and needs only the label.
+            refused += (f" This is a release cut, which may still edit the package's version files "
+                        f"(pseudolife_memory/compose/docker-compose.yml): ask the maintainer, or the "
+                        f"conductor on a maintainer ruling, for `{freeze.EXCEPTION_LABEL}`, then rebuild")
         if refused:
             own[m.sha] = (m, refused)
     for m in members:

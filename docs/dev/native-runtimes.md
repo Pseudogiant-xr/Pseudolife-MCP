@@ -268,3 +268,13 @@ The source includes isolated unit tests under `runtime::tests`, plus the
 exercises two installed native sessions while updating side by side, Unicode
 stdio and exit propagation. Build/execution evidence must be recorded separately;
 formatting success does not prove these tests have run.
+
+The installers' Python tests run the real client where one is given:
+`PSEUDOLIFE_NATIVE_TEST_BINARY` names a native `pseudolife-stdio` built from
+the same commit, and `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1` makes a test
+that needs it fail instead of skip. CI's Python lanes that run installer
+tests (`test`, `test-lite-windows`, `test-lite-macos`, the Windows nightly)
+build one before their tests and set both (`tests/test_ci_native_client.py`
+pins it); on macOS this is the native client's only CI execution. Locally,
+set them to a `cargo build -p pseudolife-stdio` output to run the same
+path.

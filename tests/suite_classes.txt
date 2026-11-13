@@ -93,6 +93,7 @@ frozen test_chronicle_store.py
 live test_ci_batch_passed.py
 live test_ci_budget_integration.py
 live test_ci_merge_queue.py
+live test_ci_native_client.py
 live test_ci_push_passed.py
 live test_ci_windows_lanes.py
 live test_classify_entity_kinds.py
