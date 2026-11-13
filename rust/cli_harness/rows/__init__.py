@@ -4,32 +4,13 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
+from pathlib import Path
 
-ROWS = {
-    "mail": "CLI-MAIL",
-    "audit": "CLI-AUDIT",
-    "backup": "CLI-BACKUP-DSN",
-    "migrate_flat": "CLI-MIGRATE-FLAT",
-    "hook": "CLI-HOOK",
-    "episode": "CLI-EPISODE",
-    "lease": "CLI-LEASE-core",
-    "lease_operator": "CLI-LEASE",
-    "transfer": "CLI-TRANSFER-DSN",
-    "test_login": "CLI-TEST-LOGIN",
-    "doctor": "CLI-DOCTOR",
-    "connect": "CLI-CONNECT",
-    "maintainer": "CLI-MAINTAINER",
-    "maintainer_setup": "CLI-MAINTAINER-SETUP",
-    "coordination_recovery": "CLI-COORDINATION-RECOVERY",
-    "invite": "CLI-PAIRING",
-    "pair": "CLI-PAIRING",
-    "move": "CLI-MOVE-REFUSALS",
-    "tunnel": "CLI-TUNNEL-STATUS",
-    "console": "CLI-CONSOLE-PRINT",
-    "restore": "CLI-RESTORE-GATES",
-    "conductor_watch": "CLI-CONDUCTOR-WATCH-SETUP",
-    "update": "CLI-UPDATE",
-}
+# Each row declares its PARITY ID (and its CI data, rust/ci/row_ci.py) in its
+# own rows/<row>.json, so ports adding different rows touch no shared list.
+ROWS = {path.stem: json.loads(path.read_text(encoding="utf-8"))["parity"]
+        for path in sorted(Path(__file__).resolve().parent.glob("*.json"))}
 
 
 def load(row: str):

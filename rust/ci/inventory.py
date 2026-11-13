@@ -129,7 +129,11 @@ def check(workflow):
     assert all_controls - observed == set(UNOBSERVED_CONTROLS), 'source control without any OS execution or named global exception'
     for row in declared:
         runtime_controls(row, core.PLATFORM)
-    rows = assigned_list("rust/cli_harness/rows/__init__.py", "ROWS")
+    import row_ci
+    from rust.cli_harness import rows as harness_rows
+    assert not row_ci.roster_problems(), ("row roster drift", row_ci.roster_problems())
+    rows = list(row_ci.rows())
+    assert harness_rows.ROWS == {row: data["parity"] for row, data in row_ci.declarations().items()},         "harness rows differ from their declarations"
     assert set(rows) == set(selected), "accepted row without a source-control CI selection"
     # Payloads must retain every declaration before the dispatcher's platform
     # eligibility and named-exception filters, not merely retain shard names.
