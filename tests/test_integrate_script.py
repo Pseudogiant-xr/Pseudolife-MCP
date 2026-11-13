@@ -2930,6 +2930,29 @@ def test_a_red_check_that_only_resembles_the_probe_is_refused(world, capsys, che
     assert FAILING in out and "merged #11 " not in out
 
 
+@pytest.mark.parametrize("listed", [False, True], ids=["run-only", "in-rollup"])
+def test_a_red_probe_beside_a_cancelled_gate_does_not_keep_a_member_out(world, capsys, listed):
+    # The gate failed only because jobs it needs were cancelled, and the
+    # report-only probe of the same run is red: the second read of the
+    # run's jobs must leave the probe out as the rollup read does.
+    sha10, sha11 = _gate_world(world, _RUN_1059 + [("510", PROBE, "failure")],
+                               rollup=list(GATES) + (["510"] if listed else []))
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+
+
+def test_a_job_that_only_resembles_the_probe_beside_a_cancelled_gate_keeps_a_member_out(
+        world, capsys):
+    _gate_world(world, _RUN_1059 + [("510", "Fixtures / ubuntu-latest", "failure"),
+                                    ("511", PROBE, "failure")], rollup=list(GATES))
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
 def test_status_shows_a_red_probe_as_not_counted(world, capsys):
     _probe_world(world, _actions_check("602", PROBE, "failure"))
 

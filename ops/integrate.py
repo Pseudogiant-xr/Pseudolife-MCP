@@ -748,8 +748,9 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
       whether the rollup lists that leg or not (`_failed_at_cancel_step`),
       or the leg ran no step at all in an attempt that itself concluded
       `cancelled` (cancelled while starting, so it gave no verdict);
-    - no other job in the run attempt failed, timed out or needs action,
-      and none the gate needs is unfinished;
+    - no other job in the run attempt failed, timed out or needs action
+      (the report-only check aside, REPORT_ONLY_CHECK), and none the gate
+      needs is unfinished;
     - a job it needs, and nothing outside its needs, was cancelled, and no
       such job ran past its timeout.
 
@@ -834,6 +835,9 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
             named = owners(str(other["name"]))
             if other.get("id") == meta.get("id") or named == {gate_id}:
                 continue                    # a leg of this gate, read above
+            if _report_only({"workflowName": check.get("workflowName"),
+                             "name": other.get("name")}):
+                continue                    # shown, never counted (REPORT_ONLY_CHECK)
             conclusion = other.get("conclusion")
             if conclusion is not None and conclusion not in _NO_VERDICT:
                 return False, ""            # a job of the run failed
