@@ -1,6 +1,8 @@
-//! The native updater as the child of a client-step hand-off, started the way
-//! the Python updater's `Update._hand_off` starts it: the update lock held by
-//! the parent, `PSEUDOLIFE_UPDATE_HANDOFF*` naming the parent and the report
+//! The native updater as the child of a client-step hand-off, given exactly
+//! what the Python updater's `Update._hand_off` gives its child (the frozen
+//! 0.23.x Python parent itself only ever starts a Python runtime; a bridge in
+//! that child may pass the same inputs on): the update lock held by the
+//! parent, `PSEUDOLIFE_UPDATE_HANDOFF*` naming the parent and the report
 //! file, `update --clients-only --tag <v> --daemon-url <url>`. Everything runs
 //! in a throwaway home with no Docker, no clients and a test-local /health.
 use serde_json::Value;
@@ -82,9 +84,9 @@ impl Home {
             .current_dir(p);
         command
     }
-    /// The child as a Python parent starts it (`Update._hand_off`): the same
-    /// arguments after the module, the same three variables and the two
-    /// Python stream settings it adds.
+    /// The child given what a Python parent gives its child
+    /// (`Update._hand_off`): the same arguments after the module, the same
+    /// three variables and the two Python stream settings it adds.
     fn handed_off(&self, from: &str, report: &PathBuf) -> Output {
         self.command()
             .args([
@@ -98,7 +100,10 @@ impl Home {
             ])
             .env("PSEUDOLIFE_UPDATE_HANDOFF", from)
             .env("PSEUDOLIFE_UPDATE_HANDOFF_REPORT", report)
-            .env("PSEUDOLIFE_UPDATE_HANDOFF_RUNTIME", self.path.join("py-runtime"))
+            .env(
+                "PSEUDOLIFE_UPDATE_HANDOFF_RUNTIME",
+                self.path.join("py-runtime"),
+            )
             .env("PYTHONIOENCODING", "utf-8")
             .env("PYTHONUNBUFFERED", "1")
             .output()
@@ -202,13 +207,23 @@ fn without_the_marker_or_with_another_holder_the_lock_is_refused() {
     fs::remove_file(&report).unwrap();
     let output = home
         .command()
-        .args(["update", "--clients-only", "--tag", TARGET, "--daemon-url", &home.url])
+        .args([
+            "update",
+            "--clients-only",
+            "--tag",
+            TARGET,
+            "--daemon-url",
+            &home.url,
+        ])
         .env("PSEUDOLIFE_UPDATE_HANDOFF_REPORT", &report)
         .output()
         .unwrap();
     let shown = text(&output);
     assert_eq!(output.status.code(), Some(2), "{shown}");
-    assert!(shown.contains("another pseudolife-mcp update is running"), "{shown}");
+    assert!(
+        shown.contains("another pseudolife-mcp update is running"),
+        "{shown}"
+    );
     assert!(!report.exists(), "{shown}");
 }
 

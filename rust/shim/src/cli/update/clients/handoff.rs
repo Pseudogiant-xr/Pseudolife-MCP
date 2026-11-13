@@ -106,7 +106,8 @@ pub struct Parent<'a> {
     /// `--json`: the child's output is dropped; its report is the result.
     pub quiet: bool,
     /// The command a failed hand-off names for the retry (this binary, not
-    /// the launcher, which would start the runtime that just failed).
+    /// the launcher, which would start the runtime that just failed), in
+    /// the form the platform's shell runs as typed.
     pub retry_program: String,
     pub pid: u32,
     /// The runtime directory this process runs from, when it is one.
@@ -134,11 +135,7 @@ pub fn child_args(version: &str, daemon_url: &str, allow_downgrade: bool) -> Vec
 }
 
 /// The variables the child reads, on top of this process's environment.
-pub fn child_env(
-    pid: u32,
-    report: &Path,
-    runtime_dir: Option<&Path>,
-) -> Vec<(String, OsString)> {
+pub fn child_env(pid: u32, report: &Path, runtime_dir: Option<&Path>) -> Vec<(String, OsString)> {
     let mut env = vec![
         (HANDOFF_ENV.to_owned(), OsString::from(pid.to_string())),
         (HANDOFF_REPORT_ENV.to_owned(), report.as_os_str().to_owned()),
@@ -205,10 +202,18 @@ pub fn hand_off(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // The same daemon and downgrade grant as this run, so the retry
+    // repairs what this one could not.
     let retry = |version: &str| {
         format!(
-            "{} update --clients-only --tag {version} --reinstall",
-            parent.retry_program
+            "{} update --clients-only --tag {version} --daemon-url {}{} --reinstall",
+            parent.retry_program,
+            super::super::seams::quote(parent.daemon_url),
+            if parent.allow_downgrade {
+                " --allow-downgrade"
+            } else {
+                ""
+            }
         )
     };
     let failed = |name: &str, version: &str, why: &str| -> Value {
@@ -225,7 +230,11 @@ pub fn hand_off(
                 state_version
             };
             return Some((
-                failed(&name, version, &format!("its runtime could not be verified: {why}")),
+                failed(
+                    &name,
+                    version,
+                    &format!("its runtime could not be verified: {why}"),
+                ),
                 None,
             ));
         }
@@ -235,7 +244,13 @@ pub fn hand_off(
         return None;
     }
     let executable = runtime.executable();
-    let started = probe.run(&executable, &["update", START_PROBE], None, PROBE_TIMEOUT, &[]);
+    let started = probe.run(
+        &executable,
+        &["update", START_PROBE],
+        None,
+        PROBE_TIMEOUT,
+        &[],
+    );
     if started.code != 0 || started.text().trim() != START_PROBE_ANSWER {
         let text = started.text();
         let last = text.trim().lines().last().unwrap_or("").trim();
@@ -253,7 +268,10 @@ pub fn hand_off(
         0 => {
             if lines.first() != Some(&version.as_str()) {
                 let why = match lines.first() {
-                    Some(first) => format!("its probe reported {:?}, not {version}", truncate(first, 64)),
+                    Some(first) => format!(
+                        "its probe reported {:?}, not {version}",
+                        truncate(first, 64)
+                    ),
                     None => "its probe printed nothing".into(),
                 };
                 return Some((failed(&name, &version, &why), None));
@@ -266,7 +284,11 @@ pub fn hand_off(
         2 => true,
         code => {
             return Some((
-                failed(&name, &version, &format!("its protocol probe ended with exit {code}")),
+                failed(
+                    &name,
+                    &version,
+                    &format!("its protocol probe ended with exit {code}"),
+                ),
                 None,
             ));
         }
@@ -285,7 +307,11 @@ pub fn hand_off(
     let scratch = std::env::temp_dir().join(format!("pseudolife-handoff-{}", uuid::Uuid::new_v4()));
     if crate::board::state::private_dir(&scratch).is_err() {
         return Some((
-            failed(&name, &version, "no private scratch directory for its report"),
+            failed(
+                &name,
+                &version,
+                "no private scratch directory for its report",
+            ),
             None,
         ));
     }
@@ -459,16 +485,20 @@ impl Spawner for NativeSpawner {
                             .map_err(|_| "cannot release the new runtime's helpers".to_owned())?;
                         Ok(status.code().unwrap_or(1))
                     }
-                    Ok(Err(e)) => Err(format!("waiting for it failed: {e}")),
-                    Err(_) => {
+                    result => {
+                        // Kill the whole job or process group, not only its
+                        // leader, before this run releases the update lock.
                         #[cfg(windows)]
                         drop(job);
                         let _ = child.start_kill();
                         let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
-                        Err(format!(
-                            "it ran longer than {} hours",
-                            CHILD_TIMEOUT.as_secs() / 3600
-                        ))
+                        Err(match result {
+                            Ok(Err(e)) => format!("waiting for it failed: {e}"),
+                            _ => format!(
+                                "it ran longer than {} hours",
+                                CHILD_TIMEOUT.as_secs() / 3600
+                            ),
+                        })
                     }
                 }
             })

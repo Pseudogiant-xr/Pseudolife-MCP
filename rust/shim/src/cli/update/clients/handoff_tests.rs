@@ -267,10 +267,25 @@ fn a_child_that_cannot_start_fails_with_the_cause_and_the_retry_and_no_fallback(
         detail.contains("the runtime's executable is missing"),
         "{detail}"
     );
+    let url = crate::cli::update::seams::quote(URL);
     assert!(
         detail.contains(&format!(
-            "pseudolife-mcp-old update --clients-only --tag {TARGET} --reinstall"
+            "pseudolife-mcp-old update --clients-only --tag {TARGET} --daemon-url {url} --reinstall"
         )),
+        "{detail}"
+    );
+    // A downgrade this run was allowed stays allowed in its retry.
+    let spawn = Spawn::new(|_: &Path| Err("missing".into()));
+    let (result, _) = run(
+        &shim(&format!("installed:{TARGET}"), &runtime),
+        &parent(true),
+        &probe,
+        &spawn,
+    );
+    let ladder = result.unwrap().0;
+    let detail = ladder["handoff"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!("--daemon-url {url} --allow-downgrade --reinstall")),
         "{detail}"
     );
     // The old binary's plugin, Codex and tunnel steps never stand in.
@@ -308,7 +323,10 @@ fn a_target_that_predates_the_protocol_is_finished_here_with_one_line() {
     let f = Fixture::new();
     let runtime = f.runtime(TARGET);
     for answer in [
-        (2, "unrecognized argument: --client-handoff-protocols\n".to_owned()),
+        (
+            2,
+            "unrecognized argument: --client-handoff-protocols\n".to_owned(),
+        ),
         (0, format!("{TARGET}\n\n")),
         (0, format!("{TARGET}\nclient-handoff-v0\n")),
     ] {
@@ -467,7 +485,10 @@ fn only_an_all_digit_pid_marks_a_handed_off_run() {
 fn a_handed_off_run_never_hands_off_again() {
     let marked = inherited(Some("4242".into()), None);
     assert!(hands_off(None, &Inherited::default()));
-    assert!(!hands_off(None, &marked), "the marker stops a second hand-off");
+    assert!(
+        !hands_off(None, &marked),
+        "the marker stops a second hand-off"
+    );
     assert!(!hands_off(Some(Path::new("/repo")), &Inherited::default()));
 }
 
@@ -495,7 +516,9 @@ fn a_handed_off_run_borrows_the_update_lock_from_its_parent_only() {
             .expect("refused")
             .message
     };
-    assert!(refused(None).contains(&format!("another pseudolife-mcp update is running (pid {pid})")));
+    assert!(refused(None).contains(&format!(
+        "another pseudolife-mcp update is running (pid {pid})"
+    )));
     assert!(refused(Some("1")).contains("another pseudolife-mcp update is running"));
     let borrowed = UpdateLock::acquire_in(&dir, Some(&pid)).unwrap();
     assert!(borrowed.borrowed());
@@ -609,4 +632,65 @@ fn the_native_spawner_reports_the_exit_code_or_why_it_could_not_start() {
         .run(&missing, &child_args(TARGET, URL, false), &env, true)
         .unwrap_err();
     assert!(error.contains("is missing"), "{error}");
+}
+
+/// How the parent folds the child's part into its own result: the child's
+/// steps and Codex steps are the run's, a clients-only run carries the
+/// child's exit code, and after a daemon deploy a failure is the client
+/// half's (5).
+#[test]
+fn the_parent_folds_the_childs_result_into_its_own() {
+    use crate::cli::update::{Options, Update};
+    let outcome = |exit_code| Outcome {
+        runtime: "000002".into(),
+        version: TARGET.into(),
+        exit_code,
+        steps: vec!["child step".into()],
+        codex: "approve again".into(),
+    };
+    let update = |clients_only: bool, tier: &str| {
+        let mut update = Update::new(Options {
+            as_json: true,
+            clients_only,
+            ..Options::default()
+        });
+        update.report.tier = tier.into();
+        update
+    };
+    let mut ok = update(true, "client");
+    ok.fold_handoff(
+        json!({"ok": true, "plugin": {"state": "current"}}),
+        outcome(0),
+    );
+    assert_eq!((ok.report.ok, ok.report.exit_code), (true, 0));
+    assert_eq!(ok.report.steps, ["child step"]);
+    assert_eq!(ok.report.codex_reapproval, "approve again");
+    assert_eq!(
+        ok.report.clients.as_ref().unwrap()["plugin"]["state"],
+        "current"
+    );
+    for (clients_only, tier, child, expected) in [
+        (true, "docker", 7, 7),
+        (false, "client", 7, 7),
+        (false, "docker", 7, CLIENT_STEP_FAILED),
+        (true, "client", 0, CLIENT_STEP_FAILED),
+    ] {
+        let mut failed = update(clients_only, tier);
+        failed.fold_handoff(json!({"ok": false}), outcome(child));
+        assert!(!failed.report.ok);
+        assert_eq!(
+            failed.report.exit_code, expected,
+            "{clients_only} {tier} {child}"
+        );
+        let warning = failed.report.steps.last().unwrap();
+        assert!(
+            warning
+                .starts_with("WARNING: the client steps in runtime 000002 (9.9.9) ended with exit"),
+            "{warning}"
+        );
+        assert_eq!(
+            warning.ends_with("; the daemon update itself succeeded"),
+            !clients_only && tier != "client"
+        );
+    }
 }

@@ -188,8 +188,7 @@ impl UpdateLock {
                 "another pseudolife-mcp update is running (pid {holder}); nothing was changed. Run this again when it has finished"
             )));
         }
-        let _ = fs::write(&pid, format!("{}
-", std::process::id()));
+        let _ = fs::write(&pid, format!("{}\n", std::process::id()));
         Ok(Self {
             held: Some((lock, pid)),
         })
@@ -564,8 +563,16 @@ impl Update {
         let mut shim_printed = false;
         let report = if handoff::hands_off(repo, &self.o.handoff) {
             let daemon_url = self.o.daemon_url.clone();
+            // PowerShell runs a quoted path only after its call operator.
             let retry_program = std::env::current_exe()
-                .map(|exe| seams::quote(&exe.to_string_lossy()))
+                .map(|exe| {
+                    let quoted = seams::quote(&exe.to_string_lossy());
+                    if cfg!(windows) {
+                        format!("& {quoted}")
+                    } else {
+                        quoted
+                    }
+                })
                 .unwrap_or_else(|_| "pseudolife-mcp".into());
             let runtime_dir = crate::runtime::default_layout()
                 .ok()
@@ -618,38 +625,7 @@ impl Update {
             )
         };
         if let Some(outcome) = outcome {
-            // The child printed its own ladder and Codex steps, and its result
-            // is this run's.
-            for step in &outcome.steps {
-                unattended::log_step(step);
-            }
-            self.report.steps.extend(outcome.steps.iter().cloned());
-            if !outcome.codex.is_empty() {
-                self.report.codex_reapproval = outcome.codex.clone();
-            }
-            if report["ok"] != true {
-                self.report.ok = false;
-                // After a daemon deploy the run's code says the client half
-                // failed (5); a clients-only run carries the child's own code.
-                let alone = self.o.clients_only || self.report.tier == "client";
-                self.report.exit_code = if alone && outcome.exit_code != 0 {
-                    outcome.exit_code
-                } else {
-                    handoff::CLIENT_STEP_FAILED
-                };
-                self.warn(format!(
-                    "the client steps in runtime {} ({}) ended with exit {} (see above){}",
-                    outcome.runtime,
-                    outcome.version,
-                    outcome.exit_code,
-                    if alone {
-                        ""
-                    } else {
-                        "; the daemon update itself succeeded"
-                    }
-                ));
-            }
-            self.report.clients = Some(report);
+            self.fold_handoff(report, outcome);
             return;
         }
         if !self.o.as_json {
@@ -671,6 +647,42 @@ impl Update {
         if !text.is_empty() {
             self.report.codex_reapproval = text.clone();
             self.step(text);
+        }
+        self.report.clients = Some(report);
+    }
+    /// The child ran the steps after the shim: its ladder, steps, Codex
+    /// steps and result are this run's.
+    pub(crate) fn fold_handoff(&mut self, report: Value, outcome: clients::handoff::Outcome) {
+        // The child printed its own ladder and Codex steps, and its result
+        // is this run's.
+        for step in &outcome.steps {
+            unattended::log_step(step);
+        }
+        self.report.steps.extend(outcome.steps.iter().cloned());
+        if !outcome.codex.is_empty() {
+            self.report.codex_reapproval = outcome.codex.clone();
+        }
+        if report["ok"] != true {
+            self.report.ok = false;
+            // After a daemon deploy the run's code says the client half
+            // failed (5); a clients-only run carries the child's own code.
+            let alone = self.o.clients_only || self.report.tier == "client";
+            self.report.exit_code = if alone && outcome.exit_code != 0 {
+                outcome.exit_code
+            } else {
+                clients::handoff::CLIENT_STEP_FAILED
+            };
+            self.warn(format!(
+                "the client steps in runtime {} ({}) ended with exit {} (see above){}",
+                outcome.runtime,
+                outcome.version,
+                outcome.exit_code,
+                if alone {
+                    ""
+                } else {
+                    "; the daemon update itself succeeded"
+                }
+            ));
         }
         self.report.clients = Some(report);
     }
@@ -840,8 +852,7 @@ impl Update {
 fn print_row(name: &str, step: &Value) {
     let _ = output(
         &format!(
-            "  {name}: {} — {}
-",
+            "  {name}: {} — {}\n",
             step["state"].as_str().unwrap_or("unknown"),
             step["detail"].as_str().unwrap_or("")
         ),
