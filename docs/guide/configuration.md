@@ -4073,9 +4073,41 @@ defaulting to `~/.pseudolife-mcp/backups` regardless of the data-dir setting.
 it must also be outside the state mount being replaced. If the destination
 database is absent, only its existing state is safety-archived.
 The state archive is opt-in: omit `--state-archive` for a database-only
-restore. By default restore starts the daemon and waits for readiness;
-`--leave-stopped` keeps it stopped. A daemon without a published health
-port needs `--daemon-url <url>` or `--leave-stopped`.
+restore. By default restore starts the daemon and waits up to ten minutes
+for it to report ready (a Rust daemon's first start can provision its
+models first); `--leave-stopped` keeps it stopped. A daemon without a
+published health port needs `--daemon-url <http://...>` or
+`--leave-stopped`.
+
+Before it stops anything, restore reads the dump and the state archive to
+their ends. The archive must be one GNU `tar` extracts exactly as restore
+checks it: POSIX extended headers (`path`, `linkpath`, `size`) and GNU long
+names are read; a sparse member, a global extended header that sets a name
+or size, a damaged header anywhere, or anything but zeros after the end
+marker is refused, with the reason. A lite (embedded PostgreSQL) bank is
+refused: restore replaces a Docker bank only, so install the Docker bank
+first ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)).
+Restore runs the `docker` it finds on an absolute `PATH` entry (never the
+current directory), or the full path in `PSEUDOLIFE_DOCKER`.
+
+**If restore fails or is interrupted.** Each step runs only after the one
+before it succeeded, and the first failure or Ctrl-C ends the run there
+with the bank's state and the command to run next. Up to the database
+drop the bank is unchanged and the daemon is started again. Once the drop
+has begun the daemon is left stopped, so it never serves a half-restored
+bank, and the message names the recovery command for the safety backup
+(`pseudolife-mcp restore --backup-file <safety dump> --state-archive
+<safety state> ... --yes`) and the command that finishes this restore.
+The same recovery command is written beside the safety pair as
+`pseudolife_restore-<timestamp>.txt` before the drop, for a run killed
+outright. Restore also records `restore-in-progress-<bank>.json` in
+`~/.pseudolife-mcp` (or `PSEUDOLIFE_MCP_DATA_DIR`) before the drop and
+removes it once the database and state are restored: a later restore of
+the same bank sees it, keeps naming the first safety backup as the
+recovery point (not a safety backup of the half-restored bank), and leaves
+the daemon stopped if it fails before its own drop. Rerunning either
+command after an interruption at any step is safe. Safety backups are
+never rotated.
 
 **Free space:** Docker update, backup and restore check for at least
 **8 GiB free** in Docker storage and the host filesystems used for backups.
