@@ -95,13 +95,16 @@ The launch (`launch.rs`), after `link_is_safe` passed and before anything
 prints:
 
 - `BackgroundBrowser.open`: `[program] + [arg.replace("%s", url) ...]`, then
-  `p.poll() is None`. POSIX: stdin, stdout and stderr inherited, `setsid`,
+  `p.poll() is None`. POSIX: stdin, stdout and stderr inherited, every other
+  descriptor closed (`close_fds=True`; marked close-on-exec here), `setsid`,
   then `_posixsubprocess`'s `execve` over the program as given (it holds a
   slash) or joined to each `os.get_exec_path()` entry, the first error that
   is not ENOENT/ENOTDIR reported; never execvp's `/bin/sh` fallback.
-  Windows: std's `CreateProcess` with the three standard handles on `NUL`;
-  CPython inherits no handle, so in both the browser holds none of this
-  command's pipes.
+  Windows: std's `CreateProcess` with nothing redirected, so the browser
+  gets this command's own standard handles, as CPython's child does
+  (Windows copies a parent's redirected standard handles to a child started
+  with none named). In both, a pipe this command writes to stays open until
+  the browser exits.
 - `WindowsDefault.open`: `ShellExecuteW(NULL, NULL, url, NULL, NULL,
   SW_SHOWNORMAL)`, the default verb `os.startfile` uses; True unless it
   returns 32 or less; a URL past 32767 UTF-16 units is `path_converter`'s
@@ -216,8 +219,10 @@ this port does not reproduce; the native candidate prints its deferral line
 - On POSIX, `xdg-settings` runs before the sign-in request rather than after
   it, and also when the answer turns out to be no safe link (the oracle then
   never calls `webbrowser.get()`); it only reads.
-- On Windows a launched program's standard handles are `NUL` (std passes
-  them inheritable) where CPython's child inherits no handle at all.
+- On Windows std starts a program with handle inheritance on, so a handle
+  this command itself inherited as inheritable, other than its three
+  standard ones, reaches the browser; CPython's child gets the standard
+  handles only.
 - Windows' error text comes from `FormatMessageW` in the system language, as
   CPython's does; the row compares the host's own text.
 

@@ -19,6 +19,7 @@ row loads), so ``webbrowser.get()`` never falls back to ``os.startfile`` or
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import os
 import re
@@ -280,22 +281,26 @@ def _gone(pid: int, deadline: float) -> bool:
     return False
 
 
-def _settle(arm, obs):
-    """Before the snapshot: wait for the stand-in the CLI reports opened (on
-    Windows it inherits none of the arm's pipes, so the arm can exit before
-    it starts), give any other a moment to show, then wait for each started
-    one to finish and exit. A stand-in that never finished leaves
+def _settle(arm, obs, launches=0):
+    """Before the snapshot: wait for the stand-ins the case starts (the arm
+    can exit before one has written its record), give any other a moment to
+    show, then wait for each started one to finish and exit. The count is
+    ``launches``, which a case declares when the CLI starts the stand-in and
+    then says nothing about it (the oracle dies after ``open_browser``), or
+    one when the CLI reports it opened. An arm that starts fewer waits out
+    the 30 seconds and then differs. A stand-in that never finished leaves
     ``launched/unfinished-N`` behind, which no arm matches."""
     _arm(arm, obs)
     state = arm.home / ".standin"
     stdout = base64.b64decode(obs["stdout"])
     opened = b"Opened the Console" in stdout or b'"state": "opened"' in stdout
+    expected = max(launches, 1 if opened else 0)
     deadline = time.monotonic() + 30
 
     def started():
         return sorted(state.glob("started-*")) if state.exists() else []
 
-    while opened and not started() and time.monotonic() < deadline:
+    while len(started()) < expected and time.monotonic() < deadline:
         time.sleep(0.02)
     if core.WINDOWS:
         time.sleep(0.5)
@@ -365,15 +370,18 @@ def case(case_id: str, argv: list[str], *, routes=None, env=None, rules=(), setu
 
 
 def browser_case(case_id: str, argv: list[str], *, browser: str | None = None,
-                 display: bool = True, env=None, **kwargs) -> Case:
+                 display: bool = True, env=None, launches: int = 0, **kwargs) -> Case:
     """A case on the path that opens a browser, run with the stand-in's
     environment. ``display`` sets a DISPLAY nothing serves (Linux's
-    ``has_display`` needs one); no case sets WAYLAND_DISPLAY."""
+    ``has_display`` needs one); no case sets WAYLAND_DISPLAY. ``launches``
+    is how many stand-ins ``_settle`` waits for when the CLI's output does
+    not say one opened."""
     own = {"BROWSER": standin_browser() if browser is None else browser, "PATH": BIN}
     if display and not core.WINDOWS:
         own["DISPLAY"] = ":99"
     return case(case_id, argv, env={**own, **(env or {})}, setup=_standin_setup,
-                during=_release, after=_settle, programs=PROGRAMS, **kwargs)
+                during=_release, after=functools.partial(_settle, launches=launches),
+                programs=PROGRAMS, **kwargs)
 
 
 def deferred(case_id: str, argv: list[str], **kwargs) -> Case:
@@ -638,9 +646,11 @@ def browser_cases() -> list[Case]:
     add(browser_case("open-unreachable", ["--to", "board"]))
     # The oracle opens the browser, then dies: reproduced, launch included.
     add(browser_case("open-crash-expires", [], routes={"/api/console/link": link(
-        lambda _o: {"expires_in": "5 minutes"})}, rules=("console-terminal-traceback",)))
+        lambda _o: {"expires_in": "5 minutes"})}, rules=("console-terminal-traceback",),
+        launches=1))
     add(browser_case("open-crash-surrogate-code", [], routes={"/api/console/link": link(
-        lambda _o: {"code": "a\udc80"})}, rules=("console-terminal-traceback",)))
+        lambda _o: {"code": "a\udc80"})}, rules=("console-terminal-traceback",),
+        launches=1))
 
     # --unless-signed-in: the session list first (a read), then the sign-in.
     add(browser_case("unless-signed-in", ["--unless-signed-in"],

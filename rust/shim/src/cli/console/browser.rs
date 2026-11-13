@@ -255,9 +255,11 @@ const STANDARD_NAMES: [&str; 35] = [
 fn basename(path: &str, platform: Platform) -> &str {
     let split = |c: char| c == '/' || (platform == Platform::Windows && c == '\\');
     let path = if platform == Platform::Windows {
-        // ntpath.splitdrive: a drive letter's colon is not part of the name.
-        match path.as_bytes() {
-            [letter, b':', ..] if letter.is_ascii_alphabetic() => &path[2..],
+        // ntpath.splitdrive: whatever precedes a colon in second place is
+        // the drive (any character, not only a letter), not part of the name.
+        let mut rest = path.chars();
+        match (rest.next(), rest.next()) {
+            (Some(_), Some(':')) => rest.as_str(),
             _ => path,
         }
     } else {

@@ -2,12 +2,16 @@
 //! it, and the machine lookups that choice reads.
 //!
 //! - `BackgroundBrowser.open`: `subprocess.Popen(cmdline)` and `p.poll() is
-//!   None`. POSIX: fds 0-2 inherited, `setsid` (`start_new_session=True`),
-//!   then `_posixsubprocess`'s `execve` over each `PATH` candidate (never
+//!   None`. POSIX: fds 0-2 inherited and every other descriptor closed
+//!   (`close_fds=True`), `setsid` (`start_new_session=True`), then
+//!   `_posixsubprocess`'s `execve` over each `PATH` candidate (never
 //!   execvp's `/bin/sh` fallback), reporting the first error that is not
-//!   ENOENT/ENOTDIR. Windows: `CreateProcess` with no handle inherited by
-//!   CPython; here std's, with the three standard handles on `NUL` so the
-//!   browser holds none of this command's pipes either.
+//!   ENOENT/ENOTDIR. Windows: `CreateProcess` with nothing redirected, so
+//!   the browser gets this command's own standard handles, as CPython's
+//!   child does (Windows copies a parent's redirected standard handles to a
+//!   child started with none named, also without handle inheritance:
+//!   measured 2026-11-13, a program CPython 3.11.9 started this way wrote
+//!   into its parent's stdout pipe).
 //! - `WindowsDefault.open`: `os.startfile(url)`, which is
 //!   `ShellExecuteW(NULL, NULL, url, NULL, NULL, SW_SHOWNORMAL)` (the
 //!   default verb) and True unless it returns 32 or less.
@@ -80,15 +84,9 @@ fn start_file(_url: &str) -> bool {
 
 #[cfg(windows)]
 fn background(program: &str, args: &[String]) -> bool {
-    use std::process::{Command, Stdio};
-    // `browser::launchable` admits only a drive-absolute `.exe`.
-    match Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
+    // `browser::launchable` admits only a drive-absolute `.exe`. Nothing is
+    // redirected: the browser gets this command's standard handles.
+    match std::process::Command::new(program).args(args).spawn() {
         Ok(child) => running(child),
         Err(_) => false,
     }
@@ -191,10 +189,24 @@ mod posix {
             .collect()
     }
 
+    /// The descriptors above stderr that are open before the fork, which
+    /// `close_fds=True` closes in the child. Read from `/dev/fd`; where
+    /// that cannot be listed, the first 1024 numbers.
+    fn open_above_stderr() -> Vec<libc::c_int> {
+        match std::fs::read_dir("/dev/fd") {
+            Ok(entries) => entries
+                .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+                .filter(|fd| *fd > 2)
+                .collect(),
+            Err(_) => (3..1024).collect(),
+        }
+    }
+
     /// What `_posixsubprocess` would `execve`, with the argv and the
     /// environment, built before the fork.
     struct Exec {
         _strings: Vec<CString>,
+        close: Vec<libc::c_int>,
         candidates: Vec<*const libc::c_char>,
         argv: Vec<*const libc::c_char>,
         envp: Vec<*const libc::c_char>,
@@ -249,6 +261,7 @@ mod posix {
             let envp = pointers(lengths[0] + lengths[1], lengths[2]);
             Ok(Self {
                 _strings: strings,
+                close: open_above_stderr(),
                 candidates,
                 argv,
                 envp,
@@ -256,11 +269,21 @@ mod posix {
             })
         }
 
-        /// The child's last step: `setsid` if asked, then each candidate.
+        /// The child's last step: `setsid` if asked, the descriptors
+        /// above stderr left to close, then each candidate.
         #[allow(unsafe_code)]
         fn exec(&self) -> io::Result<()> {
             if self.new_session {
                 rustix::process::setsid().map_err(io::Error::from)?;
+            }
+            for fd in &self.close {
+                // Close-on-exec, not close: the program starts without the
+                // descriptor either way, and the pipe std reports a failed
+                // exec through (one of these numbers) stays usable.
+                // SAFETY: fcntl on a descriptor number is async-signal-safe
+                // and touches no memory; a number no longer open fails with
+                // EBADF, which is ignored.
+                unsafe { libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC) };
             }
             let mut saved = 0;
             let mut last = 0;
@@ -289,8 +312,9 @@ mod posix {
         let exec = Exec::new(argv, new_session)?;
         let mut command = Command::new(OsStr::from_bytes(argv[0]));
         // SAFETY: Everything the closure touches was allocated before the
-        // fork and is only read; setsid and execve are async-signal-safe and
-        // the closure neither allocates, locks nor panics.
+        // fork and is only read; setsid, fcntl and execve are
+        // async-signal-safe and the closure neither allocates, locks nor
+        // panics.
         unsafe { command.pre_exec(move || exec.exec()) };
         Ok(command)
     }
@@ -340,6 +364,35 @@ mod posix {
         match String::from_utf8(output.stdout) {
             Ok(text) => Probe::Answer(super::super::pyjson::py_strip(&text).to_owned()),
             Err(_) => Probe::Raised,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::os::fd::AsRawFd;
+
+        /// `close_fds=True`: a descriptor above stderr that this process
+        /// holds open and inheritable is not open in the program it starts.
+        #[test]
+        #[allow(unsafe_code)]
+        fn a_started_program_inherits_no_descriptor_above_stderr() {
+            let file = std::fs::File::open("/dev/null").unwrap();
+            let fd = file.as_raw_fd();
+            // SAFETY: `fd` is this test's own open descriptor; clearing its
+            // close-on-exec flag only makes it inheritable.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+            let script = format!("[ -e /dev/fd/{fd} ]");
+            let argv: [&[u8]; 3] = [b"/bin/sh", b"-c", script.as_bytes()];
+            let status = super::command(&argv, false).unwrap().status().unwrap();
+            assert_eq!(
+                status.code(),
+                Some(1),
+                "descriptor {fd} reached the program"
+            );
+            // The same program sees a descriptor it is meant to keep.
+            let argv: [&[u8]; 3] = [b"/bin/sh", b"-c", b"[ -e /dev/fd/2 ]"];
+            let status = super::command(&argv, false).unwrap().status().unwrap();
+            assert_eq!(status.code(), Some(0));
         }
     }
 }

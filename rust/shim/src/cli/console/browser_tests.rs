@@ -148,6 +148,10 @@ fn windows_runs_only_an_absolute_exe_it_starts_the_same_way() {
     ] {
         assert_eq!(windows(value), Err(Unsupported), "{value}");
     }
+    // `ntpath.splitdrive` takes whatever precedes a colon in second place
+    // as the drive, a digit or a non-ASCII letter included.
+    assert_eq!(windows("1:firefox"), Err(Unsupported));
+    assert_eq!(windows("\u{e9}:Firefox --private"), Err(Unsupported));
     // A clone needs the basename itself to be a registered name.
     assert_eq!(windows("C:\\b\\my.exe"), Ok(Plan::Refused));
     assert_eq!(windows("C:\\b\\chrome.exe"), Ok(Plan::Refused));
