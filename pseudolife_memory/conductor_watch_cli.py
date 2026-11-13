@@ -80,6 +80,9 @@ DEFAULT_INTERVAL = 60.0
 # CI jobs and suite runs finish in clusters; one wake should carry them.
 DEFAULT_SETTLE = 45.0
 MAX_GH_FAILURES = 5
+# The longest run --max-age gives: 100 years. A larger age overflowed the
+# float clock, and time.sleep refuses a wait past about 292 years.
+MAX_DEADLINE = 100 * 365 * 86400.0
 # How long --detach waits for the child to register and write its pid file.
 DETACH_WAIT = 15.0
 DETACH_POLL = 0.2
@@ -944,7 +947,7 @@ class _Loop:
         except (OSError, ValueError):
             state = None
         start = self.clock()
-        deadline = start + args.max_age
+        deadline = start + min(args.max_age, MAX_DEADLINE)
         last_sent = start
         found, settle_until, failures = [], None, 0
         # The batch being delivered: its text and request id stay fixed

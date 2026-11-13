@@ -679,6 +679,27 @@ def test_bad_arguments_are_refused(h, bad):
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize("age", ["5ſ", "5K"])
+def test_a_non_ascii_unit_is_not_a_duration(h, age):
+    """``ſ`` folds to ``s`` under a Unicode IGNORECASE match, and the unit
+    lookup then raised KeyError instead of argparse's usage error."""
+    with pytest.raises(SystemExit) as exc:
+        h.main(max_age=age)
+    assert exc.value.code == 2
+    err = h.capsys.readouterr().err
+    assert f"argument --max-age: not a duration: {age!r}" in err and "Traceback" not in err
+
+
+def test_a_max_age_past_the_clocks_range_is_capped_not_a_crash(h):
+    """A max age too large for a float overflowed when the deadline was
+    added to the monotonic clock; the deadline is capped, so no sleep is
+    longer than ``time.sleep`` accepts."""
+    code, _, _ = h.main("--interval", "1e300", "--quiet-after", "1e300", max_age="9" * 400)
+    assert code == watch.EXIT_OK
+    assert "exiting: max age" in h.capsys.readouterr().err
+    assert 0 < h.clock.t <= watch.MAX_DEADLINE
+
+
 # ── review findings, 2026-10-14 ────────────────────────────────────────────
 
 def _run(id_, conclusion, status="completed", attempt=1, sha="e"):

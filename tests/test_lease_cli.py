@@ -212,8 +212,10 @@ def test_durations_accept_seconds_minutes_hours_and_days(text, seconds):
 
 
 @pytest.mark.parametrize("text", ["", "m", "d", "1.5h", "-5", "-1d", "7days", "5 m", "abc",
-                                  "1h30m"])
+                                  "1h30m", "5ſ", "5K", "٥s"])
 def test_malformed_durations_are_refused(text):
+    """``ſ`` (U+017F) folds to ``s`` and the Kelvin sign to ``k`` under a
+    Unicode IGNORECASE match: only ASCII unit letters are units."""
     with pytest.raises(ValueError):
         lease_cli.parse_duration(text)
 
