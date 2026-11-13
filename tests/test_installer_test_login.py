@@ -12,11 +12,13 @@ ops/install.sh and ops/install.ps1 with stub commands.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 
 import pytest
 
+from tests import installer_sandbox
 from tests.test_installer_client_only import BASH, REMOTE, ROOT, _Shell, _mode, _stub
 from tests.test_installer_client_only_ps import _PowerShell, _output
 from tests.test_installer_client_only_ps import _block as _ps_block
@@ -53,9 +55,11 @@ def test_it_runs_once_the_local_stack_is_healthy_and_only_when_asked(script, cal
 
 
 @BASH
-def test_sh_takes_the_flag_and_documents_it(bash):
-    proc = subprocess.run([bash, str(ROOT / "ops" / "install.sh"), "--test-login", "--help"],
-                          capture_output=True, text=True, timeout=60)
+def test_sh_takes_the_flag_and_documents_it(bash, tmp_path):
+    env = installer_sandbox.environment(tmp_path, {k: v for k, v in os.environ.items()
+                                                   if k in ("PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR")})
+    proc = installer_sandbox.run([bash, str(ROOT / "ops" / "install.sh"), "--test-login", "--help"],
+                                 env=env, root=tmp_path, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     usage = _text("install.sh").split("# <<< usage <<<", 1)[0]
     assert "--test-login" in usage

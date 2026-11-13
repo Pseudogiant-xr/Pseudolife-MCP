@@ -738,8 +738,11 @@ def test_installer_hook_and_instruction_stages_together(
     ("ask", "auto", "skipped", None),
     ("no", "auto", "skipped", None),
 ])
-def test_installer_codex_without_python_reports_unavailable(
+def test_installer_codex_setup_that_cannot_run_reports_unavailable(
         tmp_path, shell, trust, instructions, expected, existing):
+    """When the native client's Codex steps fail outright, Codex is reported
+    unavailable with its recovery, nothing under the real home is touched,
+    and the standing-instruction fallback still honours the consent given."""
     home = tmp_path / "home"
     home.mkdir()
     codex_home = home / "custom codex"
@@ -754,9 +757,10 @@ def test_installer_codex_without_python_reports_unavailable(
     env = isolated_env(codex_home)
     env.update({"HOME": home.as_posix(), "USERPROFILE": home.as_posix()})
     result = run_installer_stages(tmp_path, shell, ROOT, env, "auto", trust, instructions,
-                                  missing_python=True)
+                                  helper_fails=True)
     assert f"RESULT:unavailable:{expected}" in result
-    assert "Install Python 3.10 or newer" in result
+    assert "Codex credential setup failed" in result
+    assert "Install Python" not in result
     assert not (home / ".codex").exists()
     assert target.exists() == (expected != "skipped")
     if expected == "appended":
@@ -1024,7 +1028,6 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 {native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -1173,7 +1176,6 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 {native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -1405,7 +1407,6 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 {native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -1530,11 +1531,30 @@ def test_bash_tokenless_connection_is_scoped_to_codex_context(
 
 
 def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions,
-                         missing_python=False, launch_throws=False):
+                         helper_fails=False, launch_throws=False):
+    """Run sections 9 and 10 of an installer with the native client's
+    installer steps answered by the stand-in helper (the Python helpers in
+    ``repo``). ``helper_fails``: every native step exits 1 with no output.
+    ``launch_throws`` (PowerShell): the credential step answers tokenless and
+    launching the hook step throws."""
     if shell == "powershell":
         text = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
         stages = text.split("# -- 9. session lifecycle hooks", 1)[1].split(
             "# -- 11. wire into selected MCP clients", 1)[0].split("\n", 1)[1]
+        if helper_fails:
+            helper = "function Invoke-NativeHelper { $global:LASTEXITCODE = 1 }\n"
+        elif launch_throws:
+            helper = (
+                "function Invoke-NativeHelper {\n"
+                "  if ($args[0] -eq 'codex-credentials') {\n"
+                "    $global:LASTEXITCODE = 0\n"
+                "    Write-Output '{\"status\":\"tokenless\",\"credential_file_configured\":false,\"connection_configured\":false}'\n"
+                "    return\n"
+                "  }\n"
+                "  throw 'fixture launch failure'\n"
+                "}\n")
+        else:
+            helper = native_stub.HELPER_PS
         script = tmp_path / "stages.ps1"
         script.write_text(
             "$ErrorActionPreference = 'Stop'\n"
@@ -1544,18 +1564,7 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
             "function Step($text) { Write-Host $text }\n"
             "function Get-EnvValue($name) { return $null }\n"
             "function Read-Host($text) { throw 'Unexpected second prompt' }\n"
-            + ("function Get-Command($Name) { return $null }\n" if missing_python else "")
-            + ("function Get-Command($Name) { if ($Name -eq 'python') { return 'python' }; return $null }\n"
-               "function python { $global:LASTEXITCODE = 0; Write-Output 'fixture-python' }\n"
-               "function fixture-python {\n"
-               "  if ($args[0] -like '*setup-codex-coordination.py') {\n"
-               "    $global:LASTEXITCODE = 0\n"
-               "    Write-Output '{\"status\":\"tokenless\",\"credential_file_configured\":false,\"connection_configured\":false}'\n"
-               "    return\n"
-               "  }\n"
-               "  throw 'fixture launch failure'\n"
-               "}\n"
-               if launch_throws else "")
+            + helper
             + stages + "\nWrite-Output ('RESULT:' + $hookState['codex'] + ':' + $instrState['codex'])\n",
             encoding="utf-8")
         return pwsh_run("-File", script, env=env).stdout
@@ -1571,8 +1580,7 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
         f"CLIENTS=codex\nCODEX_HOOKS={source}\nCODEX_HOOK_TRUST={trust}\nINSTRUCTIONS={instructions}\n"
         "CLAUDE_MD=''\nAGENTS_FILE=''\nstep() { echo \"$*\"; }\n"
         "get_env() { return 0; }\n"
-        + ("command() { case \"$*\" in '-v python'|'-v python3') return 1;; "
-           "*) builtin command \"$@\";; esac; }\n" if missing_python else "")
+        + ("native_helper() { return 1; }\n" if helper_fails else native_stub.HELPER_SH)
         + parts[1] + '\nprintf "RESULT:%s:%s\\n" "$HOOK_CODEX" "$INSTR_CODEX"\n',
         encoding="utf-8")
     result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,

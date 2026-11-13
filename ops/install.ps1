@@ -185,6 +185,112 @@ if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-
 }
 # <<< client update schedule flag <<<
 
+# >>> extractor modes >>>
+# The dream extractor modes, named for the extractor family, and the models
+# the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
+# lists identical to install.sh's, the Claude shim autostart scripts',
+# docs/guide/dreaming.md's and the Console's. The model lists are the menu,
+# not a gate: a CLI shim mode passes an id it does not list to the shim
+# unchanged, so a model release is usable the day it ships. (-Model has no
+# ValidateSet for that reason.)
+$extractorModes = @("sidecar", "claude-only", "claude-fallback", "openai-only",
+    "openai-fallback", "endpoint", "endpoint-fallback")
+$claudeModels = @("claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5",
+    "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5", "claude-fable-5-1",
+    "claude-fable-5")
+$openaiModels = @("gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-sol",
+    "gpt-6-luna", "gpt-6.1-sol")
+# An explicit -Model "" is refused like a whitespace one; an absent -Model
+# picks the menu's default.
+$modelGiven = $PSBoundParameters.ContainsKey("Model")
+# The model-era names (2026-07-14 to 2026-09-28) stay accepted.
+$extractorAliases = @{
+    "sonnet-only" = "claude-only"; "sonnet-fallback" = "claude-fallback"
+    "codex-only" = "openai-only"; "codex-fallback" = "openai-fallback"
+}
+if ($Extractor -and $extractorAliases.ContainsKey($Extractor)) {
+    Write-Host "note: -Extractor $Extractor is a deprecated spelling of -Extractor $($extractorAliases[$Extractor]), which this run uses."
+    $Extractor = $extractorAliases[$Extractor]
+}
+if ($ExtractorUrl.EndsWith("/")) { $ExtractorUrl = $ExtractorUrl.Substring(0, $ExtractorUrl.Length - 1) }
+function Test-ExtractorDisablesSidecar {
+    # $true for the single-extractor modes.
+    return $Extractor -in "claude-only", "openai-only", "endpoint"
+}
+function Test-ModelBlank {
+    # $true for a -Model given empty or all whitespace.
+    return ($modelGiven -or $Model) -and -not "$Model".Trim()
+}
+# What may reach ops/.env (compose expands $ and reads " #" as a comment),
+# a systemd ExecStart line and a Windows task's command line unquoted: model
+# ids and endpoint URLs are held to these characters. Brackets are allowed
+# in a URL only, for an IPv6 host.
+$safeIdPattern = '^[A-Za-z0-9._:/@+-]+$'
+$safeUrlPattern = '^[\[\]A-Za-z0-9._:/@+-]+$'
+function Assert-ExtractorArgs {
+    # The mode, its model and its URL, together.
+    if (Test-ModelBlank) {
+        Write-Host "-Model needs a model id (it was empty)"
+        exit 2
+    }
+    if ($Model -and ($Model -cnotmatch $safeIdPattern)) {
+        Write-Host "-Model '$Model' holds characters the installer cannot write safely; use letters, digits and . _ : / @ + -"
+        exit 2
+    }
+    if ($Extractor -notin $extractorModes) {
+        Write-Host "invalid -Extractor '$Extractor' ($($extractorModes -join '|'))"
+        exit 2
+    }
+    if ($Extractor -in "endpoint", "endpoint-fallback") {
+        # Any server's own model names: none is listed here.
+        if (-not $ExtractorUrl -or -not $Model) {
+            Write-Host "-Extractor $Extractor needs -ExtractorUrl <the server's OpenAI-compatible base URL, e.g. http://127.0.0.1:1234/v1> and -Model <a model name that server serves>"
+            exit 2
+        }
+        # Checked before any other message, which never echoes the URL.
+        $urlAuthority = (($ExtractorUrl -split '://', 2)[-1] -split '/', 2)[0]
+        if ($urlAuthority.Contains("@")) {
+            Write-Host "-ExtractorUrl must not carry credentials (user:password@host); a key the server wants goes in PSEUDOLIFE_DREAM_API_KEY in ops/.env"
+            exit 2
+        }
+        if ($ExtractorUrl -cnotmatch '^https?://.') {
+            Write-Host "invalid -ExtractorUrl: expected the server's http(s) base URL, e.g. http://127.0.0.1:1234/v1"
+            exit 2
+        }
+        if ($ExtractorUrl -cnotmatch $safeUrlPattern) {
+            Write-Host "invalid -ExtractorUrl: it holds characters the installer cannot write safely; use letters, digits and . _ : / @ + - (and [ ] around an IPv6 host)"
+            exit 2
+        }
+    } else {
+        if ($ExtractorUrl) {
+            Write-Host "-ExtractorUrl applies only to -Extractor endpoint or endpoint-fallback"
+            exit 2
+        }
+        # One family rule, the same in install.sh, before any note: a shim
+        # only honours its own family's ids per request.
+        $familyOk = switch -Regex ($Extractor) {
+            '^sidecar$' { $true }
+            '^claude-' { $Model -clike "claude-?*" }
+            '^openai-' { ($Model -clike "gpt-?*") -or ($Model -clike "codex-?*") }
+            default { $true }
+        }
+        if ($Model -and -not $familyOk) {
+            Write-Host "-Model '$Model' does not match extractor mode $($Extractor): a claude-* mode takes a claude-* id, an openai-* mode a gpt-* or codex-* id"
+            exit 2
+        }
+        if ($Model -and ($Model -notin ($claudeModels + $openaiModels))) {
+            if ($Extractor -eq "sidecar") {
+                Write-Host "-Model '$Model' is not one this installer knows, and -Extractor sidecar serves only its bundled model; -Model picks a CLI shim or endpoint mode's model"
+                exit 2
+            }
+            Write-Host "model $Model is not in this installer's known list; passing it to the shim unchanged (add it to the lists when it is a real release)"
+        }
+    }
+}
+if (Test-ModelBlank) {
+    Write-Host "-Model needs a model id (it was empty)"
+    exit 2
+}
 if ($Extractor) { Assert-ExtractorArgs }
 # <<< extractor modes <<<
 
@@ -422,13 +528,20 @@ function Invoke-NativeHelper {
     # launcher. Never a launcher found on the host, which may be an older
     # release without these steps. Input piped to this function goes to it.
     $exe = if ($script:nativeStaged) { $script:nativeStaged } else { $script:nativeHelper }
+    # Before a first install's stage 2 nothing is staged: exit 127, and a
+    # caller with a rule of its own (the loopback test) uses that.
+    if (-not $exe) { $global:LASTEXITCODE = 127; return }
     if ($MyInvocation.ExpectingInput) { $input | & $exe installer @args } else { & $exe installer @args }
 }
 # <<< native client <<<
 # >>> native client stage >>>
 # Fetched and verified before anything here changes: a refusal leaves the
-# host as it was.
-Initialize-NativeClient
+# host as it was. A rerun reads its recorded choices through it, so it is
+# staged here; a first install stages it at stage 2, after its parameters
+# are checked, so a mistyped one is refused without a download.
+if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_URL -and (Test-Path -LiteralPath $envFile)) {
+    Initialize-NativeClient
+}
 # <<< native client stage <<<
 
 # >>> recorded choices >>>
@@ -927,6 +1040,17 @@ function Test-LoopbackUrl([string]$url) {
     # The client's own answer, so the installer and the client never
     # disagree on a form such as 127.0.0.01 or ::ffff:127.0.0.1. Exit 10/11
     # are its answers; anything else falls back to the host rule below.
+    # Before the client is staged (a first install's parameters), only a host
+    # the rule below could read differently from it stages it: an unusual IP
+    # form or a name around localhost. An ordinary name or address is decided
+    # here, so a mistyped parameter is still refused without a download.
+    if (-not $script:nativeStaged -and -not $script:nativeHelper) {
+        $plain = Get-DaemonUrlHost $url
+        if ($plain -in "localhost", "::1") { return $true }
+        if ($plain -match 'localhost' -or $plain.Contains(":")) { Initialize-NativeClient | Out-Null }
+        elseif ($plain -match '[a-z]') { return $false }
+        elseif ($plain -notmatch '^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$') { Initialize-NativeClient | Out-Null }
+    }
     try {
         Invoke-NativeHelper is-loopback $url 2>$null | Out-Null
         if ($LASTEXITCODE -eq 10) { return $true }
@@ -1089,6 +1213,9 @@ if ($interactive -and -not $script:installerRerun) {
 Invoke-BankTokenQuestion
 
 # -- 2. preflight --------------------------------------------------------------
+# >>> native client late stage >>>
+if (-not $script:nativeStaged -and -not $script:nativeHelper) { Initialize-NativeClient }
+# <<< native client late stage <<<
 
 # The status field of an installer credentials step's JSON report, or $null.
 function Get-HelperStatus($output) {
@@ -1605,7 +1732,6 @@ if (-not $ClientOnly) {
 # no Python for the shim falls back to HTTP, so it mints none.
 # >>> mint token >>>
 $tokenState = $null
-$tokenPython = $null
 # A client-only install never mints: the remote daemon's token is the file
 # the operator supplied. A token already set gates the daemon whatever this
 # run may mint, and the HTTP-registration warning and the board hint depend

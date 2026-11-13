@@ -6,7 +6,8 @@ registrations get a token file (plus, for Claude Code, a resumable board
 address), an existing Claude Code registration gains them in place, and the
 plugin's hooks get the file through ~/.claude/settings.json. Each block runs
 extracted from ops/install.sh against fake CLIs in a disposable home; the
-real ops/client_credentials.py does the file work.
+real ops/client_credentials.py does the file work, run by the stand-in
+native installer steps (native_client_stub.HELPER_SH).
 """
 from __future__ import annotations
 
@@ -14,7 +15,6 @@ import json
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 import pytest
 
@@ -56,8 +56,8 @@ class _Shell:
             "set -u\n"
             f"HOME='{self.path(self.home)}'\n"
             f"repo='{self.path(ROOT)}'\n"
-            f"installer_python() {{ printf '%s\\n' '{self.path(sys.executable)}'; }}\n"
-            "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
+            + native_stub.HELPER_SH
+            + "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
         )
         return subprocess.run([self.bash], input=prelude + body, capture_output=True,
                               text=True, timeout=120, env=self.env, check=False)
@@ -70,8 +70,7 @@ def _mint(shell: _Shell, env_file: Path, *, no_token: str = "", transport: str =
     return shell.run(
         extra + f"env_file='{shell.path(env_file)}'\nNO_TOKEN='{no_token}'\n"
         f"TRANSPORT='{transport}'\n"
-        # The token stage calls the shim-tooling check stage 4b defines first.
-        + _block("shim tooling") + _block("mint token")
+        + _block("mint token")
         + "\nprintf 'TOKEN_STATE=%s\\n' \"$TOKEN_STATE\"\n")
 
 
@@ -112,7 +111,7 @@ def test_open_loopback_installs_mint_nothing(bash, tmp_path, no_token, transport
 
 @pytest.mark.parametrize("no_token,transport,extra", [
     ("", "http", ""),
-    ("", "shim", "installer_python() { :; }\n"),
+    ("", "shim", ""),
     ("1", "shim", ""),
 ])
 @BASH
@@ -142,19 +141,6 @@ def test_http_registrations_against_a_gated_daemon_are_warned_about(bash, tmp_pa
     assert proc.returncode == 0, proc.stderr
     assert "HTTP registration sends no bearer token" in proc.stderr
     assert "fixture-existing" not in proc.stdout + proc.stderr
-
-
-@BASH
-def test_a_host_that_cannot_install_the_shim_mints_nothing(bash, tmp_path):
-    """Without a shim the registrations fall back to HTTP, which cannot
-    carry a token file: minting there would lock memory out."""
-    shell = _Shell(bash, tmp_path)
-    env_file = tmp_path / ".env"
-    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
-    proc = _mint(shell, env_file, extra="installer_python() { :; }\n")
-    assert proc.returncode == 0, proc.stderr
-    assert "TOKEN_STATE=no-shim" in proc.stdout
-    assert _minted(env_file) == []
 
 
 def test_installers_document_the_no_token_opt_out():

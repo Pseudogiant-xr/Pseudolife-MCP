@@ -6,7 +6,6 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 
 import pytest
 
@@ -83,7 +82,6 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 $env:FAKE_LAUNCHER = '{shim_executable}'
 $env:FAKE_KEEP_LAUNCHER = '1'
 $env:FAKE_NATIVE_EXIT = '{0 if shim_available else 1}'

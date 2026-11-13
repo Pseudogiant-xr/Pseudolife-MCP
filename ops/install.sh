@@ -526,7 +526,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
 # ensure_shim's install: the verified archive into a new side-by-side runtime
 # behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
 native_install() {
-    [ -n "$NATIVE_STAGED" ] || native_stage
+    [ -n "${NATIVE_STAGED:-}" ] || native_stage
     native_launcher_before="$(native_installed_launcher)"
     native_sum_before=""
     [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
@@ -578,14 +578,21 @@ native_installed_launcher() {  # echoes the stable launcher when it is the nativ
 native_helper() {  # runs one installer step of this run's verified native client
     # Always the staged copy: a launcher already on this host may be an older
     # release without these steps, and the staged copy is the exact release
-    # ensure_shim installs. It stays until this run exits.
+    # ensure_shim installs. It stays until this run exits. Before a first
+    # install's stage 2 nothing is staged: status 127, and a caller with a
+    # rule of its own (the loopback test) uses that.
+    [ -n "${NATIVE_STAGED:-}" ] || return 127
     "$NATIVE_STAGED" installer "$@"
 }
 # <<< native client <<<
 # >>> native client stage >>>
 # Fetched and verified before anything here changes: a refusal leaves the
-# host as it was.
-native_stage
+# host as it was. A rerun reads its recorded choices through it, so it is
+# staged here; a first install stages it at stage 2, after its flags are
+# checked, so a mistyped flag is refused without a download.
+if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -f "$env_file" ]; then
+    native_stage
+fi
 # <<< native client stage <<<
 
 # >>> recorded choices >>>
@@ -1064,10 +1071,25 @@ is_loopback_url() {  # $1 = URL; status 0 when it names this machine
     # The client's own answer, so the installer and the client never
     # disagree on a form such as 127.0.0.01 or ::ffff:127.0.0.1. Exit 10/11
     # are its answers; anything else falls back to the host rule below.
+    loopback_host="$(daemon_url_host "$1")"
+    # Before the client is staged (a first install's flags), only a host the
+    # rule below could read differently from it stages it: an unusual IP
+    # form or a name around localhost. An ordinary name or address is
+    # decided here, so a mistyped flag is still refused without a download.
+    # Called only from `if` tests in this shell, so a stage here is kept.
+    if [ -z "${NATIVE_STAGED:-}" ]; then
+        case "$loopback_host" in
+            localhost|::1) return 0 ;;
+            *localhost*|*:*) native_stage ;;
+            *[a-z]*) return 1 ;;
+            *) printf '%s' "$loopback_host" |
+                grep -Eq '^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$' ||
+                native_stage ;;
+        esac
+    fi
     loopback_rc=0
     native_helper is-loopback "$1" 2>/dev/null || loopback_rc=$?
     case "$loopback_rc" in 10) return 0 ;; 11) return 1 ;; esac
-    loopback_host="$(daemon_url_host "$1")"
     case "$loopback_host" in localhost|::1) return 0 ;; esac
     # 127.0.0.0/8 as Python's ipaddress reads it: no leading zeros, <= 255.
     printf '%s' "$loopback_host" |
@@ -1223,6 +1245,9 @@ fi
 choose_bank_token
 
 # ── 2. preflight ───────────────────────────────────────────────────────────
+# >>> native client late stage >>>
+[ -n "${NATIVE_STAGED:-}" ] || native_stage
+# <<< native client late stage <<<
 
 # >>> client-only preflight >>>
 # Nothing Docker-shaped to check: a client-only install depends on the

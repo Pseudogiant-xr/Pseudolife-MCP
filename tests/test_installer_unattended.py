@@ -5,6 +5,7 @@ import pytest
 
 from tests.test_installer_client_only import BASH, ROOT, _Shell, _block
 from tests.test_installer_client_only_ps import _PowerShell, _q, _output
+from tests.test_installer_extractor_modes import _release_env
 
 
 def text(script):
@@ -14,7 +15,9 @@ def text(script):
 @BASH
 def test_sh_yes_is_accepted_before_invalid_client_refuses(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"'{shell.path(ROOT / 'ops/install.sh')}' --yes --client invalid --extractor sidecar --no-art\n")
+    # The installer stages the native client before it reads --client.
+    proc = shell.run(f"'{shell.path(ROOT / 'ops/install.sh')}' --yes --client invalid --extractor sidecar --no-art\n",
+                     extra_env=_release_env(shell))
     assert proc.returncode == 2
     assert "Unattended install" in proc.stdout
     assert "invalid --client" in proc.stderr

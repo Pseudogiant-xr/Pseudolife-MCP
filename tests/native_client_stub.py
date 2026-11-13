@@ -32,13 +32,19 @@ _PYTHON = Path(sys.executable).as_posix()
 # The installers' `native_helper` / `Invoke-NativeHelper` (one installer step
 # of the verified native client), answered by the Python helper each step
 # replaced: see native_helper_standin.py. Included in BASH and POWERSHELL.
+# A slice without the native block also gets a staging step that has
+# already succeeded (the loopback test stages on first use).
 HELPER_SH = f'''
 native_helper() {{ "{_PYTHON}" "{_STANDIN}" "$repo" "$@"; }}
+declare -F native_stage >/dev/null || native_stage() {{ :; }}
 '''
 HELPER_PS = f'''
 function Invoke-NativeHelper {{
     if ($MyInvocation.ExpectingInput) {{ $input | & "{_PYTHON}" "{_STANDIN}" $repo @args }}
     else {{ & "{_PYTHON}" "{_STANDIN}" $repo @args }}
+}}
+if (-not (Get-Command Initialize-NativeClient -ErrorAction SilentlyContinue)) {{
+    function Initialize-NativeClient {{ }}
 }}
 '''
 

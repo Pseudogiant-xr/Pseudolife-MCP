@@ -58,7 +58,8 @@ def test_installers_wire_codex_via_shim_by_default() -> None:
     spawns its own shim process and gets tier-1 per-session identity instead
     of inheriting the Claude hook's machine-scoped tier-3 pointer
     (configuration.md#session-identity, cross-client paragraph). The HTTP
-    one-liner stays as the no-shim-tooling fallback."""
+    one-liner stays for --transport http and as the fallback when the
+    native client cannot be installed."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
@@ -375,8 +376,10 @@ def test_installers_pass_writer_id_and_refuse_flagless_registration() -> None:
 def test_codex_installers_bootstrap_and_register_rotatable_credentials() -> None:
     for rel in ("ops/install.sh", "ops/install.ps1"):
         text = _read(rel)
-        assert "setup-codex-coordination.py" in text, rel
-        assert "--credentials" in text, rel
+        # The native client's codex-credentials step (what
+        # ops/setup-codex-coordination.py --credentials did).
+        assert "codex-credentials" in text, rel
+        assert "setup-codex-coordination.py" not in text, rel
         assert "PSEUDOLIFE_MCP_TOKEN_FILE" in text, rel
 
 
@@ -384,7 +387,8 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
     for rel, text in (("ops/install.sh", sh), ("ops/install.ps1", ps)):
-        assert "--runtime-defaults" in text, rel
+        # The native client's step for setup-codex-coordination.py --runtime-defaults.
+        assert "codex-runtime-defaults" in text, rel
         assert "startup_timeout_sec = 240" not in text, rel
         assert "tool_timeout_sec = 180" not in text, rel
         assert "runtime defaults were not confirmed" in text, rel
@@ -724,15 +728,17 @@ def test_a_mode_switch_says_which_shim_autostart_it_removed_and_why() -> None:
 def test_installers_wire_claude_desktop_through_the_shared_register_script() -> None:
     """Claude Desktop has no `mcp add` CLI and launches MCP servers with a
     sanitized environment (no PATH extras, no user env vars), so its entry
-    is merged into claude_desktop_config.json by ops/register_claude_desktop.py
-    — one implementation both installers call — with the shim's ABSOLUTE
+    is merged into claude_desktop_config.json by the native client's
+    claude-desktop step (ops/register_claude_desktop.py's logic) — one
+    implementation both installers call — with the shim's ABSOLUTE
     path and, for a token-gated daemon, a token FILE path: never a token
     value, never a reliance on the OS environment (2026-09-19 incident:
     four days of 401s behind "unhandled errors in a TaskGroup")."""
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
-    for text, rel in ((sh, "install.sh"), (ps, "install.ps1")):
-        assert "register_claude_desktop.py" in text, rel
+    for text, rel, call in ((sh, "install.sh", "native_helper claude-desktop"),
+                            (ps, "install.ps1", "Invoke-NativeHelper claude-desktop")):
+        assert call in text, rel
         assert "--writer-id" in text and "--token-file" in text, rel
         assert "Claude Desktop" in text, rel          # menu + ladder
         assert "fully quit" in text, rel              # the relaunch step

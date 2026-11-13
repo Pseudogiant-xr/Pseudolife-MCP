@@ -16,7 +16,10 @@ def test_registration_notice_names_only_the_selected_profile(tmp_path, shell, pr
     executable = shutil.which(shell)
     if shell == "bash" and os.name == "nt":
         git = shutil.which("git")
-        executable = str(Path(git).parents[1] / "bin" / "bash.exe") if git else None
+        # git resolves to Git\cmd\git.exe, or to Git\mingw64\bin\git.exe on a
+        # Git Bash PATH: Git Bash's bash.exe is in the first ancestor's bin.
+        executable = next((str(parent / "bin" / "bash.exe") for parent in Path(git).parents
+                           if (parent / "bin" / "bash.exe").is_file()), None) if git else None
     if executable is None:
         pytest.skip(f"{shell} not installed")
     suffix = "sh" if shell == "bash" else "ps1"

@@ -14,6 +14,7 @@ import subprocess
 
 import pytest
 
+from tests import installer_sandbox
 from tests import native_client_stub as native_stub
 
 
@@ -40,8 +41,13 @@ def _fixture_env(tmp_path: Path) -> dict[str, str]:
         "CODEX_HOME": str(fixture_home / "codex"),
         "HOME": str(fixture_home),
         "USERPROFILE": str(fixture_home),
+        # Set, so nothing falls back to the system's real folders.
+        "LOCALAPPDATA": str(fixture_home / "AppData" / "Local"),
+        "APPDATA": str(fixture_home / "AppData" / "Roaming"),
         "XDG_CONFIG_HOME": str(fixture_home / "config"),
     })
+    # Every harness built on this environment runs installer code.
+    installer_sandbox.require(env, tmp_path)
     return env
 
 
