@@ -106,6 +106,17 @@ def _write(path, data: bytes) -> None:
     path.write_bytes(data)
 
 
+def _hidden(relative: str):
+    """A file at ``relative`` (under the home) holding "earlier", marked
+    hidden (Windows only)."""
+    def setup(arm):
+        import ctypes  # noqa: PLC0415
+        path = arm.home / relative
+        _write(path, b"earlier")
+        assert ctypes.windll.kernel32.SetFileAttributesW(str(path), 0x2)
+    return setup
+
+
 def _record(state: str, **fields):
     """A pid file beside ``state`` (relative to the home). ``pid`` may be
     "live" (a sleeper the row starts), and ``process_start`` "live" (the
@@ -226,6 +237,24 @@ def cases() -> list[Case]:
     add(case("error-stop-explicit-empty", ["--stop="]))
     add(case("error-first-wins", ["--interval", "x", "--bogus", "-h"]))
     add(case("error-deprecated-name", ["--bogus"], mode="delegate-watch"))
+    # NaN fails both `not value > 0` and `not value >= 0`; infinity passes.
+    add(case("error-settle-nan", ["--settle", "nan"]))
+    add(case("error-settle-signed-nan", ["--settle=-NaN"]))
+    add(case("error-interval-nan", ["--interval", "nan"]))
+    add(case("stop-infinite-interval", ["--interval", "inf", "--settle", "Infinity", "--stop",
+                                        "--state", STATE]))
+    # lease_cli's duration pattern is ASCII: "ſ" is no unit.
+    add(case("error-max-age-long-s", ["--max-age", "5\u017f"]))
+    # A --state with no file name, refused where argparse meets it.
+    add(case("error-state-empty", ["--stop", "--state", ""]))
+    add(case("error-state-dot", ["--state=."]))
+    add(case("error-state-parent", ["--stop", "--owner", OWNER, "--state", "w/.."]))
+    add(case("error-state-root", ["--state", "/"]))
+    add(case("error-state-in-order", ["--state", "w/s.json", "--state", "./.", "--bogus"]))
+    add(case("state-trailing-dot-component", ["--stop", "--state", "{HOME}/w/."]))
+    add(case("error-state-drive", ["--state", "C:"], platforms=("windows",)))
+    add(case("error-state-drive-root", ["--state", "C:\\"], platforms=("windows",)))
+    add(case("error-state-drive-parent", ["--state", "C:..\\."], platforms=("windows",)))
 
     # The owner, without --stop.
     add(case("owner-no-session", []))
@@ -305,6 +334,27 @@ def cases() -> list[Case]:
              steps=(_record("w/s.json", raw=b'\xef\xbb\xbf{"pid": 1}'),)))
     add(case("stop-pid-file-not-utf8", ["--stop", "--state", STATE],
              steps=(_record("w/s.json", raw=b'{"pid": "\xff"}'),)))
+    # Past the probes' range (2**31 on) or infinite: no watcher.
+    add(case("stop-pid-past-limit", ["--stop", "--state", STATE],
+             steps=(_record("w/s.json", pid=2 ** 31, agent_id=WATCHER),)))
+    add(case("stop-pid-past-limit-text", ["--stop", "--state", STATE],
+             steps=(_record("w/s.json", pid=" 99999999999999999999 ", agent_id=WATCHER),)))
+    add(case("stop-pid-huge-float", ["--stop", "--state", STATE],
+             steps=(_record("w/s.json", pid=1e300, agent_id=WATCHER),)))
+    add(case("stop-pid-infinite", ["--stop", "--state", STATE],
+             steps=(_record("w/s.json", raw=b'{"pid": Infinity, "agent_id": "x"}'),)))
+    # A stop request that cannot be written: exit 2 with the reason, the
+    # .stop path left as it was.
+    add(case("stop-request-unwritable", ["--stop", "--state", STATE],
+             steps=(_record("w/s.json", pid="live", agent_id=WATCHER),
+                    lambda arm: (arm.home / "w" / "s.stop").mkdir())))
+    add(case("stop-request-unwritable-deprecated-name", ["--stop", "--state", STATE],
+             mode="delegate-watch",
+             steps=(_record("w/s.json", pid="live", agent_id=WATCHER),
+                    lambda arm: (arm.home / "w" / "s.stop").mkdir())))
+    # Windows: the C runtime's CREATE_ALWAYS refuses a hidden or system file.
+    add(case("stop-request-hidden", ["--stop", "--state", STATE], platforms=("windows",),
+             steps=(_record("w/s.json", pid="live", agent_id=WATCHER), _hidden("w/s.stop"))))
     add(case("stop-deprecated-name", ["--stop", "--state", STATE], mode="delegate-watch",
              steps=(_record("w/s.json", pid="live", agent_id=WATCHER),)))
     # The notice comes before the stop request: when it cannot be written,
@@ -340,7 +390,12 @@ def cases() -> list[Case]:
              rules=("conductor-watch-deferral",)))
     add(case("defer-abbreviation", ["--sto", "--state", STATE], rules=("conductor-watch-deferral",)))
     add(case("defer-dash-value", ["--state", "-x", "--stop"], rules=("conductor-watch-deferral",)))
-    add(case("defer-infinite-interval", ["--interval", "inf", "--stop", "--state", STATE],
+    add(case("defer-underscore-interval", ["--interval", "1_0", "--stop", "--state", STATE],
+             rules=("conductor-watch-deferral",)))
+    # UNC and extended paths: pathlib's drive rules for them are not ported.
+    add(case("defer-state-unc", ["--stop", "--state", "\\\\srv\\share"], platforms=("windows",),
+             rules=("conductor-watch-deferral",)))
+    add(case("defer-state-trailing-dot", ["--stop", "--state", "{HOME}/w/s."],
              rules=("conductor-watch-deferral",)))
     # argparse classifies every argument before it runs any action, so an
     # ambiguous prefix later in argv wins over an earlier --help or type error.
@@ -370,4 +425,16 @@ MUTANTS = [
     Mutant("conductor-watch-age-zero-admitted", "conductor_watch", ARGS,
            "if number.bytes().all(|b| b == b'0') {", "if number.is_empty() {",
            ("error-max-age-zero",)),
+    Mutant("conductor-watch-state-parent-admitted", "conductor_watch", ARGS,
+           '"" | "." | ".." => refused(', '"" | "." => refused(', ("error-state-parent",)),
+    Mutant("conductor-watch-settle-nan-admitted", "conductor_watch", ARGS,
+           "kind == Kind::NonNegative && (number.is_nan() || number < 0.0)",
+           "kind == Kind::NonNegative && number < 0.0", ("error-settle-nan",)),
+    Mutant("conductor-watch-pid-limit-deferred", "conductor_watch", FILE,
+           "Some(J::Int(text)) => small(text),",
+           "Some(J::Int(text)) => Some(small(text).ok_or(Defer)?),", ("stop-pid-past-limit",)),
+    Mutant("conductor-watch-stop-refusal-exit-0", "conductor_watch", FILE,
+           "out = Out::say(&stop_refusal(&path, &reason).ok()?, EXIT_SETUP);",
+           "out = Out::say(&stop_refusal(&path, &reason).ok()?, EXIT_OK);",
+           ("stop-request-unwritable",)),
 ]
