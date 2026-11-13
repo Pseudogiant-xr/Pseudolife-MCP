@@ -50,8 +50,8 @@ fn archive() -> Vec<u8> {
 /// staging root.
 fn listing() -> Vec<u8> {
     [
-        &b"d\x0066\x00100\x002\x00\x00\x00"[..],
-        b"f\x0066\x00101\x001\x00config.yaml\x00\x00",
+        &b"d\x0066\x00100\x002\x00755\x00\x00\x00"[..],
+        b"f\x0066\x00101\x001\x00644\x00config.yaml\x00\x00",
         b"END\x00",
     ]
     .concat()
@@ -86,6 +86,8 @@ struct Fake {
     /// Fail every call with this label.
     fail_always: Option<&'static str>,
     interrupt_at: Option<usize>,
+    /// An interrupt that arrives just after this call succeeded.
+    interrupt_after: Option<usize>,
     interrupted: bool,
     interruptible: bool,
     /// helper id -> its script.
@@ -149,6 +151,9 @@ impl Docker for Fake {
                 stderr: b"boom".to_vec(),
                 ..Ran::default()
             };
+        }
+        if Some(at) == self.interrupt_after {
+            self.interrupted = true;
         }
         let ok = |stdout: &str| Ran {
             code: 0,
@@ -345,10 +350,14 @@ fn label(call: &[String]) -> String {
         ["exec", _, "sh", "-c", s, ..] if s.contains("pg_dump") => "safety-dump".into(),
         ["create", .., s] if s.starts_with("tar czf") => "create safety-helper".into(),
         ["create", .., s] if s.contains("df -Pk") => "create df-helper".into(),
-        ["create", .., s] if s.starts_with("rm -rf -- /data/.pseudolife-restore-*") => {
+        ["create", .., s]
+            if s.starts_with("rm -rf --one-file-system -- /data/.pseudolife-restore-[") =>
+        {
             "create sweep-helper".into()
         }
-        ["create", .., s] if s.starts_with("rm -rf -- /data/.pseudolife-restore-") => {
+        ["create", .., s]
+            if s.starts_with("rm -rf --one-file-system -- /data/.pseudolife-restore-") =>
+        {
             "create discard-helper".into()
         }
         ["create", .., s] if s.contains("-printf") => "create stage-helper".into(),
@@ -907,7 +916,7 @@ fn an_extracted_state_that_leads_out_is_refused_with_the_bank_unchanged() {
     let mut extracted = listing();
     // The new entry goes before the listing's `END`.
     extracted.truncate(extracted.len() - 4);
-    extracted.extend_from_slice(b"l\x0066\x00102\x001\x00out\x00../x\x00END\x00");
+    extracted.extend_from_slice(b"l\x0066\x00102\x001\x00777\x00out\x00../x\x00END\x00");
     let mut docker = Fake {
         extracted: Some(extracted),
         ..Fake::default()
@@ -933,7 +942,7 @@ fn an_extracted_state_that_leads_out_is_refused_with_the_bank_unchanged() {
     let discard = docker.helpers.get("helper5").cloned().unwrap_or_default();
     assert_eq!(
         discard,
-        format!("rm -rf -- /data/.pseudolife-restore-{RUN_TAG}")
+        format!("rm -rf --one-file-system -- /data/.pseudolife-restore-{RUN_TAG}")
     );
     let text = host.errors.join("\n");
     assert!(
@@ -989,20 +998,28 @@ fn the_state_is_staged_in_data_and_swapped_in_by_rename() {
     let stage = &docker.helpers["helper4"];
     let swap = &docker.helpers["helper5"];
     let dir = format!("/data/.pseudolife-restore-{RUN_TAG}");
+    // A staging directory's exact name: the prefix and 16 hex digits.
+    let glob = ".pseudolife-restore-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]";
     // move.json at any depth and a top-level staging directory an older
-    // backup caught are left out; the listing ends with END.
-    assert!(stage.contains(&format!("S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json --anchored '--exclude=./.pseudolife-restore-*' '--exclude=.pseudolife-restore-*' -xzf /tmp/pl_state.tgz -C $S;")), "{stage}");
-    assert!(stage.ends_with("; printf 'END\\0'"), "{stage}");
+    // backup caught are left out; the listing carries modes and ends with
+    // END.
+    assert!(stage.contains(&format!("S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json --anchored '--exclude=./{glob}' '--exclude={glob}' -xzf /tmp/pl_state.tgz -C $S;")), "{stage}");
+    assert!(
+        stage.ends_with("find $S -printf '%y\\0%D\\0%i\\0%n\\0%m\\0%P\\0%l\\0'; printf 'END\\0'"),
+        "{stage}"
+    );
     assert!(stage.starts_with("set -e;"), "{stage}");
-    // The safety backup leaves a staging directory out too.
+    // The safety backup leaves only such a directory out.
     assert_eq!(
         docker.helpers["helper2"],
-        "tar czf - --anchored '--exclude=./.pseudolife-restore-*' -C /data ."
+        format!("tar czf - --anchored '--exclude=./{glob}' -C /data .")
     );
     assert!(swap.starts_with("set -e;"), "{swap}");
+    // Before anything is removed, a volume mounted inside /data stops it.
+    assert!(swap.contains("/proc/self/mountinfo; then :; else echo 'a volume is mounted inside /data; nothing was replaced' >&2; exit 3; fi; find /data"), "{swap}");
     assert!(
         swap.contains(&format!(
-            "! -name move.json ! -name .pseudolife-restore-{RUN_TAG} -exec rm -rf"
+            "! -name move.json ! -name .pseudolife-restore-{RUN_TAG} -exec rm -rf --one-file-system -- {{}} +"
         )),
         "{swap}"
     );
@@ -1010,10 +1027,11 @@ fn the_state_is_staged_in_data_and_swapped_in_by_rename() {
         swap.ends_with("-exec mv -t /data -- {} +; rmdir -- $S"),
         "{swap}"
     );
-    // Stale staging directories go before the safety backup reads /data.
+    // Stale staging directories (that exact name only) go before the
+    // safety backup reads /data.
     assert_eq!(
         docker.helpers["helper1"],
-        "rm -rf -- /data/.pseudolife-restore-*"
+        format!("rm -rf --one-file-system -- /data/{glob}")
     );
 }
 
@@ -1037,6 +1055,35 @@ fn the_daemon_stays_stopped_while_a_helper_may_still_write_to_data() {
         text.contains("The bank was not changed, but the daemon d is left stopped because the helper container helper4 could not be removed and may still be writing into its /data volume: run docker rm -f helper4, then docker start d. Nothing was restored."),
         "{text}"
     );
+}
+
+#[test]
+fn an_interrupt_between_the_replay_and_the_swap_says_the_database_is_restored() {
+    let setup = Setup::new(true);
+    let replay = HAPPY.iter().position(|l| *l == "replay").unwrap();
+    let mut docker = Fake {
+        interrupt_after: Some(replay),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 130);
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    assert!(
+        !labels[replay..]
+            .iter()
+            .any(|l| l == "start d" || l == "start-a helper5"),
+        "{labels:?}"
+    );
+    let text = host.errors.join("\n");
+    assert!(
+        text.contains("The database db holds the backup, but the state volume is unchanged: it was not yet replaced. The daemon d is left stopped"),
+        "{text}"
+    );
+    assert!(
+        text.contains("or, once the cause is fixed, finish this restore with:"),
+        "{text}"
+    );
+    assert!(setup.journal().exists());
 }
 
 const HAPPY_NO_STATE: [&str; 17] = [

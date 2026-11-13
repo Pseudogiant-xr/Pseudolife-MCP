@@ -27,8 +27,9 @@ pub(super) struct Pair {
 }
 
 const DUMP: &str = r#"unset PGHOSTADDR PGSERVICE PGSERVICEFILE; exec pg_dump --no-owner --no-acl -h "$1" -p "$2" -U "$3" -d "$4" -Z9"#;
-/// `/data` without a staging directory a killed restore left behind.
-const ARCHIVE: &str = "tar czf - --anchored '--exclude=./.pseudolife-restore-*' -C /data .";
+/// `/data` without a staging directory a killed restore left behind (the
+/// exact name `execute::STAGE_GLOB` matches).
+const ARCHIVE: &str = "tar czf - --anchored '--exclude=./.pseudolife-restore-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' -C /data .";
 
 fn part(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();

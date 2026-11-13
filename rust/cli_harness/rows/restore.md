@@ -52,8 +52,12 @@ deferred; it is now tested in Rust, and the frozen oracle answers otherwise.
   (Python skips no data for it, as tar does, but accepts it), a hard link
   to anything but a plain file before it, an extended header that repeats
   or empties a name or size and a GNU long name over 1 MiB: all refused
-  natively (`state.rs` tests). A top-level `.pseudolife-restore-*` entry is
-  left out of the extract natively.
+  natively (`state.rs` tests). A top-level `.pseudolife-restore-<16 hex>`
+  entry is left out of the extract natively.
+- A daemon with a volume mounted below `/data`, with `--state-archive`:
+  refused natively before anything stops (`bank.rs`
+  `probe_refuses_a_volume_mounted_inside_data_before_anything_stops`); the
+  oracle empties that volume in its extract.
 - The staged extraction and its outcome check (the extracted tree in
   `/data/.pseudolife-restore-<run>` judged before the drop, then renamed
   into place): past the first change, so tested in `execute_tests.rs` and

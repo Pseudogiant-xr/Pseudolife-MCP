@@ -678,6 +678,18 @@ pub(super) fn probe<D: Docker>(
     }
     state_mounts.sort();
     state_mounts.dedup();
+    if args.state_archive.is_some()
+        && let Some(nested) = state_mounts.iter().find(|mount| *mount != "/data")
+    {
+        // The swap removes /data's contents: it would empty that volume and
+        // could not replace it.
+        return fail(
+            format!(
+                "{daemon_name} has a volume mounted at {nested}, inside its /data volume; restore replaces only /data and cannot replace a volume mounted inside it. Mount that volume outside /data, or restore the database alone (without --state-archive), then retry. Nothing was restored"
+            ),
+            2,
+        );
+    }
     let pg_running = match sub_dict(&pg, "State", &pg_name)? {
         Some(state) => get(state, "Running").is_some_and(truthy),
         None => false,
@@ -1153,6 +1165,34 @@ mod tests {
 
     /// `--leave-stopped` needs no health port; an absent database is no
     /// refusal; a mount one KiB under the floor is.
+    #[test]
+    fn probe_refuses_a_volume_mounted_inside_data_before_anything_stops() {
+        let safety = safety_dir();
+        let daemon = json!([{
+            "Image": "img", "State": {"Running": true},
+            "Mounts": [{"Destination": "/data"}, {"Destination": "/data/models"}],
+            "HostConfig": {"PortBindings": {"8765/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18765"}]}},
+        }])
+        .to_string();
+        let pg = json!([{"State": {"Running": true}, "Mounts": []}]).to_string();
+        let mut script = Script::new(vec![
+            (&["inspect", "d"], ok(&daemon)),
+            (&["inspect", "p"], ok(&pg)),
+        ]);
+        let Err(Stop(message, code)) =
+            probe(&mut script, &args(&safety), "tag", 0, &mut |_| Ok(()))
+        else {
+            panic!("refused");
+        };
+        assert_eq!(code, 2);
+        assert_eq!(
+            message,
+            "d has a volume mounted at /data/models, inside its /data volume; restore replaces only /data and cannot replace a volume mounted inside it. Mount that volume outside /data, or restore the database alone (without --state-archive), then retry. Nothing was restored"
+        );
+        // Nothing past the two inspects ran.
+        assert_eq!(script.calls.len(), 2);
+    }
+
     #[test]
     fn probe_refuses_one_kib_under_the_floor() {
         let safety = safety_dir();

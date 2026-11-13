@@ -584,8 +584,13 @@ impl Reader {
 const MAX_DEPTH: usize = 400;
 const MAX_STEPS: usize = 50_000_000;
 
-/// The link walk found an escape, or a graph too large to walk.
-struct Escape;
+/// Why the link walk stopped.
+enum Escape {
+    /// A path leads outside the root.
+    Out,
+    /// The graph is deeper or larger than the walk's bounds.
+    TooLarge,
+}
 
 struct Links {
     map: HashMap<Vec<u8>, Vec<u8>>,
@@ -653,20 +658,20 @@ impl Links {
         depth: usize,
     ) -> Result<Option<Vec<Vec<u8>>>, Escape> {
         if depth > MAX_DEPTH {
-            return Err(Escape);
+            return Err(Escape::TooLarge);
         }
         let mut current: Vec<Vec<u8>> = Vec::new();
         for part in parts {
             self.steps += 1;
             if self.steps > MAX_STEPS {
-                return Err(Escape);
+                return Err(Escape::TooLarge);
             }
             if part.is_empty() || part == b"." {
                 continue;
             }
             if part == b".." {
                 if current.pop().is_none() {
-                    return Err(Escape);
+                    return Err(Escape::Out);
                 }
                 continue;
             }
@@ -679,7 +684,7 @@ impl Links {
                 return Ok(None);
             }
             if target.starts_with(b"/") || target.contains(&b'\\') {
-                return Err(Escape);
+                return Err(Escape::Out);
             }
             let mut next = current[..current.len() - 1].to_vec();
             next.extend(split(&target));
@@ -712,14 +717,14 @@ impl Links {
             || split(&member.name).iter().any(|part| part == b"..")
             || name.contains(&b'\\')
         {
-            return Err(Escape);
+            return Err(Escape::Out);
         }
         if member.is_special() {
-            return Err(Escape);
+            return Err(Escape::Out);
         }
         if member.is_symlink() || member.is_hardlink() {
             if member.linkname.starts_with(b"/") || member.linkname.contains(&b'\\') {
-                return Err(Escape);
+                return Err(Escape::Out);
             }
             let mut parts = if member.is_symlink() {
                 split(&dirname(&name))
@@ -743,7 +748,7 @@ fn check_members(members: &[Member]) -> Result<(), Refusal> {
             .collect(),
         steps: 0,
     };
-    let unsafe_ = |Escape| Refusal::Unsafe;
+    let unsafe_ = |_: Escape| Refusal::Unsafe;
     for member in members {
         links.check(member).map_err(unsafe_)?;
     }
@@ -785,14 +790,16 @@ fn check_members(members: &[Member]) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// One entry of the extracted tree, as `find -printf '%y\0%D\0%i\0%n\0%P\0%l\0'`
-/// lists it: type letter, device, inode, link count, path below the
+/// One entry of the extracted tree, as
+/// `find -printf '%y\0%D\0%i\0%n\0%m\0%P\0%l\0'` lists it: type letter,
+/// device, inode, link count, permission bits (octal), path below the
 /// staging root, symlink target.
 struct Extracted {
     kind: u8,
     device: Vec<u8>,
     inode: Vec<u8>,
     links: u64,
+    mode: u32,
     path: Vec<u8>,
     target: Vec<u8>,
 }
@@ -806,13 +813,13 @@ fn parse_listing(listing: &[u8]) -> Option<Vec<Extracted>> {
     let listing = listing.strip_suffix(b"END\0")?;
     let mut fields: Vec<&[u8]> = listing.split(|byte| *byte == 0).collect();
     // The listing ends with a NUL, which leaves one empty field after it.
-    if fields.pop() != Some(&b""[..]) || !fields.len().is_multiple_of(6) {
+    if fields.pop() != Some(&b""[..]) || !fields.len().is_multiple_of(7) {
         return None;
     }
     fields
-        .chunks(6)
+        .chunks(7)
         .map(|entry| {
-            let [kind, device, inode, links, path, target] = entry else {
+            let [kind, device, inode, links, mode, path, target] = entry else {
                 return None;
             };
             let [kind] = kind else {
@@ -822,11 +829,18 @@ fn parse_listing(listing: &[u8]) -> Option<Vec<Extracted>> {
             if !number(device) || !number(inode) || !number(links) {
                 return None;
             }
+            let octal = !mode.is_empty()
+                && mode.len() <= 6
+                && mode.iter().all(|b| (b'0'..=b'7').contains(b));
+            if !octal {
+                return None;
+            }
             Some(Extracted {
                 kind: *kind,
                 device: device.to_vec(),
                 inode: inode.to_vec(),
                 links: std::str::from_utf8(links).ok()?.parse().ok()?,
+                mode: u32::from_str_radix(std::str::from_utf8(mode).ok()?, 8).ok()?,
                 path: path.to_vec(),
                 target: target.to_vec(),
             })
@@ -865,6 +879,19 @@ pub(super) fn judge_extracted(listing: &[u8]) -> Result<(), String> {
         if let Some(what) = what {
             return Err(format!("{what} ({})", shown(&entry.path)));
         }
+        // The daemon never needs a set-id file, and extraction as root
+        // keeps the bits an archive gives.
+        if entry.kind != b'l' && entry.mode & 0o6000 != 0 {
+            return Err(format!(
+                "a setuid or setgid {} ({})",
+                if entry.kind == b'd' {
+                    "directory"
+                } else {
+                    "file"
+                },
+                shown(&entry.path)
+            ));
+        }
         if entry.device != device {
             return Err(format!("a mount point inside it ({})", shown(&entry.path)));
         }
@@ -892,14 +919,20 @@ pub(super) fn judge_extracted(listing: &[u8]) -> Result<(), String> {
         }
         let mut parts = split(&dirname(&entry.path));
         parts.extend(split(&entry.target));
-        if links
-            .resolve(parts, std::slice::from_ref(&entry.path), 1)
-            .is_err()
-        {
-            return Err(format!(
-                "a symlink that leads outside the state volume ({})",
-                link()
-            ));
+        match links.resolve(parts, std::slice::from_ref(&entry.path), 1) {
+            Ok(_) => {}
+            Err(Escape::Out) => {
+                return Err(format!(
+                    "a symlink that leads outside the state volume ({})",
+                    link()
+                ));
+            }
+            Err(Escape::TooLarge) => {
+                return Err(format!(
+                    "links too deep or too many to check (at {})",
+                    link()
+                ));
+            }
         }
     }
     Ok(())
@@ -1592,7 +1625,8 @@ mod tests {
         assert_eq!(unpacked(&members), 8192 + 4096);
     }
 
-    /// One `find -printf '%y\0%D\0%i\0%n\0%P\0%l\0'` entry.
+    /// One `find -printf '%y\0%D\0%i\0%n\0%m\0%P\0%l\0'` entry, with the
+    /// mode `find` shows for that type in an ordinary state.
     fn entry(
         kind: char,
         device: &str,
@@ -1601,7 +1635,73 @@ mod tests {
         path: &str,
         target: &str,
     ) -> Vec<u8> {
-        format!("{kind}\0{device}\0{inode}\0{links}\0{path}\0{target}\0").into_bytes()
+        let mode = match kind {
+            'd' => "755",
+            'l' => "777",
+            _ => "644",
+        };
+        entry_mode(kind, device, inode, links, mode, path, target)
+    }
+
+    fn entry_mode(
+        kind: char,
+        device: &str,
+        inode: u32,
+        links: u32,
+        mode: &str,
+        path: &str,
+        target: &str,
+    ) -> Vec<u8> {
+        format!("{kind}\0{device}\0{inode}\0{links}\0{mode}\0{path}\0{target}\0").into_bytes()
+    }
+
+    #[test]
+    fn a_setuid_or_setgid_entry_is_refused() {
+        for (kind, mode, what) in [
+            ('f', "4755", "file"),
+            ('f', "2755", "file"),
+            ('f', "6711", "file"),
+            ('d', "2775", "directory"),
+        ] {
+            assert_eq!(
+                judge_extracted(&tree(&[entry_mode(kind, "66", 2, 1, mode, "x", "")])),
+                Err(format!("a setuid or setgid {what} (x)")),
+                "{mode}"
+            );
+        }
+        // The sticky bit, an executable and a symlink's 777 are ordinary.
+        let ordinary = tree(&[
+            entry_mode('d', "66", 2, 2, "1777", "tmp", ""),
+            entry_mode('f', "66", 3, 1, "755", "run", ""),
+            entry_mode('l', "66", 4, 1, "777", "l", "run"),
+        ]);
+        assert_eq!(judge_extracted(&ordinary), Ok(()));
+        // A mode find would never print is unreadable.
+        assert_eq!(
+            judge_extracted(&tree(&[entry_mode('f', "66", 2, 1, "9", "x", "")])),
+            Err("a listing restore cannot read".to_owned())
+        );
+    }
+
+    #[test]
+    fn links_too_deep_to_walk_have_their_own_reason() {
+        // A chain of 500 symlinks, each to the next, deeper than the walk.
+        let chain: Vec<Vec<u8>> = (0..500u32)
+            .map(|at| {
+                entry(
+                    'l',
+                    "66",
+                    at + 2,
+                    1,
+                    &format!("l{at}"),
+                    &format!("l{}", at + 1),
+                )
+            })
+            .collect();
+        assert_eq!(
+            judge_extracted(&tree(&chain)),
+            Err("links too deep or too many to check (at l0 -> l1)".to_owned())
+        );
     }
 
     fn tree(entries: &[Vec<u8>]) -> Vec<u8> {

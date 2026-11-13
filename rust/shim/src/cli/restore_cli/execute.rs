@@ -59,6 +59,8 @@ pub(super) enum Phase {
     Unchanged,
     Stopped,
     Replacing,
+    /// The database holds the backup; the state is not replaced yet.
+    Replayed,
     StateReplacing,
     DataRestored,
 }
@@ -89,9 +91,13 @@ const GUNZIP: &str = r#"set -C && gunzip -c "$1" > "$2""#;
 /// only restore writes it. Backups leave it out and restore never extracts
 /// it, so one a killed run left behind cannot come back.
 pub(super) const STAGE_PREFIX: &str = ".pseudolife-restore-";
+/// A staging directory's exact name as a shell and tar pattern: the prefix
+/// and a run tag (16 lowercase hex digits), so a user's own
+/// `.pseudolife-restore-*` is never swept, left out of a backup or skipped.
+pub(super) const STAGE_GLOB: &str = ".pseudolife-restore-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]";
 /// Removes the staging directories a killed restore left in `/data`, before
 /// the safety backup could archive them.
-const SWEEP: &str = "rm -rf -- /data/.pseudolife-restore-*";
+const SWEEP: &str = "rm -rf --one-file-system -- /data/.pseudolife-restore-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]";
 
 /// Extracts the archive into the fresh staging directory `dir` (in `/data`,
 /// so the swap is a rename) and lists what was actually extracted, for
@@ -101,7 +107,7 @@ const SWEEP: &str = "rm -rf -- /data/.pseudolife-restore-*";
 /// directory an older backup may hold.
 fn stage_script(dir: &str) -> String {
     format!(
-        r"set -e; S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json --anchored '--exclude=./.pseudolife-restore-*' '--exclude=.pseudolife-restore-*' -xzf /tmp/pl_state.tgz -C $S; find $S -printf '%y\0%D\0%i\0%n\0%P\0%l\0'; printf 'END\0'"
+        r"set -e; S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json --anchored '--exclude=./{STAGE_GLOB}' '--exclude={STAGE_GLOB}' -xzf /tmp/pl_state.tgz -C $S; find $S -printf '%y\0%D\0%i\0%n\0%m\0%P\0%l\0'; printf 'END\0'"
     )
 }
 
@@ -117,10 +123,15 @@ pub(super) fn staged_bytes(state_size: u128, archive: Option<&Path>) -> u128 {
 }
 
 /// Replaces the state with the staged tree: everything but `move.json` and
-/// the staging directory goes, then the staged entries are renamed in.
+/// the staging directory goes, then the staged entries are renamed in. A
+/// volume mounted below `/data` is refused before the drop (`bank::probe`);
+/// this script refuses one again before it removes anything, from the
+/// mount table, since such a volume can share `/data`'s device number
+/// (probed) and `rm --one-file-system` still empties one that is a direct
+/// child of `/data`.
 fn swap_script(dir: &str, name: &str) -> String {
     format!(
-        r"set -e; S={dir}; test -d $S; find /data -mindepth 1 -maxdepth 1 ! -name move.json ! -name {name} -exec rm -rf -- {{}} +; find $S -mindepth 1 -maxdepth 1 -exec mv -t /data -- {{}} +; rmdir -- $S"
+        r"set -e; S={dir}; test -d $S; if awk '$5 ~ /^\/data\// {{ found = 1 }} END {{ exit found }}' /proc/self/mountinfo; then :; else echo 'a volume is mounted inside /data; nothing was replaced' >&2; exit 3; fi; find /data -mindepth 1 -maxdepth 1 ! -name move.json ! -name {name} -exec rm -rf --one-file-system -- {{}} +; find $S -mindepth 1 -maxdepth 1 -exec mv -t /data -- {{}} +; rmdir -- $S"
     )
 }
 const STALE: &str = "rm -f /tmp/pl_restore-*.sql.gz /tmp/pl_restore-*.sql.gz.sql";
@@ -454,7 +465,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         }
         self.staging = false;
         let plan = self.plan();
-        let script = format!("rm -rf -- {}", self.stage_dir);
+        let script = format!("rm -rf --one-file-system -- {}", self.stage_dir);
         let removed = match self.bank.helper(&plan.image, &script, true) {
             Ok(helper) => {
                 let ran = self.bank.quiet(&["start", "-a", &helper]);
@@ -686,6 +697,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         let db = plan.db.clone();
         self.psql(&db, &["-q", "-v", "ON_ERROR_STOP=1", "-f", &sql])?;
 
+        self.phase = Phase::Replayed;
         if let Some(swap) = swap {
             self.check()?;
             self.phase = Phase::StateReplacing;
@@ -934,7 +946,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     lines.push(format!("Fix the cause, then retry with:\n  {retry}"));
                 }
             }
-            Phase::Replacing | Phase::StateReplacing => {
+            Phase::Replacing | Phase::Replayed | Phase::StateReplacing => {
                 if self.phase == Phase::Replacing {
                     // A replay the docker client no longer waits on still
                     // runs in the container: end it, so nothing writes to
@@ -957,6 +969,11 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                             plan.db
                         )
                     });
+                } else if self.phase == Phase::Replayed {
+                    lines.push(format!(
+                        "The database {} holds the backup, but the state volume is unchanged: it was not yet replaced. The daemon {daemon} is left stopped so it cannot serve a half-restored bank.",
+                        plan.db
+                    ));
                 } else {
                     lines.push(format!(
                         "The database {} holds the backup, but the state volume is only partly replaced. The daemon {daemon} is left stopped so it cannot serve a half-restored bank.",

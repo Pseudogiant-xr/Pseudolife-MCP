@@ -37,10 +37,12 @@
   database is dropped, the archive is extracted into a staging directory
   in `/data` and the extracted tree is checked (only plain files,
   directories and relative symlinks that stay inside it, no inode shared
-  with anything outside it). A refusal there, or a failure or Ctrl-C while
-  staging, leaves the bank unchanged; after the replay the staged tree is
-  renamed into place. `/data` must have 8 GiB free beyond the archive's
-  size plus what it unpacks to.
+  with anything outside it, no setuid or setgid entry). A refusal there,
+  or a failure or Ctrl-C while staging, leaves the bank unchanged; after
+  the replay the staged tree is renamed into place. `/data` must have 8 GiB
+  free beyond the archive's size plus what it unpacks to. A daemon with a
+  volume mounted inside `/data` is refused before anything stops when the
+  state is restored, since replacing `/data` would empty that volume.
 - A lite bank is refused with a line naming the Docker install; restore
   runs `docker` only from absolute `PATH` entries or `PSEUDOLIFE_DOCKER`'s
   full path; the restarted daemon gets up to ten minutes to report ready.
