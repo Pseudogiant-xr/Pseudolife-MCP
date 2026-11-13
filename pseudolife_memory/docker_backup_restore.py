@@ -10,6 +10,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -459,9 +460,17 @@ class DockerBank:
         except BaseException as exc:
             if not destructive and was_running:
                 self.command("start", self.daemon, check=False, timeout=120)
-            if destructive and isinstance(exc, Exception):
-                stopped, _ = self.command("stop", self.daemon, check=False, timeout=120)
-                argv = ["pseudolife-mcp", "restore", "--backup-file", str(safety["dump"] or backup_file)]
+            # An interrupt after the drop began leaves the bank as a failure
+            # does: it gets the same recovery text, then exits as interrupted.
+            if destructive and isinstance(exc, (Exception, KeyboardInterrupt)):
+                interrupted = isinstance(exc, KeyboardInterrupt)
+                try:
+                    stopped, _ = self.command("stop", self.daemon, check=False, timeout=120)
+                except KeyboardInterrupt:
+                    if not interrupted:
+                        raise
+                    stopped = 1  # A second interrupt must not lose the recovery text.
+                argv =["pseudolife-mcp", "restore", "--backup-file", str(safety["dump"] or backup_file)]
                 recovery_state = safety["state"] if safety["dump"] else state_archive
                 if recovery_state:
                     argv += ["--state-archive", str(recovery_state)]
@@ -473,8 +482,14 @@ class DockerBank:
                     argv += ["--daemon-url", self.daemon_url]
                 state = "the daemon is left stopped" if stopped == 0 else f"run docker stop {self.daemon} first"
                 reason = str(exc) if isinstance(exc, up.UpdateError) else type(exc).__name__
-                raise up.UpdateError(f"restore failed after database replacement began ({reason}); {state}. "
-                                     f"Recover with {_shell_command(argv)}") from exc
+                failure = up.UpdateError(f"restore failed after database replacement began ({reason}); {state}. "
+                                         f"Recover with {_shell_command(argv)}")
+                if interrupted:
+                    # Printed here, before the cleanup below, as restore_cli
+                    # prints a failure; the interrupt itself still propagates.
+                    print(f"restore failed: {failure}", file=sys.stderr, flush=True)
+                    raise
+                raise failure from exc
             raise
         finally:
             staged.close()
