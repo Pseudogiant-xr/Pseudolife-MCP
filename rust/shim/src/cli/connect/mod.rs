@@ -43,9 +43,18 @@ pub(super) fn process_table() -> Result<Option<ProcessTable>, ()> {
     procs::list()
 }
 
-/// `update_cli.interactive()`: `sys.stdin.isatty() and sys.stdout.isatty()`.
+/// `update_cli.interactive()`: `sys.stdin.isatty() and sys.stdout.isatty()`,
+/// and on Windows both handles also consoles (`GetConsoleMode`), since the
+/// CRT's `isatty()` is true for `NUL`. Rust's `is_terminal()` is that console
+/// check, but it also accepts an MSYS pty pipe, which `isatty()` refuses: the
+/// character-device check first keeps a pipe out. `connect`'s own gate reads
+/// `procs` directly and is unchanged.
 pub(super) fn interactive() -> bool {
-    procs::stdin_is_tty() && procs::stdout_is_tty()
+    use std::io::IsTerminal;
+    procs::stdin_is_tty()
+        && procs::stdout_is_tty()
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
 }
 
 /// This run is outside the native domain: nothing has been printed or

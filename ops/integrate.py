@@ -116,6 +116,13 @@ RUST_HARNESS = (
     "rust/daemon/harness/mirror/test_real_base_routes.py",
     "rust/daemon/harness/test_w2e_recall_llm.py",
     "rust/daemon/harness/test_background_harness.py", "rust/daemon/harness/test_w2d_controls.py",
+    "rust/cli_harness/test_native_runtime_contract.py",
+    "rust/daemon/harness/test_json_fidelity.py",
+    "rust/daemon/harness/test_schema_clocks.py", "rust/daemon/harness/test_schema_generation.py",
+    "rust/daemon/harness/test_schema_guards.py", "rust/daemon/harness/test_shadow_compare.py",
+    "rust/daemon/harness/test_startup_ci.py", "rust/daemon/harness/test_startup_parts.py",
+    "rust/daemon/harness/test_w2d_rerank_check.py",
+    "rust/daemon/harness/test_w2d_trace_compare.py", "rust/cli_harness/test_update_row.py",
     "rust/ci",
 )
 RUST_HARNESS_COMMAND = ("python -m pytest -q -p no:cacheprovider --require-databases "

@@ -79,6 +79,9 @@ class Case:
     rules: tuple[str, ...] = ()
     platforms: tuple[str, ...] = ("windows", "linux")
     stdout_closed: bool = False
+    # stdin and stdout are the null device (NUL on Windows, which the CRT's
+    # isatty() reads as a terminal); stderr stays a pipe and stdout reads empty.
+    null_stdin_stdout: bool = False
     stderr_closed: bool = False  # the arm's stderr is a pipe whose reader closed
     daemon: Callable[[], Any] | None = None
     skip_if: Callable[[], bool] | None = None  # e.g. root makes a chmod case vacuous
@@ -390,7 +393,7 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
         if case.stdin_json is not None:
             stdin = json.dumps(_expand_json(case.stdin_json, arm)).encode()
         creation = getattr(subprocess, "CREATE_NO_WINDOW", 0) if WINDOWS else 0
-        stdout_target = subprocess.PIPE
+        stdout_target = subprocess.DEVNULL if case.null_stdin_stdout else subprocess.PIPE
         closed_reader = None
         if case.stdout_closed:
             closed_reader, writer = os.pipe()
@@ -403,7 +406,8 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             stderr_target = writer
         arm.started = time.time()
         proc = subprocess.Popen(target.command + argv, cwd=arm.cwd, env=env,
-                                stdin=subprocess.PIPE, stdout=stdout_target,
+                                stdin=subprocess.DEVNULL if case.null_stdin_stdout else subprocess.PIPE,
+                                stdout=stdout_target,
                                 stderr=stderr_target, creationflags=creation,
                                 bufsize=0 if case.before_capture else -1)
         if case.stdout_closed:
@@ -441,7 +445,8 @@ def run_arm(case: Case, target: Target, home: Path) -> dict:
             worker = threading.Thread(target=case.during, args=(arm, proc), daemon=True)
             worker.start()
         try:
-            out, err = proc.communicate(stdin, timeout=max(0, deadline - time.monotonic()))
+            out, err = proc.communicate(None if case.null_stdin_stdout else stdin,
+                                        timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             proc.kill()
             out, err = proc.communicate()
