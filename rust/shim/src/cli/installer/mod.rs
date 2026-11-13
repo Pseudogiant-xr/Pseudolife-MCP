@@ -4,6 +4,7 @@
 //! Nothing here starts an interpreter, pip or pipx.
 mod claude_desktop;
 mod codex_config;
+mod codex_hooks;
 #[cfg(test)]
 mod fake_codex;
 
@@ -18,6 +19,7 @@ use std::{
 const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]
        pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]
        pseudolife-mcp installer codex-runtime-defaults
+       pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]
        pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
@@ -40,10 +42,11 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         },
         Some("codex-credentials") => codex_config::run_credentials(&arguments[1..]),
         Some("codex-runtime-defaults") => codex_config::run_runtime_defaults(&arguments[1..]),
+        Some("codex-hooks") => codex_hooks::run(&arguments[1..]),
         Some("claude-desktop") => claude_desktop::run(&arguments[1..]),
         Some("--help" | "-h") => emit(USAGE),
         _ => usage(
-            "expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, claude-desktop",
+            "expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop",
         ),
     }
 }
