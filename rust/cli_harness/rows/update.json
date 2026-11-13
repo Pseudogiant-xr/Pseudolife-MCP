@@ -1,5 +1,9 @@
 {
   "parity": "CLI-UPDATE",
+  "python_roots": [
+    "update_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "update-current-exit"
   ],

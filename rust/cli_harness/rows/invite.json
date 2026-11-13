@@ -1,5 +1,9 @@
 {
   "parity": "CLI-PAIRING",
+  "python_roots": [
+    "invite_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "invite-expired-is-pending",
     "invite-keep-owned-lost",

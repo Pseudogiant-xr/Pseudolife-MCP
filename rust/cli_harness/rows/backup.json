@@ -1,5 +1,9 @@
 {
   "parity": "CLI-BACKUP-DSN",
+  "python_roots": [
+    "backup_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "backup-archives-backups-dir",
     "backup-archives-password-file",

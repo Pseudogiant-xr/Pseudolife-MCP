@@ -1,5 +1,9 @@
 {
   "parity": "CLI-COORDINATION-RECOVERY",
+  "python_roots": [
+    "coordination_recovery"
+  ],
+  "postgres": false,
   "source_mutants": [
     "recovery-stop-gate-dropped"
   ],

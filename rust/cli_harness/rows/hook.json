@@ -1,5 +1,10 @@
 {
   "parity": "CLI-HOOK",
+  "python_roots": [
+    "briefing_cli",
+    "coordination_adapter"
+  ],
+  "postgres": false,
   "source_mutants": [
     "hook-briefing-cap-order",
     "hook-cursor-not-saved",

@@ -61,6 +61,9 @@ def test_a_row_dropped_with_its_module_leaves_its_spec_and_goldens_failing(tree)
     (lambda data: data.update(extra=1), "declares"),
     (lambda data: data.update(parity=1), "parity is not a str"),
     (lambda data: data.update(parity=" "), "parity is empty"),
+    (lambda data: data.update(python_roots=[]), "python_roots is not a list of module names"),
+    (lambda data: data.update(python_roots=["restore_cli.py"]), "python_roots is not a list of module names"),
+    (lambda data: data.update(postgres="false"), "postgres is not a bool"),
     (lambda data: data.update(source_mutants=[]), "source_mutants is not a list of mutant ids"),
     (lambda data: data.update(source_mutants=[1]), "source_mutants is not a list of mutant ids"),
     (lambda data: data["source_mutants"].append(data["source_mutants"][0]), "source_mutants repeats an id"),
@@ -104,3 +107,10 @@ def test_a_dropped_platform_exclusion_fails_the_runtime_registration_check(monke
     monkeypatch.setattr(control_selection, "PLATFORM_EXCLUSIONS", reduced)
     with pytest.raises(AssertionError, match="eligibility drift"):
         control_selection.runtime_controls(owners[name], core.PLATFORM)
+
+
+def test_every_python_root_is_an_oracle_module():
+    # A misspelt root would leave its row unselected when its module changes.
+    for row, roots in row_ci.python_roots().items():
+        for name in roots:
+            assert (ROOT / "pseudolife_memory" / f"{name}.py").is_file(), (row, name)

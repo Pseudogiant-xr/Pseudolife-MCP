@@ -1,5 +1,9 @@
 {
   "parity": "CLI-TEST-LOGIN",
+  "python_roots": [
+    "test_login_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "tl-banks-reverse",
     "tl-closed-token",

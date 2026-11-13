@@ -1,5 +1,9 @@
 {
   "parity": "CLI-MAINTAINER",
+  "python_roots": [
+    "maintainer_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "maint-class-fallback-dropped",
     "maint-code-ttl",

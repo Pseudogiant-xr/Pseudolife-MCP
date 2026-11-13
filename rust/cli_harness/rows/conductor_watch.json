@@ -1,5 +1,9 @@
 {
   "parity": "CLI-CONDUCTOR-WATCH-SETUP",
+  "python_roots": [
+    "conductor_watch_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "conductor-watch-age-zero-admitted",
     "conductor-watch-cr-kept",

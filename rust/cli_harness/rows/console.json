@@ -1,5 +1,9 @@
 {
   "parity": "CLI-CONSOLE-PRINT",
+  "python_roots": [
+    "console_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "console-405-not-old",
     "console-code-any-character",

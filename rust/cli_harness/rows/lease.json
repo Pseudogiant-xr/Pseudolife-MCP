@@ -1,5 +1,9 @@
 {
   "parity": "CLI-LEASE-core",
+  "python_roots": [
+    "lease_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "lease-child-status",
     "lease-list-filter",

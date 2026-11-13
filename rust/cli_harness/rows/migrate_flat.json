@@ -1,5 +1,9 @@
 {
   "parity": "CLI-MIGRATE-FLAT",
+  "python_roots": [
+    "migrate_flat_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "migrate-flat-apply-fence"
   ],

@@ -1,5 +1,10 @@
 {
   "parity": "CLI-RESTORE-GATES",
+  "python_roots": [
+    "restore_cli",
+    "docker_backup_restore"
+  ],
+  "postgres": false,
   "source_mutants": [
     "restore-busy-pid-unknown",
     "restore-checkout-unchecked",

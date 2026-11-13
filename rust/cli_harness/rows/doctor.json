@@ -1,5 +1,10 @@
 {
   "parity": "CLI-DOCTOR",
+  "python_roots": [
+    "doctor_cli",
+    "wake_liveness"
+  ],
+  "postgres": false,
   "source_mutants": [
     "doctor-agent-path-unnormalized",
     "doctor-agent-proof-inverted",

@@ -1,5 +1,9 @@
 {
   "parity": "CLI-MOVE-REFUSALS",
+  "python_roots": [
+    "move_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "move-checkout-cr",
     "move-dash-value-admitted",

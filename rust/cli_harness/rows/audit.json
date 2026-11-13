@@ -1,5 +1,9 @@
 {
   "parity": "CLI-AUDIT",
+  "python_roots": [
+    "board_audit_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "audit-body-reason-swap",
     "audit-broken-exit-3",

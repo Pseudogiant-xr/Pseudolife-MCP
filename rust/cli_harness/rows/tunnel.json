@@ -1,5 +1,9 @@
 {
   "parity": "CLI-TUNNEL-STATUS",
+  "python_roots": [
+    "tunnel_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "tunnel-ambiguous-literal-accepted",
     "tunnel-challenge-bound",

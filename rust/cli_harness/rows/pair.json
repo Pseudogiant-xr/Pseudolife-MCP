@@ -1,5 +1,9 @@
 {
   "parity": "CLI-PAIRING",
+  "python_roots": [
+    "pair_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "pair-cleanup-error-swallowed",
     "pair-constant-digest",

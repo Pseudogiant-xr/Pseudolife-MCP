@@ -28,6 +28,13 @@ ROWS_DIR = "rust/cli_harness/rows"
 # a value of another type, is refused rather than read in part.
 FIELDS = {
     "parity": str,
+    # The pseudolife_memory modules (file stems) whose import graph reaches
+    # the row's Python oracle: the ordinary-PR precheck selects the row when
+    # one of them changes (pr_precheck.py).
+    "python_roots": list,
+    # Whether the precheck must seed a bank or start the packaged
+    # PostgreSQL fixture for this row.
+    "postgres": bool,
     # The row's source mutants (the Mutant(...) ids in rows/<row>.py), in
     # the order coverage_plan cuts them into eight-mutant nightly shards.
     "source_mutants": list,
@@ -56,6 +63,9 @@ def problems(data) -> list[str]:
         return found
     if not data["parity"].strip():
         found.append("parity is empty")
+    roots = data["python_roots"]
+    if not roots or any(type(name) is not str or not name.isidentifier() for name in roots):
+        found.append("python_roots is not a list of module names")
     mutants = data["source_mutants"]
     if not mutants or any(type(name) is not str or not name for name in mutants):
         found.append("source_mutants is not a list of mutant ids")
@@ -97,6 +107,16 @@ def rows(root: Path = ROOT) -> tuple[str, ...]:
 def source_mutants(root: Path = ROOT) -> dict[str, list[str]]:
     """Each row's source mutant ids, in its declared order."""
     return {row: list(data["source_mutants"]) for row, data in declarations(root).items()}
+
+
+def python_roots(root: Path = ROOT) -> dict[str, tuple[str, ...]]:
+    """Each row's Python oracle roots under pseudolife_memory/."""
+    return {row: tuple(data["python_roots"]) for row, data in declarations(root).items()}
+
+
+def postgres_rows(root: Path = ROOT) -> tuple[str, ...]:
+    """The rows whose precheck needs a bank or the PostgreSQL fixture."""
+    return tuple(row for row, data in declarations(root).items() if data["postgres"])
 
 
 def platform_exclusions(root: Path = ROOT) -> dict[str, dict[str, str]]:

@@ -1,5 +1,9 @@
 {
   "parity": "CLI-MAINTAINER-SETUP",
+  "python_roots": [
+    "maintainer_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "setup-consent-bypassed"
   ],

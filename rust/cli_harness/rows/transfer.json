@@ -1,5 +1,9 @@
 {
   "parity": "CLI-TRANSFER-DSN",
+  "python_roots": [
+    "transfer_cli"
+  ],
+  "postgres": true,
   "source_mutants": [
     "transfer-cast-check",
     "transfer-commit-error-uncertain",

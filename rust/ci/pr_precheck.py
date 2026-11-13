@@ -13,32 +13,11 @@ import os
 from pathlib import Path, PurePosixPath
 import subprocess
 
+import row_ci
+
 ROOT = Path(__file__).resolve().parents[2]
-PYTHON_ROOTS = {
-    "mail": ("briefing_cli", "coordination_adapter"),
-    "hook": ("briefing_cli", "coordination_adapter"),
-    "episode": ("episode_cli",),
-    "lease": ("lease_cli",),
-    "lease_operator": ("lease_cli",),
-    "transfer": ("transfer_cli",),
-    "test_login": ("test_login_cli",),
-    "doctor": ("doctor_cli", "wake_liveness"),
-    "connect": ("connect_cli",),
-    "maintainer": ("maintainer_cli",),
-    "maintainer_setup": ("maintainer_cli",),
-    "coordination_recovery": ("coordination_recovery",),
-    "invite": ("invite_cli",),
-    "pair": ("pair_cli",),
-    "move": ("move_cli",),
-    "tunnel": ("tunnel_cli",),
-    "console": ("console_cli",),
-    "restore": ("restore_cli", "docker_backup_restore"),
-    "conductor_watch": ("conductor_watch_cli",),
-    "update": ("update_cli",),
-    "audit": ("board_audit_cli",),
-    "backup": ("backup_cli",),
-    "migrate_flat": ("migrate_flat_cli",),
-}
+# Each row declares its Python oracle roots in rust/cli_harness/rows/<row>.json.
+PYTHON_ROOTS = row_ci.python_roots(ROOT)
 ROWS = tuple(PYTHON_ROOTS)
 JUDGE_ROOTS = {
     "lease-headers": ("lease_cli", "os_lock", "daemon_exec"),
@@ -47,9 +26,9 @@ JUDGE_ROOTS = {
     "wait-mail-tests": ("wait_mail_cli", "coordination_adapter"),
 }
 JUDGES = ("wait-mail-tests", "lease-headers", "cli-argv", "phase1-judges", "phase2-dispatch", "cli-process")
-# These rows need database seeders or the packaged PostgreSQL fixture.
-POSTGRES_ROWS = ("lease", "lease_operator", "transfer", "test_login", "maintainer", "invite",
-                 "audit", "backup", "migrate_flat")
+# These rows need database seeders or the packaged PostgreSQL fixture (each
+# row's "postgres" declaration).
+POSTGRES_ROWS = row_ci.postgres_rows(ROOT)
 
 
 def import_graph(sources: dict[str, str]) -> dict[str, set[str]]:

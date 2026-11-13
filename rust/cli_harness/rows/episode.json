@@ -1,5 +1,9 @@
 {
   "parity": "CLI-EPISODE",
+  "python_roots": [
+    "episode_cli"
+  ],
+  "postgres": false,
   "source_mutants": [
     "episode-body-spacing",
     "episode-default-name",
