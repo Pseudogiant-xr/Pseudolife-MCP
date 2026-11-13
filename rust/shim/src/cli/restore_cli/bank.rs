@@ -252,7 +252,7 @@ impl<D: Docker> Bank<'_, D> {
 
     /// Docker's storage: `df /` in a running bank container, else in a
     /// helper created from the daemon image.
-    pub fn storage_space(&mut self, image: &str, nonce: &str) -> Step<()> {
+    pub fn storage_space(&mut self, image: &str, run_tag: &str) -> Step<()> {
         for name in [self.pg.clone(), self.daemon.clone()] {
             let ran = self.run(&["exec", &name, "df", "-Pk", "/"], MINUTE);
             if ran.ok() {
@@ -260,7 +260,7 @@ impl<D: Docker> Bank<'_, D> {
                 return require(free, "Docker storage");
             }
         }
-        let helper = format!("pseudolife-diskcheck-{nonce}");
+        let helper = format!("pseudolife-diskcheck-{run_tag}");
         let created = self.run(
             &[
                 "create",
@@ -598,7 +598,7 @@ pub(super) fn host_space(directory: &str) -> Step<()> {
 pub(super) fn probe<D: Docker>(
     docker: &mut D,
     args: &Args,
-    nonce: &str,
+    run_tag: &str,
     host_space: &mut dyn FnMut(&str) -> Step<()>,
 ) -> Step<Plan> {
     let mut bank = Bank {
@@ -725,7 +725,7 @@ pub(super) fn probe<D: Docker>(
         }
     }
     host_space(&safety)?;
-    bank.storage_space(&image, nonce)?;
+    bank.storage_space(&image, run_tag)?;
     bank.container_space("/tmp")?;
     let postgres = bank.inspect(&pg_name)?;
     let mut pg_paths = vec!["/".to_owned()];
@@ -1076,7 +1076,7 @@ mod tests {
             ),
         ]);
         let mut measured = Vec::new();
-        let plan = probe(&mut script, &args(&safety), "n", &mut |dir| {
+        let plan = probe(&mut script, &args(&safety), "tag", &mut |dir| {
             measured.push(dir.to_owned());
             Ok(())
         })
@@ -1145,12 +1145,12 @@ mod tests {
                 .collect(),
         };
         let mut script = script_of(calls(&floor));
-        let plan = probe(&mut script, &no_state, "n", &mut |_| Ok(())).unwrap();
+        let plan = probe(&mut script, &no_state, "tag", &mut |_| Ok(())).unwrap();
         assert_eq!(plan.daemon_url, "");
         assert!(!plan.exists && !plan.was_running && plan.stale_helpers.is_empty());
         let mut script = script_of(calls(&under));
         assert_eq!(
-            probe(&mut script, &no_state, "n", &mut |_| Ok(())).unwrap_err(),
+            probe(&mut script, &no_state, "tag", &mut |_| Ok(())).unwrap_err(),
             Stop(
                 "less than 8 GiB is free on p:/var/lib/postgresql; free at least 8 GiB there, then retry. Nothing was changed".into(),
                 2

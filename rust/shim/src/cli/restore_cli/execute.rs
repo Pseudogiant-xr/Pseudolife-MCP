@@ -42,8 +42,10 @@ pub(super) trait Host {
     fn sleep(&mut self, duration: Duration);
     /// `<YYYYmmdd-HHMMSS>-<8 hex>` for the safety backup's names.
     fn stamp(&mut self) -> String;
-    /// A random hex token for staging names.
-    fn nonce(&mut self) -> String;
+    /// A per-run tag that keeps this run's staging file and helper names
+    /// apart from another run's. Uniqueness only: nothing depends on it
+    /// being unpredictable (no secret, no cryptography).
+    fn run_tag(&mut self) -> String;
     /// An ISO 8601 time for the journal and the note.
     fn now(&mut self) -> String;
     /// At least 8 GiB free where the safety backup is written.
@@ -90,7 +92,7 @@ pub(super) fn shell_word(text: &str) -> String {
         if !text.is_empty()
             && text
                 .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"_./:\\-".contains(&b))
+                .all(|b| b.is_ascii_alphanumeric() || b"_./:\\-=".contains(&b))
         {
             text.to_owned()
         } else {
@@ -117,9 +119,10 @@ pub(super) fn shell_word(text: &str) -> String {
 fn command(cx: &Context, backup: &Path, state: Option<&Path>) -> String {
     let plan = cx.plan;
     let mut words: Vec<String> = vec!["pseudolife-mcp".into(), "restore".into()];
+    // `--option=value` as one word: a value that starts with `-` can never
+    // be read as an option.
     let mut push = |option: &str, value: &str| {
-        words.push(option.into());
-        words.push(shell_word(value));
+        words.push(shell_word(&format!("{option}={value}")));
     };
     push("--backup-file", &backup.to_string_lossy());
     if let Some(state) = state {
@@ -240,6 +243,19 @@ fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     }
 }
 
+/// Remove a completed restore's journal; the warning to print when it is
+/// there and cannot be removed.
+pub(super) fn clear_journal(journal: &Path) -> Option<String> {
+    match fs::remove_file(journal) {
+        Ok(()) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(format!(
+            "warning: the restore journal {} could not be removed ({error}). The restore is complete, but delete that file by hand: while it is there, a later restore of this bank keeps naming an older safety backup as a recovery point",
+            journal.display()
+        )),
+    }
+}
+
 struct Run<'a, 'd, D: Docker, H: Host> {
     bank: Bank<'d, D>,
     host: &'a mut H,
@@ -255,6 +271,8 @@ struct Run<'a, 'd, D: Docker, H: Host> {
     staged: bool,
     /// The DROP succeeded (the database is gone, not maybe gone).
     dropped: bool,
+    /// When this run took its safety backup.
+    started: String,
 }
 
 /// The run ends here: what failed (the [`Stop`]'s text) at the phase
@@ -376,16 +394,19 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         }
         self.safety = Some(pair.clone());
         self.check()?;
-        let recovery = self.recovery_command();
-        let note = Path::new(&plan.safety_dir).join(format!("pseudolife_restore-{stamp}.txt"));
         let now = self.host.now();
+        self.started = now.clone();
+        let recovery = self.recovery_text();
+        let note = Path::new(&plan.safety_dir).join(format!("pseudolife_restore-{stamp}.txt"));
         let text = format!(
-            "pseudolife-mcp restore started {now}: replacing database {db} in {pg} (and its daemon {daemon}'s state) with {backup}.\nIf it did not finish, recover the bank as it was before with:\n  {recovery}\n",
+            "pseudolife-mcp restore started {now}: replacing database {db} in {pg} (and its daemon {daemon}'s state) with {backup}.\nIf it did not finish:\n{recovery}\n",
             db = plan.db,
             pg = plan.pg,
             daemon = plan.daemon,
             backup = cx.backup_file.display(),
-            recovery = recovery.clone().unwrap_or_else(|| self.retry_command()),
+            recovery = recovery
+                .clone()
+                .unwrap_or_else(|| format!("Retry this restore with:\n  {}", self.retry_command())),
         );
         write_durably(&note, text.as_bytes()).map_err(|error| {
             Failure(Stop(
@@ -398,7 +419,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         })?;
         if let Some(recovery) = &recovery {
             self.host.info(&format!(
-                "If this restore fails or is interrupted from here on, recover the bank as it was with:\n  {recovery}\n(also written to {})",
+                "If this restore fails or is interrupted from here on:\n{recovery}\n(also written to {})",
                 note.display()
             ));
         }
@@ -503,7 +524,9 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         }
 
         self.phase = Phase::DataRestored;
-        let _ = fs::remove_file(journal_path(cx));
+        if let Some(warning) = clear_journal(&journal_path(cx)) {
+            self.host.error(&warning);
+        }
         if cx.args.leave_stopped {
             self.host
                 .info("Restore complete; daemon left stopped (--leave-stopped).");
@@ -579,16 +602,53 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         )))
     }
 
-    /// The command that puts back the bank as it was before (the earliest
-    /// interrupted restore's backup when there is one); `None` when the
-    /// database did not exist then.
-    fn recovery_command(&self) -> Option<String> {
-        let pair = match &self.earlier {
-            Some(earlier) => &earlier.pair,
-            None => self.safety.as_ref()?,
-        };
-        let dump = pair.dump.as_ref()?;
-        Some(command(self.cx, dump, Some(&pair.state)))
+    /// The commands that put the bank back, each with what it restores:
+    /// the bank as it was before an earlier interrupted restore (from its
+    /// journal), and as it was immediately before this run (its own safety
+    /// backup). A pair without a dump (the database did not exist) is none.
+    fn recovery_options(&self) -> Vec<(String, String)> {
+        let mut options = Vec::new();
+        if let Some(earlier) = &self.earlier
+            && let Some(dump) = &earlier.pair.dump
+        {
+            options.push((
+                format!(
+                    "as it was before the interrupted restore of {}",
+                    earlier.started
+                ),
+                command(self.cx, dump, Some(&earlier.pair.state)),
+            ));
+        }
+        if let Some(pair) = &self.safety
+            && let Some(dump) = &pair.dump
+        {
+            let label = if self.earlier.is_some() {
+                format!("as it was immediately before this run ({})", self.started)
+            } else {
+                "as it was before this restore".to_owned()
+            };
+            options.push((label, command(self.cx, dump, Some(&pair.state))));
+        }
+        options
+    }
+
+    /// Those commands as message lines; `None` when there is none.
+    fn recovery_text(&self) -> Option<String> {
+        let options = self.recovery_options();
+        if options.is_empty() {
+            return None;
+        }
+        Some(
+            options
+                .iter()
+                .enumerate()
+                .map(|(at, (label, command))| {
+                    let lead = if at == 0 { "Recover" } else { "or recover" };
+                    format!("{lead} the bank {label} with:\n  {command}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
     }
 
     fn retry_command(&self) -> String {
@@ -613,7 +673,14 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             stop.0.clone()
         };
         let retry = self.retry_command();
-        let recovery = self.recovery_command();
+        let recovery = self.recovery_text();
+        let earlier_command = self.earlier.as_ref().and_then(|earlier| {
+            earlier
+                .pair
+                .dump
+                .as_ref()
+                .map(|dump| command(self.cx, dump, Some(&earlier.pair.state)))
+        });
         let earlier_note = self.earlier.as_ref().map(|earlier| {
             let missing: Vec<String> = earlier
                 .pair
@@ -634,7 +701,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             format!(
                 "An earlier restore of this bank ({}) stopped after it began replacing it, so the bank is still incomplete; recover the bank as it was before that restore with:\n  {}{missing}",
                 earlier.started,
-                recovery.clone().unwrap_or_else(|| retry.clone())
+                earlier_command.clone().unwrap_or_else(|| retry.clone())
             )
         });
         let mut lines = vec![format!("restore failed: {cause}.")];
@@ -700,7 +767,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                 }
                 match &recovery {
                     Some(recovery) => lines.push(format!(
-                        "Recover the bank as it was before this restore with:\n  {recovery}\nor, once the cause is fixed, finish this restore with:\n  {retry}"
+                        "{recovery}\nor, once the cause is fixed, finish this restore with:\n  {retry}"
                     )),
                     None => lines.push(format!(
                         "The database did not exist before this restore; finish the restore, once the cause is fixed, with:\n  {retry}\n(the state volume as it was is in {})",
@@ -715,9 +782,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     "The database and state were restored completely. Check docker logs {daemon}; start it with docker start {daemon} if it is stopped."
                 ));
                 if let Some(recovery) = &recovery {
-                    lines.push(format!(
-                        "If the restored bank does not start, recover the bank as it was before with:\n  {recovery}"
-                    ));
+                    lines.push(format!("If the restored bank does not start:\n{recovery}"));
                 }
             }
         }
@@ -761,8 +826,8 @@ pub(super) fn ready(health: &Value) -> bool {
 
 /// Run the restore; the exit code (0 restored).
 pub(super) fn execute<D: Docker, H: Host>(docker: &mut D, host: &mut H, cx: &Context) -> u8 {
-    let nonce = host.nonce();
-    let remote = format!("/tmp/pl_restore-{nonce}.sql.gz");
+    let run_tag = host.run_tag();
+    let remote = format!("/tmp/pl_restore-{run_tag}.sql.gz");
     let earlier = match read_journal(&cx.data_dir, cx.plan) {
         Ok(earlier) => earlier,
         Err(message) => {
@@ -787,6 +852,7 @@ pub(super) fn execute<D: Docker, H: Host>(docker: &mut D, host: &mut H, cx: &Con
         remote,
         staged: false,
         dropped: false,
+        started: String::new(),
     };
     if let Some(earlier) = &run.earlier {
         let note = format!(

@@ -18,7 +18,7 @@ use super::{
     execute::{self, Context, Host},
 };
 
-const NONCE: &str = "0123456789abcdef";
+const RUN_TAG: &str = "0123456789abcdef";
 const STAMP: &str = "20261114-000000-abcdef01";
 const DF: &str =
     "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 1 1 99999999 1% /\n";
@@ -214,8 +214,8 @@ impl Host for FakeHost {
             format!("20261114-000000-abcde{:03x}", self.run)
         }
     }
-    fn nonce(&mut self) -> String {
-        NONCE.into()
+    fn run_tag(&mut self) -> String {
+        RUN_TAG.into()
     }
     fn now(&mut self) -> String {
         "2026-11-14T00:00:00+11:00".into()
@@ -415,7 +415,7 @@ fn a_successful_restore_runs_every_step_in_order_and_clears_its_journal() {
         "{recovery}"
     );
     assert!(
-        recovery.contains("--container p --daemon-container d --db db --user u --db-port 5432")
+        recovery.contains("--container=p --daemon-container=d --db=db --user=u --db-port=5432")
     );
 }
 
@@ -493,7 +493,7 @@ fn check_failure_at(index: usize, interrupt: bool) {
             } else {
                 assert!(text.contains("The database db was dropped and is missing or only partly restored; the state volume is unchanged. The daemon d is left stopped"), "{context}");
             }
-            assert!(text.contains(&format!("Recover the bank as it was before this restore with:\n  pseudolife-mcp restore --backup-file {}", shown(&setup, "memory"))), "{context}");
+            assert!(text.contains(&format!("Recover the bank as it was before this restore with:\n  pseudolife-mcp restore {}", shown(&setup, "memory"))), "{context}");
             assert!(setup.journal().exists(), "{context}");
         }
         "state" => {
@@ -552,7 +552,7 @@ fn shown(setup: &Setup, kind: &str) -> String {
         "pseudolife_{kind}-{STAMP}.{}",
         if kind == "memory" { "sql.gz" } else { "tgz" }
     ));
-    execute::shell_word(&path.to_string_lossy())
+    execute::shell_word(&format!("--backup-file={}", path.to_string_lossy()))
 }
 
 #[test]
@@ -660,7 +660,10 @@ fn a_rerun_after_an_interrupted_replay_keeps_the_first_safety_backup() {
         "{text}"
     );
     assert!(
-        text.contains(&execute::shell_word(&moved.to_string_lossy())),
+        text.contains(&execute::shell_word(&format!(
+            "--backup-file={}",
+            moved.to_string_lossy()
+        ))),
         "{text}"
     );
     assert!(
@@ -794,6 +797,92 @@ const HAPPY_NO_STATE: [&str; 14] = [
     "revoke",
     "replay",
 ];
+
+#[test]
+fn a_failure_with_an_earlier_journal_names_both_safety_backups() {
+    let setup = Setup::new(false);
+    // The first run dies in its replay: its journal names its pair.
+    let mut docker = Fake {
+        fail_on: Some("replay"),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 1);
+    // The second run dies in its replay too: both pairs are named, each
+    // with what it restores and when it was taken.
+    let mut docker = Fake {
+        fail_on: Some("replay"),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 1);
+    let text = host.errors.join(
+        "
+",
+    );
+    let safety = Path::new(&setup.plan.safety_dir);
+    let first = safety.join(format!("pseudolife_memory-{STAMP}.sql.gz"));
+    let second = safety.join("pseudolife_memory-20261114-000000-abcde001.sql.gz");
+    let date = "2026-11-14T00:00:00+11:00";
+    assert!(
+        text.contains(&format!(
+            "Recover the bank as it was before the interrupted restore of {date} with:
+  pseudolife-mcp restore {}",
+            execute::shell_word(&format!("--backup-file={}", first.to_string_lossy()))
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "or recover the bank as it was immediately before this run ({date}) with:
+  pseudolife-mcp restore {}",
+            execute::shell_word(&format!("--backup-file={}", second.to_string_lossy()))
+        )),
+        "{text}"
+    );
+    // So does the note beside the second pair.
+    let note =
+        std::fs::read_to_string(safety.join("pseudolife_restore-20261114-000000-abcde001.txt"))
+            .unwrap();
+    assert!(
+        note.contains("as it was before the interrupted restore of"),
+        "{note}"
+    );
+    assert!(
+        note.contains("as it was immediately before this run"),
+        "{note}"
+    );
+}
+
+#[test]
+fn a_journal_that_cannot_be_removed_is_reported() {
+    let dir = Dir::new();
+    assert_eq!(execute::clear_journal(&dir.0.join("absent.json")), None);
+    // A directory where the journal is: removal fails, and says so.
+    let blocked = dir.0.join("restore-in-progress-x.json");
+    std::fs::create_dir_all(&blocked).unwrap();
+    let warning = execute::clear_journal(&blocked).unwrap();
+    assert!(warning.contains("could not be removed"), "{warning}");
+    assert!(warning.contains("delete that file by hand"), "{warning}");
+}
+
+#[test]
+fn a_value_starting_with_a_dash_is_never_read_as_an_option() {
+    let mut setup = Setup::new(false);
+    setup.plan.db = "-x".into();
+    let mut docker = Fake {
+        fail_on: Some("replay"),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 1);
+    let text = host.errors.join(
+        "
+",
+    );
+    assert!(text.contains(" --db=-x "), "{text}");
+    assert!(!text.contains(" --db -x"), "{text}");
+}
 
 #[test]
 fn an_absent_database_is_restored_without_a_safety_dump() {

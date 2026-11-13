@@ -45,8 +45,10 @@ fn flush(path: &Path) -> std::io::Result<()> {
         .sync_all()
 }
 
-/// Make a rename in `directory` durable (a no-op where the platform
-/// flushes directory entries with the file).
+/// Make a rename in `directory` durable on Unix (fsync of the directory).
+/// On Windows there is no directory handle to flush: the file's data is
+/// flushed before its rename, and the new name relies on NTFS's metadata
+/// journal, so a power loss can lose the name but not tear the file.
 pub(super) fn sync_dir(directory: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {

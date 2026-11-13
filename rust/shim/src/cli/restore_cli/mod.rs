@@ -228,8 +228,10 @@ fn locked(args: &args::Args, directory: &Path) -> ExitCode {
         interruptible: true,
     };
     let mut host = RealHost;
-    let nonce = execute::Host::nonce(&mut host);
-    let plan = match bank::probe(&mut runner, args, &nonce, &mut |dir| bank::host_space(dir)) {
+    let run_tag = execute::Host::run_tag(&mut host);
+    let plan = match bank::probe(&mut runner, args, &run_tag, &mut |dir| {
+        bank::host_space(dir)
+    }) {
         Ok(plan) => plan,
         Err(_) if interrupt::requested() => {
             let _ = write_stream(
@@ -297,7 +299,7 @@ impl execute::Host for RealHost {
         )
     }
 
-    fn nonce(&mut self) -> String {
+    fn run_tag(&mut self) -> String {
         uuid::Uuid::new_v4().simple().to_string()[..16].to_owned()
     }
 

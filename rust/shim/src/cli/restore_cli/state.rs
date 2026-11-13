@@ -187,7 +187,11 @@ fn parse_header(header: &[u8]) -> Header {
     // The size decides where `tar` reads the next header: it must parse
     // exactly as `tar` parses it. Mode, ids, time and device numbers must
     // too, or be left blank.
-    let Some(size) = gnu_number(&header[124..136]).and_then(|size| u128::try_from(size).ok())
+    // tar refuses a size beyond `off_t` ("out of off_t range") and skips
+    // to the next header it can read; this check refuses the archive.
+    let Some(size) = gnu_number(&header[124..136])
+        .filter(|size| (0..=i128::from(i64::MAX)).contains(size))
+        .and_then(|size| u128::try_from(size).ok())
     else {
         return unsafe_;
     };
@@ -217,7 +221,11 @@ fn parse_header(header: &[u8]) -> Header {
     if kind == 0 && name.ends_with(b"/") {
         kind = b'5';
     }
-    if !prefix.is_empty() {
+    // tar joins the prefix field only under POSIX magic (`ustar\0`); in an
+    // old-GNU or V7 header those bytes are other fields (times, the sparse
+    // map), which tar ignores for the name, and so does this check.
+    let posix = &header[257..263] == b"ustar\0";
+    if posix && !prefix.is_empty() {
         let mut joined = prefix.to_vec();
         joined.push(b'/');
         joined.extend_from_slice(&name);
@@ -366,8 +374,22 @@ impl Reader {
                         member.name.pop();
                     }
                 }
+                // The extract excludes `move.json` (any path component) and
+                // skips an excluded member by its stored size, where this
+                // reader skips none for a link or directory: only a plain
+                // file reads the same both ways.
+                let excluded = split(&normpath(&member.name))
+                    .iter()
+                    .any(|part| part == b"move.json");
+                if excluded && !matches!(member.kind, b'0' | 0) {
+                    return self.refuse(Refusal::Unsupported(
+                        "a member named move.json that is not a regular file",
+                    ));
+                }
                 // Regular files and unknown types carry data; the other
-                // types carry none, whatever their size field says.
+                // types carry none, whatever their size field says (GNU tar
+                // 1.34 extracts a link or directory without skipping data,
+                // probed 14 November 2026).
                 let data = if matches!(member.kind, b'1' | b'2' | b'3' | b'4' | b'5' | b'6') {
                     0
                 } else {
@@ -1059,6 +1081,94 @@ mod tests {
             ]),
             Err(Refusal::Unsafe)
         );
+    }
+
+    /// `header` with another magic (bytes 257..265) and a prefix field
+    /// (bytes 345..500), checksum recomputed.
+    fn header_with(
+        name: &[u8],
+        kind: u8,
+        linkname: &[u8],
+        magic: &[u8; 8],
+        prefix: &[u8],
+    ) -> Vec<u8> {
+        let mut buf = header(name, kind, 0, linkname);
+        buf[257..265].copy_from_slice(magic);
+        buf[345..345 + prefix.len()].copy_from_slice(prefix);
+        buf[148..156].copy_from_slice(b"        ");
+        let sum: u32 = buf.iter().map(|b| u32::from(*b)).sum();
+        buf[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        buf
+    }
+
+    #[test]
+    fn the_prefix_field_names_a_member_only_under_posix_magic() {
+        // GNU tar 1.34 in the daemon image (probed 14 November 2026)
+        // extracts this old-GNU member as `l -> ../x`, at the top, which
+        // escapes; joined with its prefix field it would read `sub/l`.
+        let old_gnu = *b"ustar  \0";
+        assert_eq!(
+            verdict(&[
+                header_with(b"sub/", b'5', b"", &old_gnu, b""),
+                header_with(b"l", b'2', b"../x", &old_gnu, b"sub"),
+                END.to_vec(),
+            ]),
+            Err(Refusal::Unsafe)
+        );
+        let v7 = [0u8; 8];
+        let reader = read(&[header_with(b"f", b'0', b"", &v7, b"dir"), END.to_vec()]);
+        assert_eq!(reader.members[0].name, b"f");
+        let posix = *b"ustar\x0000";
+        let reader = read(&[header_with(b"f", b'0', b"", &posix, b"dir"), END.to_vec()]);
+        assert_eq!(reader.members[0].name, b"dir/f");
+    }
+
+    #[test]
+    fn a_move_json_member_tar_excludes_must_be_a_regular_file() {
+        // The extract excludes `move.json` at any depth and skips an
+        // excluded member by its stored size, which this reader would not do
+        // for a link: tar would then read the next headers elsewhere.
+        for name in [
+            &b"move.json"[..],
+            b"./move.json",
+            b"sub/move.json",
+            b"move.json/x",
+        ] {
+            let mut link = header(name, b'2', 512, b"target");
+            if name.starts_with(b"sub") {
+                link = [header(b"sub/", b'5', 0, b""), link].concat();
+            }
+            assert_eq!(
+                verdict(&[link, header(b"after", b'0', 0, b""), END.to_vec()]),
+                Err(Refusal::Unsupported(
+                    "a member named move.json that is not a regular file"
+                )),
+                "{name:?}"
+            );
+        }
+        // The bank's own move.json as a plain file is fine (tar keeps the
+        // volume's), and a name that only contains the text is no match.
+        assert_eq!(
+            verdict(&[header(b"move.json", b'0', 1, b""), data(b"x"), END.to_vec()]),
+            Ok(())
+        );
+        assert_eq!(
+            verdict(&[header(b"remove.json", b'2', 0, b"x"), END.to_vec()]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_size_beyond_off_t_is_refused() {
+        let mut huge = header(b"big", b'0', 0, b"");
+        huge[124] = 0o200;
+        huge[125..136].copy_from_slice(&(1u128 << 70).to_be_bytes()[5..]);
+        huge[148..156].copy_from_slice(b"        ");
+        let sum: u32 = huge.iter().map(|b| u32::from(*b)).sum();
+        huge[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        let mut stream = huge;
+        stream.extend(vec![0u8; 4096]);
+        assert_eq!(verdict(&[stream]), Err(Refusal::Unsafe));
     }
 
     #[test]
