@@ -27,6 +27,7 @@ ROWS = {
     "tunnel": "CLI-TUNNEL-STATUS",
     "console": "CLI-CONSOLE-PRINT",
     "restore": "CLI-RESTORE-GATES",
+    "conductor_watch": "CLI-CONDUCTOR-WATCH-SETUP",
     "update": "CLI-UPDATE",
 }
 

@@ -59,15 +59,28 @@ fn unknown_mode_uses_python_quotes_and_exit_two() {
 
 #[test]
 fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
-    for mode in [
-        "maintainer",
-        "console",
-        "test-login",
-        "conductor-watch",
-        "delegate-watch",
-    ] {
+    // A shape each mode still defers, whatever the environment: no argument
+    // for the first three; for the watcher a start with no watcher on its
+    // state (with no argument it answers the missing owner itself).
+    let state = std::env::temp_dir().join(format!("pl-dispatch-{}.json", std::process::id()));
+    let state = state.to_str().unwrap();
+    let start = [
+        "--owner",
+        "0123456789abcdef0123456789abcdef",
+        "--state",
+        state,
+    ];
+    let cases: [(&str, &[&str]); 5] = [
+        ("maintainer", &[]),
+        ("console", &[]),
+        ("test-login", &[]),
+        ("conductor-watch", &start),
+        ("delegate-watch", &start),
+    ];
+    for (mode, arguments) in cases {
         let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
             .arg(mode)
+            .args(arguments)
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(1));

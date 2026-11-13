@@ -75,7 +75,7 @@ SHARDS = [
     # 40047950017 (2026-10-24; live + golden: test_login 7.3, connect 6.3,
     # maintainer 3.5, tunnel 1.9, move 1.2), so they split in two: 10.4 and
     # 9.8 min. test_login stays here with its container image and record.
-    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel', 'console', 'restore'",
+    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel', 'console', 'restore', 'conductor_watch'",
      "w1c_timeout": 26, "job_timeout": 50},
     {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer', 'coordination_recovery', 'maintainer_setup'", "w1c_timeout": 25,
      "job_timeout": 29},
@@ -140,6 +140,7 @@ ROW_SUITES = {
     "coordination_recovery": "w1c-connect", "maintainer_setup": "w1c-connect",
     "move": "w1c-connection", "tunnel": "w1c-connection", "console": "w1c-connection",
     "restore": "w1c-connection",
+    "conductor_watch": "w1c-connection",
     "audit": "h5-audit", "backup": "h5-backup", "migrate_flat": "h5-backup",
 }
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
@@ -163,11 +164,12 @@ SHIM_COMMANDS = {
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
     "update": ("update", "doctor", "console"),
-    # console also reads move's argv helpers.
+    # console and conductor_watch also read move's argv and stream helpers.
     "connect": ("connect", "restore"), "doctor": ("doctor", "console"), "console": ("console",),
+    "conductor_watch": ("conductor_watch",),
     "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
     "coordination_recovery": ("coordination_recovery",),
-    "move_cli.rs": ("move", "console"), "test_login": ("test_login",),
+    "move_cli.rs": ("move", "console", "conductor_watch"), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
     "restore_cli": ("restore",),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
