@@ -86,9 +86,10 @@ def test_shared_build_inputs_and_test_package_initializer_replay_every_golden_ro
 @pytest.mark.parametrize("path", [*[f"rust/shim/src/cli/{entry}" for entry in SHIM_COMMANDS],
     "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/cli/lease/mod.rs", "rust/shim/src/cli/wait_mail.rs",
     "rust/shim/src/shared.rs", "rust/shim/README.md"])
-def test_shim_precheck_judges_match_batch_ownership(path):
-    expected = list(precheck.JUDGES) if "judges" in reached(path) else []
-    assert precheck.select([path])["judges"] == expected
+def test_no_shim_change_selects_a_frozen_judge(path):
+    # The judges left CI with the Python freeze: no path reaches them.
+    assert "judges" not in reached(path)
+    assert precheck.select([path])["judges"] == []
 
 
 def test_report_artifact_upload_is_not_a_pr_gate():

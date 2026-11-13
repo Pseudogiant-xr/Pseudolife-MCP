@@ -470,7 +470,10 @@ def test_the_live_comparison_jobs_and_dispatch_modes_are_gone():
         assert name not in raw["jobs"], name
     inputs = raw[True]["workflow_dispatch"]["inputs"]
     assert inputs["mode"]["options"] == ["ci", "stress"]
-    assert not {"case_list", "frozen_head"} & set(inputs)
+    assert "case_list" not in inputs
+    # A master stress dispatch still binds its oracle to this input
+    # (oracle_selection.select reads inputs.frozen_head; Codex review of 462ada24).
+    assert inputs["frozen_head"]["type"] == "string" and inputs["frozen_head"]["required"] is False
 
 
 def test_artifact_is_from_this_run_and_executable_on_linux():
@@ -2021,3 +2024,24 @@ def test_failed_manual_ci_scope_spends_no_build_slots(name):
     # classifier cannot suppress valid PR, merge-group, push or nightly work.
     for event in ("pull_request", "merge_group", "push", "schedule"):
         assert Evaluator(event, ["scope"], set()).run(condition) is not False
+
+
+def test_a_master_stress_dispatch_binds_its_oracle_to_the_frozen_head_input():
+    # Codex review of 462ada24: the stress loop's best-effort oracle binding
+    # reads inputs.frozen_head on master, so the workflow keeps declaring it.
+    import sys
+    sys.path.insert(0, str(ROOT))
+    # By name, not an import statement: rust/ci/parity_scope.py's scan would
+    # read one as a harness dependency and route the module to every suite.
+    import importlib
+    oracle_selection = importlib.import_module("evals.rust_port." + "oracle_selection")
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True,
+                          check=True).stdout.strip()
+    raw = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert "frozen_head" in raw[True]["workflow_dispatch"]["inputs"]
+    with pytest.raises(KeyError):
+        oracle_selection.select(ROOT, "workflow_dispatch", {"inputs": {"mode": "stress"}}, head,
+                                github_ref="refs/heads/master")
+    selected = oracle_selection.select(ROOT, "workflow_dispatch", {"inputs": {"mode": "stress", "frozen_head": head}},
+                                       head, github_ref="refs/heads/master")
+    assert head in str(selected)

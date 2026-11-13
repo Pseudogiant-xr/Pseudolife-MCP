@@ -475,6 +475,9 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
         # Member cost evidence has independent tests. Exercise admission
         # through the actual Git merge and frozen budget normalizer here.
         monkeypatch.setattr(integrate, "_budget_member_evidence", lambda *args: [])
+        # Its runtime edit is under pseudolife_memory/: since the Python
+        # freeze only a member carrying the exception label is admitted.
+        value.labels = ("freeze-exception",)
         plan = integrate.Plan("integrate/2026-11-06-batch-1", base)
         integrate._merge_members(plan, [value])
         if budget_conflict == "semantic":

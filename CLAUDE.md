@@ -49,7 +49,7 @@ each exists because it was violated at least once.
    ops/integrate.py merge` once the batch's own CI passed at its built head,
    because a PR from any branch but `integrate/*` runs only the fast lanes
    (workflow and lock-file edits included).
-   - The `merge-forward` skill and item 11 are the only exceptions.
+   - The `merge-forward` skill is the only exception.
    - Read `docs/dev/merge-batches.md` before building, opening or merging a
      batch.
 5. **Rust-only batches skip the Python suite lanes** and the master push
@@ -87,7 +87,8 @@ each exists because it was violated at least once.
     `freeze-exception` label, which marks a maintainer-ruled exception.
 11. **Committed goldens are Rust regression snapshots:** parity shards
     replay them and no PR, batch, push or nightly job compares against a
-    live Python oracle, so a change that moves a golden on purpose updates
+    live Python oracle outside one named security step, so a change that
+    moves a golden on purpose updates
     it in the same PR and says so (read `rust/cli_harness/README.md`
     "Goldens after the freeze" first, because `--record` still records the
     frozen Python).

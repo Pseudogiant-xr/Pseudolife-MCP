@@ -40,4 +40,12 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        run: python3 rust/ci/python_freeze.py --head-ref "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" --labels "$PR_LABELS"
+        # The base commit's copy of the script decides, so a pull request
+        # that edits the guard cannot pass its own check; the one that adds
+        # it (no copy on its base yet) runs its own.
+        run: |
+          script="$RUNNER_TEMP/python_freeze.py"
+          if ! git show HEAD^1:rust/ci/python_freeze.py > "$script" 2>/dev/null; then
+            cp rust/ci/python_freeze.py "$script"
+          fi
+          python3 "$script" --head-ref "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" --labels "$PR_LABELS"

@@ -182,5 +182,8 @@ def test_the_workflow_reruns_on_label_changes_and_passes_the_labels():
     assert checkout["with"]["fetch-depth"] == 2
     assert guard["env"]["PR_LABELS"] == "${{ toJSON(github.event.pull_request.labels.*.name) }}"
     assert guard["env"]["HEAD_REPO"] == "${{ github.event.pull_request.head.repo.full_name }}"
-    assert guard["run"].split()[:2] == ["python3", "rust/ci/python_freeze.py"]
+    # The base commit's script decides (a PR editing the guard cannot pass
+    # its own check); only a base without one falls back to the head's.
+    assert 'git show HEAD^1:rust/ci/python_freeze.py > "$script"' in guard["run"]
+    assert 'python3 "$script" --head-ref' in guard["run"]
     assert '--labels "$PR_LABELS"' in guard["run"]

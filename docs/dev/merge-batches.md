@@ -50,7 +50,7 @@ Each change waits for hosted CI once, on its batch:
   `judges` and `cli-live` suites, every H5 suite, the Windows `Parity live`
   job, the nightly body evidence and the wait-mail capture are gone; every
   parity shard replays committed goldens, which are now Rust regression
-  snapshots (`rust/PARITY.md` "Goldens after the freeze"). The rows whose
+  snapshots (`rust/cli_harness/README.md` "Goldens after the freeze"). The rows whose
   only CI replay was a recording the same run made from the oracle (audit,
   backup, migrate_flat; `rust/ci/parity_scope.py` `UNREPLAYED_ROWS`) are
   not replayed at all. The precheck never records, and
@@ -72,6 +72,10 @@ Each change waits for hosted CI once, on its batch:
   `pseudolife_memory/` (the 0.23.1 cut, #1490, bumped
   `pseudolife_memory/compose/docker-compose.yml`) carries that label too,
   and the `release-procedure` skill is the place that must say so.
+  So does a schema bump, until the schema has a Rust-owned source: the
+  Rust job's `gen_schema_sql.py --check` builds
+  `rust/daemon/src/storage/schema.sql` from
+  `pseudolife_memory/storage/schema.py`.
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
@@ -148,14 +152,15 @@ CI for a known failure: a labelled pull request whose current head
 has a failing check sits the batch out without a comment and keeps its
 label, and joins a later batch once a rerun of the failed job passes or a
 push replaces that head; the failing reason names the red checks. One
-check is never counted: `Frozen judge probes (report only) / <os>` from
-the `Rust shim` workflow (`REPORT_ONLY_CHECK` in `ops/integrate.py`), the
-report-only frozen probes, whose lost runner says nothing about the
-change. Its red, cancelled or pending result neither keeps a pull request
-out nor holds it back, and `status` shows a red one as "report-only red,
-not counted" so nobody mistakes it for a pass. Only that exact workflow
-and name prefix is exempt, and `merge` never needs the exemption: the
-probe does not run on a batch. Subject to the snapshot checkpoint below, pending,
+check name is never counted: `Frozen judge probes (report only) / <os>`
+from the `Rust shim` workflow (`REPORT_ONLY_CHECK` in `ops/integrate.py`).
+No workflow produces it since the Python freeze removed that job, so it
+matters only for a head whose run predates that. It also checks the
+Python freeze itself: a member whose own net change touches
+`pseudolife_memory/` outside `pseudolife_memory/web/static/` without the
+`freeze-exception` label is dropped with the guard's refusal, whatever its
+`Python freeze` check reported (absent, queued or cancelled, the batch
+being exempt from that check). Subject to the snapshot checkpoint below, pending,
 cancelled, green or no checks admit it: a run cancelled by hand or by a
 re-trigger gave no verdict. GitHub also reports a job that ran past its
 `timeout-minutes` as cancelled, so the script reads the annotations of

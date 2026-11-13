@@ -196,6 +196,7 @@ class Member:
     snapshot_required: bool | None = None
     snapshot: str = "not required"
     snapshot_why: str = ""
+    labels: tuple[str, ...] = ()   # label names, for the Python freeze exception
 
 
 @dataclass
@@ -890,7 +891,7 @@ def _labeled_at(number: int, label: str) -> str | None:
 
 def ready(label: str, base_sha: str | None = None) -> list[Member]:
     """Open labelled pull requests on master, in label-applied order."""
-    fields = "number,title,headRefOid,url,isDraft,reviewDecision,statusCheckRollup"
+    fields = "number,title,headRefOid,url,isDraft,reviewDecision,statusCheckRollup,labels"
     rows = json.loads(gh("pr", "list", "--state", "open", "--label", label,
                          "--base", BASE, "--limit", "100", "--json", fields) or "[]")
     members = []
@@ -899,7 +900,9 @@ def ready(label: str, base_sha: str | None = None) -> list[Member]:
         members.append(Member(number=r["number"], title=r["title"], sha=r["headRefOid"],
                               url=r["url"], review=r.get("reviewDecision") or "NONE",
                               checks=checks, draft=bool(r.get("isDraft")), checks_why=why,
-                              report_only_red=_report_only_red(r.get("statusCheckRollup"))))
+                              report_only_red=_report_only_red(r.get("statusCheckRollup")),
+                              labels=tuple(label.get("name", "") for label in r.get("labels") or []
+                                           if isinstance(label, dict))))
     base_sha = base_sha or _out("rev-parse", f"{REMOTE}/{BASE}")
     for m, row in zip(members, rows):
         if not m.draft and m.checks not in ("failing", "unverified"):
@@ -1265,6 +1268,27 @@ def _regenerate_budget(plan: Plan, root: Path) -> set[str]:
     return set(serialized)
 
 
+def _frozen_refusal(base_sha: str, m: Member) -> str | None:
+    """Why a member's own net change may not join: it touches the frozen
+    Python package without the exception label. The `Python freeze` check
+    exempts batches because their members were checked, but a member's own
+    run can be absent (opened before the guard), queued or cancelled, so the
+    batch applies the same decision (rust/ci/python_freeze.py, read from this
+    checkout) to the member's diff from its merge base."""
+    spec = importlib.util.spec_from_file_location(
+        "python_freeze", Path(__file__).resolve().parents[1] / "rust" / "ci" / "python_freeze.py")
+    freeze = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(freeze)
+    common = _out("merge-base", base_sha, m.sha)
+    paths = freeze.changed_paths(Path.cwd(), common, m.sha)   # the checkout `build` runs in
+    if paths is None:
+        return "its change could not be read for the Python freeze check; rebuild once git can read it"
+    refused = freeze.frozen_paths(paths)
+    if refused and freeze.EXCEPTION_LABEL not in m.labels:
+        return freeze.refusal(refused)
+    return None
+
+
 def _merge_members(plan: Plan, members: list[Member]) -> None:
     for m in members:
         reason = _not_ready(m)
@@ -1276,6 +1300,11 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
             plan.dropped.append(Dropped(
                 m, f"head moved from {m.sha[:12]} to {head[:12]} after listing; "
                    "rebuild to include it", comment=False))
+            continue
+        frozen = _frozen_refusal(plan.base_sha, m)
+        if frozen:
+            plan.dropped.append(Dropped(m, frozen))
+            print(f"  dropped #{m.number}: {frozen}")
             continue
         try:
             _budget_member_evidence(plan.base_sha, m)

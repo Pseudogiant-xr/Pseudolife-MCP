@@ -102,7 +102,12 @@ LIVE_INVOCATIONS = (
     re.compile(r"rust/ci/body_evidence\.py\s+run\b"),
     re.compile(r"rust/ci/body_oracle\.py\b"),
     re.compile(r"rust/ci/run_coverage\.py\s+--suite\b"),
-    re.compile(r"rust/cli_harness(?=\s|$)(?!.*\s--golden\b)"),
+    # The CLI harness without an exact --golden (--golden-dir is not one),
+    # by path or as a module; a recording from the oracle; the in-process
+    # Codex planning comparison.
+    re.compile(r"(?:rust/cli_harness(?:/__main__\.py)?|-m\s+rust\.cli_harness)(?=\s|$)(?!.*\s--golden(?=\s|$))"),
+    re.compile(r"\s--record(?:-goldens)?(?=\s|$)"),
+    re.compile(r"setup_codex_parity\.py\b"),
 )
 LIVE_EXEMPT_JOBS = ("source-mutants", "stress-plan", "stress-build", "stress", "stress-report")
 

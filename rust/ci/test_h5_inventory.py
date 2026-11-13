@@ -534,6 +534,14 @@ LIVE_LINES = [
     "python rust/cli_harness --row lease --candidate $candidate -v --out x",
     "python rust/cli_harness @live --candidate $candidate -v",
     "python3 rust/ci/body_evidence.py run --rust-bin x --out y",
+    # Near misses the first pattern let through (reviewer of 462ada24).
+    "python rust/cli_harness --row mail --golden-dir x --candidate $candidate",
+    "python -m rust.cli_harness --row mail --candidate $candidate",
+    "python rust/cli_harness/__main__.py --row mail --candidate $candidate",
+    "python rust/daemon/harness/startup_ci.py --no-build --record-goldens --out x",
+    "python rust/daemon/harness/schema_ci.py --record-goldens --out x",
+    "python rust/cli_harness --row test_login --record -v --out x",
+    "python shim/tests/setup_codex_parity.py --cargo",
 ]
 
 

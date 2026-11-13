@@ -3002,3 +3002,28 @@ def test_no_current_job_produces_the_report_only_name():
                     produced.setdefault((data["name"], job_id), []).append(name)
     assert produced == {}
     assert "frozen-probes" not in yaml.safe_load(WORKFLOW)["jobs"]
+
+
+# --- the Python freeze (rust/ci/python_freeze.py) at batch admission ---
+# A batch is exempt from the `Python freeze` check because its members were
+# checked, but a member's own check can be absent (opened before the guard),
+# queued or cancelled, so `build` applies the same decision to each member's
+# net change: a frozen path passes only with the freeze-exception label.
+
+@pytest.mark.parametrize("labels, path, merged", [
+    ([], "pseudolife_memory/update_cli.py", False),
+    ([{"name": "freeze-exception"}], "pseudolife_memory/update_cli.py", True),
+    ([{"name": "freeze-exceptions"}], "pseudolife_memory/update_cli.py", False),
+    ([], "pseudolife_memory/web/static/index.html", True),
+    ([], "docs/pseudolife_memory_notes.md", True),
+], ids=["unlabelled", "labelled", "near-miss-label", "console-build", "name-only"])
+def test_a_member_changing_frozen_python_joins_only_with_the_exception_label(world, capsys, labels, path, merged):
+    sha = world.pr(10, {path: "changed\n"})
+    world.gh.add(10, sha, labels=labels)
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert ("merged #10 " in out) is merged, out
+    if not merged:
+        assert "Python is frozen since 14 November 2026" in out and "freeze-exception" in out

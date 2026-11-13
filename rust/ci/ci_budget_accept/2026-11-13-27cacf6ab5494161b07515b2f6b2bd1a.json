@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "python-freeze.yml",
-  "job": "python-freeze",
-  "before": null,
-  "fingerprint": "a20fe381fd09cad5",
-  "reason": "New workflow (2026-11-14): the Python freeze guard, one checkout and one standard-library script; its cost is entered as an estimate until a hosted run measures it."
-}

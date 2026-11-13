@@ -20,6 +20,12 @@ on:
         options: [ci, stress]
         default: ci
         required: true
+      # evals/rust_port/oracle_selection.py binds a master stress dispatch's
+      # oracle to this commit (an oracle-dependent selection fails without it).
+      frozen_head:
+        description: 'Stress on master only: full reviewed commit ID, equal to the dispatched checkout head'
+        type: string
+        required: false
       # A machine's trial (docs/specs/2026-10-19-self-hosted-parity-lane.md):
       # its runner is online but the watcher keeps it out of the variable, so
       # nightlies never route to it until one dispatched run has passed there.
@@ -542,9 +548,10 @@ jobs:
           if-no-files-found: warn
       - name: Nextest
         run: cargo nextest run --locked --all-targets -j 4
-      - name: Codex setup Python and Rust planning parity
-        timeout-minutes: 3
-        run: python shim/tests/setup_codex_parity.py --cargo
+      # The Codex setup planning comparison with the frozen Python
+      # (shim/tests/setup_codex_parity.py) left with the Python freeze; the
+      # bearer, token-file and authority rules it covered are asserted by
+      # shim/tests/setup_codex.rs, which Nextest runs.
       - name: Check all targets without default features
         run: cargo check --locked --all-targets --no-default-features -j 4
       - name: Clippy without default features
