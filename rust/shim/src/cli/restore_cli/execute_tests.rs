@@ -46,6 +46,16 @@ fn archive() -> Vec<u8> {
     gz(&builder.into_inner().unwrap())
 }
 
+/// What `find -printf` lists after extracting [`archive`] into the
+/// staging root.
+fn listing() -> Vec<u8> {
+    [
+        &b"d\x0066\x00100\x002\x00\x00\x00"[..],
+        b"f\x0066\x00101\x001\x00config.yaml\x00\x00",
+    ]
+    .concat()
+}
+
 /// A temporary directory, removed on drop.
 struct Dir(PathBuf);
 
@@ -79,6 +89,8 @@ struct Fake {
     helpers: HashMap<String, String>,
     /// A safety dump that lacks the completion marker.
     truncated_dump: bool,
+    /// What the staging helper lists instead of [`listing`].
+    extracted: Option<Vec<u8>>,
 }
 
 impl Docker for Fake {
@@ -151,6 +163,12 @@ impl Docker for Fake {
                 if script.starts_with("tar czf") {
                     write(&archive());
                     ok("")
+                } else if script.contains("-printf") {
+                    Ran {
+                        code: 0,
+                        stdout: self.extracted.clone().unwrap_or_else(listing),
+                        ..Ran::default()
+                    }
                 } else if script.contains("df -Pk") {
                     ok(DF)
                 } else {
@@ -230,6 +248,8 @@ struct Setup {
     args: Args,
     plan: Plan,
     runs: std::cell::Cell<u32>,
+    /// What the state check said the archive unpacks to.
+    state_size: std::cell::Cell<u128>,
 }
 
 impl Setup {
@@ -273,6 +293,7 @@ impl Setup {
             args,
             plan,
             runs: std::cell::Cell::new(0),
+            state_size: std::cell::Cell::new(4096),
         }
     }
 
@@ -293,7 +314,7 @@ impl Setup {
             plan: &self.plan,
             backup_file: self.args.backup_file.clone(),
             state_archive: self.args.state_archive.clone(),
-            state_size: 4096,
+            state_size: self.state_size.get(),
             data_dir: self.data_dir(),
         };
         execute::execute(docker, host, &cx)
@@ -320,7 +341,14 @@ fn label(call: &[String]) -> String {
         ["exec", _, "sh", "-c", s, ..] if s.contains("pg_dump") => "safety-dump".into(),
         ["create", .., s] if s.starts_with("tar czf") => "create safety-helper".into(),
         ["create", .., s] if s.contains("df -Pk") => "create df-helper".into(),
-        ["create", .., s] if s.contains("tar --exclude") => "create extract-helper".into(),
+        ["create", .., s] if s.starts_with("rm -rf -- /data/.pseudolife-restore-*") => {
+            "create sweep-helper".into()
+        }
+        ["create", .., s] if s.starts_with("rm -rf -- /data/.pseudolife-restore-") => {
+            "create discard-helper".into()
+        }
+        ["create", .., s] if s.contains("-printf") => "create stage-helper".into(),
+        ["create", .., s] if s.contains("mv -t /data") => "create swap-helper".into(),
         ["start", "-a", h] => format!("start-a {h}"),
         ["rm", "-f", h] => format!("rm {h}"),
         ["rm", "-f", "-v", h] => format!("rm {h}"),
@@ -338,31 +366,37 @@ fn label(call: &[String]) -> String {
     }
 }
 
-const HAPPY: [&str; 24] = [
+const HAPPY: [&str; 30] = [
     "stale",
     "stop d",
-    "safety-dump",
-    "create safety-helper",
+    "create sweep-helper",
     "start-a helper1",
     "rm helper1",
+    "safety-dump",
+    "create safety-helper",
+    "start-a helper2",
+    "rm helper2",
     "copy-in",
     "gunzip",
-    "create extract-helper",
-    "cp state",
     "df /tmp",
     "df /",
     "create df-helper",
     "start-a helper3",
     "rm helper3",
+    "create stage-helper",
+    "cp state",
+    "start-a helper4",
+    "rm helper4",
+    "create swap-helper",
     "drop",
     "create-db",
     "revoke",
     "replay",
-    "start-a helper2",
+    "start-a helper5",
+    "rm helper5",
     "start d",
     // cleanup
     "rm staged",
-    "rm helper2",
     "",
 ];
 
@@ -381,7 +415,7 @@ fn a_successful_restore_runs_every_step_in_order_and_clears_its_journal() {
     );
     // The backup streamed in from its file, and the safety pair is final.
     assert_eq!(
-        docker.inputs[6].as_deref(),
+        docker.inputs[9].as_deref(),
         Some(setup.args.backup_file.as_path())
     );
     let safety = Path::new(&setup.plan.safety_dir);
@@ -424,11 +458,73 @@ fn a_successful_restore_runs_every_step_in_order_and_clears_its_journal() {
 fn phase_of(index: usize) -> &'static str {
     match index {
         0 => "unchanged",
-        1..=14 => "stopped",
-        15..=18 => "replacing",
-        19 => "state",
+        1..=20 => "stopped",
+        21..=24 => "replacing",
+        25 => "state",
         _ => "restored",
     }
+}
+
+/// The calls after a failure (or an interrupt) at happy-path call `index`:
+/// a helper whose step failed is removed, the staging directory goes before
+/// the daemon starts again, staged files at cleanup. `None`: the failure is
+/// ignored (clearing stale files, removing a finished helper) and the run
+/// succeeds; an interrupt there stops at the next step.
+fn after_failure(index: usize, interrupt: bool) -> Option<Vec<&'static str>> {
+    let after = match (index, interrupt) {
+        (0 | 4 | 8 | 15 | 19 | 26, false) | (28, _) => return None,
+        (0, true) => vec![],
+        (1 | 2 | 5 | 6, _) | (8, true) => vec!["start d"],
+        (3, _) | (4, true) => vec!["rm helper1", "start d"],
+        (7, _) => vec!["rm helper2", "start d"],
+        (9..=13, _) | (15, true) => vec!["start d", "rm staged"],
+        (14, _) => vec!["rm helper3", "start d", "rm staged"],
+        // The staging directory may exist from here: removed (by its own
+        // helper) before the daemon starts.
+        (16, _) => vec![
+            "create discard-helper",
+            "start-a helper4",
+            "rm helper4",
+            "start d",
+            "rm staged",
+        ],
+        (17..=19, _) => vec![
+            "rm helper4",
+            "create discard-helper",
+            "start-a helper5",
+            "rm helper5",
+            "start d",
+            "rm staged",
+        ],
+        (20, _) => vec![
+            "create discard-helper",
+            "start-a helper5",
+            "rm helper5",
+            "start d",
+            "rm staged",
+        ],
+        // After the drop the daemon stays stopped; the swap helper and the
+        // staged tree go at cleanup.
+        (21..=24, _) => vec![
+            "terminate",
+            "rm staged",
+            "rm helper5",
+            "create discard-helper",
+            "start-a helper6",
+            "rm helper6",
+        ],
+        (25, _) => vec![
+            "rm helper5",
+            "rm staged",
+            "create discard-helper",
+            "start-a helper6",
+            "rm helper6",
+        ],
+        (26, true) => vec!["rm staged", "rm helper5"],
+        (27, _) => vec!["rm staged"],
+        _ => unreachable!("{index}"),
+    };
+    Some(after)
 }
 
 fn check_failure_at(index: usize, interrupt: bool) {
@@ -446,29 +542,36 @@ fn check_failure_at(index: usize, interrupt: bool) {
         "call {index} ({}), interrupt {interrupt}: {labels:?} {:?}",
         HAPPY[index], host.errors
     );
+    let Some(expected) = after_failure(index, interrupt) else {
+        assert_eq!(code, 0, "{context}");
+        assert_eq!(
+            labels[..HAPPY.len() - 1],
+            HAPPY[..HAPPY.len() - 1],
+            "{context}"
+        );
+        // A helper that could not be removed is removed at cleanup.
+        let retried: &[&str] = match index {
+            4 => &["rm helper1"],
+            19 => &["rm helper4"],
+            26 => &["rm helper5"],
+            _ => &[],
+        };
+        assert_eq!(labels[HAPPY.len() - 1..], *retried, "{context}");
+        return;
+    };
     // A free-space refusal exits 2 like every refusal; other failures 1.
     let expected_code = if interrupt {
         130
-    } else if matches!(index, 10 | 11 | 13) {
+    } else if matches!(index, 11 | 12 | 14) {
         2
     } else {
         1
     };
-    // Clearing stale files and removing a finished helper are best effort:
-    // their failure is ignored (an interrupt there stops at the next step).
-    if matches!(index, 0 | 5 | 14) && !interrupt {
-        assert_eq!(code, 0, "{context}");
-        assert_eq!(labels, HAPPY[..HAPPY.len() - 1].to_vec(), "{context}");
-        return;
-    }
     assert_eq!(code, expected_code, "{context}");
     assert_eq!(labels[..=index], HAPPY[..=index], "{context}");
     let after: Vec<&str> = labels[index + 1..].iter().map(String::as_str).collect();
+    assert_eq!(after, expected, "{context}");
     let text = host.errors.join("\n");
-    let staged = index >= 6;
-    // The extract helper exists once its create succeeded.
-    let extract = index >= 9;
-    let mut expected: Vec<&str> = Vec::new();
     match phase_of(index) {
         "unchanged" => {
             assert!(
@@ -479,7 +582,6 @@ fn check_failure_at(index: usize, interrupt: bool) {
             );
         }
         "stopped" => {
-            expected.push("start d");
             assert!(text.contains("The bank was not changed and the daemon d was started again. Nothing was restored."), "{context}");
             assert!(
                 text.contains("retry with:\n  pseudolife-mcp restore --backup-file"),
@@ -488,8 +590,7 @@ fn check_failure_at(index: usize, interrupt: bool) {
             assert!(!setup.journal().exists(), "{context}");
         }
         "replacing" => {
-            expected.push("terminate");
-            if index == 15 {
+            if index == 21 {
                 assert!(text.contains("The DROP of the database db did not report success, so it may or may not still exist; the state volume is unchanged. The daemon d is left stopped"), "{context}");
             } else {
                 assert!(text.contains("The database db was dropped and is missing or only partly restored; the state volume is unchanged. The daemon d is left stopped"), "{context}");
@@ -513,30 +614,12 @@ fn check_failure_at(index: usize, interrupt: bool) {
             assert!(!setup.journal().exists(), "{context}");
         }
     }
-    if staged {
-        expected.push("rm staged");
-    }
-    if extract {
-        expected.push("rm helper2");
-    }
-    // A safety helper or df helper whose start failed is still removed.
-    if matches!(index, 4 | 13) {
-        expected.insert(
-            0,
-            if index == 4 {
-                "rm helper1"
-            } else {
-                "rm helper3"
-            },
-        );
-    }
-    assert_eq!(after, expected, "{context}");
     // Never a step past the failure: no drop after an early failure, no
     // daemon start after the drop began.
-    if index < 15 {
+    if index < 21 {
         assert!(!labels.iter().any(|l| l == "drop"), "{context}");
     }
-    if (15..20).contains(&index) {
+    if (21..26).contains(&index) {
         assert!(!after.contains(&"start d"), "{context}");
     }
     assert!(text.starts_with("restore failed: "), "{context}");
@@ -606,7 +689,18 @@ fn an_incomplete_safety_dump_stops_before_anything_is_dropped() {
     let mut host = ready_host();
     assert_eq!(setup.run(&mut docker, &mut host), 1);
     let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
-    assert_eq!(labels, ["stale", "stop d", "safety-dump", "start d"]);
+    assert_eq!(
+        labels,
+        [
+            "stale",
+            "stop d",
+            "create sweep-helper",
+            "start-a helper1",
+            "rm helper1",
+            "safety-dump",
+            "start d"
+        ]
+    );
     let text = host.errors.join("\n");
     assert!(
         text.contains("the safety dump of the current database is incomplete"),
@@ -777,6 +871,7 @@ fn recovery_still_runs_after_an_interrupt() {
     docker.interrupt_at = Some(replay);
     assert_eq!(setup.run(&mut docker, &mut host), 130);
     let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    assert_eq!(labels[..=replay], HAPPY_NO_STATE[..=replay], "{labels:?}");
     assert_eq!(
         labels[replay + 1..],
         ["terminate", "rm staged"],
@@ -784,8 +879,9 @@ fn recovery_still_runs_after_an_interrupt() {
     );
     // A run stopped before the drop restarts the daemon successfully.
     let setup = Setup::new(false);
+    let copy_in = HAPPY_NO_STATE.iter().position(|l| *l == "copy-in").unwrap();
     let mut docker = Fake {
-        interrupt_at: Some(6),
+        interrupt_at: Some(copy_in),
         ..Fake::default()
     };
     let mut host = ready_host();
@@ -799,13 +895,115 @@ fn recovery_still_runs_after_an_interrupt() {
     );
 }
 
-const HAPPY_NO_STATE: [&str; 14] = [
+#[test]
+fn an_extracted_state_that_leads_out_is_refused_with_the_bank_unchanged() {
+    // The header check passed; what tar actually wrote holds a link out.
+    let setup = Setup::new(true);
+    let mut extracted = listing();
+    extracted.extend_from_slice(b"l\x0066\x00102\x001\x00out\x00../x\x00");
+    let mut docker = Fake {
+        extracted: Some(extracted),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 2, "{:?}", host.errors);
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    let stage = HAPPY.iter().position(|l| *l == "rm helper4").unwrap();
+    assert_eq!(labels[..=stage], HAPPY[..=stage], "{labels:?}");
+    // The staging directory goes before the daemon starts again; nothing
+    // was dropped or replaced.
+    assert_eq!(
+        labels[stage + 1..],
+        [
+            "create discard-helper",
+            "start-a helper5",
+            "rm helper5",
+            "start d",
+            "rm staged"
+        ],
+        "{labels:?}"
+    );
+    let discard = docker.helpers.get("helper5").cloned().unwrap_or_default();
+    assert_eq!(
+        discard,
+        format!("rm -rf -- /data/.pseudolife-restore-{RUN_TAG}")
+    );
+    let text = host.errors.join("\n");
+    assert!(
+        text.starts_with("restore failed: the state archive, once extracted, holds a symlink that leads outside the state volume (out -> ../x); re-create it"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "The bank was not changed and the daemon d was started again. Nothing was restored."
+        ),
+        "{text}"
+    );
+    assert!(!setup.journal().exists());
+}
+
+#[test]
+fn the_state_volume_must_hold_the_unpacked_archive_beside_the_state() {
+    // The fake's df reports about 95 GiB free on every mount.
+    let setup = Setup::new(true);
+    setup.state_size.set(90 * 1024 * 1024 * 1024);
+    let mut docker = Fake::default();
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 2, "{:?}", host.errors);
+    let text = host.errors.join(
+        "
+",
+    );
+    assert!(
+        text.starts_with("restore failed: less than 8 GiB beyond the 90 GiB the state archive unpacks to is free on d:/data;"),
+        "{text}"
+    );
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    assert!(
+        !labels.iter().any(|l| l == "create stage-helper"),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn the_state_is_staged_in_data_and_swapped_in_by_rename() {
+    let setup = Setup::new(true);
+    let mut docker = Fake::default();
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 0, "{:?}", host.errors);
+    let stage = &docker.helpers["helper4"];
+    let swap = &docker.helpers["helper5"];
+    let dir = format!("/data/.pseudolife-restore-{RUN_TAG}");
+    assert!(stage.contains(&format!("S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json -xzf /tmp/pl_state.tgz -C $S")), "{stage}");
+    assert!(stage.starts_with("set -e;"), "{stage}");
+    assert!(swap.starts_with("set -e;"), "{swap}");
+    assert!(
+        swap.contains(&format!(
+            "! -name move.json ! -name .pseudolife-restore-{RUN_TAG} -exec rm -rf"
+        )),
+        "{swap}"
+    );
+    assert!(
+        swap.ends_with("-exec mv -t /data -- {} +; rmdir -- $S"),
+        "{swap}"
+    );
+    // Stale staging directories go before the safety backup reads /data.
+    assert_eq!(
+        docker.helpers["helper1"],
+        "rm -rf -- /data/.pseudolife-restore-*"
+    );
+}
+
+const HAPPY_NO_STATE: [&str; 17] = [
     "stale",
     "stop d",
-    "safety-dump",
-    "create safety-helper",
+    "create sweep-helper",
     "start-a helper1",
     "rm helper1",
+    "safety-dump",
+    "create safety-helper",
+    "start-a helper2",
+    "rm helper2",
     "copy-in",
     "gunzip",
     "df /tmp",

@@ -138,6 +138,26 @@ pub(super) fn available(output: &[u8], location: &str) -> Step<u128> {
     Ok(free as u128 * 1024)
 }
 
+/// At least 8 GiB free at `location` beyond the `staged` bytes a restore
+/// extracts there beside the current state.
+pub(super) fn require_beyond(free: u128, staged: u128, location: &str) -> Step<()> {
+    if staged == 0 {
+        return require(free, location);
+    }
+    if free < MIN_FREE.saturating_add(staged) {
+        let gib = |bytes: u128| bytes.div_ceil(1024 * 1024 * 1024);
+        return fail(
+            format!(
+                "less than 8 GiB beyond the {} GiB the state archive unpacks to is free on {location}; free at least {} GiB there, then retry. Nothing was changed",
+                gib(staged),
+                gib(MIN_FREE.saturating_add(staged))
+            ),
+            2,
+        );
+    }
+    Ok(())
+}
+
 /// At least 8 GiB free at `location`.
 pub(super) fn require(free: u128, location: &str) -> Step<()> {
     if free < MIN_FREE {
@@ -432,7 +452,9 @@ impl<D: Docker> Bank<'_, D> {
     }
 
     /// The daemon's state mounts, measured in a read-only helper.
-    pub fn state_space(&mut self, image: &str, mounts: &[String]) -> Step<()> {
+    /// Free space on the state mounts; `/data` must also hold `staged`
+    /// bytes (the state archive extracted beside the current state).
+    pub fn state_space(&mut self, image: &str, mounts: &[String], staged: u128) -> Step<()> {
         let script = mounts
             .iter()
             .map(|path| format!("LC_ALL=C df -Pk -- {}", sh_quote(path)))
@@ -454,7 +476,8 @@ impl<D: Docker> Bank<'_, D> {
         }
         for (path, row) in mounts.iter().zip(rows) {
             let location = format!("{}:{path}", self.daemon);
-            require(available(row.as_bytes(), &location)?, &location)?;
+            let extra = if path == "/data" { staged } else { 0 };
+            require_beyond(available(row.as_bytes(), &location)?, extra, &location)?;
         }
         Ok(())
     }
@@ -758,7 +781,7 @@ pub(super) fn probe<D: Docker>(
         bank.container_space(path)?;
     }
     if args.state_archive.is_some() {
-        bank.state_space(&image, &state_mounts)?;
+        bank.state_space(&image, &state_mounts, 0)?;
     }
     let was_running = match sub_dict(&running, "State", &daemon_name)? {
         Some(state) => get(state, "Running").is_some_and(truthy),
@@ -853,6 +876,21 @@ mod tests {
     use super::super::docker::script::{Script, fail as failed, ok};
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_state_volume_must_hold_the_staged_state_beyond_the_floor() {
+        let gib = 1024 * 1024 * 1024;
+        assert!(require_beyond(8 * gib, 0, "d:/data").is_ok());
+        assert!(require_beyond(10 * gib, 2 * gib, "d:/data").is_ok());
+        let Err(Stop(message, code)) = require_beyond(10 * gib - 1, 2 * gib, "d:/data") else {
+            panic!("refused");
+        };
+        assert_eq!(code, 2);
+        assert_eq!(
+            message,
+            "less than 8 GiB beyond the 2 GiB the state archive unpacks to is free on d:/data; free at least 10 GiB there, then retry. Nothing was changed"
+        );
+    }
 
     #[test]
     fn available_reads_the_fourth_field_of_the_last_line() {

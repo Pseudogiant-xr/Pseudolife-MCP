@@ -741,7 +741,7 @@ MUTANTS = [
            "        let incomplete = false\n            && !self.pending.is_empty()", ("state-gnu-long-data-cut",)),
     Mutant("restore-long-keeps-after-nul", "restore", STATERS, "                                long.ended = true;",
            "                                long.data.extend_from_slice(&part[at..]);", ("state-gnu-long-cut-at-nul",)),
-    Mutant("restore-confirmed-skipped", "restore", FILE, "    let code = locked(&args, &directory);",
+    Mutant("restore-confirmed-skipped", "restore", FILE, "    let code = locked(&args, &directory, state_size);",
            "    let _ = locked;\n    let code = ExitCode::SUCCESS;",
            ("valid-yes", "docker-pg-stopped", "docker-mount-low")),
     Mutant("restore-busy-pid-unknown", "restore", FILE,

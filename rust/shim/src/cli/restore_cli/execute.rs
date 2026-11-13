@@ -30,6 +30,7 @@ use super::{
     bank::{BULK, Bank, CLEANUP, MINUTE, Plan, Step, Stop, sh_quote},
     docker::{Docker, Input, Output},
     safety::{self, Pair},
+    state,
 };
 
 /// What `execute` needs from the host besides Docker: output, the health
@@ -84,8 +85,30 @@ const JOURNAL: &str = "restore-in-progress";
 /// truncated.
 const STREAM_INTO: &str = r#"set -C && umask 077 && cat > "$1""#;
 const GUNZIP: &str = r#"set -C && gunzip -c "$1" > "$2""#;
-/// Keep an active move gate (`move.json`) through the replay.
-const EXTRACT: &str = "find /data -mindepth 1 -maxdepth 1 ! -name move.json -exec rm -rf -- {} + && tar --exclude=move.json --exclude=./move.json -xzf /tmp/pl_state.tgz -C /data";
+/// The name every staging directory restore makes in `/data` starts with;
+/// only restore writes it, and the state check refuses it at the top level.
+pub(super) const STAGE_PREFIX: &str = ".pseudolife-restore-";
+/// Removes the staging directories a killed restore left in `/data`, before
+/// the safety backup could archive them.
+const SWEEP: &str = "rm -rf -- /data/.pseudolife-restore-*";
+
+/// Extracts the archive into the fresh staging directory `dir` (in `/data`,
+/// so the swap is a rename) and lists what was actually extracted, for
+/// `state::judge_extracted`. `move.json` is excluded: the volume's own move
+/// gate stays through the replay.
+fn stage_script(dir: &str) -> String {
+    format!(
+        r"set -e; S={dir}; mkdir -m 700 -- $S; tar --exclude=move.json --exclude=./move.json -xzf /tmp/pl_state.tgz -C $S; find $S -printf '%y\0%D\0%i\0%n\0%P\0%l\0'"
+    )
+}
+
+/// Replaces the state with the staged tree: everything but `move.json` and
+/// the staging directory goes, then the staged entries are renamed in.
+fn swap_script(dir: &str, name: &str) -> String {
+    format!(
+        r"set -e; S={dir}; test -d $S; find /data -mindepth 1 -maxdepth 1 ! -name move.json ! -name {name} -exec rm -rf -- {{}} +; find $S -mindepth 1 -maxdepth 1 -exec mv -t /data -- {{}} +; rmdir -- $S"
+    )
+}
 const STALE: &str = "rm -f /tmp/pl_restore-*.sql.gz /tmp/pl_restore-*.sql.gz.sql";
 /// How long the restarted daemon may take to report ready: the Rust image's
 /// first start can provision models before it is ready.
@@ -271,7 +294,8 @@ struct Run<'a, 'd, D: Docker, H: Host> {
     stopped: bool,
     safety: Option<Pair>,
     earlier: Option<Earlier>,
-    helper: Option<String>,
+    /// Helper containers this run created and has not removed yet.
+    helpers: Vec<String>,
     remote: String,
     sql: String,
     staged: bool,
@@ -279,6 +303,11 @@ struct Run<'a, 'd, D: Docker, H: Host> {
     dropped: bool,
     /// When this run took its safety backup.
     started: String,
+    /// This run's staging directory in `/data` (its name there).
+    stage_dir: String,
+    stage_name: String,
+    /// The staging directory may exist and must be removed.
+    staging: bool,
 }
 
 /// The run ends here: what failed (the [`Stop`]'s text) at the phase
@@ -311,6 +340,17 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         input: Input<'_>,
         what: &str,
     ) -> Result<(), Failure> {
+        self.capture(argv, timeout, input, what).map(|_| ())
+    }
+
+    /// [`Self::docker`], keeping the command's stdout.
+    fn capture(
+        &mut self,
+        argv: &[&str],
+        timeout: Duration,
+        input: Input<'_>,
+        what: &str,
+    ) -> Result<Vec<u8>, Failure> {
         let argv: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
         let ran = self
             .bank
@@ -329,7 +369,96 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                 1,
             )));
         }
-        Ok(())
+        Ok(ran.stdout)
+    }
+
+    /// A writable helper over the daemon's volumes that will run `script`.
+    fn make_helper(&mut self, script: &str) -> Result<String, Failure> {
+        let image = self.plan().image.clone();
+        let helper = step(self.bank.helper(&image, script, true))?;
+        self.helpers.push(helper.clone());
+        Ok(helper)
+    }
+
+    /// Removes a helper, which also ends a script the docker client stopped
+    /// waiting on; one that cannot be removed is tried again at cleanup.
+    fn remove_helper(&mut self, helper: &str) {
+        if self.bank.quiet(&["rm", "-f", helper]).ok() {
+            self.helpers.retain(|kept| kept != helper);
+        }
+    }
+
+    /// Runs `script` in a writable helper (after copying `archive` into
+    /// it), then removes the helper; its stdout.
+    fn helper_run(
+        &mut self,
+        script: &str,
+        archive: Option<&Path>,
+        what: &str,
+    ) -> Result<Vec<u8>, Failure> {
+        let helper = self.make_helper(script)?;
+        self.start_helper(&helper, archive, what)
+    }
+
+    /// Starts a helper made by [`Self::make_helper`] and removes it.
+    fn start_helper(
+        &mut self,
+        helper: &str,
+        archive: Option<&Path>,
+        what: &str,
+    ) -> Result<Vec<u8>, Failure> {
+        let helper = helper.to_owned();
+        let mut outcome = Ok(Vec::new());
+        if let Some(archive) = archive {
+            let target = format!("{helper}:/tmp/pl_state.tgz");
+            let archive = archive.to_string_lossy().into_owned();
+            outcome = self
+                .docker(
+                    &["cp", &archive, &target],
+                    BULK,
+                    Input::Null,
+                    "staging the state archive",
+                )
+                .and_then(|()| self.check())
+                .map(|()| Vec::new());
+        }
+        if outcome.is_ok() {
+            outcome = self.capture(&["start", "-a", &helper], BULK, Input::Null, what);
+        }
+        self.remove_helper(&helper);
+        outcome
+    }
+
+    /// Removes the staging directory (and a helper still running in it);
+    /// a warning when that failed.
+    fn discard_stage(&mut self) -> Option<String> {
+        for helper in self.helpers.clone() {
+            self.remove_helper(&helper);
+        }
+        if !self.staging {
+            return None;
+        }
+        self.staging = false;
+        let plan = self.plan();
+        let script = format!("rm -rf -- {}", self.stage_dir);
+        let removed = match self.bank.helper(&plan.image, &script, true) {
+            Ok(helper) => {
+                let ran = self.bank.quiet(&["start", "-a", &helper]);
+                self.bank.quiet(&["rm", "-f", &helper]);
+                ran.ok()
+            }
+            Err(_) => false,
+        };
+        (!removed).then(|| {
+            format!(
+                "The staging directory {} in {}'s /data volume could not be removed; remove it with:\n  docker run --rm --volumes-from {} --entrypoint rm {} -rf -- {}",
+                self.stage_dir,
+                plan.daemon,
+                shell_word(&plan.daemon),
+                shell_word(&plan.image),
+                self.stage_dir
+            )
+        })
     }
 
     fn plan(&self) -> &'a Plan {
@@ -381,6 +510,15 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                 "stopping the daemon",
             )?;
         }
+
+        // A staging directory a killed restore left in /data would go into
+        // the safety backup; it is never part of the state.
+        self.check()?;
+        self.helper_run(
+            SWEEP,
+            None,
+            "removing an earlier restore's staging directory",
+        )?;
 
         self.check()?;
         self.host
@@ -453,24 +591,40 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             Input::Null,
             &format!("decompressing the backup inside {pg}"),
         )?;
-        if let Some(archive) = &cx.state_archive {
-            self.check()?;
-            let helper = step(self.bank.helper(&plan.image, EXTRACT, true))?;
-            self.helper = Some(helper.clone());
-            let target = format!("{helper}:/tmp/pl_state.tgz");
-            let archive = archive.to_string_lossy().into_owned();
-            self.docker(
-                &["cp", &archive, &target],
-                BULK,
-                Input::Null,
-                "staging the state archive",
-            )?;
-        }
         self.check()?;
         step(self.host.host_space(&plan.safety_dir))?;
         step(self.bank.pg_space(&plan.pg_paths))?;
         if cx.state_archive.is_some() {
-            step(self.bank.state_space(&plan.image, &plan.state_mounts))?;
+            step(
+                self.bank
+                    .state_space(&plan.image, &plan.state_mounts, cx.state_size),
+            )?;
+        }
+        let mut swap = None;
+        if let Some(archive) = &cx.state_archive {
+            // Extracted beside the current state and judged by what tar
+            // actually wrote, before anything is replaced: a refusal here
+            // leaves the bank unchanged.
+            self.check()?;
+            self.host
+                .info("==> Extracting the state archive beside the current state...");
+            self.staging = true;
+            let script = stage_script(&self.stage_dir);
+            let listing =
+                self.helper_run(&script, Some(archive), "extracting the state archive")?;
+            if let Err(reason) = state::judge_extracted(&listing) {
+                return Err(Failure(Stop(
+                    format!(
+                        "the state archive, once extracted, holds {reason}; re-create it from the state directory (tar --format=gnu -czf <archive> -C <state directory> .) and retry"
+                    ),
+                    2,
+                )));
+            }
+            // Made now, started after the replay: nothing can fail between
+            // the replay and the swap but the swap itself.
+            self.check()?;
+            let script = swap_script(&self.stage_dir, &self.stage_name);
+            swap = Some(self.make_helper(&script)?);
         }
 
         self.check()?;
@@ -517,16 +671,12 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         let db = plan.db.clone();
         self.psql(&db, &["-q", "-v", "ON_ERROR_STOP=1", "-f", &sql])?;
 
-        if let Some(helper) = self.helper.clone() {
+        if let Some(swap) = swap {
             self.check()?;
             self.phase = Phase::StateReplacing;
             self.host.info("==> Replacing the state volume...");
-            self.docker(
-                &["start", "-a", &helper],
-                BULK,
-                Input::Null,
-                "replacing the state volume",
-            )?;
+            self.start_helper(&swap, None, "replacing the state volume")?;
+            self.staging = false;
         }
 
         self.phase = Phase::DataRestored;
@@ -730,6 +880,8 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         let mut lines = vec![format!("restore failed: {cause}.")];
         match self.phase {
             Phase::Unchanged | Phase::Stopped => {
+                // Nothing may still write into /data once the daemon runs.
+                let discarded = self.discard_stage();
                 let restarted = if !self.stopped {
                     if plan.was_running {
                         "The bank was not changed and the daemon was not stopped.".to_owned()
@@ -753,6 +905,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     }
                 };
                 lines.push(format!("{restarted} Nothing was restored."));
+                lines.extend(discarded);
                 if let Some(note) = earlier_note {
                     lines.push(note);
                 } else {
@@ -823,8 +976,8 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             self.bank
                 .run(&["exec", &pg, "rm", "-f", &remote, &sql], CLEANUP);
         }
-        if let Some(helper) = self.helper.take() {
-            self.bank.run(&["rm", "-f", &helper], CLEANUP);
+        if let Some(warning) = self.discard_stage() {
+            self.host.error(&warning);
         }
     }
 }
@@ -870,12 +1023,15 @@ pub(super) fn execute<D: Docker, H: Host>(docker: &mut D, host: &mut H, cx: &Con
         stopped: false,
         safety: None,
         earlier,
-        helper: None,
+        helpers: Vec::new(),
         sql: format!("{remote}.sql"),
         remote,
         staged: false,
         dropped: false,
         started: String::new(),
+        stage_dir: format!("/data/{STAGE_PREFIX}{run_tag}"),
+        stage_name: format!("{STAGE_PREFIX}{run_tag}"),
+        staging: false,
     };
     if let Some(earlier) = &run.earlier {
         let note = format!(

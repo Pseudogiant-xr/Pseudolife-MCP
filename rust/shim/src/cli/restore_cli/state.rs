@@ -413,9 +413,16 @@ impl Reader {
                 // skips an excluded member by its stored size, where this
                 // reader skips none for a link or directory: only a plain
                 // file reads the same both ways.
-                let excluded = split(&normpath(&member.name))
-                    .iter()
-                    .any(|part| part == b"move.json");
+                let parts = split(&normpath(&member.name));
+                if parts
+                    .first()
+                    .is_some_and(|top| top.starts_with(super::execute::STAGE_PREFIX.as_bytes()))
+                {
+                    return self.refuse(Refusal::Unsupported(
+                        "a member named like restore's own staging directory (.pseudolife-restore-*)",
+                    ));
+                }
+                let excluded = parts.iter().any(|part| part == b"move.json");
                 if excluded && !matches!(member.kind, b'0' | 0) {
                     return self.refuse(Refusal::Unsupported(
                         "a member named move.json that is not a regular file",
@@ -740,6 +747,124 @@ fn check_members(members: &[Member]) -> Result<(), Refusal> {
         Ok(())
     })();
     result.map_err(|Escape| Refusal::Unsafe)
+}
+
+/// One entry of the extracted tree, as `find -printf '%y\0%D\0%i\0%n\0%P\0%l\0'`
+/// lists it: type letter, device, inode, link count, path below the
+/// staging root, symlink target.
+struct Extracted {
+    kind: u8,
+    device: Vec<u8>,
+    inode: Vec<u8>,
+    links: u64,
+    path: Vec<u8>,
+    target: Vec<u8>,
+}
+
+fn shown(path: &[u8]) -> String {
+    String::from_utf8_lossy(path).escape_debug().to_string()
+}
+
+fn parse_listing(listing: &[u8]) -> Option<Vec<Extracted>> {
+    let mut fields: Vec<&[u8]> = listing.split(|byte| *byte == 0).collect();
+    // The listing ends with a NUL, which leaves one empty field after it.
+    if fields.pop() != Some(&b""[..]) || !fields.len().is_multiple_of(6) {
+        return None;
+    }
+    fields
+        .chunks(6)
+        .map(|entry| {
+            let [kind, device, inode, links, path, target] = entry else {
+                return None;
+            };
+            let [kind] = kind else {
+                return None;
+            };
+            let number = |text: &[u8]| !text.is_empty() && text.iter().all(u8::is_ascii_digit);
+            if !number(device) || !number(inode) || !number(links) {
+                return None;
+            }
+            Some(Extracted {
+                kind: *kind,
+                device: device.to_vec(),
+                inode: inode.to_vec(),
+                links: std::str::from_utf8(links).ok()?.parse().ok()?,
+                path: path.to_vec(),
+                target: target.to_vec(),
+            })
+        })
+        .collect()
+}
+
+/// The verdict on what tar actually extracted into the staging root,
+/// judged as the tree will be once it is the state volume: only plain
+/// files, directories and symlinks; every symlink relative and resolving,
+/// through the tree's own links, inside it; no inode shared with anything
+/// outside it; one filesystem. `Err` names what was found.
+pub(super) fn judge_extracted(listing: &[u8]) -> Result<(), String> {
+    let entries =
+        parse_listing(listing).ok_or_else(|| "a listing restore cannot read".to_owned())?;
+    let Some(root) = entries
+        .first()
+        .filter(|root| root.path.is_empty() && root.kind == b'd')
+    else {
+        return Err("no directory at the staging root".to_owned());
+    };
+    let device = root.device.clone();
+    let mut inodes: HashMap<Vec<u8>, (u64, u64, Vec<u8>)> = HashMap::new();
+    let mut links = Links {
+        map: HashMap::new(),
+        steps: 0,
+    };
+    for entry in &entries {
+        let what = match entry.kind {
+            b'f' | b'd' | b'l' => None,
+            b'p' => Some("a FIFO"),
+            b'b' | b'c' => Some("a device"),
+            b's' => Some("a socket"),
+            _ => Some("a file of a type restore does not restore"),
+        };
+        if let Some(what) = what {
+            return Err(format!("{what} ({})", shown(&entry.path)));
+        }
+        if entry.device != device {
+            return Err(format!("a mount point inside it ({})", shown(&entry.path)));
+        }
+        if entry.kind != b'd' {
+            let seen =
+                inodes
+                    .entry(entry.inode.clone())
+                    .or_insert((0, entry.links, entry.path.clone()));
+            seen.0 += 1;
+        }
+        if entry.kind == b'l' {
+            links.map.insert(entry.path.clone(), entry.target.clone());
+        }
+    }
+    if let Some((_, (_, _, path))) = inodes.iter().find(|(_, (count, total, _))| count != total) {
+        return Err(format!(
+            "a hard link to a file outside the archive ({})",
+            shown(path)
+        ));
+    }
+    for entry in entries.iter().filter(|entry| entry.kind == b'l') {
+        let link = || format!("{} -> {}", shown(&entry.path), shown(&entry.target));
+        if entry.target.starts_with(b"/") {
+            return Err(format!("a symlink to an absolute path ({})", link()));
+        }
+        let mut parts = split(&dirname(&entry.path));
+        parts.extend(split(&entry.target));
+        if links
+            .resolve(parts, std::slice::from_ref(&entry.path), 1)
+            .is_err()
+        {
+            return Err(format!(
+                "a symlink that leads outside the state volume ({})",
+                link()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The disk the extracted members take, rounded up to whole 4 KiB blocks
@@ -1383,6 +1508,172 @@ mod tests {
         ]);
         assert_eq!((reader.end, reader.members[0].kind), (End::Done, b'5'));
         assert_eq!(reader.members[0].name, b"dir");
+    }
+
+    #[test]
+    fn a_member_named_like_the_staging_directory_is_refused() {
+        let reason = Refusal::Unsupported(
+            "a member named like restore's own staging directory (.pseudolife-restore-*)",
+        );
+        for name in [
+            &b".pseudolife-restore-x"[..],
+            b"./.pseudolife-restore-0123/f",
+        ] {
+            assert_eq!(
+                verdict(&[header(name, b'0', 0, b""), END.to_vec()]),
+                Err(reason),
+                "{}",
+                shown(name)
+            );
+        }
+        // Below the top level it is an ordinary name.
+        assert_eq!(
+            verdict(&[
+                header(b"sub/.pseudolife-restore-x", b'0', 0, b""),
+                END.to_vec()
+            ]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn the_unpacked_size_counts_whole_blocks() {
+        let members = [
+            Member {
+                kind: b'0',
+                name: b"a".to_vec(),
+                linkname: Vec::new(),
+                size: 5000,
+            },
+            Member {
+                kind: b'5',
+                name: b"d".to_vec(),
+                linkname: Vec::new(),
+                size: 0,
+            },
+        ];
+        assert_eq!(unpacked(&members), 8192 + 4096);
+    }
+
+    /// One `find -printf '%y\0%D\0%i\0%n\0%P\0%l\0'` entry.
+    fn entry(
+        kind: char,
+        device: &str,
+        inode: u32,
+        links: u32,
+        path: &str,
+        target: &str,
+    ) -> Vec<u8> {
+        format!("{kind}\0{device}\0{inode}\0{links}\0{path}\0{target}\0").into_bytes()
+    }
+
+    fn tree(entries: &[Vec<u8>]) -> Vec<u8> {
+        let mut out = entry('d', "66", 1, 3, "", "");
+        for e in entries {
+            out.extend_from_slice(e);
+        }
+        out
+    }
+
+    #[test]
+    fn an_extracted_tree_inside_its_root_passes() {
+        let listing = tree(&[
+            entry('d', "66", 2, 2, "a", ""),
+            entry('f', "66", 3, 2, "a/f", ""),
+            entry('f', "66", 3, 2, "g", ""),
+            entry('l', "66", 4, 1, "a/up", "../g"),
+            entry('l', "66", 5, 1, "a/dangling", "missing/x"),
+            // A loop the filesystem cannot traverse either.
+            entry('l', "66", 6, 1, "loop1", "loop2"),
+            entry('l', "66", 7, 1, "loop2", "loop1"),
+        ]);
+        assert_eq!(judge_extracted(&listing), Ok(()));
+    }
+
+    #[test]
+    fn a_hard_link_to_a_symlink_that_points_out_from_its_new_place_is_refused() {
+        // What GNU tar 1.34 extracted in the daemon image (probed 14
+        // November 2026): `h` is a hard link to `a/b/s -> ../x`, so it is a
+        // second symlink `../x`, but at the top, where it leads out.
+        let listing = tree(&[
+            entry('d', "66", 2, 3, "a", ""),
+            entry('d', "66", 3, 2, "a/b", ""),
+            entry('l', "66", 4, 2, "a/b/s", "../x"),
+            entry('l', "66", 4, 2, "h", "../x"),
+        ]);
+        assert_eq!(
+            judge_extracted(&listing),
+            Err("a symlink that leads outside the state volume (h -> ../x)".to_owned())
+        );
+    }
+
+    #[test]
+    fn every_way_out_of_the_extracted_tree_is_refused() {
+        let cases: [(Vec<Vec<u8>>, &str); 9] = [
+            (
+                vec![entry('l', "66", 2, 1, "abs", "/etc/passwd")],
+                "a symlink to an absolute path (abs -> /etc/passwd)",
+            ),
+            (
+                vec![
+                    entry('d', "66", 2, 2, "d1", ""),
+                    entry('l', "66", 3, 1, "d1/b", ".."),
+                    // Lexically d1/x; through `b`, one level above the root.
+                    entry('l', "66", 4, 1, "d1/l", "b/../x"),
+                ],
+                "a symlink that leads outside the state volume (d1/l -> b/../x)",
+            ),
+            (
+                vec![entry('l', "66", 2, 1, "dangling-out", "missing/../../y")],
+                "a symlink that leads outside the state volume (dangling-out -> missing/../../y)",
+            ),
+            (
+                vec![entry('f', "66", 2, 2, "shared", "")],
+                "a hard link to a file outside the archive (shared)",
+            ),
+            (vec![entry('p', "66", 2, 1, "fifo", "")], "a FIFO (fifo)"),
+            (vec![entry('c', "66", 2, 1, "null", "")], "a device (null)"),
+            (vec![entry('b', "66", 2, 1, "disk", "")], "a device (disk)"),
+            (vec![entry('s', "66", 2, 1, "sock", "")], "a socket (sock)"),
+            (
+                vec![entry('d', "67", 2, 2, "mnt", "")],
+                "a mount point inside it (mnt)",
+            ),
+        ];
+        for (entries, reason) in cases {
+            assert_eq!(judge_extracted(&tree(&entries)), Err(reason.to_owned()));
+        }
+        assert_eq!(
+            judge_extracted(&tree(&[entry('D', "66", 2, 1, "door", "")])),
+            Err("a file of a type restore does not restore (door)".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_listing_without_a_real_root_directory_is_refused() {
+        let unreadable = Err("a listing restore cannot read".to_owned());
+        assert_eq!(
+            judge_extracted(b""),
+            Err("no directory at the staging root".to_owned())
+        );
+        assert_eq!(judge_extracted(b"d\x0066"), unreadable);
+        assert_eq!(judge_extracted(b"d\x00x\x001\x002\x00\x00\x00"), unreadable);
+        // The staging root replaced by a symlink.
+        assert_eq!(
+            judge_extracted(&entry('l', "66", 1, 1, "", "/")),
+            Err("no directory at the staging root".to_owned())
+        );
+        // An entry before the root.
+        assert_eq!(
+            judge_extracted(
+                &[
+                    entry('f', "66", 2, 1, "f", ""),
+                    entry('d', "66", 1, 2, "", "")
+                ]
+                .concat()
+            ),
+            Err("no directory at the staging root".to_owned())
+        );
     }
 
     #[test]
