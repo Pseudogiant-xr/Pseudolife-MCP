@@ -358,8 +358,8 @@ MUTANTS = [
            'let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();',
            'let token: Option<String> = None;', ("briefing-hook-json",)),
     Mutant("hook-first-address-only", "hook", "shim/src/cli/hook_http.rs",
-           "for address in tokio::net::lookup_host((host.as_str(), port)).await.ok()? {",
-           "for address in tokio::net::lookup_host((host.as_str(), port)).await.ok()?.take(1) {",
+           "    for address in tokio::net::lookup_host((host.as_str(), port))\n        .await\n        .map_err(other)?\n    {",
+           "    for address in tokio::net::lookup_host((host.as_str(), port))\n        .await\n        .map_err(other)?\n        .take(1)\n    {",
            ("briefing-hook-json-localhost",),
            # Linux resolves localhost to 127.0.0.1 first; only Windows
            # (::1 first) exercises the fallback to the next address.
