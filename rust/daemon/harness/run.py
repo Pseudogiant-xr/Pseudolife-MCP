@@ -2673,8 +2673,10 @@ def main() -> int:
                 continue
             started = time.monotonic()
             try:
-                r = run_scenario(scn, args.rust_bin, root, mode, args.record,
-                                 {"write": args.write} if args.record_candidate else None)
+                # Only a candidate recording passes ``candidate``, so callers
+                # and stand-ins with the five-argument shape are unaffected.
+                extra = {"candidate": {"write": args.write}} if args.record_candidate else {}
+                r = run_scenario(scn, args.rust_bin, root, mode, args.record, **extra)
             except Exception as exc:  # a scenario that cannot complete is a failure, never a pass
                 answered = [compare_case(c, *c["_answers"]) for c in getattr(scn, "partial", [])]
                 r = {"scenario": n, "cases": answered + [{"case": "scenario error",
