@@ -272,10 +272,12 @@ release file, so before the row's new cases join a required lane they need
 20 clean hosted `windows-latest` runs: the Rust workflow's `mode=stress`
 dispatch with `selection: row:console`.
 
-Local evidence (2026-11-13): Windows workstation, 139/139 live and golden and
-all 12 of its mutants caught (`console-display-ignored` is Linux-only); WSL
-Ubuntu, 139/139 live and golden and all 12 of its mutants caught
-(`console-winerror-full-stop` is Windows-only). Before the port, the row
+Local evidence (2026-11-13, after issue #1497's fixes): Windows
+workstation, 166/166 live and golden and all 15 of its mutants caught
+(`console-display-ignored` is Linux-only); WSL Ubuntu, 166/166 live and
+golden and all 15 of its mutants caught (`console-winerror-full-stop` is
+Windows-only). The row holds 16 mutants, two CI shards of eight. Before the
+port, the row
 against master's deferring binary on Windows: 37 of the new and changed
 cases differed, and the five that matched are the four declared pre-mint
 deferrals and a `--no-open --json` answer the first slice already gave.
