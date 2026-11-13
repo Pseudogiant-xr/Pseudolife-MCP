@@ -187,6 +187,34 @@ def test_goldens_and_diagnostic_probes_run_as_separate_steps(tmp_path, monkeypat
     assert "report only" in markdown and "cli-argv" in markdown and "argv-case" in markdown
 
 
+def test_each_job_publishes_only_the_group_it_ran(tmp_path, monkeypatch):
+    # The Rust job replays goldens and a job of its own runs the frozen
+    # probes: neither may report the other's group as "not run".
+    mock_summary_replace(monkeypatch)
+    monkeypatch.setattr(replay, "execute", lambda phase, *args, **kwargs: {
+        "phase": phase, "exit_code": 0, "seconds": 0, "failed_cases": [], "diagnostic_errors": []})
+    value = plan(judges=["cli-argv"])
+    for only in ("goldens", "judges"):
+        public = tmp_path / only / "public"
+        assert replay.run(value, Path("candidate"), tmp_path / only / "private", public / only, only=only) == 0
+        target = tmp_path / only / "job-summary"
+        assert replay.main(["--plan-json", json.dumps(value), "--publish", "--only", only,
+                            "--public", str(public), "--job-summary", str(target)]) == 0
+        report = json.loads((public / "report.json").read_text())
+        assert [group["name"] for group in report["groups"]] == [only]
+        markdown = target.read_text()
+        assert "not run" not in markdown and "did not produce" not in json.dumps(report)
+        assert ("report only" in markdown) == (only == "judges")
+        assert ("Golden replay" in markdown) == (only == "goldens")
+
+
+def test_a_job_with_nothing_selected_writes_no_summary(tmp_path):
+    target = tmp_path / "job-summary"
+    replay.publish(plan(linux=[], windows=[], judges=["cli-argv"]), tmp_path / "public", target, only="goldens")
+    assert json.loads((tmp_path / "public/report.json").read_text())["groups"] == []
+    assert not target.exists()
+
+
 def test_golden_failure_remains_fatal_in_the_required_group(tmp_path, monkeypatch):
     mock_summary_replace(monkeypatch)
     monkeypatch.setattr(replay, "execute", lambda phase, *args, **kwargs: {
