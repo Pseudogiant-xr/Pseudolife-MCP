@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "candidate-harness",
+  "before": "bd0fa77d268d561a",
+  "fingerprint": "a529abf5282ce028",
+  "reason": "Adds a step that names the UTC ISO week (pwsh, about a second) and prefixes the rust-cache key with it; no build or test changes, so a typical run costs what it did. Each saving key now runs cold once a week. Cold runs measured on master push 43435071010 (2026-11-13; entries 9-10 days old restored as partial matches, so the target was wiped): Rust Windows 52.7 / Linux 25.9 min (override step 19.9 / 8.4), Candidate 17.6 / 7.9, Candidate harness 9.6 / 4.1, Fixtures 7.2 / 3.8, eval parity 17.7 / 14.9; all inside their job and step limits."
+}

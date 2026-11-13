@@ -281,9 +281,16 @@ jobs:
     # Nextest 9.6, no-default 7.4 and override builds 11.9 min, while master
     # run 41699732205 at the same code took 11.8, 8.7 and 15.9 min and was
     # cancelled at the 45-minute limit inside the override builds.
-    # Ordinary PRs may also replay touched goldens and frozen judges before
-    # batching; batches keep their existing separate parity jobs.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 90 || 60 }}
+    # Ordinary PRs may also replay touched goldens before batching (the
+    # frozen judges moved to the frozen-probes job); batches keep their
+    # existing separate parity jobs.
+    # 2026-11-14: the override step's limit went from 20 to 35 (see it),
+    # so each job limit is where that step starts plus 35, plus a margin.
+    # Hosted Windows reached it 34.5 min in on batch run 43418298157 (job
+    # 131866393314): 60 -> 75. Ordinary PRs reached it 62.3 and 67.8 min
+    # in (jobs 131684824680, 131776517042), less the 9.5 and 9.2 min of
+    # frozen probes that left the job: 52.8 and 58.6, so 90 -> 100.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 100 || 75 }}
     defaults:
       run:
         working-directory: rust
@@ -328,13 +335,19 @@ jobs:
         run: |
           python rust/daemon/harness/gen_schema_sql.py --check
           exit $LASTEXITCODE
+      # rust/cli_harness/test_cli_harness.py is the harness's offline
+      # self-test (no CLI runs; its source-mutant anchor check reads files
+      # only), run here so a pull request's own checks see it rather than
+      # only the batch's cli shard: 182 passed in 25 s on a Windows desktop,
+      # 0.5 min hosted (2026-11-14). Two of its mail-row cases import
+      # pseudolife_memory.coordination_adapter, which needs httpx.
       - name: Check port inventories and producer census
         working-directory: .
         shell: pwsh
         run: |
-          python -m pip install pytest pyyaml "psycopg[binary]" psutil
+          python -m pip install pytest pyyaml "psycopg[binary]" psutil httpx
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py rust/daemon/harness/test_w2e_recall_llm.py rust/daemon/harness/test_real_bank_timer_env.py rust/cli_harness/test_native_runtime_contract.py rust/daemon/harness/test_json_fidelity.py rust/daemon/harness/test_schema_clocks.py rust/daemon/harness/test_schema_generation.py rust/daemon/harness/test_schema_guards.py rust/daemon/harness/test_shadow_compare.py rust/daemon/harness/test_startup_ci.py rust/daemon/harness/test_startup_parts.py rust/daemon/harness/test_w2d_rerank_check.py rust/daemon/harness/test_w2d_trace_compare.py rust/cli_harness/test_update_row.py
+          python -m pytest -q rust/test_contract_inventory.py rust/test_producer_census.py rust/cli_harness/test_cli_harness.py rust/daemon/harness/test_w2e_lifecycle.py rust/daemon/harness/test_w2e_own_decisions.py rust/daemon/harness/test_w2e_recall_llm.py rust/daemon/harness/test_real_bank_timer_env.py rust/cli_harness/test_native_runtime_contract.py rust/daemon/harness/test_json_fidelity.py rust/daemon/harness/test_schema_clocks.py rust/daemon/harness/test_schema_generation.py rust/daemon/harness/test_schema_guards.py rust/daemon/harness/test_shadow_compare.py rust/daemon/harness/test_startup_ci.py rust/daemon/harness/test_startup_parts.py rust/daemon/harness/test_w2d_rerank_check.py rust/daemon/harness/test_w2d_trace_compare.py rust/cli_harness/test_update_row.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
@@ -399,8 +412,30 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
+      # A weekly key (2026-11-14, issue #1520): an exact hit never saves
+      # again, so master's entry stayed as saved on 2026-11-03 while master
+      # hit it for ten days; a pull request whose Cargo.lock or member
+      # Cargo.toml differs restores such an entry as a partial match, and
+      # rust-cache then deletes every target file older than a week
+      # (restore.ts, cleanTargetDir(target, [], true)), so on 2026-11-13
+      # those runs rebuilt everything (257 crates in the release override
+      # build). The ISO week in the prefix makes each week's first run per
+      # key cold and saves a fresh entry; every other run that week restores
+      # files under a week old. Every rust-cache step here uses the prefix,
+      # so shared keys still meet.
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           # A cold run whose later steps fail still saves what it compiled,
           # so the next run is not cold too. Three cold runs were cancelled
@@ -506,20 +541,7 @@ jobs:
           $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only goldens --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-goldens-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/goldens')
           exit $LASTEXITCODE
-      - name: Probe PR frozen judges for item-11 diagnostics
-        if: ${{ !cancelled() && steps.precheck.outputs.judges == 'true' && steps.precheck_runtime.outcome == 'success' && steps.precheck_candidate.outcome == 'success' }}
-        continue-on-error: true
-        working-directory: .
-        timeout-minutes: 20
-        shell: pwsh
-        env:
-          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
-          PRECHECK_PYTHON: ${{ steps.precheck_runtime.outputs.python }}
-        run: |
-          $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
-          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only judges --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-judges-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/judges')
-          exit $LASTEXITCODE
-      - name: Summarize PR goldens and report-only frozen probes
+      - name: Summarize PR golden replay
         if: always() && steps.precheck.outputs.enabled == 'true'
         continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
         working-directory: .
@@ -527,7 +549,7 @@ jobs:
         env:
           PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
         run: |
-          python rust/ci/pr_precheck_run.py --publish --plan-json $env:PRECHECK_PLAN --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public') --job-summary $env:GITHUB_STEP_SUMMARY
+          python rust/ci/pr_precheck_run.py --publish --only goldens --plan-json $env:PRECHECK_PLAN --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public') --job-summary $env:GITHUB_STEP_SUMMARY
           exit $LASTEXITCODE
       - name: Retain ordinary PR parity precheck case IDs
         if: always() && steps.precheck.outputs.enabled == 'true'
@@ -554,7 +576,17 @@ jobs:
         # Hosted windows: about 7 min cold on 2026-10-10/13 (release build
         # 5-6 min), 3.2 min warm since 2026-10-14. The cold release build
         # was still running 6m20s in when job 116323387861 was cancelled.
-        timeout-minutes: 20
+        # 2026-11-13, hosted Windows, 20 was no longer enough: run
+        # 43392760359 job 131776517042 took 2m47s for the debug test and
+        # 17m10s for the release test on a cold cache, then timed out as
+        # the mutants dev build started; run 43418298157 job 131866393314
+        # was still compiling the release test at 20 min; run 43364043883
+        # job 131684824680 timed out in the mutants dev build. Even a
+        # full cache hit (master run 43389967460 job 131853299319) took
+        # 2m20s, 9m38s and 1m11s (13.2 min): the release build compiles
+        # the daemon itself from scratch. Cold, about 21 min: 35 leaves a
+        # margin and the job limits above make room for it.
+        timeout-minutes: 35
         shell: pwsh
         run: |
           # Each build's output is printed only once it finishes; these lines
@@ -576,6 +608,173 @@ jobs:
           Write-Host "$(Get-Date -Format o) mutants dev build: start"
           cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
           exit $LASTEXITCODE
+
+  frozen-probes:
+    # The report-only frozen judge probes of an ordinary PR (item-11
+    # diagnostics), split from the Rust job on 2026-11-14 (issue #1519):
+    # twice on 2026-11-13 the hosted runner was lost about 52 minutes into
+    # the probe, past its 20-minute step limit and continue-on-error, and
+    # took Rust / ubuntu-latest with it (run 43364043883 job 131684824657,
+    # run 43392781569 job 131777314608; "The hosted runner lost
+    # communication with the server", no log kept). Here it runs on a
+    # runner of its own: no job needs it and continue-on-error keeps it out
+    # of the workflow's result, so neither the Rust jobs nor the Parity
+    # gates can fail with it. Its own check still turns red if its runner
+    # is lost. It builds the debug candidate the step probed rather than
+    # waiting for the Rust job's: that wait would put the whole Rust job on
+    # this job's critical path. It runs where the Rust job's precheck
+    # selection can run, and selects again from the same diff.
+    needs: scope
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && needs.scope.outputs.rust != 'false' }}
+    name: Frozen judge probes (report only) / ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The probe step took 10.0-15.8 min on hosted Linux (21 passes) and
+    # 6.7-9.6 min on hosted Windows (22 passes) in the ordinary-PR runs of
+    # 2026-11-11 to 2026-11-13, inside its own 20; its setup (checkout, the
+    # [dev,lite] runtime with CPU torch, the oracle binding) took about
+    # 1.5 min on Linux and 3 min on Windows inside the Rust job, and the
+    # candidate built in 20-40 s and 53-94 s there after the job's other
+    # debug builds. Here that build may start cold: rust-cache drops target
+    # files older than a week on a partial key match. 40 minutes covers
+    # setup, a cold build and the step's own 20.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Bind the selected Python interpreter for Rust fixtures
+        shell: pwsh
+        run: |
+          $selectedPython = python -c 'import sys; print(sys.executable)'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      # The packages the Rust job's earlier steps put in this interpreter,
+      # which the precheck runtime below sees through its system site.
+      - name: Install the probe's base Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install "mcp==2.2.0" pytest pyyaml "psycopg[binary]" psutil
+          exit $LASTEXITCODE
+      - name: Select ordinary PR parity prechecks
+        id: precheck
+        shell: pwsh
+        run: |
+          python rust/ci/pr_precheck.py --github-output $env:GITHUB_OUTPUT
+          exit $LASTEXITCODE
+      - name: Bind the event-selected Python oracle
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.scope.outputs.oracle_base }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      # Setup failures leave the probe "not run" in the summary, as they did
+      # in the Rust job, instead of turning this job red.
+      - name: Install the selected PR precheck dependencies
+        id: precheck_runtime
+        if: steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'pr-precheck-runtime'
+          python -m venv --system-site-packages $runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $runtime $(if ($IsWindows) { 'Scripts/python.exe' } else { 'bin/python' })
+          & $python -m pip install --no-compile "setuptools>=68" wheel httpx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install --no-compile --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install --no-compile -e ".[dev,lite]" "mcp==2.2.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "python=$python" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.precheck.outputs.judges == 'true'
+        with:
+          toolchain: 1.94.0
+      # The same toolchain set as the Rust job, so the cache key below is
+      # the Rust job's own.
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted' && (steps.precheck.outputs.judges == 'true')
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
+      # Read-only reuse of the Rust job's cache, as the fixtures job does:
+      # shared-key "rust" is the key rust-cache derives for the job id rust.
+      - uses: Swatinem/rust-cache@v2
+        if: steps.precheck.outputs.judges == 'true'
+        with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
+          workspaces: rust
+          shared-key: rust
+          save-if: false
+      - name: Build the selected PR precheck candidate
+        id: precheck_candidate
+        if: steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        working-directory: rust
+        run: cargo build --locked -p pseudolife-stdio -j 4
+      - name: Probe PR frozen judges for item-11 diagnostics
+        if: ${{ !cancelled() && steps.precheck.outputs.judges == 'true' && steps.precheck_runtime.outcome == 'success' && steps.precheck_candidate.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
+          PRECHECK_PYTHON: ${{ steps.precheck_runtime.outputs.python }}
+        run: |
+          $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only judges --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-judges-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/judges')
+          exit $LASTEXITCODE
+      - name: Summarize report-only frozen probes
+        if: always() && steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
+        run: |
+          python rust/ci/pr_precheck_run.py --publish --only judges --plan-json $env:PRECHECK_PLAN --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public') --job-summary $env:GITHUB_STEP_SUMMARY
+          exit $LASTEXITCODE
+      - name: Retain frozen probe case IDs
+        if: always() && steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-parity-precheck-judges-${{ runner.os }}
+          path: ${{ runner.temp }}/pr-precheck-public/**/*.json
+          if-no-files-found: warn
 
   fixtures:
     # The two debug daemon builds parity shards run, built beside the
@@ -629,14 +828,26 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       # Read-only reuse of the Rust job's cache, which already holds every
       # dev-profile dependency these builds compile: shared-key "rust" is
-      # the key rust-cache derives for the job id rust (v0-rust-rust-<os>-
-      # <arch>-<environment>-<lockfile>, src/config.ts). Saving nothing keeps
+      # the key rust-cache derives for the job id rust (v0-rust-<week>-rust-
+      # <os>-<arch>-<environment>-<lockfile>, src/config.ts), with the same
+      # week prefix. Saving nothing keeps
       # the repository's cache, at its 10 GB limit on 2026-10-24, from
       # holding another copy; a miss only makes this job compile cold.
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: rust
           save-if: false
@@ -706,8 +917,19 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: shim-release
           cache-on-failure: true
@@ -777,8 +999,19 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: shim-harness
           cache-on-failure: true
@@ -1000,6 +1233,16 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       # One key per suite. All suites shared one key: the first to save fixed
       # it, and on an exact hit no later suite's compile was ever saved.
       # Only the suites that compile cache (sent-YAML mutants in cli,
@@ -1009,6 +1252,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: matrix.suite == 'eval' || matrix.suite == 'cli'
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           key: ${{ matrix.suite }}
           cache-on-failure: true
@@ -1110,7 +1354,17 @@ jobs:
         # 15:00 in batch runs 42388348056 and 42400397903, and pytest alone
         # took 14:42 in dispatch run 42404612150 with only their native arm
         # on Windows. About 16.5 minutes with the rows, plus a third.
-        timeout-minutes: 22
+        # Self-hosted Windows: 35. Its last pass took 12.7 min (nightly run
+        # 42207145241, 2026-11-06); it has hit 22 every night since
+        # 2026-11-07. On 2026-11-13 (job 131853441705) pytest had 507 of
+        # 660 cases done at 22:00, about 5.4 s per update-transaction case
+        # against hosted's 2.5 s; the rest, the wrapper tests and the four
+        # golden rows (1.9 min hosted) put it near 32 min. Hosted Windows
+        # took 15.8 min that night, so it keeps 22 inside its 35-minute job.
+        # test_update_transactions.py is 12.9 of pytest's 13.9 hosted
+        # minutes (306 of 660 cases): next, split this step rather than
+        # raise it again.
+        timeout-minutes: ${{ runner.environment == 'self-hosted' && runner.os == 'Windows' && 35 || 22 }}
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
@@ -2018,11 +2272,22 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       # One shard per OS saves the shared mutant target's dependencies; all
       # 37 restore it. Every shard saved under this one key until 2026-10-24,
       # so each nightly that changed it raced 37 uploads for one entry.
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
           key: cli-source-mutants
           cache-on-failure: true
@@ -2066,8 +2331,15 @@ jobs:
       - name: CLI source mutants
         # Linux 2026-10-11: slowest eight-control selection 81s plus
         # 65s cold compile; six minutes is about twice that cold bound.
-        # Windows is provisional, with startup headroom inside 56m.
-        timeout-minutes: ${{ runner.os == 'Linux' && 6 || 30 }}
+        # Linux 2026-11-13 (nightly run 43414735492): move-0 caught all 8
+        # mutants at 6m05s and was killed at 6m06s (job 131853444061;
+        # 2m04s to the first verdict, then about 34s per mutant); audit-0,
+        # transfer-0/1, maintainer-1 and test_login-0 took 5m38s-5m43s,
+        # and the night before (run 43209050039) audit-1 and maintainer-0
+        # took 5m42s-5m46s. One limit covers every Linux shard: ten minutes.
+        # Windows is provisional, with startup headroom inside 56m; its
+        # slowest shards took 11m21s-11m52s on those two nights.
+        timeout-minutes: ${{ runner.os == 'Linux' && 10 || 30 }}
         shell: pwsh
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/source-mutants-target
@@ -2298,8 +2570,19 @@ jobs:
           }
           rustup toolchain list
           exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (the Rust job's
+      # rust-cache step says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
       - uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: stress-tests
           cache-on-failure: true

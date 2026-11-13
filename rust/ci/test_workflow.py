@@ -521,7 +521,8 @@ def test_shards_cover_both_systems_and_build_once():
     assert fetched["with"]["path"] == "rust/target/storage-test"
     # Read-only: the Rust job's own key, never saved from here.
     cache = next(step for step in fixtures["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
-    assert cache["with"] == {"workspaces": "rust", "shared-key": "rust", "save-if": False}
+    assert cache["with"] == {"prefix-key": WEEKLY_PREFIX, "workspaces": "rust", "shared-key": "rust",
+                             "save-if": False}
 
 
 def test_original_checks_remain_gated_on_the_expected_shards():
@@ -1562,7 +1563,12 @@ def test_binaryless_harness_units_run_on_both_platforms():
                      "rust/daemon/harness/test_startup_parts.py",
                      "rust/daemon/harness/test_w2d_rerank_check.py",
                      "rust/daemon/harness/test_w2d_trace_compare.py",
-                     "rust/cli_harness/test_update_row.py",), PYTEST_FILTERS)
+                     "rust/cli_harness/test_update_row.py",
+                     # The harness's offline self-test, source-mutant anchors
+                     # included: on a pull request's own checks, not only in
+                     # the batch's cli shard.
+                     "rust/cli_harness/test_cli_harness.py",), PYTEST_FILTERS)
+    assert "httpx" in step["run"]  # test_cli_harness.py's mail cases import it
 
 
 def test_rust_job_fits_a_cold_cache_and_bounds_the_override_builds():
@@ -1886,8 +1892,9 @@ def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
     assert set(jobs) >= {"rust", "fixtures", "candidate", "candidate-harness", "parity-checks", "source-mutants"}
     for name, job in jobs.items():
         cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
-        # The fixtures job only reads the Rust job's cache and never saves.
-        if name == "fixtures":
+        # The fixtures and frozen-probes jobs only read the Rust job's cache
+        # and never save.
+        if name in ("fixtures", "frozen-probes"):
             assert cache["with"]["save-if"] is False
             continue
         assert cache["with"]["cache-on-failure"] is True, name
@@ -1911,6 +1918,26 @@ def test_every_rust_cache_hashes_only_the_pinned_toolchain():
             expected += f" && ({cache['if']})"
         assert keep["if"] == expected, name
         assert keep["shell"] == "pwsh" and keep["run"] == steps_by_name("parity-checks")[TOOLCHAIN_STEP]["run"]
+
+
+WEEKLY_PREFIX = "v0-rust-${{ steps.cache_week.outputs.week }}"
+
+
+def test_every_rust_cache_key_starts_with_the_week():
+    # An exact hit never saves again and a partial match deletes target
+    # files older than a week (issue #1520): every entry is rebuilt weekly,
+    # and the readers name the same week as the jobs that save.
+    for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
+        for name, job in (yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            caches = [step for step in steps if str(step.get("uses", "")).startswith("Swatinem/rust-cache")]
+            for cache in caches:
+                assert cache["with"]["prefix-key"] == WEEKLY_PREFIX, (path.name, name)
+                week = [step for step in steps if step.get("id") == "cache_week"]
+                assert len(week) == 1 and steps.index(week[0]) < steps.index(cache), (path.name, name)
+                assert "if" not in week[0] and week[0]["shell"] == "pwsh", (path.name, name)
+                assert "[DateTime]::UtcNow" in week[0]["run"] and "ISOWeek]::GetYear" in week[0]["run"]
+                assert week[0]["run"] == steps_by_name("rust")["Name this week's Rust cache"]["run"]
 
 
 def steps_by_name(job):

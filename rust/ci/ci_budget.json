@@ -1,11 +1,11 @@
 {
   "rust.yml": {
     "limits": {
-      "jobs": 42,
-      "runner_minutes": 410,
+      "jobs": 44,
+      "runner_minutes": 447,
       "longest_job_minutes": 34,
       "critical_path_minutes": 33,
-      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8% 2026-11-05: startup consolidation keeps both logical parts and schema checks in one shard per OS, reducing the physical-job ceiling from 43 to 41; other limits are unchanged. 2026-11-06: one late hosted Linux-pool planner adds one brief job (0.5 min estimated) before the parity burst. The fallback ceiling stays fully hosted; enabling one measured Linux cli-startup shard removes its hosted allocation. Other limits are unchanged."
+      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8% 2026-11-05: startup consolidation keeps both logical parts and schema checks in one shard per OS, reducing the physical-job ceiling from 43 to 41; other limits are unchanged. 2026-11-06: one late hosted Linux-pool planner adds one brief job (0.5 min estimated) before the parity burst. The fallback ceiling stays fully hosted; enabling one measured Linux cli-startup shard removes its hosted allocation. Other limits are unchanged. 2026-11-14 (issue #1519): the report-only frozen judge probes leave the Rust job for a job of their own per OS, because a lost probe runner failed Rust / ubuntu-latest twice on 2026-11-13. Those two jobs run only on ordinary pull requests (scope full == false) and never in a batch, but this budget cannot tell, so they are counted: jobs 42 -> 44 and runner minutes 410 -> 447, exactly their estimated 19 + 18 minutes, which leaves a batch the same headroom as before. Longest job and critical path are unchanged."
     },
     "pip_no_compile": true,
     "needs_without_data": {
@@ -156,6 +156,14 @@
       "Parity / Linux pool plan": {
         "minutes": 0.5,
         "estimate": "One late hosted checkout plus two standard-library variable GETs, with no build or install. Estimate 0.5 min versus Scope 0.2 min in the budget; remeasure from the first two enabled master or batch runs. The routed Linux cli-startup shard measured hosted 9.70 and 11.98 min in runs 42114883218 and 42133608663; its self-hosted twins took 10.95 and 12.13 min."
+      },
+      "Frozen judge probes (report only) / ubuntu-latest": {
+        "minutes": 19.0,
+        "estimate": "Ordinary PRs only (scope full == 'false'); never runs in a batch. The same steps' times in Rust / ubuntu-latest on ordinary-PR runs: probe step median 13.7 min (21 passes, 10.0-15.8, runs 43056784506 to 43392781569, 2026-11-11 to 2026-11-13); setup about 1.5 min (job 131777314608: checkout, Python deps, runtime 23 s, toolchain and cache 29 s); the debug candidate build 20-40 s warm there, estimated 3 min cold here."
+      },
+      "Frozen judge probes (report only) / windows-latest": {
+        "minutes": 18.0,
+        "estimate": "Ordinary PRs only (scope full == 'false'); never runs in a batch. The same steps' times in Rust / windows-latest on ordinary-PR runs: probe step median 8.4 min (22 passes, 6.7-9.6, runs 43056784506 to 43392781569, 2026-11-11 to 2026-11-13); setup about 3 min (job 131776517042: checkout 18 s, Python deps, runtime 53 s, toolchain and cache 52 s); the debug candidate build 53-94 s warm there, estimated 6 min cold here."
       }
     },
     "profiles": {

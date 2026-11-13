@@ -44,9 +44,13 @@ Each change waits for hosted CI once, on its batch:
   remain in a separate runtime and reuse the existing wheel cache.
 
   Covered frozen judge groups are report-only probes using the existing
-  merge-base oracle and source pins. Independent comparisons continue after failures and retain their
+  merge-base oracle and source pins. They run in their own job, `Frozen
+  judge probes (report only)`, which builds the same debug candidate, so
+  a probe that loses its runner cannot fail `Rust` or a `Parity` gate; that
+  job's own check still turns red then. Independent comparisons continue after failures and retain their
   actual failed case IDs; setup/resource failures leave unrun phases
-  visible. The job summary and `pr-parity-precheck-<OS>` artifact contain each
+  visible. Each job's summary and its artifact (`pr-parity-precheck-<OS>`
+  for goldens, `pr-parity-precheck-judges-<OS>` for probes) contain each
   available failed identifier with its phase,
   with raw logs and captures kept outside that upload. Golden replay failures
   fail `Rust` and its `Parity` gate; frozen probe failures leave those checks
@@ -124,7 +128,15 @@ GitHub approvals, but `status` shows the review decision. It does check
 CI for a known failure: a labelled pull request whose current head
 has a failing check sits the batch out without a comment and keeps its
 label, and joins a later batch once a rerun of the failed job passes or a
-push replaces that head. Subject to the snapshot checkpoint below, pending,
+push replaces that head; the failing reason names the red checks. One
+check is never counted: `Frozen judge probes (report only) / <os>` from
+the `Rust shim` workflow (`REPORT_ONLY_CHECK` in `ops/integrate.py`), the
+report-only frozen probes, whose lost runner says nothing about the
+change. Its red, cancelled or pending result neither keeps a pull request
+out nor holds it back, and `status` shows a red one as "report-only red,
+not counted" so nobody mistakes it for a pass. Only that exact workflow
+and name prefix is exempt, and `merge` never needs the exemption: the
+probe does not run on a batch. Subject to the snapshot checkpoint below, pending,
 cancelled, green or no checks admit it: a run cancelled by hand or by a
 re-trigger gave no verdict. GitHub also reports a job that ran past its
 `timeout-minutes` as cancelled, so the script reads the annotations of

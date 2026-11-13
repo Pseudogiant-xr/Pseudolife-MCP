@@ -2881,3 +2881,111 @@ def test_the_rust_harness_run_fails_a_database_case_it_cannot_run():
     """A database case the local run skips would pass unseen: the printed
     command turns those skips into failures naming the cause and the fix."""
     assert "--require-databases" in integrate.RUST_HARNESS_COMMAND.split()
+
+
+# --- the report-only frozen-probe check (rust.yml's frozen-probes job) ---
+
+PROBE = "Frozen judge probes (report only) / ubuntu-latest"
+
+
+def _probe_world(world, *checks):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[
+        _actions_check("601", "Rust / ubuntu-latest", "success"), *checks])
+
+
+def test_a_member_whose_only_red_check_is_the_report_only_probe_is_admitted(world, capsys):
+    _probe_world(world, _actions_check("602", PROBE, "failure"))
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #11 " in out and FAILING not in out
+
+
+def test_the_probe_does_not_hide_another_red_check(world, capsys):
+    _probe_world(world, _actions_check("602", PROBE, "failure"),
+                 _actions_check("603", "Rust / windows-latest", "failure"))
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert FAILING in out and "Rust / windows-latest" in out and "merged #11 " not in out
+
+
+@pytest.mark.parametrize("check", [
+    _actions_check("602", "Frozen judge probes / ubuntu-latest", "failure"),
+    _actions_check("602", "frozen judge probes (report only) / ubuntu-latest", "failure"),
+    _actions_check("602", PROBE, "failure", workflow="CI"),
+    {"context": PROBE, "state": "FAILURE"},
+], ids=["no-report-only", "lower-case", "other-workflow", "status-context"])
+def test_a_red_check_that_only_resembles_the_probe_is_refused(world, capsys, check):
+    _probe_world(world, check)
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert FAILING in out and "merged #11 " not in out
+
+
+@pytest.mark.parametrize("listed", [False, True], ids=["run-only", "in-rollup"])
+def test_a_red_probe_beside_a_cancelled_gate_does_not_keep_a_member_out(world, capsys, listed):
+    # The gate failed only because jobs it needs were cancelled, and the
+    # report-only probe of the same run is red: the second read of the
+    # run's jobs must leave the probe out as the rollup read does.
+    sha10, sha11 = _gate_world(world, _RUN_1059 + [("510", PROBE, "failure")],
+                               rollup=list(GATES) + (["510"] if listed else []))
+
+    assert _publish(world) == 0, capsys.readouterr()
+
+    assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10, sha11]
+
+
+def test_a_job_that_only_resembles_the_probe_beside_a_cancelled_gate_keeps_a_member_out(
+        world, capsys):
+    _gate_world(world, _RUN_1059 + [("510", "Fixtures / ubuntu-latest", "failure"),
+                                    ("511", PROBE, "failure")], rollup=list(GATES))
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
+
+
+def test_status_shows_a_red_probe_as_not_counted(world, capsys):
+    _probe_world(world, _actions_check("602", PROBE, "failure"))
+
+    assert integrate.main(["status"]) == 0
+    lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()
+             if line.startswith("#")}
+
+    assert "CI green" in lines["#11"]
+    assert f"report-only red, not counted: {PROBE}" in lines["#11"]
+
+
+def test_the_report_only_exemption_names_exactly_the_frozen_probes_job():
+    """A rename of the job, or of the workflow, must not silently turn the
+    exemption off or leave it exempting nothing; and no other job may
+    produce a name it exempts."""
+    import yaml
+    workflow_name, prefix = integrate.REPORT_ONLY_CHECK
+    produced = {}
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_id, job in data["jobs"].items():
+            template = str(job.get("name") or job_id)
+            systems = ((job.get("strategy") or {}).get("matrix") or {}).get("os") or [""]
+            for system in systems if isinstance(systems, list) else [""]:
+                name = template.replace("${{ matrix.os }}", str(system))
+                if name.startswith(prefix):
+                    produced.setdefault((data["name"], job_id), []).append(name)
+    assert produced == {(workflow_name, "frozen-probes"): [
+        f"{prefix}ubuntu-latest", f"{prefix}windows-latest"]}
+    rust = yaml.safe_load(WORKFLOW)
+    probes = rust["jobs"]["frozen-probes"]
+    # Report-only by construction: nothing needs it and it cannot fail the run.
+    assert probes["continue-on-error"] is True
+    assert all("frozen-probes" not in (job.get("needs") or []) for job in rust["jobs"].values())
+    # It never runs in a batch, whose CI `merge` requires fully green.
+    assert "needs.scope.outputs.full == 'false'" in probes["if"]
