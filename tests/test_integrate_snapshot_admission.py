@@ -430,7 +430,8 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
     git("config", "user.name", "Test")
     git("config", "user.email", "test@example.com")
     git("config", "commit.gpgsign", "false")
-    for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py"):
+    # python_freeze.py: `build` refuses a master without the guard.
+    for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py", "rust/ci/python_freeze.py"):
         write(path, (ROOT / path).read_text(encoding="utf-8"))
     write("pseudolife_memory/doctor_cli.py", "old\n")
     write(remainder, "old\n")
@@ -475,6 +476,9 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
         # Member cost evidence has independent tests. Exercise admission
         # through the actual Git merge and frozen budget normalizer here.
         monkeypatch.setattr(integrate, "_budget_member_evidence", lambda *args: [])
+        # Its runtime edit is under pseudolife_memory/: since the Python
+        # freeze only a member carrying the exception label is admitted.
+        value.labels = ("freeze-exception",)
         plan = integrate.Plan("integrate/2026-11-06-batch-1", base)
         integrate._merge_members(plan, [value])
         if budget_conflict == "semantic":

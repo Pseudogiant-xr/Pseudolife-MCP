@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "scope",
+  "before": "1be8245c7953029b",
+  "fingerprint": "58e9c623d9cdbae6",
+  "reason": "Python freeze (2026-11-14): the dispatch-only oracle base freeze step left and a parity_any output was added; on a pull request, batch or push the job runs the same steps, so its 0.2 min holds."
+}
