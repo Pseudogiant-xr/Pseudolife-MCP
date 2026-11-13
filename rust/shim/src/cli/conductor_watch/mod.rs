@@ -485,8 +485,10 @@ fn stop(state: &Path) -> Res<Out> {
 /// the failure `error` stands for, `None` where it is not reproduced.
 /// POSIX: the C library's `strerror`, the text Rust prints before ` (os
 /// error N)`. Windows: Python's `open` reports the C runtime's errno for the
-/// Win32 code (`_dosmaperr`), then that errno's message; only the codes
-/// whose mapping is certain are listed.
+/// Win32 code (`_dosmaperr`), then that errno's message. Codes 3, 5 and 32
+/// were measured against CPython 3.11 (2026-11-13: a missing directory, a
+/// directory or hidden file, a file held with no sharing); 2, the rest of
+/// 19..=36 and 112 follow the C runtime's documented table. Others defer.
 fn strerror(error: &io::Error) -> Option<String> {
     let code = error.raw_os_error()?;
     if cfg!(windows) {

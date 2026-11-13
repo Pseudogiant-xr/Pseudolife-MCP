@@ -1,5 +1,6 @@
 //! `conductor-watch` before its lock, against texts the oracle printed
-//! (`conductor_watch_cli.py` at this branch's base). The decision tests
+//! (`conductor_watch_cli.py` with its conductor-watch defect fixes). The
+//! decision tests
 //! read no process environment: each passes its own variables and a state
 //! under a fresh temporary directory; a "running watcher" is this test
 //! process, dated by `process_start` as the oracle dates one.
