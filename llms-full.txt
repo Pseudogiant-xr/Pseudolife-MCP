@@ -9272,10 +9272,25 @@ checks it: POSIX extended headers (`path`, `linkpath`, `size`) and GNU long
 names are read, and numeric fields and the ustar prefix are read as tar
 reads them. Only plain files, links and directories are read (a member
 whose final name ends in `/` is a directory); any other member type, a
-link or directory with a non-zero size, a sparse member, a global extended
-header that sets a name or size, a damaged header anywhere, a `move.json`
-that is not a plain file, or anything but zeros after the end marker is
-refused, with the reason. A lite (embedded PostgreSQL) bank is
+link or directory with a non-zero size, a hard link to anything but a plain
+file before it, an extended header that repeats or empties a name or size,
+a GNU long name over 1 MiB, a top-level name starting with
+`.pseudolife-restore-` (restore's own staging directory), a sparse member,
+a global extended header that sets a name or size, a damaged header
+anywhere, a `move.json` that is not a plain file, or anything but zeros
+after the end marker is refused, with the reason.
+
+The state is not judged by its headers alone. Before the database is
+dropped, restore extracts the archive into a fresh staging directory in the
+daemon's `/data` volume (`/data/.pseudolife-restore-<run>`) and checks what
+`tar` actually wrote: only plain files, directories and symlinks; every
+symlink relative and leading, through the tree's own links, to a place
+inside it as it will be once it is `/data`; no file sharing its inode with
+anything outside it; nothing mounted inside it. If that check refuses, the
+staging directory is removed, the daemon starts again and nothing was
+changed. After the replay the old state (except `move.json`) is removed
+and the staged entries are renamed into place. `/data` itself keeps its
+own owner and mode. A lite (embedded PostgreSQL) bank is
 refused: restore replaces a Docker bank only, so install the Docker bank
 first ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)).
 Restore runs the `docker` it finds on an absolute `PATH` entry (never the
@@ -9284,7 +9299,9 @@ current directory), or the full path in `PSEUDOLIFE_DOCKER`.
 **If restore fails or is interrupted.** Each step runs only after the one
 before it succeeded, and the first failure or Ctrl-C ends the run there
 with the bank's state and the command to run next. Up to the database
-drop the bank is unchanged and the daemon is started again. Once the drop
+drop the bank is unchanged: a staging directory is removed before the
+daemon is started again (one a killed run left behind is removed by the
+next restore before its safety backup). Once the drop
 has begun the daemon is left stopped, so it never serves a half-restored
 bank, and the message names the recovery command for the safety backup
 (`pseudolife-mcp restore --backup-file <safety dump> --state-archive
@@ -9313,7 +9330,9 @@ each container on the selected backup destination's filesystem (the backup direc
 restore's safety directory), not the system temporary directory, and check
 the floor on that destination before writing anything there; the staging
 files are removed on success, failure or interruption. Restore also checks
-PostgreSQL's writable mounts and, when replacing state, the state mounts.
+PostgreSQL's writable mounts and, when replacing state, the state mounts;
+`/data` must have 8 GiB free beyond what the state archive unpacks to,
+since the new state is extracted beside the old one.
 A low-space refusal says
 `less than 8 GiB is free on <location>; free at least 8 GiB there, then retry. Nothing was changed`.
 Free space on the named filesystem and rerun the same command. These

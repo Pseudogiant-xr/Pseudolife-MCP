@@ -14,6 +14,11 @@
 //! header that sets a name or size, Solaris extended headers) are refused
 //! with their own reason. A deflate error, a link graph too deep to walk and
 //! two long names or two long links for one member are refusals too.
+//!
+//! The header check refuses early, before anything is stopped, but it is a
+//! prediction of what tar will do. Restore also judges the outcome:
+//! [`judge_extracted`] reads the listing of the tree tar actually wrote into
+//! the staging directory, before anything in `/data` is replaced.
 use std::{collections::HashMap, path::Path};
 
 use super::gzip::{self, Stop};

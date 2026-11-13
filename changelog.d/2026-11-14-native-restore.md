@@ -28,9 +28,19 @@
   read as tar reads them, and a member ending in `/` is a directory by its
   final name, while only the member types a state archive holds are read
   (plain files, links, directories); any other type, a link or directory
-  with a non-zero size, a sparse member, a global extended header that sets
-  a name or size, a damaged header anywhere, a `move.json` that is not a
+  with a non-zero size, a hard link to anything but a plain file before
+  it, an extended header that repeats or empties a name or size, a GNU long
+  name over 1 MiB, a sparse member, a global extended header that sets a
+  name or size, a damaged header anywhere, a `move.json` that is not a
   plain file and data after the end marker are refused with their reason.
+- The state is also judged by what `tar` actually extracts: before the
+  database is dropped, the archive is extracted into a staging directory
+  in `/data` and the extracted tree is checked (only plain files,
+  directories and relative symlinks that stay inside it, no inode shared
+  with anything outside it). A refusal there, or a failure or Ctrl-C while
+  staging, leaves the bank unchanged; after the replay the staged tree is
+  renamed into place. `/data` must have 8 GiB free beyond the unpacked
+  archive.
 - A lite bank is refused with a line naming the Docker install; restore
   runs `docker` only from absolute `PATH` entries or `PSEUDOLIFE_DOCKER`'s
   full path; the restarted daemon gets up to ten minutes to report ready.
