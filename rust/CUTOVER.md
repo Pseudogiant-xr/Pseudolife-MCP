@@ -17,7 +17,7 @@ deploy or a live-bank change.
 |---|---|---|
 | 2026-11-14 | The bar is that the Rust system works and does what its users need. Matching Python exactly is no longer required. | New Rust work carries its own Rust tests. No new differential rows, source mutants or two-OS recordings against Python. The committed goldens stay as regression snapshots of the Rust behaviour and are re-recorded from Rust when behaviour changes on purpose. |
 | 2026-11-14 | Python is hard-frozen. | Nothing under `pseudolife_memory/` changes again, except the Console build output in `pseudolife_memory/web/static/` until it moves. A defect is fixed in Rust only. The one exception is the already finished program-lookup security fix, which lands as the last Python change. This replaces the soft freeze of 2026-10-23 (D10). |
-| 2026-11-14 | The lite tier is dropped. | Embedded PostgreSQL and file mode are not ported. A lite bank gets a refusal that names the Docker install. This reverses the lite half of D1. |
+| 2026-11-14 | The lite tier is dropped. | The embedded PostgreSQL port is not finished and file mode is not ported. A lite bank gets a refusal that names the Docker install, and the partial lite code (`rust/shared/embedded_pg.rs`, `pg_runtime.rs`, `native_provision.rs`) goes with Python. This reverses the lite half of D1. |
 | 2026-11-14 | Banks older than the Rust daemon can open step through 0.23.x. | A bank below schema 57, or one that still keeps counters in `weights.pt` or documents in Chroma, is first updated to 0.23.1, whose Python daemon imports them. Those imports are not ported. |
 | 2026-11-14 | `move` and `tunnel` are rebuilt in Rust as features, after the native client ships. | Until then the native command refuses plainly. Everything else unported is finished or retired first (below). |
 | 2026-11-14 | Two CI trims: the Python lanes do not re-run on the master push of a Rust-only batch, and the source mutants run weekly, not nightly. | Folded into the CI change under "Stop comparing with Python". |
@@ -31,14 +31,15 @@ deploy or a live-bank change.
 | Daemon on a host that chose Python, or whose bank the Rust daemon cannot open yet | `ghcr.io/…/pseudolife-daemon` (`ops/Dockerfile.daemon`). | Yes |
 | Stdio shim and `pseudolife-mcp` on the user's machine | A Python virtual environment the installers build with `ops/shim_runtime.py`; every client registration points at its launcher. | Yes |
 | Installers (`ops/install.sh`, `ops/install.ps1`) | Shell and PowerShell that call Python helpers: `client_credentials.py` (the bearer token), `installer_state.py`, `installer_engine.py`, `preflight.py`, the Codex setup scripts and the Claude Desktop registrar. | Yes |
-| `pseudolife-mcp update` | The installed Python updater; its client step installs a shim runtime from PyPI. The native updater runs only when asked for or when no Python is found. | Yes |
-| Native client (`rust/shim`, binary `pseudolife-stdio`, installed as `pseudolife-mcp`) | Opt-in through `pseudolife-mcp runtime install --archive`. `release.yml` builds archives for five targets but publishes them only when the repository variable `PSEUDOLIFE_PUBLISH_RUST_ASSETS` is `true`; it is unset, and release 0.23.1 carries no assets. | Not installed |
+| `pseudolife-mcp update` | The installed Python updater; its client step installs a shim runtime from PyPI. From a checkout, the wrappers (`ops/update.sh`, `update.ps1`, `update.py`) use the native updater only with `--native` or `PSEUDOLIFE_NATIVE_UPDATE=1`, or when no Python 3.10 or newer is found. | Yes |
+| Native client (`rust/shim`, binary `pseudolife-stdio`, installed as `pseudolife-mcp`) | Opt-in through `pseudolife-mcp runtime install --archive`. On a release, `release.yml`'s native-archive job (five targets) runs and publishes only when the repository variable `PSEUDOLIFE_PUBLISH_RUST_ASSETS` is `true`; it is unset, and release 0.23.1 carries no assets. A manual dispatch builds the archives without publishing. | Not installed |
 | Plugin hooks | bash and PowerShell scripts (`plugin/hooks/`). | No |
 | Published packages | The PyPI wheel, the Python daemon image, the PostgreSQL image, the Rust daemon image, and an MCP registry entry (`server.json`) that points at PyPI. | PyPI, the Python image and the registry entry |
 
 The native `pseudolife-mcp` never falls back to Python. A shape it has not
-ported prints `mode '<mode>' is deferred in this candidate` and exits 1
-(`rust/shim/src/cli.rs`, `dispatch`). The day the native client is what the
+ported prints a deferral on stderr, usually `pseudolife-stdio: mode '<mode>'
+is deferred in this candidate`, and exits 1 (`rust/shim/src/cli.rs`,
+`dispatch`). The day the native client is what the
 installers register, each such shape is a dead end for the user, so each one
 below is either finished or turned into a refusal that says the true cause and
 the fix.
@@ -65,13 +66,15 @@ the fix.
 |---|---|---|
 | `restore` | The checks before any change. | The restore itself: stop the daemon, safety backup, drop, replay, state archive, restart; the confirmation prompt. |
 | `conductor-watch` (`delegate-watch`) | Help, `--stop`, the setup refusals. | The watch loop and `--detach`. |
-| `connect` | Most shapes. | Pairing codes, the Codex configuration, the interactive prompts. |
+| `connect` | Re-pointing existing JSON-file registrations (Claude Code, Claude Desktop, Gemini CLI). | Pairing codes, the Codex configuration, the interactive prompts, a Windows user-scope daemon URL, the unattended-update schedule. |
+| `console` | Every shape except the browser launchers it does not reproduce. | The macOS default launcher and the other launchers Python's `webbrowser` knows. |
+| `serve` | Only a bounded HTTP candidate used in maintainer testing (`sent_serve.rs`), not the daemon. | A refusal that names the Docker install; the daemon is the separate `pseudolife-daemon` binary. |
 | `expose` | Nothing. | The whole command; done on a branch with the program-lookup fix. |
 | `move` | The refusals before any change. | Rebuilt later; until then a plain refusal. |
-| `tunnel` | Status and a pending-only update. | Rebuilt later; until then a plain refusal. |
+| `tunnel` | Status, a pending-only update, and the refusals of `verify` and `setup`. | Rebuilt later; until then a plain refusal. |
 | `embedded` | Nothing. | Retired with file mode; a plain refusal. |
 | `backup`, `export`, `import`, `invite`, `maintainer`, `lease`, `board-audit` on a lite bank | A refusal or a deferral. | One refusal that names the Docker install. |
-| Edge shapes in `doctor`, `console`, `connect`, `invite`, `pair`, `board-audit` | Several hundred `Defer` sites that reproduce Python's handling of unusual input. | A sensible native answer; no reproduction of Python quirks. |
+| Edge shapes in `doctor`, `console`, `connect`, `invite`, `pair`, `board-audit`, `export`, `import` | Several hundred `Defer` sites that reproduce Python's handling of unusual input. | A sensible native answer; no reproduction of Python quirks. |
 
 The release that makes the native client the default is accepted on installed
 proof, not on parity: a fresh install, an update from the previous release, a
@@ -81,12 +84,15 @@ macOS.
 ### 2. Stop comparing with Python
 
 CI spends most of its hosted time comparing Rust with a live Python oracle or
-testing Python code that can no longer change. Measured from runs of 13 and 14
-November 2026 (job durations, not billed minutes): an ordinary pull request
-about 140 to 156 hosted minutes, a Rust-only batch about 445 (about 355 of
-them in the parity shards), a master push about 230.
+testing Python code that can no longer change. Summed job durations (not
+billed minutes) from single runs of 13 and 14 November 2026: an ordinary pull
+request about 140 to 156 hosted minutes (runs 43433514840, 43392781569,
+43392771163), a Rust-only batch about 445, about 355 of them in the parity
+shards (run 43449162029), and a master push about 230 (runs 43456549508 and
+43456549451).
 
-1. A check fails an ordinary pull request that changes `pseudolife_memory/`.
+1. A check fails an ordinary pull request that changes `pseudolife_memory/`,
+   other than the Console build output in `pseudolife_memory/web/static/`.
 2. No workflow builds or runs a Python oracle: the judges suite, the frozen
    judge probes, the live arm of each parity shard, `cli-live`, the nightly
    body evidence and the wait-mail capture stop. Golden replays stay.
@@ -102,14 +108,16 @@ What remains after that is the Rust build and test, mostly on Windows.
 ### 3. Delete Python
 
 1. The Console build output moves out of `pseudolife_memory/web/static`
-   (`frontend/vite.config.ts` writes it; `rust/daemon/src/static_files.rs`
-   and `ops/Dockerfile.daemon-rust` read it).
+   (`frontend/vite.config.ts` writes it; `ops/Dockerfile.daemon-rust`,
+   `ops/Dockerfile.daemon` and the static-file tests in
+   `rust/daemon/src/static_files.rs` read it).
 2. Whatever still reads `pseudolife_memory/storage/schema.py` (the schema
    generator, the native updater's engine switch) reads a Rust source.
 3. A last PyPI release carries a deprecation note; the Python daemon image
    stops publishing; `server.json` points at what the native install offers.
 4. `pseudolife_memory/`, the tests that only test it, the oracle harness code
-   under `rust/` and `evals/rust_port/`, and the Python lanes are deleted.
+   under `rust/` and `evals/rust_port/`, the partial lite-tier code under
+   `rust/shared/`, and the Python lanes are deleted.
 5. `evals/` is decided separately: about half of its scripts import the
    package and would have to drive the Rust daemon over HTTP.
 6. Follow-ups that waited for this: #1357 (regenerate the Unicode tables).
@@ -117,9 +125,10 @@ What remains after that is the Rust build and test, mostly on Windows.
 ## Decision record (October and November 2026)
 
 These are the decisions the October plan rested on, with their outcome. Code
-comments and parity rows cite them by ID. The full text of each, and of the
-batch labels B1 to B17 that some comments cite, is in this file's history
-(`git log -- rust/CUTOVER.md`).
+comments and parity rows cite them by ID. The full text of each, the batch
+labels B1 to B17, and the sections older comments cite by name ("Ordered
+plan", "Maintainer decisions and gates", "Recovery", "What sets the pace")
+are in the previous version of this file: `git show 201311de3:rust/CUTOVER.md`.
 
 | ID | Question | Outcome |
 |---|---|---|
@@ -130,7 +139,7 @@ batch labels B1 to B17 that some comments cite, is in this file's history
 | D5 | Existing Chroma documents. | Migrated once into the `reference_chunks` table by the Python daemon; Chroma is not in the Rust daemon. |
 | D6, D11 | Evidence bar for a ported surface. | A published nightly differential run. Superseded 2026-11-14: the bar is that it works. |
 | D7 | Declared divergences from Python. | Triaged 2026-11-07; the register under `rust/daemon/divergences/` is now a record, not a gate. |
-| D8 | Operator-only CLI modes. | `coordination-recovery` ported; the rest are in "What is left". |
+| D8 | Operator-only CLI modes. | `coordination-recovery` and `maintainer setup` ported; `conductor-watch` (`delegate-watch`) is in "What is left". |
 | 2026-10-19, Option B | Graph insight: port NetworkX's Louvain or not. | The Rust daemon computes communities and sampled betweenness with its own deterministic algorithm; compared structurally with Python, not byte for byte. |
 | D9 (Proposal A, batch B2r) | Console routes no Console code calls. | Five retired and answered with a declared 501 by the Rust daemon (`routes/console.rs`, `D9_RETIRED`); three episode routes ported. |
 | D10 | Soft Python freeze. | Replaced by the hard freeze of 2026-11-14. |

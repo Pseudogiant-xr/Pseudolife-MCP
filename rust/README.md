@@ -9,9 +9,9 @@ where the move from Python stands and what is left.
 |---|---|
 | `daemon/` | `pseudolife-daemon`, the HTTP service that owns a bank: the MCP tools, the Console and hook routes, the board, dreams and background duties. Published as `pseudolife-daemon-rust` and the default engine for Docker installs since 0.23.0. |
 | `shim/` | The package `pseudolife-stdio`: the stdio MCP bridge to the daemon and the native `pseudolife-mcp` command. The Rust daemon image ships it as `pseudolife-mcp`; on a user's machine it is opt-in (`pseudolife-mcp runtime install`). |
-| `shared/` | Modules both crates include: PostgreSQL runtime and TLS helpers, Windows file-security checks, float formatting. |
-| `cli_harness/`, `daemon/harness/`, `extractor_harness/` | Python harnesses that run the Rust binaries and compare them with committed recordings (goldens). They were built to compare with the Python implementation, which is frozen since 2026-11-14; the goldens now serve as regression snapshots. |
-| `parity/`, `daemon/divergences/`, [PORT-STATE.md](PORT-STATE.md), [PORTING.md](PORTING.md), [PARITY.md](PARITY.md) | The register of what was ported and where Rust knowingly differs from Python. A record of the port, no longer an acceptance gate. |
+| `shared/` | Modules both crates include: PostgreSQL runtime and TLS helpers, Windows file-security checks, float formatting, and the unfinished embedded-PostgreSQL (lite tier) lifecycle, which is being removed. |
+| `cli_harness/`, `daemon/harness/`, `extractor_harness/` | Python harnesses that run the Rust binaries and compare them with the live Python implementation and with committed recordings (goldens). Python is frozen since 2026-11-14; once CI stops the live comparisons ([CUTOVER.md](CUTOVER.md), "Stop comparing with Python"), the goldens remain as regression snapshots. |
+| `parity/`, `daemon/divergences/`, [PORT-STATE.md](PORT-STATE.md), [PORTING.md](PORTING.md), [PARITY.md](PARITY.md) | The register of what was ported and where Rust knowingly differs from Python. Since the 2026-11-14 ruling that matching Python is no longer the bar, it is a record of the port; the CI rules that still enforce it are being removed. |
 | `ci/` | Scripts and tests behind `.github/workflows/rust.yml`: scope, budget, stress and timing. |
 
 ## Building
@@ -26,9 +26,10 @@ cargo clippy --locked --all-targets --jobs 4 -- -D warnings
 cargo nextest run --locked --jobs 4
 ```
 
-Releases build `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`,
-`aarch64-unknown-linux-gnu` and both macOS targets. Each platform needs its
-target toolchain and linker; a Windows build alone is no Linux evidence.
+`release.yml`'s native-archive job builds `x86_64-pc-windows-msvc`,
+`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` and both macOS
+targets. Each platform needs its target toolchain and linker; a Windows build
+alone is no Linux evidence.
 
 ## Dependencies worth knowing
 
@@ -40,16 +41,13 @@ JSON member order. `Cargo.lock` records the resolved versions.
 
 ## Unsafe code
 
-The crates deny unsafe Rust by default. Platform modules have narrow,
-documented exceptions: `credentials::windows_security` inspects the owner and
-protected DACL through the live token-file handle, validates ACE/SID bounds
-and keeps OS allocations under RAII until inspection finishes;
-`lifecycle::posix_session` uses an allocation-free, lock-free `setsid` call in
-the child before exec; `board::doorbell_windows` owns native job, process and
-thread handles for suspended adoption and cleanup; `board::doorbell_posix`
-registers an execve-only callback after session setup, with strings and
-pointer tables prepared before fork. Their exact invariants are recorded in
-[PORTING.md](PORTING.md). Review any change to them as security-sensitive.
+The crates deny unsafe Rust by default and allow it only in commented,
+module-local exceptions (`#[allow(unsafe_code)]`) in the shim, the daemon and
+`shared/`: Windows security descriptors, job objects and process handles,
+POSIX session and exec setup, file locks, and the daemon's PDFium, BLAS and
+heap-trim calls. [PORTING.md](PORTING.md), "Unsafe code and dependencies",
+records the main ones and their invariants. Review any change to an
+`allow(unsafe_code)` site as security-sensitive.
 
 ## The shim at runtime
 
@@ -61,5 +59,6 @@ interpreter or a `PSEUDOLIFE_MCP_SERVE_COMMAND` JSON argv; with neither, the
 shim waits for a daemon and says so on stderr.
 
 Every other mode is a `pseudolife-mcp` command. A command or shape that is not
-ported prints `mode '<mode>' is deferred in this candidate` and exits 1; it
-never runs Python. [CUTOVER.md](CUTOVER.md) lists the ones left.
+ported prints a deferral on stderr, usually `pseudolife-stdio: mode '<mode>'
+is deferred in this candidate`, and exits 1; it never runs Python.
+[CUTOVER.md](CUTOVER.md) lists the ones left.
