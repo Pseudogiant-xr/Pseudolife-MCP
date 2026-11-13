@@ -11,7 +11,7 @@ before it starts the process, and ``run`` does both for a direct start.
 set and inside that directory, every XDG_* variable and every other variable
 that redirects writes (``REDIRECTS``) that is set is inside it, and the
 directory itself is inside the system temporary directory. Git Bash paths
-(``/c/...``) are read as the Windows paths they name. A missing
+(``/c/...``, ``/tmp/...``) are read as the Windows paths they name. A missing
 LOCALAPPDATA or APPDATA is refused too: on Windows a program that finds it
 unset asks the system for the real folder instead.
 """
@@ -38,6 +38,9 @@ def _resolved(value: str | os.PathLike[str]) -> Path:
     # Git Bash spells C:\x as /c/x; read it as the Windows path it names.
     if os.name == "nt" and len(text) > 2 and text[0] == "/" and text[1].isalpha() and text[2] == "/":
         text = f"{text[1]}:{text[2:]}"
+    elif os.name == "nt" and (text == "/tmp" or text.startswith("/tmp/")):
+        # Git Bash's /tmp is the Windows temporary directory.
+        text = tempfile.gettempdir() + text[4:]
     return Path(os.path.realpath(text))
 
 

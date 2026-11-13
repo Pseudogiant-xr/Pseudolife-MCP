@@ -469,7 +469,12 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     if engine == "rust-checkout" {
         // A rerun would rebuild it from the checkout with none of update's
         // backup, rollback or health gate: checkout mode manages this daemon.
-        let repo = repo.display();
+        // As Python's str(Path(...)) prints it: Windows separators there.
+        let repo = if cfg!(windows) {
+            repo.display().to_string().replace('/', "\\")
+        } else {
+            repo.display().to_string()
+        };
         return Err(refusal(format!(
             "This host runs a Rust daemon selected by checkout-mode update, which the installer does not rebuild. Update it with pseudolife-mcp update --checkout {repo}, or switch it back with pseudolife-mcp update --engine python --checkout {repo} and rerun the installer. Nothing was started."
         )));

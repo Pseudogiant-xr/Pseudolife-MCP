@@ -631,7 +631,7 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
     ];
     if allowed.iter().any(|(key, options)| {
         selected
-            .get(*key)
+            .get(key)
             .is_some_and(|v| !options.contains(&v.as_str()))
     }) {
         return refuse(
@@ -658,7 +658,7 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
     let mut result: Vec<(String, String)> = CHOICES
         .iter()
         .filter(|k| **k != "GENERIC_TARGET_B64")
-        .filter_map(|k| selected.get(*k).map(|v| ((*k).to_owned(), v.clone())))
+        .filter_map(|k| selected.get(k).map(|v| ((*k).to_owned(), v.clone())))
         .collect();
     if let Some(encoded) = selected.get("GENERIC_TARGET_B64").filter(|v| !v.is_empty()) {
         let invalid = || {
