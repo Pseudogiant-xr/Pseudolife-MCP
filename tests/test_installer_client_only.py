@@ -23,6 +23,8 @@ import threading
 
 import pytest
 
+from tests import native_client_stub as native_stub
+
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_client_install_ux import _heredoc_payload, _marker_block
 from tests.test_installer_existing_upgrade import (
@@ -1012,10 +1014,11 @@ def test_codex_credentials_come_from_the_token_file_and_the_remote_url(bash, tmp
         f"repo='{shell.path(ROOT)}'\nenv_file='{shell.path(env_file)}'\n"
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
         "CLIENTS=codex CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD=''\n"
-        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + stages
+        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n" + stages
         + "\nprintf 'FILE=%s\\nURL=%s\\n' \"$CODEX_CREDENTIAL_FILE\" \"$CODEX_CREDENTIAL_URL\"\n",
         strict="set -euo pipefail",
         extra_env={"CAPTURED": str(captured), "FIXTURE_URL": REMOTE,
+                   "FAKE_LAUNCHER": _bash_fixture_path(bash, tmp_path / "native" / "pseudolife-mcp", shell.env),
                    "FIXTURE_PYTHON": _bash_fixture_path(bash, Path(sys.executable),
                                                         shell.env)})
     assert proc.returncode == 0, proc.stderr
@@ -1038,7 +1041,8 @@ CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_c
 def _codex_wiring(shell: _Shell, *, python_ok: bool = True, cred: str | None = None,
                   cred_exit: int = 0, pipx_exit: int = 0, existing: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with stub
-    python, pipx and codex. Returns the run and the codex calls."""
+    python, the native client (``pipx_exit`` is its install result) and
+    codex. Returns the run and the codex calls."""
     token = _token(shell)
     installed = shell.tmp / "installed-bin"
     installed.mkdir()
@@ -1055,10 +1059,6 @@ def _codex_wiring(shell: _Shell, *, python_ok: bool = True, cred: str | None = N
               "    printf '{\"status\":\"ready\",\"source\":\"manual\","
               "\"instructions\":\"covered-by-hooks\",\"recovery\":null}\\n' ;;\n"
               "esac\n")
-    _stub(shell.bin / "pipx",
-          "if [ \"$1\" = environment ]; then\n"
-          "  [ \"$3\" = PIPX_BIN_DIR ] && printf '%s\\n' \"$FAKE_INSTALL_BIN\"; exit 0; fi\n"
-          "exit \"$FAKE_PIPX_EXIT\"\n")
     _stub(shell.bin / "codex",
           "printf 'codex|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "if [ \"$1 $2\" = 'mcp get' ]; then\n"
@@ -1073,16 +1073,17 @@ def _codex_wiring(shell: _Shell, *, python_ok: bool = True, cred: str | None = N
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
         "CLIENTS=codex CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD=''\n"
         "AGENTS_FILE='' TRANSPORT=shim\n"
-        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + stages
+        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n" + stages
         + "\nprintf 'MCP_CODEX=%s\\n' \"$MCP_CODEX\"\n",
         strict="set -euo pipefail",
         extra_env={"FAKE_PY_OK": "1" if python_ok else "0",
                    "FIXTURE_PYTHON": _bash_fixture_path(shell.bash, Path(sys.executable),
                                                         shell.env),
                    "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
-                   "FAKE_CRED_EXIT": str(cred_exit), "FAKE_PIPX_EXIT": str(pipx_exit),
+                   "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(pipx_exit),
                    "FAKE_EXISTING": existing,
-                   "FAKE_INSTALL_BIN": _bash_fixture_path(shell.bash, installed, shell.env)})
+                   "FAKE_LAUNCHER": _bash_fixture_path(shell.bash, installed / "pseudolife-mcp", shell.env),
+                   "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in shell.logged()
             if call.startswith("codex|mcp add") and "--help" not in call]
     return proc, adds
@@ -1292,7 +1293,7 @@ def _copy_repo(tmp_path: Path) -> Path:
     wrote ops/.env or the compose override must not touch the real tree."""
     repo = tmp_path / "repo"
     for rel in ("ops/install.sh", "ops/install-hook.sh", "ops/client_credentials.py",
-                "ops/.env.example", "examples/CLAUDE.memory.md"):
+                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     (repo / "ops" / "install.sh").chmod(0o755)
@@ -1308,18 +1309,17 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     repo = _copy_repo(tmp_path)
     installed = tmp_path / "installed-bin"
     installed.mkdir()
-    _stub(installed / "pseudolife-mcp",
-          "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-          "if [ \"$1\" = connect ]; then\n"
-          "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
-          "exit 0\n")
+    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    release_env = native_stub.write_release(
+        tmp_path / "release", version,
+        "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+        "if [ \"$1\" = connect ]; then\n"
+        "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+        "exit 0\n")
+    release_env["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] = shell.path(tmp_path / "release")
     python = shell.path(sys.executable)
     for name in ("python3", "python"):
         _stub(shell.bin / name, f"exec '{python}' \"$@\"\n")
-    _stub(shell.bin / "pipx",
-          "printf 'pipx|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-          "if [ \"$1\" = environment ] && [ \"$3\" = PIPX_BIN_DIR ]; then "
-          "printf '%s\\n' \"$FAKE_INSTALL_BIN\"; fi\nexit 0\n")
     _stub(shell.bin / "claude",
           "printf 'claude|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "if [ \"$1 $2\" = 'mcp get' ]; then exit 1; fi\n"
@@ -1340,7 +1340,9 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
         f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
         "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
         extra_env={"FAKE_HEALTH": HEALTH_ON,
-                   "FAKE_INSTALL_BIN": _bash_fixture_path(bash, installed, shell.env),
+                   **release_env,
+                   "PSEUDOLIFE_SHIM_RUNTIMES": shell.path(installed / "runtimes"),
+                   "PSEUDOLIFE_SHIM_LAUNCHER": shell.path(installed / "pseudolife-mcp"),
                    "PYTHONPATH": str(ROOT),
                    # The installer's own environment carries an older credential.
                    "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})

@@ -21,6 +21,8 @@ import threading
 
 import pytest
 
+from tests import native_client_stub as native_stub
+
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
 from tests.test_installer_existing_upgrade import _between, _fixture_env
@@ -922,6 +924,11 @@ function global:fake-codex-python {{
         return '{{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}}'
     }}
 }}
+$env:FAKE_LAUNCHER = '{_q(tmp_path / "native" / ("pseudolife-mcp.cmd" if os.name == "nt" else "pseudolife-mcp"))}'
+$env:FAKE_LAUNCHER_SH = @'
+{native_stub.LAUNCHER_SH}
+'@
+{native_stub.POWERSHELL}
 {stages}
 Write-Output "URL=$codexCredentialUrl"
 """
@@ -953,12 +960,15 @@ CODEX_STUB = """$global:LASTEXITCODE = 0
 def _codex_wiring(ps: _PowerShell, *, python_ok: bool = True, cred: str | None = None,
                   cred_exit: int = 0, pipx_exit: int = 0, existing: str = ""):
     """Sections 9 to 11 for a Codex-only client-only install, with stub
-    python, pipx and codex commands. Returns the run and the codex adds."""
+    python, native client (``pipx_exit`` is its install result) and codex
+    commands. Returns the run and the codex adds."""
     token = _token(ps)
     installed = ps.tmp / "installed-bin"
     installed.mkdir()
-    (installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")).write_text(
-        "placeholder\n", encoding="utf-8")
+    launcher = installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
+    launcher.write_text("placeholder\n", encoding="utf-8")
+    if "FAKE_INSTALL_BIN" in ps.env:  # a test's own launcher that answers connect
+        launcher = Path(ps.env["FAKE_INSTALL_BIN"]) / "pseudolife-mcp.ps1"
     stages = re.search(r"(?ms)^# -- 9\. session lifecycle hooks[^\n]*\n(.*?)^# -- 12\. health",
                        (ROOT / INSTALL).read_text(encoding="utf-8"))[1]
     body = f"""$env:PATH = '{_q(ps.tmp)}'
@@ -989,15 +999,7 @@ function global:fake-codex-python {{
         return '{{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}}'
     }}
 }}
-function global:pipx {{
-    $callArgs = @($args)
-    $global:LASTEXITCODE = 0
-    if ($callArgs[0] -eq 'environment') {{
-        if ($callArgs[2] -eq 'PIPX_BIN_DIR') {{ return '{_q(installed)}' }}
-        return
-    }}
-    $global:LASTEXITCODE = [int]$env:FAKE_PIPX_EXIT
-}}
+{native_stub.POWERSHELL}
 {ps.stub_function("codex", CODEX_STUB)}
 {stages}
 Write-Output ("MCP_CODEX=" + $mcpState['codex'])
@@ -1005,8 +1007,8 @@ Write-Output ("MCP_CODEX=" + $mcpState['codex'])
     proc = ps.run(body, extra_env={
         "FAKE_PY_OK": "1" if python_ok else "0",
         "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
-        "FAKE_CRED_EXIT": str(cred_exit), "FAKE_PIPX_EXIT": str(pipx_exit),
-        "FAKE_EXISTING": existing})
+        "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(pipx_exit),
+        "FAKE_EXISTING": existing, "FAKE_LAUNCHER": str(launcher), "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in ps.logged()
             if call.startswith("codex|mcp add") and "--help" not in call]
     return proc, adds
@@ -1083,7 +1085,7 @@ def _copy_repo(tmp_path: Path) -> Path:
     wrote ops/.env or the compose override must not touch the real tree."""
     repo = tmp_path / "repo"
     for rel in ("ops/install.ps1", "ops/install-hook.ps1", "ops/client_credentials.py",
-                "ops/.env.example", "examples/CLAUDE.memory.md"):
+                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     return repo
@@ -1095,6 +1097,10 @@ def _script_stub(bin_dir: Path, calls: Path, name: str, body: str = "exit 0") ->
         + body + "\n", encoding="utf-8")
 
 
+@pytest.mark.skipif(os.name == "nt", reason=(
+    "the installer runs the staged native client before anything else, and a "
+    "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
+    "that stage with a real binary"))
 def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daemon_server):
     ps = _PowerShell(tmp_path)
     token = _token(ps)
@@ -1103,25 +1109,20 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     fake_bin.mkdir()
     installed = tmp_path / "installed-bin"
     installed.mkdir()
-    shim = installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
-    # Off Windows the installed shim answers connect's dry run as the real one
-    # does on a fresh machine (its report of no registration, exit 3). A
-    # Windows .exe cannot be a script here, so there the shim cannot start and
-    # the install carries on with the warning (that path is pinned too).
-    shim.write_text("placeholder\n" if os.name == "nt" else
-                    "#!/bin/sh\n"
-                    f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
-                    "if [ \"$1\" = connect ]; then\n"
-                    "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
-                    "exit 0\n", encoding="utf-8")
-    shim.chmod(0o755)
+    shim = installed / "pseudolife-mcp"
+    # The release's client answers connect's dry run as the real one does on
+    # a fresh machine (its report of no registration, exit 3).
+    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    release_env = native_stub.write_release(
+        tmp_path / "release", version,
+        f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
+        "if [ \"$1\" = connect ]; then\n"
+        "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+        "exit 0\n")
     calls = ps.calls
     for name in ("docker", "codex"):
         _script_stub(fake_bin, calls, name, "exit 99")
     _script_stub(fake_bin, calls, "python", f"& '{_q(sys.executable)}' @args\nexit $LASTEXITCODE")
-    _script_stub(fake_bin, calls, "pipx",
-                 "if (($args[0] -eq 'environment') -and ($args[2] -eq 'PIPX_BIN_DIR')) "
-                 f"{{ Write-Output '{_q(installed)}' }}\nexit 0")
     _script_stub(fake_bin, calls, "claude",
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'get')) { exit 1 }\n"
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'add') -and ($args -contains '--help')) "
@@ -1138,6 +1139,9 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     env = dict(ps.env)
     system_dirs = [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")] \
         if os.name == "nt" else ["/usr/bin", "/bin"]
+    env.update(release_env)
+    env.update({"PSEUDOLIFE_SHIM_RUNTIMES": str(installed / "runtimes"),
+                "PSEUDOLIFE_SHIM_LAUNCHER": str(shim)})
     env.update({"PATH": os.pathsep.join([str(fake_bin), *system_dirs]),
                 "PYTHONPATH": str(ROOT), "NO_COLOR": "1", "TERM": "dumb",
                 # The installer's own environment carries an older credential.

@@ -250,6 +250,27 @@ above. `editable`, `spawning` and unrecognised registrations are reported and
 left alone, and numbered directories holding a Python venv are named as the
 old client left on disk. A rerun that changes nothing prints one line.
 
+## Installers
+
+`ops/install.sh` and `ops/install.ps1` install the client from the release
+their checkout names (`pyproject.toml`'s version) in their native-client
+block, before anything on the host changes: they download that version's
+`SHA256SUMS` and the archive for the host target into
+`~/.pseudolife-mcp/downloads/<version>/` (kept for a rerun), refuse unless
+the sums name it exactly once and its digest matches, extract the one
+binary into a private temporary directory and run its `version` command.
+Any failure refuses with its cause and fix and nothing changed; there is no
+fallback to a Python client. The shim step then runs that staged binary's
+`runtime install` with the verified files and registers every client
+against the stable launcher; `installer migrate-registrations --client X`
+moves a client's pipx, `pip --user` or Python runtime registration, and
+`installer expose` adds the POSIX user-bin link (the PowerShell installer
+puts the launcher's directory first on the user PATH itself).
+`PSEUDOLIFE_NATIVE_ARCHIVE_URL` (also a local directory, for the installers
+only) and `PSEUDOLIFE_NATIVE_TARGET` (one of the five targets) override the
+download and the detected target. A rerun whose launcher already matches
+says nothing changed.
+
 ## Recovery and validation
 
 A failed download or checksum leaves the old launcher and runtime active. A

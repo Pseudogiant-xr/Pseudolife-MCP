@@ -825,7 +825,8 @@ jobs:
           tests/test_update_cli.py
           tests/test_ops_update_wrappers.py
           tests/test_register_claude_desktop.py
-          tests/test_installer_shim_upgrade.py
+          tests/test_installer_native_client.py
+          tests/test_installer_native_client_ps.py
           tests/test_installer_existing_upgrade.py
           tests/test_codex_hooks.py
           --deselect tests/test_codex_hooks.py::test_native_hook_rejects_broadened_managed_connection_acl

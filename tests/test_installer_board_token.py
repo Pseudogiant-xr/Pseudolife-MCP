@@ -18,6 +18,8 @@ import sys
 
 import pytest
 
+from tests import native_client_stub as native_stub
+
 from pseudolife_memory.credentials import CredentialProvider
 from tests.test_installer_existing_upgrade import (
     _bash_fixture_path, _bash_variants, _between, _fixture_env,
@@ -256,13 +258,6 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
             "if [ \"$1\" = mcp ] && [ \"$2\" = add ]; then exit 0; fi\n"
             "exit 91\n", encoding="utf-8")
         (fake_bin / name).chmod(0o755)
-    (fake_bin / "pipx").write_text(
-        "#!/bin/sh\n"
-        "if [ \"$1\" = environment ]; then printf '%s\\n' \"$FAKE_INSTALL_BIN\"; fi\n"
-        "exit 0\n", encoding="utf-8")
-    # Executable on POSIX: Linux refuses a stub without the bit (CI run
-    # 36331871190); Windows Git Bash runs it regardless.
-    (fake_bin / "pipx").chmod(0o755)
     helper = _between("ops/install.sh", "resolve_installed_shim() {",
                       "\n}\n\n# Two env pairs") + "\n}"
     loop = _between("ops/install.sh",
@@ -271,7 +266,7 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""PATH='{shell.path(installed_bin)}:{shell.path(fake_bin)}:/usr/bin:/bin'
 export PATH CALL_LOG='{shell.path(call_log)}' FAKE_CONFIG='{_q(config)}'
-export FAKE_INSTALL_BIN='{shell.path(installed_bin)}'
+export FAKE_LAUNCHER='{shell.path(installed_bin / "pseudolife-mcp")}' FAKE_KEEP_LAUNCHER=1
 CLIENTS='{client}'
 TRANSPORT=shim
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED='' CODEX_CONNECTION_CONFIGURED='' CODEX_CREDENTIAL_FILE=''
@@ -284,9 +279,8 @@ CLIENT_DAEMON_URL='http://127.0.0.1:8765'
 CLAUDE_AGENT_STATE_DIR='{_q(state_dir)}'
 CLAUDE_JSON='{shell.path(claude_json) if claude_json else ""}'
 configure_codex_runtime_defaults() {{ CODEX_RUNTIME_DEFAULTS=preserved; }}
-shim_process_table() {{ return 2; }}
 {helper}
-shim_runtime_python() {{ :; }}
+{native_stub.BASH}
 {loop}
 printf 'STATE=%s/%s\\n' "$MCP_CLAUDE" "$MCP_GEMINI"
 """

@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]";
+const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]";
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
 /// Arguments follow `installer`. Exit 0 when every selected registration
@@ -30,8 +30,14 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
             Ok(None) => emit(USAGE),
             Err(message) => usage(&message),
         },
+        Some("expose") => match &arguments[1..] {
+            [] => expose(false),
+            [flag] if flag == "--json" => expose(true),
+            [flag] if flag == "--help" || flag == "-h" => emit(USAGE),
+            _ => usage("expose takes only --json"),
+        },
         Some("--help" | "-h") => emit(USAGE),
-        _ => usage("expected an installer step: migrate-registrations"),
+        _ => usage("expected an installer step: migrate-registrations or expose"),
     }
 }
 
@@ -154,6 +160,159 @@ fn migrate_registrations(options: &MigrateOptions) -> u8 {
         return 1;
     }
     code
+}
+
+/// Put the stable launcher where a terminal finds it as `pseudolife-mcp`
+/// (a user-bin link on POSIX); exit 1 only when that link could not be made.
+/// An entry this package's old pipx or `pip --user` install left there is
+/// moved aside (`pseudolife-mcp.python-<stamp>`, never deleted); anything
+/// else there is left alone and named.
+fn expose(json: bool) -> u8 {
+    let report = match runtime::default_layout() {
+        Ok(layout) => {
+            let mut report = expose_layout(&layout);
+            report["launcher"] = json!(layout.launcher);
+            report["user_bin"] = json!(layout.user_bin);
+            if let Some(hint) = path_hint(&layout) {
+                report["hint"] = json!(hint);
+            }
+            report
+        }
+        Err(detail) => json!({"state": "failed", "detail": detail}),
+    };
+    let text = if json {
+        report.to_string()
+    } else {
+        let mut line = format!(
+            "pseudolife-mcp on PATH: {}",
+            report["detail"].as_str().unwrap_or("unknown")
+        );
+        if let Some(hint) = report["hint"].as_str() {
+            line.push_str(&format!("; {hint}"));
+        }
+        line
+    };
+    if emit(&text) != 0 {
+        return 1;
+    }
+    u8::from(report["state"] == "failed")
+}
+
+fn expose_layout(layout: &Layout) -> Value {
+    #[cfg(unix)]
+    if let Some(bin) = &layout.user_bin {
+        let link = bin.join(runtime::BINARY);
+        if old_python_entry(&link) {
+            // Cooperating installers and updaters serialise on this lock.
+            let _lock = match runtime::UpdateLock::acquire(layout) {
+                Ok(lock) => lock,
+                Err(detail) => {
+                    return json!({"state": "failed", "detail": format!("{detail}; {} was left as it is", link.display())});
+                }
+            };
+            if let Some(reason) = entry_still_needed(&link, layout) {
+                return json!({"state": "left", "detail": format!("{} is the old Python client's entry, left as it is because {reason}; run the launcher by its full path", link.display())});
+            }
+            let stamp = chrono_stamp();
+            let mut aside = bin.join(format!("{}.python-{stamp}", runtime::BINARY));
+            let mut counter = 0;
+            while std::fs::symlink_metadata(&aside).is_ok() {
+                counter += 1;
+                aside = bin.join(format!("{}.python-{stamp}-{counter}", runtime::BINARY));
+            }
+            if std::fs::rename(&link, &aside).is_err() {
+                return json!({"state": "failed", "detail": format!("could not move the old Python client's {} aside; run the launcher by its full path", link.display())});
+            }
+            let mut report = registrations::expose_launcher(layout);
+            if report["state"] == "linked" {
+                report["state"] = json!("replaced");
+                report["detail"] = json!(format!(
+                    "linked {} to the native launcher; the old Python client's entry is kept as {}",
+                    link.display(),
+                    aside.display()
+                ));
+            } else if std::fs::symlink_metadata(&link).is_err() {
+                // Nothing took the name meanwhile: put the old entry back.
+                let _ = std::fs::rename(&aside, &link);
+            } else {
+                // Another writer made a new entry: keep it and the backup.
+                report["detail"] = json!(format!(
+                    "{} was replaced by another program while this step ran; the old Python client's entry is kept as {}",
+                    link.display(),
+                    aside.display()
+                ));
+            }
+            return report;
+        }
+    }
+    registrations::expose_launcher(layout)
+}
+
+/// Why a registration still needs the old entry at `link`, if one does: a
+/// registration the installer leaves alone (editable, self-spawning or
+/// unrecognised) that runs it, or configurations that cannot be read.
+#[cfg(unix)]
+fn entry_still_needed(link: &Path, layout: &Layout) -> Option<String> {
+    let found = match registrations::find_registrations() {
+        Ok(found) => found,
+        Err(detail) => {
+            return Some(format!(
+                "the client configurations cannot be read ({detail})"
+            ));
+        }
+    };
+    let target = std::fs::canonicalize(link).ok();
+    found
+        .iter()
+        .filter(|r| !matches!(r.install_kind(layout, None), "managed" | "legacy"))
+        .find(|r| {
+            let command = Path::new(&r.command);
+            runtime::same_path(command, link)
+                || target.as_deref().is_some_and(|target| {
+                    std::fs::canonicalize(command).is_ok_and(|c| runtime::same_path(&c, target))
+                })
+        })
+        .map(|r| format!("the {} registration still runs it", r.client))
+}
+
+/// This package's own console script (pipx or `pip --user`), directly or
+/// through a symlink, as opposed to the launcher or another tool's file.
+#[cfg(unix)]
+fn old_python_entry(link: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(link) else {
+        return false;
+    };
+    let target = if meta.file_type().is_symlink() {
+        match std::fs::canonicalize(link) {
+            Ok(target) => target,
+            Err(_) => return false,
+        }
+    } else {
+        link.to_path_buf()
+    };
+    target.is_file() && registrations::owned_console(&target)
+}
+
+#[cfg(unix)]
+fn chrono_stamp() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    seconds.to_string()
+}
+
+/// One line when a new terminal would not find the launcher by name.
+fn path_hint(layout: &Layout) -> Option<String> {
+    let bin = layout.user_bin.as_ref()?;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if std::env::split_paths(&path).any(|entry| runtime::same_path(&entry, bin)) {
+        return None;
+    }
+    Some(format!(
+        "{} is not on PATH: add it to PATH in your shell profile (~/.profile, ~/.bashrc or ~/.zshrc), then open a new terminal",
+        bin.display()
+    ))
 }
 
 fn left_detail(kind: &str) -> &'static str {
