@@ -189,12 +189,16 @@ def write_summary(directory: Path, records: list[dict]) -> None:
     temporary.replace(directory / "summary.json")
 
 
-def publish(plan: dict, public: Path, job_summary: Path | None) -> None:
-    """Present required golden results separately from informational probes."""
+def publish(plan: dict, public: Path, job_summary: Path | None, only: str = "all") -> None:
+    """Present required golden results separately from informational probes.
+    `only` names the one group this job ran (the Rust job replays goldens; a
+    job of its own runs the probes), so the other is not reported "not run"."""
+    if only not in ("all", "goldens", "judges"):
+        raise ValueError("unknown precheck group")
     platform = "windows" if os.name == "nt" else "linux"
     groups = []
     for name, wanted, gating in (("goldens", plan[platform], True), ("judges", plan["judges"], False)):
-        if not wanted:
+        if not wanted or only not in ("all", name):
             continue
         try:
             value = json.loads((public / name / "summary.json").read_text(encoding="utf-8"))
@@ -215,7 +219,7 @@ def publish(plan: dict, public: Path, job_summary: Path | None) -> None:
         groups.append({"name": name, "gating": gating, "phases": phases})
     public.mkdir(parents=True, exist_ok=True)
     (public / "report.json").write_text(json.dumps({"schema": 1, "groups": groups}, indent=2) + "\n", encoding="utf-8")
-    if job_summary is None:
+    if job_summary is None or not groups:
         return
     safe = lambda value: html.escape(str(value)).replace("`", "&#96;").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
     lines = ["## PR parity prechecks", ""]
@@ -329,7 +333,7 @@ def main(argv=None) -> int:
     except (ValueError, TypeError) as error:
         parser.error(str(error))
     if options.publish:
-        publish(plan, options.public.resolve(), options.job_summary)
+        publish(plan, options.public.resolve(), options.job_summary, options.only)
         return 0
     if options.candidate is None or options.private is None:
         parser.error("execution requires --candidate and --private")

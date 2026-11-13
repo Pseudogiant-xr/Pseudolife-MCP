@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "b280739891b6e09e",
+  "fingerprint": "797f95e0392a161f",
+  "reason": "Only the CLI differential harness step limit changes, and only on self-hosted Windows (22 -> 35 min): hosted runs still get 22, so no hosted parity-checks job runs longer. Self-hosted Windows hit 22 every night since 2026-11-07; job 131853441705 (2026-11-13) had 507 of 660 cases done at 22:00, estimated near 32 min in full."
+}

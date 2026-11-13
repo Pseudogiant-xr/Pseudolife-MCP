@@ -14,7 +14,7 @@
     "docs/dev/dev-machines.md": "0c8e4a571f2700ea5974ca924153f075577d753ff1532658ca84907951dab699",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "9697bca8a33df07bee6a0b177ddfe638fdbd8d99989aa8e2b898aa55779968a1",
+    "docs/dev/merge-batches.md": "473102f2499a2622e715567e6e26d5a1a44bdbb8d12b554f210761b7d39e8357",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "6972b4d5028dc1f88eee51ffb656603b810dcd4b1588edf0bb912d9e65ad4056",
     "docs/dev/release-assets.md": "c29299c03e204673ef1970e8a9d5ff32b0c3a394bb3d7ab343cfa1fa0a903ed3",
@@ -263,7 +263,7 @@
     "ops/install.sh": "c96916dcf81674b9ee92dbe16ac19c84d729965345ba78c276e6abfc52749a14",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "69d5e540ae04bf9b49638138c8ded0888c77c8bf107b07af4d4780060aa64032",
+    "ops/integrate.py": "8994c77f2bb1d676a066a6603cfd11ff0d62c2262fbf674e92a30c1009500698",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -47944,7 +47944,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:240",
+          "location": "docs/dev/merge-batches.md:252",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47959,7 +47959,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:408",
+          "location": "docs/dev/merge-batches.md:420",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -47989,7 +47989,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1691",
+          "location": "ops/integrate.py:1734",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -66374,7 +66374,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:425",
+      "location": "docs/dev/merge-batches.md:437",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -80038,23 +80038,23 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:425",
+      "location": "docs/dev/merge-batches.md:437",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:475",
+      "location": "docs/dev/merge-batches.md:487",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:55",
+      "location": "docs/dev/merge-batches.md:59",
       "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:68",
+      "location": "docs/dev/merge-batches.md:72",
       "reason": "forwarded parameters"
     },
     {
