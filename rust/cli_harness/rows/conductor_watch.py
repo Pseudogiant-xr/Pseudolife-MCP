@@ -421,7 +421,7 @@ MUTANTS = [
            r"first[end - 1] == b'\r'", r"first[end - 1] == b'\n'",
            ("start-already-running-from-agent-file",)),
     Mutant("conductor-watch-stop-file-kept", "conductor_watch", FILE,
-           'fs::write(path, b"")', 'fs::write(path, b"x")', ("stop-running-stop-file-exists",)),
+           'fs::write(stop, b"")', 'fs::write(stop, b"x")', ("stop-running-stop-file-exists",)),
     Mutant("conductor-watch-age-zero-admitted", "conductor_watch", ARGS,
            "if number.bytes().all(|b| b == b'0') {", "if number.is_empty() {",
            ("error-max-age-zero",)),
