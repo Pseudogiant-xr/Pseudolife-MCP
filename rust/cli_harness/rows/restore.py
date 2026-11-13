@@ -324,22 +324,6 @@ def declared_deferral(obs: dict) -> None:
     obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
 
 
-@normalize.rule("restore-zlib-traceback")
-def zlib_traceback(obs: dict) -> None:
-    """A deflate error escapes the oracle's checks as an uncaught
-    ``zlib.error`` traceback (exit 1); this leaf defers there. Only a
-    traceback whose last line is that exception, with no output and nothing
-    touched, becomes the deferral."""
-    if obs.get("arm") != "python" or obs["exit"] != 1 or not _untouched(obs):
-        return
-    stderr = base64.b64decode(obs["stderr"]).decode("utf-8", "replace").splitlines()
-    if base64.b64decode(obs["stdout"]) or not stderr or stderr[0] != "Traceback (most recent call last):":
-        return
-    if not stderr[-1].startswith("zlib.error: Error -3 while decompressing data: "):
-        return
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-
-
 # What the oracle may have written by its first change, and nothing else.
 _FIRST_CHANGE_FILES = (".pseudolife-mcp", "cwd/safety")
 
@@ -561,6 +545,11 @@ def _case(case_id: str, argv: list[str], *, dump: str | None = "good", state: st
     return case
 
 
+def _null_console(case: Case) -> Case:
+    case.null_stdin_stdout = True
+    return case
+
+
 def _deferred(case_id: str, argv: list[str], **kwargs) -> Case:
     return _case(case_id, argv, rules=("restore-declared-deferral",), **kwargs)
 
@@ -574,13 +563,14 @@ EVERY_OPTION = ["--leave-stopped", "--container", "pg-x", "--daemon-container", 
 DUMP_PASS = ("good", "copy-closed", "copy-no-token", "copy-separator", "crlf", "lone-cr", "no-final-newline",
              "invalid-utf8", "multi-member", "trailing-zeros")
 DUMP_REFUSE = ("no-marker", "in-copy", "copy-crlf", "trailing-space", "vertical-tab", "line-separator",
-               "invalid-utf8-marker", "trailing-junk", "bad-crc", "truncated", "plain-sql", "empty")
+               "invalid-utf8-marker", "trailing-junk", "bad-crc", "truncated", "plain-sql", "empty",
+               "corrupt-deflate", "distance-too-far")
 STATE_PASS = ("plain", "links-inside", "link-loop", "loop-ends-walk","self-loop-hides-escape", "only-zero-blocks",
               "bad-later-header", "short-later-header", "later-header-absent", "directory-with-size",
               "v7-directory-slash", "unknown-type-skips", "prefix-join", "octal-prefix-fields",
               "signed-checksum", "gnu-long-name", "gnu-long-records", "gnu-long-cut-at-nul",
               "multi-member-gzip", "trailing-zeros-gzip")
-STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "empty-file", "empty-gzip",
+STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "corrupt-deflate-gzip", "empty-file", "empty-gzip",
                 "garbage-first-header", "invalid-mode-field", "absolute-path", "dotdot-path", "dotdot-leading",
                 "backslash-path", "prefix-escape", "fifo", "character-device", "block-device",
                 "symlink-absolute", "symlink-backslash", "symlink-escape", "symlink-chain-escape",
@@ -590,18 +580,12 @@ STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "empty-file", "emp
 STATE_DEFER = ("pax-name", "negative-size", "deep-link-chain")
 
 
-# The oracle refuses a CRC or length mismatch; this leaf defers there, as a
-# corruption zlib rejects but miniz_oxide decodes ends the same way.
-CRC_DEFER = ("bad-crc", "bad-crc-gzip")
-
-
 def _gate_cases() -> list[Case]:
     out = []
-    crc = ("restore-declared-deferral",)
     for name in DUMP_PASS + DUMP_REFUSE:
-        out.append(_case(f"dump-{name}", DUMP, dump=name, rules=crc if name in CRC_DEFER else ()))
+        out.append(_case(f"dump-{name}", DUMP, dump=name))
     for name in STATE_PASS + STATE_REFUSE:
-        out.append(_case(f"state-{name}", DUMP + STATE, state=name, rules=crc if name in CRC_DEFER else ()))
+        out.append(_case(f"state-{name}", DUMP + STATE, state=name))
     for name in STATE_DEFER:
         out.append(_deferred(f"defer-state-{name}", DUMP + STATE, state=name))
     return out
@@ -647,6 +631,8 @@ def cases() -> list[Case]:
         # the refusal without --yes (stdin is a pipe in both arms)
         _case("no-yes", DUMP),
         _case("no-yes-every-option", DUMP + STATE + EVERY_OPTION, state="plain"),
+        # stdin and stdout the null device: a character device, never a console
+        _null_console(_case("no-yes-null-device", DUMP)),
         # the oracle answers before any effect; the candidate defers by design
         _deferred("defer-help-columns", ["--help"], dump=None, columns="100"),
         _deferred("defer-usage-columns", [], dump=None, columns="120"),
@@ -655,10 +641,6 @@ def cases() -> list[Case]:
         _deferred("defer-help-cluster", ["-hx"], dump=None),
         _deferred("defer-unicode-port", DUMP + ["--db-port", "١"]),
         _deferred("defer-unicode-unknown", DUMP + ["--bé"]),
-        _case("defer-dump-corrupt-deflate", DUMP, dump="corrupt-deflate", rules=("restore-zlib-traceback",)),
-        _case("defer-dump-distance-too-far", DUMP, dump="distance-too-far", rules=("restore-zlib-traceback",)),
-        _case("defer-state-corrupt-deflate", DUMP + STATE, state="corrupt-deflate-gzip",
-              rules=("restore-zlib-traceback",)),
         # argv that passes every gate reaches Docker: the stand-in refuses
         # the first inspect, and both arms stop there under the update lock
         _case("valid-yes", DUMP + ["--yes", "--safety-dir", "safety"]),
@@ -714,6 +696,7 @@ def _docker_cases() -> list[Case]:
         _scripted("docker-inspect-pg-fails", [_inspect(DAEMON, _daemon_doc()), _inspect(PG, "", exit=1)]),
         _scripted("docker-inspect-empty-list", [_inspect(DAEMON, "[]")]),
         _scripted("docker-inspect-not-a-dict", [_inspect(DAEMON, "[5]")]),
+        _scripted("docker-inspect-object", [_inspect(DAEMON, '{"Id": "x"}')]),
         _scripted("docker-inspect-empty-output", [_inspect(DAEMON, "")]),
         _scripted("docker-resolve-unmatched-host", [
             _inspect(DAEMON, _daemon_doc(Config={"Env": ["PSEUDOLIFE_MCP_DATABASE_URL=postgresql://u@elsewhere/db"]})),
@@ -839,6 +822,9 @@ MUTANTS = [
     Mutant("restore-refusal-exit", "restore", FILE, "Some(ExitCode::from(2))\n}", "Some(ExitCode::from(1))\n}",
            ("no-yes",)),
     Mutant("restore-yes-ignored", "restore", FILE, "    if !args.yes {", "    if true {", ("valid-yes",)),
+    Mutant("restore-null-device-terminal", "restore", "shim/src/cli/connect/mod.rs",
+           "        && std::io::stdin().is_terminal()\n        && std::io::stdout().is_terminal()\n", "\n",
+           ("no-yes-null-device",), platforms=("windows",)),
     Mutant("restore-state-skipped", "restore", FILE, "if let Some(archive) = &args.state_archive {",
            "if let Some(archive) = None::<&std::path::PathBuf> {", ("state-symlink-escape",)),
     Mutant("restore-dump-after-state", "restore", FILE, "        Verdict::Refuse => return refuse(INCOMPLETE_DUMP),",
@@ -856,11 +842,11 @@ MUTANTS = [
            "                b'\\r' => {\n                    self.line.push(byte);", ("dump-lone-cr",)),
     Mutant("restore-gzip-padding", "restore", GZIPRS, "                Some(0) => {}\n", "", ("dump-trailing-zeros",)),
     Mutant("restore-gzip-crc", "restore", GZIPRS, "stored_crc != crc.sum()", "stored_crc == crc.sum().wrapping_add(1)", ("dump-bad-crc",)),
-    Mutant("restore-crc-answered", "restore", GZIPRS,
-           "            return Err(Stop::Unsure);\n        }\n        // Zero padding",
-           "            return Err(Stop::Refuse);\n        }\n        // Zero padding", ("defer-dump-distance-too-far",)),
-    Mutant("restore-zlib-answered", "restore", GZIPRS, ".map_err(|_| Stop::Unsure)?;", ".map_err(|_| Stop::Refuse)?;",
-           ("defer-dump-corrupt-deflate",)),
+    Mutant("restore-crc-deferred", "restore", GZIPRS,
+           "            return Err(Stop::Refuse);\n        }\n        // Zero padding",
+           "            return Err(Stop::Unsure);\n        }\n        // Zero padding", ("dump-distance-too-far",)),
+    Mutant("restore-zlib-deferred", "restore", GZIPRS, "                )\n                .map_err(|_| Stop::Refuse)?;",
+           "                )\n                .map_err(|_| Stop::Unsure)?;", ("dump-corrupt-deflate",)),
     Mutant("restore-later-header-error", "restore", STATERS,
            "            Header::Invalid => {\n                self.end = if self.next == 0 {",
            "            Header::Invalid => {\n                self.end = if true {", ("state-bad-later-header",)),
@@ -916,6 +902,9 @@ MUTANTS = [
            "        let text = ascii_text(&ran.output(true)).ok_or(Stop::Defer)?;\n        if text.trim_matches",
            "        let text = ascii_text(&[ran.stdout.clone(), ran.stderr.clone()].concat()).ok_or(Stop::Defer)?;\n"
            "        if text.trim_matches", ("docker-stderr-ignored-on-success",)),
+    Mutant("restore-inspect-object-deferred", "restore", BANK,
+           "            // `{...}[0]` raises KeyError, which the oracle refuses too.\n            _ => Err(refuse()),",
+           "            Value::Object(_) => Err(Stop::Defer),\n            _ => Err(refuse()),", ("docker-inspect-object",)),
     Mutant("restore-json-error-refused", "restore", BANK,
            "let value: Value = serde_json::from_str(&text).map_err(|_| Stop::Defer)?;",
            "let value: Value = serde_json::from_str(&text).map_err(|_| refuse())?;", ("reach-unsure-json",)),

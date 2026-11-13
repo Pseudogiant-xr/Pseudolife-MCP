@@ -528,6 +528,87 @@ def test_failed_replay_leaves_daemon_stopped_and_names_safety_restore(docker_ban
     assert ["start", up.DAEMON_CONTAINER] not in world.calls
 
 
+def _interrupt_at(world, marker, *, again=None):
+    """Raise KeyboardInterrupt from the Docker call whose argv holds
+    ``marker``, and optionally from the next call holding ``again``."""
+    original = world.run
+    fired = set()
+
+    def run(argv, **kwargs):
+        joined = " ".join(map(str, argv))
+        for key in (marker, again):
+            if key and key in joined and key not in fired and (key == marker or marker in fired):
+                fired.add(key)
+                world.calls.append(list(map(str, argv[1:])))
+                raise KeyboardInterrupt
+        return original(argv, **kwargs)
+    return run
+
+
+@pytest.mark.parametrize("phase", ["replay", "drop"])
+def test_interrupt_after_the_drop_began_prints_the_recovery_command(docker_bank, tmp_path, monkeypatch, capsys, phase):
+    bank, world = docker_bank
+    marker = "ON_ERROR_STOP=1 -f" if phase == "replay" else "DROP DATABASE"
+    monkeypatch.setattr(up, "run_cli", _interrupt_at(world, marker))
+    with pytest.raises(KeyboardInterrupt):
+        bank.restore(_input_dump(tmp_path))
+    err = capsys.readouterr().err
+    safety = tmp_path / "home" / ".pseudolife-mcp" / "backups"
+    dump = next(safety.glob("pseudolife_memory-*.sql.gz"))
+    assert err.startswith("restore failed: restore failed after database replacement began (KeyboardInterrupt); "
+                          "the daemon is left stopped. Recover with pseudolife-mcp restore --backup-file ")
+    assert str(dump) in err and "--yes" in err
+    assert ["stop", up.DAEMON_CONTAINER] in world.calls[-6:]
+    assert ["start", up.DAEMON_CONTAINER] not in world.calls
+
+
+def test_a_second_interrupt_during_the_stop_still_prints_the_recovery(docker_bank, tmp_path, monkeypatch, capsys):
+    bank, world = docker_bank
+    stop = "stop " + up.DAEMON_CONTAINER
+    monkeypatch.setattr(up, "run_cli", _interrupt_at(world, "DROP DATABASE", again=stop))
+    with pytest.raises(KeyboardInterrupt):
+        bank.restore(_input_dump(tmp_path))
+    err = capsys.readouterr().err
+    assert err.startswith("restore failed: restore failed after database replacement began (KeyboardInterrupt); "
+                          f"run docker stop {up.DAEMON_CONTAINER} first. Recover with pseudolife-mcp restore ")
+
+
+def test_an_interrupt_while_stopping_after_a_failure_still_prints_the_recovery(docker_bank, tmp_path, monkeypatch,
+                                                                              capsys):
+    """A replay that fails stops the daemon before it reports anything; an
+    interrupt in that silent stop must not lose the recovery command."""
+    bank, world = docker_bank
+    world.fail_replay = True
+    original, replayed = world.run, []
+
+    def run(argv, **kwargs):
+        joined = " ".join(map(str, argv))
+        if "ON_ERROR_STOP=1 -f" in joined:
+            replayed.append(True)
+        elif replayed and f"stop {up.DAEMON_CONTAINER}" in joined:
+            world.calls.append(list(map(str, argv[1:])))
+            raise KeyboardInterrupt
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(up, "run_cli", run)
+    with pytest.raises(KeyboardInterrupt):
+        bank.restore(_input_dump(tmp_path))
+    err = capsys.readouterr().err
+    assert err.startswith("restore failed: restore failed after database replacement began (")
+    assert f"; run docker stop {up.DAEMON_CONTAINER} first. Recover with pseudolife-mcp restore " in err
+    assert "KeyboardInterrupt" not in err.split(";")[0]          # the reason is the failure, not the interrupt
+
+
+def test_interrupt_before_the_drop_restarts_the_daemon_without_recovery_text(docker_bank, tmp_path, monkeypatch, capsys):
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "run_cli", _interrupt_at(world, "gunzip -c"))
+    with pytest.raises(KeyboardInterrupt):
+        bank.restore(_input_dump(tmp_path))
+    assert capsys.readouterr().err == ""
+    assert ["start", up.DAEMON_CONTAINER] in world.calls
+    assert not any("DROP DATABASE" in " ".join(c) for c in world.calls)
+
+
 @pytest.mark.parametrize("answer,expected_calls", [("n", 0), ("y", 1)])
 def test_restore_asks_once_before_overwrite(tmp_path, monkeypatch, answer, expected_calls):
     from pseudolife_memory import restore_cli
@@ -554,6 +635,42 @@ def test_unattended_restore_needs_yes_before_docker(tmp_path, monkeypatch):
     monkeypatch.setattr(up, "interactive", lambda: False)
     monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("no Docker mutation without confirmation"))
     assert restore_cli.main(["--backup-file", str(_input_dump(tmp_path))]) == 2
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows' CRT isatty() is true for the null device")
+def test_a_null_device_is_not_a_person_at_a_terminal(tmp_path, monkeypatch, capsys):
+    import os
+    from pseudolife_memory import restore_cli
+    with open(os.devnull, encoding="utf-8") as stdin, open(os.devnull, "w", encoding="utf-8") as stdout:
+        assert stdin.isatty() and stdout.isatty()  # what the old check read as a terminal
+        monkeypatch.setattr(sys, "stdin", stdin)
+        monkeypatch.setattr(sys, "stdout", stdout)
+        assert up.interactive() is False
+        monkeypatch.setattr(up, "ask", lambda question: pytest.fail("no prompt without a console"))
+        monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("no Docker call without confirmation"))
+        assert restore_cli.main(["--backup-file", str(_input_dump(tmp_path))]) == 2
+    assert capsys.readouterr().err.strip() == (
+        "restore failed: restore replaces the existing bank; rerun with --yes to confirm. Nothing was restored")
+
+
+def test_interactive_needs_both_streams_to_be_terminals(monkeypatch):
+    class Stream:
+        def __init__(self, tty):
+            self.tty = tty
+
+        def isatty(self):
+            return self.tty
+
+        def fileno(self):
+            raise ValueError("no descriptor")  # a console check must fail closed
+
+    for stdin, stdout in ((False, True), (True, False)):
+        monkeypatch.setattr(sys, "stdin", Stream(stdin))
+        monkeypatch.setattr(sys, "stdout", Stream(stdout))
+        assert up.interactive() is False
+    monkeypatch.setattr(sys, "stdin", Stream(True))
+    monkeypatch.setattr(sys, "stdout", Stream(True))
+    assert up.interactive() is (sys.platform != "win32")
 
 
 @pytest.mark.parametrize("name", ["../escape", "/absolute", "dir/../../escape"])
@@ -705,6 +822,76 @@ def test_corrupt_gzip_state_refuses_before_any_mutation(docker_bank, tmp_path, c
     with pytest.raises(up.UpdateError, match="archive"):
         bank.restore(_input_dump(tmp_path), state_archive=state)
     assert len(world.calls) == before
+
+
+# A stored block whose length and complement disagree: zlib raises
+# zlib.error ("invalid stored block lengths"), not OSError or EOFError.
+CORRUPT_DEFLATE = bytes([0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 0, 0xFF, 0x01, 0x05, 0x00, 0x00, 0x00])
+
+
+def test_a_corrupt_deflate_state_archive_is_refused_not_a_traceback(tmp_path):
+    from pseudolife_memory.docker_backup_restore import validate_state
+    state = tmp_path / "bad.tgz"
+    state.write_bytes(CORRUPT_DEFLATE)
+    with pytest.raises(up.UpdateError, match="state archive is unreadable") as caught:
+        validate_state(state)
+    assert caught.value.exit_code == 2
+
+
+@pytest.mark.parametrize("which", ["dump", "state"])
+def test_restore_command_refuses_corrupt_deflate_input_cleanly(tmp_path, monkeypatch, capsys, which):
+    from pseudolife_memory import restore_cli
+    monkeypatch.setattr(up, "run_cli", lambda *a, **kw: pytest.fail("no Docker call for an unreadable input"))
+    dump = _input_dump(tmp_path)
+    argv = ["--backup-file", str(dump), "--yes"]
+    if which == "dump":
+        dump.write_bytes(CORRUPT_DEFLATE)
+        expected = "restore failed: the backup is unreadable or incomplete; use a complete .sql.gz dump. Nothing was restored"
+    else:
+        state = tmp_path / "bad.tgz"
+        state.write_bytes(CORRUPT_DEFLATE)
+        argv += ["--state-archive", str(state)]
+        expected = ("restore failed: the state archive is unreadable or contains unsafe paths; use a complete, "
+                    "unmodified state backup. Nothing was restored")
+    assert restore_cli.main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == expected
+
+
+@pytest.mark.parametrize("which", ["dump", "state"])
+def test_a_corrupt_safety_backup_copy_restarts_the_daemon_and_says_retry(docker_bank, tmp_path, which):
+    bank, world = docker_bank
+    original = world.run
+
+    def corrupt_copy(argv, **kwargs):
+        args = list(map(str, argv[1:]))
+        if args[0] == "cp" and ":" in args[1] and not Path(args[1]).is_file():
+            is_dump = args[1].startswith(world.pg_name + ":")
+            if is_dump == (which == "dump"):
+                world.calls.append(args)
+                Path(args[2]).write_bytes(CORRUPT_DEFLATE)
+                return 0, ""
+        return original(argv, **kwargs)
+
+    # The fixture's copy_from_container stand-in calls world.run.
+    world.run = corrupt_copy
+    with pytest.raises(up.UpdateError, match="retry backup before restoring anything"):
+        bank.restore(_input_dump(tmp_path))
+    assert not any("DROP DATABASE" in " ".join(c) for c in world.calls)
+    assert ["start", up.DAEMON_CONTAINER] in world.calls
+    safety = tmp_path / "home" / ".pseudolife-mcp" / "backups"
+    assert [p.name for p in safety.iterdir() if p.name.endswith(".part")] == []
+
+
+@pytest.mark.parametrize("output", ['{"Id": "x"}', "{}", "[" * 100000 + "]" * 100000], ids=["object", "empty-object", "deep"])
+def test_unusable_inspect_json_is_a_clean_refusal(docker_bank, monkeypatch, output):
+    # A JSON object raises KeyError on [0]; deep nesting raises RecursionError.
+    bank, world = docker_bank
+    monkeypatch.setattr(up, "run_cli", lambda argv, **kw: (0, output))
+    with pytest.raises(up.UpdateError, match="cannot inspect probe; restore its Docker container") as caught:
+        bank.inspect("probe")
+    assert caught.value.exit_code == 2
 
 
 def test_symlink_chain_cannot_escape_through_parent_components(docker_bank, tmp_path):

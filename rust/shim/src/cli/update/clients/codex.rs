@@ -33,6 +33,35 @@ pub(super) fn digest(directory: &Path, names: &[&str]) -> Option<String> {
     Some(format!("{:x}", digest.finalize()))
 }
 
+/// Events in the plugin's hooks.json that Codex does not run: StopFailure is
+/// Claude Code's re-arm after a failed turn, which Codex skips without an
+/// error or a trust change. It is no consent change, no approval to ask for
+/// and no handler Codex must load (the Python updater's
+/// CODEX_SKIPPED_HOOK_EVENTS; the shared consent cases pin both).
+pub(super) const CODEX_SKIPPED_HOOK_EVENTS: &[&str] = &["StopFailure"];
+
+/// Whether valid JSON text holds a NaN or Infinity literal: outside strings
+/// those are the only tokens with an `N` or an `I`.
+fn has_constant_literal(bytes: &[u8]) -> bool {
+    let (mut quoted, mut escaped) = (false, false);
+    for &byte in bytes {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = false;
+            }
+        } else if byte == b'"' {
+            quoted = true;
+        } else if matches!(byte, b'N' | b'I') {
+            return true;
+        }
+    }
+    false
+}
+
 /// Typed, duplicate-free, conservative consent comparison. This is deliberately
 /// not Codex's trust hash; it never writes a trusted_hash or enables a handler.
 pub(super) fn manifest(bytes: &[u8]) -> Option<Value> {
@@ -62,12 +91,33 @@ pub(super) fn manifest(bytes: &[u8]) -> Option<Value> {
         }
         Some(())
     }
-    // The shared scanner detects escaped duplicate keys. serde's arbitrary
+    use crate::cli::pyjson::{J, PAIR_DEPTH, dumps, loads_unique};
+    // The oracle parses the whole document first (a duplicate key, also an
+    // escaped one, or a NaN/Infinity literal anywhere refuses), then drops
+    // the events Codex skips, then validates what is left. serde's arbitrary
     // precision path collapses the integer token -0 to i64 zero, whereas the
-    // consent oracle explicitly treats it as a float (and rejects it in u64
-    // fields). Preserve that one numeric spelling outside JSON strings first.
-    crate::cli::pyjson::loads_unique(std::str::from_utf8(bytes).ok()?, 127).ok()?;
-    let mut value: Value = serde_json::from_slice(&preserve_negative_zero(bytes)).ok()?;
+    // oracle reads it as a float (and rejects it in u64 fields), so that one
+    // numeric spelling outside JSON strings becomes -0.0 before either parse.
+    let widened = preserve_negative_zero(std::str::from_utf8(bytes).ok()?.as_bytes());
+    let mut parsed = loads_unique(std::str::from_utf8(&widened).ok()?, PAIR_DEPTH).ok()?;
+    if has_constant_literal(&widened) {
+        return None;
+    }
+    if let J::Dict(top) = &mut parsed
+        && let Some((_, J::Dict(hooks))) = top.iter_mut().find(|(k, _)| k.as_str() == Some("hooks"))
+    {
+        hooks.retain(|(event, _)| {
+            !event
+                .as_str()
+                .is_some_and(|event| CODEX_SKIPPED_HOOK_EVENTS.contains(&event))
+        });
+    }
+    // What is left, re-spelled: nesting past the oracle's limit, a lone
+    // surrogate (serde refuses it) and any non-finite number now refuse only
+    // when they sit outside a skipped event.
+    let text = dumps(&parsed, false);
+    loads_unique(&text, 127).ok()?;
+    let mut value: Value = serde_json::from_str(&text).ok()?;
     normalize_numbers(&mut value)?;
     let top = value.as_object_mut()?;
     if top.keys().any(|k| k != "description" && k != "hooks")
@@ -790,6 +840,28 @@ mod runtime_trust_tests {
             ),
             "unknown"
         );
+    }
+    #[test]
+    fn runtime_expects_no_handler_for_the_shipped_claude_only_stop_failure() {
+        // Read at run time: a compile-time include would name a file the
+        // daemon image's builder stage does not copy.
+        let shipped = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugin/hooks/hooks.json"),
+        )
+        .unwrap();
+        let keys = handler_keys(&manifest(&shipped).unwrap()).unwrap();
+        assert!(!keys.is_empty());
+        assert!(
+            keys.iter().all(|key| !key.contains(":stop_failure:")),
+            "{keys:?}"
+        );
+        // Codex lists every handler but StopFailure: that is a full load.
+        let hooks: Vec<Value> = keys
+            .iter()
+            .map(|key| json!({"key":key,"enabled":true,"trustStatus":"trusted"}))
+            .collect();
+        let listed = json!({"data":[{"errors":[],"hooks":hooks}]});
+        assert_eq!(runtime_status(&listed, &keys), "current");
     }
     #[test]
     fn recovery_matches_the_runtime_cause_and_unknown_preserves_file_verdict() {

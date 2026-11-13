@@ -28,6 +28,7 @@ ROWS = {
     "console": "CLI-CONSOLE-PRINT",
     "expose": "CLI-EXPOSE",
     "restore": "CLI-RESTORE-GATES",
+    "conductor_watch": "CLI-CONDUCTOR-WATCH-SETUP",
     "update": "CLI-UPDATE",
 }
 

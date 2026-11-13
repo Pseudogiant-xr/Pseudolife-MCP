@@ -10,9 +10,11 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
+import zlib
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -80,7 +82,8 @@ def validate_state(path: Path) -> None:
                 else:
                     links.pop(posixpath.normpath(item.name), None)
                 check(item)
-    except (OSError, EOFError, tarfile.TarError, ValueError, RecursionError) as exc:
+    # zlib.error is a corrupt deflate stream: neither OSError nor EOFError.
+    except (OSError, EOFError, zlib.error, tarfile.TarError, ValueError, RecursionError) as exc:
         raise up.UpdateError("the state archive is unreadable or contains unsafe paths; use a complete, "
                              "unmodified state backup. Nothing was restored", 2) from exc
 
@@ -231,7 +234,8 @@ class DockerBank:
             if not isinstance(result, dict):
                 raise ValueError("container")
             return result
-        except (ValueError, IndexError, TypeError) as exc:
+        # A JSON object raises KeyError on [0]; deep nesting RecursionError.
+        except (ValueError, IndexError, KeyError, TypeError, RecursionError) as exc:
             raise up.UpdateError(f"cannot inspect {container}; restore its Docker container configuration and retry", 2) from exc
 
     @contextmanager
@@ -318,7 +322,13 @@ class DockerBank:
             with self.helper(f"tar czf {state_tmp} -C /data .") as helper:
                 self.command("start", "-a", helper)
                 copy_from_container(self.docker, f"{helper}:{state_tmp}", state_part)
-            validate_state(state_part)
+            try:
+                validate_state(state_part)
+            except up.UpdateError as exc:
+                # The archive is this backup's own copy, not an operator's input.
+                raise up.UpdateError("the state backup copied out of Docker is unreadable or contains unsafe "
+                                     "paths; check the daemon's /data volume and free space, then retry backup "
+                                     "before restoring anything") from exc
             if include_database:
                 dump_part.replace(dump)
             state_part.replace(state)
@@ -450,8 +460,16 @@ class DockerBank:
         except BaseException as exc:
             if not destructive and was_running:
                 self.command("start", self.daemon, check=False, timeout=120)
-            if destructive and isinstance(exc, Exception):
-                stopped, _ = self.command("stop", self.daemon, check=False, timeout=120)
+            # An interrupt after the drop began leaves the bank as a failure
+            # does: it gets the same recovery text, then exits as interrupted.
+            if destructive and isinstance(exc, (Exception, KeyboardInterrupt)):
+                interrupted = isinstance(exc, KeyboardInterrupt)
+                try:
+                    stopped, _ = self.command("stop", self.daemon, check=False, timeout=120)
+                except KeyboardInterrupt:
+                    # An interrupt while the daemon stops (after a failure,
+                    # or a second one) must not lose the recovery text.
+                    interrupted, stopped = True, 1
                 argv = ["pseudolife-mcp", "restore", "--backup-file", str(safety["dump"] or backup_file)]
                 recovery_state = safety["state"] if safety["dump"] else state_archive
                 if recovery_state:
@@ -464,8 +482,16 @@ class DockerBank:
                     argv += ["--daemon-url", self.daemon_url]
                 state = "the daemon is left stopped" if stopped == 0 else f"run docker stop {self.daemon} first"
                 reason = str(exc) if isinstance(exc, up.UpdateError) else type(exc).__name__
-                raise up.UpdateError(f"restore failed after database replacement began ({reason}); {state}. "
-                                     f"Recover with {_shell_command(argv)}") from exc
+                failure = up.UpdateError(f"restore failed after database replacement began ({reason}); {state}. "
+                                         f"Recover with {_shell_command(argv)}")
+                if interrupted:
+                    # Printed here, before the cleanup below, as restore_cli
+                    # prints a failure; the interrupt itself still propagates.
+                    print(f"restore failed: {failure}", file=sys.stderr, flush=True)
+                    if isinstance(exc, KeyboardInterrupt):
+                        raise
+                    raise KeyboardInterrupt from exc
+                raise failure from exc
             raise
         finally:
             staged.close()

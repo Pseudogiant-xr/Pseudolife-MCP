@@ -66,4 +66,4 @@ rustix = { workspace = true, features = ["event"] }
 
 [target.'cfg(windows)'.dependencies]
 libc.workspace = true
-windows-sys = { workspace = true, features = ["Win32_System_SystemInformation"] }
+windows-sys = { workspace = true, features = ["Win32_System_SystemInformation", "Win32_UI_WindowsAndMessaging"] }

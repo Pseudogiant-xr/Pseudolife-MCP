@@ -181,6 +181,37 @@ fn codex_reports_missing_approval_and_preserves_disabled_handler() {
     assert_eq!(fs::read(&path).unwrap(), before);
 }
 #[test]
+fn codex_ignores_the_claude_only_stop_failure_handler_codex_never_loads() {
+    // Codex skips StopFailure (CODEX_SKIPPED_HOOK_EVENTS in the Python
+    // updater): it is no approval to ask for and no definition change.
+    let f = Fixture::new();
+    let home = f.path.join("codex");
+    let repo = f.path.join("repo");
+    let installed = home.join("plugins/cache/pseudolife-mcp/pseudolife-memory/local/hooks");
+    f.hooks(&repo.join("plugin/hooks"), "same scripts\n");
+    f.hooks(&installed, "same scripts\n");
+    let handler = json!({"hooks":[{"type":"command","command":"fixture-command"}]});
+    let with_stop_failure = json!({"hooks":{
+        "SessionEnd":[{"hooks":[{"type":"command","command":"fixture-command","timeout":3}]}],
+        "StopFailure":[handler]}});
+    f.write(&repo.join("plugin/hooks/hooks.json"), &with_stop_failure);
+    fs::write(home.join("config.toml"),"[plugins.\"pseudolife-memory@pseudolife-mcp\"]\nenabled = true\n[hooks.state.\"pseudolife-memory@pseudolife-mcp:hooks/hooks.json:session_end:0:0\"]\ntrusted_hash = \"fixture\"\n").unwrap();
+    let runner =
+        Fake::new(|_: &[&str], _: Option<&Path>| panic!("approval checks must not spawn a client"));
+    // The installed copy lacks StopFailure, the reference has it: the same
+    // Codex definition, so neither stale nor a change to re-approve.
+    assert_eq!(
+        codex::check_with(&home, Some(&repo), None, false, &runner)["state"],
+        "current"
+    );
+    // Both carry it and only the handlers Codex loads are approved.
+    f.write(&installed.join("hooks.json"), &with_stop_failure);
+    assert_eq!(
+        codex::check_with(&home, Some(&repo), None, false, &runner)["state"],
+        "current"
+    );
+}
+#[test]
 fn codex_distinguishes_script_drift_from_definition_drift() {
     let f = Fixture::new();
     let home = f.path.join("codex");

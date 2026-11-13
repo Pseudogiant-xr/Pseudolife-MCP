@@ -49,11 +49,17 @@ class World:
         self.pr_states = {}
         self.fail_gh = False
         self.calls = []
+        # A function of the command: raw stdout to answer with (exit 0, or 1
+        # for a lease check whose answer says held), or None to answer as usual.
+        self.override = None
         self.suites = tmp_path / "suite-results"
         self.suites.mkdir(exist_ok=True)
 
     def __call__(self, cmd):
         self.calls.append(cmd)
+        raw = self.override(cmd) if self.override else None
+        if raw is not None:
+            return (1 if cmd[0] != "gh" and '"held": true' in raw else 0), raw, ""
         if cmd[0] == "gh":
             if self.gh_missing:
                 raise FileNotFoundError(cmd[0])
@@ -617,6 +623,23 @@ def test_an_unreadable_suite_result_is_retried_not_dropped(h):
     assert lines(h.main("--settle", "0")[1])[0].startswith("suite remote cccccccc exit 0")
 
 
+@pytest.mark.parametrize("body", ["[]", "null", "5", '"done"'])
+def test_a_suite_result_that_is_not_an_object_is_skipped_once(h, body):
+    """JSON that is not an object ended the watcher in AttributeError; the
+    file is skipped with one ledger line per run, and others still count."""
+    h.main(max_age="60")
+    (h.world.suites / "bad.json").write_text(body, encoding="utf-8")
+    code, texts, _ = h.main(max_age="600")             # ten polls
+    assert code == watch.EXIT_OK and texts == []
+    skipped = [line for line in h.ledger() if " skipped " in line]
+    assert len(skipped) == 1 and "bad.json" in skipped[0] and "not an object" in skipped[0]
+    assert h.capsys.readouterr().err.count("bad.json") == 1
+    h.world.suite("good.json")
+    assert lines(h.main("--settle", "0")[1])[0].startswith("suite remote cccccccc exit 0")
+    h.world.suite("bad.json")                           # rewritten as a result: reported
+    assert lines(h.main("--settle", "0")[1])[0].startswith("suite remote cccccccc exit 0")
+
+
 def test_gh_failing_repeatedly_tells_the_owner_once_then_exits_2(h):
     h.main(max_age="60")
     h.world.fail_gh = True
@@ -672,11 +695,202 @@ def test_each_message_appends_one_ledger_line(h):
 
 
 @pytest.mark.parametrize("bad", [["--quiet-after", "0"], ["--interval", "0"], ["--settle", "-1"],
+                                 ["--settle", "nan"], ["--interval", "nan"], ["--quiet-after", "nan"],
                                  ["--max-age", "0"], ["--max-age", "soon"]])
 def test_bad_arguments_are_refused(h, bad):
     with pytest.raises(SystemExit) as exc:
         h.main(*bad)
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("age", ["5ſ", "5K"])
+def test_a_non_ascii_unit_is_not_a_duration(h, age):
+    """``ſ`` folds to ``s`` under a Unicode IGNORECASE match, and the unit
+    lookup then raised KeyError instead of argparse's usage error."""
+    with pytest.raises(SystemExit) as exc:
+        h.main(max_age=age)
+    assert exc.value.code == 2
+    err = h.capsys.readouterr().err
+    assert f"argument --max-age: not a duration: {age!r}" in err and "Traceback" not in err
+
+
+@pytest.mark.parametrize("state", ["", ".", "..", "dir/.."])
+@pytest.mark.parametrize("stop", [False, True])
+def test_a_state_without_a_file_name_is_a_usage_error(tmp_path, capsys, monkeypatch, state, stop):
+    """``Path("")`` is ``.``, which has no name for ``with_suffix``: an empty
+    --state raised ValueError instead of a usage error naming the option,
+    and ``..`` put its lock and ledger at ``...lock`` beside it."""
+    monkeypatch.chdir(tmp_path)
+    argv = ["--state", state, "--owner", OWNER] + (["--stop"] if stop else [])
+    clock = Clock()
+    with pytest.raises(SystemExit) as exc:
+        watch.main(argv, runner=World(tmp_path), clock=clock, sleep=clock.sleep,
+                   board=FakeBoard(clock), environ={})
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "argument --state: " in err and "file name" in err and "Traceback" not in err
+
+
+def test_a_max_age_past_the_clocks_range_is_capped_not_a_crash(h):
+    """A max age too large for a float overflowed when the deadline was
+    added to the monotonic clock; the deadline is capped, so no sleep is
+    longer than ``time.sleep`` accepts."""
+    code, _, _ = h.main("--interval", "1e300", "--quiet-after", "1e300", max_age="9" * 400)
+    assert code == watch.EXIT_OK
+    assert "exiting: max age" in h.capsys.readouterr().err
+    assert 0 < h.clock.t <= watch.MAX_DEADLINE
+
+
+# ── gh output of the wrong shape (2026-11-13) ─────────────────────────────
+
+def _pr_list(raw):
+    return lambda cmd: raw if cmd[1:3] == ["pr", "list"] else None
+
+
+def _master_runs(raw):
+    return lambda cmd: raw if cmd[1:3] == ["run", "list"] and "--branch" in cmd else None
+
+
+def _head_runs(raw):
+    return lambda cmd: raw if cmd[1:3] == ["run", "list"] and "--commit" in cmd else None
+
+
+WRONG_SHAPES = [
+    ("pr-list-object", _pr_list, "{}", "gh pr list printed a JSON object, not a list of objects"),
+    ("pr-list-null", _pr_list, "null", "gh pr list printed null, not a list of objects"),
+    ("pr-list-number-items", _pr_list, "[1]", "gh pr list printed a list holding a number"),
+    ("pr-list-not-json", _pr_list, "<html>", "gh pr list printed output that is not JSON"),
+    ("pr-number-text", _pr_list, '[{"number": "7"}]', "gh pr list printed number as a string"),
+    ("pr-number-missing", _pr_list, '[{"title": "t"}]', "gh pr list printed an item with no number"),
+    ("pr-number-null", _pr_list, '[{"number": null}]', "gh pr list printed number as null"),
+    ("pr-number-bool", _pr_list, '[{"number": true}]', "gh pr list printed number as true"),
+    ("pr-head-number", _pr_list, '[{"number": 7, "headRefOid": 5}]',
+     "gh pr list printed headRefOid as a number"),
+    ("pr-title-list", _pr_list, '[{"number": 7, "title": ["t"]}]',
+     "gh pr list printed title as a list"),
+    ("pr-rollup-object", _pr_list, '[{"number": 7, "statusCheckRollup": {}}]',
+     "gh pr list printed statusCheckRollup as a JSON object"),
+    ("pr-rollup-text-items", _pr_list, '[{"number": 7, "statusCheckRollup": ["x"]}]',
+     "gh pr list printed a statusCheckRollup holding a string"),
+    ("pr-check-status-number", _pr_list, '[{"number": 7, "statusCheckRollup": [{"status": 1}]}]',
+     "gh pr list printed status as a number"),
+    ("master-runs-object", _master_runs, '{"runs": []}',
+     "gh run list printed a JSON object, not a list of objects"),
+    ("master-runs-list-items", _master_runs, "[[]]", "gh run list printed a list holding a list"),
+    ("master-run-id-text", _master_runs,
+     '[{"databaseId": "5", "event": "push", "status": "completed", "conclusion": "success"}]',
+     "gh run list printed databaseId as a string"),
+    ("master-run-event-list", _master_runs, '[{"databaseId": 5, "event": ["push"]}]',
+     "gh run list printed event as a list"),
+]
+
+
+@pytest.mark.parametrize("case", WRONG_SHAPES, ids=lambda c: c[0])
+def test_gh_output_of_the_wrong_shape_is_a_failed_poll(h, case):
+    """JSON that is not a list of objects, or a field of the wrong type,
+    ended the watcher in a traceback; it is a failed gh poll naming what
+    was wrong, and the watcher keeps going."""
+    _, source, raw, reason = case
+    h.world.prs = [pr(1)]
+    h.main(max_age="60")
+    h.world.override = source(raw)
+    code, texts, _ = h.main(max_age="60")
+    err = h.capsys.readouterr().err
+    assert code == watch.EXIT_OK and texts == []
+    assert f"gh failed (1/{watch.MAX_GH_FAILURES}): {reason}" in err, err
+    assert "gh --version" in err and "Traceback" not in err
+
+
+def test_a_head_lookup_of_the_wrong_shape_is_a_failed_poll(h):
+    h.world.prs = [pr(1, checks=[run_("a", status="QUEUED", conclusion="")])]
+    h.main(max_age="60")
+    h.world.prs = [pr(1, checks=[run_("a")])]
+    h.world.override = _head_runs('{"runs": []}')
+    code, texts, _ = h.main(max_age="60")
+    assert code == watch.EXIT_OK and texts == []
+    assert "gh failed (1/5): gh run list printed a JSON object" in h.capsys.readouterr().err
+    h.world.override = None                 # the head is reported once gh answers again
+    assert lines(h.main("--settle", "0")[1]) == ["PR #1 green at aaaaaaaa, merge state clean"]
+
+
+def test_gh_output_of_the_wrong_shape_on_five_polls_tells_the_owner_why(h):
+    h.main(max_age="60")
+    h.world.override = _pr_list("{}")
+    code, _, _ = h.main(max_age="3300")
+    assert code == watch.EXIT_SETUP
+    assert len(h.board.sent) == 1
+    text = h.board.sent[0]["text"]
+    assert text.startswith("conductor-watch stopped: gh failed on 5 polls in a row; last: "
+                           "gh pr list printed a JSON object, not a list of objects")
+
+
+@pytest.mark.parametrize("raw", ["{}", "[]", '{"state": ["MERGED"]}', '{"state": 1}', "<html>"])
+def test_a_closure_lookup_of_the_wrong_shape_keeps_tracking(h, raw):
+    h.world.prs = [pr(8, title="fix: x")]
+    h.main(max_age="60")
+    h.world.prs = []
+    h.world.override = lambda cmd: raw if cmd[1:3] == ["pr", "view"] else None
+    assert h.main(max_age="120")[1] == []
+    h.world.override = None
+    assert lines(h.main("--settle", "0")[1]) == ["PR #8 merged: fix: x"]
+
+
+def test_gh_vanishing_during_a_closure_lookup_tells_the_owner(h):
+    """A closure lookup runs outside the poll's gh handling; gh going
+    missing there ended the watcher in a traceback."""
+    h.world.prs = [pr(8)]
+    h.main(max_age="60")
+    h.world.prs = []
+
+    def gone(cmd):
+        if cmd[1:3] == ["pr", "view"]:
+            h.world.gh_missing = True
+            raise FileNotFoundError(cmd[0])
+    h.world.override = gone
+    code, _, _ = h.main(max_age="600")
+    assert code == watch.EXIT_SETUP
+    assert "gh is not installed" in h.board.sent[-1]["text"]
+
+
+@pytest.mark.parametrize("raw", ["[]", "null", '{"held": true, "board": "up"}',
+                                 '{"held": false, "board": [true]}', "1"])
+def test_lease_check_output_of_the_wrong_shape_leaves_the_lease_unknown(h, raw):
+    h.world.leases["full-suite"] = 1
+    h.main(max_age="60")
+    h.world.override = lambda cmd: raw if cmd[0] != "gh" and cmd[-1] == "full-suite" else None
+    code, texts, _ = h.main(max_age="120")
+    assert code == watch.EXIT_OK and texts == []
+    assert "Traceback" not in h.capsys.readouterr().err
+    h.world.override = None
+    h.world.leases["full-suite"] = 0
+    assert lines(h.main("--settle", "0")[1]) == ["full-suite free"]
+
+
+@pytest.mark.parametrize("holder", ["x", ["a"], 5])
+def test_a_lease_holder_of_the_wrong_shape_is_a_refusal_not_a_crash(h, holder):
+    h.board.leases = lambda name=None: ([{"name": name, "holder": holder}], False)
+    code, _, _ = h.main("--until-lease", "conductor:x")
+    assert code == watch.EXIT_SETUP
+    assert "the daemon's leases reply was not understood" in h.capsys.readouterr().err
+
+
+def _fixture_inputs():
+    for key, field in (("checks_state", "rollup"), ("runs_state", "runs"),
+                       ("pr_snapshot", "prs"), ("master_snapshot", "runs")):
+        for case in FIXTURE[key]:
+            yield pytest.param(key, case[field], id=f"{key}-{case['name']}")
+
+
+@pytest.mark.parametrize(("key", "value"), _fixture_inputs())
+def test_every_fixture_input_passes_the_shape_checks(key, value):
+    """The shape checks refuse only what the classifiers cannot read: every
+    gh answer the shared fixture holds is accepted."""
+    if key == "checks_state":
+        watch._gh_records([{"number": 1, "statusCheckRollup": value}], "gh pr list", watch.PR_TYPES)
+    elif key == "pr_snapshot":
+        watch._gh_records(value, "gh pr list", watch.PR_TYPES)
+    else:
+        watch._gh_records(value or [], "gh run list", watch.RUN_TYPES)
 
 
 # ── review findings, 2026-10-14 ────────────────────────────────────────────
@@ -970,6 +1184,175 @@ def test_a_stale_stop_file_does_not_stop_a_new_watcher(h):
     h.state.with_suffix(".stop").write_text("", encoding="utf-8")
     code, _, _ = h.main(max_age="300")
     assert code == 0 and "exit max age" in h.ledger()[-1]
+
+
+# ── a malformed state, an unwritable state (2026-11-13) ────────────────────
+
+_PR_ENTRY = {"title": "t", "head": "a" * 40, "checks": "none", "failed": [],
+             "mergeable": "MERGEABLE", "merge_state": "clean"}
+
+
+@pytest.mark.parametrize("body", [
+    b"{", b"\xff\xfe{}", b"[]", b'"x"', b"null", b'{"prs": []}', b'{"prs": {"x": {}}}',
+    json.dumps({"prs": {"1": dict(_PR_ENTRY, head=5)}}).encode(),
+    json.dumps({"prs": {"1": dict(_PR_ENTRY, failed="a")}}).encode(),
+    json.dumps({"prs": {"1": {"title": "t"}}}).encode(),
+    b'{"master": {"CI": {"id": "5", "conclusion": "success", "sha": "e"}}}',
+    b'{"master": {"CI": {"id": true, "conclusion": "success", "sha": "e"}}}',
+    b'{"master": []}', b'{"suites": []}', b'{"leases": 3}',
+], ids=lambda b: b.decode("utf-8", "replace")[:40])
+def test_a_malformed_state_file_is_a_fresh_baseline(h, body):
+    """A state an earlier run left that is not the watcher's shape ended
+    the watcher in a traceback (or, unparseable, was dropped without a
+    word); it is treated as no state, with one ledger line saying so."""
+    h.world.prs = [pr(1)]
+    h.state.write_bytes(body)
+    code, texts, _ = h.main(max_age="120")
+    assert code == watch.EXIT_OK and texts == []
+    err = h.capsys.readouterr().err
+    assert "baseline recorded" in err and "Traceback" not in err
+    reset = [line for line in h.ledger() if " reset " in line]
+    assert len(reset) == 1 and str(h.state) in reset[0] and "fresh baseline" in reset[0]
+    assert set(json.loads(h.state.read_text(encoding="utf-8"))["prs"]) == {"1"}
+    h.world.prs = [pr(1), pr(2, title="feat: y")]               # and it watches from there
+    assert lines(h.main("--settle", "0")[1]) == ["PR #2 opened: feat: y"]
+
+
+def test_a_state_file_that_cannot_be_read_is_a_fresh_baseline(h, monkeypatch):
+    """The write check before registering must not need the old contents:
+    a state file that denies reads, in a directory that takes a new file,
+    is replaced with a fresh baseline as a malformed one is (review,
+    2026-11-13: the check refused it with exit 2)."""
+    h.world.prs = [pr(1)]
+    h.state.write_bytes(b"{}")
+    real, denied = Path.read_bytes, [True]
+
+    def read_bytes(self):
+        if denied[0] and self == h.state:
+            raise PermissionError(13, "Permission denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    code, texts, _ = h.main(max_age="120")
+    denied[0] = False
+    assert code == watch.EXIT_OK and texts == []
+    err = h.capsys.readouterr().err
+    assert "baseline recorded" in err and "Traceback" not in err
+    reset = [line for line in h.ledger() if " reset " in line]
+    assert len(reset) == 1 and "could not be read (Permission denied)" in reset[0]
+    assert "fresh baseline" in reset[0]
+    assert set(json.loads(h.state.read_text(encoding="utf-8"))["prs"]) == {"1"}
+
+
+def test_every_state_the_watcher_writes_passes_its_own_check(h):
+    h.world.prs = [pr(1, checks=[run_("a", conclusion="FAILURE")]), pr(2, mergeable="UNKNOWN")]
+    h.world.runs = [_run(10, "failure")]
+    h.world.leases["full-suite"] = 1
+    h.world.suite("r.json")
+    h.main(max_age="60")
+    h.main("--settle", "0", max_age="60")
+    assert watch._state_problem(json.loads(h.state.read_text(encoding="utf-8"))) is None
+    for partial in ({}, {"prs": None, "master": None}, {"suites": {}, "leases": {}}):
+        assert watch._state_problem(partial) is None
+    for key in ("pr_events", "master_events"):
+        for case in FIXTURE[key]:
+            for side in ("old", "new"):
+                source = "prs" if key == "pr_events" else "master"
+                assert watch._state_problem({source: case[side]}) is None, case["name"]
+
+
+def test_a_state_path_that_is_a_directory_is_refused_before_registering(h):
+    h.state.mkdir()
+    code, _, _ = h.main()
+    assert code == watch.EXIT_SETUP
+    assert h.board.registers == [] and h.board.sent == []
+    err = h.capsys.readouterr().err
+    assert f"state {h.state} is a directory" in err and "pass --state <" in err
+    assert "Traceback" not in err
+
+
+def test_a_pid_path_that_is_a_directory_is_refused_before_registering(h):
+    h.state.with_suffix(".pid").mkdir()
+    code, _, _ = h.main()
+    assert code == watch.EXIT_SETUP and h.board.registers == []
+    assert f"{h.state.with_suffix('.pid')} is a directory" in h.capsys.readouterr().err
+
+
+def test_a_state_under_a_regular_file_names_the_fix(h):
+    (h.tmp / "file").write_text("", encoding="utf-8")
+    code, _, _ = h.main(state=h.tmp / "file" / "state.json")
+    assert code == watch.EXIT_SETUP and h.board.registers == []
+    assert "pass --state <" in h.capsys.readouterr().err
+
+
+def test_a_state_that_cannot_be_written_mid_run_tells_the_owner(h):
+    h.main(max_age="60")
+
+    def between(poll):
+        if poll == 2:
+            h.state.unlink()
+            h.state.mkdir()                                     # what _save replaces is gone
+    code, _, _ = h.main(between=between)
+    assert code == watch.EXIT_SETUP
+    final = h.board.sent[-1]["text"]
+    assert final.startswith(f"conductor-watch stopped: state {h.state} is a directory")
+    assert "Traceback" not in h.capsys.readouterr().err
+
+
+def test_a_stop_request_that_cannot_be_written_changes_nothing(h, capsys):
+    watch._write_pid(h.state, agent_id="a" * 32, owner=OWNER)          # this process, alive
+    h.state.with_suffix(".stop").mkdir()
+    code = watch.main(["--stop", "--state", str(h.state)], environ={})
+    assert code == watch.EXIT_SETUP
+    err = capsys.readouterr().err
+    assert str(h.state.with_suffix(".stop")) in err and "nothing changed" in err
+
+
+def test_a_detached_start_whose_log_cannot_be_written_is_a_setup_refusal(tmp_path, capsys):
+    state = tmp_path / "w.json"
+
+    def spawn(argv, log):
+        raise PermissionError(13, "Permission denied", str(log))
+    code = watch.main(["--detach", "--owner", OWNER, "--state", str(state)], environ={}, spawn=spawn)
+    assert code == watch.EXIT_SETUP
+    err = capsys.readouterr().err
+    assert "the watcher did not start" in err and str(state.with_suffix(".log")) in err
+
+
+@pytest.mark.parametrize("pid", ["2" * 40, "1e400", "-1e400", "[" * 2000 + "]" * 2000])
+def test_a_pid_record_out_of_range_names_no_watcher(h, capsys, pid):
+    """A pid past what the process probes take overflowed in them, and a
+    deeply nested record overflowed the JSON decoder's recursion."""
+    h.state.with_suffix(".pid").write_text('{"pid": %s}' % pid, encoding="utf-8")
+    assert watch.main(["--stop", "--state", str(h.state)], environ={}) == watch.EXIT_OK
+    assert "no watcher running" in capsys.readouterr().out
+
+
+_STAT_TAIL = b" S" + b"".join(b" %d" % n for n in range(4, 30))       # field 22 is 22
+
+
+@pytest.mark.parametrize(("ps", "expected"), [("", None), ("Thu Nov 13 10:00:00 2026\n",
+                                                           "Thu Nov 13 10:00:00 2026")])
+def test_a_stat_that_is_not_utf8_reads_as_unreadable(tmp_path, monkeypatch, ps, expected):
+    """A process name that is not UTF-8 raised UnicodeDecodeError on Linux;
+    the stat is unreadable, as a missing one is, and ``ps`` is asked."""
+    (tmp_path / "77").mkdir()
+    (tmp_path / "77" / "stat").write_bytes(b"77 (n\x81me)" + _STAT_TAIL)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return watch.subprocess.CompletedProcess(cmd, 0, ps, "")
+    monkeypatch.setattr(watch.subprocess, "run", fake_run)
+    assert watch._posix_process_start(77, proc=tmp_path) == expected
+    assert calls == [["ps", "-o", "lstart=", "-p", "77"]]
+
+
+def test_a_readable_stat_gives_field_22(tmp_path, monkeypatch):
+    (tmp_path / "77").mkdir()
+    (tmp_path / "77" / "stat").write_bytes(b"77 (a) b) c)" + _STAT_TAIL)
+    monkeypatch.setattr(watch.subprocess, "run", lambda *a, **k: pytest.fail("ps asked"))
+    assert watch._posix_process_start(77, proc=tmp_path) == "22"
 
 
 # ── owner resolution ───────────────────────────────────────────────────────

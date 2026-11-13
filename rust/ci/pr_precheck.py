@@ -34,6 +34,7 @@ PYTHON_ROOTS = {
     "console": ("console_cli",),
     "expose": ("expose_cli",),
     "restore": ("restore_cli", "docker_backup_restore"),
+    "conductor_watch": ("conductor_watch_cli",),
     "update": ("update_cli",),
     "audit": ("board_audit_cli",),
     "backup": ("backup_cli",),

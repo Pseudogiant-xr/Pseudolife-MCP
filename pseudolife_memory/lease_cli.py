@@ -177,7 +177,9 @@ CHILD_POLL = 0.2
 # How often ``hold`` looks whether the process it follows is still there.
 PID_POLL = 0.5
 
-_DURATION = re.compile(r"([0-9]+)([smhd]?)", re.IGNORECASE)
+# ASCII: under a Unicode IGNORECASE match "ſ" (long s) matches "s",
+# and the unit lookup below then raised KeyError.
+_DURATION = re.compile(r"([0-9]+)([smhd]?)", re.IGNORECASE | re.ASCII)
 _UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
 

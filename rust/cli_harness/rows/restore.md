@@ -5,8 +5,10 @@ Oracle: `pseudolife_memory/restore_cli.py`, `docker_backup_restore.py`
 `database_exists`, `_backup_space`, `_restore_space` and the start of
 `restore`), `disk_space.py`, and `update_cli` (`_dump_complete`,
 `interactive`, `UpdateLock`, `_backup_connection_details`, `run_cli`,
-`docker_cmd`, `data_dir`, `home`) at origin/master 01fba4b6, under CPython
-3.11 (the CI interpreter) with psycopg 3's `conninfo_to_dict` and
+`docker_cmd`, `data_dir`, `home`) at origin/master 01fba4b6, with the
+2026-11-13 fixes (a corrupt deflate stream refused, an `inspect` object
+refused, a console required on Windows), under CPython 3.11 (the CI
+interpreter) with psycopg 3's `conninfo_to_dict` and
 `make_conninfo`. Candidate: `rust/shim/src/cli/restore_cli/`. Harness row:
 `restore` (`rust/cli_harness/rows/restore.py`). Rust contract test:
 `rust/shim/tests/cli_restore_contract.rs`.
@@ -58,9 +60,9 @@ is answered, before any Docker call, as the oracle answers it.
 | A value after an option may be a negative number (`-1`, `-.5`) or `-`: argparse takes it as the value | `_negative_number_matcher` |
 | Repeated options: the last value wins; `--opt=value` | argparse |
 | Paths are pathlib's spelling (`dump.sql.gz/` and `./dump.sql.gz` name the file, `''` is `.`) | `type=Path` |
-| The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, truncation); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
+| The dump: every gzip member read as Python's `gzip` reads it (padding, trailing bytes, truncation, a CRC or length mismatch, a deflate error: each a refusal); lines split on `\n`, `\r\n` and a lone `\r`; the marker counts only outside `COPY ... FROM stdin;` data, with `\S` read as Python's `str.isspace` complement | `_dump_complete`, `gzip._GzipReader` |
 | The state archive: the gzip check, then members as CPython 3.11 `tarfile` reads them (`frombuf`, `nti` with Python `int(..., 8)`, both checksums, the ustar prefix, the V7 trailing-slash directory, GNU long names and links (`L`, `K`: each record's data up to its first NUL patches the header after it, a directory losing one trailing slash per record, and any header problem after a record a `ReadError`), a bad or short header after the first ending the archive quietly, a member's data present to the end of its last block, non-regular supported types skipping no data, unknown types skipping theirs), then every `validate_state` check: absolute, `..` or backslash names, devices and FIFOs, absolute or backslash link targets, escaping links through the final and the transient link graph, and a link loop ending the walk | `validate_state` |
-| The confirmation gate: on Windows a character device counts as a terminal (the CRT's `isatty`, so `NUL` does) | `update_cli.interactive` |
+| The confirmation gate: stdin and stdout must both be terminals, and on Windows consoles too (`GetConsoleMode`), so `NUL`, a character device the CRT's `isatty` accepts, is refused (`no-yes-null-device`) | `update_cli.interactive` |
 | A held update lock: `another pseudolife-mcp update is running (pid N); nothing was changed. Run this again when it has finished`, exit 2, the pid read from `update.lock.pid` (`unknown` unless digits), no Docker call; otherwise the lock file under `PSEUDOLIFE_MCP_DATA_DIR` or `<USERPROFILE or HOME>/.pseudolife-mcp` stays after a refusal and its pid file does not | `UpdateLock`, `os_lock.OsLock` |
 | Docker commands: `PSEUDOLIFE_DOCKER` or `docker`, stdin closed, the oracle's argv, order and timeouts; the text read is stdout only, with stderr added for a failed `inspect` or `psql`; a command that cannot start or times out reads as exit 1 | `run_cli`, `DockerBank.command`, `disk_space` |
 | `inspect`: a failure is `Docker inspect failed for the backup/restore; check the containers with docker logs <pg> and docker logs <daemon>, then retry`, exit 1; output that is not a JSON list whose first item is an object is `cannot inspect <name>; restore its Docker container configuration and retry`, exit 2 | `DockerBank.inspect` |
@@ -79,8 +81,9 @@ is answered, before any Docker call, as the oracle answers it.
 - Confirmed runs whose outcome the candidate is not sure of, before the
   lock: Docker output that is not ASCII (the oracle decodes it in the
   locale's encoding); `inspect` output serde cannot parse (`json.loads`
-  also reads `NaN`, `Infinity`, huge exponents and lone surrogates) or a
-  JSON object rather than a list; container fields of a type Python would
+  also reads `NaN`, `Infinity`, huge exponents and lone surrogates, and
+  nesting past serde's limit, which the oracle refuses); container fields
+  of a type Python would
   iterate or fail on in a way this leaf does not reproduce (a string or
   dict where a list is expected, a non-dict where `.get` is called, a
   non-string image, alias or binding); a daemon URL outside the libpq
@@ -96,21 +99,14 @@ is answered, before any Docker call, as the oracle answers it.
   in a dot or space, reserved device names, a result that keeps the `\\?\`
   prefix); a `.git` probe whose error pathlib would raise; no
   `USERPROFILE` or `HOME`; a lock probe that fails.
-- Without `--yes` at a terminal (stdin and stdout both terminals, or on
-  Windows character devices): the oracle prompts.
+- Without `--yes` at a terminal (stdin and stdout both terminals, on
+  Windows both consoles): the oracle prompts.
 - Argparse shapes: abbreviations (`--back`), `--`, single-dash arguments
   other than `-h`, `-` and negative numbers (option clusters such as `-hx`,
   `-h=x`), non-Unicode argv, non-ASCII in a single-dash argument or a
   `--db-port` value (Python reads Unicode digits and spaces there), any
   error message that would hold non-ASCII text, and help or usage at any
   other wrap width.
-- A deflate error in either file: the oracle's `zlib.error` escapes both
-  checks and it prints a traceback (exit 1).
-- A gzip CRC or length mismatch in either file. The oracle refuses it
-  (`BadGzipFile`), but miniz_oxide, unlike zlib, decodes a back-reference
-  before the start of a member's output, so a stream zlib stops on with a
-  traceback reaches the trailer here with the wrong bytes; this leaf cannot
-  tell the two apart.
 - State archives with PAX headers (`x`, `g`, `X`), sparse members (`S`),
   a negative size on a member that skips data or on a GNU long record, more
   than 32 GNU long records before one header, a link walk deeper than 400
@@ -120,10 +116,15 @@ is answered, before any Docker call, as the oracle answers it.
 ## Declared divergences
 
 - A stream holding a corruption miniz_oxide decodes and zlib rejects (a
-  back-reference before the member's start) that is also cut off before its
-  trailer: the oracle prints its `zlib.error` traceback (exit 1), this leaf
-  refuses the file as incomplete (exit 2). Both stop before any effect. Not
-  in the harness: no fixture is known whose two outcomes are this pair.
+  back-reference before the member's start) whose trailer's CRC and length
+  match miniz_oxide's wrong bytes: the oracle refuses it (`zlib.error`),
+  this leaf reads those bytes, which pass only if they hold the dump's
+  marker or a safe archive. Not in the harness: no such stream is known; a
+  stream that was not built for it fails the CRC check here and is refused
+  (`dump-distance-too-far`).
+- A deflate stream miniz_oxide rejects and zlib accepts, if one exists:
+  this leaf refuses it (exit 2) where the oracle reads it. Not in the
+  harness: none is known.
 - Order of the lock and the read-only calls: the oracle takes the update
   lock first; the candidate makes the read-only calls first. Their
   sequence, the output and the files are the same in every case answered.
@@ -139,11 +140,7 @@ is answered, before any Docker call, as the oracle answers it.
 
 - `restore-declared-deferral`: the oracle answers before any Docker command
   (exit 0 or 2, no docker call, fixtures intact) where this leaf defers by
-  design (including `dump-bad-crc` and `state-bad-crc-gzip`); the
-  expectation becomes the deferral.
-- `restore-zlib-traceback`: the oracle's uncaught `zlib.error` traceback
-  (exit 1, nothing on stdout, last line `zlib.error: Error -3 while
-  decompressing data: ...`, no docker call) becomes the deferral.
+  design; the expectation becomes the deferral.
 - `restore-defer-at-first-change`: a case names how many of the oracle's
   Docker calls precede its first change (`reached`). When the oracle's next
   call is a `stop` or `create`, or it printed the safety step line, and the
@@ -175,16 +172,17 @@ non-test source: only `docker.rs` starts processes, only `mod.rs` writes
 
 ## Mutants
 
-63 source mutants, one per decision the row pins. The gates (27): exit code,
-`--yes`, the state check and its order after the dump check, argparse's error
+65 source mutants, one per decision the row pins. The gates (28): exit code,
+`--yes`, the null device read as no terminal (Windows), the state check and its order after the dump check, argparse's error
 order and negative numbers, the 80-column guard, the COPY pattern, lone `\r`,
-gzip padding, the CRC check and its deferral, the zlib deferral, tar header
-and data handling, the transient pass, FIFOs, loop handling, the ustar
+gzip padding, the CRC check and its refusal, the deflate error's refusal, tar
+header and data handling, the transient pass, FIFOs, loop handling, the ustar
 prefix, the signed checksum, `int`'s base prefix, and GNU long records (the
 name and link patches, the end block and short read after a record, and the
-cut at the first NUL). The confirmed path (36): deferring it all, the busy
+cut at the first NUL). The confirmed path (37): deferring it all, the busy
 pid, the lock check, the lock around a refusal, deferring at the first
-change, `inspect`'s exit code, stderr and parse errors, the four selectors
+change, `inspect`'s exit code, stderr and parse errors, its refusal of a JSON
+object, the four selectors
 and their values, the port range, the image, the `/data` mount, PostgreSQL
 running, the health port and `--leave-stopped`, the socket message, the
 database answer, the checkout and state-mount checks, Docker Desktop's

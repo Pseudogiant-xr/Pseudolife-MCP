@@ -157,6 +157,7 @@ PLATFORM_EXCLUSIONS = {
         'expose-winerror-full-stop': 'Declared Windows-only: only FormatMessageW text ends in a full stop.',
         'expose-pathext-lowercased': 'Declared Windows-only: only Windows has PATHEXT, whose spelling the lookup reports.',
         'restore-desktop-unmapped': "Declared Windows-only: only Windows maps Docker Desktop's host-mount source paths.",
+        'restore-null-device-terminal': "Declared Windows-only: only Windows' CRT isatty() reads the null device as a terminal.",
         'backup-member-mode-windows': 'Registered only by the Windows backup source branch.',
         'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
         'backup-owner-name-windows': 'Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.',
@@ -175,6 +176,7 @@ PLATFORM_EXCLUSIONS = {
         'backup-raw-member-name': 'Declared Linux-only raw-byte member name witness.',
         'backup-discovery-generic-errno-class': 'Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.',
         'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
+        'console-display-ignored': 'Declared Linux-only: only Linux gates the browser on DISPLAY or WAYLAND_DISPLAY.',
     },
 }
 # These two controls have no selected OS witness; global gaps cannot arise

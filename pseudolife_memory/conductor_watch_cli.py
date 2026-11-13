@@ -33,14 +33,16 @@ the owner's prompt cache warm, unless the owner is parked done.
 
 It exits 0 when the owner leaves the board, when --until-lease names a lease
 the owner no longer holds, after --max-age, or on --stop; it exits 2 when gh
-is missing or fails on 5 polls in a row (after telling the owner), or when
-the board refuses it. "Leaves the board" includes going idle: the board
-lists an attached session for three hours after its last action
-(ATTACHED_IDLE_WINDOW in storage/coordination.py), and an owner parked done
-gets no quiet mail, so after about three hours of a done park the watcher
-exits. That matches done (no follow-up expected); --detach is idempotent,
+is missing or fails on 5 polls in a row (an answer of the wrong shape counts
+as a failure), when its state cannot be written (after telling the owner,
+once it has started), or when the board refuses it. "Leaves the board"
+includes going idle: the board lists an attached session for three hours
+after its last action (ATTACHED_IDLE_WINDOW in storage/coordination.py),
+and an owner parked done gets no quiet mail, so after about three hours
+of a done park the watcher exits. That matches done (no follow-up expected); --detach is idempotent,
 so an owner runs it again on any turn that waits. The first run without a
-state file records a baseline and reports nothing for what is already true.
+state file, or with one it cannot read, records a baseline and reports
+nothing for what is already true.
 """
 from __future__ import annotations
 
@@ -80,6 +82,9 @@ DEFAULT_INTERVAL = 60.0
 # CI jobs and suite runs finish in clusters; one wake should carry them.
 DEFAULT_SETTLE = 45.0
 MAX_GH_FAILURES = 5
+# The longest run --max-age gives: 100 years. A larger age overflowed the
+# float clock, and time.sleep refuses a wait past about 292 years.
+MAX_DEADLINE = 100 * 365 * 86400.0
 # How long --detach waits for the child to register and write its pid file.
 DETACH_WAIT = 15.0
 DETACH_POLL = 0.2
@@ -317,12 +322,58 @@ def next_batch(found: list[str]) -> tuple[str, list[str], list[str]]:
 
 # ── the sources ──────────────────────────────────────────────────────────────
 
+# The fields the classifiers read from gh's JSON, and the types they can
+# read; null (or absent) is always allowed except where a type list omits it.
+_TEXT = (str, type(None))
+PR_TYPES = {"number": (int,), "title": _TEXT, "headRefOid": _TEXT, "mergeable": _TEXT,
+            "mergeStateStatus": _TEXT, "statusCheckRollup": (list, type(None))}
+CHECK_TYPES = {"__typename": _TEXT, "state": _TEXT, "context": _TEXT, "status": _TEXT,
+               "conclusion": _TEXT, "name": _TEXT, "workflowName": _TEXT}
+RUN_TYPES = {"databaseId": (int, type(None)), "workflowDatabaseId": (int, str, type(None)),
+             "workflowName": _TEXT, "status": _TEXT, "conclusion": _TEXT, "headSha": _TEXT,
+             "event": _TEXT}
+# What a person can do about gh printing something this watcher cannot read.
+_GH_FIX = " (check that the gh on PATH is the GitHub CLI and current: gh --version)"
+
+
+def _json_kind(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return {dict: "a JSON object", list: "a list", str: "a string"}.get(type(value), "a number")
+
+
+def _gh_records(value, what: str, types: dict, *, holder: str = "a list") -> list:
+    """``value`` when it is a list of objects whose fields in ``types`` have
+    those types; otherwise GhError saying what ``what`` printed instead."""
+    if not isinstance(value, list):
+        raise GhError(f"{what} printed {_json_kind(value)}, not a list of objects{_GH_FIX}")
+    for item in value:
+        if not isinstance(item, dict):
+            raise GhError(f"{what} printed {holder} holding {_json_kind(item)}, "
+                          f"not objects{_GH_FIX}")
+        for key, allowed in types.items():
+            if key not in item and type(None) not in allowed:
+                raise GhError(f"{what} printed an item with no {key}{_GH_FIX}")
+            field = item.get(key)
+            if isinstance(field, bool) or not isinstance(field, allowed):
+                raise GhError(f"{what} printed {key} as {_json_kind(field)}{_GH_FIX}")
+        if types is PR_TYPES:
+            _gh_records(item.get("statusCheckRollup") or [], what, CHECK_TYPES,
+                        holder="a statusCheckRollup")
+    return value
+
+
 class Watcher:
-    def __init__(self, args, runner):
+    def __init__(self, args, runner, note=None):
         self.args = args
         self.runner = runner
         self.repo = ["-R", args.repo] if args.repo else []
         self.warned_cli = False
+        # ``note(detail)`` reports a skipped input once (stderr and ledger).
+        self.note = note or _say
+        self.skipped: set[str] = set()
 
     def gh(self, *argv):
         try:
@@ -336,21 +387,26 @@ class Watcher:
         if code != 0:
             lines = (err or out).strip().splitlines()
             raise GhError(lines[-1] if lines else f"gh exited {code}")
-        return json.loads(out or "null")
+        try:
+            return json.loads(out or "null")
+        except (ValueError, RecursionError):
+            raise GhError(f"gh {' '.join(argv[:2])} printed output that is not JSON"
+                          f"{_GH_FIX}") from None
 
     def prs(self, old):
         args = ["pr", "list", "--state", "open", "--limit", str(PR_LIMIT), "--json", PR_FIELDS]
         if self.args.author:
             args += ["--author", self.args.author]
-        snap = pr_snapshot(old, self.gh(*args))
+        snap = pr_snapshot(old, _gh_records(self.gh(*args), "gh pr list", PR_TYPES))
         for number, p in snap.items():
             # Only a head about to be reported green or cancelled is looked
             # up, so a poll with nothing new costs no extra gh calls.
             before = (old or {}).get(number)
             if p["checks"] in {"green", "cancelled"} and not (
                     before and before["head"] == p["head"] and before["checks"] == p["checks"]):
-                runs, names = runs_state(self.gh("run", "list", "--commit", p["head"], "--limit", "100",
-                                                 "--json", RUN_FIELDS))
+                runs, names = runs_state(_gh_records(
+                    self.gh("run", "list", "--commit", p["head"], "--limit", "100",
+                            "--json", RUN_FIELDS), "gh run list", RUN_TYPES))
                 # The runs can only hold or worsen what the rollup says:
                 # pending, then failing, then cancelled over green.
                 if runs == "pending":
@@ -360,12 +416,15 @@ class Watcher:
         return snap
 
     def master(self, old):
-        return master_snapshot(old, self.gh("run", "list", "--branch", "master", "--limit", "30",
-                                            "--json", RUN_FIELDS))
+        return master_snapshot(old, _gh_records(
+            self.gh("run", "list", "--branch", "master", "--limit", "30", "--json", RUN_FIELDS),
+            "gh run list", RUN_TYPES))
 
     def suites(self, old):
         """Readable result files. One that does not parse yet (still being
-        written) stays out, so a later poll reports it."""
+        written) stays out, so a later poll reports it. One that parses but
+        is not an object is no result: it is noted once per run and stays
+        out too, so a rewrite into a result is still reported."""
         snap = dict(old or {})
         directory = Path(self.args.suite_results)
         for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
@@ -373,7 +432,13 @@ class Watcher:
                 continue
             try:
                 body = json.loads(path.read_text(encoding="utf-8-sig"))
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
+                continue
+            if not isinstance(body, dict):
+                if path.name not in self.skipped:
+                    self.skipped.add(path.name)
+                    self.note(f"suite result {path} is {_json_kind(body)}, not an object; "
+                              "skipped until it holds a result")
                 continue
             snap[path.name] = {"machine": str(body.get("machine", "?")),
                                "commit": str(body.get("commit", ""))[:8],
@@ -397,9 +462,12 @@ class Watcher:
                     _say(f"{self.args.lease_cli} not found; leases unknown")
                     self.warned_cli = True
                 continue
-            except (OSError, subprocess.TimeoutExpired, ValueError):
+            except (OSError, subprocess.TimeoutExpired, ValueError, RecursionError):
                 continue
-            board_up = (body.get("board") or {}).get("available") is True
+            if not isinstance(body, dict):
+                continue
+            board = body.get("board")
+            board_up = isinstance(board, dict) and board.get("available") is True
             if code == 1 and body.get("held") is True:
                 snap[name] = "held"
             elif code == 0 and body.get("held") is False and board_up:
@@ -410,12 +478,14 @@ class Watcher:
         """``merged`` or ``closed``, or None while that is not known: the
         lookup failed, or the pull request is still open (it fell off the
         list). None keeps it tracked and asks again next poll (Codex review,
-        2026-10-14)."""
+        2026-10-14). gh missing reads as unknown too: the next poll's
+        snapshot raises it, where the watcher tells its owner."""
         try:
-            state = self.gh("pr", "view", number, "--json", "state").get("state", "")
-        except (GhError, ValueError, AttributeError):
+            body = self.gh("pr", "view", number, "--json", "state")
+        except (GhError, GhMissing):
             return None
-        return {"MERGED": "merged", "CLOSED": "closed"}.get(state)
+        state = body.get("state") if isinstance(body, dict) else None
+        return {"MERGED": "merged", "CLOSED": "closed"}.get(state) if isinstance(state, str) else None
 
     def snapshot(self, old):
         """Every source, keeping the old value of a source whose gh call
@@ -525,6 +595,85 @@ def default_state(environ, owner: str | None = None) -> Path | None:
     return Path.home() / ".pseudolife-mcp" / "watch" / f"{owner}.json"
 
 
+_PR_KEY = re.compile(r"-?[0-9]+")
+_PR_STATE_TYPES = {"title": str, "head": str, "checks": str, "mergeable": str, "merge_state": str}
+_MASTER_STATE_TYPES = {"conclusion": str, "sha": str}
+
+
+def _state_problem(state) -> str | None:
+    """Why ``state`` (a state file's JSON) is not one this watcher wrote,
+    or None. It checks what the classifiers index in an old snapshot; a
+    source that is null or absent is allowed, as after a failed first poll."""
+    if not isinstance(state, dict):
+        return f"holds {_json_kind(state)}, not an object"
+    for key in ("prs", "master", "suites", "leases"):
+        if not isinstance(state.get(key), (dict, type(None))):
+            return f"holds {key} as {_json_kind(state[key])}, not an object"
+    for number, p in (state.get("prs") or {}).items():
+        if not _PR_KEY.fullmatch(number) or not isinstance(p, dict):
+            return f"holds a pull request entry {number!r} it cannot read"
+        if (any(not isinstance(p.get(k), t) for k, t in _PR_STATE_TYPES.items())
+                or not isinstance(p.get("failed"), list)
+                or not all(isinstance(name, str) for name in p["failed"])):
+            return f"holds pull request {number} in a shape it cannot read"
+    for name, r in (state.get("master") or {}).items():
+        if (not isinstance(r, dict) or isinstance(r.get("id"), bool)
+                or not isinstance(r.get("id"), int)
+                or any(not isinstance(r.get(k), t) for k, t in _MASTER_STATE_TYPES.items())):
+            return f"holds master workflow {name!r} in a shape it cannot read"
+    return None
+
+
+class _Unwritable(Exception):
+    """A file the watcher must write cannot be; the message names it and
+    the fix."""
+
+
+STATE_FIX = "pass --state <path to a file in a writable directory>"
+
+
+def _unwritable(label: str, reason: str) -> _Unwritable:
+    return _Unwritable(f"{label} {reason}; {STATE_FIX}")
+
+
+def _writable(path: Path, label: str) -> None:
+    """Raise _Unwritable unless ``_save`` can write ``path``: its
+    directory takes a new file, and an existing file can be replaced (it is
+    rewritten with its own bytes, so nothing changes). A file that cannot
+    be read is not replaced here, since its bytes could not be put back:
+    ``load`` reports it and a later write that fails tells the owner.
+    ``label`` names the file in the refusal."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        if path.is_dir():
+            raise _unwritable(label, "is a directory")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            body = path.read_bytes()
+        except OSError:           # missing, or unreadable: only the directory is checked
+            body = None
+        tmp.write_bytes(body or b"")
+        if body is None:
+            tmp.unlink()
+        else:
+            os.replace(tmp, path)
+    except OSError as exc:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise _unwritable(label, f"cannot be written ({exc.strerror or exc})") from None
+
+
+def _persist(path: Path, label: str, value) -> None:
+    """``_save``, raising _Unwritable naming ``label`` when it fails."""
+    try:
+        _save(path, value)
+    except OSError as exc:
+        reason = "is a directory" if path.is_dir() else f"cannot be written ({exc.strerror or exc})"
+        raise _unwritable(label, reason) from None
+
+
 def _process_start(pid: int) -> str | None:
     """An opaque token for when ``pid`` started, or None when it cannot be
     read. With the pid it tells a running watcher from a reused pid; stdlib
@@ -549,15 +698,23 @@ def _process_start(pid: int) -> str | None:
             return str((times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
         finally:
             kernel32.CloseHandle(handle)
+    return _posix_process_start(pid)
+
+
+def _posix_process_start(pid: int, proc: Path = Path("/proc")) -> str | None:
+    """``_process_start`` outside Windows: field 22 of Linux's
+    ``/proc/<pid>/stat``, else ``ps``'s start time. ``proc`` is a test seam."""
     try:
         # Field 22 of /proc/<pid>/stat, counted after the parenthesised name.
-        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
-    except (OSError, IndexError):
+        # A name that does not decode (ValueError: UnicodeDecodeError) is an
+        # unreadable stat like any other.
+        return (proc / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError, ValueError):
         pass
     try:
         out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True,
                              text=True, timeout=10).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
     return out or None
 
@@ -568,15 +725,20 @@ def _write_pid(state: Path, *, agent_id: str, owner: str, nonce: str | None = No
                                       "nonce": nonce})
 
 
+# Past this a pid overflows the process probes (a C int on POSIX; ctypes
+# truncates a Windows DWORD silently); no live watcher has one.
+_PID_LIMIT = 2 ** 31
+
+
 def _running(state: Path) -> dict | None:
     """The pid file's record when it names a live process that started when
     the record says, else None."""
     try:
         record = json.loads(state.with_suffix(".pid").read_text(encoding="utf-8"))
         pid = int(record["pid"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError, RecursionError):
         return None
-    if not _pid_alive(pid):
+    if pid >= _PID_LIMIT or not _pid_alive(pid):
         return None
     recorded, current = record.get("process_start"), _process_start(pid)
     if recorded is not None and current is not None and recorded != current:
@@ -589,7 +751,7 @@ def _remove_own_pid(state: Path) -> None:
     try:
         if json.loads(path.read_text(encoding="utf-8")).get("pid") == os.getpid():
             path.unlink()
-    except (OSError, ValueError, AttributeError):
+    except (OSError, ValueError, AttributeError, RecursionError):
         pass
 
 
@@ -608,7 +770,7 @@ def _positive(text):
 
 def _non_negative(text):
     value = float(text)
-    if value < 0:
+    if not value >= 0:                    # NaN too: a NaN settle never sent a batch
         raise argparse.ArgumentTypeError("must be 0 or more")
     return value
 
@@ -621,6 +783,17 @@ def _age(text):
     if value <= 0:
         raise argparse.ArgumentTypeError("must be above 0")
     return value
+
+
+def _state_path(text):
+    """A file path whose last component can carry the .pid, .lock and other
+    suffixes: an empty path is ``.``, and ``.`` and ``..`` name directories."""
+    path = Path(text)
+    if path.name in {"", ".", ".."}:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} has no file name; give a file path such as "
+            "~/.pseudolife-mcp/watch/<owner>.json")
+    return path
 
 
 def parser():
@@ -649,7 +822,7 @@ def parser():
                    help=f"seconds between polls (default {DEFAULT_INTERVAL:g})")
     p.add_argument("--settle", type=_non_negative, default=DEFAULT_SETTLE,
                    help=f"seconds to keep collecting after the first event (default {DEFAULT_SETTLE:g})")
-    p.add_argument("--state", type=Path,
+    p.add_argument("--state", type=_state_path,
                    help="state file (default: <session digest>.dwatch.json, else "
                         "~/.pseudolife-mcp/watch/<owner>.json); .pid, .lock, .stop, .log and .ledger "
                         "files go beside it")
@@ -732,8 +905,14 @@ def _stop(state: Path) -> int:
     if record is None:
         print(f"conductor-watch: no watcher running for {state}; nothing changed")
         return EXIT_OK
-    state.with_suffix(".stop").parent.mkdir(parents=True, exist_ok=True)
-    state.with_suffix(".stop").write_text("", encoding="utf-8")
+    stop = state.with_suffix(".stop")
+    try:
+        stop.parent.mkdir(parents=True, exist_ok=True)
+        stop.write_text("", encoding="utf-8")
+    except OSError as exc:
+        _say(f"cannot write {stop} ({exc.strerror or exc}); nothing changed. "
+             f"Make {stop.parent} writable, then run --stop again")
+        return EXIT_SETUP
     print(f"conductor-watch {record.get('agent_id')} asked to stop; it exits at its next poll")
     return EXIT_OK
 
@@ -767,12 +946,20 @@ def _detach(argv: list[str], args, owner: str, state: Path, spawn, clock, sleep)
         child += ["--state", str(state)]
     pid_path = state.with_suffix(".pid")
     log = state.with_suffix(".log")
-    pid = spawn(child_python.cli_argv("conductor-watch", *child), log)
+    try:
+        pid = spawn(child_python.cli_argv("conductor-watch", *child), log)
+    except OSError as exc:
+        why = exc.strerror or str(exc)
+        if exc.filename is not None and Path(exc.filename) == log:
+            _say(f"the watcher did not start: its log {log} cannot be written ({why}); {STATE_FIX}")
+        else:
+            _say(f"the watcher did not start: {exc}")
+        return EXIT_SETUP
     deadline = clock() + DETACH_WAIT
     while True:
         try:
             record = json.loads(pid_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             record = None
         if isinstance(record, dict) and record.get("nonce") == nonce:
             agent_id = record.get("agent_id")
@@ -825,7 +1012,7 @@ def main(argv=None, *, runner=run, clock=time.monotonic, sleep=time.sleep, board
             _say(f"another watcher holds {state}; this one exits")
             return EXIT_OK
     except OSError as exc:
-        _say(f"cannot lock {state.with_suffix('.lock')} ({exc})")
+        _say(f"cannot lock {state.with_suffix('.lock')} ({exc.strerror or exc}); {STATE_FIX}")
         return EXIT_SETUP
     try:
         if board is None:
@@ -835,7 +1022,12 @@ def main(argv=None, *, runner=run, clock=time.monotonic, sleep=time.sleep, board
                 _ledger(state, "setup", f"no board: {why}")
                 return EXIT_SETUP
         try:
-            return _Loop(args, owner, state, Watcher(args, runner), board, environ, clock, sleep).run()
+            def note(detail):
+                _say(detail)
+                _ledger(state, "skipped", detail)
+
+            return _Loop(args, owner, state, Watcher(args, runner, note), board, environ, clock,
+                         sleep).run()
         finally:
             _remove_own_pid(state)
             close = getattr(board, "close", None)
@@ -863,7 +1055,34 @@ class _Loop:
         if self.project is None:
             self.project = self.watcher.project(self.environ)
         self.board.register(task=self.task, project=self.project, label=LABEL, status="starting")
-        _write_pid(self.state, agent_id=self.board.agent_id, owner=self.owner, nonce=self.args.nonce)
+        pid = self.state.with_suffix(".pid")
+        try:
+            _write_pid(self.state, agent_id=self.board.agent_id, owner=self.owner, nonce=self.args.nonce)
+        except OSError as exc:
+            reason = "is a directory" if pid.is_dir() else f"cannot be written ({exc.strerror or exc})"
+            raise _unwritable(str(pid), reason) from None
+
+    def load(self):
+        """The state an earlier run saved, or None for a fresh baseline: no
+        file, or one that is not this watcher's (said once in the ledger)."""
+        try:
+            state = json.loads(self.state.read_bytes().decode("utf-8"))
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            why = f"could not be read ({exc.strerror or exc})"
+        except UnicodeDecodeError:
+            why = "is not UTF-8 text"
+        except (ValueError, RecursionError):
+            why = "is not JSON"
+        else:
+            why = _state_problem(state)
+            if why is None:
+                return state
+        detail = f"state {self.state} {why}; recording a fresh baseline"
+        _say(detail)
+        _ledger(self.state, "reset", detail)
+        return None
 
     def call(self, action):
         """``action()``, registering again once if the daemon forgot this
@@ -897,7 +1116,10 @@ class _Loop:
         leases, _ = self.call(lambda: self.board.leases(name))
         for lease in leases:
             if lease.get("name") == name:
-                return (lease.get("holder") or {}).get("agent_id") == self.owner
+                holder = lease.get("holder")
+                if holder is not None and not isinstance(holder, dict):
+                    raise _Refused("the daemon's leases reply was not understood")
+                return (holder or {}).get("agent_id") == self.owner
         return False
 
     def send(self, text, request_id=None):
@@ -926,25 +1148,37 @@ class _Loop:
     # the loop ────────────────────────────────────────────────────────────
 
     def run(self) -> int:
-        args, stop = self.args, self.state.with_suffix(".stop")
+        stop = self.state.with_suffix(".stop")
         try:
             stop.unlink()                     # a request meant for an earlier watcher
         except OSError:
             pass
         try:
+            # Before registering, so a refusal leaves nothing on the board.
+            _writable(self.state, f"state {self.state}")
+            _writable(self.state.with_suffix(".pid"), str(self.state.with_suffix(".pid")))
             self.register()
+        except _Unwritable as exc:
+            _say(str(exc))
+            _ledger(self.state, "setup", str(exc))
+            return EXIT_SETUP
         except (_Refused, _Transient) as exc:
             _say(f"could not register on the board: {exc}")
             _ledger(self.state, "setup", f"could not register on the board: {exc}")
             return EXIT_SETUP
         print(f"conductor-watch {self.board.agent_id} watching for {self.owner}; "
               f"{_park_hint(self.board.agent_id)}", flush=True)
+        state = self.load()
         try:
-            state = json.loads(self.state.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            state = None
+            return self._watch(state)
+        except _Unwritable as exc:
+            return self.give_up(str(exc))
+
+    def _watch(self, state) -> int:
+        args, stop = self.args, self.state.with_suffix(".stop")
+        label = f"state {self.state}"
         start = self.clock()
-        deadline = start + args.max_age
+        deadline = start + min(args.max_age, MAX_DEADLINE)
         last_sent = start
         found, settle_until, failures = [], None, 0
         # The batch being delivered: its text and request id stay fixed
@@ -972,7 +1206,7 @@ class _Loop:
             if state is None:
                 if error is None:
                     _say("baseline recorded; reporting changes from now")
-                    _save(self.state, snap)
+                    _persist(self.state, label, snap)
                     state = snap
             else:
                 new = self.watcher.events(state, snap)
@@ -1011,7 +1245,7 @@ class _Loop:
                 _ledger(self.state, "setup", f"board refused: {exc}")
                 return EXIT_SETUP
             if state is not None and not found and pending is None:
-                _save(self.state, state)
+                _persist(self.state, label, state)
             if now >= deadline:
                 unsent = (pending["lines"] if pending else []) + found
                 if unsent:

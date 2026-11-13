@@ -59,6 +59,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -232,11 +233,28 @@ def sleep(seconds: float) -> None:
 
 
 def interactive() -> bool:
-    """A person at a terminal to answer a question (stdin and stdout)."""
+    """A person at a terminal to answer a question (stdin and stdout). On
+    Windows the CRT's ``isatty()`` is true for any character device, the
+    ``NUL`` device included, so both handles must also be consoles."""
     try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return False
+        return os.name != "nt" or (_console(sys.stdin) and _console(sys.stdout))
+    except (AttributeError, ValueError, OSError):
         return False
+
+
+def _console(stream) -> bool:
+    """Whether ``stream``'s Windows handle is a console (``GetConsoleMode``
+    succeeds on console input and screen-buffer handles only)."""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+    handle = msvcrt.get_osfhandle(stream.fileno())
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleMode.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    return bool(kernel32.GetConsoleMode(handle, ctypes.byref(wintypes.DWORD())))
 
 
 def ask(question: str) -> str:
@@ -2253,7 +2271,8 @@ def _dump_complete(path: Path) -> bool:
                     in_copy = True
                 elif line == f"-- {_DUMP_MARKER}":
                     complete = True
-    except (OSError, EOFError, ValueError):
+    # zlib.error is a corrupt deflate stream: neither OSError nor EOFError.
+    except (OSError, EOFError, ValueError, zlib.error):
         return False
     return complete
 

@@ -13,6 +13,8 @@
 #                  hook before it can be converted (tracked, not accepted)
 # A new entry needs one of the first four; prefer converting the test.
 
+rust/cli_harness/rows/console.py | _settle | time.sleep(0.5) | negative: gives a stand-in browser no case declared a moment to show on Windows; every launch a case expects is waited for by its own record, so slowness only hides an unexpected launch
+
 rust/cli_harness/rows/lease_operator.py | hold_case.during | time.sleep(0.5) | negative: the no-board hold must still be up after it; slowness only keeps it up longer
 
 rust/cli_harness/rows/maintainer.py | terminate_during | time.sleep(0.5) | minimum: lets the enrol-code poll pass once; the 57P01 reaches the CLI either way

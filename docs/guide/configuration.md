@@ -877,7 +877,9 @@ ack=true)`. After 55 quiet minutes (`--quiet-after`) it sends one quiet line,
 unless you are parked `done`. It exits 0 when the owner leaves the board,
 when `--until-lease NAME` names a lease the owner no longer holds, after 14
 days (`--max-age`), or on `--stop`; it exits 2 when `gh` is missing or fails
-five polls in a row (after telling the owner), or when the board refuses it.
+five polls in a row (an answer it cannot read counts as a failure), when its
+state cannot be written (after telling the owner, once it has started), or
+when the board refuses it. A state file it cannot read gets a fresh baseline.
 `--detach` is safe to repeat: it answers that a live watcher is already
 running. The first run records what is already true and reports nothing for
 it; its state, log and a one-line-per-message ledger live beside the
@@ -1095,7 +1097,10 @@ token the way every client command does (`PSEUDOLIFE_MCP_DAEMON_URL`,
 Codex registration `doctor` reads), asks the daemon for a one-time sign-in
 code, and opens `<origin>/ui/#/signin?code=…`. The code lasts 5 minutes,
 works once, and only at the Console address it was made for. The command
-also prints the link and the code. On a machine with no browser, open the
+opens only a link that holds nothing but that address, the code and the
+page asked for, and refuses any other answer (exit 4), so whatever answers
+at the daemon's address cannot hand the browser another address or a
+command. It also prints the link and the code. On a machine with no browser, open the
 link on any device that reaches that address, or type the code into the
 Console's sign-in dialog there. `--no-open` only prints, which is also the
 right choice on a machine other people use, since a browser's command line
