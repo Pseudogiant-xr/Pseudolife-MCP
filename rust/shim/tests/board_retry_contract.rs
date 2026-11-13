@@ -1307,3 +1307,56 @@ async fn board_retry_retired_record_does_not_fall_back_to_the_legacy_record() {
     assert_eq!(saved(&stale(&path)), original);
     assert_eq!(saved(&legacy), unversioned);
 }
+// #1324: a start that meets another start of the same session holding a
+// fresh, unsaved reservation of its state file retries in the background
+// and registers once that reservation is gone, instead of stopping for good
+// and forwarding board calls without an address.
+#[tokio::test]
+async fn board_retry_startup_waits_out_a_reservation_held_by_another_start() {
+    if capture(
+        "board_retry_startup_waits_out_a_reservation_held_by_another_start",
+        &[
+            "another start of this session is registering with the same private state",
+            "(registration_in_progress)",
+            "coordination registered after a startup delay",
+        ],
+        &["coordination unavailable"],
+    ) {
+        return;
+    }
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let runtime = runtime(&fixture, false);
+    let state = pseudolife_stdio::board::identity::bound_state_path(
+        &home.0.join("agents"),
+        &fixture.url,
+        BANK,
+    );
+    pseudolife_stdio::board::state::private_dir(state.parent().unwrap()).unwrap();
+    // The other start's reservation: an empty state file younger than 60 s.
+    drop(pseudolife_stdio::board::state::create(&state).unwrap());
+    let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
+    let error = board
+        .prepare_call(
+            "memory_agents",
+            Some(json!({"action":"update"}).as_object().unwrap().clone()),
+            &json!({}),
+        )
+        .await
+        .err()
+        .expect("a board call was forwarded without an address");
+    assert_eq!(error.message, policy::PENDING);
+    assert_eq!(fixture.count("/register"), 0);
+    // The other start gave its reservation up.
+    // The background retry opens the file every 40 ms without delete
+    // sharing, so on Windows a removal can meet a sharing violation.
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    while let Err(error) = std::fs::remove_file(&state) {
+        assert!(std::time::Instant::now() < until, "{error}");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let call = registered(&board).await;
+    assert_eq!(call.operation.headers["x-pl-agent"], "fixture-agent");
+    assert_eq!(fixture.count("/register"), 1);
+    board.close().await;
+}

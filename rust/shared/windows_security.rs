@@ -239,6 +239,378 @@ pub(crate) fn make_private(file: &File) -> Result<(), CredentialError> {
     }
 }
 
+/// Why a marker file the plugin hooks share with this process may not be
+/// trusted (see [`validate_marker`]).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MarkerDistrust {
+    /// Owned by a principal other than this user, SYSTEM or Administrators.
+    Owner(String),
+    /// This principal, not this user, SYSTEM or Administrators, can write it.
+    Writer(String),
+    /// The file has no DACL, so every principal can write it.
+    NoDacl,
+}
+
+/// Rights that let a principal change a marker's contents or its
+/// protection, delete it, or backdate it: deleting `.wake` or `.wake-armed`
+/// between reads suppresses a wake (DELETE on the file allows that whatever
+/// its folder grants), and a backdated marker is swept as a day old.
+const MARKER_WRITE_RIGHTS: u32 = 0x0002 // FILE_WRITE_DATA
+    | 0x0004 // FILE_APPEND_DATA
+    | 0x0100 // FILE_WRITE_ATTRIBUTES
+    | 0x0001_0000 // DELETE
+    | 0x0004_0000 // WRITE_DAC
+    | 0x0008_0000 // WRITE_OWNER
+    | 0x1000_0000 // GENERIC_ALL
+    | 0x4000_0000; // GENERIC_WRITE
+
+/// The current token's user SID, in usize-aligned storage that keeps the SID
+/// pointer valid for as long as the buffer lives.
+unsafe fn token_user() -> Option<Vec<usize>> {
+    unsafe {
+        let mut token_handle = ptr::null_mut();
+        if OpenProcessToken(
+            GetCurrentProcess(),
+            Security::TOKEN_QUERY,
+            &mut token_handle,
+        ) == 0
+        {
+            return None;
+        }
+        let _token = Token(token_handle);
+        let mut needed = 0;
+        Security::GetTokenInformation(
+            token_handle,
+            Security::TokenUser,
+            ptr::null_mut(),
+            0,
+            &mut needed,
+        );
+        if needed < mem::size_of::<Security::TOKEN_USER>() as u32 {
+            return None;
+        }
+        let mut buffer = vec![0usize; (needed as usize).div_ceil(mem::size_of::<usize>())];
+        if Security::GetTokenInformation(
+            token_handle,
+            Security::TokenUser,
+            buffer.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        ) == 0
+        {
+            return None;
+        }
+        let sid = (*(buffer.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
+        (!sid.is_null() && Security::IsValidSid(sid) != 0).then_some(buffer)
+    }
+}
+
+/// This process's account as people read it (`DOMAIN\name`), for a fix line
+/// that must name the account rather than a shell variable.
+pub(crate) fn current_user_name() -> Option<String> {
+    // SAFETY: the token buffer owns the SID for the duration of the lookup.
+    unsafe {
+        let user = token_user()?;
+        let sid = (*(user.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
+        Some(sid_name(sid))
+    }
+}
+
+/// A SID as people read it: `DOMAIN\name` when it resolves, else `S-1-...`.
+unsafe fn sid_name(sid: *mut c_void) -> String {
+    unsafe {
+        let (mut name, mut domain) = ([0u16; 256], [0u16; 256]);
+        let (mut name_len, mut domain_len, mut kind) = (256u32, 256u32, 0);
+        if Security::LookupAccountSidW(
+            ptr::null(),
+            sid,
+            name.as_mut_ptr(),
+            &mut name_len,
+            domain.as_mut_ptr(),
+            &mut domain_len,
+            &mut kind,
+        ) != 0
+        {
+            let name = String::from_utf16_lossy(&name[..name_len as usize]);
+            let domain = String::from_utf16_lossy(&domain[..domain_len as usize]);
+            return if domain.is_empty() {
+                name
+            } else {
+                format!("{domain}\\{name}")
+            };
+        }
+        let mut text = ptr::null_mut();
+        if windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW(sid, &mut text) == 0
+            || text.is_null()
+        {
+            return "an unreadable principal".into();
+        }
+        let _text = Descriptor(text.cast());
+        let length = (0..).take_while(|&i| *text.add(i) != 0).count();
+        String::from_utf16_lossy(std::slice::from_raw_parts(text, length))
+    }
+}
+
+/// This user, SYSTEM, Administrators or OWNER RIGHTS (the owner, which is
+/// checked to be one of these first): principals that can already write any
+/// file this user can, so a marker they own or write forges nothing.
+unsafe fn trusted_marker_principal(sid: *mut c_void, user: *mut c_void) -> bool {
+    unsafe {
+        Security::EqualSid(sid, user) != 0
+            || Security::IsWellKnownSid(sid, Security::WinLocalSystemSid) != 0
+            || Security::IsWellKnownSid(sid, Security::WinBuiltinAdministratorsSid) != 0
+            || Security::IsWellKnownSid(sid, Security::WinCreatorOwnerRightsSid) != 0
+    }
+}
+
+/// The marker rule over an owner and DACL (see [`validate_marker`]); `None`
+/// trusts them.
+///
+/// # Safety
+/// `owner` and `user` must be valid SIDs and `dacl` null or a valid ACL, all
+/// live for the call.
+pub(crate) unsafe fn marker_distrust(
+    owner: *mut c_void,
+    dacl: *const Security::ACL,
+    user: *mut c_void,
+) -> Option<MarkerDistrust> {
+    unsafe {
+        if !trusted_marker_principal(owner, user)
+            || Security::IsWellKnownSid(owner, Security::WinCreatorOwnerRightsSid) != 0
+        {
+            return Some(MarkerDistrust::Owner(sid_name(owner)));
+        }
+        let Some(acl) = dacl.as_ref() else {
+            return Some(MarkerDistrust::NoDacl);
+        };
+        let unreadable = || {
+            Some(MarkerDistrust::Writer(
+                "an access rule that cannot be read".into(),
+            ))
+        };
+        // A malformed list (an entry count or size its entries do not
+        // match) is refused before any entry is read.
+        if Security::IsValidAcl(dacl) == 0 {
+            return unreadable();
+        }
+        for index in 0..acl.AceCount as u32 {
+            let Some((header, bytes)) = ace_at(acl, index) else {
+                return unreadable();
+            };
+            // An inherit-only entry grants nothing on this file; a deny
+            // entry takes rights away.
+            if header.AceFlags as u32 & Security::INHERIT_ONLY_ACE != 0 || header.AceType == 1 {
+                continue;
+            }
+            // Any other allow form (callback, object) is not read here, so
+            // it fails closed rather than being guessed at.
+            if header.AceType != 0 || bytes.len() < 16 {
+                return unreadable();
+            }
+            // ACCESS_ALLOWED_ACE: header (4), mask (4), then the SID.
+            let mask = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+            if mask & MARKER_WRITE_RIGHTS == 0 {
+                continue;
+            }
+            // A SID has an 8-byte header and four bytes per subauthority.
+            let sid_size = 8 + bytes[9] as usize * 4;
+            if 8 + sid_size > bytes.len() {
+                return unreadable();
+            }
+            let sid = bytes[8..].as_ptr().cast_mut().cast::<c_void>();
+            if Security::IsValidSid(sid) == 0 {
+                return unreadable();
+            }
+            if !trusted_marker_principal(sid, user) {
+                return Some(MarkerDistrust::Writer(sid_name(sid)));
+            }
+        }
+        None
+    }
+}
+
+/// The entry at `index` of `acl` as its header and its bytes, when it lies
+/// wholly inside the list and is at least a header long; `None` otherwise.
+///
+/// # Safety
+/// `acl` must be an ACL that `IsValidAcl` accepted, live for `'a`.
+unsafe fn ace_at(acl: &Security::ACL, index: u32) -> Option<(&Security::ACE_HEADER, &[u8])> {
+    unsafe {
+        let start = acl as *const Security::ACL as usize;
+        let end = start + acl.AclSize as usize;
+        let mut ace = ptr::null_mut();
+        if Security::GetAce(acl, index, &mut ace) == 0 {
+            return None;
+        }
+        let at = ace as usize;
+        if at < start + mem::size_of::<Security::ACL>()
+            || at + mem::size_of::<Security::ACE_HEADER>() > end
+        {
+            return None;
+        }
+        let header = ace.cast::<Security::ACE_HEADER>().as_ref()?;
+        let size = header.AceSize as usize;
+        if size < mem::size_of::<Security::ACE_HEADER>() || at + size > end {
+            return None;
+        }
+        Some((header, std::slice::from_raw_parts(ace.cast::<u8>(), size)))
+    }
+}
+
+/// [`marker_distrust`] over raw ACL bytes, with this token's user as owner
+/// and user: lets tests hand the rule a malformed list.
+#[cfg(test)]
+pub(crate) fn marker_distrust_raw(acl: &mut [u32]) -> Option<MarkerDistrust> {
+    // SAFETY: the buffer is live and u32-aligned for the call; the token
+    // buffer outlives the SID it holds.
+    unsafe {
+        let token = token_user().expect("token user");
+        let user = (*(token.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
+        marker_distrust(user, acl.as_mut_ptr().cast(), user)
+    }
+}
+
+/// Check a marker the plugin hooks write and this process reads (`.wake`,
+/// `.wake-armed`, `.seen`, `.reprint`). Hooks write them through Git Bash or
+/// PowerShell, whose files carry inherited, unprotected DACLs, so the
+/// owner-only rule of [`validate`] does not fit. What it guards still holds:
+/// a marker another user owns or can write could forge or suppress a board
+/// wake. So the owner must be this user, SYSTEM or Administrators (an
+/// elevated token's default owner), and no allow entry may give write access
+/// to any other principal. Returns the file's identity (volume, index) and
+/// why it is distrusted, if it is.
+pub(crate) fn validate_marker(
+    file: &File,
+) -> Result<(Vec<u128>, Option<MarkerDistrust>), CredentialError> {
+    // SAFETY: file owns a live handle for the whole call; output structures
+    // are exactly sized; the descriptor and token buffers outlive every SID
+    // and ACE read, and no pointer escapes.
+    unsafe {
+        let handle = file.as_raw_handle() as HANDLE;
+        let mut info: BY_HANDLE_FILE_INFORMATION = mem::zeroed();
+        if GetFileInformationByHandle(handle, &mut info) == 0 {
+            return Err(CredentialError("marker file is unavailable"));
+        }
+        if info.nNumberOfLinks != 1
+            || info.dwFileAttributes & 0x400 != 0
+            || info.dwFileAttributes & 0x10 != 0
+        {
+            return Err(CredentialError("marker must be a regular file"));
+        }
+        let mut owner = ptr::null_mut();
+        let mut dacl = ptr::null_mut();
+        let mut descriptor = ptr::null_mut();
+        let result = GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            Security::OWNER_SECURITY_INFORMATION | Security::DACL_SECURITY_INFORMATION,
+            &mut owner,
+            ptr::null_mut(),
+            &mut dacl,
+            ptr::null_mut(),
+            &mut descriptor,
+        );
+        let _descriptor = Descriptor(descriptor);
+        if result != 0 || descriptor.is_null() || owner.is_null() {
+            return Err(CredentialError("marker permissions cannot be read"));
+        }
+        let user = token_user().ok_or(CredentialError("marker owner cannot be checked"))?;
+        let user_sid = (*(user.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
+        let distrust = marker_distrust(owner, dacl, user_sid);
+        let combine = |high: u32, low: u32| ((high as u128) << 32) | low as u128;
+        Ok((
+            vec![
+                info.dwVolumeSerialNumber as u128,
+                combine(info.nFileIndexHigh, info.nFileIndexLow),
+            ],
+            distrust,
+        ))
+    }
+}
+
+/// [`marker_distrust`] over an SDDL descriptor naming its owner (`O:`) and
+/// DACL (`D:`), with `user` (SDDL SID text, or `None` for this token's user)
+/// as the current user: the rule's tests need no privilege to set an owner.
+#[cfg(test)]
+pub(crate) fn marker_distrust_sddl(sddl: &str, user: Option<&str>) -> Option<MarkerDistrust> {
+    use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
+    // SAFETY: converted descriptors and SIDs are freed by their guards after
+    // the rule read them; the token buffer outlives its SID.
+    unsafe {
+        let wide: Vec<u16> = sddl.encode_utf16().chain([0]).collect();
+        let mut descriptor = ptr::null_mut();
+        assert!(
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                wide.as_ptr(),
+                1,
+                &mut descriptor,
+                ptr::null_mut()
+            ) != 0,
+            "invalid SDDL {sddl}"
+        );
+        let _descriptor = Descriptor(descriptor);
+        let (mut owner, mut defaulted) = (ptr::null_mut(), 0);
+        assert!(Security::GetSecurityDescriptorOwner(descriptor, &mut owner, &mut defaulted) != 0);
+        let (mut present, mut dacl) = (0, ptr::null_mut());
+        assert!(
+            Security::GetSecurityDescriptorDacl(
+                descriptor,
+                &mut present,
+                &mut dacl,
+                &mut defaulted
+            ) != 0
+        );
+        if present == 0 {
+            dacl = ptr::null_mut();
+        }
+        let token = token_user().expect("token user");
+        let mut converted = ptr::null_mut();
+        let _converted;
+        let user_sid = match user {
+            Some(text) => {
+                let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+                assert!(ConvertStringSidToSidW(wide.as_ptr(), &mut converted) != 0);
+                _converted = Descriptor(converted);
+                converted
+            }
+            None => (*(token.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid,
+        };
+        marker_distrust(owner, dacl, user_sid)
+    }
+}
+
+/// Replace a path's DACL (not its protection flag) from SDDL, as its owner
+/// may: for tests that need a file or folder other principals can write.
+#[cfg(test)]
+pub(crate) fn set_dacl_sddl(path: &Path, sddl: &str) -> io::Result<()> {
+    let wide: Vec<u16> = sddl.encode_utf16().chain([0]).collect();
+    let name: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: live NUL-terminated buffers; the descriptor is freed by its
+    // guard after SetFileSecurityW copied it.
+    unsafe {
+        let mut descriptor = ptr::null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            wide.as_ptr(),
+            1,
+            &mut descriptor,
+            ptr::null_mut(),
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let _descriptor = Descriptor(descriptor);
+        if Security::SetFileSecurityW(
+            name.as_ptr(),
+            Security::DACL_SECURITY_INFORMATION,
+            descriptor,
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate(file: &File) -> Result<Vec<u128>, CredentialError> {
     // SAFETY: file owns a valid, live OS handle for this entire operation.
     // Every output structure has its exact Win32 size and initialized storage.

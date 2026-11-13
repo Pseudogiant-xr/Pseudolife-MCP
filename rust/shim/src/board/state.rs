@@ -200,13 +200,25 @@ pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
 /// group- or world-writable, and is refused with one stderr line naming the
 /// path and the fix otherwise. The other checks of [`open`] hold too: no
 /// redirected ancestor, no symlink, one regular file with a single link.
-/// Windows still applies [`open`]'s protected owner-only DACL rule, which
-/// files written by Git Bash or PowerShell do not meet, so the Windows
-/// native wake stays open (see the SHIM-HOOK-MARKERS parity row).
+/// On Windows the hooks write markers through Git Bash or PowerShell, whose
+/// files carry inherited, unprotected DACLs that [`open`]'s protected
+/// owner-only rule refuses; the same guard is applied instead: the owner is
+/// this user, SYSTEM or Administrators, and no other principal can write it
+/// (`windows_security::validate_marker`).
 pub fn open_marker(path: &Path, write: bool) -> Result<PrivateFile> {
     #[cfg(windows)]
     {
-        open_with_write(path, write)
+        crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+        let file = options(false, write)
+            .open(path)
+            .map_err(|_| "state_unavailable")?;
+        let (identity, distrust) = crate::credentials::windows_security::validate_marker(&file)
+            .map_err(|_| "invalid_state")?;
+        if let Some(distrust) = distrust {
+            report_marker_once(path, &marker_refusal_windows(path, &distrust));
+            return Err("invalid_state");
+        }
+        Ok(PrivateFile { file, identity })
     }
     #[cfg(unix)]
     {
@@ -250,10 +262,39 @@ fn marker_refusal(path: &Path, own: u32, owner: u32, mode: u32) -> Option<String
     }
     None
 }
+/// Why a Windows marker may not be trusted, as the line [`open_marker`]
+/// prints: the path, the cause and the one fix.
+#[cfg(windows)]
+fn marker_refusal_windows(
+    path: &Path,
+    distrust: &crate::credentials::windows_security::MarkerDistrust,
+) -> String {
+    use crate::credentials::windows_security::MarkerDistrust;
+    let shown = path.display();
+    let folder = path
+        .parent()
+        .map(|parent| parent.display().to_string())
+        .unwrap_or_default();
+    match distrust {
+        MarkerDistrust::Owner(owner) => format!(
+            "pseudolife-mcp: ignoring {shown}: it is owned by {owner}, not this user, so it could forge or suppress board wakes for this session. Fix: delete that file; the plugin hooks write it again."
+        ),
+        MarkerDistrust::Writer(writer) => {
+            // Named, not %USERNAME%: Git Bash and PowerShell do not expand it.
+            let me = crate::credentials::windows_security::current_user_name()
+                .unwrap_or_else(|| "<this account>".into());
+            format!(
+                "pseudolife-mcp: ignoring {shown}: {writer} can change or delete it, so it could forge or suppress board wakes for this session. Fix: make {folder} private to this account (icacls \"{folder}\" /inheritance:r /grant:r \"{me}:(OI)(CI)F\"), then delete the file; the plugin hooks write it again."
+            )
+        }
+        MarkerDistrust::NoDacl => format!(
+            "pseudolife-mcp: ignoring {shown}: it has no access list, so every user can write it and it could forge or suppress board wakes for this session. Fix: delete that file; the plugin hooks write it again."
+        ),
+    }
+}
 /// One line per directory and marker kind per process: each Stop-hook run
 /// arms a fresh `<key>.<token>.wake-armed`, so a per-path set would repeat
 /// the same refusal at every turn end.
-#[cfg(unix)]
 fn report_marker_once(path: &Path, line: &str) {
     static REPORTED: LazyLock<StdMutex<std::collections::HashSet<(PathBuf, String)>>> =
         LazyLock::new(Default::default);
@@ -356,26 +397,52 @@ fn atomic_replace(
     let _ = fs::remove_file(&temp);
     result
 }
+/// Create `path` (and missing ancestors) as a folder only this user can
+/// use, or make an existing one so.
+///
+/// Another task may create the same folder between the check and the
+/// create: the shim's handshake cache creates `<state dir>/handshake-cache`,
+/// and with it the state directory, while the board reserves its state file
+/// (#1324: on the Windows dev VM a refused `create_dir` here left a session
+/// without a board address on a first start). A folder that appeared
+/// meanwhile is treated like one that existed before the call: `path`
+/// itself is protected, and an ancestor is left as its creator made it.
+/// Protecting that ancestor would cut off what its creator is putting in
+/// it: on Windows the protected DACL has no inheritable entries, so the
+/// cache's `handshake-cache` inside it would be left with none.
 pub fn private_dir(path: &Path) -> Result<()> {
+    private_dir_at(path, true)
+}
+fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
     crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
     if !path.is_dir() {
         if let Some(parent) = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty() && !p.is_dir())
         {
-            private_dir(parent)?;
+            private_dir_at(parent, false)?;
         }
+        #[cfg(test)]
+        tests::create_meanwhile(path);
         #[cfg(unix)]
-        {
+        let created = {
             use std::os::unix::fs::DirBuilderExt;
-            fs::DirBuilder::new()
-                .mode(0o700)
-                .create(path)
-                .map_err(|_| "state_unavailable")?;
-        }
+            fs::DirBuilder::new().mode(0o700).create(path)
+        };
         #[cfg(windows)]
-        {
-            fs::create_dir(path).map_err(|_| "state_unavailable")?;
+        let created = fs::create_dir(path);
+        match created {
+            Ok(()) => {}
+            // Never a symlink: the protection below must not follow one.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists
+                    && fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) =>
+            {
+                if !leaf {
+                    return Ok(());
+                }
+            }
+            Err(_) => return Err("state_unavailable"),
         }
     }
     #[cfg(unix)]
@@ -398,13 +465,97 @@ pub fn private_dir(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+/// Why the private state file at `path` or its folder is refused, when a
+/// fresh look finds a reason: for the one line a stopped registration
+/// prints. `None` when nothing is wrong now, or the cause is not a
+/// permission or redirect one.
+pub fn diagnose(path: &Path) -> Option<String> {
+    if crate::credentials::reject_ancestor_redirects(path).is_err() {
+        return Some(
+            "a folder on its path is a symlink or junction, which private state never follows"
+                .into(),
+        );
+    }
+    let folder = path.parent()?;
+    let meta = fs::symlink_metadata(folder).ok()?;
+    if !meta.is_dir() {
+        return Some(format!("{} is not a plain folder", folder.display()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let own = rustix::process::getuid().as_raw();
+        if meta.uid() != own {
+            return Some(format!("{} is owned by another user", folder.display()));
+        }
+        let file = fs::symlink_metadata(path).ok()?;
+        if file.uid() != own {
+            return Some("the file is owned by another user".into());
+        }
+        if file.mode() & 0o077 != 0 {
+            return Some(format!(
+                "other users can use the file (mode {:04o})",
+                file.mode() & 0o7777
+            ));
+        }
+        if file.nlink() != 1 || !file.is_file() {
+            return Some("the file is not one plain file".into());
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse point.
+        let opened = |target: &Path, flags: u32| {
+            OpenOptions::new()
+                .access_mode(0x0002_0000 | 0x80)
+                .share_mode(0x1 | 0x2)
+                .custom_flags(flags | 0x0020_0000)
+                .open(target)
+        };
+        let Ok(directory) = opened(folder, 0x0200_0000) else {
+            return Some(format!(
+                "this user cannot read the permissions of {}",
+                folder.display()
+            ));
+        };
+        if crate::credentials::windows_security::validate(&directory).is_err() {
+            return Some(format!(
+                "the access list of {} is not private to this user (it lets other accounts in, or another account owns it)",
+                folder.display()
+            ));
+        }
+        if exists(path) {
+            let Ok(file) = opened(path, 0) else {
+                return Some("this user cannot read the file's permissions".into());
+            };
+            if crate::credentials::windows_security::validate(&file).is_err() {
+                return Some(
+                    "the file's access list is not private to this user (it lets other accounts in, or another account owns it)"
+                        .into(),
+                );
+            }
+        }
+    }
+    None
+}
 impl Reservation {
     pub fn load_or_reserve(path: &Path, url: &str) -> Result<(Option<Value>, Option<Self>)> {
         if let Some(parent) = path.parent() {
             private_dir(parent)?;
         }
         if !exists(path) {
-            let opened = create(path)?;
+            // Another start of this session may create it between the
+            // check and the create: that start holds the reservation now.
+            #[cfg(test)]
+            tests::create_file_meanwhile(path);
+            let opened = create(path).map_err(|code| {
+                if exists(path) {
+                    "registration_in_progress"
+                } else {
+                    code
+                }
+            })?;
             return Ok((
                 None,
                 Some(Self {
@@ -521,6 +672,150 @@ mod tests {
     /// Writes to files named `slow-write*` take this long under test.
     pub(super) const WRITE_DELAY: Duration = Duration::from_millis(300);
 
+    thread_local! {
+        /// Folders another task creates while [`private_dir`] on this
+        /// thread is between its check and its create.
+        static MEANWHILE: std::cell::RefCell<Vec<PathBuf>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+        /// A symlink (path, target) another process plants at that moment.
+        static LINKED_MEANWHILE: std::cell::RefCell<Option<(PathBuf, PathBuf)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    thread_local! {
+        /// A state file another start creates at that moment.
+        static FILE_MEANWHILE: std::cell::RefCell<Option<PathBuf>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    pub(super) fn create_file_meanwhile(path: &Path) {
+        if FILE_MEANWHILE.with(|file| file.borrow().as_deref() == Some(path)) {
+            drop(create(path).unwrap());
+        }
+    }
+
+    #[test]
+    fn a_state_file_another_start_creates_meanwhile_is_its_reservation() {
+        let root = Dir::new();
+        let path = root.0.join("key.json");
+        FILE_MEANWHILE.with(|file| *file.borrow_mut() = Some(path.clone()));
+        let reserved = Reservation::load_or_reserve(&path, "http://x");
+        FILE_MEANWHILE.with(|file| *file.borrow_mut() = None);
+        // Retried in the background, not a stop (state_unavailable).
+        assert!(matches!(reserved, Err("registration_in_progress")));
+        assert!(exists(&path));
+    }
+
+    pub(super) fn create_meanwhile(path: &Path) {
+        if MEANWHILE.with(|folders| folders.borrow().iter().any(|folder| folder == path)) {
+            // As the handshake cache's `create_dir_all` does: the folder and
+            // its `handshake-cache` child, which it then writes into.
+            fs::create_dir_all(path.join("handshake-cache")).unwrap();
+        }
+        #[cfg(unix)]
+        if let Some((link, target)) = LINKED_MEANWHILE.with(|linked| linked.borrow().clone())
+            && link == path
+        {
+            std::os::unix::fs::symlink(target, link).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_state_folder_another_task_creates_meanwhile_is_still_made_private() {
+        // A home that inherits its access, as a user's profile does (a
+        // private root would give everything under it explicit entries).
+        let home =
+            std::env::temp_dir().join(format!("pseudolife-race-{}", uuid::Uuid::new_v4().simple()));
+        let root = Dir(home.clone());
+        let state_dir = root.0.join(".pseudolife-mcp").join("agent-state");
+        let bound = state_dir.join("0c33202fbddfe6ee6eebb386fea0df74");
+        // Each level the reservation creates can be raced; on the Windows
+        // dev VM (#1324) the cache made `agent-state` meanwhile, with its
+        // `handshake-cache` child, under a `.pseudolife-mcp` it had made.
+        for raced in [&state_dir, &bound] {
+            let _ = fs::remove_dir_all(&home);
+            fs::create_dir_all(root.0.join(".pseudolife-mcp")).unwrap();
+            MEANWHILE.with(|folders| *folders.borrow_mut() = vec![raced.clone()]);
+            let reserved = Reservation::load_or_reserve(&bound.join("key.json"), "http://x");
+            MEANWHILE.with(|folders| folders.borrow_mut().clear());
+            let (saved, reservation) =
+                reserved.unwrap_or_else(|code| panic!("{}: {code}", raced.display()));
+            assert!(saved.is_none() && reservation.is_some());
+            // The state file's own folder is private, whoever created it.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    fs::metadata(&bound).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                let directory = OpenOptions::new()
+                    .access_mode(0x0002_0000 | 0x80)
+                    .custom_flags(0x0200_0000 | 0x0020_0000)
+                    .open(&bound)
+                    .unwrap();
+                crate::credentials::windows_security::validate(&directory).unwrap();
+            }
+            // What the cache made in the state folder still works for it:
+            // protecting that folder on Windows emptied the child's DACL.
+            // (The cache never creates inside the state file's own folder.)
+            if raced == &state_dir {
+                fs::write(raced.join("handshake-cache").join("cache.json"), b"{}")
+                    .unwrap_or_else(|error| panic!("{}: {error}", raced.display()));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_that_appears_meanwhile_is_not_adopted() {
+        let root = Dir::new();
+        let target = root.0.join("elsewhere");
+        fs::create_dir(&target).unwrap();
+        let link = root.0.join("state");
+        // Planted between private_dir's check and its create, where an
+        // existing folder is now accepted: a symlink there is not.
+        LINKED_MEANWHILE.with(|linked| *linked.borrow_mut() = Some((link.clone(), target.clone())));
+        let result = private_dir(&link);
+        LINKED_MEANWHILE.with(|linked| *linked.borrow_mut() = None);
+        assert_eq!(result, Err("state_unavailable"));
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn diagnose_names_a_state_folder_others_can_use() {
+        let root = Dir::new();
+        let file = root.0.join("key.json");
+        assert_eq!(diagnose(&file), None);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(&file, b"{}").unwrap();
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(
+                diagnose(&file).as_deref(),
+                Some("other users can use the file (mode 0644)")
+            );
+        }
+        #[cfg(windows)]
+        {
+            set_dacl(&root.0, "D:(A;;FA;;;OW)(A;OICI;FA;;;WD)");
+            let reason = diagnose(&file).unwrap();
+            assert!(
+                reason.contains("is not private to this user")
+                    && reason.contains(&root.0.display().to_string()),
+                "{reason}"
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_marker_others_can_write_or_another_user_owns_is_refused_with_its_fix() {
@@ -549,6 +844,281 @@ mod tests {
                 && line.contains("Fix: remove it"),
             "{line}"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_rule_trusts_this_user_system_and_administrators_only() {
+        use crate::credentials::windows_security::{MarkerDistrust, marker_distrust_sddl};
+        const ME: &str = "S-1-5-21-100-200-300-1001";
+        // Power Users: a non-admin group, standing in for another account.
+        const OTHER: &str = "S-1-5-32-547";
+        let rule = |sddl: &str| {
+            marker_distrust_sddl(&sddl.replace("ME", ME).replace("OTHER", OTHER), Some(ME))
+        };
+        // What Git Bash and PowerShell leave: inherited, unprotected entries
+        // for this user, SYSTEM and Administrators, a read-only logon SID,
+        // and (Cygwin) a read-control-only Everyone entry.
+        for sddl in [
+            "O:MED:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;FA;;;ME)",
+            "O:MED:(A;;FA;;;ME)(A;;FA;;;SY)(A;;0x1200a9;;;S-1-5-5-0-123456)",
+            "O:MED:(A;;0x1f019f;;;ME)(A;;0x120080;;;WD)(A;;FR;;;BU)",
+            "O:MED:P(A;;FA;;;OW)",
+            // An elevated token's files are owned by Administrators.
+            "O:BAD:(A;;FA;;;BA)(A;;FA;;;SY)(A;;FA;;;ME)",
+            "O:SYD:(A;;FA;;;SY)",
+            // Entries that grant nothing here: inherit-only, or a denial.
+            "O:MED:(A;;FA;;;ME)(A;OICIIO;FA;;;WD)(D;;FA;;;OTHER)",
+        ] {
+            assert_eq!(rule(sddl), None, "{sddl}");
+        }
+        assert!(
+            matches!(
+                rule("O:OTHERD:(A;;FA;;;OTHER)(A;;FA;;;ME)"),
+                Some(MarkerDistrust::Owner(_))
+            ),
+            "another user's marker"
+        );
+        for (sddl, who) in [
+            ("O:MED:(A;;FA;;;ME)(A;;FW;;;WD)", "Everyone"),
+            (
+                "O:MED:(A;;FA;;;ME)(A;;0x1301bf;;;AU)",
+                "Authenticated Users",
+            ),
+            ("O:MED:(A;;FA;;;ME)(A;;FA;;;BU)", "Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;0x4;;;OTHER)", "Power Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;WD;;;OTHER)", "Power Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;GW;;;OTHER)", "Power Users"),
+            // Deleting or backdating a marker suppresses a wake too.
+            ("O:MED:(A;;FA;;;ME)(A;;SD;;;BU)", "Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;0x100;;;BU)", "Users"),
+        ] {
+            match rule(sddl) {
+                Some(MarkerDistrust::Writer(name)) => assert!(name.contains(who), "{sddl}: {name}"),
+                other => panic!("{sddl}: {other:?}"),
+            }
+        }
+        assert_eq!(
+            rule("O:MED:NO_ACCESS_CONTROL"),
+            Some(MarkerDistrust::NoDacl)
+        );
+        // The real token user is trusted too, not only the synthetic one.
+        assert_eq!(marker_distrust_sddl("O:SYD:(A;;FA;;;SY)", None), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_rule_refuses_a_malformed_access_list() {
+        use crate::credentials::windows_security::{MarkerDistrust, marker_distrust_raw};
+        // ACL (revision 2, size 28, one entry) holding ACCESS_ALLOWED_ACE
+        // (size 20, FILE_ALL_ACCESS) for Everyone (S-1-1-0), little-endian.
+        let well_formed = || {
+            vec![
+                0x001C_0002u32,
+                0x0000_0001,
+                0x0014_0000,
+                0x001F_01FF,
+                0x0000_0101,
+                0x0100_0000,
+                0x0000_0000,
+            ]
+        };
+        match marker_distrust_raw(&mut well_formed()) {
+            Some(MarkerDistrust::Writer(name)) => assert!(name.contains("Everyone"), "{name}"),
+            other => panic!("{other:?}"),
+        }
+        let unreadable = Some(MarkerDistrust::Writer(
+            "an access rule that cannot be read".into(),
+        ));
+        // More entries counted than the list holds.
+        let mut counted = well_formed();
+        counted[1] = 0x0000_0002;
+        assert_eq!(marker_distrust_raw(&mut counted), unreadable);
+        // An entry shorter than its own header.
+        let mut short = well_formed();
+        short[2] = 0x0002_0000;
+        assert_eq!(marker_distrust_raw(&mut short), unreadable);
+    }
+
+    /// A folder whose children inherit their access, as in a user profile:
+    /// the profile's own entries (SYSTEM, Administrators and this account,
+    /// inherited by everything below). The temporary folder itself can carry
+    /// more: on a host with the Codex sandbox its sandbox accounts may modify
+    /// everything under %TEMP%, which the marker rule rightly refuses.
+    #[cfg(windows)]
+    fn inheriting_folder(tag: &str) -> Dir {
+        let path = std::env::temp_dir().join(format!(
+            "pseudolife-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&path).unwrap();
+        let me = crate::credentials::windows_security::current_user_name().unwrap();
+        let status = std::process::Command::new("icacls")
+            .arg(&path)
+            .args([
+                "/inheritance:r",
+                "/grant:r",
+                "*S-1-5-18:(OI)(CI)F",
+                "*S-1-5-32-544:(OI)(CI)F",
+            ])
+            .arg(format!("{me}:(OI)(CI)F"))
+            .arg("/Q")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "icacls on {}", path.display());
+        Dir(path)
+    }
+
+    /// Git Bash, as Claude Code runs the `.sh` hooks on Windows.
+    #[cfg(windows)]
+    fn git_bash() -> PathBuf {
+        let output = std::process::Command::new("git")
+            .arg("--exec-path")
+            .output()
+            .expect("git is on PATH");
+        let exec = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        exec.ancestors()
+            .map(|dir| dir.join("bin").join("bash.exe"))
+            .find(|bash| bash.is_file())
+            .unwrap_or_else(|| panic!("no Git Bash beside {}", exec.display()))
+    }
+
+    #[cfg(windows)]
+    fn bash(script: &str, args: &[&Path]) {
+        let status = std::process::Command::new(git_bash())
+            .arg("-c")
+            .arg(script)
+            .arg("hook")
+            .args(
+                args.iter()
+                    .map(|path| path.to_string_lossy().replace('\\', "/")),
+            )
+            .status()
+            .unwrap();
+        assert!(status.success(), "{script}");
+    }
+
+    #[cfg(windows)]
+    fn powershell_write(path: &Path, text: &str) {
+        // `-Command` joins trailing arguments into the script text, so the
+        // values travel in the environment instead.
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg("[IO.File]::WriteAllText($env:MARKER_PATH, $env:MARKER_TEXT)")
+            .env("MARKER_PATH", path)
+            .env("MARKER_TEXT", text)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    /// Set a file's or folder's DACL from SDDL, as its owner may.
+    #[cfg(windows)]
+    fn set_dacl(path: &Path, sddl: &str) {
+        crate::credentials::windows_security::set_dacl_sddl(path, sddl).unwrap();
+    }
+
+    #[cfg(windows)]
+    const MARKERS: [&str; 4] = ["k.wake", "k.0123abcd.wake-armed", "k.seen", "k.reprint"];
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_markers_written_by_git_bash_and_powershell_are_read() {
+        let root = Dir::new();
+        // The digest folder as the shim makes it (owner-only), as a hook's
+        // `mkdir -p` under umask 077 makes it, and as plain inheritance from
+        // the user's temporary folder leaves it.
+        let private = root.0.join("private");
+        private_dir(&private).unwrap();
+        let hooked = root.0.join("hooked");
+        bash(r#"umask 077; mkdir -p "$1""#, &[&hooked]);
+        let _inherited = inheriting_folder("markers");
+        let inherited = _inherited.0.clone();
+        for folder in [&private, &hooked, &inherited] {
+            for marker in MARKERS {
+                let bashed = folder.join(format!("bash-{marker}"));
+                // stop-wake.sh and coordination-start.sh: umask 077, a
+                // temporary file, then mv -f over the marker.
+                bash(
+                    r#"umask 077; printf '%s\n' 1789 > "$1.$$" && mv -f "$1.$$" "$1""#,
+                    &[&bashed],
+                );
+                // lifecycle.ps1 (Codex on Windows).
+                let shelled = folder.join(format!("ps-{marker}"));
+                powershell_write(&shelled, "1789\n");
+                for path in [&bashed, &shelled] {
+                    assert_eq!(
+                        read_marker(path, 64).as_deref(),
+                        Ok(&b"1789\n"[..]),
+                        "{}",
+                        path.display()
+                    );
+                    // A hook-written marker is also replaced in place.
+                    atomic_write_marker(path, b"1790\n").unwrap();
+                    assert_eq!(read_marker(path, 64).unwrap(), b"1790\n");
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_another_principal_can_write_is_refused() {
+        let root = Dir::new();
+        for (index, grant) in ["(A;;FW;;;WD)", "(A;;FA;;;S-1-5-32-547)"]
+            .into_iter()
+            .enumerate()
+        {
+            let path = root.0.join(format!("k{index}.wake"));
+            powershell_write(&path, "1\n");
+            assert!(read_marker(&path, 64).is_ok());
+            set_dacl(&path, &format!("D:(A;;FA;;;OW)(A;;FA;;;SY){grant}"));
+            assert_eq!(read_marker(&path, 64), Err("invalid_state"), "{grant}");
+            // The guard also keeps a forged marker from being adopted on write.
+            assert_eq!(atomic_write_marker(&path, b"2\n"), Err("invalid_state"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_marker_refusal_names_the_path_the_writer_and_the_fix() {
+        use crate::credentials::windows_security::MarkerDistrust;
+        let path = Path::new(r"C:\Users\<user>\.pseudolife-mcp\digests\k.wake");
+        let line = marker_refusal_windows(path, &MarkerDistrust::Writer("Everyone".into()));
+        assert!(line.contains(&path.display().to_string()), "{line}");
+        assert!(line.contains("Everyone can change or delete it"), "{line}");
+        assert!(
+            line.contains(r#"icacls "C:\Users\<user>\.pseudolife-mcp\digests" /inheritance:r"#),
+            "{line}"
+        );
+        // The fix names this account: %USERNAME% expands only in cmd, and
+        // agents run the line in Git Bash or PowerShell.
+        let me = crate::credentials::windows_security::current_user_name().unwrap();
+        assert!(
+            line.contains(&format!("/grant:r \"{me}:(OI)(CI)F\"")),
+            "{line}"
+        );
+        assert!(!line.contains('%') && !line.contains("del \""), "{line}");
+        let line = marker_refusal_windows(path, &MarkerDistrust::Owner(r"HOST\other".into()));
+        assert!(
+            line.contains(r"owned by HOST\other, not this user")
+                && line.contains("Fix: delete that file"),
+            "{line}"
+        );
+        let line = marker_refusal_windows(path, &MarkerDistrust::NoDacl);
+        assert!(
+            line.contains("no access list") && line.contains("Fix: delete that file"),
+            "{line}"
+        );
+        for distrust in [
+            MarkerDistrust::Writer("Everyone".into()),
+            MarkerDistrust::Owner("other".into()),
+            MarkerDistrust::NoDacl,
+        ] {
+            let line = marker_refusal_windows(path, &distrust);
+            assert!(!line.contains("  ") && !line.contains('\n'), "{line}");
+        }
     }
 
     struct Dir(PathBuf);

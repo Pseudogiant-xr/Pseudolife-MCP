@@ -32,6 +32,37 @@ pub struct Failure {
     /// The saved state file a startup refusal of a saved binding is about,
     /// bound or legacy (Python `AdapterError.state_file`).
     pub state_file: Option<PathBuf>,
+    /// The step of [`Adapter::enter`] that failed (see [`Step`]); `None`
+    /// outside it.
+    pub step: Option<Step>,
+}
+/// The steps of [`Adapter::enter`], so a refusal can name where it stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// Asking the daemon which bank and principal this login maps to.
+    BankCheck,
+    /// Opening or reserving the private state file.
+    PrivateState,
+    /// Proving a saved address the bank must still recognise.
+    SavedAddress,
+    /// Registering a new board address.
+    Registration,
+    /// Saving the new address to the private state file.
+    StateSave,
+    /// Attaching this session to its address.
+    Attach,
+}
+impl Step {
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::BankCheck => "the bank check",
+            Self::PrivateState => "the private state",
+            Self::SavedAddress => "the saved address check",
+            Self::Registration => "registration",
+            Self::StateSave => "saving the private state",
+            Self::Attach => "attach",
+        }
+    }
 }
 impl Failure {
     fn local(code: &'static str) -> Self {
@@ -40,7 +71,14 @@ impl Failure {
             status: None,
             binding: None,
             state_file: None,
+            step: None,
         }
+    }
+    /// Record the step this failure happened in, unless a nested attempt
+    /// already named its own.
+    fn at(mut self, step: Step) -> Self {
+        self.step.get_or_insert(step);
+        self
     }
     /// Name the saved file a refused binding came from.
     fn about(mut self, file: &Option<PathBuf>) -> Self {
@@ -66,6 +104,15 @@ impl Failure {
         ) || self
             .status
             .is_some_and(|status| status >= 500 || status == 429)
+    }
+    /// Worth a background retry after a start that did not register: a
+    /// [`transient`](Self::transient) failure, or another start of this
+    /// session holding a fresh reservation of the same state file, which
+    /// ends when that start saves it or the reservation goes stale (60 s).
+    /// Kept apart from `transient`, which also decides whether a board call
+    /// is checked again.
+    pub fn retried_in_background(&self) -> bool {
+        self.transient() || self.code == "registration_in_progress"
     }
 }
 #[derive(Clone)]
@@ -398,6 +445,16 @@ impl Adapter {
         retires_left: u8,
         direct: bool,
     ) -> Result<Arc<Self>, Failure> {
+        let mut step = Step::BankCheck;
+        let entered = Self::enter_steps(config, retires_left, direct, &mut step).await;
+        entered.map_err(|failure| failure.at(step))
+    }
+    async fn enter_steps(
+        config: Config,
+        retires_left: u8,
+        direct: bool,
+        step: &mut Step,
+    ) -> Result<Arc<Self>, Failure> {
         let client = Client::builder().redirect(reqwest::redirect::Policy::none());
         let client = if direct { client.no_proxy() } else { client }
             .build()
@@ -412,6 +469,7 @@ impl Adapter {
         current(&config.provider, &snapshot)?;
         // State-file steps go through `state::offload`: off the runtime, and
         // ordered behind any save an earlier, abandoned attempt still runs.
+        *step = Step::PrivateState;
         let (loaded_identity, mut saved, mut reservation) = match &config.state {
             Some(path) => {
                 let (target, url) = (path.clone(), config.url.clone());
@@ -472,6 +530,7 @@ impl Adapter {
         let mut identity = if let Some(mut saved) = saved {
             match saved.get("version") {
                 None => {
+                    *step = Step::SavedAddress;
                     let proved = fetch_context(&client, &config, &snapshot, Some(&saved), false)
                         .await
                         .map_err(|failure| failure.about(&source))?;
@@ -486,6 +545,7 @@ impl Adapter {
                     saved["version"] = json!(2);
                     saved["bank_id"] = json!(context.bank_id);
                     saved["principal"] = json!(context.principal);
+                    *step = Step::StateSave;
                     if let Some(path) = &config.state {
                         if let Some(held) = reservation.take() {
                             // Once saved, the file is no longer reclaimable, so
@@ -507,6 +567,7 @@ impl Adapter {
                     }
                 }
                 Some(version) if version.as_u64() == Some(2) => {
+                    *step = Step::SavedAddress;
                     if context.principal_changed(&saved)
                         && reservation.is_none()
                         && let (Some(original), Some(path)) =
@@ -545,6 +606,7 @@ impl Adapter {
             }
             saved
         } else {
+            *step = Step::Registration;
             context = fetch_context(&client, &config, &snapshot, None, false).await?;
             let mut capabilities = if config.codex {
                 json!({"pull":true,"channel":false,"codex":config.wake,"resumable":config.state.is_some()})
@@ -597,11 +659,13 @@ impl Adapter {
             }
             let saved = json!({"bank_url":config.url,"agent_id":registered["agent_id"],"credential":registered["credential"],"version":2,"bank_id":context.bank_id,"principal":context.principal});
             if let (Some(path), Some(held)) = (&config.state, reservation.take()) {
+                *step = Step::StateSave;
                 save(path, held, &saved).await?;
             }
             saved
         };
         // Every instance request validates the current bank before exposing its key.
+        *step = Step::Attach;
         context = fetch_context(&client, &config, &snapshot, None, false).await?;
         context
             .check_binding(&identity)
