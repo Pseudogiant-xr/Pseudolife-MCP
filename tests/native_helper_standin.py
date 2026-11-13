@@ -102,7 +102,9 @@ def main(argv: list[str]) -> int:
         return subprocess.call([sys.executable, str(repo / script), *fixed, *args])
     if step == "volume-names":
         options = dict(zip(args[::2], args[1::2]))
-        return subprocess.call([sys.executable, str(Path(options["--repo"]) / "ops/preflight.py"),
+        # The checkout's own helper, as every other step runs (in the
+        # installers, --repo is that same checkout).
+        return subprocess.call([sys.executable, str(repo / "ops/preflight.py"),
                                 "--env-file", options["--env-file"], "--volume-names"])
     if step == "json-field":
         report = _report()

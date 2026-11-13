@@ -74,6 +74,9 @@ case "$1" in
         echo "$PSEUDOLIFE_SHIM_LAUNCHER" ;;
     update) [ "$2" = --native-capability ] && echo "pseudolife-mcp native-update-v1" ;;
     installer)
+        if [ "$2" = expose ] && [ -n "${STUB_EXPOSE:-}" ]; then printf '%s\n' "$STUB_EXPOSE"; fi
+        # A flat JSON object's string field, as the real step reads it.
+        if [ "$2" = json-field ]; then sed -n "s/.*\"$3\": \"\([^\"]*\)\".*/\1/p"; fi
         if [ "$2" = migrate-registrations ]; then
             case "$STUB_MOVES" in
                 moved) echo "moved $4 to the native client at $PSEUDOLIFE_SHIM_LAUNCHER (each changed file has a private backup)" ;;
@@ -171,7 +174,7 @@ def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, releas
     run_env.update(env or {})
     script_file = tmp_path / "run.sh"
     script_file.write_text(script + "\n", encoding="utf-8", newline="\n")
-    installer_sandbox.require({**run_env, "HOME": str(home)}, tmp_path)
+    installer_sandbox.require(run_env, tmp_path)
     result = subprocess.run([BASH, _p(script_file)], capture_output=True, text=True, env=run_env, timeout=120)
     forbidden_log = tmp_path / "forbidden-calls"
     assert not forbidden_log.exists(), f"the installer ran Python tooling: {forbidden_log.read_text()}"
@@ -195,7 +198,7 @@ def test_fresh_install_verifies_the_archive_and_installs_it_natively(tmp_path):
     downloads = tmp_path / "home/.pseudolife-mcp/downloads" / VERSION
     assert install == (f"runtime install --archive {_p(downloads / ASSET)} "
                        f"--sha256sums {_p(downloads / 'SHA256SUMS')} --version {VERSION}")
-    assert "installer expose" in calls
+    assert "installer expose --json" in calls
 
 
 def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):
@@ -328,3 +331,24 @@ def test_the_real_client_installs_and_answers_the_installer_steps(tmp_path):
     assert "FIELD=start" in result.stdout, result.stdout
     assert "OK=1" in result.stdout, result.stdout
     assert f"Native client {VERSION} installed at" in result.stdout
+
+
+@pytest.mark.parametrize("report, shown", [
+    ('{"state": "left", "detail": "user bin entry is already occupied; run the stable launcher by its full path"}',
+     "pseudolife-mcp on PATH: user bin entry is already occupied; run the stable launcher by its full path"),
+    ('{"state": "failed", "detail": "could not create the user bin link; run the stable launcher by its full path"}',
+     "pseudolife-mcp on PATH: could not create the user bin link"),
+    ('{"state": "linked", "detail": "linked user bin to the stable launcher", "hint": "/x is not on PATH: add it"}',
+     "pseudolife-mcp on PATH: /x is not on PATH: add it"),
+    ('{"state": "linked", "detail": "linked user bin to the stable launcher"}', None),
+    ('{"state": "current", "detail": "user bin already reaches the stable launcher"}', None),
+])
+def test_the_launcher_exposure_is_said_unless_it_simply_worked(tmp_path, report, shown):
+    # The installer steps of the stub client read JSON as the real one does.
+    result = _run(tmp_path, "native_stage; ensure_shim", env={"STUB_EXPOSE": report})
+    assert result.returncode == 0, result.stderr
+    exposure = [line for line in result.stdout.splitlines() if "pseudolife-mcp on PATH" in line]
+    if shown is None:
+        assert exposure == [], result.stdout
+    else:
+        assert len(exposure) == 1 and shown in exposure[0], result.stdout

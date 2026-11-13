@@ -364,8 +364,106 @@ fn read_block(path: &Path) -> Result<EnvBlock, Refusal> {
     })
 }
 
-fn url_parts(url: &str) -> Option<reqwest::Url> {
-    reqwest::Url::parse(url).ok()
+/// The parts of `urllib.parse.urlsplit(url)` that `choices` reads, read
+/// the same way (WHATWG parsing would drop a default port such as `:80` and
+/// refuse some authorities `urlsplit` accepts).
+struct Split<'a> {
+    scheme: &'a str,
+    netloc: &'a str,
+    /// The text after the netloc: path, query and fragment.
+    rest: &'a str,
+}
+impl<'a> Split<'a> {
+    fn new(url: &'a str) -> Self {
+        // A scheme is letters first, then letters, digits, "+", "-" or ".".
+        let (scheme, after) = match url.split_once(':') {
+            Some((scheme, after))
+                if scheme
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic())
+                    && scheme
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)) =>
+            {
+                (scheme, after)
+            }
+            _ => ("", url),
+        };
+        let (netloc, rest) = match after.strip_prefix("//") {
+            Some(after) => {
+                let end = after.find(['/', '?', '#']).unwrap_or(after.len());
+                (&after[..end], &after[end..])
+            }
+            None => ("", after),
+        };
+        Self {
+            scheme,
+            netloc,
+            rest,
+        }
+    }
+    /// `(hostname, port text)` as `_hostinfo` splits them.
+    fn hostinfo(&self) -> (&'a str, Option<&'a str>) {
+        let hostinfo = self.netloc.rsplit_once('@').map_or(self.netloc, |(_, h)| h);
+        let (hostname, port) = match hostinfo.split_once('[') {
+            Some((_, bracketed)) => {
+                let (hostname, after) = bracketed.split_once(']').unwrap_or((bracketed, ""));
+                (hostname, after.split_once(':').map_or("", |(_, p)| p))
+            }
+            None => hostinfo.split_once(':').unwrap_or((hostinfo, "")),
+        };
+        (hostname, (!port.is_empty()).then_some(port))
+    }
+    /// `.hostname`: lowercased, `None` when empty.
+    fn hostname(&self) -> Option<String> {
+        let (host, _) = self.hostinfo();
+        (!host.is_empty()).then(|| host.to_lowercase())
+    }
+    /// `.port`; `Err` where Python raises ValueError (not digits, or out
+    /// of range).
+    fn port(&self) -> Result<Option<u32>, ()> {
+        match self.hostinfo().1 {
+            None => Ok(None),
+            Some(text) if text.bytes().all(|b| b.is_ascii_digit()) => text
+                .parse::<u32>()
+                .ok()
+                .filter(|p| *p <= 65535)
+                .map(Some)
+                .ok_or(()),
+            Some(_) => Err(()),
+        }
+    }
+    /// `.username is not None or .password is not None`: any "@".
+    fn has_userinfo(&self) -> bool {
+        self.netloc.contains('@')
+    }
+}
+
+/// Recorded choices in the order Python's dict kept them: an existing key
+/// keeps its place when its value is replaced, a new one goes last.
+#[derive(Default)]
+struct Ordered(Vec<(String, String)>);
+impl Ordered {
+    fn get(&self, key: &str) -> Option<&String> {
+        self.0.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+    fn contains_key(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+    fn insert(&mut self, key: String, value: String) {
+        match self.0.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, slot)) => *slot = value,
+            None => self.0.push((key, value)),
+        }
+    }
+}
+impl<'a> IntoIterator for &'a Ordered {
+    type Item = &'a (String, String);
+    type IntoIter = std::slice::Iter<'a, (String, String)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
 }
 
 fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
@@ -375,17 +473,19 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
     }
     let saved = fields(&env.block);
     let all_values = fields(&split_lines(&env.text));
-    let mut selected: BTreeMap<String, String> = CHOICES
-        .iter()
-        .filter_map(|k| {
-            saved
-                .get(&format!("{PREFIX}{k}"))
-                .map(|v| ((*k).to_owned(), v.clone()))
-        })
-        .collect();
-    selected
-        .entry("BANK_LOCATION".into())
-        .or_insert_with(|| "local".into());
+    let mut selected = Ordered(
+        CHOICES
+            .iter()
+            .filter_map(|k| {
+                saved
+                    .get(&format!("{PREFIX}{k}"))
+                    .map(|v| ((*k).to_owned(), v.clone()))
+            })
+            .collect(),
+    );
+    if !selected.contains_key("BANK_LOCATION") {
+        selected.insert("BANK_LOCATION".into(), "local".into());
+    }
     // An older open-loopback install must not acquire a token on a rerun.
     let token_set = |k: &str| all_values.get(k).is_some_and(|v| !v.is_empty());
     if !(selected.contains_key("NO_TOKEN")
@@ -410,17 +510,23 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
             selected.insert("EXTRACTOR".into(), "sidecar".into());
         } else if !model.is_empty() && model != "extractor" {
             let mut shown = base.clone();
-            if let Some(parts) = url_parts(&base)
-                && parts.host_str() == Some("host.docker.internal")
-            {
-                // urlunsplit((scheme, "127.0.0.1[:port]", path, "", "")): the
-                // path exactly as written, query and fragment dropped.
-                let port = parts.port().map(|p| format!(":{p}")).unwrap_or_default();
-                let after = base.split_once("://").map_or("", |(_, rest)| rest);
-                let path_start = after.find(['/', '?', '#']).unwrap_or(after.len());
-                let path = &after[path_start..];
-                let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
-                shown = format!("{}://127.0.0.1{port}{path}", parts.scheme());
+            let parts = Split::new(&base);
+            if parts.hostname().as_deref() == Some("host.docker.internal") {
+                // urlunsplit((scheme, "127.0.0.1" + (f":{port}" if port
+                // else ""), path, "", "")): port 0 is dropped, the path is
+                // kept as written, the query and fragment are dropped.
+                let port = match parts.port() {
+                    Ok(Some(port)) if port != 0 => format!(":{port}"),
+                    Ok(_) => String::new(),
+                    Err(()) => return refuse(READ_FAILED),
+                };
+                let path = &parts.rest[..parts.rest.find(['?', '#']).unwrap_or(parts.rest.len())];
+                let scheme = if parts.scheme.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}:", parts.scheme.to_lowercase())
+                };
+                shown = format!("{scheme}//127.0.0.1{port}{path}");
             }
             selected.insert(
                 "EXTRACTOR".into(),
@@ -434,7 +540,10 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
             selected.insert("MODEL".into(), model);
             selected.insert("EXTRACTOR_URL".into(), shown);
         } else {
-            let port = url_parts(&base).and_then(|u| u.port());
+            let port = match Split::new(&base).port() {
+                Ok(port) => port,
+                Err(()) => return refuse(READ_FAILED),
+            };
             let mut matches = Vec::new();
             for (family, mode) in [("CLAUDE", "claude"), ("CODEX", "openai")] {
                 let prefix = format!("PSEUDOLIFE_{family}_SHIM_");
@@ -496,11 +605,7 @@ fn choices(path: &Path) -> Result<Vec<(String, String)>, Refusal> {
                 "Recorded installer choices are invalid. Repeat the original installer flags to replace the managed block; nothing changed.",
             );
         }
-        if key == "EXTRACTOR_URL"
-            && !value.is_empty()
-            && let Some(parts) = url_parts(value)
-            && (!parts.username().is_empty() || parts.password().is_some())
-        {
+        if key == "EXTRACTOR_URL" && !value.is_empty() && Split::new(value).has_userinfo() {
             return refuse(
                 "The recorded extractor URL contains credentials. Remove URL credentials from ops/.env and keep API keys outside the managed block; nothing changed.",
             );
@@ -635,16 +740,23 @@ fn write_env(
 /// Python `subprocess.run(..., text=True, errors="replace", timeout=30)`:
 /// stdout with universal newlines, or the refusal on any failure.
 fn run_command(argv: &[String]) -> Result<String, Refusal> {
-    let (program, rest) = argv
-        .split_first()
-        .ok_or_else(|| Refusal(CHECK_FAILED.into()))?;
+    output_within(argv, Duration::from_secs(30)).map_err(|_| Refusal(CHECK_FAILED.into()))
+}
+
+/// Python `subprocess.run(argv, text=True, errors="replace", timeout=...)`
+/// for a successful run: stdout with universal newlines, stderr discarded
+/// (it may carry resolved credentials). `Err(Unreached)` when the program
+/// cannot start or outlives `timeout` (then it is killed), `Err(Exited)`
+/// when it exits nonzero.
+pub(super) fn output_within(argv: &[String], timeout: Duration) -> Result<String, NotRun> {
+    let (program, rest) = argv.split_first().ok_or(NotRun::Unreached)?;
     let mut child = Command::new(program)
         .args(rest)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| Refusal(CHECK_FAILED.into()))?;
+        .map_err(|_| NotRun::Unreached)?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
@@ -664,21 +776,28 @@ fn run_command(argv: &[String]) -> Result<String, Refusal> {
         if let Ok(Some(status)) = child.try_wait() {
             break status;
         }
-        if started.elapsed() > Duration::from_secs(30) {
+        if started.elapsed() > timeout {
             let _ = child.kill();
             let _ = child.wait();
-            return refuse(CHECK_FAILED);
+            return Err(NotRun::Unreached);
         }
         std::thread::sleep(Duration::from_millis(20));
     };
     let bytes = reader.join().unwrap_or_default();
     let _ = drain.join();
     if !status.success() {
-        return refuse(CHECK_FAILED);
+        return Err(NotRun::Exited);
     }
     Ok(String::from_utf8_lossy(&bytes)
         .replace("\r\n", "\n")
         .replace('\r', "\n"))
+}
+
+/// Why `output_within` has no output: Python's OSError or TimeoutExpired
+/// (`Unreached`), or a nonzero exit (`Exited`).
+pub(super) enum NotRun {
+    Unreached,
+    Exited,
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -740,18 +859,20 @@ fn deployment(
     let untracked = git(&["ls-files", "-z", "--others", "--exclude-standard"])?;
     let mut names: Vec<&str> = untracked.split('\0').filter(|n| !n.is_empty()).collect();
     names.sort_unstable();
+    // A file that is there but cannot be read refuses, as Python's open()
+    // raising did; one that is gone (or not a file) hashes as empty.
     let extra: Vec<Value> = names
         .into_iter()
         .map(|name| {
             let path = repo.join(name);
             let hash = if path.is_file() {
-                sha256_hex(&std::fs::read(&path).unwrap_or_default())
+                sha256_hex(&std::fs::read(&path).map_err(|_| Refusal(READ_FAILED.into()))?)
             } else {
                 sha256_hex(b"")
             };
-            json!([name, hash])
+            Ok(json!([name, hash]))
         })
-        .collect();
+        .collect::<Result<_, Refusal>>()?;
     let source_hash = digest(&json!([resolved(repo), head, delta, extra]));
     let mut compose = vec![
         s("docker"),

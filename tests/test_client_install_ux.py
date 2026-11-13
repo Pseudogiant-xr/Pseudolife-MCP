@@ -246,6 +246,14 @@ def test_installer_env_block_covers_codex_modes() -> None:
     assert "shim_autostart_family=codex" in sh and 'elseif ($codexShimMode) { "codex" }' in ps
 
 
+def test_the_shim_autostart_runs_the_stable_launcher() -> None:
+    """The launcher re-executes the newest numbered runtime, so without
+    --native-exe the service would record that runtime and keep running it
+    after an update (or fail once it is pruned)."""
+    assert '"${shim_autostart_args[@]}" --native-exe "$SHIM_PATH"' in _read("ops/install.sh")
+    assert '$autostartArgs += @("--native-exe", $script:shimInstallPath)' in _read("ops/install.ps1")
+
+
 def test_mode_switch_tears_down_the_sibling_shim_autostart() -> None:
     """Re-running with a different -Extractor is the documented way to switch
     modes, so a cross-family switch (codex -> sonnet, any -> sidecar) must

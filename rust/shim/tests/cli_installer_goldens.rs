@@ -167,8 +167,9 @@ fn run_case(case: &Value) -> Value {
             after.insert(
                 name.clone(),
                 match fs::read(&target) {
+                    // Compared as text, as the Python test compares them.
                     Ok(bytes) => Value::String(placeholder(
-                        &String::from_utf8_lossy(&bytes),
+                        &String::from_utf8_lossy(&bytes).replace("\r\n", "\n"),
                         &home_text,
                         paths,
                     )),

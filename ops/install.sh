@@ -542,8 +542,15 @@ native_install() {
     else
         step "Native client $NATIVE_VERSION installed at $SHIM_PATH (running sessions keep the client they started with)"
     fi
-    native_expose_line="$("$SHIM_PATH" installer expose 2>/dev/null)" || true
-    case "$native_expose_line" in *"not on PATH"*|*"kept as"*|*"left as it is"*) echo "  $native_expose_line" ;; esac
+    # Said unless the link is simply in place: an entry left alone, one moved
+    # aside, a failure, or a link whose directory is not on PATH.
+    native_expose_report="$("$SHIM_PATH" installer expose --json 2>/dev/null)" || true
+    native_expose_state="$(printf '%s' "$native_expose_report" | native_helper json-field state)" || native_expose_state=""
+    native_expose_hint="$(printf '%s' "$native_expose_report" | native_helper json-field hint)" || native_expose_hint=""
+    case "$native_expose_state" in
+        ""|linked|current) [ -z "$native_expose_hint" ] || echo "  pseudolife-mcp on PATH: $native_expose_hint" ;;
+        *) echo "  pseudolife-mcp on PATH: $(printf '%s' "$native_expose_report" | native_helper json-field detail)${native_expose_hint:+; $native_expose_hint}" ;;
+    esac
     native_user_path
     return 0
 }
@@ -3484,9 +3491,11 @@ if [ -n "$shim_autostart_family" ]; then
     if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "WARNING: shim autostart was not registered: the native client is unavailable (see above)" >&2
         echo "  Re-run later: pseudolife-mcp ${shim_autostart_args[*]}" >&2
-    elif ! "$SHIM_PATH" "${shim_autostart_args[@]}"; then
+    # The stable launcher, not the numbered runtime it starts: the service
+    # then runs whatever release a later update installs.
+    elif ! "$SHIM_PATH" "${shim_autostart_args[@]}" --native-exe "$SHIM_PATH"; then
         echo "WARNING: shim autostart registration failed (see above: usually no systemd --user on this host)" >&2
-        echo "  Re-run later: $SHIM_PATH ${shim_autostart_args[*]}" >&2
+        echo "  Re-run later: $SHIM_PATH ${shim_autostart_args[*]} --native-exe $SHIM_PATH" >&2
         echo "  Or start it manually: $SHIM_PATH extractor-shim $shim_autostart_family --repo $repo --port $SHIM_PORT --model $MODEL" >&2
     fi
 fi

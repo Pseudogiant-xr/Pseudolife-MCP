@@ -3344,6 +3344,9 @@ if ($shimAutostartFamily) {
         Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu: $rerun"
     } else {
         $autostartCode = 1
+        # The stable launcher, not the numbered runtime it starts: the task
+        # then runs whatever release a later update installs.
+        $autostartArgs += @("--native-exe", $script:shimInstallPath)
         try {
             & $script:shimInstallPath @autostartArgs
             $autostartCode = $LASTEXITCODE

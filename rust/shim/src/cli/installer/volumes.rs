@@ -5,9 +5,11 @@
 use std::{
     io::{self, Write},
     path::Path,
-    process::{Command, Stdio},
 };
 
+// ops/preflight.py printed every refusal as "FAIL <message>".
+const UNREACHED: &str =
+    "Cannot inspect Docker safely. Run docker info, fix Docker access, then rerun.";
 const RESOLVE_FAILED: &str = "Cannot resolve ops/.env with Docker Compose. Run docker compose --env-file ops/.env -f ops/docker-compose.yml config --quiet, fix the reported configuration, then rerun. Nothing changed.";
 const INVALID: &str = "Invalid bank/state volume name. Set literal Docker volume names in ops/.env, then rerun. Nothing changed.";
 
@@ -68,29 +70,34 @@ pub(super) fn run(args: &[String]) -> u8 {
         ops.join(".env.example")
     };
     // Compose owns dotenv syntax, interpolation and exported-value precedence;
-    // its output stays private, only the two names leave this process.
-    let output = Command::new("docker")
-        .args(["compose", "--env-file"])
-        .arg(&source)
-        .arg("-f")
-        .arg(ops.join("docker-compose.yml"))
-        .args(["config", "--environment"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
-    let text = match output {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
-        }
-        _ => {
-            let _ = writeln!(io::stderr().lock(), "{RESOLVE_FAILED}");
+    // its output stays private, only the two names leave this process. A
+    // wedged Docker is given up on after 20 seconds, as ops/preflight.py did.
+    let argv: Vec<String> = [
+        "docker".into(),
+        "compose".into(),
+        "--env-file".into(),
+        source.display().to_string(),
+        "-f".into(),
+        ops.join("docker-compose.yml").display().to_string(),
+        "config".into(),
+        "--environment".into(),
+    ]
+    .to_vec();
+    let text = match super::state::output_within(&argv, std::time::Duration::from_secs(20)) {
+        Ok(text) => text,
+        Err(why) => {
+            let message = match why {
+                super::state::NotRun::Unreached => UNREACHED,
+                super::state::NotRun::Exited => RESOLVE_FAILED,
+            };
+            let _ = writeln!(io::stderr().lock(), "FAIL {message}");
             return 1;
         }
     };
     match names(&text) {
         Ok((bank, state)) => u8::from(writeln!(io::stdout().lock(), "{bank}\n{state}").is_err()),
         Err(message) => {
-            let _ = writeln!(io::stderr().lock(), "{message}");
+            let _ = writeln!(io::stderr().lock(), "FAIL {message}");
             1
         }
     }

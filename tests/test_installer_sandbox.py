@@ -112,3 +112,25 @@ def test_the_powershell_harness_refuses_a_real_home(tmp_path):
         ps.run("Write-Output never\n")
     # Refused before any process: the fixture pwsh name would not start.
     assert not (tmp_path / "calls.txt").exists()
+
+
+@pytest.mark.parametrize("name", installer_sandbox.REDIRECTS)
+def test_a_redirect_outside_is_refused_and_one_inside_is_not(tmp_path, name):
+    env = installer_sandbox.environment(tmp_path)
+    env[name] = str(tmp_path / "home" / "inside")
+    installer_sandbox.require(env, tmp_path)
+    env[name] = str(Path.home() / ".pseudolife-mcp")
+    with pytest.raises(installer_sandbox.RealHomeRefused, match=name):
+        installer_sandbox.require(env, tmp_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Git Bash path spelling")
+def test_a_git_bash_path_is_read_as_the_windows_path(tmp_path):
+    env = installer_sandbox.environment(tmp_path)
+    text = tmp_path.as_posix()
+    env["HOME"] = "/" + text[0].lower() + text[2:] + "/home"
+    installer_sandbox.require(env, tmp_path)
+    real = Path.home().as_posix()
+    env["HOME"] = "/" + real[0].lower() + real[2:]
+    with pytest.raises(installer_sandbox.RealHomeRefused, match="HOME"):
+        installer_sandbox.require(env, tmp_path)

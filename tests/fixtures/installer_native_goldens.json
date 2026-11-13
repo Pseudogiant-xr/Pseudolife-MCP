@@ -504,6 +504,510 @@
           "stderr": ""
         }
       ]
+    },
+    {
+      "name": "helpers-json-field-and-json-string",
+      "steps": [
+        {
+          "argv": [
+            "json-field",
+            "action"
+          ],
+          "stdin": "{\"action\": \"start\", \"n\": 1}",
+          "exit": 0,
+          "stdout": "start\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-field",
+            "n"
+          ],
+          "stdin": "{\"action\": \"start\", \"n\": 1}",
+          "exit": 0,
+          "stdout": "\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-field",
+            "action"
+          ],
+          "stdin": "not json",
+          "exit": 0,
+          "stdout": "\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-string"
+          ],
+          "stdin": "\"C:\\\\agents\\\\caf\\u00e9.md\"",
+          "exit": 0,
+          "stdout": "C:\\agents\\café.md",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-string"
+          ],
+          "stdin": "{\"not\": \"a string\"}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "helpers-connect-report",
+      "steps": [
+        {
+          "argv": [
+            "connect-report",
+            "valid"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "error"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "plan"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "    change   claude-code registration: ~/.claude.json [pseudolife-memory]\n             PSEUDOLIFE_MCP_DAEMON_URL: http://127.0.0.1:8765 -> http://10.0.0.5:8765\n             PSEUDOLIFE_MCP_TOKEN: x -> (removed)\n    current  codex registration: ~/.codex/config.toml\n    manual   claude-desktop hooks: settings.json\n             edit it by hand\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "manual"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "    manual   claude-desktop hooks: settings.json\n             edit it by hand\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "handled"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "claude-code codex\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "valid"
+          ],
+          "stdin": "{\"rows\": []}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "plan"
+          ],
+          "stdin": "[]",
+          "exit": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "helpers-codex-fields",
+      "steps": [
+        {
+          "argv": [
+            "codex-fields",
+            "credentials"
+          ],
+          "stdin": "{\"status\": \"ready\", \"credential_file_configured\": true, \"connection_configured\": false, \"credential_file_path\": \"/t/c.token\", \"daemon_url\": null}",
+          "exit": 0,
+          "stdout": "1\n0\n/t/c.token\n\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "credentials"
+          ],
+          "stdin": "{\"status\": \"ready\", \"credential_file_configured\": \"yes\", \"connection_configured\": false}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "hooks"
+          ],
+          "stdin": "{\"status\": \"pending\", \"source\": \"manual\", \"instructions\": \"skipped\", \"recovery\": \"Hooks are not installed.\\nRerun the installer.\"}",
+          "exit": 0,
+          "stdout": "pending\nmanual\nskipped\nHooks are not installed. Rerun the installer.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "hooks"
+          ],
+          "stdin": "{\"status\": \"ready\", \"source\": \"elsewhere\", \"instructions\": \"present\"}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "runtime-defaults"
+          ],
+          "stdin": "{\"status\": \"ready\", \"runtime_defaults\": \"configured\"}",
+          "exit": 0,
+          "stdout": "configured\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "runtime-defaults"
+          ],
+          "stdin": "{\"status\": \"needs-configuration\", \"recovery\": \"x\"}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "helpers-loopback-and-pairing-code",
+      "steps": [
+        {
+          "argv": [
+            "is-loopback",
+            "http://127.0.0.1:8765"
+          ],
+          "stdin": null,
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://127.0.0.01:8765"
+          ],
+          "stdin": null,
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://[::ffff:127.0.0.1]:8765"
+          ],
+          "stdin": null,
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://LOCALHOST:8765/"
+          ],
+          "stdin": null,
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://10.0.0.5:8765"
+          ],
+          "stdin": null,
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "https://daemon.example.com"
+          ],
+          "stdin": null,
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "7KQ2-MX4P-9TZC\n",
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "oil2mx4p9tzc\n",
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "7KQ2-MX4P-9TZ\n",
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "tok-abc\n",
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "engine-without-docker-and-choices",
+      "steps": [
+        {
+          "argv": [
+            "engine",
+            "detect",
+            "--repo",
+            "{HOME}/repo"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Cannot reach Docker; start Docker and rerun the installer. Nothing was started.\n"
+        },
+        {
+          "argv": [
+            "engine",
+            "prepare",
+            "--repo",
+            "{HOME}/repo",
+            "--engine",
+            "rust-checkout"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "This host runs a Rust daemon selected by checkout-mode update, which the installer does not rebuild. Update it with pseudolife-mcp update --checkout {HOME}\\repo, or switch it back with pseudolife-mcp update --engine python --checkout {HOME}\\repo and rerun the installer. Nothing was started.\n"
+        },
+        {
+          "argv": [
+            "engine",
+            "choose",
+            "--engine",
+            "rust"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "choose records only --engine python.\n"
+        },
+        {
+          "argv": [
+            "engine",
+            "choose",
+            "--engine",
+            "python"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "recorded\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "engine",
+            "prepare",
+            "--repo",
+            "{HOME}/repo"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "prepare needs --repo and --engine.\n"
+        }
+      ],
+      "files_after": {
+        ".pseudolife-mcp/update-engine/engine-choice.json": "{\"engine\": \"python\"}\n"
+      }
+    },
+    {
+      "name": "volume-names-without-docker",
+      "files": {
+        "repo/ops/.env.example": "PSEUDOLIFE_BANK_VOLUME=b\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "volume-names",
+            "--repo",
+            "{HOME}/repo",
+            "--env-file",
+            "{HOME}/repo/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "FAIL Cannot inspect Docker safely. Run docker info, fix Docker access, then rerun.\n"
+        }
+      ]
+    },
+    {
+      "name": "state-choices-keep-an-explicit-default-port",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:80/v1?x=1\nPSEUDOLIFE_DREAM_MODEL=m1\nPSEUDOLIFE_INSTALL_CLIENT=gemini\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=endpoint\nMODEL=m1\nEXTRACTOR_URL=http://127.0.0.1:80/v1\nCLIENT=gemini\nBANK_LOCATION=local\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-cli-family-on-port-443",
+      "files": {
+        "ops/.env": "PSEUDOLIFE_CODEX_SHIM_PORT=443\nPSEUDOLIFE_CODEX_SHIM_MODEL=gpt-5.5\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_DREAM_BASE_URL=https://host.docker.internal:443/v1\nPSEUDOLIFE_DREAM_MODEL=extractor\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=openai-only\nMODEL=gpt-5.5\nSHIM_PORT=443\nBANK_LOCATION=local\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-first-bad-value-in-python-order",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_INSTRUCTIONS=append;skip\nPSEUDOLIFE_DREAM_BASE_URL=http://u:p@host.docker.internal:9000/v1\nPSEUDOLIFE_DREAM_MODEL=m1\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Recorded installer choices are invalid. Repeat the original installer flags to replace the managed block; nothing changed.\n"
+        }
+      ],
+      "note": "Python checks the recorded values in insertion order: INSTRUCTIONS (recorded) before EXTRACTOR_URL (inferred later), so the general refusal wins; alphabetical order would give the credentials one."
+    },
+    {
+      "name": "state-choices-userinfo-without-a-password",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_EXTRACTOR=endpoint\nPSEUDOLIFE_INSTALL_MODEL=m1\nPSEUDOLIFE_INSTALL_EXTRACTOR_URL=http://@10.0.0.5:9000/v1\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "The recorded extractor URL contains credentials. Remove URL credentials from ops/.env and keep API keys outside the managed block; nothing changed.\n"
+        }
+      ]
+    },
+    {
+      "name": "credentials-a-bad-source-token-leaves-the-file",
+      "env": {
+        "PSEUDOLIFE_INSTALLER_TOKEN": "tok-new value  # rotated"
+      },
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "write-token-file",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": "tok-good-0123456789abcdef\n",
+          "exit": 0,
+          "stdout": "{\"status\": \"written\", \"path\": \"{HOME}/.pseudolife-mcp/claude-code.token\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "claude-code",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "{\"status\": \"failed\", \"recovery\": \"could not write the token file {HOME}/.pseudolife-mcp/claude-code.token: credential file contains an invalid bearer token\"}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".pseudolife-mcp/claude-code.token": "tok-good-0123456789abcdef"
+      }
     }
   ]
 }

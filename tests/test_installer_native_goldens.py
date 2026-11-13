@@ -27,7 +27,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDENS = ROOT / "tests" / "fixtures" / "installer_native_goldens.json"
-SCRIPTS = {"state": "ops/installer_state.py", "credentials": "ops/client_credentials.py"}
+# Every step is answered as the sliced installer tests answer it: the ops
+# helper it replaced, or the installer's old inline reader.
+STANDIN = ROOT / "tests" / "native_helper_standin.py"
 RECORD = os.environ.get("PSEUDOLIFE_RECORD_INSTALLER_GOLDENS") == "1"
 
 
@@ -85,10 +87,9 @@ def run_case(case: dict) -> dict:
         steps = []
         for step in case["steps"]:
             argv = [expand(arg, str(home)) for arg in step["argv"]]
-            script = ROOT / SCRIPTS[argv[0]]
             stdin = step.get("stdin")
             result = subprocess.run(
-                [sys.executable, "-I", str(script), *argv[1:]], cwd=home,
+                [sys.executable, "-I", str(STANDIN), str(ROOT), *argv], cwd=home,
                 env=_environment(home, case.get("env", {})),
                 input=None if stdin is None else expand(stdin, str(home)).encode("utf-8"),
                 stdin=subprocess.DEVNULL if stdin is None else None,
@@ -107,7 +108,11 @@ def run_case(case: dict) -> dict:
         after = {}
         for name in case.get("files_after", {}):
             target = home / name
-            after[name] = (placeholder(target.read_bytes().decode("utf-8", "replace"), str(home), paths)
+            # Compared as text: Python's write_text writes CRLF on Windows
+            # where the native steps write LF, and every reader of these
+            # files reads either.
+            after[name] = (placeholder(target.read_bytes().decode("utf-8", "replace").replace("\r\n", "\n"),
+                                       str(home), paths)
                            if target.is_file() else None)
         return {"steps": steps, "files_after": after}
     finally:

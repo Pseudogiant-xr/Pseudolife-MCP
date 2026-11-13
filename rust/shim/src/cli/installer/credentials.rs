@@ -335,14 +335,21 @@ fn token_file(principal: &str, path: &Path) -> Value {
     if exists && read_token(path).ok().flatten().as_deref() == Some(source.as_str()) {
         return json!({"status": "ready", "path": path});
     }
-    if let Err(error) = files::write_private(path, source.as_bytes()) {
-        return match error {
-            Fail::Helper(message) => failed(message),
-            Fail::Name(name) => failed(format!(
-                "could not write the token file {}: {name}",
-                path.display()
-            )),
-        };
+    // As credentials._write_token_file: the token is validated before
+    // anything is written, and the private edit refuses a link or a
+    // redirected ancestor instead of writing through it.
+    let written = crate::credentials::CredentialProvider::new(Some(source.clone()), None)
+        .map_err(|error| error.to_string())
+        .and_then(|_| {
+            crate::setup::files::PrivateEdit::prepare(path, source.as_bytes().to_vec())
+                .and_then(|mut edit| edit.commit())
+                .map_err(|error| error.to_string())
+        });
+    if let Err(cause) = written {
+        return failed(format!(
+            "could not write the token file {}: {cause}",
+            path.display()
+        ));
     }
     match read_token(path) {
         Ok(Some(token)) if token == source => json!({"status": "ready", "path": path}),
@@ -389,7 +396,10 @@ fn registration_env(config: &Path, sets: &[String]) -> Result<Value, String> {
     let Some(J::Dict(entry)) = pyjson::get_mut(servers, SERVER) else {
         return Ok(json!({"status": "absent", "backup": null}));
     };
-    let stdio = pyjson::get(entry, "type").is_none_or(|t| t.as_str() == Some("stdio"));
+    // entry.get("type", "stdio") == "stdio": a key that is there but null
+    // is not stdio.
+    let stdio = !pyjson::has(entry, "type")
+        || pyjson::get(entry, "type").is_some_and(|t| t.as_str() == Some("stdio"));
     if !stdio || !pyjson::get(entry, "command").is_some_and(J::truthy) {
         return Ok(json!({"status": "unsupported", "backup": null}));
     }

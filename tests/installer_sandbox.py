@@ -8,8 +8,10 @@ shared harness that runs installer code (a fragment or the whole script) calls
 before it starts the process, and ``run`` does both for a direct start.
 
 ``require`` refuses unless HOME, USERPROFILE, LOCALAPPDATA and APPDATA are all
-set and inside that directory, every XDG_* variable that is set is inside it,
-and the directory itself is inside the system temporary directory. A missing
+set and inside that directory, every XDG_* variable and every other variable
+that redirects writes (``REDIRECTS``) that is set is inside it, and the
+directory itself is inside the system temporary directory. Git Bash paths
+(``/c/...``) are read as the Windows paths they name. A missing
 LOCALAPPDATA or APPDATA is refused too: on Windows a program that finds it
 unset asks the system for the real folder instead.
 """
@@ -22,6 +24,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 SANDBOXED = ("HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA")
+# Each of these, when set, also sends writes somewhere: it must be inside too.
+REDIRECTS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "PSEUDOLIFE_MCP_DATA_DIR",
+             "PSEUDOLIFE_SHIM_LAUNCHER", "PSEUDOLIFE_SHIM_RUNTIMES")
 
 
 class RealHomeRefused(RuntimeError):
@@ -29,7 +34,11 @@ class RealHomeRefused(RuntimeError):
 
 
 def _resolved(value: str | os.PathLike[str]) -> Path:
-    return Path(os.path.realpath(os.fspath(value)))
+    text = os.fspath(value)
+    # Git Bash spells C:\x as /c/x; read it as the Windows path it names.
+    if os.name == "nt" and len(text) > 2 and text[0] == "/" and text[1].isalpha() and text[2] == "/":
+        text = f"{text[1]}:{text[2:]}"
+    return Path(os.path.realpath(text))
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -64,7 +73,7 @@ def require(env: Mapping[str, str], root: Path) -> None:
         elif not _inside(_resolved(value), root):
             problems.append(f"{name}={value} is outside {root}")
     for name, value in env.items():
-        if name.startswith("XDG_") and value and not _inside(_resolved(value), root):
+        if (name.startswith("XDG_") or name in REDIRECTS) and value and not _inside(_resolved(value), root):
             problems.append(f"{name}={value} is outside {root}")
     if problems:
         raise RealHomeRefused("refusing to start installer code outside a disposable home: " + "; ".join(problems))

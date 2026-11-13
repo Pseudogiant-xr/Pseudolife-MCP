@@ -309,9 +309,19 @@ fn write_overlay(image: &str, labels: &Map<String, Value>) -> io::Result<PathBuf
     let body = lines.join("\n") + "\n";
     let path = overlay_path();
     fs::create_dir_all(path.parent().expect("overlay directory"))?;
-    if fs::read_to_string(&path).ok().as_deref() != Some(body.as_str()) {
+    // Python's read_text/write_text: compared as text (universal newlines),
+    // written with the platform's line ending.
+    let current = fs::read_to_string(&path)
+        .ok()
+        .map(|t| t.replace("\r\n", "\n"));
+    if current.as_deref() != Some(body.as_str()) {
         let temporary = path.with_file_name(format!("{OVERLAY}.tmp"));
-        fs::write(&temporary, &body)?;
+        let bytes = if cfg!(windows) {
+            body.replace('\n', "\r\n")
+        } else {
+            body
+        };
+        fs::write(&temporary, bytes)?;
         fs::rename(&temporary, &path)?;
     }
     Ok(path)
