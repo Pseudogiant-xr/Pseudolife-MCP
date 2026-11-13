@@ -177,5 +177,134 @@
     "name": "unknown-top",
     "input": "{\"hooks\":{},\"unknown\":true}",
     "normalized": null
+  },
+  {
+    "name": "stop-failure-skipped",
+    "input": "{\"hooks\":{\"StopFailure\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\"}]}]}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-beside-other-event",
+    "input": "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\"}]}],\"StopFailure\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\"}]}]}}",
+    "normalized": {
+      "hooks": {
+        "Stop": [
+          {
+            "hooks": [
+              {
+                "command": "fixture",
+                "type": "command"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "stop-failure-content-not-validated",
+    "input": "{\"hooks\":{\"StopFailure\":[{\"hooks\":[{\"type\":\"prompt\"}]}]}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-not-a-list",
+    "input": "{\"hooks\":{\"StopFailure\":3}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-escaped-key-skipped",
+    "input": "{\"hooks\":{\"\\u0053topFailure\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\"}]}]}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-lone-surrogate-skipped",
+    "input": "{\"hooks\":{\"StopFailure\":\"\\ud800\"}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-overflow-integer-skipped",
+    "input": "{\"hooks\":{\"StopFailure\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-huge-exponent-skipped",
+    "input": "{\"hooks\":{\"StopFailure\":1e400}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-negative-zero-skipped",
+    "input": "{\"hooks\":{\"StopFailure\":-0}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-deep-nesting-skipped",
+    "input": "{\"hooks\":{\"StopFailure\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}}",
+    "normalized": {
+      "hooks": {}
+    }
+  },
+  {
+    "name": "stop-failure-name-is-case-sensitive",
+    "input": "{\"hooks\":{\"stopFailure\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"fixture\"}]}]}}",
+    "normalized": {
+      "hooks": {
+        "stopFailure": [
+          {
+            "hooks": [
+              {
+                "command": "fixture",
+                "type": "command"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "stop-failure-duplicate-inside",
+    "input": "{\"hooks\":{\"StopFailure\":[{\"a\":1,\"a\":2}]}}",
+    "normalized": null
+  },
+  {
+    "name": "stop-failure-escaped-duplicate",
+    "input": "{\"hooks\":{\"StopFailure\":[],\"\\u0053topFailure\":[]}}",
+    "normalized": null
+  },
+  {
+    "name": "stop-failure-nan-literal",
+    "input": "{\"hooks\":{\"StopFailure\":NaN}}",
+    "normalized": null
+  },
+  {
+    "name": "stop-failure-infinity-literal",
+    "input": "{\"hooks\":{\"StopFailure\":-Infinity}}",
+    "normalized": null
+  },
+  {
+    "name": "stop-failure-at-top-level",
+    "input": "{\"hooks\":{},\"StopFailure\":[]}",
+    "normalized": null
+  },
+  {
+    "name": "stop-failure-hooks-not-object",
+    "input": "{\"hooks\":[{\"StopFailure\":[]}]}",
+    "normalized": null
   }
 ]
