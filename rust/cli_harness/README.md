@@ -153,3 +153,47 @@ fails the control.
 `goldens/<row>.<platform>.json` holds the oracle's observations with the home
 path replaced by `{HOME}` and the arm's invocation window kept, so `--golden`
 applies the same rules a live run does.
+
+## Adding a row
+
+A row's data lives in its own files, so ports adding different rows do not
+edit the same lines:
+
+1. `rows/<row>.py` with `cases()` and its `Mutant(...)` controls,
+   `rows/<row>.md` (the spec) and `goldens/<row>.<platform>.json`.
+2. `rows/<row>.json`, which the CI scripts read through `rust/ci/row_ci.py`:
+   - `parity`: the row's PARITY ID;
+   - `python_roots`: the `pseudolife_memory` modules (file stems) whose
+     imports reach the row's oracle; the ordinary-PR precheck selects the
+     row when one changes;
+   - `postgres`: whether the precheck needs a bank or the PostgreSQL fixture;
+   - `shim`: the `rust/shim/src/cli` entries (file or directory names) whose
+     change reaches the row: the command's own module and every mapped entry
+     it imports (`rust/ci/test_parity_scope.py` scans the imports and names
+     any that is missing);
+   - `source_mutants`: every `Mutant(...)` id in `rows/<row>.py`, in the
+     order the nightly shards cut them, eight to a shard;
+   - `platform_exclusions`: under `linux` and `windows`, each mutant that
+     platform never registers, with its reason.
+
+Then one line each in shared files, in name order, so only ports whose
+names sort next to each other touch neighbouring lines:
+
+3. The row in one W1-C shard's `w1c_rows(...)` in `rust/ci/parity_scope.py`
+   `SHARDS` (a row the cli or H5 steps run by name instead goes in
+   `NAMED_ROW_SUITES` there, in `NAMED_ROWS` in `rust/ci/test_workflow.py`
+   and in its step in `.github/workflows/rust.yml`).
+4. `<row>-<n>` for each eight-mutant shard in the `source-mutants` job's
+   `shard:` list in `.github/workflows/rust.yml`.
+5. A CI budget acceptance of your own: `parity_scope.py` changed, so run
+   `python rust/ci/ci_budget.py accept --workflow rust.yml --job
+   parity-checks --reason "..."` with the row's measured time.
+6. In the shim: the module's `mod` line and its block in mode order in
+   `rust/shim/src/cli.rs`, and an `eol=lf` line in `rust/.gitattributes` for
+   a help asset the command embeds.
+7. In the parity docs: the row's file under `rust/parity/parity-rows/`, the
+   mode's checklist entry, and the mode's own entry under "CLI modes since
+   the count" in `rust/CUTOVER.md` and in the checklist's `_section.md`.
+
+`python rust/ci/inventory.py` checks the declarations against the row
+modules, goldens, shards and workflow, and names what is missing.
