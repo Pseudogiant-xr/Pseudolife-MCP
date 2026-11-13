@@ -157,6 +157,7 @@ NATIVE_UNAVAILABLE_SH = (
     "native_install() { return 1; }\n"
     "native_installed_launcher() { :; }\n")
 NATIVE_FROM_SHIM_BIN_PS = (
-    "$env:FAKE_LAUNCHER = Join-Path $env:FIXTURE_SHIM_BIN "
-    "$(if ($IsWindows -or ($null -eq $IsWindows)) { 'pseudolife-mcp.exe' } else { 'pseudolife-mcp' })\n"
+    # The fixture's shim-bin holds both names; its tests expect the .exe one
+    # on every platform, as the earlier pipx lookup found it first.
+    "$env:FAKE_LAUNCHER = Join-Path $env:FIXTURE_SHIM_BIN 'pseudolife-mcp.exe'\n"
     "$env:FAKE_KEEP_LAUNCHER = '1'\n" + POWERSHELL)
