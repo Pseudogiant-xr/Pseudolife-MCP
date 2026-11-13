@@ -186,6 +186,11 @@ fn text(bytes: &[u8]) -> Option<String> {
 /// (the oracle raises, or on Windows prints a reader thread's traceback and
 /// goes on with `None`), or a spawn failure without an OS error code.
 pub(super) async fn run(binary: &str, args: &[&str]) -> Result<Proc, ()> {
+    run_within(binary, args, TIMEOUT).await
+}
+
+/// [`run`] with its timeout given (`TAILSCALE_TIMEOUT_S` outside tests).
+async fn run_within(binary: &str, args: &[&str], timeout: Duration) -> Result<Proc, ()> {
     use tokio::io::AsyncReadExt;
     let mut command = tokio::process::Command::new(binary);
     command
@@ -206,22 +211,31 @@ pub(super) async fn run(binary: &str, args: &[&str]) -> Result<Proc, ()> {
     };
     let mut stdout = child.stdout.take().ok_or(())?;
     let mut stderr = child.stderr.take().ok_or(())?;
-    let out = tokio::spawn(async move {
+    let mut out = tokio::spawn(async move {
         let mut bytes = Vec::new();
         let _ = stdout.read_to_end(&mut bytes).await;
         bytes
     });
-    let err = tokio::spawn(async move {
+    let mut err = tokio::spawn(async move {
         let mut bytes = Vec::new();
         let _ = stderr.read_to_end(&mut bytes).await;
         bytes
     });
-    let finished = tokio::time::timeout(TIMEOUT, child.wait()).await;
+    // `communicate(timeout=...)`: both pipes to their end and then the
+    // child, inside the one deadline. A descendant that inherited a pipe
+    // keeps it open after the child has gone, so the reads are bounded too.
+    let (mut read_out, mut read_err) = (None, None);
+    let finished = tokio::time::timeout(timeout, async {
+        read_out = Some((&mut out).await);
+        read_err = Some((&mut err).await);
+        child.wait().await
+    })
+    .await;
     match finished {
         Ok(status) => {
             let status = status.map_err(|_| ())?;
-            let out = out.await.map_err(|_| ())?;
-            let err = err.await.map_err(|_| ())?;
+            let out = read_out.ok_or(())?.map_err(|_| ())?;
+            let err = read_err.ok_or(())?.map_err(|_| ())?;
             Ok(Proc {
                 code: returncode(status),
                 out: text(&out).ok_or(())?,
@@ -235,8 +249,16 @@ pub(super) async fn run(binary: &str, args: &[&str]) -> Result<Proc, ()> {
             let _ = child.start_kill();
             let _ = child.wait().await;
             let out = if cfg!(windows) {
-                let out = out.await.map_err(|_| ())?;
-                let err = err.await.map_err(|_| ())?;
+                let out = match read_out {
+                    Some(done) => done,
+                    None => out.await,
+                }
+                .map_err(|_| ())?;
+                let err = match read_err {
+                    Some(done) => done,
+                    None => err.await,
+                }
+                .map_err(|_| ())?;
                 text(&err).ok_or(())?;
                 text(&out).ok_or(())?
             } else {
@@ -249,7 +271,7 @@ pub(super) async fn run(binary: &str, args: &[&str]) -> Result<Proc, ()> {
             Ok(Proc {
                 code: 124,
                 out,
-                err: format!("timed out after {}s", TIMEOUT.as_secs()),
+                err: format!("timed out after {}s", timeout.as_secs()),
             })
         }
     }
@@ -536,6 +558,27 @@ pub(super) fn port_state(config: &Dict, port: u16) -> (State, Option<Vec<u16>>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A descendant that inherited the pipes keeps them open after the
+    /// direct child has gone. `subprocess.run(timeout=...)` bounds the
+    /// reads too and raises at the timeout, which on POSIX this port defers.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_timeout_also_bounds_pipes_a_descendant_holds_open() {
+        let started = std::time::Instant::now();
+        let ran = run_within(
+            "sh",
+            &["-c", "sleep 3 & exit 0"],
+            Duration::from_millis(200),
+        )
+        .await;
+        assert!(ran.is_err());
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+    }
 
     fn read(text: &str) -> Dict {
         match pyjson::loads(text, DEPTH).unwrap() {

@@ -119,6 +119,9 @@ pub(super) enum Parsed {
     Defer,
 }
 
+/// CPython 3.11's default `sys.get_int_max_str_digits()`.
+const INT_MAX_STR_DIGITS: usize = 4300;
+
 /// `_port(value)`: `Ok(Some(port))`, `Ok(None)` for argparse's
 /// `not a port` error, `Err(())` where `int()` accepts a spelling this port
 /// does not reproduce (a sign, whitespace, underscores, non-ASCII digits).
@@ -127,8 +130,13 @@ pub(super) fn port_value(value: &str) -> Result<Option<u16>, ()> {
         return Err(());
     }
     if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
+        // int()'s digit limit (4300 unless PYTHONINTMAXSTRDIGITS moves it,
+        // which defers the whole command) counts leading zeros: past it
+        // int() raises, and `_port` reports that as no port.
+        if value.len() > INT_MAX_STR_DIGITS {
+            return Ok(None);
+        }
         let digits = value.trim_start_matches('0');
-        // Past 4300 digits int() raises; either way it is no port.
         let port = if digits.len() > 5 {
             None
         } else {
@@ -350,6 +358,10 @@ mod tests {
         assert_eq!(port_value("8765"), Ok(Some(8765)));
         assert_eq!(port_value("000080"), Ok(Some(80)));
         assert_eq!(port_value("65535"), Ok(Some(65535)));
+        // int()'s digit limit counts leading zeros: 4300 digits are read,
+        // 4301 raise, which `_port` reports as no port.
+        assert_eq!(port_value(&format!("{}80", "0".repeat(4298))), Ok(Some(80)));
+        assert_eq!(port_value(&format!("{}80", "0".repeat(4299))), Ok(None));
         for refused in [
             "0",
             "65536",
