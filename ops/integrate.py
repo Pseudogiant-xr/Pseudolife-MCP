@@ -1274,11 +1274,15 @@ FREEZE_GUARD = "rust/ci/python_freeze.py"
 def _freeze_module(base_sha: str):
     """Master's copy of the Python freeze guard, loaded in this process
     (master's code, never a member's: an earlier member merged into this
-    checkout must not decide a later one's admission). None when master has
-    none yet, so there is nothing to enforce."""
+    checkout must not decide a later one's admission). Master without it
+    refuses: the guard and this check landed together, so a missing guard
+    was deleted or renamed, and admitting Python changes silently is the one
+    outcome this must not have."""
     shown = git("show", f"{base_sha}:{FREEZE_GUARD}", check=False)
     if shown.returncode != 0:
-        return None
+        raise Refusal(f"{BASE} has no {FREEZE_GUARD}, so `build` cannot apply the Python "
+                      "freeze to its members; restore it on master. The pull request that "
+                      "deletes pseudolife_memory/ removes this check in the same change")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "python_freeze.py"
         path.write_text(shown.stdout, encoding="utf-8")
@@ -1292,22 +1296,80 @@ def _freeze_module(base_sha: str):
     return module
 
 
-def _frozen_refusal(base_sha: str, m: Member, freeze) -> str | None:
-    """Why a member's own net change may not join: it touches the frozen
-    Python package without the exception label. The `Python freeze` check
-    exempts batches because their members were checked, but a member's own
-    run can be absent (opened before the guard), queued or cancelled, so the
-    batch applies master's copy of the same decision (`_freeze_module`) to
-    the member's diff from its merge base."""
-    if freeze is None:
-        return None
-    common = _out("merge-base", base_sha, m.sha)
-    paths = freeze.changed_paths(Path.cwd(), common, m.sha)   # the checkout `build` runs in
+def _frozen_refusal(freeze, commit: str, labels) -> str | None:
+    """Why a merge commit on the batch branch may not stay: what it changes
+    against its first parent touches the frozen Python package and the
+    member does not carry the exception label. Judged on the merge itself,
+    not on a merge-base diff: with two merge bases, `git merge-base` reports
+    one, and a member can set a frozen file back with an empty diff from it.
+    The `Python freeze` check is early feedback on the pull request; this is
+    the gate, since the batch is exempt from that check and a member's own
+    run can be absent, queued or cancelled."""
+    paths = freeze.changed_paths(Path.cwd(), f"{commit}^1", commit)   # the checkout `build` runs in
     if paths is None:
         return "its change could not be read for the Python freeze check; rebuild once git can read it"
     refused = freeze.frozen_paths(paths)
-    if refused and freeze.EXCEPTION_LABEL not in m.labels:
+    if refused and freeze.EXCEPTION_LABEL not in labels:
         return freeze.refusal(refused)
+    return None
+
+
+def _undo_merge_if_frozen(plan: Plan, m: Member, freeze) -> bool:
+    """Drop the merge just made for ``m`` when it changes frozen paths
+    without the label; True when it was undone."""
+    frozen = _frozen_refusal(freeze, "HEAD", m.labels)
+    if not frozen:
+        return False
+    git("reset", "-q", "--hard", "HEAD^1")
+    plan.dropped.append(Dropped(m, frozen))
+    print(f"  dropped #{m.number}: {frozen}")
+    return True
+
+
+def _labels_now(number: int) -> tuple[str, ...]:
+    view = json.loads(gh("pr", "view", str(number), "--json", "labels") or "{}")
+    return tuple(label.get("name", "") for label in view.get("labels") or [] if isinstance(label, dict))
+
+
+def _batch_freeze_refusal(plan: Plan) -> str | None:
+    """Why the built batch may not be published or merged, judged on the
+    batch as a whole with master's guard: every commit since its base must
+    be a member's merge or the one generated commit, the generated commit
+    touches nothing frozen, and a member merge that changes frozen paths
+    still carries the exception label (read again now: it may have been
+    removed since `build`)."""
+    freeze = _freeze_module(plan.base_sha)
+    members = {m.sha: m for m in plan.merged}
+    seen: set[str] = set()
+    generated = 0
+    for commit in _out("rev-list", "--first-parent", "--reverse",
+                       f"{plan.base_sha}..{plan.head}").split():
+        parents = _out("rev-list", "--parents", "-n", "1", commit).split()[1:]
+        if len(parents) == 2 and parents[1] in members:
+            m = members[parents[1]]
+            seen.add(m.sha)
+            first = _frozen_refusal(freeze, commit, (freeze.EXCEPTION_LABEL,))
+            if first:   # unreadable
+                return f"#{m.number}'s merge {commit[:12]}: {first}"
+            if _frozen_refusal(freeze, commit, ()):
+                frozen = _frozen_refusal(freeze, commit, _labels_now(m.number))
+                if frozen:
+                    return (f"#{m.number} no longer carries the {freeze.EXCEPTION_LABEL} label its "
+                            f"Python change was admitted with: {frozen}; rebuild without it, or "
+                            "restore the label if the maintainer's exception stands")
+            continue
+        subject = _out("log", "-1", "--format=%s", commit)
+        if len(parents) == 1 and subject == CENSUS_SUBJECT and generated == 0:
+            generated += 1
+            frozen = _frozen_refusal(freeze, commit, ())
+            if frozen:
+                return f"the generated commit {commit[:12]} changes the frozen package: {frozen}"
+            continue
+        return (f"commit {commit[:12]} ({subject!r}) on {plan.branch} is neither a member merge "
+                "nor the one generated commit; nothing is fixed inside a batch, so rebuild it")
+    missing = [f"#{m.number}" for m in plan.merged if m.sha not in seen]
+    if missing:
+        return f"the batch lacks the merges of {', '.join(missing)}; rebuild it"
     return None
 
 
@@ -1324,11 +1386,6 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
                 m, f"head moved from {m.sha[:12]} to {head[:12]} after listing; "
                    "rebuild to include it", comment=False))
             continue
-        frozen = _frozen_refusal(plan.base_sha, m, freeze)
-        if frozen:
-            plan.dropped.append(Dropped(m, frozen))
-            print(f"  dropped #{m.number}: {frozen}")
-            continue
         try:
             _budget_member_evidence(plan.base_sha, m)
         except (ValueError, TypeError, KeyError) as error:
@@ -1342,11 +1399,15 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
                    f"Merge #{m.number} into {plan.branch}: {m.title}", m.sha,
                    check=False)
         if proc.returncode == 0:
+            if _undo_merge_if_frozen(plan, m, freeze):
+                continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} {m.title}")
             continue
         conflicted = _out("diff", "--name-only", "--diff-filter=U").splitlines()
         if _merge_budget_conflict(plan.base_sha, conflicted):
+            if _undo_merge_if_frozen(plan, m, freeze):
+                continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} after normalizing derived CI budget metadata")
             continue
@@ -1905,6 +1966,9 @@ def open_(args: argparse.Namespace) -> int:
     if head != plan.head:
         raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
                       "build; nothing is fixed inside a batch, so rebuild it")
+    frozen = _batch_freeze_refusal(plan)
+    if frozen:
+        raise Refusal(frozen)
     open_prs = _open_batches()
     others = [(n, name) for n, name, _, _ in open_prs if name != plan.branch]
     if others:
@@ -2211,6 +2275,9 @@ def merge(args: argparse.Namespace) -> int:
         print(f"#{n} is already merged; confirming its members")
     else:
         _refuse_unmergeable(plan, view)
+        frozen = _batch_freeze_refusal(plan)
+        if frozen:
+            raise Refusal(frozen)
         try:
             gh("pr", "merge", str(n), "--merge", "--admin",
                "--match-head-commit", plan.head)

@@ -174,7 +174,9 @@ def test_the_workflow_reruns_on_label_changes_and_passes_the_labels():
     import yaml
     workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/python-freeze.yml")
                               .read_text(encoding="utf-8"))
-    assert workflow[True] == {"pull_request": {"types": ["opened", "synchronize", "reopened", "labeled", "unlabeled"]}}
+    # edited: a pull request retargeted to master is judged again.
+    assert workflow[True] == {"pull_request": {"types": ["opened", "synchronize", "reopened", "labeled",
+                                                         "unlabeled", "edited"]}}
     assert list(workflow["jobs"]) == ["python-freeze"]
     job = workflow["jobs"]["python-freeze"]
     assert job["name"] == "Python freeze" and "if" not in job and not job.get("continue-on-error")
@@ -187,3 +189,21 @@ def test_the_workflow_reruns_on_label_changes_and_passes_the_labels():
     assert 'git show HEAD^1:rust/ci/python_freeze.py > "$script"' in guard["run"]
     assert 'python3 "$script" --head-ref' in guard["run"]
     assert '--labels "$PR_LABELS"' in guard["run"]
+
+
+@pytest.mark.parametrize("path", [
+    "Pseudolife_memory/core.py", "PSEUDOLIFE_MEMORY/cli.py", "pseudolife_Memory/web/api.py",
+    "pseudolife_memory/web/Static/index.html", "Pseudolife_memory/web/static/index.html",
+    "p\u017feudolife_memory/core.py",   # long s: NFKC-folds to a plain s
+])
+def test_a_case_or_compatibility_variant_of_the_package_is_refused(path):
+    # Reviewer of bf3de877 (N1): on a case-insensitive checkout (Windows, a
+    # default macOS volume) a variant writes into the real package directory.
+    # The Console build stays exempt only under its exact spelling.
+    assert python_freeze.frozen_paths([path]) == [path]
+
+
+@pytest.mark.parametrize("path", ["pseudolife_memory_tools/x.py", "docs/Pseudolife_memory.md",
+                                  "pseudolife_memory/web/static/assets/App.JS"])
+def test_case_variants_outside_the_package_still_pass(path):
+    assert python_freeze.frozen_paths([path]) == []

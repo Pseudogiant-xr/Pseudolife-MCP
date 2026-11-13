@@ -8,10 +8,19 @@ commit against the base parent, ``git diff --no-renames``, so a rename out
 of the package counts as a deletion of its old path.
 
 One prefix is exempt: ``pseudolife_memory/web/static/``, the tracked Console
-build output the Rust daemon serves (ci.yml's ``frontend`` job rebuilds it).
-An integration batch (an exact ``integrate/`` head branch from this
-repository) is exempt too: everything in a batch already passed this check
-as an ordinary pull request. A diff that cannot be read fails closed.
+build output the Rust daemon serves (ci.yml's ``frontend`` job rebuilds it),
+under its exact spelling only. The package prefix itself is compared after
+NFKC normalisation and case folding, because on a case-insensitive checkout
+(Windows, a default macOS volume) ``Pseudolife_memory/x.py`` writes into the
+real package. A diff that cannot be read fails closed.
+
+This check is early feedback on the pull request; the gate is
+``ops/integrate.py build``, which applies master's copy of this module to
+what each member's merge changes on the batch branch, and ``open`` and
+``merge``, which judge the whole batch again with fresh labels. An
+integration batch (an exact ``integrate/`` head branch from this repository)
+is exempt from this check for that reason, not because its members passed
+it: a member's own run can be absent, queued or cancelled.
 
 A maintainer-ruled exception (the expose security fix, the last release's
 update bridge in ``update_cli.py``) passes through the exact label
@@ -28,6 +37,7 @@ import argparse
 import json
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 FROZEN = "pseudolife_memory/"
@@ -36,9 +46,15 @@ BATCH_PREFIX = "integrate/"
 EXCEPTION_LABEL = "freeze-exception"
 
 
+def _folded(path: str) -> str:
+    return unicodedata.normalize("NFKC", path).casefold()
+
+
 def frozen_paths(paths: list[str]) -> list[str]:
-    """The changed paths the freeze refuses, in order."""
-    return [path for path in paths if path.startswith(FROZEN) and not path.startswith(EXEMPT)]
+    """The changed paths the freeze refuses, in order: anything whose folded
+    form is under the package, unless it is under the exempt prefix exactly."""
+    return [path for path in paths
+            if _folded(path).startswith(FROZEN) and not path.startswith(EXEMPT)]
 
 
 def changed_paths(root: Path, base: str, head: str) -> list[str] | None:

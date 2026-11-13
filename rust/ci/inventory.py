@@ -97,23 +97,35 @@ LIVE_SECURITY_EXCEPTIONS = {
 LIVE_INVOCATIONS = (
     re.compile(r"\bevals[./]rust_port\b"),
     re.compile(r"\bevals[./]rust_baseline\b"),
-    re.compile(r"rust/daemon/harness/(?:run|graph_store|principals|dream_cursors)\.py\s+(?:live|mutants|oracle)\b"),
-    re.compile(r"rust/daemon/harness/(?:mcp_ci|mcp_binding_sweep|mcp_run)\.py\b"),
+    # rust/ optional: a step with `working-directory: rust` names the path
+    # relative to it.
+    re.compile(r"(?:rust/)?daemon/harness/(?:run|graph_store|principals|dream_cursors)\.py\s+(?:live|mutants|oracle)\b"),
+    re.compile(r"(?:rust/)?daemon/harness/(?:mcp_ci|mcp_binding_sweep|mcp_run)\.py\b"),
     re.compile(r"rust/ci/body_evidence\.py\s+run\b"),
     re.compile(r"rust/ci/body_oracle\.py\b"),
     re.compile(r"rust/ci/run_coverage\.py\s+--suite\b"),
     # The CLI harness without an exact --golden (--golden-dir is not one),
     # by path or as a module; a recording from the oracle; the in-process
     # Codex planning comparison.
-    re.compile(r"(?:rust/cli_harness(?:/__main__\.py)?|-m\s+rust\.cli_harness)(?=\s|$)(?!.*\s--golden(?=\s|$))"),
+    re.compile(r"(?:(?:rust/)?cli_harness(?:/__main__\.py)?|-m\s+rust\.cli_harness)(?=\s|$)(?!.*\s--golden(?=\s|$))"),
     re.compile(r"\s--record(?:-goldens)?(?=\s|$)"),
     re.compile(r"setup_codex_parity\.py\b"),
 )
 LIVE_EXEMPT_JOBS = ("source-mutants", "stress-plan", "stress-build", "stress", "stress-report")
 
 
+# A trailing shell or PowerShell comment, which must not supply a --golden.
+TRAILING_COMMENT = re.compile(r"\s#.*$")
+# Commands sharing one line; each is judged on its own.
+COMMAND_SEPARATORS = re.compile(r";|&&|\|\|")
+
+
 def live_invocations(workflow):
-    """Every (job, step, line) whose run text starts a live comparison."""
+    """Every (job, step, line) whose run text starts a live comparison.
+
+    Lexical: it catches a live comparison coming back by accident, not a
+    deliberate evasion (a mode or script from a variable, a module form, a
+    harness change behind an allowed line; the PR's "Known limits")."""
     found = []
     for name, job in workflow["jobs"].items():
         if name in LIVE_EXEMPT_JOBS:
@@ -123,8 +135,23 @@ def live_invocations(workflow):
                 text = line.strip()
                 if name in LIVE_SECURITY_JOBS and text in LIVE_SECURITY_EXCEPTIONS.get(step.get("name", ""), ()):
                     continue
-                if text and not text.startswith("#") and any(p.search(text) for p in LIVE_INVOCATIONS):
-                    found.append((name, step.get("name", ""), text))
+                if not text or text.startswith("#"):
+                    continue
+                command_text = TRAILING_COMMENT.sub("", text).replace("\\", "/")
+                for command in COMMAND_SEPARATORS.split(command_text):
+                    if any(p.search(command.strip()) for p in LIVE_INVOCATIONS):
+                        found.append((name, step.get("name", ""), text))
+                        break
+    return found
+
+
+def all_workflow_live_invocations(root=ROOT):
+    """live_invocations over every workflow file, not only rust.yml."""
+    import yaml
+    found = []
+    for path in sorted((root / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        found += [(path.name, *row) for row in live_invocations({"jobs": workflow.get("jobs", {})})]
     return found
 
 
@@ -245,6 +272,11 @@ def check(workflow):
     assert not RETIRED_SUITES & set(matrix["suite"]), 'a retired live-comparison suite is back in the matrix'
     live = live_invocations(workflow)
     assert not live, f'a job starts a live comparison against the Python oracle: {live[0]}'
+    # The name-exempt stress jobs hang off the stress plan, a manual dispatch.
+    assert jobs["stress-plan"]["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'", \
+        'the stress plan no longer runs only on a manual stress dispatch'
+    for name in ("stress-build", "stress", "stress-report"):
+        assert "stress-plan" in (jobs[name].get("needs") or []), f'{name} no longer depends on the stress plan'
 
     # Every accepted row replays its committed goldens in some shard, or is
     # named as unreplayed (parity_scope.UNREPLAYED_ROWS).
@@ -315,4 +347,6 @@ def check(workflow):
 if __name__ == "__main__":
     import yaml
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
+    everywhere = all_workflow_live_invocations()
+    assert not everywhere, f"a workflow starts a live comparison against the Python oracle: {everywhere[0]}"
     print("ported-row-and-mutant-ci-inventory: all named selections accounted for")

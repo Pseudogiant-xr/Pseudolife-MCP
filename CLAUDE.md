@@ -82,9 +82,10 @@ each exists because it was violated at least once.
    `docs/dev/ci-budget.md` before adding a job or shard.
 10. **Python is frozen since 14 November 2026:** a change under
     `pseudolife_memory/` (the Console build `pseudolife_memory/web/static/`
-    excepted) is made in Rust instead, because the `Python freeze` check
-    refuses it on an ordinary PR unless the PR carries the
-    `freeze-exception` label, which marks a maintainer-ruled exception.
+    excepted) is made in Rust instead, because batch admission
+    (`ops/integrate.py`) and the `Python freeze` check refuse it unless the
+    PR carries the `freeze-exception` label, which marks a maintainer-ruled
+    exception.
 11. **Committed goldens are Rust regression snapshots:** parity shards
     replay them and no PR, batch, push or nightly job compares against a
     live Python oracle outside one named security step, so a change that

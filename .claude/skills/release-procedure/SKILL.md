@@ -71,7 +71,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the daemon image tag in **both** compose files (`ops/docker-compose.yml`
    and the packaged copy `pseudolife_memory/compose/docker-compose.yml`,
-   which makes the cut PR carry the `freeze-exception` label for the `Python freeze` check),
+   so, as nothing under the package may change, the cut PR is an exception that carries the `freeze-exception` label, applied by the maintainer or the conductor on a maintainer ruling),
    **both** version fields in `server.json`,
    `plugin/release.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the release the hooks report for the

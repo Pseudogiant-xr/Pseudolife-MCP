@@ -430,7 +430,8 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
     git("config", "user.name", "Test")
     git("config", "user.email", "test@example.com")
     git("config", "commit.gpgsign", "false")
-    for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py"):
+    # python_freeze.py: `build` refuses a master without the guard.
+    for path in ("rust/ci/pr_precheck.py", "rust/ci/parity_scope.py", "rust/ci/python_freeze.py"):
         write(path, (ROOT / path).read_text(encoding="utf-8"))
     write("pseudolife_memory/doctor_cli.py", "old\n")
     write(remainder, "old\n")

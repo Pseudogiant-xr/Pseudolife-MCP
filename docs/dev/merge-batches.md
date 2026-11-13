@@ -67,15 +67,24 @@ Each change waits for hosted CI once, on its batch:
   build output. It decides on the diff's paths and the exact label
   `freeze-exception`, which marks a change the maintainer ruled an
   exception (the expose security fix, the last release's update bridge);
-  it reruns when a label is added or removed. Batches are exempt: their
-  members passed it. A version cut that still edits a file under
-  `pseudolife_memory/` (the 0.23.1 cut, #1490, bumped
-  `pseudolife_memory/compose/docker-compose.yml`) carries that label too,
-  and the `release-procedure` skill is the place that must say so.
-  So does a schema bump, until the schema has a Rust-owned source: the
-  Rust job's `gen_schema_sql.py --check` builds
-  `rust/daemon/src/storage/schema.sql` from
-  `pseudolife_memory/storage/schema.py`.
+  it reruns when a label is added or removed or the pull request is
+  retargeted. It is early feedback, not the gate: `build` applies master's
+  copy of the guard to what each member's merge changes on the batch
+  branch, and `open` and `merge` judge the whole batch again with the
+  members' labels read afresh. The batch pull request is exempt from the
+  check because `build` judged its members, not because they passed it: a
+  member's own run can be absent, queued or cancelled. A pull request that
+  edits `python-freeze.yml` runs its own edited workflow, which review
+  catches; admission does not depend on it.
+  Because nothing under `pseudolife_memory/` may change, two routine
+  changes are exceptions too while they still edit the package, and carry
+  the label, applied by the maintainer or by the conductor acting on a
+  maintainer ruling (the maintainer is confirming this): a version cut (the
+  0.23.1 cut, #1490, bumped `pseudolife_memory/compose/docker-compose.yml`;
+  the `release-procedure` skill says so) and a schema bump, until the
+  schema has a Rust-owned source (the Rust job's `gen_schema_sql.py
+  --check` builds `rust/daemon/src/storage/schema.sql` from
+  `pseudolife_memory/storage/schema.py`).
 - **A pull request that edits CI or dependency inputs**
   (`.github/workflows/`, `pyproject.toml`, a lock file, the Rust toolchain
   pin) is ordinary too, since 2026-10-29 (maintainer: only batches spend
@@ -155,12 +164,16 @@ push replaces that head; the failing reason names the red checks. One
 check name is never counted: `Frozen judge probes (report only) / <os>`
 from the `Rust shim` workflow (`REPORT_ONLY_CHECK` in `ops/integrate.py`).
 No workflow produces it since the Python freeze removed that job, so it
-matters only for a head whose run predates that. It also checks the
-Python freeze itself: a member whose own net change touches
-`pseudolife_memory/` outside `pseudolife_memory/web/static/` without the
-`freeze-exception` label is dropped with the guard's refusal, whatever its
-`Python freeze` check reported (absent, queued or cancelled, the batch
-being exempt from that check). Subject to the snapshot checkpoint below, pending,
+matters only for a head whose run predates that. The script also applies
+the Python freeze itself, with master's copy of `rust/ci/python_freeze.py`
+(it refuses to build when master has none): a member whose merge changes
+`pseudolife_memory/` outside `pseudolife_memory/web/static/` on the batch
+branch without the `freeze-exception` label is dropped with the guard's
+refusal, whatever its `Python freeze` check reported; judged on the merge,
+not on a merge-base diff, which a criss-cross history can leave empty.
+`open` and `merge` then refuse a batch holding any commit that is neither
+a member's merge nor the one generated commit, a generated commit that
+touches the package, or a member whose label has gone since `build`. Subject to the snapshot checkpoint below, pending,
 cancelled, green or no checks admit it: a run cancelled by hand or by a
 re-trigger gave no verdict. GitHub also reports a job that ran past its
 `timeout-minutes` as cancelled, so the script reads the annotations of

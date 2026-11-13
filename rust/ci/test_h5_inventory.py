@@ -542,6 +542,12 @@ LIVE_LINES = [
     "python rust/daemon/harness/schema_ci.py --record-goldens --out x",
     "python rust/cli_harness --row test_login --record -v --out x",
     "python shim/tests/setup_codex_parity.py --cargo",
+    # Shapes the fix-round reviewer of bf3de877 got past the first patterns.
+    "python rust/cli_harness --row mail --candidate $candidate  # --golden",
+    "python rust/cli_harness --row mail --candidate x; python rust/cli_harness --row hook --golden --candidate x",
+    "python rust\\daemon\\harness\\run.py live --rust-bin $candidate --only body-limits",
+    "python daemon/harness/run.py live --rust-bin $candidate --only body-limits",
+    "python cli_harness --row mail --candidate $candidate",
 ]
 
 
@@ -570,6 +576,29 @@ def test_golden_replays_and_self_tests_are_not_live_comparisons(line):
     workflow = workflow_copy()
     workflow['jobs']['parity-checks']['steps'].append({'name': 'Replay', 'run': line})
     assert live_invocations(workflow) == []
+
+
+def test_no_workflow_starts_a_live_comparison():
+    from inventory import all_workflow_live_invocations
+    assert all_workflow_live_invocations() == []
+
+
+def test_a_live_comparison_in_another_workflow_is_found(tmp_path):
+    from inventory import all_workflow_live_invocations
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "other.yml").write_text(
+        "jobs:\n  x:\n    steps:\n      - run: python rust/daemon/harness/run.py live --rust-bin b\n",
+        encoding="utf-8")
+    assert [row[0] for row in all_workflow_live_invocations(tmp_path)] == ["other.yml"]
+
+
+def test_inventory_rejects_a_stress_plan_that_runs_outside_a_stress_dispatch():
+    from inventory import check
+    workflow = workflow_copy()
+    workflow['jobs']['stress-plan']['if'] = "github.event_name == 'workflow_dispatch'"
+    with pytest.raises(AssertionError, match='stress plan'):
+        check(workflow)
 
 
 def test_the_weekly_source_mutants_may_compare_live():

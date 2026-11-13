@@ -6,13 +6,18 @@
 # someone with triage access can apply, for a change the maintainer ruled an
 # exception. Its own workflow, so that labelling a pull request (labeled,
 # unlabeled) reruns only this check, not every ci.yml lane; removing the
-# label brings the refusal back. An integration batch is exempt in the
-# script: its members already passed here.
+# label brings the refusal back, and a retargeted pull request (edited) is
+# judged again. This check is early feedback: the gate is
+# `ops/integrate.py build`, which applies master's guard to what each
+# member's merge changes on the batch, and `open` and `merge`, which judge
+# the whole batch again with fresh labels. That is why an integration batch
+# is exempt here, not because its members passed this check (a member's own
+# run can be absent, queued or cancelled).
 name: Python freeze
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
 permissions:
   contents: read
@@ -40,9 +45,12 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        # The base commit's copy of the script decides, so a pull request
-        # that edits the guard cannot pass its own check; the one that adds
-        # it (no copy on its base yet) runs its own.
+        # The base commit's copy of the script decides, so an edit to
+        # python_freeze.py cannot change its own verdict (the pull request
+        # that adds it, with no copy on its base, runs its own). This
+        # workflow file itself comes from the pull request, so an edit to it
+        # can pass this check: review catches that, and batch admission,
+        # which uses master's guard, does not depend on it.
         run: |
           script="$RUNNER_TEMP/python_freeze.py"
           if ! git show HEAD^1:rust/ci/python_freeze.py > "$script" 2>/dev/null; then

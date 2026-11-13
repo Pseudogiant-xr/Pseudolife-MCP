@@ -80,9 +80,9 @@ class FakeGh:
             self.labeled_at[number] = labeled_at
 
     VIEW_FIELDS = {"headRefOid", "statusCheckRollup", "headRefName", "baseRefName",
-                   "state", "isCrossRepository", "url", "mergeCommit"}
+                   "state", "isCrossRepository", "url", "mergeCommit", "labels"}
     VIEW_DEFAULTS = {"baseRefName": "master", "state": "OPEN", "isCrossRepository": False,
-                     "mergeCommit": None,
+                     "mergeCommit": None, "labels": [],
                      "statusCheckRollup": [
                          {"name": name, "status": "COMPLETED", "conclusion": "SUCCESS"}
                          for name in ("scope", "test", "Parity / ubuntu-latest",
@@ -316,6 +316,10 @@ def world(tmp_path, monkeypatch):
         return [b for b in out.splitlines() if b.startswith("integrate/")]
 
     w.pr, w.advance_master, w.remote_branches = pr, advance_master, remote_branches
+    # Master's Python freeze guard: build loads it from the base and refuses
+    # without one (ops/integrate.py _freeze_module).
+    advance_master({"rust/ci/python_freeze.py":
+                    (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8")})
     return w
 
 
@@ -3011,8 +3015,8 @@ def test_no_current_job_produces_the_report_only_name():
 # net change: a frozen path passes only with the freeze-exception label.
 
 def _freeze_on_master(world):
-    world.advance_master({"rust/ci/python_freeze.py":
-                          (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8")})
+    """Master carries the guard (the world fixture seeds it)."""
+    assert (world.work / "rust" / "ci" / "python_freeze.py").is_file()
 
 
 @pytest.mark.parametrize("labels, path, merged", [
@@ -3040,26 +3044,129 @@ def test_an_earlier_member_cannot_switch_the_freeze_off_for_a_later_one(world, c
     # guard, never one a member merged into the batch checkout first.
     _freeze_on_master(world)
     opened = (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8").replace(
-        "    return [path for path in paths if path.startswith(FROZEN) and not path.startswith(EXEMPT)]",
-        "    return []")
-    assert "return []" in opened
+        "    return [path for path in paths\n"
+        "            if _folded(path).startswith(FROZEN) and not path.startswith(EXEMPT)]",
+        "    return []  # switched off")
+    assert "return []  # switched off" in opened
+    # In production `build` runs the batch checkout's own ops/integrate.py,
+    # so a loader that resolved the guard beside __file__ read the merged
+    # member's copy; pretend to be that file (reviewer of bf3de877).
+    import os
+    monkeypatch_file = world.work / "ops" / "integrate.py"
+    integrate_file = integrate.__file__
+    integrate.__file__ = os.fspath(monkeypatch_file)
     sha10 = world.pr(10, {"rust/ci/python_freeze.py": opened})
     sha11 = world.pr(11, {"pseudolife_memory/update_cli.py": "changed\n"})
     world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z")
     world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z")
 
-    assert _build() == 0, capsys.readouterr()
+    try:
+        assert _build() == 0, capsys.readouterr()
+    finally:
+        integrate.__file__ = integrate_file
 
     out = capsys.readouterr().out
     assert "merged #10 " in out and "merged #11 " not in out, out
     assert "Python is frozen since 14 November 2026" in out
 
 
-def test_a_master_without_the_guard_skips_the_admission_check(world, capsys):
-    # Before the guard reaches master there is nothing to enforce yet.
+def test_a_master_without_the_guard_refuses_to_build(world, capsys):
+    # Reviewer of bf3de877: the guard and this check land together, so a
+    # master without the guard means it was deleted or renamed; build then
+    # refuses instead of admitting Python changes silently.
+    seed = world.gh.seed
+    _git(seed, "fetch", "-q", "origin")
+    _git(seed, "switch", "-q", "-C", "master", "origin/master")
+    _git(seed, "rm", "-q", "rust/ci/python_freeze.py")
+    _git(seed, "commit", "-q", "-m", "drop the guard")
+    _git(seed, "push", "-q", "origin", "master")
+    _git(world.work, "fetch", "-q", "origin")
+    _git(world.work, "reset", "-q", "--hard", "origin/master")
     sha = world.pr(10, {"pseudolife_memory/update_cli.py": "changed\n"})
     world.gh.add(10, sha)
 
+    assert _build() == 2
+
+    captured = capsys.readouterr()
+    assert "rust/ci/python_freeze.py" in captured.err and "merged #10 " not in captured.out
+
+
+def test_a_criss_cross_member_cannot_revert_a_frozen_file_unseen(world, capsys):
+    # Reviewer of bf3de877: with two merge bases, the member's diff from the
+    # one `git merge-base` prints is empty, yet merging it sets the frozen
+    # file back. build judges what the merge changes on the batch branch.
+    seed = world.gh.seed
+    world.advance_master({"pseudolife_memory/core.py": "v1\n"})
+    _git(seed, "switch", "-q", "-c", "xp", "master")
+    (seed / "pseudolife_memory" / "core.py").write_text("v2\n", encoding="utf-8", newline="\n")
+    _git(seed, "commit", "-qam", "Xp: v2")
+    _git(seed, "switch", "-q", "master")
+    (seed / "README.md").write_text("readme\nyq\n", encoding="utf-8", newline="\n")
+    _git(seed, "commit", "-qam", "Yq")
+    yq = _git(seed, "rev-parse", "HEAD")
+    _git(seed, "merge", "-q", "--no-ff", "-m", "master takes Xp", "xp")
+    _git(seed, "push", "-q", "origin", "master")
+    _git(world.work, "fetch", "-q", "origin")
+    _git(world.work, "reset", "-q", "--hard", "origin/master")
+    _git(seed, "switch", "-q", "-c", "member", yq)
+    _git(seed, "merge", "-q", "--no-ff", "--no-commit", "xp")
+    _git(seed, "checkout", yq, "--", "pseudolife_memory/core.py")
+    _git(seed, "commit", "-qm", "member keeps v1")
+    _git(seed, "push", "-q", "-f", "origin", "HEAD:refs/pull/10/head")
+    sha = _git(seed, "rev-parse", "HEAD")
+    world.gh.add(10, sha)
+    _git(world.work, "fetch", "-q", "origin", "refs/pull/10/head")
+    base = _git(world.work, "rev-parse", "origin/master")
+    chosen = _git(world.work, "merge-base", base, sha)
+    assert _git(world.work, "diff", "--name-only", chosen, sha) == ""
+
     assert _build() == 0, capsys.readouterr()
 
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out, out
+    assert "pseudolife_memory/core.py" in out and "Python is frozen" in out
+    assert (world.work / "pseudolife_memory" / "core.py").read_text(encoding="utf-8") == "v2\n"
+
+
+def test_open_refuses_a_batch_commit_that_is_neither_a_member_merge_nor_generated(world, capsys, monkeypatch):
+    # Reviewer of bf3de877 (S3): the census script is member code; a commit
+    # it makes on its own becomes part of the built head and was never judged.
+    sha = world.pr(10, {"b.txt": "b\n"})
+    world.gh.add(10, sha)
+    original = integrate._merge_members
+
+    def rogue(plan, members):
+        result = original(plan, members)
+        (world.work / "pseudolife_memory").mkdir(exist_ok=True)
+        (world.work / "pseudolife_memory" / "core.py").write_text("rogue\n", encoding="utf-8")
+        _git(world.work, "add", "-A")
+        _git(world.work, "commit", "-qm", "rogue")
+        return result
+
+    # A stray commit before build records its head, as a member's census
+    # script committing on its own would leave one.
+    monkeypatch.setattr(integrate, "_merge_members", rogue)
+    assert _build() == 0, capsys.readouterr()
+    capsys.readouterr()
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "neither a member merge nor the one generated commit" in err
+    assert not world.gh.bodies("create")
+
+
+def test_open_and_merge_refuse_a_member_whose_exception_label_was_removed(world, capsys):
+    # Reviewer of bf3de877 (S5): the label is read at build; a revoked
+    # exception during the batch's CI must not land.
+    sha = world.pr(10, {"pseudolife_memory/update_cli.py": "bridge\n"})
+    world.gh.add(10, sha, labels=[{"name": "freeze-exception"}])
+    assert _build() == 0, capsys.readouterr()
     assert "merged #10 " in capsys.readouterr().out
+    world.gh.pr(10)["labels"] = []
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "#10" in err and "freeze-exception" in err
+    assert not world.gh.bodies("create")
