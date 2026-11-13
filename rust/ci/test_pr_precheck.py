@@ -91,9 +91,13 @@ def test_shim_precheck_judges_match_batch_ownership(path):
 
 def test_report_artifact_upload_is_not_a_pr_gate():
     import yaml
-    job = yaml.safe_load((precheck.ROOT / ".github/workflows/rust.yml").read_text())["jobs"]["rust"]
-    upload = next(step for step in job["steps"] if step.get("name") == "Retain ordinary PR parity precheck case IDs")
+    jobs = yaml.safe_load((precheck.ROOT / ".github/workflows/rust.yml").read_text())["jobs"]
+    upload = next(step for step in jobs["rust"]["steps"] if step.get("name") == "Retain ordinary PR parity precheck case IDs")
     assert upload["continue-on-error"] is True
+    probes = next(step for step in jobs["frozen-probes"]["steps"] if step.get("name") == "Retain frozen probe case IDs")
+    assert probes["continue-on-error"] is True
+    # upload-artifact@v4 refuses a second artifact of the same name in a run.
+    assert probes["with"]["name"] != upload["with"]["name"]
 
 
 def goldens(root, *, windows=None):
@@ -170,14 +174,29 @@ def test_prechecks_are_ordinary_pr_only_and_keep_python_dependencies_isolated():
     assert runtime["if"] == "steps.precheck.outputs.enabled == 'true'"
     assert replay["if"] == "steps.precheck.outputs.golden == 'true'"
     assert not replay.get("continue-on-error", False)
-    probes = steps["Probe PR frozen judges for item-11 diagnostics"]
-    assert probes["continue-on-error"] is True
-    assert "!cancelled()" in probes["if"] and "precheck_runtime.outcome == 'success'" in probes["if"]
-    assert "--only goldens" in replay["run"] and "--only judges" in probes["run"]
-    assert "--publish" in steps["Summarize PR goldens and report-only frozen probes"]["run"]
+    assert "--only goldens" in replay["run"]
+    assert "--publish --only goldens" in steps["Summarize PR golden replay"]["run"]
     ordered = [step.get("name") for step in jobs["rust"]["steps"]]
     assert ordered.index(replay["name"]) < ordered.index("Nextest")
+    # The report-only frozen probes run in a job of their own (issue #1519):
+    # a lost probe runner took Rust / ubuntu-latest with it twice. No Rust
+    # step runs them, and no job, the Parity gates included, needs theirs.
+    assert not any("--only judges" in step.get("run", "") for step in jobs["rust"]["steps"])
     assert not any("precheck" in name for name in jobs)
+    probe_job = jobs["frozen-probes"]
+    assert probe_job["continue-on-error"] is True
+    assert all("frozen-probes" not in (job.get("needs") or []) for job in jobs.values())
+    assert probe_job["if"] == ("${{ !cancelled() && github.event_name == 'pull_request' && "
+                               "needs.scope.outputs.full == 'false' && needs.scope.outputs.rust != 'false' }}")
+    probe_steps = {step.get("name"): step for step in probe_job["steps"]}
+    probes = probe_steps["Probe PR frozen judges for item-11 diagnostics"]
+    assert probes["continue-on-error"] is True and probes["timeout-minutes"] == 20
+    assert "!cancelled()" in probes["if"] and "precheck_runtime.outcome == 'success'" in probes["if"]
+    assert "precheck_candidate.outcome == 'success'" in probes["if"] and "--only judges" in probes["run"]
+    assert probe_steps["Select ordinary PR parity prechecks"]["run"] == steps["Select ordinary PR parity prechecks"]["run"]
+    assert "--publish --only judges" in probe_steps["Summarize report-only frozen probes"]["run"]
+    assert "venv --system-site-packages" in probe_steps["Install the selected PR precheck dependencies"]["run"]
+    assert "GITHUB_ENV" not in probe_steps["Install the selected PR precheck dependencies"]["run"]
 
 
 def test_precheck_data_tests_join_the_native_windows_lite_selection():

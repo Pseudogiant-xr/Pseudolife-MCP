@@ -37,8 +37,11 @@ def test_the_budget_covers_every_workflow_that_runs_on_pull_requests():
 
 def test_a_full_rust_run_is_what_a_batch_starts():
     workflow = load("rust.yml")
-    assert pull_request_reachable(workflow) == ["scope", "rust", "fixtures", "candidate", "candidate-harness",
-                                                "parity-pool", "parity-checks", "daemon-image", "parity"]
+    # frozen-probes runs only on ordinary PRs, never in a batch, but the
+    # budget cannot read scope's `full`, so it is counted with the rest.
+    assert pull_request_reachable(workflow) == ["scope", "rust", "frozen-probes", "fixtures", "candidate",
+                                                "candidate-harness", "parity-pool", "parity-checks",
+                                                "daemon-image", "parity"]
     names = reachable_names(workflow)
     assert "Parity checks / ubuntu-latest / h5-light" in names
     assert "Parity checks / windows-latest / h5-light" not in names
@@ -112,7 +115,7 @@ def test_an_estimate_counts_until_it_is_measured():
                                                    "Extra / ubuntu-latest", "Extra / windows-latest"])
 
 
-@pytest.mark.parametrize("limit, words", [("jobs", "job count 42 is over its limit"),
+@pytest.mark.parametrize("limit, words", [("jobs", "job count 44 is over its limit"),
                                           ("runner_minutes", "runner-minutes per full run, over the limit"),
                                           ("longest_job_minutes", "limit for one job"),
                                           ("critical_path_minutes", "slowest chain of needs")])

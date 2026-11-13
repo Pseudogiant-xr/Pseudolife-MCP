@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "frozen-probes",
+  "before": null,
+  "fingerprint": "ebdca76bc4f3a787",
+  "reason": "New job, priced by the two estimates entered with it (Frozen judge probes (report only) / ubuntu-latest 19, / windows-latest 18); it runs only on ordinary PRs."
+}

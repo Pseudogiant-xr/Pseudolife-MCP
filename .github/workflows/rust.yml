@@ -506,20 +506,7 @@ jobs:
           $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only goldens --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-goldens-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/goldens')
           exit $LASTEXITCODE
-      - name: Probe PR frozen judges for item-11 diagnostics
-        if: ${{ !cancelled() && steps.precheck.outputs.judges == 'true' && steps.precheck_runtime.outcome == 'success' && steps.precheck_candidate.outcome == 'success' }}
-        continue-on-error: true
-        working-directory: .
-        timeout-minutes: 20
-        shell: pwsh
-        env:
-          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
-          PRECHECK_PYTHON: ${{ steps.precheck_runtime.outputs.python }}
-        run: |
-          $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
-          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only judges --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-judges-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/judges')
-          exit $LASTEXITCODE
-      - name: Summarize PR goldens and report-only frozen probes
+      - name: Summarize PR golden replay
         if: always() && steps.precheck.outputs.enabled == 'true'
         continue-on-error: ${{ steps.precheck.outputs.golden != 'true' }}
         working-directory: .
@@ -527,7 +514,7 @@ jobs:
         env:
           PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
         run: |
-          python rust/ci/pr_precheck_run.py --publish --plan-json $env:PRECHECK_PLAN --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public') --job-summary $env:GITHUB_STEP_SUMMARY
+          python rust/ci/pr_precheck_run.py --publish --only goldens --plan-json $env:PRECHECK_PLAN --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public') --job-summary $env:GITHUB_STEP_SUMMARY
           exit $LASTEXITCODE
       - name: Retain ordinary PR parity precheck case IDs
         if: always() && steps.precheck.outputs.enabled == 'true'
@@ -576,6 +563,162 @@ jobs:
           Write-Host "$(Get-Date -Format o) mutants dev build: start"
           cargo +1.94.0 build --manifest-path rust/Cargo.toml --locked -p pseudolife-daemon --features mutants -j 3
           exit $LASTEXITCODE
+
+  frozen-probes:
+    # The report-only frozen judge probes of an ordinary PR (item-11
+    # diagnostics), split from the Rust job on 2026-11-14 (issue #1519):
+    # twice on 2026-11-13 the hosted runner was lost about 52 minutes into
+    # the probe, past its 20-minute step limit and continue-on-error, and
+    # took Rust / ubuntu-latest with it (run 43364043883 job 131684824657,
+    # run 43392781569 job 131777314608; "The hosted runner lost
+    # communication with the server", no log kept). Here it runs on a
+    # runner of its own: no job needs it and continue-on-error keeps it out
+    # of the workflow's result, so neither the Rust jobs nor the Parity
+    # gates can fail with it. Its own check still turns red if its runner
+    # is lost. It builds the debug candidate the step probed rather than
+    # waiting for the Rust job's: that wait would put the whole Rust job on
+    # this job's critical path. It runs where the Rust job's precheck
+    # selection can run, and selects again from the same diff.
+    needs: scope
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && needs.scope.outputs.rust != 'false' }}
+    name: Frozen judge probes (report only) / ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The probe step took 10.0-15.8 min on hosted Linux (21 passes) and
+    # 6.7-9.6 min on hosted Windows (22 passes) in the ordinary-PR runs of
+    # 2026-11-11 to 2026-11-13, inside its own 20; its setup (checkout, the
+    # [dev,lite] runtime with CPU torch, the oracle binding) took about
+    # 1.5 min on Linux and 3 min on Windows inside the Rust job, and the
+    # candidate built in 20-40 s and 53-94 s there after the job's other
+    # debug builds. Here that build may start cold: rust-cache drops target
+    # files older than a week on a partial key match. 40 minutes covers
+    # setup, a cold build and the step's own 20.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Bind the selected Python interpreter for Rust fixtures
+        shell: pwsh
+        run: |
+          $selectedPython = python -c 'import sys; print(sys.executable)'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      # The packages the Rust job's earlier steps put in this interpreter,
+      # which the precheck runtime below sees through its system site.
+      - name: Install the probe's base Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install "mcp==2.2.0" pytest pyyaml "psycopg[binary]" psutil
+          exit $LASTEXITCODE
+      - name: Select ordinary PR parity prechecks
+        id: precheck
+        shell: pwsh
+        run: |
+          python rust/ci/pr_precheck.py --github-output $env:GITHUB_OUTPUT
+          exit $LASTEXITCODE
+      - name: Bind the event-selected Python oracle
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          PSEUDOLIFE_PORT_DISPATCH_BASE: ${{ needs.scope.outputs.oracle_base }}
+        run: |
+          python -m evals.rust_port.oracle_selection --out (Join-Path $env:RUNNER_TEMP 'oracle-selection.json') --github-env $env:GITHUB_ENV
+          exit $LASTEXITCODE
+      # Setup failures leave the probe "not run" in the summary, as they did
+      # in the Rust job, instead of turning this job red.
+      - name: Install the selected PR precheck dependencies
+        id: precheck_runtime
+        if: steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'pr-precheck-runtime'
+          python -m venv --system-site-packages $runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $runtime $(if ($IsWindows) { 'Scripts/python.exe' } else { 'bin/python' })
+          & $python -m pip install --no-compile "setuptools>=68" wheel httpx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install --no-compile --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install --no-compile -e ".[dev,lite]" "mcp==2.2.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "python=$python" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.precheck.outputs.judges == 'true'
+        with:
+          toolchain: 1.94.0
+      # The same toolchain set as the Rust job, so the cache key below is
+      # the Rust job's own.
+      - name: Keep only the pinned Rust toolchain
+        if: runner.environment != 'self-hosted' && (steps.precheck.outputs.judges == 'true')
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # Read-only reuse of the Rust job's cache, as the fixtures job does:
+      # shared-key "rust" is the key rust-cache derives for the job id rust.
+      - uses: Swatinem/rust-cache@v2
+        if: steps.precheck.outputs.judges == 'true'
+        with:
+          workspaces: rust
+          shared-key: rust
+          save-if: false
+      - name: Build the selected PR precheck candidate
+        id: precheck_candidate
+        if: steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        working-directory: rust
+        run: cargo build --locked -p pseudolife-stdio -j 4
+      - name: Probe PR frozen judges for item-11 diagnostics
+        if: ${{ !cancelled() && steps.precheck.outputs.judges == 'true' && steps.precheck_runtime.outcome == 'success' && steps.precheck_candidate.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
+          PRECHECK_PYTHON: ${{ steps.precheck_runtime.outputs.python }}
+        run: |
+          $binary = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
+          & $env:PRECHECK_PYTHON rust/ci/pr_precheck_run.py --only judges --plan-json $env:PRECHECK_PLAN --candidate (Join-Path 'rust/target/debug' $binary) --private (Join-Path $env:RUNNER_TEMP 'pr-precheck-judges-private') --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public/judges')
+          exit $LASTEXITCODE
+      - name: Summarize report-only frozen probes
+        if: always() && steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          PRECHECK_PLAN: ${{ steps.precheck.outputs.precheck }}
+        run: |
+          python rust/ci/pr_precheck_run.py --publish --only judges --plan-json $env:PRECHECK_PLAN --public (Join-Path $env:RUNNER_TEMP 'pr-precheck-public') --job-summary $env:GITHUB_STEP_SUMMARY
+          exit $LASTEXITCODE
+      - name: Retain frozen probe case IDs
+        if: always() && steps.precheck.outputs.judges == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-parity-precheck-judges-${{ runner.os }}
+          path: ${{ runner.temp }}/pr-precheck-public/**/*.json
+          if-no-files-found: warn
 
   fixtures:
     # The two debug daemon builds parity shards run, built beside the
