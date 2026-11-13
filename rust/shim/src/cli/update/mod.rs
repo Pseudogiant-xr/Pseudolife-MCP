@@ -256,6 +256,14 @@ impl Update {
         )
     }
     pub fn daemon_present(&self) -> Result<bool> {
+        // `update_cli`: `if not which(self.docker) and self.docker == "docker"`
+        // is a client install; `which` finds only an absolute PATH entry's
+        // docker, never one in the current directory.
+        if self.docker == "docker"
+            && matches!(crate::cli::program_lookup::find_program("docker"), Ok(None))
+        {
+            return Ok(false);
+        }
         let (code, out) = self.docker_call(&["inspect", "-f", "{{.Id}}", DAEMON_CONTAINER]);
         if code == 0 {
             return Ok(true);

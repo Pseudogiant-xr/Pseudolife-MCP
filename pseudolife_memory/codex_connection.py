@@ -178,8 +178,11 @@ def resolve_codex() -> str:
     found = find_program("codex")
     if found:
         return found
-    if os.name == "nt":
-        root = Path(os.environ.get("LOCALAPPDATA", "")) / "OpenAI/Codex/bin"
+    local = os.environ.get("LOCALAPPDATA", "").strip().strip('"')
+    # Only an absolute LOCALAPPDATA: an unset or relative one would search
+    # the current directory.
+    if os.name == "nt" and local and Path(local).is_absolute():
+        root = Path(local) / "OpenAI/Codex/bin"
         candidates = list(root.glob("*/codex.exe"))
         if candidates:
             return str(max(candidates, key=lambda p: p.stat().st_mtime))

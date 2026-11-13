@@ -22,7 +22,7 @@ pub mod maintainer;
 mod migrate_flat;
 mod move_cli;
 mod pairing;
-mod program_lookup;
+pub(crate) mod program_lookup;
 mod pyjson;
 mod restore_cli;
 mod test_login;

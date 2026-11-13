@@ -133,6 +133,22 @@ def tree(root_rel: str = "bank", old_backups: bool = True, bdir_rel: str | None 
     return setup
 
 
+def with_decoy_pg_dump(setup):
+    """``setup``, plus a decoy ``pg_dump`` (exit 99 if run) in the arm's
+    working directory and in its ``bin``: a lookup that searches the current
+    directory or a relative ``PATH`` entry would run it."""
+    name, body = (("pg_dump.cmd", b"@exit /b 99\r\n") if WINDOWS
+                  else ("pg_dump", b"#!/bin/sh\nexit 99\n"))
+
+    def wrapped(arm):
+        setup(arm)
+        for directory in (arm.cwd, arm.cwd / "bin"):
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / name).write_bytes(body)
+            (directory / name).chmod(0o755)
+    return wrapped
+
+
 def working_directory(setup, relative):
     def prepare(arm):
         setup(arm)
@@ -454,10 +470,13 @@ def cases() -> list[Case]:
         Case("missing-absolute", ["backup", "--data-dir", f"{{HOME}}{sep}absent-µ"]),
         Case("missing-relative", ["backup", "--data-dir", "absent-µ"]),
         Case("file-mode", ["backup", *data], setup=tree(), rules=RULES),
+        # Without --data-dir the oracle asks whether Docker holds the bank:
+        # PATH stays inside the home, so no arm reaches this host's docker.
         Case("file-mode-env-data-dir", ["backup"],
-             env={"PSEUDOLIFE_MCP_DATA_DIR": f"{{HOME}}{sep}bank"},
-             setup=tree(), rules=RULES),
-        Case("file-mode-cwd-data", ["backup"], setup=tree("cwd/data"), rules=RULES),
+             env={"PSEUDOLIFE_MCP_DATA_DIR": f"{{HOME}}{sep}bank", **no_pg_dump},
+             setup=tree(), rules=RULES, programs=("docker",)),
+        Case("file-mode-cwd-data", ["backup"], env=no_pg_dump, setup=tree("cwd/data"),
+             rules=RULES, programs=("docker",)),
         Case("file-mode-data-dir-dot", ["backup", "--data-dir", "."],
              setup=working_directory(tree(), "bank"), rules=RULES),
         Case("file-mode-out-dot", ["backup", *data, "--out", "."],
@@ -494,6 +513,13 @@ def cases() -> list[Case]:
                   "PATH": pg0_bin + os.pathsep + f"{{HOME}}{sep}no-bin"},
              setup=tree(), after=check_bank, platforms=dsn_platforms, rules=RULES, timeout=120,
              real_programs=("pg_dump",)),
+        # pg_dump is found only in an absolute PATH directory: a decoy in
+        # the working directory, under ".", "bin" or an empty entry, is not
+        # run by either arm (it would exit 99).
+        Case("dsn-pg-dump-relative-path-skipped", ["backup", *data],
+             env={"PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://unused",
+                  "PATH": os.pathsep.join(["", ".", "bin", f"{{HOME}}{sep}no-bin"])},
+             setup=with_decoy_pg_dump(tree()), rules=RULES, programs=("pg_dump", "docker")),
         Case("dsn-pg-dump-missing", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
              setup=tree(), platforms=dsn_platforms, rules=RULES, programs=("pg_dump",)),

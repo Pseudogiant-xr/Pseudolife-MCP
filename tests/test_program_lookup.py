@@ -189,3 +189,22 @@ def test_a_name_that_carries_its_extension_is_that_file(tmp_path, work):
     assert _same(find_program("tool.exe", _env(d, PATHEXT=".CMD")), planted)
     assert find_program("tool.exe", _env(".", "")) is None
     assert find_program("tool.cmd", _env(d)) is None
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the desktop Codex install location is Windows-only")
+@pytest.mark.parametrize("local", [None, "", "relative"])
+def test_codex_setup_never_finds_a_desktop_build_under_the_current_directory(tmp_path, work, monkeypatch,
+                                                                            local):
+    from pseudolife_memory import codex_connection
+
+    decoy = work / (local or "") / "OpenAI" / "Codex" / "bin" / "1.0" / "codex.exe"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_bytes(b"not run\n")
+    monkeypatch.delenv("CODEX_CLI_PATH", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    if local is None:
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    else:
+        monkeypatch.setenv("LOCALAPPDATA", local)
+    with pytest.raises(codex_connection.SetupError):
+        codex_connection.resolve_codex()

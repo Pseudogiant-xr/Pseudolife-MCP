@@ -49,11 +49,26 @@ fn docker() -> OsString {
         .unwrap_or_else(|| "docker".into())
 }
 
-pub(super) async fn exposed_url(port: u32) -> Option<String> {
+/// The `tailscale` `expose status` would run, from `find_tailscale()`'s
+/// answer: absent is no URL; a lookup this port cannot answer for defers.
+fn tailscale_binary(lookup: Result<Option<String>, ()>) -> Result<Option<PathBuf>, Defer> {
+    lookup
+        .map(|found| found.map(PathBuf::from))
+        .map_err(|()| Defer)
+}
+
+/// `invite_cli.exposed_url(port)`. `Err` defers, before anything is written.
+pub(super) async fn exposed_url(port: u32) -> Result<Option<String>, Defer> {
     // `expose_cli.find_tailscale()`, as `expose status` finds it: absolute
-    // PATH directories only, never the current directory. A PATH entry the
-    // lookup cannot classify (UNC, device) that holds it gives no URL here.
-    let binary = PathBuf::from(crate::cli::program_lookup::find_tailscale().ok()??);
+    // PATH directories only, never the current directory.
+    let Some(binary) = tailscale_binary(crate::cli::program_lookup::find_tailscale())? else {
+        return Ok(None);
+    };
+    Ok(exposed_url_with(&binary, port).await)
+}
+
+async fn exposed_url_with(binary: &std::path::Path, port: u32) -> Option<String> {
+    let binary = binary.to_path_buf();
     let query = |args: &[&str]| {
         let mut command = vec![binary.clone().into_os_string()];
         command.extend(args.iter().map(|arg| OsString::from(*arg)));
@@ -279,7 +294,7 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
     }
     let url = match args.url.clone().filter(|u| !u.is_empty()) {
         Some(url) => Some(url),
-        None if args.name.is_some() => exposed_url(port).await,
+        None if args.name.is_some() => exposed_url(port).await?,
         None => None,
     };
     let command =
@@ -719,6 +734,16 @@ mod tests {
         assert_eq!(
             owner,
             [("env", None), ("guest", Some(false)), ("mine", Some(true))]
+        );
+    }
+
+    #[test]
+    fn a_tailscale_lookup_this_port_cannot_answer_defers() {
+        assert!(tailscale_binary(Err(())).is_err());
+        assert_eq!(tailscale_binary(Ok(None)).ok(), Some(None));
+        assert_eq!(
+            tailscale_binary(Ok(Some("C:/t/tailscale.exe".into()))).ok(),
+            Some(Some(PathBuf::from("C:/t/tailscale.exe")))
         );
     }
 
