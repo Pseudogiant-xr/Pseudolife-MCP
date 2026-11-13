@@ -1272,6 +1272,35 @@ def test_a_state_that_cannot_be_written_mid_run_tells_the_owner(h):
     assert "Traceback" not in h.capsys.readouterr().err
 
 
+def test_a_stop_request_that_cannot_be_written_changes_nothing(h, capsys):
+    watch._write_pid(h.state, agent_id="a" * 32, owner=OWNER)          # this process, alive
+    h.state.with_suffix(".stop").mkdir()
+    code = watch.main(["--stop", "--state", str(h.state)], environ={})
+    assert code == watch.EXIT_SETUP
+    err = capsys.readouterr().err
+    assert str(h.state.with_suffix(".stop")) in err and "nothing changed" in err
+
+
+def test_a_detached_start_whose_log_cannot_be_written_is_a_setup_refusal(tmp_path, capsys):
+    state = tmp_path / "w.json"
+
+    def spawn(argv, log):
+        raise PermissionError(13, "Permission denied", str(log))
+    code = watch.main(["--detach", "--owner", OWNER, "--state", str(state)], environ={}, spawn=spawn)
+    assert code == watch.EXIT_SETUP
+    err = capsys.readouterr().err
+    assert "the watcher did not start" in err and str(state.with_suffix(".log")) in err
+
+
+@pytest.mark.parametrize("pid", ["2" * 40, "1e400", "-1e400", "[" * 2000 + "]" * 2000])
+def test_a_pid_record_out_of_range_names_no_watcher(h, capsys, pid):
+    """A pid past what the process probes take overflowed in them, and a
+    deeply nested record overflowed the JSON decoder's recursion."""
+    h.state.with_suffix(".pid").write_text('{"pid": %s}' % pid, encoding="utf-8")
+    assert watch.main(["--stop", "--state", str(h.state)], environ={}) == watch.EXIT_OK
+    assert "no watcher running" in capsys.readouterr().out
+
+
 # ── owner resolution ───────────────────────────────────────────────────────
 
 def _session(tmp_path, monkeypatch=None):

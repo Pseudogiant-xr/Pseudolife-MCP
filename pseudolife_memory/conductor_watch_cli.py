@@ -715,15 +715,20 @@ def _write_pid(state: Path, *, agent_id: str, owner: str, nonce: str | None = No
                                       "nonce": nonce})
 
 
+# Past this a pid overflows the process probes (a C int on POSIX; ctypes
+# truncates a Windows DWORD silently); no live watcher has one.
+_PID_LIMIT = 2 ** 31
+
+
 def _running(state: Path) -> dict | None:
     """The pid file's record when it names a live process that started when
     the record says, else None."""
     try:
         record = json.loads(state.with_suffix(".pid").read_text(encoding="utf-8"))
         pid = int(record["pid"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError, RecursionError):
         return None
-    if not _pid_alive(pid):
+    if pid >= _PID_LIMIT or not _pid_alive(pid):
         return None
     recorded, current = record.get("process_start"), _process_start(pid)
     if recorded is not None and current is not None and recorded != current:
@@ -736,7 +741,7 @@ def _remove_own_pid(state: Path) -> None:
     try:
         if json.loads(path.read_text(encoding="utf-8")).get("pid") == os.getpid():
             path.unlink()
-    except (OSError, ValueError, AttributeError):
+    except (OSError, ValueError, AttributeError, RecursionError):
         pass
 
 
@@ -890,8 +895,14 @@ def _stop(state: Path) -> int:
     if record is None:
         print(f"conductor-watch: no watcher running for {state}; nothing changed")
         return EXIT_OK
-    state.with_suffix(".stop").parent.mkdir(parents=True, exist_ok=True)
-    state.with_suffix(".stop").write_text("", encoding="utf-8")
+    stop = state.with_suffix(".stop")
+    try:
+        stop.parent.mkdir(parents=True, exist_ok=True)
+        stop.write_text("", encoding="utf-8")
+    except OSError as exc:
+        _say(f"cannot write {stop} ({exc.strerror or exc}); nothing changed. "
+             f"Make {stop.parent} writable, then run --stop again")
+        return EXIT_SETUP
     print(f"conductor-watch {record.get('agent_id')} asked to stop; it exits at its next poll")
     return EXIT_OK
 
@@ -925,12 +936,20 @@ def _detach(argv: list[str], args, owner: str, state: Path, spawn, clock, sleep)
         child += ["--state", str(state)]
     pid_path = state.with_suffix(".pid")
     log = state.with_suffix(".log")
-    pid = spawn(child_python.cli_argv("conductor-watch", *child), log)
+    try:
+        pid = spawn(child_python.cli_argv("conductor-watch", *child), log)
+    except OSError as exc:
+        why = exc.strerror or str(exc)
+        if exc.filename is not None and Path(exc.filename) == log:
+            _say(f"the watcher did not start: its log {log} cannot be written ({why}); {STATE_FIX}")
+        else:
+            _say(f"the watcher did not start: {exc}")
+        return EXIT_SETUP
     deadline = clock() + DETACH_WAIT
     while True:
         try:
             record = json.loads(pid_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             record = None
         if isinstance(record, dict) and record.get("nonce") == nonce:
             agent_id = record.get("agent_id")
