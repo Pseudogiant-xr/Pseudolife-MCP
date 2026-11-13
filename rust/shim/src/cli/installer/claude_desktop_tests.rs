@@ -248,7 +248,7 @@ fn command_and_token_files_must_be_absolute_and_nothing_is_touched() {
     );
     assert_eq!(outcome.code, EXIT_REFUSED);
     assert!(!dir.config().exists());
-    assert!(is_absolute("C:\\Users\\u\\bin\\pseudolife-mcp.exe"));
+    assert!(is_absolute("C:\\Users\\<user>\\bin\\pseudolife-mcp.exe"));
     assert!(is_absolute("/usr/bin/pseudolife-mcp"));
     assert!(!is_absolute("bin/pseudolife-mcp"));
 }

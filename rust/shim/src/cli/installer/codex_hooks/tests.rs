@@ -1235,3 +1235,16 @@ fn an_old_bundle_the_checkout_matches_is_never_pruned() {
             .is_empty()
     );
 }
+
+#[test]
+fn more_listed_handlers_than_the_plugin_ships_are_not_a_complete_set() {
+    let world = World::new();
+    let listed = world.plugin();
+    let mut hooks: Vec<Hook> = listed.iter().filter_map(Hook::parse).collect();
+    assert!(manual::complete_set(&hooks.iter().collect::<Vec<_>>(), "plugin"));
+    let mut extra = hooks.iter().find(|h| h.event == "subagentStop").unwrap().clone();
+    extra.key = "plugin-SubagentStop-9-0".into();
+    extra.command = "pwsh -File other.ps1".into();
+    hooks.push(extra);
+    assert!(!manual::complete_set(&hooks.iter().collect::<Vec<_>>(), "plugin"));
+}

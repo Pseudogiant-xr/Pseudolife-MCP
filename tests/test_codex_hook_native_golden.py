@@ -30,7 +30,7 @@ GOLDEN = ROOT / "rust/shim/src/cli/installer/codex_hooks/testdata" / f"definitio
 # Literal homes for the pure definitions: quoting of a space, an apostrophe
 # and a dollar sign in both shells' commands.
 LITERAL_HOMES = {
-    "windows": ["C:\\Users\\u\\.codex", "C:\\Users\\o'brien $x\\.codex"],
+    "windows": ["C:\\Users\\<user>\\.codex","C:\\Users\\<user>\\o'brien $x\\.codex"],
     "posix": ["/home/u/.codex", "/home/o'brien $x/.codex", "/home/u/plain.codex"],
 }[FAMILY]
 OLD = "0123456789abcdef0123"

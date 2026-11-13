@@ -1,234 +1,234 @@
 {
   "family": "windows",
   "definitions": {
-    "C:\\Users\\u\\.codex": {
+    "C:\\Users\\<user>\\.codex": {
       "launcher": {
         "SessionStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionStart",
           "timeout": 15
         },
         "MemoryPolicy": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh memory-policy",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.ps1' -Event MemoryPolicy",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh memory-policy",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.ps1' -Event MemoryPolicy",
           "timeout": 15
         },
         "UserPromptSubmit": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.sh' user-prompt-submit.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.ps1' -Event UserPromptSubmit",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.sh' user-prompt-submit.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.ps1' -Event UserPromptSubmit",
           "timeout": 5
         },
         "CoordinationStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.sh' coordination-start.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.sh' coordination-start.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationStart",
           "timeout": 5
         },
         "CoordinationPrompt": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.sh' coordination-prompt.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationPrompt",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.sh' coordination-prompt.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationPrompt",
           "timeout": 5
         },
         "SessionEnd": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.sh' session-end.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionEnd",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.sh' session-end.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionEnd",
           "timeout": 3
         }
       },
       "manual_marker": {
         "SessionStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
           "timeout": 15
         },
         "MemoryPolicy": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
           "timeout": 15
         },
         "UserPromptSubmit": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
           "timeout": 5
         },
         "CoordinationStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
           "timeout": 5
         },
         "CoordinationPrompt": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
           "timeout": 5
         },
         "SessionEnd": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
           "timeout": 3
         }
       },
       "manual_plain": {
         "SessionStart": {
           "type": "command",
-          "command": "bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
+          "command": "bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
           "timeout": 15
         },
         "MemoryPolicy": {
           "type": "command",
-          "command": "bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
+          "command": "bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
           "timeout": 15
         },
         "UserPromptSubmit": {
           "type": "command",
-          "command": "bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
+          "command": "bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
           "timeout": 5
         },
         "CoordinationStart": {
           "type": "command",
-          "command": "bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
+          "command": "bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
           "timeout": 5
         },
         "CoordinationPrompt": {
           "type": "command",
-          "command": "bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
+          "command": "bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
           "timeout": 5
         },
         "SessionEnd": {
           "type": "command",
-          "command": "bash 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\u\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
+          "command": "bash 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
           "timeout": 3
         }
       }
     },
-    "C:\\Users\\o'brien $x\\.codex": {
+    "C:\\Users\\<user>\\o'brien $x\\.codex": {
       "launcher": {
         "SessionStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionStart",
           "timeout": 15
         },
         "MemoryPolicy": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh memory-policy",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event MemoryPolicy",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' session-start.sh memory-policy",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event MemoryPolicy",
           "timeout": 15
         },
         "UserPromptSubmit": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' user-prompt-submit.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event UserPromptSubmit",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' user-prompt-submit.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event UserPromptSubmit",
           "timeout": 5
         },
         "CoordinationStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' coordination-start.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' coordination-start.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationStart",
           "timeout": 5
         },
         "CoordinationPrompt": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' coordination-prompt.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationPrompt",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' coordination-prompt.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event CoordinationPrompt",
           "timeout": 5
         },
         "SessionEnd": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' session-end.sh",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionEnd",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\run.sh' session-end.sh",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\run.ps1' -Event SessionEnd",
           "timeout": 3
         }
       },
       "manual_marker": {
         "SessionStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
           "timeout": 15
         },
         "MemoryPolicy": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
           "timeout": 15
         },
         "UserPromptSubmit": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
           "timeout": 5
         },
         "CoordinationStart": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
           "timeout": 5
         },
         "CoordinationPrompt": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
           "timeout": 5
         },
         "SessionEnd": {
           "type": "command",
-          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
+          "command": "env PSEUDOLIFE_CODEX_HOOK=1 bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
           "timeout": 3
         }
       },
       "manual_plain": {
         "SessionStart": {
           "type": "command",
-          "command": "bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
+          "command": "bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionStart",
           "timeout": 15
         },
         "MemoryPolicy": {
           "type": "command",
-          "command": "bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
+          "command": "bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-start.sh' memory-policy",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event MemoryPolicy",
           "timeout": 15
         },
         "UserPromptSubmit": {
           "type": "command",
-          "command": "bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
+          "command": "bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\user-prompt-submit.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event UserPromptSubmit",
           "timeout": 5
         },
         "CoordinationStart": {
           "type": "command",
-          "command": "bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
+          "command": "bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-start.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationStart",
           "timeout": 5
         },
         "CoordinationPrompt": {
           "type": "command",
-          "command": "bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
+          "command": "bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\coordination-prompt.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event CoordinationPrompt",
           "timeout": 5
         },
         "SessionEnd": {
           "type": "command",
-          "command": "bash 'C:\\Users\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
-          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
+          "command": "bash 'C:\\Users\\<user>\\o'\"'\"'brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\session-end.sh'",
+          "commandWindows": "pwsh -NoProfile -File 'C:\\Users\\<user>\\o''brien $x\\.codex\\pseudolife\\hooks\\0123456789abcdef0123\\lifecycle.ps1' -Event SessionEnd",
           "timeout": 3
         }
       }
