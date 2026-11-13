@@ -220,6 +220,10 @@ class Plan:
     markers: list[str] = field(default_factory=list)
     census_commit: str = ""   # the generated census commit, when there is one
     census_drift: list[str] = field(default_factory=list)   # manual shapes it withdrew
+    # Members whose head the batch already contained when `build` reached
+    # them (a stacked child merged first, or a head already on master): no
+    # merge commit of their own, so `open` and `merge` do not demand one.
+    contained: list[int] = field(default_factory=list)
     # `passed` or `not needed`, which `open` accepts, or `failed: ...` or
     # `not run: ...`; empty for a plan built before the check existed.
     rust_check: str = ""
@@ -1271,21 +1275,54 @@ def _regenerate_budget(plan: Plan, root: Path) -> set[str]:
 FREEZE_GUARD = "rust/ci/python_freeze.py"
 
 
-def _freeze_module(base_sha: str):
+def _guard_text(rev: str) -> str | None:
+    shown = git("show", f"{rev}:{FREEZE_GUARD}", check=False)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def _freeze_module(base_sha: str, members: list[Member] = (), head: str = ""):
     """Master's copy of the Python freeze guard, loaded in this process
     (master's code, never a member's: an earlier member merged into this
-    checkout must not decide a later one's admission). Master without it
-    refuses: the guard and this check landed together, so a missing guard
-    was deleted or renamed, and admitting Python changes silently is the one
+    checkout must not decide a later one's admission).
+
+    Master without it refuses, with one exception told apart by history,
+    not presence: when no commit on master's history ever touched the
+    guard, this is the batch that introduces it (the guard and this check
+    land together, so `open` and `merge` run this code against a master
+    that has never had it). Its members are then judged with the one copy
+    the members carry, which the batch head (``head``, when given) must
+    still hold. Anything else, a master that had the guard and lost it
+    above all, refuses: admitting Python changes silently is the one
     outcome this must not have."""
-    shown = git("show", f"{base_sha}:{FREEZE_GUARD}", check=False)
-    if shown.returncode != 0:
-        raise Refusal(f"{BASE} has no {FREEZE_GUARD}, so `build` cannot apply the Python "
-                      "freeze to its members; restore it on master. The pull request that "
-                      "deletes pseudolife_memory/ removes this check in the same change")
+    text = _guard_text(base_sha)
+    if text is None:
+        if _out("rev-list", "-1", base_sha, "--", FREEZE_GUARD):
+            raise Refusal(f"{BASE} has no {FREEZE_GUARD} although it had one, so the Python "
+                          "freeze cannot be applied to this batch; restore it on master. The "
+                          "pull request that deletes pseudolife_memory/ removes this check "
+                          "in the same change")
+        copies: dict[str, list[Member]] = {}
+        for m in members:
+            carried = _guard_text(m.sha)
+            if carried is not None:
+                copies.setdefault(carried, []).append(m)
+        if not copies:
+            raise Refusal(f"{BASE} has never had {FREEZE_GUARD} and no member adds it, so "
+                          "the Python freeze cannot be applied; build with master's own "
+                          "ops/integrate.py, or include the pull request that adds the guard")
+        if len(copies) > 1:
+            numbers = ", ".join(f"#{m.number}" for carriers in copies.values() for m in carriers)
+            raise Refusal(f"the members introducing {FREEZE_GUARD} ({numbers}) carry different "
+                          "copies of it; batch one copy at a time")
+        (text, carriers), = copies.items()
+        if head and _guard_text(head) != text:
+            raise Refusal(f"this batch introduces {FREEZE_GUARD} with #{carriers[0].number}'s "
+                          "copy, but its head holds another; rebuild it")
+        print(f"  {BASE} has never had {FREEZE_GUARD}: this batch introduces it, so its "
+              f"members are judged with the copy #{carriers[0].number} adds")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "python_freeze.py"
-        path.write_text(shown.stdout, encoding="utf-8")
+        path.write_text(text, encoding="utf-8")
         spec = importlib.util.spec_from_file_location("_batch_python_freeze", path)
         module = importlib.util.module_from_spec(spec)
         try:
@@ -1337,9 +1374,14 @@ def _batch_freeze_refusal(plan: Plan) -> str | None:
     be a member's merge or the one generated commit, the generated commit
     touches nothing frozen, and a member merge that changes frozen paths
     still carries the exception label (read again now: it may have been
-    removed since `build`)."""
-    freeze = _freeze_module(plan.base_sha)
-    members = {m.sha: m for m in plan.merged}
+    removed since `build`). A member whose head the batch already
+    contained has no merge of its own: its changes entered under the
+    containing member's merge, judged with that member's labels."""
+    if not _is_ancestor(plan.base_sha, plan.head):
+        return (f"{plan.branch}'s head {plan.head[:12]} does not descend from its base "
+                f"{plan.base_sha[:12]}; rebuild it")
+    freeze = _freeze_module(plan.base_sha, plan.merged, plan.head)
+    members = {m.sha: m for m in plan.merged if m.number not in plan.contained}
     seen: set[str] = set()
     generated = 0
     for commit in _out("rev-list", "--first-parent", "--reverse",
@@ -1367,14 +1409,19 @@ def _batch_freeze_refusal(plan: Plan) -> str | None:
             continue
         return (f"commit {commit[:12]} ({subject!r}) on {plan.branch} is neither a member merge "
                 "nor the one generated commit; nothing is fixed inside a batch, so rebuild it")
-    missing = [f"#{m.number}" for m in plan.merged if m.sha not in seen]
+    missing = [f"#{m.number}" for m in plan.merged if m.sha not in seen
+               and not (m.number in plan.contained and _is_ancestor(m.sha, plan.head))]
     if missing:
         return f"the batch lacks the merges of {', '.join(missing)}; rebuild it"
     return None
 
 
+def _is_ancestor(ancestor: str, descendant: str) -> bool:
+    return git("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
+
+
 def _merge_members(plan: Plan, members: list[Member]) -> None:
-    freeze = _freeze_module(plan.base_sha)
+    freeze = _freeze_module(plan.base_sha, members)
     for m in members:
         reason = _not_ready(m)
         if reason:
@@ -1395,9 +1442,22 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
             continue
         # rerere off: a replayed resolution would be a conflict resolved
         # inside the batch, and would hide the conflict from --diff-filter=U.
+        before = _out("rev-parse", "HEAD")
         proc = git("-c", "rerere.enabled=false", "merge", "--no-ff", "--no-edit", "-m",
                    f"Merge #{m.number} into {plan.branch}: {m.title}", m.sha,
                    check=False)
+        if proc.returncode == 0 and _out("rev-parse", "HEAD") == before:
+            # "Already up to date": the batch holds this head already (a
+            # stacked child merged first, or a head on master GitHub has not
+            # marked merged). No merge commit to judge; HEAD^1 would be the
+            # previous member's merge, or below the base.
+            if not _is_ancestor(m.sha, before):
+                raise Refusal(f"merging #{m.number} made no commit, yet its head "
+                              f"{m.sha[:12]} is not in the batch")
+            plan.merged.append(m)
+            plan.contained.append(m.number)
+            print(f"  merged #{m.number} {m.sha[:12]} {m.title} (already contained)")
+            continue
         if proc.returncode == 0:
             if _undo_merge_if_frozen(plan, m, freeze):
                 continue
@@ -1585,7 +1645,7 @@ def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
              out: set[int]) -> None:
     """Merge `members` but `out` again from the base, in their order."""
     git("reset", "-q", "--hard", plan.base_sha)
-    plan.merged, plan.dropped = [], list(dropped)
+    plan.merged, plan.dropped, plan.contained = [], list(dropped), []
     _merge_members(plan, [m for m in members if m.number not in out])
 
 

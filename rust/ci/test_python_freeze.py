@@ -203,7 +203,15 @@ def test_a_case_or_compatibility_variant_of_the_package_is_refused(path):
     assert python_freeze.frozen_paths([path]) == [path]
 
 
+@pytest.mark.parametrize("path", ["PSEUDO~1/core.py", "pseudo~2/cli.py", "Pseudo~10/web/api.py"])
+def test_a_windows_short_name_of_the_package_is_refused(path):
+    # Reviewer of 6953d0ba: with 8.3 names enabled a Windows checkout writes
+    # PSEUDO~1/ into the real package directory.
+    assert python_freeze.frozen_paths([path]) == [path]
+
+
 @pytest.mark.parametrize("path", ["pseudolife_memory_tools/x.py", "docs/Pseudolife_memory.md",
-                                  "pseudolife_memory/web/static/assets/App.JS"])
+                                  "pseudolife_memory/web/static/assets/App.JS",
+                                  "docs/PSEUDO~1/x.py", "pseudo~x/y.py", "pseudo~1.txt", "PSEUDOX~1/a.py"])
 def test_case_variants_outside_the_package_still_pass(path):
     assert python_freeze.frozen_paths([path]) == []

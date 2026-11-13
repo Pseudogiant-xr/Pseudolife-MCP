@@ -38,6 +38,7 @@ import json
 import subprocess
 import sys
 import unicodedata
+import re
 from pathlib import Path
 
 FROZEN = "pseudolife_memory/"
@@ -50,11 +51,18 @@ def _folded(path: str) -> str:
     return unicodedata.normalize("NFKC", path).casefold()
 
 
+# A Windows 8.3 short name for the package directory (PSEUDO~1), which a
+# checkout with short names enabled writes into the real package.
+SHORT_NAME = re.compile(r"pseudo~[0-9]+/")
+
+
 def frozen_paths(paths: list[str]) -> list[str]:
     """The changed paths the freeze refuses, in order: anything whose folded
-    form is under the package, unless it is under the exempt prefix exactly."""
+    form is under the package or its short name, unless it is under the
+    exempt prefix exactly."""
     return [path for path in paths
-            if _folded(path).startswith(FROZEN) and not path.startswith(EXEMPT)]
+            if (_folded(path).startswith(FROZEN) or SHORT_NAME.match(_folded(path)))
+            and not path.startswith(EXEMPT)]
 
 
 def changed_paths(root: Path, base: str, head: str) -> list[str] | None:

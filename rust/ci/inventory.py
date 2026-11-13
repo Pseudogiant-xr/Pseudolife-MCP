@@ -120,20 +120,23 @@ TRAILING_COMMENT = re.compile(r"\s#.*$")
 COMMAND_SEPARATORS = re.compile(r";|&&|\|\|")
 
 
-def live_invocations(workflow):
-    """Every (job, step, line) whose run text starts a live comparison.
+def live_invocations(workflow, exempt=True):
+    """Every (job, step, line) whose run text starts a live comparison;
+    ``exempt`` applies the exempt jobs and security exceptions, which name
+    rust.yml's jobs and are off for every other workflow.
 
     Lexical: it catches a live comparison coming back by accident, not a
     deliberate evasion (a mode or script from a variable, a module form, a
     harness change behind an allowed line; the PR's "Known limits")."""
     found = []
     for name, job in workflow["jobs"].items():
-        if name in LIVE_EXEMPT_JOBS:
+        if exempt and name in LIVE_EXEMPT_JOBS:
             continue
         for step in job.get("steps", []):
             for line in step.get("run", "").splitlines():
                 text = line.strip()
-                if name in LIVE_SECURITY_JOBS and text in LIVE_SECURITY_EXCEPTIONS.get(step.get("name", ""), ()):
+                if exempt and name in LIVE_SECURITY_JOBS and \
+                        text in LIVE_SECURITY_EXCEPTIONS.get(step.get("name", ""), ()):
                     continue
                 if not text or text.startswith("#"):
                     continue
@@ -146,12 +149,16 @@ def live_invocations(workflow):
 
 
 def all_workflow_live_invocations(root=ROOT):
-    """live_invocations over every workflow file, not only rust.yml."""
+    """live_invocations over every workflow file (*.yml and *.yaml), not
+    only rust.yml; the exempt job names hold in rust.yml only. Run from
+    __main__ and the tests, not from check(), which takes one workflow."""
     import yaml
     found = []
-    for path in sorted((root / ".github" / "workflows").glob("*.yml")):
+    workflows = root / ".github" / "workflows"
+    for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
         workflow = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        found += [(path.name, *row) for row in live_invocations({"jobs": workflow.get("jobs", {})})]
+        found += [(path.name, *row) for row in live_invocations(
+            {"jobs": workflow.get("jobs", {})}, exempt=path.name == "rust.yml")]
     return found
 
 

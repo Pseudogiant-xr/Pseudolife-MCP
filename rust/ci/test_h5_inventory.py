@@ -593,6 +593,18 @@ def test_a_live_comparison_in_another_workflow_is_found(tmp_path):
     assert [row[0] for row in all_workflow_live_invocations(tmp_path)] == ["other.yml"]
 
 
+def test_a_yaml_workflow_is_scanned_and_exempt_names_hold_only_in_rust_yml(tmp_path):
+    from inventory import all_workflow_live_invocations
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    live = "      - run: python rust/daemon/harness/run.py live --rust-bin b\n"
+    (workflows / "other.yaml").write_text("jobs:\n  x:\n    steps:\n" + live, encoding="utf-8")
+    # A job named like rust.yml's exempt stress job, in another workflow.
+    (workflows / "elsewhere.yml").write_text("jobs:\n  stress:\n    steps:\n" + live, encoding="utf-8")
+    (workflows / "rust.yml").write_text("jobs:\n  stress:\n    steps:\n" + live, encoding="utf-8")
+    assert sorted(row[0] for row in all_workflow_live_invocations(tmp_path)) == ["elsewhere.yml", "other.yaml"]
+
+
 def test_inventory_rejects_a_stress_plan_that_runs_outside_a_stress_dispatch():
     from inventory import check
     workflow = workflow_copy()

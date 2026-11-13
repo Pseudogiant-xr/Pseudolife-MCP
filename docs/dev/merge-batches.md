@@ -166,14 +166,19 @@ from the `Rust shim` workflow (`REPORT_ONLY_CHECK` in `ops/integrate.py`).
 No workflow produces it since the Python freeze removed that job, so it
 matters only for a head whose run predates that. The script also applies
 the Python freeze itself, with master's copy of `rust/ci/python_freeze.py`
-(it refuses to build when master has none): a member whose merge changes
+(it refuses when master has none, except for the batch that introduces it:
+when master's history never held the guard, the members are judged with
+the one copy they carry): a member whose merge changes
 `pseudolife_memory/` outside `pseudolife_memory/web/static/` on the batch
 branch without the `freeze-exception` label is dropped with the guard's
 refusal, whatever its `Python freeze` check reported; judged on the merge,
 not on a merge-base diff, which a criss-cross history can leave empty.
 `open` and `merge` then refuse a batch holding any commit that is neither
 a member's merge nor the one generated commit, a generated commit that
-touches the package, or a member whose label has gone since `build`. Subject to the snapshot checkpoint below, pending,
+touches the package, or a member whose label has gone since `build`. A
+member whose head the batch already holds (a stacked child merged first, a
+head already on master) makes no merge commit; it is recorded as contained,
+and its changes count under the merge that brought them. Subject to the snapshot checkpoint below, pending,
 cancelled, green or no checks admit it: a run cancelled by hand or by a
 re-trigger gave no verdict. GitHub also reports a job that ran past its
 `timeout-minutes` as cancelled, so the script reads the annotations of

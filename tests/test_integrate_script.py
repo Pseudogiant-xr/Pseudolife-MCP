@@ -232,6 +232,17 @@ sys.exit(code)
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
+    return _make_world(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def world_without_guard(tmp_path, monkeypatch):
+    """Master as it is before the pull request that adds the Python freeze
+    guard lands: no commit on its history has ever touched the guard."""
+    return _make_world(tmp_path, monkeypatch, guard=False)
+
+
+def _make_world(tmp_path, monkeypatch, *, guard=True):
     origin = tmp_path / "origin.git"
     seed = tmp_path / "seed"
     work = tmp_path / "work"
@@ -318,9 +329,12 @@ def world(tmp_path, monkeypatch):
     w.pr, w.advance_master, w.remote_branches = pr, advance_master, remote_branches
     # Master's Python freeze guard: build loads it from the base and refuses
     # without one (ops/integrate.py _freeze_module).
-    advance_master({"rust/ci/python_freeze.py":
-                    (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8")})
+    if guard:
+        advance_master({"rust/ci/python_freeze.py": GUARD})
     return w
+
+
+GUARD = (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8")
 
 
 def _build(*extra: str) -> int:
@@ -3043,14 +3057,15 @@ def test_an_earlier_member_cannot_switch_the_freeze_off_for_a_later_one(world, c
     # Codex review of a49c9635: the decision runs master's copy of the
     # guard, never one a member merged into the batch checkout first.
     _freeze_on_master(world)
-    opened = (ROOT / "rust" / "ci" / "python_freeze.py").read_text(encoding="utf-8").replace(
-        "    return [path for path in paths\n"
-        "            if _folded(path).startswith(FROZEN) and not path.startswith(EXEMPT)]",
-        "    return []  # switched off")
+    # The member's copy switches the path rule off: whatever frozen_paths
+    # says, it returns nothing.
+    opened = GUARD.replace(
+        "def frozen_paths(paths: list[str]) -> list[str]:\n",
+        "def frozen_paths(paths: list[str]) -> list[str]:\n    return []  # switched off\n", 1)
     assert "return []  # switched off" in opened
-    # In production `build` runs the batch checkout's own ops/integrate.py,
-    # so a loader that resolved the guard beside __file__ read the merged
-    # member's copy; pretend to be that file (reviewer of bf3de877).
+    # `build` runs in the batch checkout, whose tree changes as members
+    # merge, so a loader that resolved the guard beside __file__ read the
+    # merged member's copy; pretend to be that file (reviewer of bf3de877).
     import os
     monkeypatch_file = world.work / "ops" / "integrate.py"
     integrate_file = integrate.__file__
@@ -3156,7 +3171,7 @@ def test_open_refuses_a_batch_commit_that_is_neither_a_member_merge_nor_generate
     assert not world.gh.bodies("create")
 
 
-def test_open_and_merge_refuse_a_member_whose_exception_label_was_removed(world, capsys):
+def test_open_refuses_a_member_whose_exception_label_was_removed(world, capsys):
     # Reviewer of bf3de877 (S5): the label is read at build; a revoked
     # exception during the batch's CI must not land.
     sha = world.pr(10, {"pseudolife_memory/update_cli.py": "bridge\n"})
@@ -3170,3 +3185,151 @@ def test_open_and_merge_refuse_a_member_whose_exception_label_was_removed(world,
     err = capsys.readouterr().err
     assert "#10" in err and "freeze-exception" in err
     assert not world.gh.bodies("create")
+
+
+def test_merge_refuses_a_member_whose_exception_label_was_removed(world, capsys):
+    # Reviewer of 6953d0ba (N7): the same re-read at `merge`.
+    sha = world.pr(10, {"pseudolife_memory/update_cli.py": "bridge\n"})
+    world.gh.add(10, sha, labels=[{"name": "freeze-exception"}])
+    assert _publish(world) == 0, capsys.readouterr()
+    capsys.readouterr()
+    world.gh.pr(10)["labels"] = []
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "#10" in err and "freeze-exception" in err
+    assert not _merge_calls(world)
+
+
+# --- the batch that introduces the guard (reviewer of 6953d0ba, B1) ---
+# `open` and `merge` run the batch's own ops/integrate.py, which is the
+# pull request adding the guard, against a master that has never had it.
+
+def test_the_batch_that_introduces_the_guard_builds_opens_and_merges(world_without_guard, capsys):
+    world = world_without_guard
+    sha10 = world.pr(10, {"rust/ci/python_freeze.py": GUARD, "b.txt": "b\n"})
+    sha11 = world.pr(11, {"pseudolife_memory/core.py": "bridge\n"})
+    sha12 = world.pr(12, {"pseudolife_memory/cli.py": "unruled\n"})
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z")
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z", labels=[{"name": "freeze-exception"}])
+    world.gh.add(12, sha12, labeled_at="2026-11-14T00:00:03Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "this batch introduces it" in out and "#10 adds" in out
+    assert "merged #10 " in out and "merged #11 " in out and "merged #12 " not in out
+    assert "Python is frozen since 14 November 2026" in out
+    assert _open(world) == 0, capsys.readouterr()
+    capsys.readouterr()
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+    assert len(_merge_calls(world)) == 1
+
+
+def test_a_member_adding_the_guard_with_an_unlabelled_python_change_is_refused(world_without_guard, capsys):
+    world = world_without_guard
+    sha = world.pr(10, {"rust/ci/python_freeze.py": GUARD, "pseudolife_memory/core.py": "changed\n"})
+    world.gh.add(10, sha)
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "Python is frozen since 14 November 2026" in out
+
+
+def test_a_master_that_never_had_the_guard_refuses_a_batch_that_does_not_add_it(world_without_guard, capsys):
+    world = world_without_guard
+    sha = world.pr(10, {"pseudolife_memory/core.py": "changed\n"})
+    world.gh.add(10, sha, labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 2
+
+    captured = capsys.readouterr()
+    assert "never had rust/ci/python_freeze.py" in captured.err and "merged #10 " not in captured.out
+
+
+def test_members_introducing_different_copies_of_the_guard_refuse(world_without_guard, capsys):
+    world = world_without_guard
+    sha10 = world.pr(10, {"rust/ci/python_freeze.py": GUARD})
+    sha11 = world.pr(11, {"rust/ci/python_freeze.py": GUARD.replace("return [path", "return [] or [path")})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+
+    assert _build() == 2
+
+    assert "different copies" in capsys.readouterr().err
+
+
+def test_open_and_merge_refuse_a_master_that_lost_the_guard(world, capsys):
+    # A deletion still fails closed: master's history had the guard.
+    seed = world.gh.seed
+    _git(seed, "fetch", "-q", "origin")
+    _git(seed, "switch", "-q", "-C", "master", "origin/master")
+    _git(seed, "rm", "-q", "rust/ci/python_freeze.py")
+    _git(seed, "commit", "-q", "-m", "drop the guard")
+    _git(seed, "push", "-q", "origin", "master")
+    _git(world.work, "fetch", "-q", "origin")
+    base = _git(world.work, "rev-parse", "origin/master")
+    member = integrate.Member(number=10, title="carries no guard", sha=base, url="u",
+                              review="APPROVED", checks="SUCCESS")
+
+    with pytest.raises(integrate.Refusal, match="although it had one"):
+        integrate._freeze_module(base, [member], base)
+
+
+# --- a member the batch already contains (reviewer of 6953d0ba, S6) ---
+
+@pytest.mark.parametrize("child_first", [True, False], ids=["child-first", "parent-first"])
+def test_a_stacked_pair_merges_and_opens_in_either_label_order(world, capsys, child_first):
+    # The parent touches nothing frozen and has no label; the child, stacked
+    # on it, carries an exception. Merged child first, the parent's merge is
+    # a no-op, which must not be judged as the child's merge.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"pseudolife_memory/core.py": "bridge\n"}, base="pr-10")
+    first, second = ("2026-11-14T00:00:02Z", "2026-11-14T00:00:01Z") if child_first else \
+        ("2026-11-14T00:00:01Z", "2026-11-14T00:00:02Z")
+    world.gh.add(10, sha10, labeled_at=first)
+    world.gh.add(11, sha11, labeled_at=second, labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "merged #11 " in out, out
+    assert "dropped" not in out and "Python is frozen" not in out
+    assert ("already contained" in out) is child_first
+    assert not world.gh.bodies("comment")
+    assert _open(world) == 0, capsys.readouterr()
+
+
+def test_a_member_already_on_master_is_contained_and_the_batch_stays_above_master(world, capsys):
+    # Its head reached master with the previous batch, whose merge changed
+    # frozen paths under an exception. Judging base^1..base with this
+    # member's labels used to reset the batch below master.
+    seed = world.gh.seed
+    _git(seed, "fetch", "-q", "origin")
+    _git(seed, "switch", "-q", "-C", "prev", "origin/master")
+    (seed / "pseudolife_memory").mkdir(exist_ok=True)
+    (seed / "pseudolife_memory" / "core.py").write_text("ruled\n", encoding="utf-8", newline="\n")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-qm", "previous batch's exception")
+    landed = _git(seed, "rev-parse", "HEAD")
+    _git(seed, "switch", "-q", "-C", "master", "origin/master")
+    _git(seed, "merge", "-q", "--no-ff", "-m", "previous batch", "prev")
+    _git(seed, "push", "-q", "origin", "master")
+    _git(seed, "push", "-q", "-f", "origin", f"{landed}:refs/pull/10/head")
+    _git(world.work, "fetch", "-q", "origin")
+    _git(world.work, "reset", "-q", "--hard", "origin/master")
+    master = _git(world.work, "rev-parse", "origin/master")
+    world.gh.add(10, landed, labeled_at="2026-11-14T00:00:01Z")
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "already contained" in out and "merged #11 " in out, out
+    assert "Python is frozen" not in out
+    head = _git(world.work, "rev-parse", "HEAD")
+    assert _git(world.work, "merge-base", master, head) == master
+    assert _open(world) == 0, capsys.readouterr()
