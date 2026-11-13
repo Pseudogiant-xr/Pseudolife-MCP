@@ -23,14 +23,20 @@ import zipfile
 
 import pytest
 
+from tests import installer_sandbox
+from tests import native_client_stub
+
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "9.8.7"
 PWSH = shutil.which("pwsh")
 pytestmark = pytest.mark.skipif(PWSH is None, reason="needs pwsh")
 WINDOWS = os.name == "nt"
-REAL = os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY", "")
-TARGET = "x86_64-pc-windows-msvc" if WINDOWS else "x86_64-unknown-linux-gnu"
+_REAL = native_client_stub.real_binary()
+REAL = str(_REAL) if _REAL else ""
+# A real client runs only on its own target; the stub is the Linux one.
+TARGET = ("x86_64-pc-windows-msvc" if WINDOWS
+          else native_client_stub.host_target() if REAL else "x86_64-unknown-linux-gnu")
 ASSET = f"pseudolife-mcp-{VERSION}-{TARGET}." + ("zip" if WINDOWS else "tar.gz")
 needs_client = pytest.mark.skipif(
     WINDOWS and not (REAL and Path(REAL).is_file()),
@@ -65,7 +71,7 @@ def _release(directory: Path, *, digest_override: str | None = None, omit: bool 
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("pseudolife-mcp.exe", data)
     else:
-        data = STUB.encode()
+        data = Path(REAL).read_bytes() if REAL else STUB.encode()
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             info = tarfile.TarInfo("pseudolife-mcp")
             info.size = len(data)
@@ -107,7 +113,8 @@ def _run(tmp_path: Path, body: str, *, release: bool = True, **release_kwargs) -
     ])
     script_file = tmp_path / "run.ps1"
     script_file.write_text(script, encoding="utf-8")
-    env = {key: value for key, value in os.environ.items() if not key.startswith("PSEUDOLIFE_")}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("PSEUDOLIFE_", "XDG_"))}
     env.update({
         "PATH": os.pathsep.join([str(stubs), os.environ.get("PATH", "")]),
         "HOME": str(home), "USERPROFILE": str(home),
@@ -119,8 +126,8 @@ def _run(tmp_path: Path, body: str, *, release: bool = True, **release_kwargs) -
         "PSEUDOLIFE_SHIM_LAUNCHER": str(launcher),
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9",
     })
-    result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_file)],
-                            capture_output=True, text=True, env=env, timeout=180)
+    result = installer_sandbox.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_file)],
+                                   env=env, root=tmp_path, capture_output=True, text=True, timeout=180)
     assert not forbidden.exists(), f"the installer ran Python tooling: {forbidden.read_text()}"
     return result
 
@@ -144,7 +151,9 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
 @needs_client
 def test_a_python_client_registration_moves_to_the_native_launcher(tmp_path):
     if not WINDOWS:
-        pytest.skip("the move itself is the native binary's (cli_installer_contract.rs); the stub only reports")
+        # The fixture is a Windows pipx layout; the move itself is the native
+        # binary's (cli_installer_contract.rs), and the stub only reports.
+        pytest.skip("a Windows pipx layout")
     venv = tmp_path / "home" / "pipx-venv"
     (venv / "Scripts").mkdir(parents=True)
     (venv / "Lib" / "site-packages" / "pseudolife_mcp-0.23.1.dist-info").mkdir(parents=True)

@@ -178,6 +178,38 @@ def write_release(directory, version: str, launcher_body: str) -> dict[str, str]
 BASH += HELPER_SH
 POWERSHELL += HELPER_PS
 
+
+# -- A real native client, for tests that can run one -------------------------
+# PSEUDOLIFE_NATIVE_TEST_BINARY names a debug pseudolife-stdio[.exe] built from
+# the same commit; CI lanes that build one also set
+# PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, so a missing build fails instead
+# of skipping.
+def real_binary() -> Path | None:
+    import os
+    value = os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY", "")
+    path = Path(value) if value else None
+    if path is not None and path.is_file():
+        return path
+    if os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED") == "1":
+        raise RuntimeError(
+            "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, but PSEUDOLIFE_NATIVE_TEST_BINARY "
+            f"({value or 'unset'}) names no file: build pseudolife-stdio first")
+    return None
+
+
+def host_target() -> str | None:
+    """This machine's release target triple, or None for one no release has."""
+    import platform
+    machine = platform.machine().lower()
+    arm = machine in ("arm64", "aarch64")
+    if sys.platform == "win32":
+        return None if arm else "x86_64-pc-windows-msvc"
+    if sys.platform == "darwin":
+        return "aarch64-apple-darwin" if arm else "x86_64-apple-darwin"
+    if sys.platform.startswith("linux"):
+        return "aarch64-unknown-linux-gnu" if arm else "x86_64-unknown-linux-gnu"
+    return None
+
 # Harnesses whose fake shim sits in $FIXTURE_SHIM_BIN (test_codex_hooks.py).
 NATIVE_FROM_SHIM_BIN_SH = 'FAKE_LAUNCHER="$FIXTURE_SHIM_BIN/pseudolife-mcp"\nFAKE_KEEP_LAUNCHER=1\n' + BASH
 NATIVE_UNAVAILABLE_SH = (
