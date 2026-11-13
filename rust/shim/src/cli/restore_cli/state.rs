@@ -880,8 +880,9 @@ pub(super) fn judge_extracted(listing: &[u8]) -> Result<(), String> {
             return Err(format!("{what} ({})", shown(&entry.path)));
         }
         // The daemon never needs a set-id file, and extraction as root
-        // keeps the bits an archive gives.
-        if entry.kind != b'l' && entry.mode & 0o6000 != 0 {
+        // keeps the bits an archive gives. The staging root's own mode
+        // (the archive's `./`) never reaches /data: only its entries move.
+        if !entry.path.is_empty() && entry.kind != b'l' && entry.mode & 0o6000 != 0 {
             return Err(format!(
                 "a setuid or setgid {} ({})",
                 if entry.kind == b'd' {
@@ -1669,6 +1670,10 @@ mod tests {
                 "{mode}"
             );
         }
+        // The staging root's own mode stays behind with it.
+        let mut root_setgid = entry_mode('d', "66", 1, 2, "2775", "", "");
+        root_setgid.extend_from_slice(b"END ");
+        assert_eq!(judge_extracted(&root_setgid), Ok(()));
         // The sticky bit, an executable and a symlink's 777 are ordinary.
         let ordinary = tree(&[
             entry_mode('d', "66", 2, 2, "1777", "tmp", ""),
