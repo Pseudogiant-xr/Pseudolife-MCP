@@ -704,7 +704,7 @@ def test_install_sh_reports_a_registration_already_on_the_launcher_as_preserved(
 ) -> None:
     proc = _run_bash_existing(
         bash, tmp_path, client=client,
-        config=_custom_config(client, "/home/u/.local/bin/pseudolife-mcp", "1"),
+        config=_custom_config(client, "/opt/tools/pseudolife-mcp", "1"),
         manager_exit=0, migrate_exit=4,
     )
     output = (proc.stdout + proc.stderr).decode(errors="replace")
@@ -720,7 +720,7 @@ def test_install_ps1_reports_a_registration_already_on_the_launcher_as_preserved
 ) -> None:
     proc = _run_powershell_existing(
         tmp_path, client=client,
-        config=_custom_config(client, r"C:\Users\u\.local\bin\pseudolife-mcp.exe", "1"),
+        config=_custom_config(client, r"D:\tools\pseudolife-mcp.exe", "1"),
         manager_exit=0, migrate_exit=4,
     )
     output = (proc.stdout + proc.stderr).decode(errors="replace").replace("\r", "")
