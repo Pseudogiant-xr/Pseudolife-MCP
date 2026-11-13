@@ -75,7 +75,7 @@ SHARDS = [
     # 40047950017 (2026-10-24; live + golden: test_login 7.3, connect 6.3,
     # maintainer 3.5, tunnel 1.9, move 1.2), so they split in two: 10.4 and
     # 9.8 min. test_login stays here with its container image and record.
-    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel', 'console'",
+    {"suite": "w1c-connection", "w1c_rows": "'test_login', 'move', 'tunnel', 'console', 'expose'",
      "w1c_timeout": 26, "job_timeout": 50},
     {"suite": "w1c-connect", "w1c_rows": "'connect', 'maintainer', 'coordination_recovery', 'maintainer_setup'", "w1c_timeout": 25,
      "job_timeout": 29},
@@ -139,6 +139,7 @@ ROW_SUITES = {
     "test_login": "w1c-connection", "connect": "w1c-connect", "maintainer": "w1c-connect",
     "coordination_recovery": "w1c-connect", "maintainer_setup": "w1c-connect",
     "move": "w1c-connection", "tunnel": "w1c-connection", "console": "w1c-connection",
+    "expose": "w1c-connection",
     "audit": "h5-audit", "backup": "h5-backup", "migrate_flat": "h5-backup",
 }
 # The pseudolife-stdio binary: every CLI row, plus the differential judges,
@@ -162,11 +163,13 @@ SHIM_COMMANDS = {
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
     "update": ("update", "doctor", "console"),
-    # console also reads move's argv helpers.
-    "connect": ("connect",), "doctor": ("doctor", "console"), "console": ("console",),
+    # console and expose also read move's argv helpers; expose reads
+    # connect's stdin check.
+    "connect": ("connect", "expose"), "doctor": ("doctor", "console"), "console": ("console",),
+    "expose": ("expose",),
     "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
     "coordination_recovery": ("coordination_recovery",),
-    "move_cli.rs": ("move", "console"), "test_login": ("test_login",),
+    "move_cli.rs": ("move", "console", "expose"), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),

@@ -39,6 +39,12 @@ use pyjson::J;
 
 pub(super) type ProcessTable = procs::Table;
 
+/// `sys.stdin.isatty()` as CPython answers it (on Windows any character
+/// device, `NUL` included), for the other modes' confirmations.
+pub(super) fn stdin_is_tty() -> bool {
+    procs::stdin_is_tty()
+}
+
 pub(super) fn process_table() -> Result<Option<ProcessTable>, ()> {
     procs::list()
 }

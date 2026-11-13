@@ -124,6 +124,15 @@
     "episode-start-path",
     "episode-system-dir-titled"
   ],
+  "expose": [
+    "expose-auth-truthy",
+    "expose-first-line-unstripped",
+    "expose-funnel-ignored",
+    "expose-pathext-lowercased",
+    "expose-port-range-off-by-one",
+    "expose-winerror-full-stop",
+    "expose-yes-skips-tty-check"
+  ],
   "hook": [
     "hook-briefing-cap-order",
     "hook-cursor-not-saved",

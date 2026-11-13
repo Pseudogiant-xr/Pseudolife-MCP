@@ -12,6 +12,7 @@ pub mod coordination_recovery;
 mod doctor;
 mod doorbell_seen;
 mod episode;
+mod expose;
 mod hook_http;
 mod hook_json;
 mod host_connection;
@@ -207,6 +208,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "console"
         && let Some(code) = console::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
+    }
+    if mode == "expose"
+        && let Some(code) = expose::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
     }
