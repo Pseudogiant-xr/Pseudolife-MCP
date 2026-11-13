@@ -16,6 +16,11 @@ use std::{
 };
 
 pub use codex::{check_codex_hooks, codex_reapproval_text, runtime_hook_line, runtime_hook_status};
+#[allow(
+    unused_imports,
+    reason = "the native installer (W3's installer pull request) calls it"
+)]
+pub use plugin::migrate_marketplace;
 use plugin::update_plugin;
 
 /// Sees the shim step's result; a returned report replaces the rest of the ladder.
