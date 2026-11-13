@@ -83,12 +83,20 @@
   ],
   "console": [
     "console-405-not-old",
+    "console-code-any-character",
+    "console-code-unchecked",
+    "console-display-ignored",
+    "console-exited-counts-as-opened",
+    "console-expiry-refusal-swallowed",
+    "console-generic-launched",
     "console-get-without-content-type",
     "console-hint-over-message",
+    "console-localtime-refusal-deferred",
     "console-null-cell-empty",
     "console-paired-note-always",
-    "console-plain-sign-in-admitted",
     "console-stamp-rounded",
+    "console-unless-skips-the-list",
+    "console-unsafe-link-launched",
     "console-winerror-full-stop"
   ],
   "coordination_recovery": [
@@ -315,7 +323,7 @@
     "restore-checkout-unchecked",
     "restore-confirmed-deferred",
     "restore-copy-loose",
-    "restore-crc-answered",
+    "restore-crc-deferred",
     "restore-data-mount-unchecked",
     "restore-dbname-quoted",
     "restore-desktop-unmapped",
@@ -334,6 +342,7 @@
     "restore-host-unmatched-allowed",
     "restore-image-unchecked",
     "restore-inspect-exit",
+    "restore-inspect-object-deferred",
     "restore-inspect-stderr",
     "restore-json-error-refused",
     "restore-later-header-error",
@@ -349,6 +358,7 @@
     "restore-negative-as-option",
     "restore-no-transient-pass",
     "restore-non-ascii-read",
+    "restore-null-device-terminal",
     "restore-octal-prefix",
     "restore-padding-unchecked",
     "restore-pg-running-unchecked",
@@ -373,6 +383,6 @@
     "restore-unshared-network-read",
     "restore-unsure-url-read",
     "restore-yes-ignored",
-    "restore-zlib-answered"
+    "restore-zlib-deferred"
   ]
 }

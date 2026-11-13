@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "fe87901d0f5022fd",
+  "fingerprint": "fe87901d0f5022fd",
+  "reason": "Extends the console CLI row (CLI-CONSOLE-PRINT) in the w1c-connection shard from 105 to 139 cases: the browser sign-in, --unless-signed-in and the empty --revoke, each browser case starting a recording stand-in and waiting for it to exit. No job, shard or step changed. Measured locally on 2026-11-13: Windows workstation live 223 s and golden replay 85 s for the whole row; WSL Ubuntu live 127 s and golden 49 s. The windows-latest w1c-connection shard grows by about 2 minutes, inside its harness step budget; its measured minutes hold within that margin until the batch run re-measures them."
+}
