@@ -2,14 +2,16 @@
 
 Python is frozen since 14 November 2026 (maintainer ruling): nothing under
 ``pseudolife_memory/`` changes again, so a test that exercises only that
-package can no longer find a regression. Every test file is classified in
+package can find only a dependency regression, which the weekly
+``--include-frozen`` nightly looks for. Every test file is classified in
 ``tests/suite_classes.txt``, one ``<class> <file>`` line each:
 
 - ``live``: it tests something that still changes or still ships (the
   installers and update wrappers, ``ops/`` tooling, the plugin hooks, docs,
   release and repository guards, CI tooling, the Console frontend, the
-  container images, eval tooling), or it tests a frozen module and a
-  survivor both.
+  container images, eval tooling, the suite's own infrastructure), a module
+  an open freeze exception changes, or a frozen module and a survivor both;
+  the header of ``tests/suite_classes.txt`` states the rules.
 - ``frozen``: it exercises ``pseudolife_memory`` and nothing that survives.
 
 ``tests/conftest.py`` collects only live files unless pytest is given

@@ -101,13 +101,11 @@ def test_every_listed_file_and_test_exists():
             assert tests <= top_level_tests(path), (path, tests - top_level_tests(path))
 
 
-def test_docker_restore_safety_left_the_lane_with_the_python_freeze():
-    # The Python Docker restore is frozen (tests/suite_classes.txt); the
-    # native restore's Windows tests run in the Rust workflow.
-    from tests import suite_classes
+def test_docker_restore_safety_runs_in_required_windows_lane():
+    # Live while the freeze exceptions that change backup_cli and update_cli
+    # (#1539, #1537) are open (tests/suite_classes.txt rule 3).
     files, _, _ = selection(lane_argv(REQUIRED))
-    assert "tests/test_docker_backup_restore.py" not in files
-    assert "test_docker_backup_restore.py" in suite_classes.frozen()
+    assert "tests/test_docker_backup_restore.py" in files
 
 
 def listed_files():
@@ -221,4 +219,10 @@ def test_no_option_drops_tests_or_retries_them_unseen():
         assert not hidden, (job_id, hidden)
         job = jobs()[job_id]
         envs = [job.get("env") or {}] + [s.get("env") or {} for s in job["steps"]]
-        assert not any("PYTEST_ADDOPTS" in env for env in envs), job_id
+        # PYTEST_ADDOPTS only as scope's output, which is --include-frozen or
+        # nothing: it adds frozen files, never --reruns or a filter.
+        assert all(env.get("PYTEST_ADDOPTS") in (None, "${{ needs.scope.outputs.pytest_addopts }}")
+                   for env in envs), job_id
+    scope = next(s for s in jobs()["scope"]["steps"] if s.get("id") == "scope")["run"]
+    import re
+    assert set(re.findall(r'pytest_addopts=([^"\s]*)', scope)) == {"--include-frozen"}

@@ -42,7 +42,9 @@ A selection is one of:
                          gets no database: its db_ tests return early and count
                          as run, which is why such tests are selected by name.
   <node id> [<node id>]  pytest node ids, run with -ra and a junit report, with
-                         the parity shards' candidate binaries in the env
+                         the parity shards' candidate binaries in the env, and
+                         with --include-frozen where the checkout has it, so a
+                         freeze-exception change can loop a frozen file
 
 An iteration passes only with evidence: a pytest or cargo run where every
 selected test ran and passed (a runtime skip is not evidence; nextest's
@@ -365,7 +367,9 @@ def command(kind: str, names: list[str], candidates: Path, scratch: Path,
         return [sys.executable, "rust/daemon/harness/run.py", "live", "--rust-bin", str(path),
                 *(["--fixture"] if fixture else []), "--only", names[0],
                 "--out", str(scratch / "harness.json")]
-    return [sys.executable, "-m", "pytest", *names, "-ra", "--durations=30",
+    # tests/suite_classes.py's switch: frozen files are refused without it.
+    frozen = ["--include-frozen"] if Path("tests/suite_classes.py").is_file() else []
+    return [sys.executable, "-m", "pytest", *names, *frozen, "-ra", "--durations=30",
             "--junitxml", str(scratch / "junit.xml")]
 
 

@@ -92,6 +92,6 @@ run is not a pass: a later master push cancels an earlier run
 commit containing the merge: `ci.yml` for rule A, both `ci.yml` and
 `rust.yml` for rule B. A Rust-only change's master push skips `ci.yml`'s
 Python lanes since the Python freeze; for it, the backstop is the next
-nightly's `ci.yml` run on that commit. If it fails, open a revert PR at once (landed as a batch of one), or a fix PR
+nightly's `ci.yml` run (on master's tip, which contains it). If it fails, open a revert PR at once (landed as a batch of one), or a fix PR
 when the fix is obvious, and make no more such merges until master is green
 again.

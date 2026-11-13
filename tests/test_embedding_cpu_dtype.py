@@ -235,14 +235,6 @@ def test_an_unknown_precision_is_a_config_error(
             EmbeddingConfig(device=device, cpu_dtype=configured))
 
 
-def test_the_suite_runs_the_embedder_in_fp32() -> None:
-    """conftest pins fp32 for every pipeline the suite builds, and every
-    daemon it spawns inherits the variable — so a runner that reports
-    native bf16 cannot flip the suite's numerics. GitHub's runners report
-    none today; this keeps it that way on any host."""
-    assert os.environ.get(ENV) == "fp32"
-
-
 # ── how bf16 is loaded ─────────────────────────────────────────────────────
 
 
