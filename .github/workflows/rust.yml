@@ -1110,7 +1110,17 @@ jobs:
         # 15:00 in batch runs 42388348056 and 42400397903, and pytest alone
         # took 14:42 in dispatch run 42404612150 with only their native arm
         # on Windows. About 16.5 minutes with the rows, plus a third.
-        timeout-minutes: 22
+        # Self-hosted Windows: 35. Its last pass took 12.7 min (nightly run
+        # 42207145241, 2026-11-06); it has hit 22 every night since
+        # 2026-11-07. On 2026-11-13 (job 131853441705) pytest had 507 of
+        # 660 cases done at 22:00, about 5.4 s per update-transaction case
+        # against hosted's 2.5 s; the rest, the wrapper tests and the four
+        # golden rows (1.9 min hosted) put it near 32 min. Hosted Windows
+        # took 15.8 min that night, so it keeps 22 inside its 35-minute job.
+        # test_update_transactions.py is 12.9 of pytest's 13.9 hosted
+        # minutes (306 of 660 cases): next, split this step rather than
+        # raise it again.
+        timeout-minutes: ${{ runner.environment == 'self-hosted' && runner.os == 'Windows' && 35 || 22 }}
         shell: pwsh
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
