@@ -153,3 +153,51 @@ fails the control.
 `goldens/<row>.<platform>.json` holds the oracle's observations with the home
 path replaced by `{HOME}` and the arm's invocation window kept, so `--golden`
 applies the same rules a live run does.
+
+## Goldens after the freeze
+
+With Python frozen, a golden is a regression snapshot of the Rust candidate.
+When a pull request changes on purpose a behaviour a golden pins, it
+re-records the affected cases from the candidate, on each OS whose golden
+pins them:
+
+```sh
+# dry run: shows each case's difference and exits 1 if anything would change
+python rust/cli_harness --row mail --case ring-past-seen --record-candidate --candidate <pseudolife-stdio>
+# after reviewing that difference: write it, then review the golden diff
+python rust/cli_harness --row mail --case ring-past-seen --record-candidate --candidate <pseudolife-stdio> --write
+git diff -- rust/cli_harness/goldens/mail.*.json
+```
+
+`--record-candidate` runs each selected case once on the candidate and
+classes it with the replay comparison itself: `unchanged` (`--golden` would
+pass), `changed` (printed with the replay's difference, the committed golden
+labelled `golden`), or `new`. Recording a whole row also lists the recorded
+cases the row no longer defines as `removed`; `--case` never removes
+anything. Without `--write` nothing is written, and the run exits 1 when
+anything would change. With `--write` only changed and new cases are
+replaced; unchanged and unselected cases keep their committed bytes.
+
+A case to be written is refused, and nothing in its row is written, when:
+
+- its observation is vacuous (a case that requires output got none, or a
+  row's own guard failed);
+- the candidate printed a deferral (`is deferred in this candidate`), unless
+  `--allow-deferral` is given, because a snapshot of a deferral asserts "not
+  ported" as the expected behaviour;
+- the entry would not replay green against the very run it came from, which
+  happens when the recorder had to scrub a host path or a SCRAM verifier out
+  of a compared span.
+
+The golden's top-level `recorded_from_candidate` names, for each case written
+this way, the checkout's commit, whether its Rust sources differed from that
+commit (`rust_tree`), the platform and the candidate's SHA-256. Replay reads
+only `cases`, so it never compares this, and oracle-recorded cases keep the
+golden's `oracle_commit`. Only this platform's golden is written; the run
+names the command to repeat on the other OS.
+
+Re-record only when the change is deliberate, the dry run's difference is
+exactly that change, and the pull request names the cases and why. A red
+replay you do not understand (a flake, a host difference, a regression) is
+investigated, never re-recorded: `--write` exists to update a snapshot, not to
+turn CI green.

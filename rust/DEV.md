@@ -49,6 +49,26 @@ git diff -- rust/cli_harness/goldens/mail.*.json
 Recording writes `goldens/<row>.<platform>.json` and replaces that row's record;
 omit `--case` to avoid replacing it with a partial row.
 
+Python is frozen, so a deliberate Rust behaviour change re-records its
+golden from the candidate instead. The first command is a dry run that
+prints each case as unchanged, changed (with the replay's difference) or new
+and exits 1 if anything would change; `--write` then replaces only the
+changed and new cases of this platform's golden:
+
+```powershell
+python rust/cli_harness --row mail --case ring-past-seen --record-candidate --candidate $candidate
+python rust/cli_harness --row mail --case ring-past-seen --record-candidate --candidate $candidate --write
+```
+
+Repeat it on the other OS when that golden pins the case too. It refuses a
+vacuous case, a deferral (unless `--allow-deferral`) and an entry that would
+not replay against its own run. Re-record only a difference you can name as
+the intended change; a red replay you cannot explain is a finding, not a
+golden to rewrite ([Goldens after the freeze](cli_harness/README.md#goldens-after-the-freeze)).
+The daemon harness has the same contract in `run.py golden --record-candidate`
+and `w2e.py golden --record-candidate` (each with `--write`), recording
+through the replay's own Rust-only path.
+
 Run the existing source mutants; every selected mutant must be caught:
 
 ```powershell

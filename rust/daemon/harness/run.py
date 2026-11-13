@@ -50,6 +50,7 @@ sys.path.insert(0, str(HERE))
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":
     import embedding
     raise SystemExit(embedding.main(sys.argv[2:]))
+import candidate_record  # noqa: E402
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
@@ -2128,7 +2129,8 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
     return row
 
 
-def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
+def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool,
+                 candidate: dict | None = None) -> dict:
     if scn.loopback_bind_fixture:
         import subprocess
         probe = subprocess.run([str(binary)], capture_output=True, timeout=10,
@@ -2137,14 +2139,15 @@ def run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: boo
             raise RuntimeError("trust-bind requires a debug --features mutants binary: refuse before any wildcard listener")
     tag = scn.name.replace("-", "_")
     try:
-        return _run_scenario(scn, binary, root, mode, record)
+        return _run_scenario(scn, binary, root, mode, record, candidate)
     finally:
         # Only this scenario's three exact names, including seed failure.
         for suffix in ("t", "py", "rs"):
             pg.drop(pg.name(f"{pg.PREFIX}{tag}_{suffix}"))
 
 
-def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool) -> dict:
+def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bool,
+                  candidate: dict | None = None) -> dict:
     tag = scn.name.replace("-", "_")
     template = pg.name(f"{pg.PREFIX}{tag}_t")
     dsn_t = pg.create(template)
@@ -2188,30 +2191,44 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
         golden_name = scn.name
         if scn.name in {"static-build", "static-paths", "static-root-link"}:
             golden_name += "-windows" if os.name == "nt" else "-linux"
-        golden = load_golden(golden_name) if mode == "golden" else None
+        # A candidate recording may create a golden the scenario never had.
+        golden = (load_golden(golden_name) if mode == "golden" and (
+            candidate is None or (GOLDENS / f"{golden_name}.json").is_file()) else None)
+        recorded = golden["responses"] if golden else None
         cases = scn.timeline(procs, holders) or scn.cases()
         for i, c in enumerate(cases):
             scn.case_in_flight = c["name"]
             if c.get("_answers"):
                 py_r, rs_r = c["_answers"]
+                rs_raw = rs_r
                 if py_r is None and mode == "golden":
-                    py_r, rs_r = golden["responses"][i], golden_scrub(rs_r)
+                    py_r, rs_r = (recorded[i] if recorded else None), golden_scrub(rs_r)
             else:
                 # The empty root redirect is chunked by uvicorn, fixed-length
                 # by hyper. Static entities use fixed lengths in both arms.
                 compare_length = isinstance(scn, StaticBuild) and c["path"] != "/"
                 py_r = call(procs["python"].port, c["method"], c["path"], c["headers"], c["body"],
                             compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
-                            chunked=c.get("chunked", False), headers_only=c.get("headers_only", False)) if "python" in procs else golden["responses"][i]
+                            chunked=c.get("chunked", False), headers_only=c.get("headers_only", False)) if "python" in procs else (recorded[i] if recorded else None)
                 rs_r = call(procs["rust"].port, c["method"], c["path"], c["headers"], c["body"],
                             compare_length=compare_length, body_bytes=isinstance(scn, StaticBuild),
                             chunked=c.get("chunked", False), headers_only=c.get("headers_only", False))
+                rs_raw = rs_r
                 if "python" not in procs:
                     rs_r = golden_scrub(rs_r)
                     if type(scn).prepare_template is not Scenario.prepare_template and not c.get("exact_seed_timestamps"):
                         # A seeded template's entries carry the seeding moment.
-                        py_r, rs_r = seed_clock_scrub(py_r), seed_clock_scrub(rs_r)
-            rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
+                        py_r, rs_r = (seed_clock_scrub(py_r) if py_r is not None else None,
+                                      seed_clock_scrub(rs_r))
+            if py_r is None and mode == "golden":
+                # A candidate recording's new scenario: nothing to compare yet.
+                rows.append({"case": c["name"], "method": c["method"], "path": c["path"][:120],
+                             "python_status": None, "rust_status": rs_r["status"], "diffs": [],
+                             "declared": c["declared"]})
+            else:
+                rows.append(compare_case(c, py_r, rs_r, golden=mode == "golden"))
+            if candidate is not None:
+                rows[-1]["_candidate"] = (c, rs_raw)
             if record:
                 rows[-1]["_python"] = normalize_response(py_r, c["path"], [])
             # A generator timeline runs its next steps before the next case.
@@ -2265,9 +2282,14 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
     # hashes, seeding timestamps) a replay cannot reproduce: golden mode
     # checks bank state only for scenarios whose bank starts empty.
     seeded_template = type(scn).prepare_template is not Scenario.prepare_template
-    if mode == "golden" and golden.get("db_state") and (not seeded_template or scn.golden_db_state):
+    checks_db = not seeded_template or scn.golden_db_state
+    if mode == "golden" and golden and golden.get("db_state") and checks_db:
         db_diffs += dbstate.diff(golden["db_state"], golden_scrub(states["rust"]))
     result = {"scenario": scn.name, "cases": rows, "db_diffs": db_diffs, "declared_db_writes": scrubbed}
+    if candidate is not None:
+        result.update(record_from_candidate(scn, golden_name, golden, rows, db_diffs,
+                                            states.get("rust") if checks_db else None,
+                                            seeded_template, binary, candidate.get("write", False)))
     if record:
         save_golden(golden_name, rows, states.get("python"))
     return result
@@ -2387,7 +2409,11 @@ def run_retired_layout_refusals(binary: Path, root: Path) -> list[dict]:
 
 
 def load_golden(name: str) -> dict:
-    data = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    return adjust_loaded_golden(name, json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8")))
+
+
+def adjust_loaded_golden(name: str, data: dict) -> dict:
+    """The host-dependent parts of a golden, recomputed on this host for replay."""
     # The replay process and its daemon share the host's cgroup/proc view.
     # Recompute only this host-dependent shape from the Python oracle. Raw
     # candidate values still pass normalize_memory; source, optional keys,
@@ -2523,6 +2549,63 @@ def save_golden(name: str, rows: list[dict], state: dict | None) -> None:
     (GOLDENS / f"{name}.json").write_text(text, encoding="utf-8", newline="\n")
 
 
+def record_from_candidate(scn: "Scenario", name: str, golden: dict | None, rows: list[dict],
+                          db_diffs: list[str], state: dict | None, seeded_template: bool,
+                          binary: Path, write: bool) -> dict:
+    """The candidate golden a golden-mode run just observed, classed against
+    the committed one (``candidate_record``) and written only when asked.
+
+    Responses are normalized and scrubbed exactly as ``save_golden`` does an
+    oracle's; ``db_state`` is the Rust bank's where replay checks bank state
+    (``state``), otherwise the committed value is kept. Refused (nothing
+    written) when an undeclared case answered a deferral, or when the new
+    golden, loaded as replay loads it, would not replay against the very run
+    it came from."""
+    captured = [row.pop("_candidate") for row in rows if "_candidate" in row]
+    diffs = [f"{row['case']}: {d}" for row in rows for d in row["diffs"]]
+    diffs += [f"db {d}" for d in db_diffs]
+    kind = candidate_record.classify(golden is not None, diffs)
+    new = golden_scrub({
+        "normalizers": {"db_nondeterministic": [list(k) + [v] for k, v in DB_NONDETERMINISTIC.items()],
+                        "db_declared": [list(r) for r in DB_DECLARED],
+                        "health": "normalize_health in run.py",
+                        "golden": "golden_scrub in run.py"},
+        "responses": [normalize_response(raw, c["path"], []) for c, raw in captured],
+        "db_state": state if state is not None else (golden or {}).get("db_state")})
+    new[candidate_record.PROVENANCE_KEY] = candidate_record.provenance(binary)
+    out = {"recorded": kind, "written": False}
+    for c, raw in captured:
+        mark = None if c["declared"] else candidate_record.deferral(raw)
+        if mark:
+            out["refused"] = f"case {c['name']} answered a deferral ({mark})"
+            return out
+    loaded = adjust_loaded_golden(name, copy.deepcopy(new))
+    for i, (c, raw) in enumerate(captured):
+        want, got = loaded["responses"][i], golden_scrub(raw)
+        if seeded_template and not c.get("exact_seed_timestamps") and not c.get("_answers"):
+            want, got = seed_clock_scrub(want), seed_clock_scrub(got)
+        again = compare_case(c, want, got, golden=True)["diffs"]
+        if again:
+            out["refused"] = (f"case {c['name']}'s entry would not replay against the run it "
+                              f"came from: {'; '.join(map(str, again[:3]))}")
+            return out
+    if state is not None:
+        again = dbstate.diff(loaded["db_state"], golden_scrub(state))
+        if again:
+            out["refused"] = f"the bank state would not replay: {'; '.join(again[:3])}"
+            return out
+    text = json.dumps(new, indent=1, sort_keys=True) + "\n"
+    leaked = [p for p in _machine_paths() if p in text]
+    if leaked:
+        out["refused"] = f"the golden would carry machine paths {leaked}"
+        return out
+    if write and kind != "unchanged":
+        GOLDENS.mkdir(exist_ok=True)
+        (GOLDENS / f"{name}.json").write_text(text, encoding="utf-8", newline="\n")
+        out["written"] = True
+    return out
+
+
 def summarize(results: list[dict], refusals: list[dict]) -> tuple[int, int, int]:
     cases = sum(len(r["cases"]) for r in results) + len(refusals)
     diff_cases = (sum(1 for r in results for c in r["cases"] if c["diffs"])
@@ -2551,7 +2634,17 @@ def main() -> int:
     ap.add_argument("--fixture", action="store_true", help="use the offline embedding fixture in both arms")
     ap.add_argument("--settle-with-search", action="store_true",
                     help="use successful blank search readiness when testing health's db field")
+    ap.add_argument("--record-candidate", action="store_true",
+                    help="golden: re-record each scenario from the candidate (a dry run that "
+                         "shows the difference unless --write is given)")
+    ap.add_argument("--write", action="store_true", help="with --record-candidate: write")
     args = ap.parse_args()
+    if args.record_candidate and args.mode != "golden":
+        ap.error("--record-candidate belongs to golden mode")
+    if args.write and not args.record_candidate:
+        ap.error("--write needs --record-candidate")
+    if args.record_candidate and os.environ.get("PSEUDOLIFE_DAEMON_MUTANT"):
+        ap.error("never record a golden from a mutant: unset PSEUDOLIFE_DAEMON_MUTANT")
     if args.golden_dir:
         GOLDENS = args.golden_dir.resolve()
         GOLDENS.mkdir(parents=True, exist_ok=True)
@@ -2580,7 +2673,8 @@ def main() -> int:
                 continue
             started = time.monotonic()
             try:
-                r = run_scenario(scn, args.rust_bin, root, mode, args.record)
+                r = run_scenario(scn, args.rust_bin, root, mode, args.record,
+                                 {"write": args.write} if args.record_candidate else None)
             except Exception as exc:  # a scenario that cannot complete is a failure, never a pass
                 answered = [compare_case(c, *c["_answers"]) for c in getattr(scn, "partial", [])]
                 r = {"scenario": n, "cases": answered + [{"case": "scenario error",
@@ -2597,6 +2691,11 @@ def main() -> int:
                   flush=True)
             for d in r["db_diffs"][:12]:
                 print(f"  DB DIFF {d[:400]}", flush=True)
+            if args.record_candidate:
+                if "recorded" not in r:
+                    r["recorded"], r["refused"] = "error", "the scenario did not complete"
+                print(candidate_record.summary_line(n, r["recorded"], args.write, r.get("refused")),
+                      flush=True)
             if args.out:
                 args.out.write_text(json.dumps({"partial": results}, indent=1), encoding="utf-8")
         refusals = (run_refusals(args.rust_bin, root) + run_retired_layout_refusals(args.rust_bin, root)
@@ -2660,6 +2759,13 @@ def main() -> int:
     if args.out:
         args.out.write_text(json.dumps({"summary": summary, "scenarios": results, "refusals": refusals},
                                        indent=1), encoding="utf-8")
+    if args.record_candidate:
+        print("Goldens other than the static-* -windows/-linux pairs are shared by both OSes: "
+              "replay each written one on the other OS before landing it (python "
+              "rust/daemon/harness/run.py golden --rust-bin <pseudolife-daemon> --only <scenario>)")
+        pending = [r for r in results if r.get("refused")
+                   or (r.get("recorded") in ("changed", "new") and not r.get("written"))]
+        return 1 if pending else 0
     return 1 if diff_cases or db else 0
 
 

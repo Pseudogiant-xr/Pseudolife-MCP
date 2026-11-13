@@ -209,6 +209,7 @@ Rust daemon; the test login (``pgdisposable``) for the banks.
 from __future__ import annotations
 
 import argparse
+import copy
 import difflib
 import hashlib
 import json
@@ -223,6 +224,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import candidate_record  # noqa: E402
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
@@ -6487,21 +6489,22 @@ def prepare_template(scn: dict, tag: str, root: Path, owned: list[str],
 
 
 def run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
-                 tol: dict, mutant: str | None = None) -> dict:
+                 tol: dict, mutant: str | None = None, candidate: dict | None = None) -> dict:
     owned = []
     try:
-        return _run_scenario(name, binary, root, mode, record, tol, mutant, owned)
+        return _run_scenario(name, binary, root, mode, record, tol, mutant, owned, candidate)
     finally:
         for database in reversed(owned):
             pg.drop(database)
 
 
 def _run_scenario(name: str, binary: Path, root: Path, mode: str, record: bool,
-                  tol: dict, mutant: str | None, owned: list[str]) -> dict:
+                  tol: dict, mutant: str | None, owned: list[str],
+                  candidate: dict | None = None) -> dict:
     scn = SCENARIOS[name]
     tag = name.replace("-", "_")
     if mode == "golden":
-        return run_golden(name, binary, root, tol, owned)
+        return run_golden(name, binary, root, tol, owned, candidate, mutant)
     stubs = start_stubs(scn, ("seed", "python", "rust"))
     try:
         return _run_live(name, scn, tag, binary, root, record, tol, mutant, owned, stubs)
@@ -6728,21 +6731,82 @@ def unpack_numeric(packed: dict, into: dict) -> dict:
     return into
 
 
-def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str]) -> dict:
+BOOT_PROBES = ("SELECT count(*) FROM retrieval_events WHERE query_text = 'warmup probe' "
+               "AND origin = 'search'")
+
+
+def settle_boot_probes(dsn: str, boots: int, deadline_s: float = 120.0) -> list[str]:
+    """Wait until ``boots`` startup warmup probes have logged their event,
+    then keep only the first, as ``restart_sides`` does.
+
+    The golden replay boots its bank twice, and each boot's probe runs on its
+    own task after init (``wait_warmups``), so without this step 0 held one
+    or two probe rows and a sequence one or two ahead depending on timing
+    (#1378). Once every probe has landed, the bank holds one probe row and a
+    sequence ``boots`` ahead on every run, which a golden recorded through
+    this same path can assert exactly."""
+    import psycopg
+    end = time.monotonic() + deadline_s
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        landed = conn.execute(BOOT_PROBES).fetchone()[0]
+        while landed < boots and time.monotonic() < end:
+            time.sleep(0.25)
+            landed = conn.execute(BOOT_PROBES).fetchone()[0]
+        conn.execute("DELETE FROM retrieval_events WHERE query_text = 'warmup probe' "
+                     "AND id > (SELECT COALESCE(min(id), 0) FROM retrieval_events "
+                     "WHERE query_text = 'warmup probe')")
+    if landed < boots:
+        return [f"warmup: {landed} of {boots} boots' startup probe events landed "
+                f"within {deadline_s:g}s"]
+    return []
+
+
+def _ops_key(ops) -> str:
+    return json.dumps(list(ops), sort_keys=True)
+
+
+def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str],
+               candidate: dict | None = None, mutant: str | None = None) -> dict:
     """Replay a recorded scenario against the Rust daemon alone, from a bank
     its own constructor builds. Seeded scenarios need the Python daemon to
-    seed and are skipped (declared)."""
+    seed and are skipped (declared).
+
+    ``candidate`` (``{"write": bool}``) re-records the golden from this run:
+    the steps come from the scenario's own ops, each step's answer, packed
+    state and new numerics become what the snapshot asserts, and the result
+    says whether it is unchanged, changed (the replay's own differences) or
+    new (``record_from_candidate``). ``mutant`` replays against a deliberate
+    break compiled into a ``--features mutants`` build."""
     scn = SCENARIOS[name]
     if scn["seed"]:
         return {"scenario": name, "skipped": "seeded through the Python daemon", "steps": [],
                 "stats": {}}
     if scn.get("live_only"):
         return {"scenario": name, "skipped": scn["live_only"], "steps": [], "stats": {}}
-    golden = json.loads((GOLDENS / f"{name}.json").read_text(encoding="utf-8"))
+    console_dream = name.startswith("console-dream-")
+    path = GOLDENS / f"{name}.json"
+    if candidate is not None and console_dream:
+        return {"scenario": name, "steps": [], "stats": {},
+                "refused": "its replay seeds the bank from the recording itself "
+                           "(w2e_console_dream.seed_replay), so the candidate cannot record it"}
+    golden = (json.loads(path.read_text(encoding="utf-8"))
+              if candidate is None or path.is_file() else None)
+    recs = golden["steps"] if golden else None
+    ops = [r["op"] for r in recs] if recs else []
+    ops_changed = None
+    if candidate is not None:
+        ops = [{"op": "init"}] + scn["ops"]
+        if recs is not None and _ops_key(r["op"] for r in recs) != _ops_key(ops):
+            # The steps line up only to the first changed operation: compare
+            # those, and report every later step as new.
+            same = 0
+            while (same < min(len(recs), len(ops))
+                   and _ops_key([recs[same]["op"]]) == _ops_key([ops[same]])):
+                same += 1
+            ops_changed, recs = same, recs[:same]
     tag = name.replace("-", "_")
     db = pg.name(f"pl_cf_w2e_{tag}_rs")
     owned.append(db)
-    console_dream = name.startswith("console-dream-")
     # These recordings start from the Python constructor's empty template,
     # including its declared migration metadata, just as the live run does.
     stubs = start_stubs(scn, ("seed", "rust") if console_dream else ("rust",))
@@ -6754,26 +6818,34 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
     config = scenario_config(scn, stubs.get("rust")) if console_dream else scn.get("config")
     home = daemons.make_home(root, f"{tag}-rs", config)
     renv = w1a.rust_env(side_env(scn, dsn, extractor_env(scn, stubs.get("rust"))))
+    if mutant:
+        renv["PSEUDOLIFE_DAEMON_MUTANT"] = mutant
     d = daemons.rust_daemon(binary, home, daemons.free_port(), daemons.base_env(home, renv))
     steps, stats, numeric = [], {}, {}
+    boot_diffs: list[str] = []
     try:
         # The oracle's template was booted once to seed it and once to run,
         # so its writer-lease epoch is 2: boot the Rust bank twice as well.
         d.start(300)
         w1a.wait_settled([d.port], token=TOKEN)
         if not console_dream:
+            probes = warmup_expected(scn)
+            if probes:
+                boot_diffs += settle_boot_probes(dsn, 1)
             d.stop()
             d.start(300)
             w1a.wait_settled([d.port], token=TOKEN)
+            if probes:
+                boot_diffs += settle_boot_probes(dsn, 2)
         elif warmup_expected(scn):
             diffs = wait_warmups({"rust": dsn}, {"rust": before})
             if diffs:
                 raise AssertionError(diffs)
         client = Mcp(d.port)
         client.init()
-        for i, rec in enumerate(golden["steps"]):
-            op = rec["op"]
-            row = {"step": i, "op": op, "diffs": []}
+        for i, op in enumerate(ops):
+            rec = recs[i] if recs and i < len(recs) else None
+            row = {"step": i, "op": op, "diffs": [] if i else list(boot_diffs)}
             if op["op"] == "console_dream_concurrent":
                 rs = w2e_console_dream.concurrent(d.port, dsn, client, stubs["rust"],
                                                   sys.modules[__name__])
@@ -6797,19 +6869,88 @@ def run_golden(name: str, binary: Path, root: Path, tol: dict, owned: list[str])
                                       or op.get("name") == "memory_dream"):
                     rs = dream_tokens(rs, ts_tokens(raw))
                 row["rust"] = rename_prefixes(rs, er)
-                row["diffs"] += compare_response(rec["python"], row["rust"], tol, stats)
-            unpack_numeric(rec["numeric_new"], numeric)
-            row["diffs"] += compare_numeric(numeric, nr, tol, stats)
+                if rec is not None:
+                    # A candidate recording names its answer ``response``; an
+                    # oracle recording, ``python``.
+                    want = rec["response"] if "response" in rec else rec["python"]
+                    row["diffs"] += compare_response(want, row["rust"], tol, stats)
             got = pack(sr, full=i == 0)
-            if i:
-                # Recordings that predate a write table are compared on theirs.
-                got["rows"] = {k: v for k, v in got["rows"].items() if k in rec["state"]["rows"]}
-            row["diffs"] += [f"db {x}" for x in state_and_events_diff(rec["state"], got)]
+            if candidate is not None:
+                row["_state"], row["_numeric"] = copy.deepcopy(got), nr
+            if rec is not None:
+                unpack_numeric(rec["numeric_new"], numeric)
+                row["diffs"] += compare_numeric(numeric, nr, tol, stats)
+                if i:
+                    # Recordings that predate a write table are compared on theirs.
+                    got["rows"] = {k: v for k, v in got["rows"].items() if k in rec["state"]["rows"]}
+                row["diffs"] += [f"db {x}" for x in state_and_events_diff(rec["state"], got)]
             steps.append(row)
     finally:
         d.stop()
         close_stubs(stubs)
-    return {"scenario": name, "steps": steps, "stats": stats}
+    result = {"scenario": name, "steps": steps, "stats": stats}
+    if candidate is not None:
+        result.update(record_from_candidate(name, path, golden, steps, tol, binary,
+                                            candidate.get("write", False), ops_changed))
+    return result
+
+
+def record_from_candidate(name: str, path: Path, golden: dict | None, steps: list[dict],
+                          tol: dict, binary: Path, write: bool, ops_changed: int | None) -> dict:
+    """The candidate golden ``run_golden`` just observed, classed against the
+    committed one and written only when asked. ``ops_changed`` is the first
+    step whose operation differs from the recording's, if any. Refused
+    (nothing written) when an answer is a deferral, a step never answered, or
+    the new entry would not replay against the very run it came from."""
+    diffs = [f"step {s['step']}: {d}" for s in steps for d in s["diffs"]]
+    if ops_changed is not None:
+        diffs.insert(0, f"the scenario's operations differ from the recording's from step "
+                        f"{ops_changed} on ({len(golden['steps'])} recorded, {len(steps)} now)")
+    kind = candidate_record.classify(golden is not None, diffs)
+    seen: set = set()
+    new = {"scenario": name, "normalizers": "harness/w2e.py normalize_state, pack",
+           candidate_record.PROVENANCE_KEY: candidate_record.provenance(binary),
+           "steps": [{"op": s["op"], "response": s.get("rust"), "state": s["_state"],
+                      "numeric_new": pack_numeric(s["_numeric"], seen)} for s in steps]}
+    refused = None
+    for s in steps:
+        mark = candidate_record.deferral(s.get("rust"))
+        if mark:
+            refused = f"step {s['step']} answered a deferral ({mark})"
+            break
+        if s["op"]["op"] != "init" and s.get("rust") is None:
+            refused = f"step {s['step']} has no answer to record"
+            break
+    if refused is None:
+        numeric: dict = {}
+        for s, rec in zip(steps, new["steps"]):
+            again = []
+            if s.get("rust") is not None:
+                again += compare_response(rec["response"], s["rust"], tol, {})
+            unpack_numeric(rec["numeric_new"], numeric)
+            again += compare_numeric(numeric, s["_numeric"], tol, {})
+            again += state_and_events_diff(rec["state"], s["_state"])
+            if again:
+                refused = (f"step {s['step']}'s entry would not replay against the run it came "
+                           f"from: {'; '.join(again[:3])}")
+                break
+    for s in steps:
+        s.pop("_state", None)
+        s.pop("_numeric", None)
+    out = {"recorded": kind, "written": False, "differences": len(diffs)}
+    if ops_changed is not None:
+        out["ops_changed"] = diffs[0]
+    if refused:
+        out["refused"] = refused
+    elif write and kind != "unchanged":
+        text = json.dumps(new, sort_keys=True)
+        for leaked in w1a._machine_paths():
+            if leaked in text:
+                out["refused"] = f"the recording would carry a machine path ({leaked[:40]}...)"
+                return out
+        candidate_record.write_json(path, new, newline_at_end=True)
+        out["written"] = True
+    return out
 
 
 # A search over entries each side stored itself, before and after a
@@ -6864,7 +7005,19 @@ def main() -> int:
     ap.add_argument("--out", type=Path)
     ap.add_argument("--record", action="store_true")
     ap.add_argument("--mutants", nargs="*", choices=MUTANTS)
+    ap.add_argument("--mutant", choices=MUTANTS,
+                    help="golden: replay against this deliberate break (a --features mutants build)")
+    ap.add_argument("--record-candidate", action="store_true",
+                    help="golden: re-record each scenario from the candidate (a dry run that "
+                         "shows the difference unless --write is given)")
+    ap.add_argument("--write", action="store_true", help="with --record-candidate: write")
     args = ap.parse_args()
+    if (args.record_candidate or args.write or args.mutant) and args.mode != "golden":
+        ap.error("--record-candidate, --write and --mutant belong to golden mode")
+    if args.write and not args.record_candidate:
+        ap.error("--write needs --record-candidate")
+    if args.record_candidate and args.mutant:
+        ap.error("never record a golden from a mutant")
     args.rust_bin = args.rust_bin.resolve()
     root = run_root()
     names = args.only or list(SCENARIOS)
@@ -6889,11 +7042,17 @@ def main() -> int:
             args.out.write_text(json.dumps({"complete": False, "planned_scenarios": names,
                                            "scenarios": results}, default=str), encoding="utf-8")
         r = run_scenario(n, args.rust_bin, root, "golden" if args.mode == "golden" else "live",
-                         args.record, tol)
+                         args.record, tol, mutant=args.mutant,
+                         candidate={"write": args.write} if args.record_candidate else None)
         results.append(r)
         for s in r["steps"]:
             for d in s["diffs"][:6]:
                 print(f"DIFF [{n}] step {s['step']} {json.dumps(s['op'])[:90]}: {d}")
+        if args.record_candidate:
+            if r.get("ops_changed"):
+                print(f"DIFF [{n}] {r['ops_changed']}")
+            print(candidate_record.summary_line(n, r.get("recorded", "skipped"), args.write,
+                                                r.get("refused") or r.get("skipped")), flush=True)
     steps = sum(len(r["steps"]) for r in results)
     diff_steps = sum(1 for r in results for s in r["steps"] if s["diffs"])
     stats = {}
@@ -6908,6 +7067,15 @@ def main() -> int:
                                        default=str), encoding="utf-8")
     if args.mode == "calibrate":
         return 0
+    if args.record_candidate:
+        # The golden is shared by both OSes: replay it on the other one too.
+        print("w2e goldens are shared by Windows and Linux: replay each written scenario on the "
+              "other OS before landing it (python rust/daemon/harness/w2e.py golden --rust-bin "
+              "<pseudolife-daemon> --only <scenario>)")
+        refused = [r for r in results if r.get("refused")]
+        pending = [r for r in results if r.get("recorded") in ("changed", "new")
+                   and not r.get("written")]
+        return 1 if refused or pending else 0
     return 1 if diff_steps else 0
 
 

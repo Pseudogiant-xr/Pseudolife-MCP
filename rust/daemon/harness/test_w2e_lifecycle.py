@@ -1154,3 +1154,215 @@ def test_continued_session_paragraphs_normalize_only_on_an_exact_match(monkeypat
                   py + " Extra."):
         assert hooks._continued_token(other) == other
     assert hooks._continued_token(None) is None
+
+
+# ---- golden --record-candidate: re-recording a daemon golden from the candidate ----
+
+
+class _GoldenDaemon:
+    def __init__(self, *args, **kwargs):
+        self.port = 1
+
+    def start(self, timeout):
+        pass
+
+    def stop(self):
+        pass
+
+
+def _w2e_rig(harness, monkeypatch, tmp_path, answers, name="rec-probe", config=None):
+    """A fake unseeded scenario ``name`` whose ops answer ``answers`` in turn on
+    a fake Rust daemon; its golden lives under ``tmp_path / goldens``."""
+    events = []
+    goldens = tmp_path / "goldens"
+    goldens.mkdir(exist_ok=True)
+    monkeypatch.setattr(harness, "GOLDENS", goldens)
+    ops = [harness.sql(f"SELECT {i}") for i in range(len(answers))]
+    monkeypatch.setitem(harness.SCENARIOS, name, {"config": config, "seed": [], "ops": ops})
+    monkeypatch.setattr(harness.pg, "create", lambda name, **kw: name)
+    state = {"rows": {}, "catalog": {"sequences": []}}
+    monkeypatch.setattr(harness.dbstate, "dump", lambda dsn: state)
+    monkeypatch.setattr(harness.daemons, "rust_daemon", _GoldenDaemon)
+    monkeypatch.setattr(harness.daemons, "make_home", lambda root, tag, config: root)
+    monkeypatch.setattr(harness.w1a, "wait_settled", lambda *a, **kw: None)
+    monkeypatch.setattr(harness, "settle_boot_probes",
+                        lambda dsn, boots: events.append(("probes", boots)) or [])
+    monkeypatch.setattr(harness, "Mcp", lambda port: SimpleNamespace(init=lambda: None))
+    queue = list(answers)
+    monkeypatch.setattr(harness, "run_op", lambda *a: queue.pop(0))
+    monkeypatch.setattr(harness, "normalize_state",
+                        lambda raw, before, *ts: (json.loads(json.dumps(raw)), {}, {}))
+    binary = tmp_path / "pseudolife-daemon"
+    binary.write_bytes(b"candidate")
+    return goldens / f"{name}.json", binary, events
+
+
+def _answer(value):
+    return {"isError": False, "value": value}
+
+
+def _golden_run(harness, tmp_path, name="rec-probe", candidate=None):
+    return harness.run_golden(name, tmp_path / "pseudolife-daemon", tmp_path, {}, [], candidate)
+
+
+def test_w2e_candidate_recording_of_a_new_scenario_writes_only_when_asked(harness, monkeypatch,
+                                                                          tmp_path):
+    answers = [_answer({"id": 1}), _answer({"id": 2})]
+    path, binary, events = _w2e_rig(harness, monkeypatch, tmp_path, list(answers))
+    dry = _golden_run(harness, tmp_path, candidate={"write": False})
+    assert dry["recorded"] == "new" and not dry["written"] and not path.exists()
+    # Both boots' startup probes are settled before step 0 (#1378).
+    assert events == [("probes", 1), ("probes", 2)]
+    _w2e_rig(harness, monkeypatch, tmp_path, list(answers))
+    wrote = _golden_run(harness, tmp_path, candidate={"write": True})
+    assert wrote["recorded"] == "new" and wrote["written"]
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    assert [s.get("response") for s in golden["steps"]] == [None, *answers]
+    stamp = golden["recorded_from_candidate"]
+    assert stamp["candidate_sha256"] == __import__("hashlib").sha256(b"candidate").hexdigest()
+    assert stamp["platform"] in ("windows", "linux") and "commit" in stamp
+    # The recording replays green against the same candidate behaviour.
+    _w2e_rig(harness, monkeypatch, tmp_path, list(answers))
+    replay = _golden_run(harness, tmp_path)
+    assert [s["diffs"] for s in replay["steps"]] == [[], [], []]
+
+
+def test_w2e_candidate_recording_reports_a_change_and_a_dry_run_keeps_the_file(
+        harness, monkeypatch, tmp_path):
+    path, _, _ = _w2e_rig(harness, monkeypatch, tmp_path, [_answer("before")])
+    assert _golden_run(harness, tmp_path, candidate={"write": True})["written"]
+    committed = path.read_bytes()
+    _w2e_rig(harness, monkeypatch, tmp_path, [_answer("after")])
+    dry = _golden_run(harness, tmp_path, candidate={"write": False})
+    assert dry["recorded"] == "changed" and any(dry["steps"][1]["diffs"])
+    assert path.read_bytes() == committed
+    _w2e_rig(harness, monkeypatch, tmp_path, [_answer("before")])
+    same = _golden_run(harness, tmp_path, candidate={"write": True})
+    assert same["recorded"] == "unchanged" and not same["written"]
+    assert path.read_bytes() == committed
+
+
+def test_w2e_candidate_recording_compares_the_steps_that_still_line_up(harness, monkeypatch,
+                                                                       tmp_path):
+    path, _, _ = _w2e_rig(harness, monkeypatch, tmp_path, [_answer("kept")])
+    assert _golden_run(harness, tmp_path, candidate={"write": True})["written"]
+    # The scenario gains an operation: step 1 still compares, step 2 is new.
+    _w2e_rig(harness, monkeypatch, tmp_path, [_answer("kept"), _answer("added")])
+    dry = _golden_run(harness, tmp_path, candidate={"write": False})
+    assert dry["recorded"] == "changed"
+    assert "from step 2 on (2 recorded, 3 now)" in dry["ops_changed"]
+    assert [s["diffs"] for s in dry["steps"]] == [[], [], []]
+
+
+@pytest.mark.parametrize("answer", [
+    {"isError": True, "value": {"error": "not_implemented", "path": "/api/x"}},
+    None,
+])
+def test_w2e_candidate_recording_refuses_a_deferral_or_a_missing_answer(harness, monkeypatch,
+                                                                        tmp_path, answer):
+    path, _, _ = _w2e_rig(harness, monkeypatch, tmp_path, [answer])
+    r = _golden_run(harness, tmp_path, candidate={"write": True})
+    assert r["refused"] and not r["written"] and not path.exists()
+
+
+def test_w2e_candidate_recording_refuses_a_scenario_that_seeds_from_its_recording(
+        harness, monkeypatch, tmp_path):
+    _w2e_rig(harness, monkeypatch, tmp_path, [_answer(1)], name="console-dream-probe")
+    r = _golden_run(harness, tmp_path, name="console-dream-probe", candidate={"write": True})
+    assert "seeds the bank from the recording" in r["refused"]
+
+
+def test_w2e_oracle_goldens_replay_and_provenance_is_never_compared(harness, monkeypatch,
+                                                                    tmp_path):
+    path, _, _ = _w2e_rig(harness, monkeypatch, tmp_path, [_answer({"n": 1})])
+    oracle = {"scenario": "rec-probe", "normalizers": "harness/w2e.py normalize_state, pack",
+              "steps": [{"op": {"op": "init"}, "python": None, "numeric_new": {},
+                         "state": {"rows": {}, "catalog": {"sequences": []}}},
+                        {"op": harness.sql("SELECT 0"), "python": _answer({"n": 1}),
+                         "numeric_new": {}, "state": {"rows": {}, "catalog": {"sequences": []}}}]}
+    path.write_text(json.dumps(oracle), encoding="utf-8")
+    assert [s["diffs"] for s in _golden_run(harness, tmp_path)["steps"]] == [[], []]
+    oracle["recorded_from_candidate"] = {"commit": "f" * 40, "platform": "elsewhere"}
+    path.write_text(json.dumps(oracle), encoding="utf-8")
+    _w2e_rig(harness, monkeypatch, tmp_path, [_answer({"n": 1})])
+    assert [s["diffs"] for s in _golden_run(harness, tmp_path)["steps"]] == [[], []]
+    _w2e_rig(harness, monkeypatch, tmp_path, [_answer({"n": 2})])
+    assert _golden_run(harness, tmp_path)["steps"][1]["diffs"]  # and a change still shows
+
+
+def test_boot_probes_are_settled_only_while_the_retrieval_log_is_on(harness, monkeypatch,
+                                                                     tmp_path):
+    _, _, events = _w2e_rig(harness, monkeypatch, tmp_path, [_answer(1)],
+                            config="memory:\n  retrieval_log:\n    enabled: false\n")
+    _golden_run(harness, tmp_path, candidate={"write": False})
+    assert events == []
+
+
+def _w1a_case(path="/api/thing", declared=None):
+    return {"name": "thing", "method": "GET", "path": path, "headers": {}, "body": None,
+            "declared": declared}
+
+
+def _w1a_raw(status=200, body=None):
+    body = {"answer": 1} if body is None else body
+    return {"status": status, "headers": {"content-type": "application/json; charset=utf-8"},
+            "json": body, "raw": json.dumps(body)}
+
+
+def _w1a(monkeypatch, tmp_path):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parent))
+    w1a = importlib.import_module("run")
+    monkeypatch.setattr(w1a, "GOLDENS", tmp_path / "goldens")
+    binary = tmp_path / "pseudolife-daemon"
+    binary.write_bytes(b"candidate")
+    return w1a, binary
+
+
+def _w1a_record(w1a, binary, golden, raw, *, write, case=None, diffs=()):
+    case = case or _w1a_case()
+    rows = [{"case": case["name"], "diffs": list(diffs), "_candidate": (case, raw)}]
+    return w1a.record_from_candidate(None, "probe", golden, rows, [], None, False, binary, write)
+
+
+def test_w1a_candidate_recording_writes_a_golden_replay_accepts(monkeypatch, tmp_path):
+    w1a, binary = _w1a(monkeypatch, tmp_path)
+    dry = _w1a_record(w1a, binary, None, _w1a_raw(), write=False)
+    assert dry == {"recorded": "new", "written": False}
+    assert not (tmp_path / "goldens" / "probe.json").exists()
+    wrote = _w1a_record(w1a, binary, None, _w1a_raw(), write=True)
+    assert wrote == {"recorded": "new", "written": True}
+    golden = w1a.load_golden("probe")
+    assert golden["recorded_from_candidate"]["platform"] in ("windows", "linux")
+    row = w1a.compare_case(_w1a_case(), golden["responses"][0], w1a.golden_scrub(_w1a_raw()),
+                           golden=True)
+    assert row["diffs"] == []
+    other = w1a.compare_case(_w1a_case(), golden["responses"][0],
+                             w1a.golden_scrub(_w1a_raw(body={"answer": 2})), golden=True)
+    assert other["diffs"]
+
+
+def test_w1a_candidate_recording_classes_changes_and_refuses_undeclared_deferrals(monkeypatch,
+                                                                                  tmp_path):
+    w1a, binary = _w1a(monkeypatch, tmp_path)
+    committed = {"responses": [{}], "db_state": None}
+    assert _w1a_record(w1a, binary, committed, _w1a_raw(), write=False)["recorded"] == "unchanged"
+    changed = _w1a_record(w1a, binary, committed, _w1a_raw(), write=False, diffs=["status"])
+    assert changed == {"recorded": "changed", "written": False}
+    deferred = _w1a_raw(501, {"error": w1a.NOT_IMPLEMENTED, "path": "/api/thing"})
+    deferred["headers"].update({"cache-control": "no-store", "x-content-type-options": "nosniff"})
+    refused = _w1a_record(w1a, binary, committed, deferred, write=True, diffs=["status"])
+    assert "deferral" in refused["refused"] and not refused["written"]
+    assert not (tmp_path / "goldens" / "probe.json").exists()
+    # A declared case's 501 is asserted by the replay itself, not the golden.
+    declared = _w1a_record(w1a, binary, committed, deferred, write=False,
+                           case=_w1a_case(declared="owned by a later slice"), diffs=["status"])
+    assert "refused" not in declared
+
+
+def test_record_candidate_flags_belong_to_golden_mode(monkeypatch, tmp_path):
+    w1a, binary = _w1a(monkeypatch, tmp_path)
+    for argv in (["live", "--record-candidate"], ["golden", "--write"]):
+        monkeypatch.setattr(sys, "argv", ["run.py", *argv, "--rust-bin", str(binary)])
+        with pytest.raises(SystemExit) as refused:
+            w1a.main()
+        assert refused.value.code == 2
