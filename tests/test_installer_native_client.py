@@ -163,6 +163,8 @@ def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, releas
         "FORBIDDEN_CALLS": _p((tmp_path / "forbidden-calls")),
         "PSEUDOLIFE_NATIVE_ARCHIVE_URL": _p(base),
         "PSEUDOLIFE_SHIM_LAUNCHER": _p(launcher),
+        # The real client takes both layout overrides or neither.
+        "PSEUDOLIFE_SHIM_RUNTIMES": _p(home / "share" / "pseudolife-mcp" / "runtimes"),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
     }
     (tmp_path / "tmp").mkdir(exist_ok=True)
@@ -313,13 +315,16 @@ def test_the_real_client_installs_and_answers_the_installer_steps(tmp_path):
     # rule (10 = this machine) and a JSON field read, then the install.
     body = (
         "native_stage\n"
-        "rc=0; native_helper is-loopback http://127.0.0.01:8765 || rc=$?; echo \"LOOPBACK=$rc\"\n"
+        "rc=0; native_helper is-loopback 'http://[::ffff:127.0.0.1]:8765' || rc=$?; echo \"LOOPBACK=$rc\"\n"
+        "rc=0; native_helper is-loopback http://127.0.0.01:8765 || rc=$?; echo \"LEADING_ZERO=$rc\"\n"
         "echo \"FIELD=$(printf '%s' '{\"action\": \"start\"}' | native_helper json-field action)\"\n"
         "ensure_shim; echo \"OK=$SHIM_OK\"\n"
     )
     result = _run(tmp_path, body, real=True)
     assert result.returncode == 0, result.stderr + result.stdout
     assert "LOOPBACK=10" in result.stdout, result.stdout
+    # As Python's ipaddress reads it: a leading zero is not this machine.
+    assert "LEADING_ZERO=11" in result.stdout, result.stdout
     assert "FIELD=start" in result.stdout, result.stdout
     assert "OK=1" in result.stdout, result.stdout
     assert f"Native client {VERSION} installed at" in result.stdout
