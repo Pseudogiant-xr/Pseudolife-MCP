@@ -48,6 +48,14 @@
     "backup-discovery-generic-errno-class",
     "backup-owner-name-windows"
   ],
+  "conductor_watch": [
+    "conductor-watch-age-zero-admitted",
+    "conductor-watch-cr-kept",
+    "conductor-watch-foreign-exit-0",
+    "conductor-watch-start-ignored",
+    "conductor-watch-stop-before-owner",
+    "conductor-watch-stop-file-kept"
+  ],
   "connect": [
     "connect-backup-stamp-millis",
     "connect-cache-url-last",

@@ -23,7 +23,7 @@ fn proc_stat_is_zombie(stat: std::io::Result<Vec<u8>>) -> bool {
 
 /// Probe another process without signalling or acquiring ownership of it.
 #[cfg_attr(windows, allow(unsafe_code))]
-fn pid_alive(pid: u32) -> bool {
+pub(crate) fn pid_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
         use windows_sys::Win32::{

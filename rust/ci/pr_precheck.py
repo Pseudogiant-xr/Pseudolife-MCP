@@ -33,6 +33,7 @@ PYTHON_ROOTS = {
     "tunnel": ("tunnel_cli",),
     "console": ("console_cli",),
     "restore": ("restore_cli", "docker_backup_restore"),
+    "conductor_watch": ("conductor_watch_cli",),
     "update": ("update_cli",),
     "audit": ("board_audit_cli",),
     "backup": ("backup_cli",),

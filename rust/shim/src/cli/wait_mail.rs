@@ -2,6 +2,7 @@
 //! These markers have no lock or transaction in the oracle; preserve its races.
 #[path = "wait_mail_args.rs"]
 mod args;
+pub(crate) use args::pathlib;
 use std::{
     cmp::Ordering,
     ffi::OsString,
@@ -148,7 +149,7 @@ fn key_name(bytes: &[u8]) -> bool {
             .iter()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
 }
-fn digest_path(session: &OsString) -> Option<PathBuf> {
+pub(crate) fn digest_path(session: &OsString) -> Option<PathBuf> {
     if session.is_empty() {
         return None;
     }
