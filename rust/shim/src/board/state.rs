@@ -176,6 +176,12 @@ pub(crate) fn open_detailed_with_write(
 }
 pub fn create(path: &Path) -> Result<PrivateFile> {
     crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+    // Owner-only from creation on Windows: the folder may be one this
+    // client uses without protecting it (see private_dir).
+    #[cfg(windows)]
+    let file = crate::credentials::windows_security::create_owner_only(path)
+        .map_err(|_| "state_unavailable")?;
+    #[cfg(unix)]
     let file = options(true, true)
         .open(path)
         .map_err(|_| "state_unavailable")?;
@@ -284,7 +290,8 @@ fn marker_refusal_windows(
             let me = crate::credentials::windows_security::current_user_name()
                 .unwrap_or_else(|| "<this account>".into());
             format!(
-                "pseudolife-mcp: ignoring {shown}: {writer} can change or delete it, so it could forge or suppress board wakes for this session. Fix: make {folder} private to this account (icacls \"{folder}\" /inheritance:r /grant:r \"{me}:(OI)(CI)F\"), then delete the file; the plugin hooks write it again."
+                "pseudolife-mcp: ignoring {shown}: {writer} can change or delete it, so it could forge or suppress board wakes for this session. Fix: make {folder} private to this account ({}), then delete the file; the plugin hooks write it again.",
+                private_folder_command(&folder, &me, Some(writer))
             )
         }
         MarkerDistrust::NoDacl => format!(
@@ -415,6 +422,9 @@ pub fn private_dir(path: &Path) -> Result<()> {
 }
 fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
     crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+    // Whether this call made the folder, or another task did meanwhile.
+    let mut created = false;
+    let mut appeared = false;
     if !path.is_dir() {
         if let Some(parent) = path
             .parent()
@@ -425,14 +435,14 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
         #[cfg(test)]
         tests::create_meanwhile(path);
         #[cfg(unix)]
-        let created = {
+        let made = {
             use std::os::unix::fs::DirBuilderExt;
             fs::DirBuilder::new().mode(0o700).create(path)
         };
         #[cfg(windows)]
-        let created = fs::create_dir(path);
-        match created {
-            Ok(()) => {}
+        let made = fs::create_dir(path);
+        match made {
+            Ok(()) => created = true,
             // Never a symlink: the protection below must not follow one.
             Err(error)
                 if error.kind() == std::io::ErrorKind::AlreadyExists
@@ -441,12 +451,15 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
                 if !leaf {
                     return Ok(());
                 }
+                appeared = true;
             }
             Err(_) => return Err("state_unavailable"),
         }
     }
     #[cfg(unix)]
     {
+        // A mode change never takes access away from what is in the folder.
+        let _ = (created, appeared);
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))
             .map_err(|_| "state_unavailable")?;
@@ -454,16 +467,168 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        let directory = OpenOptions::new()
-            .access_mode(0x00120089 | 0x000c0000)
-            .share_mode(0x1 | 0x2)
-            .custom_flags(0x02000000 | 0x00200000)
-            .open(path)
-            .map_err(|_| "state_unavailable")?;
-        crate::credentials::windows_security::make_private(&directory)
-            .map_err(|_| "invalid_state")?;
+        // Protect only a folder this call made, or one still empty. Any
+        // other already holds what another client or task put there, whose
+        // access may be only inherited: the protected DACL has no
+        // inheritable entry, so protecting it would leave those files with
+        // none (#1538). Such a folder must already be safe instead. (An
+        // empty folder can be filled between this check and the change;
+        // what lands in it then is as exposed as it was before this fix.)
+        let empty = !created
+            && !appeared
+            && fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none());
+        if created || empty {
+            let directory = OpenOptions::new()
+                .access_mode(0x00120089 | 0x000c0000)
+                .share_mode(0x1 | 0x2)
+                .custom_flags(0x02000000 | 0x00200000)
+                .open(path)
+                .map_err(|_| "state_unavailable")?;
+            // An existing empty folder another account owns is refused, not
+            // taken over: its owner may hold a handle that can re-grant
+            // itself access after the change.
+            if empty
+                && let Ok(Some(
+                    distrust @ crate::credentials::windows_security::MarkerDistrust::Owner(_),
+                )) = crate::credentials::windows_security::validate_folder(&directory)
+            {
+                report_folder_once(path, &folder_refusal_windows(path, &distrust));
+                return Err("invalid_state");
+            }
+            if crate::credentials::windows_security::make_private(&directory).is_err() {
+                drop(directory);
+                // Nothing is left half-done: a folder this call made goes
+                // again; an empty one keeps the access it had.
+                if created {
+                    let _ = fs::remove_dir(path);
+                }
+                return Err("invalid_state");
+            }
+        } else {
+            // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse
+            // point: enough to read the owner and DACL, which the owner can
+            // always do.
+            let directory = OpenOptions::new()
+                .access_mode(0x0002_0000 | 0x80)
+                .share_mode(0x1 | 0x2 | 0x4)
+                .custom_flags(0x02000000 | 0x00200000)
+                .open(path)
+                .map_err(|_| "state_unavailable")?;
+            match crate::credentials::windows_security::validate_folder(&directory) {
+                Ok(None) => {}
+                Ok(Some(distrust)) => {
+                    report_folder_once(path, &folder_refusal_windows(path, &distrust));
+                    return Err("invalid_state");
+                }
+                Err(error) => {
+                    report_folder_once(
+                        path,
+                        &format!(
+                            "pseudolife-mcp: not using {}: its permissions could not be checked ({}). Fix: check that this account can read that folder's permissions, then retry.",
+                            path.display(),
+                            error.0
+                        ),
+                    );
+                    return Err("invalid_state");
+                }
+            }
+        }
     }
     Ok(())
+}
+/// The icacls command that makes `folder` private to `me` while keeping
+/// access for what is in it, and removes `writer`'s own grants, which
+/// `/inheritance:r` (inherited entries only) and `/grant:r` (only the named
+/// account) leave in place. A writer that is not a readable account name
+/// gets no `/remove`, and the caller says to remove that rule by hand.
+#[cfg(windows)]
+fn private_folder_command(folder: &str, me: &str, writer: Option<&str>) -> String {
+    let remove = writer
+        .filter(|writer| *writer != "an access rule that cannot be read")
+        .map(|writer| {
+            if writer.starts_with("S-1-") {
+                format!(" /remove:g \"*{writer}\"")
+            } else {
+                format!(" /remove:g \"{writer}\"")
+            }
+        })
+        .unwrap_or_default();
+    format!("icacls \"{folder}\" /inheritance:r /grant:r \"{me}:(OI)(CI)F\"{remove}")
+}
+/// Why an existing Windows folder is not used for private state, as the
+/// line [`private_dir`] prints: the path, the cause and the fix.
+#[cfg(windows)]
+fn folder_refusal_windows(
+    path: &Path,
+    distrust: &crate::credentials::windows_security::MarkerDistrust,
+) -> String {
+    use crate::credentials::windows_security::MarkerDistrust;
+    let shown = path.display();
+    let me = crate::credentials::windows_security::current_user_name()
+        .unwrap_or_else(|| "<this account>".into());
+    let fix = |writer: Option<&str>| {
+        format!(
+            "Fix: make it private to this account, keeping access for what is in it ({}), then retry.",
+            private_folder_command(&shown.to_string(), &me, writer)
+        )
+    };
+    match distrust {
+        MarkerDistrust::Owner(owner) => format!(
+            "pseudolife-mcp: not using {shown}: it is owned by {owner}, not this account, so private state there could be read or replaced. Fix: move it aside and retry; this client creates it again."
+        ),
+        MarkerDistrust::Writer(writer) => format!(
+            "pseudolife-mcp: not using {shown}: {writer} can add, delete or replace what is in it, so private state there could be forged. {}",
+            fix(Some(writer))
+        ),
+        MarkerDistrust::NoDacl => format!(
+            "pseudolife-mcp: not using {shown}: it has no access list, so every account can change what is in it. {}",
+            fix(None)
+        ),
+    }
+}
+/// One line per folder per process.
+#[cfg(windows)]
+fn report_folder_once(path: &Path, line: &str) {
+    static REPORTED: LazyLock<StdMutex<std::collections::HashSet<PathBuf>>> =
+        LazyLock::new(Default::default);
+    if REPORTED
+        .lock()
+        .map(|mut seen| seen.insert(path.to_path_buf()))
+        .unwrap_or(false)
+    {
+        eprintln!("{line}");
+    }
+}
+/// `error` from opening, reading or moving `path`, with its cause when that
+/// is an earlier native client's folder protection: on Windows a file this
+/// account owns whose access list has no entries (#1538), which only its
+/// owner can repair. The client never rewrites access it did not set.
+pub fn denied_cause(path: &Path, error: &std::io::Error) -> String {
+    #[cfg(windows)]
+    if error.kind() == std::io::ErrorKind::PermissionDenied
+        && crate::credentials::windows_security::empty_dacl_owned(path)
+    {
+        // The folder whose protection cut it off: the nearest ancestor with
+        // a protected DACL that passes nothing on. Resetting a folder below
+        // that one would re-inherit nothing.
+        let folder = path
+            .ancestors()
+            .skip(1)
+            .find(|folder| {
+                crate::credentials::windows_security::protected_without_inheritance(folder)
+            })
+            .or(path.parent())
+            .unwrap_or(path)
+            .display();
+        // Git Bash rewrites the /reset and /T switches, so the command is
+        // given for PowerShell or cmd.
+        return format!(
+            "{error}: {} has an empty access list (an earlier native client's folder protection removed the access it inherited); restore it as its owner (from an elevated prompt if Administrators owns it), in PowerShell or cmd, with: icacls \"{folder}\" /reset /T",
+            path.display()
+        );
+    }
+    let _ = path;
+    error.to_string()
 }
 /// Why the private state file at `path` or its folder is refused, when a
 /// fresh look finds a reason: for the one line a stopped registration
@@ -519,9 +684,14 @@ pub fn diagnose(path: &Path) -> Option<String> {
                 folder.display()
             ));
         };
-        if crate::credentials::windows_security::validate(&directory).is_err() {
+        // A folder this client did not create is used when no other account
+        // can change what is in it (see private_dir), not only when owner-only.
+        if !matches!(
+            crate::credentials::windows_security::validate_folder(&directory),
+            Ok(None)
+        ) {
             return Some(format!(
-                "the access list of {} is not private to this user (it lets other accounts in, or another account owns it)",
+                "the access list of {} lets other accounts change what is in it, or another account owns it",
                 folder.display()
             ));
         }
@@ -722,16 +892,14 @@ mod tests {
     fn a_state_folder_another_task_creates_meanwhile_is_still_made_private() {
         // A home that inherits its access, as a user's profile does (a
         // private root would give everything under it explicit entries).
-        let home =
-            std::env::temp_dir().join(format!("pseudolife-race-{}", uuid::Uuid::new_v4().simple()));
-        let root = Dir(home.clone());
+        let root = inheriting_folder("race");
         let state_dir = root.0.join(".pseudolife-mcp").join("agent-state");
         let bound = state_dir.join("0c33202fbddfe6ee6eebb386fea0df74");
         // Each level the reservation creates can be raced; on the Windows
         // dev VM (#1324) the cache made `agent-state` meanwhile, with its
         // `handshake-cache` child, under a `.pseudolife-mcp` it had made.
         for raced in [&state_dir, &bound] {
-            let _ = fs::remove_dir_all(&home);
+            let _ = fs::remove_dir_all(root.0.join(".pseudolife-mcp"));
             fs::create_dir_all(root.0.join(".pseudolife-mcp")).unwrap();
             MEANWHILE.with(|folders| *folders.borrow_mut() = vec![raced.clone()]);
             let reserved = Reservation::load_or_reserve(&bound.join("key.json"), "http://x");
@@ -756,7 +924,12 @@ mod tests {
                     .custom_flags(0x0200_0000 | 0x0020_0000)
                     .open(&bound)
                     .unwrap();
-                crate::credentials::windows_security::validate(&directory).unwrap();
+                // Protected when this call made it; trusted as it is
+                // when the other task did.
+                assert_eq!(
+                    crate::credentials::windows_security::validate_folder(&directory).unwrap(),
+                    None
+                );
             }
             // What the cache made in the state folder still works for it:
             // protecting that folder on Windows emptied the child's DACL.
@@ -766,6 +939,286 @@ mod tests {
                     .unwrap_or_else(|error| panic!("{}: {error}", raced.display()));
             }
         }
+    }
+
+    /// A folder whose children inherit their access, as in a user profile.
+    /// On Windows it gets the profile's own entries (SYSTEM, Administrators
+    /// and this account, inherited by everything below), because the
+    /// temporary folder can carry more: on a host with the Codex sandbox,
+    /// its sandbox accounts may modify everything under %TEMP%.
+    fn inheriting_folder(tag: &str) -> Dir {
+        let path = std::env::temp_dir().join(format!(
+            "pseudolife-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&path).unwrap();
+        #[cfg(windows)]
+        profile_like(&path);
+        Dir(path)
+    }
+    #[cfg(windows)]
+    fn profile_like(path: &Path) {
+        let me = crate::credentials::windows_security::current_user_name().unwrap();
+        let status = std::process::Command::new("icacls")
+            .arg(path)
+            .args([
+                "/inheritance:r",
+                "/grant:r",
+                "*S-1-5-18:(OI)(CI)F",
+                "*S-1-5-32-544:(OI)(CI)F",
+            ])
+            .arg(format!("{me}:(OI)(CI)F"))
+            .arg("/Q")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "icacls on {}", path.display());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_folder_rule_refuses_what_lets_others_change_its_contents() {
+        use crate::credentials::windows_security::{MarkerDistrust, folder_distrust_sddl};
+        const ME: &str = "S-1-5-21-100-200-300-1001";
+        let rule = |sddl: &str| folder_distrust_sddl(&sddl.replace("ME", ME), Some(ME));
+        // A profile folder as Windows makes it, with CREATOR OWNER for new
+        // children, and the shim's own protected folder.
+        for sddl in [
+            "O:MED:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;ME)",
+            "O:MED:(A;;FA;;;ME)(A;OICIIO;FA;;;CO)(A;;0x1200a9;;;BU)",
+            "O:MED:P(A;;FA;;;OW)",
+            "O:BAD:(A;OICI;FA;;;BA)(A;OICI;FA;;;ME)",
+        ] {
+            assert_eq!(rule(sddl), None, "{sddl}");
+        }
+        for (sddl, who) in [
+            // Inherit-only entries decide what new files there grant.
+            ("O:MED:(A;;FA;;;ME)(A;OICIIO;FA;;;WD)", "Everyone"),
+            // Deleting a child replaces it as surely as writing it.
+            ("O:MED:(A;;FA;;;ME)(A;;0x40;;;BU)", "Users"),
+            (
+                "O:MED:(A;;FA;;;ME)(A;OICI;0x1301bf;;;AU)",
+                "Authenticated Users",
+            ),
+        ] {
+            match rule(sddl) {
+                Some(MarkerDistrust::Writer(name)) => assert!(name.contains(who), "{sddl}: {name}"),
+                other => panic!("{sddl}: {other:?}"),
+            }
+        }
+        assert!(matches!(
+            rule("O:S-1-5-32-547D:(A;;FA;;;ME)"),
+            Some(MarkerDistrust::Owner(_))
+        ));
+        assert_eq!(
+            rule("O:MED:NO_ACCESS_CONTROL"),
+            Some(MarkerDistrust::NoDacl)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_filled_folder_others_can_change_is_refused_and_left_as_it_was() {
+        let home = inheriting_folder("exposed");
+        let folder = home.0.join("state");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("kept"), b"x").unwrap();
+        crate::credentials::windows_security::set_dacl_sddl(
+            &folder,
+            "D:(A;OICI;FA;;;OW)(A;OICI;FA;;;WD)",
+        )
+        .unwrap();
+        assert_eq!(private_dir(&folder), Err("invalid_state"));
+        // Refused, not rewritten: what is in it is still usable.
+        fs::read(folder.join("kept")).unwrap();
+        let line = folder_refusal_windows(
+            &folder,
+            &crate::credentials::windows_security::MarkerDistrust::Writer("Everyone".into()),
+        );
+        assert!(line.contains(&folder.display().to_string()), "{line}");
+        assert!(
+            line.contains("Everyone can add, delete or replace what is in it"),
+            "{line}"
+        );
+        assert!(
+            line.contains("/inheritance:r /grant:r") && line.contains("(OI)(CI)F"),
+            "{line}"
+        );
+        // The printed fix, run as printed, makes the folder acceptable and
+        // keeps what is in it usable.
+        let me = crate::credentials::windows_security::current_user_name().unwrap();
+        let command = private_folder_command(&folder.display().to_string(), &me, Some("Everyone"));
+        assert!(line.contains(&command), "{line}");
+        // Run in PowerShell exactly as printed; the text travels in the
+        // environment so no quoting layer sits in between.
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg("Invoke-Expression $env:PRINTED_FIX; exit $LASTEXITCODE")
+            .env("PRINTED_FIX", &command)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "{command}");
+        private_dir(&folder).unwrap();
+        fs::read(folder.join("kept")).unwrap();
+        fs::write(folder.join("kept"), b"y").unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_state_file_is_owner_only_from_its_creation() {
+        // In a folder used as it is (not re-protected) that lets everyone
+        // read what is created in it, a new state file must not inherit
+        // that access even before make_private: a handle opened then keeps
+        // it.
+        let home = inheriting_folder("born-private");
+        let folder = home.0.join("state");
+        fs::create_dir(&folder).unwrap();
+        crate::credentials::windows_security::set_dacl_sddl(
+            &folder,
+            "D:(A;OICI;FA;;;OW)(A;OICI;FR;;;WD)",
+        )
+        .unwrap();
+        let born = crate::credentials::windows_security::create_owner_only(&folder.join("k.json"))
+            .unwrap();
+        assert_eq!(
+            crate::credentials::windows_security::dacl_sddl(&born),
+            "D:P(A;;FA;;;OW)"
+        );
+        // And the full create still ends owner-only, owned by this account.
+        drop(born);
+        let created = create(&folder.join("k2.json")).unwrap();
+        crate::credentials::windows_security::validate(&created.file).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_an_empty_existing_folder_others_could_change_is_made_private() {
+        let home = inheriting_folder("empty");
+        let folder = home.0.join("state");
+        fs::create_dir(&folder).unwrap();
+        crate::credentials::windows_security::set_dacl_sddl(
+            &folder,
+            "D:(A;OICI;FA;;;OW)(A;OICI;FA;;;WD)",
+        )
+        .unwrap();
+        private_dir(&folder).unwrap();
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = OpenOptions::new()
+            .access_mode(0x0002_0000 | 0x80)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(&folder)
+            .unwrap();
+        crate::credentials::windows_security::validate(&directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_hook_markers_survive_their_folder_being_taken_for_digests() {
+        // The digest folder the hooks made and wrote markers into before
+        // the shim's first digest write (finding 10 of the #1536 review).
+        let home = inheriting_folder("digests");
+        let digests = home.0.join("digests");
+        fs::create_dir(&digests).unwrap();
+        let marker = digests.join("k.seen");
+        powershell_write(
+            &marker, "7
+",
+        );
+        private_dir(&digests).unwrap();
+        assert_eq!(
+            read_marker(&marker, 64).unwrap(),
+            b"7
+"
+        );
+        atomic_write(
+            &digests.join("k.txt"),
+            b"7
+",
+            None,
+        )
+        .unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_file_an_earlier_protection_emptied_names_its_repair() {
+        // A machine an earlier native client already hit: the folder was
+        // protected with the file in it, which emptied the file's DACL.
+        let home = inheriting_folder("emptied");
+        let folder = home.0.join("runtimes");
+        fs::create_dir(&folder).unwrap();
+        let file = folder.join("runtime.json");
+        fs::write(&file, b"{}").unwrap();
+        // A Python venv's file one level down, as 000001\pyvenv.cfg is.
+        let nested = folder.join("000001").join("pyvenv.cfg");
+        fs::create_dir(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, b"home").unwrap();
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let directory = OpenOptions::new()
+                .access_mode(0x00120089 | 0x000c0000)
+                .share_mode(0x1 | 0x2)
+                .custom_flags(0x02000000 | 0x00200000)
+                .open(&folder)
+                .unwrap();
+            crate::credentials::windows_security::make_private(&directory).unwrap();
+        }
+        let error = fs::read(&file).expect_err("the emptied file is still readable");
+        let line = denied_cause(&file, &error);
+        assert!(line.contains("has an empty access list"), "{line}");
+        assert!(
+            line.contains(&format!("icacls \"{}\" /reset /T", folder.display())),
+            "{line}"
+        );
+        // The command is given for PowerShell or cmd (Git Bash rewrites /reset).
+        assert!(line.contains("in PowerShell or cmd"), "{line}");
+        // For a file further down, it names the folder that was protected,
+        // not the file's own: resetting that one would re-inherit nothing.
+        let error = fs::read(&nested).expect_err("the emptied file is still readable");
+        let line = denied_cause(&nested, &error);
+        assert!(
+            line.contains(&format!("icacls \"{}\" /reset /T", folder.display())),
+            "{line}"
+        );
+        // The repair it names works, run as the owner.
+        let status = std::process::Command::new("icacls")
+            .arg(&folder)
+            .args(["/reset", "/T", "/Q"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        fs::read(&file).unwrap();
+        fs::read(&nested).unwrap();
+        // An ordinary refusal is passed through unchanged.
+        let other = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            denied_cause(&home.0.join("absent"), &other),
+            other.to_string()
+        );
+    }
+
+    #[test]
+    fn a_folder_another_client_filled_keeps_its_files_usable() {
+        // The Python client's runtimes root: folders and files it wrote with
+        // inherited access only, which this client then reuses.
+        let home = inheriting_folder("filled");
+        let root = home.0.join("runtimes");
+        let scripts = root.join("000001").join("Scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        let files = [
+            root.join("000001").join("runtime.json"),
+            scripts.join("pseudolife-mcp.exe"),
+        ];
+        for file in &files {
+            fs::write(file, b"python client").unwrap();
+        }
+        private_dir(&root).unwrap();
+        for file in &files {
+            fs::read(file).unwrap_or_else(|error| panic!("{}: {error}", file.display()));
+        }
+        fs::write(root.join("000001").join("runtime.json"), b"rewritten").unwrap();
+        fs::write(scripts.join("added"), b"x").unwrap();
     }
 
     #[cfg(unix)]
@@ -809,7 +1262,7 @@ mod tests {
             set_dacl(&root.0, "D:(A;;FA;;;OW)(A;OICI;FA;;;WD)");
             let reason = diagnose(&file).unwrap();
             assert!(
-                reason.contains("is not private to this user")
+                reason.contains("lets other accounts change what is in it")
                     && reason.contains(&root.0.display().to_string()),
                 "{reason}"
             );
@@ -938,36 +1391,6 @@ mod tests {
         let mut short = well_formed();
         short[2] = 0x0002_0000;
         assert_eq!(marker_distrust_raw(&mut short), unreadable);
-    }
-
-    /// A folder whose children inherit their access, as in a user profile:
-    /// the profile's own entries (SYSTEM, Administrators and this account,
-    /// inherited by everything below). The temporary folder itself can carry
-    /// more: on a host with the Codex sandbox its sandbox accounts may modify
-    /// everything under %TEMP%, which the marker rule rightly refuses.
-    #[cfg(windows)]
-    fn inheriting_folder(tag: &str) -> Dir {
-        let path = std::env::temp_dir().join(format!(
-            "pseudolife-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir(&path).unwrap();
-        let me = crate::credentials::windows_security::current_user_name().unwrap();
-        let status = std::process::Command::new("icacls")
-            .arg(&path)
-            .args([
-                "/inheritance:r",
-                "/grant:r",
-                "*S-1-5-18:(OI)(CI)F",
-                "*S-1-5-32-544:(OI)(CI)F",
-            ])
-            .arg(format!("{me}:(OI)(CI)F"))
-            .arg("/Q")
-            .stdout(std::process::Stdio::null())
-            .status()
-            .unwrap();
-        assert!(status.success(), "icacls on {}", path.display());
-        Dir(path)
     }
 
     /// Git Bash, as Claude Code runs the `.sh` hooks on Windows.

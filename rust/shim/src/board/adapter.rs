@@ -1264,8 +1264,11 @@ impl Adapter {
                 );
                 let target = path.clone();
                 digest_write = Some(state::offload(path, move || {
+                    // A digest folder this client cannot make or trust is not
+                    // written to: the hooks hand the digest to the agent, so
+                    // one another account can replace must not carry it.
                     if let Some(parent) = target.parent() {
-                        let _ = state::private_dir(parent);
+                        state::private_dir(parent)?;
                     }
                     state::atomic_write(&target, body.as_bytes(), None)?;
                     for (marker, hook_written) in [
