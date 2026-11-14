@@ -2329,12 +2329,12 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "ZXJyb3I6IG5vIGJhbmsgZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgdG8gdGhlIGJhbmsncyBkYXRhYmFzZSBVUkwsIG9yIHJ1biB3aGVyZSB0aGUgbGl0ZSB0aWVyJ3MgZGF0YSBkaXIgaG9sZHMgb25lIChEb2NrZXIgdGllcjogc3RhcnQgdGhlIGRhZW1vbiwgb3IgcnVuIGBkb2NrZXIgZXhlYyAtaXQgcHNldWRvbGlmZS1tY3AtZGFlbW9uIHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgLi4uYCBvbiBpdHMgaG9zdCkNCg==",
+   "stderr": "ZXJyb3I6IG5vIGJhbmsgZm91bmQ6IHNldCBQU0VVRE9MSUZFX01DUF9EQVRBQkFTRV9VUkwgdG8gdGhlIGJhbmsncyBkYXRhYmFzZSBVUkwgKERvY2tlciB0aWVyOiBzdGFydCB0aGUgZGFlbW9uLCBvciBydW4gYGRvY2tlciBleGVjIC1pdCBwc2V1ZG9saWZlLW1jcC1kYWVtb24gcHNldWRvbGlmZS1tY3AgbWFpbnRhaW5lciAuLi5gIG9uIGl0cyBob3N0KQ0K",
    "window": [
-    1793648787.778244,
-    1793648788.4970303
+    1794625296.5408723,
+    1794625297.2653236
    ],
-   "arm": "python",
+   "arm": "rust",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
    "shown": {
     "phoneKey_qua": [
@@ -2447,6 +2447,14 @@
     "cwd": "dir"
    },
    "modes": {}
+  }
+ },
+ "recorded_from_candidate": {
+  "defer-no-dsn": {
+   "commit": "22ac243a9e742ac6aa055d59860fc6c0a9282d8e",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "2e277fbdb03c5efcd81ed7bc5bc0e7c761094aee1f4a3a747f89774c2fd3af92"
   }
  }
 }
