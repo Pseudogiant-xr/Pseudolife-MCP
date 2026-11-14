@@ -3,7 +3,6 @@
 use super::events;
 use serde_json::{Map, Value, json};
 use std::{
-    ffi::OsString,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -38,58 +37,6 @@ pub(super) enum GhError {
 #[allow(async_fn_in_trait)]
 pub(super) trait Gh {
     async fn call(&mut self, argv: &[&str]) -> Result<String, GhError>;
-}
-
-/// The extensions `CreateProcess` starts, in `PATHEXT`'s default order.
-#[cfg(windows)]
-const LAUNCHABLE: [&str; 4] = [".com", ".exe", ".bat", ".cmd"];
-
-/// `name` in an absolute `PATH` directory: never the current directory, and
-/// never a relative or empty entry, so a `gh` planted in a checkout is not
-/// run. On Windows the `PATHEXT` extensions `CreateProcess` starts are tried.
-/// The shared native lookup (`program_lookup::find_program_path`) follows
-/// the same rule.
-pub(super) fn find_program(
-    name: &str,
-    path: Option<OsString>,
-    pathext: Option<OsString>,
-) -> Option<PathBuf> {
-    let path = path?;
-    #[cfg(not(windows))]
-    let _ = pathext;
-    for dir in std::env::split_paths(&path) {
-        if !dir.is_absolute() {
-            continue;
-        }
-        #[cfg(windows)]
-        {
-            let pathext = pathext
-                .clone()
-                .and_then(|value| value.into_string().ok())
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_owned());
-            for ext in pathext.split(';') {
-                let ext = ext.to_ascii_lowercase();
-                if !LAUNCHABLE.contains(&ext.as_str()) {
-                    continue;
-                }
-                let candidate = dir.join(format!("{name}{ext}"));
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-        }
-        #[cfg(unix)]
-        {
-            let candidate = dir.join(name);
-            if candidate.is_file()
-                && rustix::fs::access(&candidate, rustix::fs::Access::EXEC_OK).is_ok()
-            {
-                return Some(candidate);
-            }
-        }
-    }
-    None
 }
 
 /// The real gh: found once, run with a timeout, `-R <repo>` appended.

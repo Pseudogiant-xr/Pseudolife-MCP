@@ -3,7 +3,7 @@
 //! for until its pid record names it).
 use super::{
     args::Args,
-    sources::{self, GhProgram},
+    sources::GhProgram,
     watch::{self, EXIT_OK, EXIT_SETUP, Files, Host, Settings},
 };
 use serde_json::Value;
@@ -214,11 +214,8 @@ fn watch_here(settings: &Settings) -> u8 {
             interrupted,
         };
         let mut gh = GhProgram {
-            program: sources::find_program(
-                "gh",
-                std::env::var_os("PATH"),
-                std::env::var_os("PATHEXT"),
-            ),
+            // Absolute `PATH` directories only: never the current directory.
+            program: crate::cli::program_lookup::find_program_path("gh"),
             repo: settings.repo.clone(),
         };
         watch::Watcher::new(settings, board.as_ref(), &mut gh, &mut host)

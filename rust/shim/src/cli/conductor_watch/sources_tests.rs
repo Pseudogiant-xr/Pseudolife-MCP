@@ -14,45 +14,6 @@ impl Drop for Scratch {
     }
 }
 
-fn program(dir: &Path) -> PathBuf {
-    let path = dir.join(if cfg!(windows) { "gh.exe" } else { "gh" });
-    std::fs::write(&path, b"x").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    path
-}
-
-#[test]
-fn gh_is_found_only_in_absolute_path_directories() {
-    let scratch = Scratch::new();
-    let found = program(&scratch.0);
-    let path = |entries: &[&std::ffi::OsStr]| Some(std::env::join_paths(entries).unwrap());
-    assert_eq!(find_program("gh", path(&[scratch.0.as_os_str()]), None), Some(found));
-    // Relative and empty entries name the current directory: never searched.
-    for entries in [&["."][..], &[""], &["sub"], &["./bin"]] {
-        let entries: Vec<&std::ffi::OsStr> = entries.iter().map(std::ffi::OsStr::new).collect();
-        assert_eq!(find_program("gh", path(&entries), None), None, "{entries:?}");
-    }
-    assert_eq!(find_program("gh", None, None), None);
-}
-
-#[cfg(windows)]
-#[test]
-fn only_extensions_windows_starts_are_tried() {
-    let scratch = Scratch::new();
-    std::fs::write(scratch.0.join("gh.ps1"), b"x").unwrap();
-    let path = Some(scratch.0.clone().into_os_string());
-    assert_eq!(find_program("gh", path.clone(), Some(".PS1;.CMD".into())), None);
-    std::fs::write(scratch.0.join("gh.cmd"), b"x").unwrap();
-    assert_eq!(
-        find_program("gh", path, Some(".PS1;.CMD".into())),
-        Some(scratch.0.join("gh.cmd"))
-    );
-}
-
 #[test]
 fn gh_output_of_the_wrong_shape_is_refused_with_what_it_printed() {
     let refused = |value: Value| records(value, "gh pr list", &PR_TYPES).unwrap_err();
