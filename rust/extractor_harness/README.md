@@ -138,17 +138,36 @@ python rust/extractor_harness/test_prompt.py
 PSEUDOLIFE_TEST_REAL_AUTOSTART=1 cargo test --manifest-path rust/Cargo.toml -p pseudolife-stdio --test extractor_shim extractor_shim_autostart
 ```
 
-The differential harness launches both implementations with disposable stub
-provider executables. It compares HTTP status and response-body bytes,
-normalizing generated completion/tool IDs, and compares recorded argv (with instruction-file paths normalized),
-stdin bytes, instruction-file bytes and child environment. It covers routes,
-models, prompt overrides, tools, errors and managed configuration; the lifecycle
+The contract suite starts the native shim with disposable stub provider
+executables and checks it against committed snapshots,
+`goldens/contract.<platform>.json` (one per OS: the platforms differ in the
+instruction file's line endings and in Windows' batch launchers). Each
+snapshot keeps the HTTP status and response-body bytes (generated
+completion/tool IDs normalized) and the recorded argv (instruction-file
+paths normalized), stdin bytes, instruction-file bytes and child
+environment, keyed by slice, launcher and provider. It covers routes,
+models, prompt overrides, tools, errors and managed configuration.
+
+A snapshot pins no prompt or model list: the production prompt's text is a
+token, and a `/models` body's run of the provider's listed models is one
+token when it is exactly the native list in its order (the launch model,
+the default, stays literal). Strings over 4096 characters are kept as
+length and SHA-256. `run.py --suite contract --record-goldens` starts the
+Python shim beside the native one and records where the two agree; it
+also records the digests of the Python shims and `ops/shim_autostart.py`,
+and `test_contract_golden.py` asks for a new recording when they change,
+since those files are live and the installers still run them. A
+deliberate native change re-records from the native shim alone with
+`--record-candidate`, then `--write`, on each OS whose golden it changes
+(`rust/daemon/harness/candidate_record.py` has the shared rules). The
+`.env` comparison against `ops/shim_autostart.py`, the live writer, still
+runs every time. The lifecycle
 suite above covers timeout descendant cleanup, serialized calls and health
 refresh on the native shim alone. Windows exercises native
-executables and batch launchers separately. A dev-only fixture crate compiles
+executables and batch launchers separately, each with its own snapshots. A dev-only fixture crate compiles
 the stub and waiting launcher for Cargo's target triple and embeds their bytes
 in the integration test. Nextest archives therefore need no compiler or rustup
-toolchain at test time. Both differential arms receive the same stub bytes.
+toolchain at test time. A recording gives both shims the same stub bytes.
 Python and the Rust trampolines are test fixtures only; no provider account is called.
 
 Separate Claude and Codex autostart tests report named step timings and register
