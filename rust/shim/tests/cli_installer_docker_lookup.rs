@@ -20,6 +20,8 @@ const UNREACHED: &str = "FAIL Cannot inspect Docker safely.";
 const RAN: &str = "FAIL Cannot resolve ops/.env with Docker Compose.";
 /// `engine detect` when `docker` cannot be started at all.
 const NO_DOCKER: &str = "Cannot reach Docker; start Docker and rerun the installer.";
+/// `preflight-check` when `docker` cannot be started or fails.
+const PREFLIGHT_UNSAFE: &str = "Cannot inspect Docker safely.";
 /// `engine detect` when a `docker` ran and exited nonzero.
 const ENGINE_RAN: &str = "Cannot inspect the existing daemon container";
 
@@ -42,8 +44,13 @@ fn scratch(tag: &str) -> Scratch {
     Scratch(root)
 }
 
+/// The file the shell-script plant creates when it is run.
+const MARKER: &str = "INSTALLER_LOOKUP_MARKER";
+
 /// A `docker` that runs and fails whatever it is asked: a copy of this
-/// package's binary on Windows, a shell script elsewhere.
+/// package's binary on Windows, a shell script elsewhere that also leaves
+/// the `MARKER` file (the preflight check answers alike for a docker that
+/// could not start and one that failed, so only the file tells them apart).
 fn plant(dir: &Path) {
     fs::create_dir_all(dir).unwrap();
     if cfg!(windows) {
@@ -54,7 +61,7 @@ fn plant(dir: &Path) {
         .unwrap();
     } else {
         let path = dir.join("docker");
-        fs::write(&path, "#!/bin/sh\nexit 3\n").unwrap();
+        fs::write(&path, format!("#!/bin/sh\n: > \"${MARKER}\"\nexit 3\n")).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -79,6 +86,7 @@ fn run(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr, args: &[
         .env("APPDATA", home.join("Roaming"))
         .env("PATH", path)
         .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:1")
+        .env(MARKER, root.join("ran"))
         .arg("installer")
         .args(args)
         .current_dir(cwd)
@@ -87,8 +95,15 @@ fn run(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr, args: &[
         .unwrap()
 }
 
-/// Both steps' answers, as (volume-names stderr, engine detect stderr).
-fn answers(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr) -> (String, String) {
+/// What the steps answered, and whether the shell-script plant was run.
+struct Answers {
+    volumes: String,
+    engine: String,
+    preflight: String,
+    ran: bool,
+}
+
+fn answers(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr) -> Answers {
     let repo = root.join("home/repo");
     let repo = repo.to_str().unwrap();
     let env_file = root.join("home/repo/ops/.env");
@@ -112,13 +127,34 @@ fn answers(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr) -> (
         path,
         &["engine", "detect", "--repo", repo],
     );
-    (
-        String::from_utf8_lossy(&volumes.stderr).into_owned(),
-        String::from_utf8_lossy(&engine.stderr).into_owned(),
-    )
+    let preflight = run(
+        program,
+        root,
+        cwd,
+        path,
+        &[
+            "preflight-check",
+            "--repo",
+            repo,
+            "--env-file",
+            env_file.to_str().unwrap(),
+        ],
+    );
+    Answers {
+        volumes: String::from_utf8_lossy(&volumes.stderr).into_owned(),
+        engine: String::from_utf8_lossy(&engine.stderr).into_owned(),
+        preflight: String::from_utf8_lossy(&preflight.stderr).into_owned(),
+        ran: root.join("ran").exists(),
+    }
 }
 
-fn assert_not_run(where_: &str, (volumes, engine): (String, String)) {
+fn assert_not_run(where_: &str, answers: Answers) {
+    let Answers {
+        volumes,
+        engine,
+        preflight,
+        ran,
+    } = answers;
     assert!(
         volumes.starts_with(UNREACHED),
         "{where_}: volume-names ran the planted docker: {volumes}"
@@ -127,6 +163,11 @@ fn assert_not_run(where_: &str, (volumes, engine): (String, String)) {
         engine.starts_with(NO_DOCKER),
         "{where_}: engine detect ran the planted docker: {engine}"
     );
+    assert!(
+        preflight.contains(PREFLIGHT_UNSAFE),
+        "{where_}: preflight-check answered {preflight}"
+    );
+    assert!(!ran, "{where_}: a step ran the planted docker");
 }
 
 #[test]
@@ -188,12 +229,19 @@ fn a_docker_on_an_absolute_path_directory_is_run() {
     let root = scratch("control");
     let tools = root.0.join("tools");
     plant(&tools);
-    let (volumes, engine) = answers(
+    let Answers {
+        volumes,
+        engine,
+        ran,
+        ..
+    } = answers(
         Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")),
         &root.0,
         &root.0.join("home"),
         tools.as_os_str(),
     );
+    // Only the shell-script plant leaves the file.
+    assert_eq!(ran, !cfg!(windows), "the planted docker's marker");
     assert!(
         volumes.starts_with(RAN),
         "volume-names did not run docker from PATH: {volumes}"
