@@ -16,23 +16,10 @@
 # 3. It imports a pseudolife_memory module that an open, maintainer-ruled
 #    freeze exception changes. Re-freeze these once the exception has landed
 #    (a test of a landed exception change is frozen again):
-#    - #1539, the expose security fix (backup_cli, client_updates,
-#      codex_connection, codex_doorbell, expose_cli, maintainer_setup,
-#      program_lookup, runtimes, tunnel_runtime, update_cli):
-#      test_backup_cli.py, test_child_python.py, test_codex_cli_connection.py,
-#      test_codex_doorbell.py, test_codex_doorbell_revision.py,
-#      test_codex_hook_runtime_trust.py (also rule 2: the real plugin/ hook
-#      tree, through helpers of live test modules), test_coordination_adapter.py,
-#      test_coordination_integration.py, test_docker_backup_restore.py,
-#      test_expose_cli.py, test_maintainer_setup.py, test_migrate_flat.py,
-#      test_reference_bank.py, test_tunnel_bridge.py, test_tunnel_runtime.py,
-#      test_tunnel_service.py, and test_invite_cli.py (invite_cli drives
-#      expose_cli).
-#    - #1537 and #1539 both (update_cli, and #1537's update_bridge):
-#      test_disk_space.py, test_update_backup_connection.py,
-#      test_update_client_handoff.py.
-#    #1539 adds test_program_lookup.py and #1537 test_update_bridge.py, each
-#    with its own live line.
+#    None is open now. The tests kept live for #1539 (the expose security
+#    fix) and #1537 (the update bridge) were frozen again once both landed
+#    (14 November 2026), except test_codex_hook_runtime_trust.py (rule 2)
+#    and test_update_bridge.py (rule 1: it reads rust/ paths).
 # 4. The maintainer's conductor ruled it live (14 November 2026), each until
 #    the event named:
 #    - test_embedded_pg.py: CI's own PostgreSQL launcher on the Windows lanes;
@@ -63,7 +50,7 @@ live test_atlas_currency.py
 frozen test_atomic_weights.py
 live test_audit_supersessions.py
 live test_backfill_edge_confidence.py
-live test_backup_cli.py
+frozen test_backup_cli.py
 live test_band_ablation_flat.py
 frozen test_band_cosine.py
 frozen test_band_overflow_and_depth_prior.py
@@ -88,7 +75,7 @@ live test_capture_metrics.py
 live test_changelog_fragments.py
 frozen test_channel.py
 live test_check_lock_resolves.py
-live test_child_python.py
+frozen test_child_python.py
 frozen test_chronicle_store.py
 live test_ci_batch_passed.py
 live test_ci_budget_integration.py
@@ -111,14 +98,14 @@ frozen test_client_sessions.py
 frozen test_cms_counters.py
 frozen test_cms_legacy_load.py
 frozen test_cms_pt_schema.py
-live test_codex_cli_connection.py
+frozen test_codex_cli_connection.py
 frozen test_codex_coordination.py
 frozen test_codex_coordination_recovery.py
 live test_codex_coordination_setup.py
 frozen test_codex_delivery.py
-live test_codex_doorbell.py
+frozen test_codex_doorbell.py
 live test_codex_doorbell_probe.py
-live test_codex_doorbell_revision.py
+frozen test_codex_doorbell_revision.py
 live test_codex_hook_launcher.py
 live test_codex_hook_native_golden.py
 live test_codex_hook_runtime_trust.py
@@ -153,7 +140,7 @@ live test_container_entrypoint.py
 frozen test_contender_stamps.py
 live test_contiguity_cue_split.py
 frozen test_contradiction_cost.py
-live test_coordination_adapter.py
+frozen test_coordination_adapter.py
 live test_coordination_audit.py
 frozen test_coordination_auth.py
 frozen test_coordination_awareness.py
@@ -168,7 +155,7 @@ frozen test_coordination_daemon_notice.py
 frozen test_coordination_dispatch_isolation.py
 frozen test_coordination_fanout.py
 frozen test_coordination_id_prefix.py
-live test_coordination_integration.py
+frozen test_coordination_integration.py
 frozen test_coordination_leases.py
 frozen test_coordination_leases_api.py
 frozen test_coordination_mail_continuity.py
@@ -212,10 +199,10 @@ frozen test_deep_dream_judge.py
 frozen test_deep_dream_response_bound.py
 frozen test_deep_dream_tick.py
 frozen test_dim_mismatch_health.py
-live test_disk_space.py
+frozen test_disk_space.py
 frozen test_dismissed_pairs.py
 live test_disposable_database_guard.py
-live test_docker_backup_restore.py
+frozen test_docker_backup_restore.py
 live test_doctor_cli.py
 frozen test_doctor_coordination.py
 frozen test_document_ingest_batch_bound.py
@@ -255,7 +242,7 @@ live test_eval_lesson_bench.py
 live test_eval_replicate.py
 live test_events_pass.py
 frozen test_eviction_nonstring_source.py
-live test_expose_cli.py
+frozen test_expose_cli.py
 live test_external_stack_compose.py
 frozen test_extractor_fallback.py
 live test_extractor_fallback_key.py
@@ -319,7 +306,7 @@ live test_installer_test_login.py
 live test_installer_unattended.py
 live test_integrate_script.py
 live test_integrate_snapshot_admission.py
-live test_invite_cli.py
+frozen test_invite_cli.py
 frozen test_judge_agreement.py
 live test_judge_ladder_caution.py
 frozen test_judge_lock_budget.py
@@ -359,7 +346,7 @@ frozen test_maintainer_cli.py
 live test_maintainer_messages.py
 frozen test_maintainer_rendering.py
 frozen test_maintainer_roles.py
-live test_maintainer_setup.py
+frozen test_maintainer_setup.py
 frozen test_maintainer_web.py
 frozen test_maintainer_webauthn.py
 live test_mcp_client_neutrality.py
@@ -378,7 +365,7 @@ live test_memory_policy_variant.py
 live test_merge_queue.py
 frozen test_meta_filter.py
 live test_migrate_embeddings.py
-live test_migrate_flat.py
+frozen test_migrate_flat.py
 frozen test_migration.py
 live test_misleading_recall_probe.py
 live test_move_cli.py
@@ -415,7 +402,7 @@ live test_postgres_container_nonroot.py
 frozen test_principal_activity.py
 frozen test_principal_store_pg.py
 frozen test_principals.py
-live test_program_lookup.py
+frozen test_program_lookup.py
 live test_prompt_example_lifts.py
 live test_prune_worktrees.py
 live test_pytest_retry_once.py
@@ -431,7 +418,7 @@ frozen test_readiness_contract.py
 live test_rebuild_contexts_stripping.py
 live test_recall.py
 frozen test_recovery_lock_probe.py
-live test_reference_bank.py
+frozen test_reference_bank.py
 live test_refind_arm.py
 live test_register_claude_desktop.py
 live test_regression_gate_defaults.py
@@ -528,16 +515,16 @@ frozen test_tool_consolidation.py
 frozen test_toolset_tiers.py
 live test_trace_invalidations_storage.py
 live test_transfer_cli.py
-live test_tunnel_bridge.py
+frozen test_tunnel_bridge.py
 live test_tunnel_cli.py
 frozen test_tunnel_profiles.py
-live test_tunnel_runtime.py
-live test_tunnel_service.py
+frozen test_tunnel_runtime.py
+frozen test_tunnel_service.py
 live test_unattended_update.py
-live test_update_backup_connection.py
+frozen test_update_backup_connection.py
 live test_update_bridge.py
 live test_update_cli.py
-live test_update_client_handoff.py
+frozen test_update_client_handoff.py
 live test_update_clients.py
 live test_update_engine.py
 live test_update_offer.py
