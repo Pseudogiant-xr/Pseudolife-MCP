@@ -1,7 +1,7 @@
 {
  "database": {
   "clock-corrected": {
-   "catalog_changed": [],
+   "catalog_rows": {},
    "replaced": {
     "public.meta": {
      "rows": [
@@ -29,11 +29,55 @@
    }
   },
   "column-dropped": {
-   "catalog_changed": [
-    "column_types",
-    "columns",
-    "constraints"
-   ],
+   "catalog_rows": {
+    "column_types": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       true,
+       ""
+      ]
+     ]
+    },
+    "columns": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ]
+    },
+    "constraints": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       "entries_text_not_null",
+       "n",
+       "NOT NULL text"
+      ]
+     ]
+    }
+   },
    "replaced": {
     "public.meta": {
      "rows": [
@@ -61,11 +105,55 @@
    }
   },
   "healthy": {
-   "catalog_changed": [
-    "column_types",
-    "columns",
-    "constraints"
-   ],
+   "catalog_rows": {
+    "column_types": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       true,
+       ""
+      ]
+     ]
+    },
+    "columns": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ]
+    },
+    "constraints": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       "entries_text_not_null",
+       "n",
+       "NOT NULL text"
+      ]
+     ]
+    }
+   },
    "replaced": {
     "public.meta": {
      "rows": [
@@ -85,11 +173,55 @@
    }
   },
   "healthy-clock-broken": {
-   "catalog_changed": [
-    "column_types",
-    "columns",
-    "constraints"
-   ],
+   "catalog_rows": {
+    "column_types": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       true,
+       ""
+      ]
+     ]
+    },
+    "columns": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ]
+    },
+    "constraints": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       "entries_text_not_null",
+       "n",
+       "NOT NULL text"
+      ]
+     ]
+    }
+   },
    "replaced": {
     "public.meta": {
      "rows": [
@@ -109,7 +241,7 @@
    }
   },
   "initial": {
-   "catalog_changed": [],
+   "catalog_rows": {},
    "replaced": {
     "public.meta": {
      "rows": [
@@ -129,11 +261,55 @@
    }
   },
   "retry": {
-   "catalog_changed": [
-    "column_types",
-    "columns",
-    "constraints"
-   ],
+   "catalog_rows": {
+    "column_types": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       true,
+       ""
+      ]
+     ]
+    },
+    "columns": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       3,
+       "text",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ]
+     ]
+    },
+    "constraints": {
+     "added": [],
+     "removed": [
+      [
+       "public",
+       "entries",
+       "entries_text_not_null",
+       "n",
+       "NOT NULL text"
+      ]
+     ]
+    }
+   },
    "replaced": {
     "public.meta": {
      "rows": [
@@ -1315,5 +1491,5 @@
    }
   ]
  },
- "oracle_head": "05d0ff81d882503aaf30e75ed6413fe4928f7f10"
+ "oracle_head": "7214b6794e0ce43636cf5c0b91912b97038e7954"
 }

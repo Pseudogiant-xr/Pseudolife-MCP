@@ -513,23 +513,35 @@ def start_delta(before, state, rules):
     The template's rows carry the seeders' own clocks, so its full post-state
     would not repeat between recordings. The delta keeps every row the start
     wrote, exactly (a new row's clock columns as tokens, per ``rules``), the
-    keys of the template rows it rewrote or removed, and the catalog entries
-    it changed. A table's rows sit under ``rows`` so that a difference reads
-    like the live comparison's (``/rows/public.entries/rows: ...``).
+    first column (the key) of each template row it rewrote or removed, and
+    each catalog row it added or removed. Rows are counted as multisets, so a
+    duplicated row is a change. A table's rows sit under ``rows`` so that a
+    difference reads like the live comparison's
+    (``/rows/public.entries/rows: ...``).
     """
+    from collections import Counter
     from run import golden_scrub
+
+    def changed(old_rows, new_rows):
+        old = Counter(json.dumps(row, sort_keys=True) for row in old_rows)
+        new = Counter(json.dumps(row, sort_keys=True) for row in new_rows)
+        return sorted((new - old).elements()), sorted((old - new).elements())
+
     after = dbstate.normalize(state, rules, before)
-    written, replaced = {}, {}
+    written, replaced, catalog = {}, {}, {}
     for table in sorted(set(before["rows"]) | set(after["rows"])):
-        old = {json.dumps(row, sort_keys=True) for row in before["rows"].get(table, {}).get("rows", [])}
-        new = {json.dumps(row, sort_keys=True) for row in after["rows"].get(table, {}).get("rows", [])}
-        if new - old:
-            written[table] = {"rows": [json.loads(row) for row in sorted(new - old)]}
-        if old - new:
-            replaced[table] = {"rows": sorted({json.dumps(json.loads(row)[0]) for row in old - new})}
-    catalog = sorted(name for name in set(before["catalog"]) | set(after["catalog"])
-                     if before["catalog"].get(name) != after["catalog"].get(name))
-    return golden_scrub({"rows": written, "replaced": replaced, "catalog_changed": catalog})
+        added, removed = changed(before["rows"].get(table, {}).get("rows", []),
+                                 after["rows"].get(table, {}).get("rows", []))
+        if added:
+            written[table] = {"rows": [json.loads(row) for row in added]}
+        if removed:
+            replaced[table] = {"rows": sorted(json.dumps(json.loads(row)[0]) for row in removed)}
+    for name in sorted(set(before["catalog"]) | set(after["catalog"])):
+        added, removed = changed(before["catalog"].get(name, []), after["catalog"].get(name, []))
+        if added or removed:
+            catalog[name] = {"added": [json.loads(row) for row in added],
+                             "removed": [json.loads(row) for row in removed]}
+    return golden_scrub({"rows": written, "replaced": replaced, "catalog_rows": catalog})
 
 
 def reaches(difference, wanted):
@@ -712,7 +724,12 @@ def main(argv=None):
     oracle = goldens is None
 
     def expected(case):
-        return {"snapshot": goldens["cases"][case], "database": goldens["database"][case]} if goldens else None
+        if not goldens:
+            return None
+        if case not in goldens["cases"] or case not in goldens.get("database", {}):
+            raise RuntimeError(f"startup-hydration.json has no committed golden for {case}; record it with "
+                               "`python rust/daemon/harness/startup_ci.py --record-goldens`")
+        return {"snapshot": goldens["cases"][case], "database": goldens["database"][case]}
 
     for index, case in enumerate(args.only or (part_cases(args.part) if args.part else CASES)):
         result = {"case": case}

@@ -331,6 +331,9 @@ def main(argv=None):
               "declared_noop_callbacks": [*NOOP_CALLBACKS, "curation_safety.recover_slot_curation"]}
     number = time.time_ns()
     expected = json.loads(GOLDEN.read_text()) if args.check_goldens else None
+    if expected is not None and "database" not in expected:
+        parser.error("clock-retry.json has no database section; record it with "
+                     "`python rust/daemon/harness/startup_ci.py --record-goldens`")
     oracle = expected is None
     try:
         cell(args.rust_test_bin.resolve(), number, result, expected=expected, oracle=oracle)

@@ -216206,7 +216206,7 @@
  "database": {
   "deep-overflow": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -216531,7 +216531,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -216858,7 +216858,7 @@
   ],
   "empty": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -216878,7 +216878,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -216900,7 +216900,7 @@
   ],
   "malformed-highwater-bool": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -217093,7 +217093,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -217288,7 +217288,7 @@
   ],
   "malformed-highwater-component": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -217481,7 +217481,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -217676,7 +217676,7 @@
   ],
   "malformed-highwater-float": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -217869,7 +217869,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -218064,7 +218064,7 @@
   ],
   "malformed-highwater-negative": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -218257,7 +218257,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -218452,7 +218452,7 @@
   ],
   "malformed-highwater-short": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -218645,7 +218645,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -218840,7 +218840,7 @@
   ],
   "preset-rename": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -219033,7 +219033,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -219228,7 +219228,7 @@
   ],
   "record-highwater": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -219421,7 +219421,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -219616,7 +219616,7 @@
   ],
   "required-cortex-loader-failure": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -219809,7 +219809,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -220004,7 +220004,7 @@
   ],
   "required-entry-loader-failure": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -220024,7 +220024,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -220046,7 +220046,7 @@
   ],
   "required-episode-loader-failure": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -220239,7 +220239,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -220434,7 +220434,7 @@
   ],
   "required-loader-failure": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -220627,7 +220627,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -220822,7 +220822,7 @@
   ],
   "required-world-loader-failure": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -221015,7 +221015,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -221210,7 +221210,7 @@
   ],
   "seeded": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -221403,7 +221403,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -221598,7 +221598,7 @@
   ],
   "stale-combined-dims": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -221791,7 +221791,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -221986,7 +221986,7 @@
   ],
   "stale-cortex-dims": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -222179,7 +222179,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -222374,7 +222374,7 @@
   ],
   "stale-entry-dims": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -222567,7 +222567,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -222762,7 +222762,7 @@
   ],
   "startup-tags-non-string-preservation": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -222782,7 +222782,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -222804,7 +222804,7 @@
   ],
   "surprise-real-text-rounding": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -222824,7 +222824,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -222846,7 +222846,7 @@
   ],
   "world-lesson-dims-accepted": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -223039,7 +223039,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.entries": {
       "rows": [
@@ -223234,7 +223234,7 @@
   ],
   "zero-timestamp-seating": [
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -223254,7 +223254,7 @@
     }
    },
    {
-    "catalog_changed": [],
+    "catalog_rows": {},
     "replaced": {
      "public.meta": {
       "rows": [
@@ -223281,5 +223281,5 @@
   "relations.created_at": "new constructor rows only, checked against each arm's invocation window",
   "restart.meta.writer_lease_epoch": "removed only for idempotence; increment checked separately"
  },
- "oracle_head": "05d0ff81d882503aaf30e75ed6413fe4928f7f10"
+ "oracle_head": "7214b6794e0ce43636cf5c0b91912b97038e7954"
 }

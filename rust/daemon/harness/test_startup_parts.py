@@ -145,11 +145,6 @@ class SchemaBuildOnly(unittest.TestCase):
             schema_ci.main(["--no-build", "--rust-test-bin", "daemon-test"])
 
 
-
-class Started(Exception):
-    """A service start the test intercepted."""
-
-
 class Connection:
     def __enter__(self):
         return self
@@ -161,13 +156,19 @@ class Connection:
         pass
 
 
-EMPTY_STATE = {"rows": {}, "catalog": {}}
+# A bank dump with only the lease epoch, enough for every per-arm check to run.
+EMPTY_STATE = {"rows": {"public.meta": {"columns": ["key", "value"], "rows": [["writer_lease_epoch", 1]]}},
+               "catalog": {"extensions": []}}
+
+
+def empty_state(*args, **kwargs):
+    return json.loads(json.dumps(EMPTY_STATE))
 
 
 class GoldenChecking(unittest.TestCase):
-    """CI checks committed goldens with the Rust side alone (#1314's sibling):
-    the Python service may seed a template but is never started as an oracle,
-    and every case CI runs has a golden for each stage it compares."""
+    """CI checks committed goldens with the Rust side alone: the Python
+    service may seed a template but is never started as an oracle, and every
+    case CI runs has a golden for each stage it compares."""
 
     def setUp(self):
         self.scratch = Path(tempfile.mkdtemp(prefix="pl-golden-checking-"))
@@ -184,7 +185,7 @@ class GoldenChecking(unittest.TestCase):
                 self.assertEqual(len(golden["cases"][case]), 2)
                 self.assertEqual(len(golden["database"][case]), 2)
                 for stage in golden["database"][case]:
-                    self.assertEqual(set(stage), {"rows", "replaced", "catalog_changed"})
+                    self.assertEqual(set(stage), {"rows", "replaced", "catalog_rows"})
         mutant_cases = {case for case, _ in startup_cases.MUTANTS.values()}
         self.assertLessEqual(mutant_cases, set(golden["database"]))
 
@@ -201,27 +202,60 @@ class GoldenChecking(unittest.TestCase):
             with self.subTest(case=case):
                 self.assertEqual(len(stages), 2)
 
-    def start_cells(self, module, main_args, invoke_python_as="python"):
-        """Run a harness's main with every service start intercepted, and
-        return the arms it started, in order. A template seed is not a start."""
+    def starts(self, module, main_args):
+        """Run a harness's main with every service start faked, and return
+        the services it started, in order. A template seed is not a start."""
         started = []
 
-        def invoke(binary, kind, *args, seed_case=None, seed_only=False, **kwargs):
+        def invoke(binary, kind, dsn, home, *args, seed_case=None, seed_only=False, **kwargs):
             if seed_case or seed_only:
                 return None, [0.0, 0.0]
             started.append(kind)
-            raise Started(kind)
+            if module is clock_retry_cases:
+                phases = Path(args[1])
+                phases.mkdir(parents=True, exist_ok=True)
+                for phase in clock_retry_cases.PHASES:
+                    (phases / f"{phase}.json").write_text(json.dumps(EMPTY_STATE))
+                return {"attempts": []}
+            return {"ok": True, "startup": {}, "entries": []}, [0.0, 0.0]
 
         with patch.object(module, "invoke", invoke), \
                 patch.object(module.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
                 patch.object(module.pg, "drop", lambda name, *args: None), \
-                patch.object(module.dbstate, "dump", lambda *args, **kwargs: json.loads(json.dumps(EMPTY_STATE))), \
+                patch.object(module.dbstate, "dump", empty_state), \
                 patch.object(module.daemons, "make_home", lambda root, name, config: Path(root) / name), \
                 patch.dict(sys.modules, {"embedding_fixture": type(sys)("embedding_fixture")}), \
                 patch("sys.stdout"):
             sys.modules["embedding_fixture"].create = lambda model: None
             module.main(["--rust-test-bin", str(self.binary), "--out", str(self.out), *main_args])
         return started
+
+    def opens(self, main_args):
+        """The same for the schema cells: which storages opened, in order."""
+        opened = []
+
+        class Storage:
+            def __init__(self, dsn):
+                opened.append("python")
+
+            def close(self):
+                pass
+
+        def rust_open(binary, dsn, refusal=None):
+            opened.append("rust")
+
+        import pseudolife_memory.storage.postgres as postgres
+        with patch.object(postgres, "PostgresStorage", Storage), \
+                patch.object(schema_cases, "rust_open", rust_open), \
+                patch.object(schema_cases.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
+                patch.object(schema_cases.pg, "drop", lambda name, *args: None), \
+                patch.object(schema_cases, "snapshot", empty_state), \
+                patch.object(schema_cases.psycopg, "connect", lambda *args, **kwargs: Connection()), \
+                patch.object(schema_cases, "assert_disposable_database", lambda conn: None), \
+                patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}), \
+                patch("sys.stdout"):
+            schema_cases.main(["--rust-test-bin", str(self.binary), "--out", str(self.out), *main_args])
+        return opened
 
     def test_a_mutant_that_stops_a_table_write_reaches_its_row_path(self):
         wanted = "/rows/public.entries/rows:"
@@ -233,40 +267,19 @@ class GoldenChecking(unittest.TestCase):
         self.assertFalse(startup_cases.reaches("/startup/world: only in python", "/startup/world_facts:"))
 
     def test_checking_startup_goldens_never_starts_the_python_service(self):
-        started = self.start_cells(startup_cases, ["--check-goldens", "--only", "empty"])
-        self.assertEqual(started, ["rust"])
+        self.assertEqual(self.starts(startup_cases, ["--check-goldens", "--only", "empty"]), ["rust", "rust"])
 
     def test_checking_the_clock_retry_golden_never_starts_the_python_service(self):
-        started = self.start_cells(clock_retry_cases, ["--check-goldens"])
-        self.assertEqual(started, ["rust"])
-
-    def test_recording_still_starts_both_services(self):
-        started = self.start_cells(startup_cases, ["--only", "empty"])
-        self.assertEqual(started, ["python"])
+        self.assertEqual(self.starts(clock_retry_cases, ["--check-goldens"]), ["rust"])
 
     def test_checking_schema_goldens_opens_only_the_rust_storage(self):
-        opened = []
+        self.assertEqual(self.opens(["--check-goldens"]), ["rust", "rust"])
 
-        def storage(dsn):
-            opened.append("python")
-            raise Started("python")
-
-        def rust_open(binary, dsn, refusal=None):
-            opened.append("rust")
-            raise Started("rust")
-
-        import pseudolife_memory.storage.postgres as postgres
-        with patch.object(postgres, "PostgresStorage", storage), \
-                patch.object(schema_cases, "rust_open", rust_open), \
-                patch.object(schema_cases.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
-                patch.object(schema_cases.pg, "drop", lambda name, *args: None), \
-                patch.object(schema_cases, "snapshot", lambda dsn: json.loads(json.dumps(EMPTY_STATE))), \
-                patch.object(schema_cases.psycopg, "connect", lambda *args, **kwargs: Connection()), \
-                patch.object(schema_cases, "assert_disposable_database", lambda conn: None), \
-                patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}), \
-                self.assertRaises(Started):
-            schema_cases.main(["--rust-test-bin", str(self.binary), "--check-goldens", "--out", str(self.out)])
-        self.assertEqual(opened, ["rust"])
+    def test_without_golden_checking_both_sides_still_run(self):
+        # Recording (and a plain run) still compares the two live.
+        self.assertEqual(self.starts(startup_cases, ["--only", "empty"]), ["python", "rust"] * 2)
+        self.assertEqual(self.starts(clock_retry_cases, []), ["python", "rust"])
+        self.assertEqual(self.opens([]), ["python", "rust"] * 2)
 
 
 if __name__ == "__main__":
