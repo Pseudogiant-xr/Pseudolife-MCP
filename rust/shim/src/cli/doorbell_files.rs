@@ -105,8 +105,15 @@ fn open(path: &Path, write: bool, create: bool) -> Result<File> {
         }
         o
     };
+    // A new record is owner-only from its creation on Windows: the digest
+    // folder may be one used as it is (#1538), whose inherited entries could
+    // let another account open it before make_private ran.
+    #[cfg(windows)]
+    let create_new = || crate::credentials::windows_security::create_owner_only(path);
+    #[cfg(not(windows))]
+    let create_new = || options(true).open(path);
     let (file, new) = if create {
-        match options(true).open(path) {
+        match create_new() {
             Ok(f) => (f, true),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 (options(false).open(path).map_err(|_| ())?, false)

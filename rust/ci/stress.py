@@ -43,8 +43,9 @@ A selection is one of:
                          as run, which is why such tests are selected by name.
   <node id> [<node id>]  pytest node ids, run with -ra and a junit report, with
                          the parity shards' candidate binaries in the env, and
-                         with --include-frozen where the checkout has it, so a
-                         freeze-exception change can loop a frozen file
+                         with --include-frozen where the checkout has it and a
+                         node is under tests/, so a freeze-exception change
+                         can loop a frozen file
 
 An iteration passes only with evidence: a pytest or cargo run where every
 selected test ran and passed (a runtime skip is not evidence; nextest's
@@ -367,8 +368,11 @@ def command(kind: str, names: list[str], candidates: Path, scratch: Path,
         return [sys.executable, "rust/daemon/harness/run.py", "live", "--rust-bin", str(path),
                 *(["--fixture"] if fixture else []), "--only", names[0],
                 "--out", str(scratch / "harness.json")]
-    # tests/suite_classes.py's switch: frozen files are refused without it.
-    frozen = ["--include-frozen"] if Path("tests/suite_classes.py").is_file() else []
+    # tests/suite_classes.py's switch, which only tests/conftest.py defines:
+    # frozen files are refused without it, and a run outside tests/ (a
+    # rust/ci or rust/cli_harness test) would refuse the unknown option.
+    frozen = (["--include-frozen"] if Path("tests/suite_classes.py").is_file()
+              and any(name.replace("\\", "/").startswith("tests/") for name in names) else [])
     return [sys.executable, "-m", "pytest", *names, *frozen, "-ra", "--durations=30",
             "--junitxml", str(scratch / "junit.xml")]
 

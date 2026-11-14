@@ -219,10 +219,7 @@ def test_no_option_drops_tests_or_retries_them_unseen():
         assert not hidden, (job_id, hidden)
         job = jobs()[job_id]
         envs = [job.get("env") or {}] + [s.get("env") or {} for s in job["steps"]]
-        # PYTEST_ADDOPTS only as scope's output, which is --include-frozen or
-        # nothing: it adds frozen files, never --reruns or a filter.
-        assert all(env.get("PYTEST_ADDOPTS") in (None, "${{ needs.scope.outputs.pytest_addopts }}")
-                   for env in envs), job_id
+        assert not any("PYTEST_ADDOPTS" in env for env in envs), job_id
     scope = next(s for s in jobs()["scope"]["steps"] if s.get("id") == "scope")["run"]
     import re
-    assert set(re.findall(r'pytest_addopts=([^"\s]*)', scope)) == {"--include-frozen"}
+    assert "pytest_addopts" not in scope

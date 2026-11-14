@@ -155,10 +155,9 @@ touched, with no retrofit sweep.
 
 - **Frozen test files:** a run collects only the live files of
   `tests/suite_classes.txt` (`--include-frozen` adds the rest), because the
-  frozen package's code no longer changes; while the package still ships,
-  its tests can still find a dependency regression, so the weekly nightly,
-  a freeze-exception change's batch and a release's local validation run
-  them.
+  frozen package's code no longer changes (`docs/dev/merge-batches.md` "What
+  CI runs where" says when the frozen files still run; read it before
+  relying on them).
 - A new test file adds its line there: a test of a freeze-exception change,
   or of anything that survives, is live; read the header of
   `tests/suite_classes.txt`.

@@ -166,6 +166,123 @@ fn replacement_conflict_keeps_observed_and_actual_displaced_contents() {
     );
 }
 
+/// Issue #1545: umask 002 (a private group per user, Debian and Ubuntu)
+/// makes client files 0664; group or other write is never a reason to refuse,
+/// the target keeps its mode, and the backup is 0600.
+#[cfg(unix)]
+mod modes {
+    use super::*;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    fn edit_with(file_mode: u32, parent_mode: Option<u32>) {
+        let f = Fixture::new();
+        let parent = match parent_mode {
+            Some(mode) => {
+                let dir = f.0.join("config-dir");
+                fs::create_dir(&dir).unwrap();
+                fs::set_permissions(&dir, fs::Permissions::from_mode(mode)).unwrap();
+                dir
+            }
+            None => f.0.clone(),
+        };
+        let path = parent.join("client.json");
+        fs::write(&path, b"before").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(file_mode)).unwrap();
+        let backup = write_config(&path, b"before", b"after")
+            .unwrap_or_else(|e| panic!("mode {file_mode:o} parent {parent_mode:?}: {e}"));
+        assert_eq!(fs::read(&path).unwrap(), b"after");
+        assert_eq!(
+            fs::metadata(&path).unwrap().mode() & 0o7777,
+            file_mode,
+            "the target keeps its mode"
+        );
+        assert_eq!(fs::read(&backup).unwrap(), b"before");
+        assert_eq!(fs::metadata(&backup).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(backup.parent().unwrap()).unwrap().mode() & 0o777,
+            0o700
+        );
+        assert!(backup.parent().unwrap().join(COMPLETION).is_file());
+        if let Some(mode) = parent_mode {
+            assert_eq!(
+                fs::metadata(&parent).unwrap().mode() & 0o777,
+                mode,
+                "parent untouched"
+            );
+        }
+    }
+
+    #[test]
+    fn group_writable_and_private_configs_are_edited_keeping_their_mode() {
+        for mode in [0o664, 0o660, 0o644, 0o600, 0o666] {
+            edit_with(mode, None);
+        }
+    }
+
+    #[test]
+    fn a_group_writable_parent_directory_is_not_a_reason_to_refuse() {
+        for mode in [0o664, 0o644, 0o600] {
+            edit_with(mode, Some(0o775));
+        }
+    }
+
+    #[test]
+    fn another_accounts_file_is_refused_naming_the_path_and_the_fix() {
+        let f = Fixture::new();
+        // As root, a fixture file given to nobody (65534); as anyone else, a
+        // file root owns. The owner check refuses before anything is created.
+        let path = if rustix::process::getuid().as_raw() == 0 {
+            let path = f.0.join("client.json");
+            fs::write(&path, b"before").unwrap();
+            std::os::unix::fs::chown(&path, Some(65534), Some(65534)).unwrap();
+            path
+        } else {
+            PathBuf::from("/etc/passwd")
+        };
+        let content = fs::read(&path).unwrap();
+        let error = write_config(&path, &content, b"after").unwrap_err();
+        assert!(
+            error.contains("is owned by another account") && error.contains("sudo chown"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), content);
+        assert!(
+            !fs::read_dir(path.parent().unwrap()).unwrap().any(|e| e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".client-native-backup-")),
+            "no recovery files were created"
+        );
+    }
+
+    #[test]
+    fn a_hard_link_is_refused_without_changing_either_name() {
+        let f = Fixture::new();
+        let path = f.0.join("client.json");
+        fs::write(&path, b"before").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o664)).unwrap();
+        let link = f.0.join("dotfiles-copy.json");
+        fs::hard_link(&path, &link).unwrap();
+        let error = write_config(&path, b"before", b"after").unwrap_err();
+        assert!(error.contains("another hard link"), "{error}");
+        assert_eq!(fs::read(&path).unwrap(), b"before");
+        assert_eq!(fs::metadata(&link).unwrap().mode() & 0o777, 0o664);
+    }
+
+    #[test]
+    fn the_replacement_keeps_the_original_group() {
+        let f = Fixture::new();
+        let path = f.0.join("client.json");
+        fs::write(&path, b"before").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o664)).unwrap();
+        let gid = fs::metadata(&path).unwrap().gid();
+        write_config(&path, b"before", b"after").unwrap();
+        let meta = fs::metadata(&path).unwrap();
+        assert_eq!((meta.gid(), meta.mode() & 0o777), (gid, 0o664));
+    }
+}
+
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows {
@@ -278,7 +395,7 @@ mod windows {
         replace_preserving(&target, &pending, &previous).unwrap();
         assert!(!pending.exists());
         assert_eq!(read_optional(&target).unwrap().unwrap(), b"after");
-        windows_config_security::validate(&fs::File::open(&target).unwrap()).unwrap();
+        windows_config_security::validate(&fs::File::open(&target).unwrap(), false).unwrap();
         assert_eq!(fs::read(&previous).unwrap(), b"before");
         assert_eq!(fs::read_dir(&f.0).unwrap().count(), 2);
     }
@@ -317,14 +434,47 @@ mod windows {
     }
 
     #[test]
-    fn broadly_writable_acl_is_rejected_without_creating_recovery_files() {
+    fn a_file_other_accounts_may_write_is_edited_keeping_its_acl_with_a_private_backup() {
+        // Issue #1545: the client already trusts this file as it is; the
+        // edit keeps its ACL (never loosened, never changed) and the backup
+        // of the displaced file is this user's alone.
         let f = Fixture::new();
         let path = f.0.join("client.json");
         crate::board::state::atomic_create(&path, b"before").unwrap();
         set_acl(&opened(&path, false), "D:P(A;;FA;;;OW)(A;;FW;;;WD)");
-        assert!(write_config(&path, b"before", b"after").is_err());
-        assert_eq!(fs::read(&path).unwrap(), b"before");
-        assert_eq!(fs::read_dir(&f.0).unwrap().count(), 1);
+        let backup = write_config(&path, b"before", b"after").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"after");
+        assert_eq!(fs::read(&backup).unwrap(), b"before");
+        // The target still grants Everyone write, exactly as before.
+        assert!(windows_config_security::validate(&fs::File::open(&path).unwrap(), false).is_err());
+        windows_config_security::validate(&fs::File::open(&path).unwrap(), true).unwrap();
+        // The backup is private, so its completion is recorded and pruning works.
+        windows_config_security::validate(&fs::File::open(&backup).unwrap(), false).unwrap();
+        assert!(backup.parent().unwrap().join(COMPLETION).is_file());
+    }
+
+    #[test]
+    fn a_store_desktop_config_with_an_inherited_package_capability_ace_is_edited() {
+        // The Store (MSIX) Claude Desktop folder grants a package capability
+        // SID (S-1-15-3-*) full control by inheritance, so the config Desktop
+        // creates there carries it; that file is the client's own.
+        let f = Fixture::new();
+        let directory = opened(&f.0, true);
+        set_acl(
+            &directory,
+            "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681)",
+        );
+        let path = f.0.join("claude_desktop_config.json");
+        fs::write(&path, b"before").unwrap();
+        // The inherited capability ACE is really there: the strict check sees it.
+        let strict =
+            || windows_config_security::validate(&fs::File::open(&path).unwrap(), false).is_err();
+        assert!(strict());
+        let backup = write_config(&path, b"before", b"after").unwrap();
+        assert!(strict(), "the target keeps its ACL");
+        assert_eq!(fs::read(&path).unwrap(), b"after");
+        assert_eq!(fs::read(&backup).unwrap(), b"before");
+        windows_config_security::validate(&fs::File::open(&backup).unwrap(), false).unwrap();
     }
 
     #[test]

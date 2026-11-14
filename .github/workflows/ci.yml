@@ -38,9 +38,10 @@
 #
 # The Python freeze also split tests/ (tests/suite_classes.txt): a run
 # collects only the live files unless pytest gets --include-frozen, which
-# the Python lanes get (PYTEST_ADDOPTS, from scope) for a change to the
-# frozen package (a freeze exception), an unreadable diff and the weekly
-# nightly (Sunday UTC). The lite tier is dropped, and with it test-lite-linux (the
+# `test` passes (scope's include_frozen, through ops/ci_tests.sh) for a
+# change to the frozen package (a freeze exception), an unreadable diff and
+# the weekly nightly (Sunday UTC). The Windows and macOS lanes name live
+# files only, so the switch would add nothing there. The lite tier is dropped, and with it test-lite-linux (the
 # whole suite on embedded PostgreSQL); the Windows and macOS lanes keep their
 # names and run the live files of their selections.
 #
@@ -126,10 +127,12 @@ jobs:
       # true for a batch, push or merge group whose change is Rust-only: the
       # guards job then also runs the live tests that read rust/ files.
       rust_only: ${{ steps.scope.outputs.rust_only }}
-      # --include-frozen when the frozen package's own tests must run too
-      # (the Classify step says when); the Python lanes pass it to pytest as
-      # PYTEST_ADDOPTS, so it reaches ops/ci_tests.sh and every list alike.
-      pytest_addopts: ${{ steps.scope.outputs.pytest_addopts }}
+      # true when the frozen package's own tests must run too (the Classify
+      # step says when). Only `test` reads it, and ops/ci_tests.sh turns it
+      # into --include-frozen on its own pytest command line: an argument,
+      # not PYTEST_ADDOPTS, which every pytest a test starts would inherit
+      # (tests/test_suite_classes.py's own child runs, for one).
+      include_frozen: ${{ steps.scope.outputs.include_frozen }}
       batch_passed: ${{ steps.batch.outputs.passed }}
       push_passed: ${{ steps.push.outputs.passed }}
     steps:
@@ -197,12 +200,12 @@ jobs:
               if [ "$MERGE_GROUP_BASE_REF" != refs/heads/master ] ||
                  ! git fetch --no-tags --depth=1 origin refs/heads/master; then
                 echo "python=true" >> "$GITHUB_OUTPUT"
-                echo "pytest_addopts=--include-frozen" >> "$GITHUB_OUTPUT"; exit 0
+                echo "include_frozen=true" >> "$GITHUB_OUTPUT"; exit 0
               fi
               base=FETCH_HEAD ;;
             *) echo "python=true" >> "$GITHUB_OUTPUT"
                if [ "$WEEKLY_FROZEN" = true ]; then
-                 echo "pytest_addopts=--include-frozen" >> "$GITHUB_OUTPUT"
+                 echo "include_frozen=true" >> "$GITHUB_OUTPUT"
                fi
                exit 0 ;;
           esac
@@ -210,7 +213,7 @@ jobs:
           # package, so it runs everything, frozen tests included.
           if ! files=$(git diff --no-renames --name-only "$base" HEAD) || [ -z "$files" ]; then
             echo "python=true" >> "$GITHUB_OUTPUT"
-            echo "pytest_addopts=--include-frozen" >> "$GITHUB_OUTPUT"; exit 0
+            echo "include_frozen=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           printf '%s\n' "$files"
           # An ordinary pull request runs the fast lanes only (guards and the
@@ -230,7 +233,7 @@ jobs:
           # tests too. The Console build under web/static/ is not one.
           frozen=$(grep -E '^pseudolife_memory/' <<<"$files" | grep -vE '^pseudolife_memory/web/static/' || true)
           if [ -n "$frozen" ]; then
-            echo "pytest_addopts=--include-frozen" >> "$GITHUB_OUTPUT"
+            echo "include_frozen=true" >> "$GITHUB_OUTPUT"
           fi
           # Skip only when nothing falls outside the allowlist AND the PR
           # touches rust/ (a CHANGELOG-only docs PR keeps the full suite).
@@ -314,7 +317,8 @@ jobs:
       - name: Live tests that read rust/ files
         # Since the Python freeze a Rust-only batch skips the Python lanes on
         # its pull request and its master push, so every live test that
-        # names a rust/ path runs here on such a change, on the job's
+        # names a rust/ path, imports rust code or reads rust.yml runs here on
+        # such a change, on the job's
         # throwaway PostgreSQL (a missing one fails them, never skips):
         # tests/test_suite_classes.py keeps this list complete. An ordinary
         # pull request skips the step; its batch runs these in the test job.
@@ -329,6 +333,8 @@ jobs:
           tests/test_pdfium_pin.py tests/test_prune_worktrees.py tests/test_rehearse_activation.py
           tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_suite_classes.py
+          tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
+          tests/test_claude_md_citations.py
 
   lock-resolve:
     # Replays the daemon image's constrained install (ops/Dockerfile.daemon
@@ -386,9 +392,9 @@ jobs:
           --health-retries 12
 
     env:
-      # --include-frozen for a change to the frozen package and the weekly
-      # run (scope says when); empty otherwise.
-      PYTEST_ADDOPTS: ${{ needs.scope.outputs.pytest_addopts }}
+      # true for a change to the frozen package and the weekly run (scope
+      # says when): ops/ci_tests.sh then passes pytest --include-frozen.
+      PSEUDOLIFE_CI_INCLUDE_FROZEN: ${{ needs.scope.outputs.include_frozen }}
       # tests/pg_fixtures.py resolves the test server from this; the
       # fixture creates/truncates the test database itself.
       PSEUDOLIFE_TEST_DATABASE_URL: postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test
@@ -565,9 +571,6 @@ jobs:
     # empty scope runs the suite instead of skipping it.
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-windows') }}
     runs-on: windows-latest
-    env:
-      # --include-frozen for a change to the frozen package (scope says when).
-      PYTEST_ADDOPTS: ${{ needs.scope.outputs.pytest_addopts }}
     # Needs no embedding model (torch installs as a core dep but never loads
     # weights here). Measured 2026-10-20 on the maintainer's Windows host,
     # serially, against embedded PG: this selection's 377 cases took 75 s
@@ -837,9 +840,6 @@ jobs:
     # empty scope runs the suite instead of skipping it.
     if: ${{ !cancelled() && needs.scope.outputs.push_passed != 'true' && needs.scope.outputs.python != 'false' && !contains(fromJSON(needs.scope.outputs.batch_passed || '[]'), 'test-lite-macos') }}
     runs-on: macos-latest
-    env:
-      # --include-frozen for a change to the frozen package (scope says when).
-      PYTEST_ADDOPTS: ${{ needs.scope.outputs.pytest_addopts }}
     # Curated like the Windows lane: the hook and installer surface needs no
     # embedding model, so this is minutes, not the full suite.
     timeout-minutes: 25

@@ -11,17 +11,19 @@
       "test-lite-macos": "f3e61581c78da942",
       "test-lite-windows": "200ef2b514faec86"
     },
+    "python-freeze.yml": {
+      "python-freeze": "11925709ebd29f33"
+    },
     "rust.yml": {
       "candidate": "4ecb836547864d17",
       "candidate-harness": "a529abf5282ce028",
       "daemon-image": "0c0adfbcb5b53ced",
       "fixtures": "02c883eba613073a",
-      "frozen-probes": "d300a5394671f24c",
-      "parity": "4b13f8c55b6e3de3",
-      "parity-checks": "36dea8536f4db6e2",
+      "parity": "f8acb83e13126842",
+      "parity-checks": "5e0cf825879abfff",
       "parity-pool": "743ed0bdc6621552",
-      "rust": "0f464b588183eae9",
-      "scope": "1be8245c7953029b"
+      "rust": "9045b09e5ae957d5",
+      "scope": "58e9c623d9cdbae6"
     }
   }
 }
