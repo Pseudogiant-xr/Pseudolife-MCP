@@ -55,7 +55,9 @@ fn sorted_unique(mut names: Vec<String>) -> Vec<String> {
 /// check finished), `green`, or `none` with no checks. One failure is
 /// enough; a cancellation waits for the rest.
 pub(super) fn checks_state(rollup: Option<&Value>) -> (&'static str, Vec<String>) {
-    let checks = rollup.and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    let checks = rollup
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
     let (mut failed, mut cancelled, mut pending) = (Vec::new(), Vec::new(), false);
     for check in checks {
         if text(check, "__typename") == "StatusContext" {
@@ -123,8 +125,11 @@ pub(super) fn runs_state(runs: &[Value]) -> (&'static str, Vec<String>) {
             None => newest.push((key, run)),
         }
     }
-    let mut by_state: [(&str, Vec<String>); 3] =
-        [("pending", Vec::new()), ("failing", Vec::new()), ("cancelled", Vec::new())];
+    let mut by_state: [(&str, Vec<String>); 3] = [
+        ("pending", Vec::new()),
+        ("failing", Vec::new()),
+        ("cancelled", Vec::new()),
+    ];
     for (_, run) in &newest {
         let name = non_empty(text(run, "workflowName"), "workflow");
         let conclusion = upper(run, "conclusion");
@@ -186,23 +191,65 @@ pub(super) fn pr_snapshot(old: Option<&Map<String, Value>>, prs: &[Value]) -> Ma
 /// One thing that needs a decision.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Event {
-    Opened { number: String, title: String },
-    Failing { number: String, head: String, names: Vec<String> },
-    Green { number: String, head: String, merge_state: String },
-    Cancelled { number: String, head: String, names: Vec<String> },
-    Conflicts { number: String },
-    Ended { number: String, how: String, title: String },
-    MasterFailed { workflow: String, sha: String, event: String },
-    MasterGreen { workflow: String, sha: String, event: String },
-    Suite { machine: String, commit: String, exit: Value, summary: String },
-    LeaseFree { name: String },
+    Opened {
+        number: String,
+        title: String,
+    },
+    Failing {
+        number: String,
+        head: String,
+        names: Vec<String>,
+    },
+    Green {
+        number: String,
+        head: String,
+        merge_state: String,
+    },
+    Cancelled {
+        number: String,
+        head: String,
+        names: Vec<String>,
+    },
+    Conflicts {
+        number: String,
+    },
+    Ended {
+        number: String,
+        how: String,
+        title: String,
+    },
+    MasterFailed {
+        workflow: String,
+        sha: String,
+        event: String,
+    },
+    MasterGreen {
+        workflow: String,
+        sha: String,
+        event: String,
+    },
+    Suite {
+        machine: String,
+        commit: String,
+        exit: Value,
+        summary: String,
+    },
+    LeaseFree {
+        name: String,
+    },
 }
 
 fn strings(value: &Value, key: &str) -> Vec<String> {
     value
         .get(key)
         .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -278,7 +325,10 @@ pub(super) fn pr_events(
 /// The newest completed, non-cancelled push or schedule run per workflow.
 /// An older run never replaces the one held, and a held run being re-run
 /// stays until its new attempt finishes.
-pub(super) fn master_snapshot(old: Option<&Map<String, Value>>, runs: &[Value]) -> Map<String, Value> {
+pub(super) fn master_snapshot(
+    old: Option<&Map<String, Value>>,
+    runs: &[Value],
+) -> Map<String, Value> {
     let mut snap = old.cloned().unwrap_or_default();
     let mut seen: Vec<String> = Vec::new();
     for run in runs {
@@ -323,9 +373,9 @@ pub(super) fn master_events(old: &Map<String, Value>, new: &Map<String, Value>) 
     for (name, run) in new {
         let before = old.get(name);
         if let Some(before) = before
-            && ["id", "attempt", "conclusion"]
-                .iter()
-                .all(|key| before.get(*key).unwrap_or(&Value::Null) == run.get(*key).unwrap_or(&Value::Null))
+            && ["id", "attempt", "conclusion"].iter().all(|key| {
+                before.get(*key).unwrap_or(&Value::Null) == run.get(*key).unwrap_or(&Value::Null)
+            })
         {
             continue;
         }
@@ -337,9 +387,17 @@ pub(super) fn master_events(old: &Map<String, Value>, new: &Map<String, Value>) 
             text(run, "event").to_owned(),
         );
         if MASTER_FAILED.contains(&conclusion) && was.is_none_or(|was| was == "success") {
-            out.push(Event::MasterFailed { workflow, sha, event });
+            out.push(Event::MasterFailed {
+                workflow,
+                sha,
+                event,
+            });
         } else if conclusion == "success" && was.is_some_and(|was| MASTER_FAILED.contains(&was)) {
-            out.push(Event::MasterGreen { workflow, sha, event });
+            out.push(Event::MasterGreen {
+                workflow,
+                sha,
+                event,
+            });
         }
     }
     out
@@ -449,28 +507,77 @@ impl Event {
     /// Messages and the ledger carry `quoted`.
     #[cfg(test)]
     pub(super) fn plain(&self) -> String {
-        let names = |names: &[String]| names.iter().take(NAMES).cloned().collect::<Vec<_>>().join(", ");
+        let names = |names: &[String]| {
+            names
+                .iter()
+                .take(NAMES)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         match self {
             Self::Opened { number, title } => format!("PR #{number} opened: {title}"),
-            Self::Failing { number, head, names: failed } => {
-                format!("PR #{number} failing at {}: {}", first(head, 8), names(failed))
+            Self::Failing {
+                number,
+                head,
+                names: failed,
+            } => {
+                format!(
+                    "PR #{number} failing at {}: {}",
+                    first(head, 8),
+                    names(failed)
+                )
             }
-            Self::Green { number, head, merge_state } => {
-                format!("PR #{number} green at {}, merge state {merge_state}", first(head, 8))
+            Self::Green {
+                number,
+                head,
+                merge_state,
+            } => {
+                format!(
+                    "PR #{number} green at {}, merge state {merge_state}",
+                    first(head, 8)
+                )
             }
-            Self::Cancelled { number, head, names: cancelled } => {
-                format!("PR #{number} cancelled at {}: {}", first(head, 8), names(cancelled))
+            Self::Cancelled {
+                number,
+                head,
+                names: cancelled,
+            } => {
+                format!(
+                    "PR #{number} cancelled at {}: {}",
+                    first(head, 8),
+                    names(cancelled)
+                )
             }
             Self::Conflicts { number } => format!("PR #{number} conflicts with its base"),
             Self::Ended { number, how, title } => format!("PR #{number} {how}: {title}"),
-            Self::MasterFailed { workflow, sha, event } => {
+            Self::MasterFailed {
+                workflow,
+                sha,
+                event,
+            } => {
                 format!("master {workflow} failed at {} ({event})", first(sha, 8))
             }
-            Self::MasterGreen { workflow, sha, event } => {
-                format!("master {workflow} green again at {} ({event})", first(sha, 8))
+            Self::MasterGreen {
+                workflow,
+                sha,
+                event,
+            } => {
+                format!(
+                    "master {workflow} green again at {} ({event})",
+                    first(sha, 8)
+                )
             }
-            Self::Suite { machine, commit, exit, summary } => {
-                format!("suite {machine} {commit} exit {}: {summary}", python_str(exit))
+            Self::Suite {
+                machine,
+                commit,
+                exit,
+                summary,
+            } => {
+                format!(
+                    "suite {machine} {commit} exit {}: {summary}",
+                    python_str(exit)
+                )
             }
             Self::LeaseFree { name } => format!("{name} free"),
         }
@@ -483,41 +590,70 @@ impl Event {
             Self::Opened { number: n, title } => {
                 format!("PR #{} opened, title {}", number(n), quote(title))
             }
-            Self::Failing { number: n, head, names } => format!(
+            Self::Failing {
+                number: n,
+                head,
+                names,
+            } => format!(
                 "PR #{} failing at {}, checks {}",
                 number(n),
                 short_sha(head),
                 quoted_names(names)
             ),
-            Self::Green { number: n, head, merge_state } => format!(
+            Self::Green {
+                number: n,
+                head,
+                merge_state,
+            } => format!(
                 "PR #{} green at {}, merge state {}",
                 number(n),
                 short_sha(head),
                 word(merge_state)
             ),
-            Self::Cancelled { number: n, head, names } => format!(
+            Self::Cancelled {
+                number: n,
+                head,
+                names,
+            } => format!(
                 "PR #{} cancelled at {}, checks {}",
                 number(n),
                 short_sha(head),
                 quoted_names(names)
             ),
             Self::Conflicts { number: n } => format!("PR #{} conflicts with its base", number(n)),
-            Self::Ended { number: n, how, title } => {
+            Self::Ended {
+                number: n,
+                how,
+                title,
+            } => {
                 format!("PR #{} {}, title {}", number(n), word(how), quote(title))
             }
-            Self::MasterFailed { workflow, sha, event } => format!(
+            Self::MasterFailed {
+                workflow,
+                sha,
+                event,
+            } => format!(
                 "master workflow {} failed at {} ({})",
                 quote(workflow),
                 short_sha(sha),
                 word(event)
             ),
-            Self::MasterGreen { workflow, sha, event } => format!(
+            Self::MasterGreen {
+                workflow,
+                sha,
+                event,
+            } => format!(
                 "master workflow {} green again at {} ({})",
                 quote(workflow),
                 short_sha(sha),
                 word(event)
             ),
-            Self::Suite { machine, commit, exit, summary } => {
+            Self::Suite {
+                machine,
+                commit,
+                exit,
+                summary,
+            } => {
                 let exit = match exit {
                     Value::Number(code) if code.is_i64() => code.to_string(),
                     other => quote(&python_str(other)),

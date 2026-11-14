@@ -42,16 +42,20 @@ pub(super) struct Start {
 
 /// One line on stderr, with the line ending the rest of this CLI writes.
 fn say(text: &str) {
-    let line = super::super::text_bytes(&format!("conductor-watch: {text}
-"));
+    let line = super::super::text_bytes(&format!(
+        "conductor-watch: {text}
+"
+    ));
     let _ = std::io::stderr().write_all(&line);
 }
 
 /// One line on stdout, flushed: a detached watcher's stdout is its log.
 fn print(text: &str) {
     let mut out = std::io::stdout();
-    let _ = out.write_all(&super::super::text_bytes(&format!("{text}
-")));
+    let _ = out.write_all(&super::super::text_bytes(&format!(
+        "{text}
+"
+    )));
     let _ = out.flush();
 }
 
@@ -73,7 +77,10 @@ pub(super) fn settings(start: &Start) -> Settings {
             std::path::PathBuf::from,
         ),
         leases: if leases.is_empty() {
-            DEFAULT_LEASES.iter().map(|name| (*name).to_owned()).collect()
+            DEFAULT_LEASES
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect()
         } else {
             leases
         },
@@ -260,7 +267,10 @@ pub(super) fn foreground(start: &Start) -> u8 {
 }
 
 fn watch_here(settings: &Settings) -> u8 {
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
         say("could not start the async runtime");
         return EXIT_SETUP;
     };
@@ -269,7 +279,11 @@ fn watch_here(settings: &Settings) -> u8 {
             Ok(board) => board,
             Err(failure) => {
                 say(&format!("no board: {}", failure.text));
-                append_ledger(&settings.files.ledger, "setup", &format!("no board: {}", failure.text));
+                append_ledger(
+                    &settings.files.ledger,
+                    "setup",
+                    &format!("no board: {}", failure.text),
+                );
                 return EXIT_SETUP;
             }
         };
@@ -334,9 +348,12 @@ fn keep_standard_handles() {
 /// `.`, `_` and `-`.
 fn repo_name_shape(text: &str) -> bool {
     let part = |p: &str| {
-        !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        !p.is_empty()
+            && p.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
     };
-    text.split_once('/').is_some_and(|(owner, name)| part(owner) && part(name))
+    text.split_once('/')
+        .is_some_and(|(owner, name)| part(owner) && part(name))
 }
 
 /// The repository gh finds from this folder, for a detached watcher that
@@ -350,9 +367,15 @@ fn caller_repository() -> Result<Option<String>, String> {
         .enable_all()
         .build()
         .map_err(|error| format!("could not start the async runtime ({error})"))?;
-    let mut gh = GhProgram { program: Some(program), repo: None };
+    let mut gh = GhProgram {
+        program: Some(program),
+        repo: None,
+    };
     let out = runtime
-        .block_on(super::sources::Gh::call(&mut gh, &["repo", "view", "--json", "nameWithOwner"]))
+        .block_on(super::sources::Gh::call(
+            &mut gh,
+            &["repo", "view", "--json", "nameWithOwner"],
+        ))
         .map_err(|error| match error {
             super::sources::GhError::Missing => "gh is not installed".to_owned(),
             super::sources::GhError::Failed(why) => why,
@@ -369,7 +392,9 @@ fn log_since(log: &Path, offset: u64) -> String {
     let Ok(bytes) = fs::read(log) else {
         return String::new();
     };
-    let start = usize::try_from(offset).unwrap_or(usize::MAX).min(bytes.len());
+    let start = usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(bytes.len());
     String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
@@ -390,7 +415,8 @@ pub(super) fn detach(start: &Start) -> u8 {
         child_args.extend(["--owner".to_owned(), start.owner.clone()]);
     }
     // Absolute: the child does not run from the caller's folder.
-    let state = std::path::absolute(&start.files.state).unwrap_or_else(|_| start.files.state.clone());
+    let state =
+        std::path::absolute(&start.files.state).unwrap_or_else(|_| start.files.state.clone());
     if start.args.state.is_none() || state != start.files.state {
         child_args.extend(["--state".to_owned(), state.display().to_string()]);
     }
@@ -450,7 +476,8 @@ pub(super) fn detach(start: &Start) -> u8 {
         let record = fs::read(&start.files.pid)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
-        if let Some(record) = record.filter(|r| r["nonce"] == nonce.as_str() && r["ready"] == true) {
+        if let Some(record) = record.filter(|r| r["nonce"] == nonce.as_str() && r["ready"] == true)
+        {
             let agent = record["agent_id"].as_str().unwrap_or("?").to_owned();
             print(&format!(
                 "conductor-watch {agent} watching for {}; {}",
@@ -468,10 +495,13 @@ pub(super) fn detach(start: &Start) -> u8 {
         }
         // Another start won: say whose watcher runs. Our own child's
         // record is not another.
-        let other = super::running(&start.files.state).ok().flatten().or_else(|| {
-            super::owner_watcher(&start.home, &start.owner)
-                .and_then(|other| super::running(&other).ok().flatten())
-        });
+        let other = super::running(&start.files.state)
+            .ok()
+            .flatten()
+            .or_else(|| {
+                super::owner_watcher(&start.home, &start.owner)
+                    .and_then(|other| super::running(&other).ok().flatten())
+            });
         if let Some(other) = other
             && super::pyjson::get(&other, "nonce") != Some(&super::pyjson::J::Str(nonce.clone()))
         {
@@ -492,7 +522,10 @@ pub(super) fn detach(start: &Start) -> u8 {
         if let Ok(Some(status)) = child.try_wait() {
             let said = log_since(log, offset);
             // It found this owner's watcher already running: relay that.
-            if let Some(line) = said.lines().find(|line| line.contains(" already running for ")) {
+            if let Some(line) = said
+                .lines()
+                .find(|line| line.contains(" already running for "))
+            {
                 print(line.trim_end());
                 return EXIT_OK;
             }

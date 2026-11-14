@@ -85,7 +85,12 @@ fn events_are_the_fixture_lines_in_the_fixture_order() {
             .map(|(number, how)| (number, how.as_str().unwrap().to_owned()))
             .collect();
         let events = pr_events(&map(&case["old"]), &map(&case["new"]), &closed);
-        assert_eq!(lines(&events), expected_lines(&case["expected"]), "{}", case["name"]);
+        assert_eq!(
+            lines(&events),
+            expected_lines(&case["expected"]),
+            "{}",
+            case["name"]
+        );
     }
     for (name, classify) in [
         ("master_events", master_events as fn(&_, &_) -> Vec<Event>),
@@ -94,7 +99,12 @@ fn events_are_the_fixture_lines_in_the_fixture_order() {
     ] {
         for case in cases(name) {
             let events = classify(&map(&case["old"]), &map(&case["new"]));
-            assert_eq!(lines(&events), expected_lines(&case["expected"]), "{name}: {}", case["name"]);
+            assert_eq!(
+                lines(&events),
+                expected_lines(&case["expected"]),
+                "{name}: {}",
+                case["name"]
+            );
         }
     }
     for case in cases("quiet_line") {
@@ -127,7 +137,13 @@ fn text_from_github_reaches_the_owner_quoted_and_escaped() {
     let failing = Event::Failing {
         number: "4".into(),
         head: "not-a-sha-at-all".into(),
-        names: vec!["a\"b".into(), "c".into(), "d".into(), "e".into(), "f".into()],
+        names: vec![
+            "a\"b".into(),
+            "c".into(),
+            "d".into(),
+            "e".into(),
+            "f".into(),
+        ],
     }
     .quoted();
     assert_eq!(
@@ -156,7 +172,10 @@ fn text_from_github_reaches_the_owner_quoted_and_escaped() {
     let every: String = (0..0x11_0000u32).filter_map(char::from_u32).collect();
     for chunk in every.chars().collect::<Vec<_>>().chunks(QUOTED_MAX) {
         let quoted = quote(&chunk.iter().collect::<String>());
-        assert!(quoted.bytes().all(|b| (b' '..=b'~').contains(&b)), "{quoted}");
+        assert!(
+            quoted.bytes().all(|b| (b' '..=b'~').contains(&b)),
+            "{quoted}"
+        );
     }
 }
 
@@ -168,7 +187,10 @@ fn a_batch_is_bounded_and_says_how_many_follow() {
     let body: Vec<&str> = text.lines().collect();
     assert_eq!(body[0], HEADER);
     assert_eq!(body[1], "PR #0 opened, title \"t\"");
-    assert_eq!(body[body.len() - 2], "and 3 more events in the next message");
+    assert_eq!(
+        body[body.len() - 2],
+        "and 3 more events in the next message"
+    );
     assert_eq!(body[body.len() - 1], REMINDER);
     assert_eq!(body.len(), MESSAGE_EVENTS + 3);
 
@@ -188,5 +210,8 @@ fn a_batch_is_bounded_and_says_how_many_follow() {
 
     let (text, kept) = next_batch(&[opened(1, "one")]);
     assert_eq!(kept, 1);
-    assert_eq!(text, format!("{HEADER}\nPR #1 opened, title \"one\"\n{REMINDER}"));
+    assert_eq!(
+        text,
+        format!("{HEADER}\nPR #1 opened, title \"one\"\n{REMINDER}")
+    );
 }

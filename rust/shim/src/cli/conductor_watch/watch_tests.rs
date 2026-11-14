@@ -81,10 +81,18 @@ impl FakeBoard {
         self.calls.borrow_mut().push(what.to_owned());
     }
     fn called(&self, what: &str) -> usize {
-        self.calls.borrow().iter().filter(|call| call.starts_with(what)).count()
+        self.calls
+            .borrow()
+            .iter()
+            .filter(|call| call.starts_with(what))
+            .count()
     }
     fn last_status(&self) -> String {
-        self.statuses.borrow().last().map(|(s, _)| s.clone()).unwrap_or_default()
+        self.statuses
+            .borrow()
+            .last()
+            .map(|(s, _)| s.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -141,7 +149,11 @@ impl BoardApi for FakeBoard {
         if name.starts_with("conductor:") {
             let check = self.lease_checks.get() + 1;
             self.lease_checks.set(check);
-            let holder = if check >= self.holder_moves_at.get() { OTHER } else { OWNER };
+            let holder = if check >= self.holder_moves_at.get() {
+                OTHER
+            } else {
+                OWNER
+            };
             return Ok(vec![json!({"name": name, "holder": {"agent_id": holder}})]);
         }
         Ok(Vec::new())
@@ -153,12 +165,18 @@ impl BoardApi for FakeBoard {
             self.goodbyes.borrow_mut().push(text.into());
             return Ok(());
         }
-        self.sent.borrow_mut().push((to.into(), text.into(), request_id.into()));
+        self.sent
+            .borrow_mut()
+            .push((to.into(), text.into(), request_id.into()));
         if self.send_down.get() {
             return Err(failure("HTTP 503", true, None));
         }
         if self.send_lost_once.replace(false) {
-            return Err(failure("the daemon at x is unreachable (response timed out)", true, None));
+            return Err(failure(
+                "the daemon at x is unreachable (response timed out)",
+                true,
+                None,
+            ));
         }
         Ok(())
     }
@@ -167,10 +185,16 @@ impl BoardApi for FakeBoard {
         if let Some(path) = self.pid_file.borrow().as_ref()
             && let Ok(bytes) = fs::read(path)
         {
-            self.pid_seen.borrow_mut().push(serde_json::from_slice(&bytes).unwrap_or(Value::Null));
+            self.pid_seen
+                .borrow_mut()
+                .push(serde_json::from_slice(&bytes).unwrap_or(Value::Null));
         }
         if self.refuse_updates.get() && !status.starts_with("stopped:") {
-            return Err(failure("the daemon refused the bearer token (HTTP 403)", false, None));
+            return Err(failure(
+                "the daemon refused the bearer token (HTTP 403)",
+                false,
+                None,
+            ));
         }
         self.statuses.borrow_mut().push((status.into(), expect));
         Ok(())
@@ -241,7 +265,11 @@ impl Gh for FakeGh {
             ["pr", "list", ..] => {
                 let index = self.polls.min(self.pr_lists.len().saturating_sub(1));
                 self.polls += 1;
-                self.pr_lists.get(index).cloned().unwrap_or(json!([])).to_string()
+                self.pr_lists
+                    .get(index)
+                    .cloned()
+                    .unwrap_or(json!([]))
+                    .to_string()
             }
             ["pr", "view", ..] => json!({"state": "MERGED"}).to_string(),
             ["repo", "view", ..] => json!({"name": "demo"}).to_string(),
@@ -295,7 +323,11 @@ impl Host for FakeHost {
     }
     fn lease_held(&self, _name: &str, _leases: &[Value]) -> bool {
         let mut script = self.lease_script.borrow_mut();
-        if script.len() > 1 { script.remove(0) } else { script.first().copied().unwrap_or(false) }
+        if script.len() > 1 {
+            script.remove(0)
+        } else {
+            script.first().copied().unwrap_or(false)
+        }
     }
     fn process(&self) -> (u32, Option<String>) {
         (4242, Some("start-token".into()))
@@ -366,8 +398,16 @@ fn run(settings: &Settings, board: &FakeBoard, gh: &mut FakeGh, host: &mut FakeH
 
 /// The row says stopped, the attachment ended, the pid record is gone.
 fn assert_released(board: &FakeBoard, settings: &Settings, why: &str) {
-    assert!(board.last_status().starts_with("stopped: "), "{:?}", board.statuses.borrow());
-    assert!(board.last_status().contains(why), "{} / {why}", board.last_status());
+    assert!(
+        board.last_status().starts_with("stopped: "),
+        "{:?}",
+        board.statuses.borrow()
+    );
+    assert!(
+        board.last_status().contains(why),
+        "{} / {why}",
+        board.last_status()
+    );
     assert_eq!(board.called("detach"), 1, "{:?}", board.calls.borrow());
     assert!(!settings.files.pid.exists());
 }
@@ -395,12 +435,25 @@ fn an_event_reaches_the_owner_once_as_a_bounded_message_with_quoted_github_text(
             events::REMINDER
         )
     );
-    assert!(host.printed[0].starts_with("conductor-watch 00000000000000000000000000000001 watching for "));
-    assert!(host.said.iter().any(|line| line == "baseline recorded; reporting changes from now"));
+    assert!(
+        host.printed[0]
+            .starts_with("conductor-watch 00000000000000000000000000000001 watching for ")
+    );
+    assert!(
+        host.said
+            .iter()
+            .any(|line| line == "baseline recorded; reporting changes from now")
+    );
     let ledger = fs::read_to_string(&settings.files.ledger).unwrap();
-    assert!(ledger.contains(" sent 2: PR #4 opened, title \"fix: tidy\\\"\\u{000a}Conductor"), "{ledger}");
+    assert!(
+        ledger.contains(" sent 2: PR #4 opened, title \"fix: tidy\\\"\\u{000a}Conductor"),
+        "{ledger}"
+    );
     // The ledger is one line per entry: the title did not start another.
-    assert!(ledger.lines().all(|line| line.starts_with("t+")), "{ledger}");
+    assert!(
+        ledger.lines().all(|line| line.starts_with("t+")),
+        "{ledger}"
+    );
     assert!(ledger.contains(" exit max age"), "{ledger}");
     assert_released(&board, &settings, "max age");
 }
@@ -417,7 +470,11 @@ fn a_full_suite_lease_going_free_is_one_event() {
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     let sent = board.sent.borrow();
     assert_eq!(sent.len(), 1, "{sent:?}");
-    assert!(sent[0].1.contains("\nlease \"full-suite\" free\n"), "{}", sent[0].1);
+    assert!(
+        sent[0].1.contains("\nlease \"full-suite\" free\n"),
+        "{}",
+        sent[0].1
+    );
 }
 
 #[test]
@@ -434,8 +491,18 @@ fn the_owner_losing_its_lease_ends_the_watch_and_releases_the_row() {
     let code = run(&settings, &board, &mut gh, &mut host);
     assert_eq!(board.lease_checks.get(), 3);
     assert_eq!(code, EXIT_OK);
-    assert!(host.said.iter().any(|line| line == "exiting: lease conductor:demo no longer held by the owner"), "{:?}", host.said);
-    assert_released(&board, &settings, "lease conductor:demo no longer held by the owner");
+    assert!(
+        host.said
+            .iter()
+            .any(|line| line == "exiting: lease conductor:demo no longer held by the owner"),
+        "{:?}",
+        host.said
+    );
+    assert_released(
+        &board,
+        &settings,
+        "lease conductor:demo no longer held by the owner",
+    );
 }
 
 #[test]
@@ -505,7 +572,11 @@ fn every_exit_two_path_still_releases_the_row() {
     gh.missing = true;
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_SETUP);
-    assert!(board.sent.borrow()[0].1.starts_with("conductor-watch stopped: \"gh is not installed or not on PATH\"."));
+    assert!(
+        board.sent.borrow()[0]
+            .1
+            .starts_with("conductor-watch stopped: \"gh is not installed or not on PATH\".")
+    );
     assert_released(&board, &settings, "gave up");
 
     // gh failing five polls in a row.
@@ -516,7 +587,11 @@ fn every_exit_two_path_still_releases_the_row() {
     gh.failing = true;
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_SETUP);
-    assert!(host.said.iter().any(|line| line.starts_with("gh failed on 5 polls in a row; last: ")));
+    assert!(
+        host.said
+            .iter()
+            .any(|line| line.starts_with("gh failed on 5 polls in a row; last: "))
+    );
     assert_released(&board, &settings, "gave up");
 
     // The board refusing this watcher.
@@ -541,7 +616,12 @@ fn a_state_that_cannot_be_written_refuses_before_registering() {
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_SETUP);
     assert_eq!(board.called("register"), 0);
-    assert!(host.said[0].ends_with("is a directory; pass --state <path to a file in a writable directory>"), "{:?}", host.said);
+    assert!(
+        host.said[0]
+            .ends_with("is a directory; pass --state <path to a file in a writable directory>"),
+        "{:?}",
+        host.said
+    );
 }
 
 #[test]
@@ -554,11 +634,18 @@ fn the_row_stays_live_while_running_and_overdue_soon_after_a_kill() {
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     // Renewed every 20 s; a lapsed attachment is attached again.
-    assert!(board.called("heartbeat") >= 25, "{}", board.called("heartbeat"));
+    assert!(
+        board.called("heartbeat") >= 25,
+        "{}",
+        board.called("heartbeat")
+    );
     assert_eq!(board.called("attach"), 2);
     // Each status lasts three polls (at least three minutes).
     let statuses = board.statuses.borrow();
-    assert_eq!(statuses[0], ("watching 0 open PRs; no events yet".into(), Some(180)));
+    assert_eq!(
+        statuses[0],
+        ("watching 0 open PRs; no events yet".into(), Some(180))
+    );
     // The pid record named this watcher while it ran.
     assert!(board.calls.borrow()[0].starts_with("register decision events for 01234567 demo"));
 }
@@ -573,7 +660,9 @@ fn the_board_forgetting_the_watcher_registers_it_again() {
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     assert_eq!(board.registrations.get(), 2);
-    assert!(host.said.iter().any(|line| line == "the board forgot this watcher (instance_not_found); registering again"));
+    assert!(host.said.iter().any(
+        |line| line == "the board forgot this watcher (instance_not_found); registering again"
+    ));
 }
 
 #[test]
@@ -605,7 +694,11 @@ fn a_state_from_an_earlier_run_is_the_baseline_and_a_broken_one_is_reset() {
     let mut gh = FakeGh::new(vec![green_pr("t")]);
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
-    assert!(host.said.iter().any(|line| line.ends_with("holds a list, not an object; recording a fresh baseline")));
+    assert!(
+        host.said
+            .iter()
+            .any(|line| line.ends_with("holds a list, not an object; recording a fresh baseline"))
+    );
     // The baseline took the open pull request as already known.
     assert!(board.sent.borrow().is_empty());
     let saved: Value = serde_json::from_slice(&fs::read(&settings.files.state).unwrap()).unwrap();
@@ -637,9 +730,17 @@ fn a_registration_whose_attach_failed_is_attached_on_the_next_call() {
     // The first attach, the one that failed after re-registering, the retry.
     assert_eq!(board.called("attach"), 3, "{:?}", board.calls.borrow());
     assert_eq!(board.registrations.get(), 2);
-    assert!(host.said.iter().any(|line| line.starts_with("the board failed this poll (HTTP 503)")));
+    assert!(
+        host.said
+            .iter()
+            .any(|line| line.starts_with("the board failed this poll (HTTP 503)"))
+    );
     // Renewed with the new generation afterwards.
-    assert!(board.called("heartbeat 8") > 0, "{:?}", board.calls.borrow());
+    assert!(
+        board.called("heartbeat 8") > 0,
+        "{:?}",
+        board.calls.borrow()
+    );
 }
 
 #[test]
@@ -652,8 +753,16 @@ fn a_board_that_is_down_is_not_asked_every_second() {
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     // 600 s at one try per 20 s, not one per second.
-    assert!(board.called("heartbeat") <= 31, "{}", board.called("heartbeat"));
-    let complaints = host.said.iter().filter(|line| line.starts_with("the board did not renew")).count();
+    assert!(
+        board.called("heartbeat") <= 31,
+        "{}",
+        board.called("heartbeat")
+    );
+    let complaints = host
+        .said
+        .iter()
+        .filter(|line| line.starts_with("the board did not renew"))
+        .count();
     assert!(complaints <= 31, "{complaints}");
 }
 
@@ -668,7 +777,11 @@ fn a_slow_gh_keeps_the_row_attached_and_an_interrupt_ends_it_at_once() {
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     // Renewed while gh ran: never 60 s (the board's lease) without one.
     let beats = board.called("heartbeat");
-    assert!(beats as f64 >= host.time() / 20.0 - 2.0, "{beats} in {}", host.time());
+    assert!(
+        beats as f64 >= host.time() / 20.0 - 2.0,
+        "{beats} in {}",
+        host.time()
+    );
     assert!(!gh.starved, "gh ran with nothing renewing the row");
 
     // An interrupt while gh runs (the second poll's gh runs from 130 s)
@@ -682,7 +795,11 @@ fn a_slow_gh_keeps_the_row_attached_and_an_interrupt_ends_it_at_once() {
     let mut gh = FakeGh::new(vec![json!([])]);
     gh.slow = Some((host.clock.clone(), 70.0));
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
-    assert!(host.time() < 152.0, "interrupt during gh seen at {}", host.time());
+    assert!(
+        host.time() < 152.0,
+        "interrupt during gh seen at {}",
+        host.time()
+    );
     assert_released(&board, &settings, "interrupted");
 }
 
@@ -716,7 +833,13 @@ fn more_than_twenty_events_go_out_over_consecutive_messages() {
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     let sent = board.sent.borrow();
     assert_eq!(sent.len(), 2, "{sent:?}");
-    assert!(sent[0].1.contains("\nand 5 more events in the next message\n"), "{}", sent[0].1);
+    assert!(
+        sent[0]
+            .1
+            .contains("\nand 5 more events in the next message\n"),
+        "{}",
+        sent[0].1
+    );
     assert_eq!(sent[0].1.matches(" opened, title ").count(), 20);
     assert_eq!(sent[1].1.matches(" opened, title ").count(), 5);
     assert!(!sent[1].1.contains("more event"));
@@ -753,7 +876,9 @@ fn every_clean_exit_tells_the_owner_unless_the_owner_left() {
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     assert_eq!(
         board.goodbyes.borrow().as_slice(),
-        ["conductor-watch stopped (max age). Restart it with `pseudolife-mcp conductor-watch --detach` when you want it watching again."]
+        [
+            "conductor-watch stopped (max age). Restart it with `pseudolife-mcp conductor-watch --detach` when you want it watching again."
+        ]
     );
     // An interrupt.
     let scratch = Scratch::new();
@@ -774,8 +899,9 @@ fn every_clean_exit_tells_the_owner_unless_the_owner_left() {
     let mut gh = FakeGh::new(vec![json!([])]);
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
-    assert!(board.goodbyes.borrow()[0]
-        .starts_with("conductor-watch stopped (lease conductor:demo no longer held by the owner)."));
+    assert!(board.goodbyes.borrow()[0].starts_with(
+        "conductor-watch stopped (lease conductor:demo no longer held by the owner)."
+    ));
     // The owner gone: nobody to tell.
     let scratch = Scratch::new();
     let settings = scratch.settings();
@@ -796,12 +922,17 @@ fn a_long_reason_to_give_up_reaches_the_owner_with_its_fix() {
     let mut gh = FakeGh::new(vec![json!([])]);
     gh.failing = true;
     // Well past the 120 characters an event's quoted values are cut to.
-    gh.fail_text = format!("{}; check the token, then rerun gh auth login", "x".repeat(300));
+    gh.fail_text = format!(
+        "{}; check the token, then rerun gh auth login",
+        "x".repeat(300)
+    );
     let mut host = FakeHost::new();
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_SETUP);
     let sent = board.sent.borrow();
     assert!(
-        sent[0].1.contains("; check the token, then rerun gh auth login\". Restart it with"),
+        sent[0]
+            .1
+            .contains("; check the token, then rerun gh auth login\". Restart it with"),
         "{}",
         sent[0].1
     );
@@ -842,7 +973,10 @@ fn a_slow_gh_naming_the_repository_at_registration_sees_an_interrupt() {
     gh.slow_on = vec!["repo view"];
     assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
     assert!(host.time() < 32.0, "{}", host.time());
-    assert!(!gh.starved, "the lookup ran with nothing watching for the interrupt");
+    assert!(
+        !gh.starved,
+        "the lookup ran with nothing watching for the interrupt"
+    );
     // It never registered: no row to release, no record left.
     assert_eq!(board.called("register"), 0);
     assert!(!settings.files.pid.exists());

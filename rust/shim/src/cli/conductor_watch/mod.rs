@@ -194,13 +194,7 @@ fn process_start(pid: u32) -> Res<Option<String>> {
         // SAFETY: `info` outlives the call, and `size` is its exact size, so
         // the kernel writes inside it.
         let read = unsafe {
-            libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDTBSDINFO,
-                0,
-                (&raw mut info).cast(),
-                size,
-            )
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
         };
         if read != size {
             return Ok(None);

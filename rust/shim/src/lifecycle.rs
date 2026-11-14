@@ -626,8 +626,12 @@ mod job_tests {
     #[test]
     fn a_job_that_kills_on_close_and_allows_no_breakaway_ends_detached_children() {
         assert!(job_with(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE));
-        assert!(!job_with(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK));
-        assert!(!job_with(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK));
+        assert!(!job_with(
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        ));
+        assert!(!job_with(
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+        ));
         assert!(!job_with(0));
     }
 }

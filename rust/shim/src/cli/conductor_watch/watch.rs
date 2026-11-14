@@ -283,7 +283,9 @@ fn state_problem(state: &Value) -> Option<String> {
         for (number, pr) in prs {
             let digits = number.strip_prefix('-').unwrap_or(number);
             if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || !pr.is_object() {
-                return Some(format!("holds a pull request entry {number:?} it cannot read"));
+                return Some(format!(
+                    "holds a pull request entry {number:?} it cannot read"
+                ));
             }
             let texts = ["title", "head", "checks", "mergeable", "merge_state"]
                 .iter()
@@ -292,7 +294,9 @@ fn state_problem(state: &Value) -> Option<String> {
                 .as_array()
                 .is_some_and(|names| names.iter().all(Value::is_string));
             if !(texts && failed) {
-                return Some(format!("holds pull request {number} in a shape it cannot read"));
+                return Some(format!(
+                    "holds pull request {number} in a shape it cannot read"
+                ));
             }
         }
     }
@@ -300,7 +304,9 @@ fn state_problem(state: &Value) -> Option<String> {
         for (name, run) in master {
             let ok = run["id"].is_i64() && run["conclusion"].is_string() && run["sha"].is_string();
             if !ok {
-                return Some(format!("holds master workflow {name:?} in a shape it cannot read"));
+                return Some(format!(
+                    "holds master workflow {name:?} in a shape it cannot read"
+                ));
             }
         }
     }
@@ -374,7 +380,12 @@ enum Cut {
 }
 
 impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
-    pub(super) fn new(settings: &'a Settings, board: &'a B, gh: &'a mut G, host: &'a mut H) -> Self {
+    pub(super) fn new(
+        settings: &'a Settings,
+        board: &'a B,
+        gh: &'a mut G,
+        host: &'a mut H,
+    ) -> Self {
         Self {
             settings,
             board,
@@ -415,13 +426,26 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         if let Some(project) = &self.project {
             return Ok(project.clone());
         }
-        let printable = |text: &str| text.chars().filter(|c| !c.is_control()).take(120).collect::<String>();
+        let printable = |text: &str| {
+            text.chars()
+                .filter(|c| !c.is_control())
+                .take(120)
+                .collect::<String>()
+        };
         let project = match (&self.settings.project, &self.settings.repo) {
             (Some(project), _) if !project.is_empty() => printable(project),
             (_, Some(repo)) => printable(repo.rsplit('/').next().unwrap_or_default()),
             _ => {
                 let settings = self.settings;
-                let Self { gh, board, host, attachment, generation, renewed_at, .. } = self;
+                let Self {
+                    gh,
+                    board,
+                    host,
+                    attachment,
+                    generation,
+                    renewed_at,
+                    ..
+                } = self;
                 let named = guarded(
                     *board,
                     &mut **host,
@@ -429,7 +453,14 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                     generation,
                     renewed_at,
                     &settings.files.stop,
-                    async { GitHub { gh: &mut **gh, author: None }.repo_name().await },
+                    async {
+                        GitHub {
+                            gh: &mut **gh,
+                            author: None,
+                        }
+                        .repo_name()
+                        .await
+                    },
                 )
                 .await
                 .ok_or(Cut::Stopped)?;
@@ -465,7 +496,11 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         });
         let path = &self.settings.files.pid;
         save(path, &record).map_err(|error| {
-            Halt::Unwritable(format!("{} {}; {STATE_FIX}", path.display(), reason(&error, path)))
+            Halt::Unwritable(format!(
+                "{} {}; {STATE_FIX}",
+                path.display(),
+                reason(&error, path)
+            ))
         })
     }
 
@@ -479,7 +514,11 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
     }
 
     async fn forgotten(&mut self, failure: &Failure) -> Result<bool, Halt> {
-        if !failure.code.as_deref().is_some_and(|code| FORGOTTEN.contains(&code)) {
+        if !failure
+            .code
+            .as_deref()
+            .is_some_and(|code| FORGOTTEN.contains(&code))
+        {
             return Ok(false);
         }
         self.host.say(&format!(
@@ -534,7 +573,14 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
     }
 
     async fn renew(&mut self) {
-        let Self { board, host, attachment, generation, renewed_at, .. } = self;
+        let Self {
+            board,
+            host,
+            attachment,
+            generation,
+            renewed_at,
+            ..
+        } = self;
         keep_attached(*board, &mut **host, attachment, generation, renewed_at).await;
     }
 
@@ -543,7 +589,10 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
     /// or an empty row before any was seen.
     async fn owner_row(&mut self) -> Result<Option<Value>, Halt> {
         let (agents, truncated) = self.agents().await?;
-        if let Some(row) = agents.into_iter().find(|agent| agent["agent_id"] == self.settings.owner.as_str()) {
+        if let Some(row) = agents
+            .into_iter()
+            .find(|agent| agent["agent_id"] == self.settings.owner.as_str())
+        {
             self.last_row = Some(row.clone());
             return Ok(Some(row));
         }
@@ -556,7 +605,9 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             if lease["name"] == name {
                 let holder = &lease["holder"];
                 if !(holder.is_null() || holder.is_object()) {
-                    return Err(Halt::Refused("the daemon's leases reply was not understood".into()));
+                    return Err(Halt::Refused(
+                        "the daemon's leases reply was not understood".into(),
+                    ));
                 }
                 return Ok(holder["agent_id"] == self.settings.owner.as_str());
             }
@@ -591,15 +642,34 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         let old_master = object(old.and_then(|o| o.get("master"))).cloned();
         let settings = self.settings;
         let fetched = {
-            let Self { gh, board, host, attachment, generation, renewed_at, .. } = self;
+            let Self {
+                gh,
+                board,
+                host,
+                attachment,
+                generation,
+                renewed_at,
+                ..
+            } = self;
             let github = async {
-                let mut github = GitHub { gh: &mut **gh, author: settings.author.clone() };
+                let mut github = GitHub {
+                    gh: &mut **gh,
+                    author: settings.author.clone(),
+                };
                 let prs = github.prs(old_prs.as_ref()).await;
                 let master = github.master(old_master.as_ref()).await;
                 (prs, master)
             };
-            guarded(*board, &mut **host, attachment, generation, renewed_at, &settings.files.stop, github)
-                .await
+            guarded(
+                *board,
+                &mut **host,
+                attachment,
+                generation,
+                renewed_at,
+                &settings.files.stop,
+                github,
+            )
+            .await
         };
         let Some((prs, master)) = fetched else {
             return Err(Cut::Stopped);
@@ -626,7 +696,9 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             self.host.say(&note);
             self.ledger("skipped", &note);
         }
-        let leases = self.lease_states(object(old.and_then(|o| o.get("leases")))).await;
+        let leases = self
+            .lease_states(object(old.and_then(|o| o.get("leases"))))
+            .await;
         Ok((
             json!({"prs": prs, "master": master, "suites": suites, "leases": leases}),
             error,
@@ -637,23 +709,47 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
     /// list is looked up; while its end is unknown it stays in `new`.
     async fn events(&mut self, old: &Value, new: &mut Value) -> Result<Vec<Event>, Cut> {
         let mut out = Vec::new();
-        if let (Some(old_prs), Some(new_prs)) = (old["prs"].as_object(), new["prs"].as_object_mut()) {
-            let mut gone: Vec<String> = old_prs.keys().filter(|k| !new_prs.contains_key(*k)).cloned().collect();
+        if let (Some(old_prs), Some(new_prs)) = (old["prs"].as_object(), new["prs"].as_object_mut())
+        {
+            let mut gone: Vec<String> = old_prs
+                .keys()
+                .filter(|k| !new_prs.contains_key(*k))
+                .cloned()
+                .collect();
             gone.sort_by_key(|n| n.parse::<i64>().unwrap_or(i64::MAX));
             let settings = self.settings;
             let ends = {
-                let Self { gh, board, host, attachment, generation, renewed_at, .. } = self;
+                let Self {
+                    gh,
+                    board,
+                    host,
+                    attachment,
+                    generation,
+                    renewed_at,
+                    ..
+                } = self;
                 let lookups = async {
-                    let mut github = GitHub { gh: &mut **gh, author: None };
+                    let mut github = GitHub {
+                        gh: &mut **gh,
+                        author: None,
+                    };
                     let mut ends = Vec::new();
                     for number in &gone {
                         ends.push((number.clone(), github.closed_as(number).await));
                     }
                     ends
                 };
-                guarded(*board, &mut **host, attachment, generation, renewed_at, &settings.files.stop, lookups)
-                    .await
-                    .ok_or(Cut::Stopped)?
+                guarded(
+                    *board,
+                    &mut **host,
+                    attachment,
+                    generation,
+                    renewed_at,
+                    &settings.files.stop,
+                    lookups,
+                )
+                .await
+                .ok_or(Cut::Stopped)?
             };
             let mut closed = Vec::new();
             for (number, how) in ends {
@@ -667,10 +763,24 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             out.extend(events::pr_events(old_prs, new_prs, &closed));
         }
         let empty = Map::new();
-        let pick = |value: &Value, key: &str| value[key].as_object().cloned().unwrap_or_else(|| empty.clone());
-        out.extend(events::master_events(&pick(old, "master"), &pick(new, "master")));
-        out.extend(events::suite_events(&pick(old, "suites"), &pick(new, "suites")));
-        out.extend(events::lease_events(&pick(old, "leases"), &pick(new, "leases")));
+        let pick = |value: &Value, key: &str| {
+            value[key]
+                .as_object()
+                .cloned()
+                .unwrap_or_else(|| empty.clone())
+        };
+        out.extend(events::master_events(
+            &pick(old, "master"),
+            &pick(new, "master"),
+        ));
+        out.extend(events::suite_events(
+            &pick(old, "suites"),
+            &pick(new, "suites"),
+        ));
+        out.extend(events::lease_events(
+            &pick(old, "leases"),
+            &pick(new, "leases"),
+        ));
         Ok(out)
     }
 
@@ -700,17 +810,21 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
     fn persist(&self, state: &Value) -> Result<(), Halt> {
         let path = &self.settings.files.state;
         save(path, state).map_err(|error| {
-            Halt::Unwritable(format!("state {} {}; {STATE_FIX}", path.display(), reason(&error, path)))
+            Halt::Unwritable(format!(
+                "state {} {}; {STATE_FIX}",
+                path.display(),
+                reason(&error, path)
+            ))
         })
     }
 
     fn status_line(&self, state: Option<&Value>) -> String {
         let prs = state.and_then(|s| s["prs"].as_object()).map_or(0, Map::len);
         let plural = if prs == 1 { "" } else { "s" };
-        let last = self
-            .last_event
-            .as_ref()
-            .map_or_else(|| "no events yet".to_owned(), |at| format!("last event {at}"));
+        let last = self.last_event.as_ref().map_or_else(
+            || "no events yet".to_owned(),
+            |at| format!("last event {at}"),
+        );
         format!("watching {prs} open PR{plural}; {last}")
     }
 
@@ -746,7 +860,12 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                 "conductor-watch stopped ({why}). Restart it with `pseudolife-mcp conductor-watch --detach` \
                  when you want it watching again."
             );
-            if self.board.send(&self.settings.owner, &text, &uuid()).await.is_err() {
+            if self
+                .board
+                .send(&self.settings.owner, &text, &uuid())
+                .await
+                .is_err()
+            {
                 self.host.say("could not tell the owner");
             }
         }
@@ -796,7 +915,11 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                 return self.finish(EXIT_SETUP, "could not register").await;
             }
             Err(Halt::Stopped) => {
-                let why = if self.host.interrupted() { "interrupted" } else { "stopped" };
+                let why = if self.host.interrupted() {
+                    "interrupted"
+                } else {
+                    "stopped"
+                };
                 let _ = fs::remove_file(&self.settings.files.stop);
                 return self.leave(why).await;
             }
@@ -833,17 +956,22 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             }
             let (mut snap, error) = match self.snapshot(state.as_ref()).await {
                 Ok(snapshot) => snapshot,
-                Err(Cut::Missing) => return self.give_up("gh is not installed or not on PATH").await,
+                Err(Cut::Missing) => {
+                    return self.give_up("gh is not installed or not on PATH").await;
+                }
                 // The loop's top says which.
                 Err(Cut::Stopped) => continue,
             };
             match &error {
                 Some(why) => {
                     failures += 1;
-                    self.host.say(&format!("gh failed ({failures}/{MAX_GH_FAILURES}): {why}"));
+                    self.host
+                        .say(&format!("gh failed ({failures}/{MAX_GH_FAILURES}): {why}"));
                     if failures >= MAX_GH_FAILURES {
                         return self
-                            .give_up(&format!("gh failed on {failures} polls in a row; last: {why}"))
+                            .give_up(&format!(
+                                "gh failed on {failures} polls in a row; last: {why}"
+                            ))
                             .await;
                     }
                 }
@@ -852,7 +980,8 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             match &state {
                 None => {
                     if error.is_none() {
-                        self.host.say("baseline recorded; reporting changes from now");
+                        self.host
+                            .say("baseline recorded; reporting changes from now");
                         if let Err(Halt::Unwritable(why)) = self.persist(&snap) {
                             return self.give_up(&why).await;
                         }
@@ -872,7 +1001,18 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                 }
             }
             let now = self.host.now();
-            match self.board_turn(&mut found, &mut pending, &mut settle_until, &mut last_sent, state.as_ref(), now, deadline).await {
+            match self
+                .board_turn(
+                    &mut found,
+                    &mut pending,
+                    &mut settle_until,
+                    &mut last_sent,
+                    state.as_ref(),
+                    now,
+                    deadline,
+                )
+                .await
+            {
                 Ok(None) => {
                     if !self.ready
                         && let Err(why) = self.mark_ready()
@@ -883,10 +1023,13 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                 Ok(Some(why)) => return self.leave(&why).await,
                 Err(Halt::Stopped) => continue,
                 Err(Halt::Transient(why)) => {
-                    self.host.say(&format!("the board failed this poll ({why}); trying again next poll"));
+                    self.host.say(&format!(
+                        "the board failed this poll ({why}); trying again next poll"
+                    ));
                 }
                 Err(Halt::Refused(why)) => {
-                    self.host.say(&format!("the board refused this watcher: {why}"));
+                    self.host
+                        .say(&format!("the board refused this watcher: {why}"));
                     self.ledger("setup", &format!("board refused: {why}"));
                     return self.finish(EXIT_SETUP, "board refused").await;
                 }
@@ -900,18 +1043,29 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                 return self.give_up(&why).await;
             }
             if now >= deadline {
-                let mut unsent: Vec<String> = pending.as_ref().map(|p| p.lines.clone()).unwrap_or_default();
+                let mut unsent: Vec<String> = pending
+                    .as_ref()
+                    .map(|p| p.lines.clone())
+                    .unwrap_or_default();
                 unsent.extend(found.iter().map(Event::quoted));
                 if !unsent.is_empty() {
-                    self.ledger("lost", &format!("{} unsent at exit: {}", unsent.len(), unsent.join("; ")));
+                    self.ledger(
+                        "lost",
+                        &format!("{} unsent at exit: {}", unsent.len(), unsent.join("; ")),
+                    );
                 }
                 return self.leave("max age").await;
             }
             let mut wait = settings.interval;
-            let quiet_due = (found.is_empty() && pending.is_none()).then_some(last_sent + settings.quiet_after);
-            for due in [if found.is_empty() { None } else { settle_until }, Some(deadline), quiet_due]
-                .into_iter()
-                .flatten()
+            let quiet_due =
+                (found.is_empty() && pending.is_none()).then_some(last_sent + settings.quiet_after);
+            for due in [
+                if found.is_empty() { None } else { settle_until },
+                Some(deadline),
+                quiet_due,
+            ]
+            .into_iter()
+            .flatten()
             {
                 if due > now {
                     wait = wait.min(due - now);
@@ -935,7 +1089,8 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             return Ok(());
         }
         record["ready"] = json!(true);
-        save(path, &record).map_err(|error| format!("{} {}; {STATE_FIX}", path.display(), reason(&error, path)))
+        save(path, &record)
+            .map_err(|error| format!("{} {}; {STATE_FIX}", path.display(), reason(&error, path)))
     }
 
     /// Sleep `seconds` in slices, renewing the attachment and returning
@@ -974,11 +1129,18 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         {
             return Ok(Some(format!("lease {lease} no longer held by the owner")));
         }
-        if pending.is_none() && !found.is_empty() && settle_until.is_some_and(|until| now >= until.min(deadline)) {
+        if pending.is_none()
+            && !found.is_empty()
+            && settle_until.is_some_and(|until| now >= until.min(deadline))
+        {
             let (text, kept) = events::next_batch(found);
             // The ledger keeps the quoted lines too: a title cannot forge one.
             let lines = found.drain(..kept).map(|event| event.quoted()).collect();
-            *pending = Some(Pending { text, request_id: uuid(), lines });
+            *pending = Some(Pending {
+                text,
+                request_id: uuid(),
+                lines,
+            });
             *settle_until = if found.is_empty() { None } else { Some(now) };
         }
         if let Some(batch) = pending.as_ref() {
@@ -993,8 +1155,12 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             && row["park_reason"] != "done"
         {
             let minutes = ((now - *last_sent) / 60.0).round() as i64;
-            let prs = state.and_then(|s| s["prs"].as_object()).cloned().unwrap_or_default();
-            self.send(&events::quiet_line(minutes, &prs), &uuid()).await?;
+            let prs = state
+                .and_then(|s| s["prs"].as_object())
+                .cloned()
+                .unwrap_or_default();
+            self.send(&events::quiet_line(minutes, &prs), &uuid())
+                .await?;
             self.ledger("quiet", &format!("{minutes}m"));
             *last_sent = now;
         }

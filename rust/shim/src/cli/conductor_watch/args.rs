@@ -61,7 +61,9 @@ impl Args {
 
     /// `--max-age` in seconds, or `default` (`90`, `90s`, `20m`, `2h`, `7d`).
     pub(super) fn max_age(&self, default: f64) -> f64 {
-        self.last("--max-age").and_then(age_seconds).unwrap_or(default)
+        self.last("--max-age")
+            .and_then(age_seconds)
+            .unwrap_or(default)
     }
 }
 
@@ -69,7 +71,9 @@ impl Args {
 pub(super) fn age_seconds(text: &str) -> Option<f64> {
     let stripped = super::super::pyjson::py_strip(text);
     let (number, unit) = match stripped.chars().last() {
-        Some(c) if "smhdSMHD".contains(c) => (&stripped[..stripped.len() - 1], c.to_ascii_lowercase()),
+        Some(c) if "smhdSMHD".contains(c) => {
+            (&stripped[..stripped.len() - 1], c.to_ascii_lowercase())
+        }
         _ => (stripped, 's'),
     };
     let count: f64 = number.parse().ok()?;
@@ -479,8 +483,17 @@ mod tests {
     #[test]
     fn settings_read_the_last_value_and_every_lease() {
         let Parsed::Args(args) = run(&[
-            "--lease", "x", "--interval", "5", "--lease=y", "--interval", "7",
-            "--max-age", " 2H ", "--settle", "0",
+            "--lease",
+            "x",
+            "--interval",
+            "5",
+            "--lease=y",
+            "--interval",
+            "7",
+            "--max-age",
+            " 2H ",
+            "--settle",
+            "0",
         ]) else {
             panic!("parsed");
         };
@@ -619,7 +632,9 @@ mod tests {
             run(&["--settle=-0.5"]),
             error("argument --settle: must be 0 or more")
         );
-        assert!(matches!(run(&["--settle=-0"]), Parsed::Args(args) if args.seconds("--settle", 45.0) == 0.0));
+        assert!(
+            matches!(run(&["--settle=-0"]), Parsed::Args(args) if args.seconds("--settle", 45.0) == 0.0)
+        );
         assert_eq!(
             run(&["--settle", "1.2.3"]),
             error("argument --settle: invalid _non_negative value: '1.2.3'")

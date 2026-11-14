@@ -341,14 +341,20 @@ fn a_record_whose_start_cannot_be_proven_is_decided_by_the_states_lock() {
     let (pid, _) = me();
     // No start time recorded: the pid alone proves nothing (it may be a
     // reused pid), so a free lock means no watcher.
-    scratch.pid_file(&format!("{{\"pid\": \" {pid} \", \"agent_id\": \"w1\", \"owner\": \"{OWNER}\"}}"));
+    scratch.pid_file(&format!(
+        "{{\"pid\": \" {pid} \", \"agent_id\": \"w1\", \"owner\": \"{OWNER}\"}}"
+    ));
     let out = decided(&["--stop", "--state", &state]);
     assert_eq!(
         out.stdout,
         format!("conductor-watch: no watcher running for {state}; nothing changed\n")
     );
     assert_eq!(out.stop_file, None);
-    assert!(decided(&["--owner", OWNER, "--state", &state]).start.is_some());
+    assert!(
+        decided(&["--owner", OWNER, "--state", &state])
+            .start
+            .is_some()
+    );
     // A held lock is a watcher, whatever its record lacks.
     let mut lock = super::super::lease::lock::Lock::new(scratch.0.join("s.lock"));
     assert!(matches!(lock.acquire(), Ok(true)));
@@ -357,7 +363,11 @@ fn a_record_whose_start_cannot_be_proven_is_decided_by_the_states_lock() {
         out.stdout,
         "conductor-watch w1 asked to stop; it exits at its next poll\n"
     );
-    assert!(decided(&["--owner", OWNER, "--state", &state]).start.is_none());
+    assert!(
+        decided(&["--owner", OWNER, "--state", &state])
+            .start
+            .is_none()
+    );
     lock.release();
 }
 
@@ -387,7 +397,14 @@ fn one_watcher_per_owner_answers_from_another_state_file() {
         format!("{{\"pid\": {pid}, \"process_start\": \"{start}\", \"agent_id\": \"w9\", \"owner\": \"{OWNER}\"}}"),
     )
     .unwrap();
-    fs::write(&note, format!("{{\"state\": {}}}", serde_json::json!(other.display().to_string()))).unwrap();
+    fs::write(
+        &note,
+        format!(
+            "{{\"state\": {}}}",
+            serde_json::json!(other.display().to_string())
+        ),
+    )
+    .unwrap();
     let mut lock = super::super::lease::lock::Lock::new(lock_path);
     assert!(matches!(lock.acquire(), Ok(true)));
     let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
@@ -398,7 +415,9 @@ fn one_watcher_per_owner_answers_from_another_state_file() {
     assert!(out.start.is_none());
     assert_eq!(
         out.stdout,
-        format!("conductor-watch w9 already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by=w9\n")
+        format!(
+            "conductor-watch w9 already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by=w9\n"
+        )
     );
     // --stop for that owner from here stops that watcher.
     let out = decide_with(&["--stop", "--owner", OWNER, "--state", &state], &vars).unwrap();
@@ -510,5 +529,8 @@ fn a_python_watchers_macos_start_time_reads_as_ps_wrote_it() {
         cfg!(target_os = "macos")
     );
     assert!(!legacy_start_matches(&legacy, Some("1700000001.000000")));
-    assert!(!legacy_start_matches(&J::Str("1".into()), Some("1700000000.0")));
+    assert!(!legacy_start_matches(
+        &J::Str("1".into()),
+        Some("1700000000.0")
+    ));
 }

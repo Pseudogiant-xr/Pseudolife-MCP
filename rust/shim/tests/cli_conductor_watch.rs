@@ -58,11 +58,15 @@ impl Board {
                 let roster = roster.clone();
                 thread::spawn(move || {
                     stream.set_nonblocking(false).unwrap();
-                    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
                     let mut bytes = Vec::new();
                     let mut buffer = [0u8; 8192];
                     let body = loop {
-                        let Ok(read) = stream.read(&mut buffer) else { return };
+                        let Ok(read) = stream.read(&mut buffer) else {
+                            return;
+                        };
                         if read == 0 {
                             return;
                         }
@@ -78,8 +82,9 @@ impl Board {
                             .unwrap_or(0);
                         if bytes.len() >= split + 4 + length {
                             let path = head.split_whitespace().nth(1).unwrap_or("").to_owned();
-                            let body: Value = serde_json::from_slice(&bytes[split + 4..split + 4 + length])
-                                .unwrap_or(json!({}));
+                            let body: Value =
+                                serde_json::from_slice(&bytes[split + 4..split + 4 + length])
+                                    .unwrap_or(json!({}));
                             break (path, body);
                         }
                     };
@@ -109,10 +114,20 @@ impl Board {
                 });
             }
         });
-        Self { url, requests, listed, stop }
+        Self {
+            url,
+            requests,
+            listed,
+            stop,
+        }
     }
     fn count(&self, action: &str) -> usize {
-        self.requests.lock().unwrap().iter().filter(|(a, _)| a == action).count()
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(a, _)| a == action)
+            .count()
     }
     fn bodies(&self, action: &str) -> Vec<Value> {
         self.requests
@@ -180,7 +195,11 @@ impl Sandbox {
                 fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
             }
         }
-        Self { root, board: Board::new(), started: Mutex::new(Vec::new()) }
+        Self {
+            root,
+            board: Board::new(),
+            started: Mutex::new(Vec::new()),
+        }
     }
 
     /// gh made slow: two seconds per call, so a first poll takes several.
@@ -191,9 +210,12 @@ impl Sandbox {
                 .join("PING.EXE");
             fs::write(
                 self.root.join("bin").join("gh.cmd"),
-                format!("@\"{}\" -n 3 127.0.0.1 >nul
+                format!(
+                    "@\"{}\" -n 3 127.0.0.1 >nul
 @echo []
-", ping.display()),
+",
+                    ping.display()
+                ),
             )
             .unwrap();
         } else {
@@ -201,15 +223,24 @@ impl Sandbox {
                 .into_iter()
                 .find(|path| Path::new(path).exists())
                 .expect("a sleep program");
-            fs::write(self.root.join("bin").join("gh"), format!("#!/bin/sh
+            fs::write(
+                self.root.join("bin").join("gh"),
+                format!(
+                    "#!/bin/sh
 {sleep} 2
 echo '[]'
-")).unwrap();
+"
+                ),
+            )
+            .unwrap();
         }
     }
 
     fn state(&self, name: &str) -> PathBuf {
-        self.root.join("home").join("watch").join(format!("{name}.json"))
+        self.root
+            .join("home")
+            .join("watch")
+            .join(format!("{name}.json"))
     }
 
     fn env(&self, path: &OsString) -> Vec<(String, OsString)> {
@@ -217,22 +248,41 @@ echo '[]'
         let mut env: Vec<(String, OsString)> = vec![
             ("HOME".into(), home.clone().into()),
             ("USERPROFILE".into(), home.clone().into()),
-            ("LOCALAPPDATA".into(), home.join("AppData").join("Local").into()),
-            ("APPDATA".into(), home.join("AppData").join("Roaming").into()),
+            (
+                "LOCALAPPDATA".into(),
+                home.join("AppData").join("Local").into(),
+            ),
+            (
+                "APPDATA".into(),
+                home.join("AppData").join("Roaming").into(),
+            ),
             ("XDG_CONFIG_HOME".into(), home.join(".config").into()),
             ("XDG_STATE_HOME".into(), home.join(".state").into()),
-            ("PSEUDOLIFE_MCP_DAEMON_URL".into(), self.board.url.clone().into()),
+            (
+                "PSEUDOLIFE_MCP_DAEMON_URL".into(),
+                self.board.url.clone().into(),
+            ),
             ("PSEUDOLIFE_MCP_TOKEN".into(), "fake-test-token".into()),
             ("PSEUDOLIFE_AGENT_PROJECT".into(), "demo".into()),
-            ("PSEUDOLIFE_LEASE_LOCK_DIR".into(), home.join("locks").into()),
-            ("PSEUDOLIFE_SUITE_LOCK_DIR".into(), home.join("locks").into()),
+            (
+                "PSEUDOLIFE_LEASE_LOCK_DIR".into(),
+                home.join("locks").into(),
+            ),
+            (
+                "PSEUDOLIFE_SUITE_LOCK_DIR".into(),
+                home.join("locks").into(),
+            ),
             ("PATH".into(), path.clone()),
         ];
         if let Some(comspec) = std::env::var_os("ComSpec") {
             env.push(("ComSpec".into(), comspec));
         }
         for (key, value) in &env {
-            if key != "PATH" && !key.starts_with("PSEUDOLIFE_MCP") && key != "PSEUDOLIFE_AGENT_PROJECT" && key != "ComSpec" {
+            if key != "PATH"
+                && !key.starts_with("PSEUDOLIFE_MCP")
+                && key != "PSEUDOLIFE_AGENT_PROJECT"
+                && key != "ComSpec"
+            {
                 fs::create_dir_all(value).unwrap();
             }
         }
@@ -242,12 +292,28 @@ echo '[]'
     /// Refuse unless `env` and `cwd` keep everything this test's own.
     fn require(&self, env: &[(String, OsString)], cwd: &Path) {
         let temp = std::env::temp_dir();
-        assert!(inside(&self.root, &temp), "the sandbox {} is not in {}", self.root.display(), temp.display());
-        assert!(inside(cwd, &self.root), "working directory {} is outside the sandbox", cwd.display());
-        let get = |name: &str| env.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone());
+        assert!(
+            inside(&self.root, &temp),
+            "the sandbox {} is not in {}",
+            self.root.display(),
+            temp.display()
+        );
+        assert!(
+            inside(cwd, &self.root),
+            "working directory {} is outside the sandbox",
+            cwd.display()
+        );
+        let get = |name: &str| {
+            env.iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        };
         for name in ["HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA"] {
             let value = get(name).unwrap_or_else(|| panic!("refusing to start: {name} is unset"));
-            assert!(inside(Path::new(&value), &self.root), "refusing to start: {name} is outside the sandbox");
+            assert!(
+                inside(Path::new(&value), &self.root),
+                "refusing to start: {name} is outside the sandbox"
+            );
         }
         for (key, value) in env {
             match key.as_str() {
@@ -260,12 +326,23 @@ echo '[]'
                 "PSEUDOLIFE_AGENT_PROJECT" => {}
                 "PATH" => {
                     for entry in std::env::split_paths(value) {
-                        let entry = if entry.is_absolute() { entry } else { cwd.join(entry) };
-                        assert!(inside(&entry, &self.root), "refusing to start: PATH entry {} is outside", entry.display());
+                        let entry = if entry.is_absolute() {
+                            entry
+                        } else {
+                            cwd.join(entry)
+                        };
+                        assert!(
+                            inside(&entry, &self.root),
+                            "refusing to start: PATH entry {} is outside",
+                            entry.display()
+                        );
                     }
                 }
                 key if key.starts_with("XDG_") || key.starts_with("PSEUDOLIFE_") => {
-                    assert!(inside(Path::new(value), &self.root), "refusing to start: {key} is outside the sandbox");
+                    assert!(
+                        inside(Path::new(value), &self.root),
+                        "refusing to start: {key} is outside the sandbox"
+                    );
                 }
                 _ => {}
             }
@@ -275,8 +352,13 @@ echo '[]'
     fn command_in(&self, args: &[&str], path: OsString, cwd: &Path) -> Command {
         let env = self.env(&path);
         self.require(&env, cwd);
-        let mut command = common::cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
-        command.envs(env).current_dir(cwd).arg("conductor-watch").args(args);
+        let mut command =
+            common::cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
+        command
+            .envs(env)
+            .current_dir(cwd)
+            .arg("conductor-watch")
+            .args(args);
         command
     }
 
@@ -290,7 +372,20 @@ echo '[]'
             .iter()
             .map(|s| (*s).to_owned())
             .chain([state.display().to_string()])
-            .chain(["--interval", "1", "--settle", "0", "--repo", "example/demo", "--max-age", "120"].iter().map(|s| (*s).to_owned()))
+            .chain(
+                [
+                    "--interval",
+                    "1",
+                    "--settle",
+                    "0",
+                    "--repo",
+                    "example/demo",
+                    "--max-age",
+                    "120",
+                ]
+                .iter()
+                .map(|s| (*s).to_owned()),
+            )
             .collect()
     }
 
@@ -312,7 +407,10 @@ echo '[]'
     /// Record a watcher for the final stop, with its start token now.
     fn track(&self, pid: u32, state: &Path) {
         let start = process::start(pid);
-        self.started.lock().unwrap().push((pid, start, state.to_path_buf()));
+        self.started
+            .lock()
+            .unwrap()
+            .push((pid, start, state.to_path_buf()));
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
@@ -357,9 +455,15 @@ mod process {
         {
             use windows_sys::Win32::{
                 Foundation::{CloseHandle, FILETIME, STILL_ACTIVE},
-                System::Threading::{GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+                System::Threading::{
+                    GetExitCodeProcess, GetProcessTimes, OpenProcess,
+                    PROCESS_QUERY_LIMITED_INFORMATION,
+                },
             };
-            let empty = || FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+            let empty = || FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            };
             // SAFETY: a query-only handle, closed on every path.
             unsafe {
                 let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
@@ -367,11 +471,13 @@ mod process {
                     return None;
                 }
                 let mut code = 0u32;
-                let alive = GetExitCodeProcess(handle, &mut code) != 0 && code == STILL_ACTIVE as u32;
+                let alive =
+                    GetExitCodeProcess(handle, &mut code) != 0 && code == STILL_ACTIVE as u32;
                 let (mut a, mut b, mut c, mut d) = (empty(), empty(), empty(), empty());
                 let read = GetProcessTimes(handle, &mut a, &mut b, &mut c, &mut d);
                 CloseHandle(handle);
-                (alive && read != 0).then(|| (u64::from(a.dwHighDateTime) << 32) | u64::from(a.dwLowDateTime))
+                (alive && read != 0)
+                    .then(|| (u64::from(a.dwHighDateTime) << 32) | u64::from(a.dwLowDateTime))
             }
         }
         #[cfg(target_os = "linux")]
@@ -400,15 +506,22 @@ mod process {
             use windows_sys::Win32::{
                 Foundation::{CloseHandle, FILETIME},
                 System::Threading::{
-                    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
-                    TerminateProcess,
+                    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+                    PROCESS_TERMINATE, TerminateProcess,
                 },
             };
-            let empty = || FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+            let empty = || FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            };
             // SAFETY: one handle, closed on every path; the creation time is
             // read from the same handle the process is ended through.
             unsafe {
-                let handle = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                let handle = OpenProcess(
+                    PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    0,
+                    pid,
+                );
                 if handle.is_null() {
                     return false;
                 }
@@ -432,7 +545,13 @@ mod process {
                 }
                 let same = start(pid) == Some(token);
                 let ended = same
-                    && libc::syscall(libc::SYS_pidfd_send_signal, fd, libc::SIGKILL, std::ptr::null::<u8>(), 0) == 0;
+                    && libc::syscall(
+                        libc::SYS_pidfd_send_signal,
+                        fd,
+                        libc::SIGKILL,
+                        std::ptr::null::<u8>(),
+                        0,
+                    ) == 0;
                 libc::close(fd);
                 ended
             }
@@ -477,7 +596,11 @@ fn a_second_watcher_on_the_same_state_is_refused_and_stop_ends_the_first() {
     let sandbox = Sandbox::new();
     let state = sandbox.state("one");
     let mut first = sandbox.spawn(&state);
-    wait_for("the first watcher's pid record", Duration::from_secs(20), || record(&state).is_some());
+    wait_for(
+        "the first watcher's pid record",
+        Duration::from_secs(20),
+        || record(&state).is_some(),
+    );
     let held = record(&state).unwrap();
     assert_eq!(held["pid"], first.id());
     assert_eq!(held["agent_id"], AGENT);
@@ -489,7 +612,9 @@ fn a_second_watcher_on_the_same_state_is_refused_and_stop_ends_the_first() {
     assert_eq!(second.status.code(), Some(0), "{}", text(&second.stderr));
     assert_eq!(
         text(&second.stdout).trim_end(),
-        format!("conductor-watch {AGENT} already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by={AGENT}")
+        format!(
+            "conductor-watch {AGENT} already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by={AGENT}"
+        )
     );
     // Without its record the first still holds the state's lock.
     let saved = fs::read(state.with_extension("pid")).unwrap();
@@ -498,14 +623,20 @@ fn a_second_watcher_on_the_same_state_is_refused_and_stop_ends_the_first() {
     assert_eq!(third.status.code(), Some(0));
     assert_eq!(
         text(&third.stderr).trim_end(),
-        format!("conductor-watch: another watcher holds {}; this one exits", state.display())
+        format!(
+            "conductor-watch: another watcher holds {}; this one exits",
+            state.display()
+        )
     );
     assert_eq!(sandbox.board.count("register"), 1);
     fs::write(state.with_extension("pid"), saved).unwrap();
 
     // --stop asks it; it exits cleanly within seconds and leaves the row released.
     let stop = sandbox.run(&["--stop", "--state", &state.display().to_string()]);
-    assert_eq!(text(&stop.stdout).trim_end(), format!("conductor-watch {AGENT} asked to stop; it exits at its next poll"));
+    assert_eq!(
+        text(&stop.stdout).trim_end(),
+        format!("conductor-watch {AGENT} asked to stop; it exits at its next poll")
+    );
     let status = exit_within(&mut first, Duration::from_secs(10));
     assert_eq!(status.code(), Some(0));
     assert!(record(&state).is_none());
@@ -522,7 +653,10 @@ fn a_second_watcher_on_the_same_state_is_refused_and_stop_ends_the_first() {
     let detach = &sandbox.board.bodies("detach")[0];
     assert_eq!(detach["attachment_id"], attachment);
     assert_eq!(detach["generation"], 1);
-    assert!(statuses.iter().any(|body| body["expect"] == 180), "{statuses:?}");
+    assert!(
+        statuses.iter().any(|body| body["expect"] == 180),
+        "{statuses:?}"
+    );
     assert!(statuses.last().unwrap().get("expect").is_none());
     assert_eq!(sandbox.board.bodies("agents")[0]["limit"], 50);
 }
@@ -532,7 +666,9 @@ fn stop_leaves_a_process_alone_whose_start_time_is_not_the_recorded_one() {
     let sandbox = Sandbox::new();
     let state = sandbox.state("real");
     let mut watcher = sandbox.spawn(&state);
-    wait_for("the watcher's pid record", Duration::from_secs(20), || record(&state).is_some());
+    wait_for("the watcher's pid record", Duration::from_secs(20), || {
+        record(&state).is_some()
+    });
     let real = record(&state).unwrap();
     let pid = real["pid"].as_u64().unwrap() as u32;
     let start = process::start(pid);
@@ -548,15 +684,25 @@ fn stop_leaves_a_process_alone_whose_start_time_is_not_the_recorded_one() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(
         text(&out.stdout).trim_end(),
-        format!("conductor-watch: no watcher running for {}; nothing changed", near.display())
+        format!(
+            "conductor-watch: no watcher running for {}; nothing changed",
+            near.display()
+        )
     );
     assert!(!near.with_extension("stop").exists());
     thread::sleep(Duration::from_secs(3));
-    assert_eq!(process::start(pid), start, "the process with that pid was disturbed");
+    assert_eq!(
+        process::start(pid),
+        start,
+        "the process with that pid was disturbed"
+    );
     assert_eq!(sandbox.board.count("detach"), 0);
     // Its own stop still ends it.
     fs::write(state.with_extension("stop"), b"").unwrap();
-    assert_eq!(exit_within(&mut watcher, Duration::from_secs(10)).code(), Some(0));
+    assert_eq!(
+        exit_within(&mut watcher, Duration::from_secs(10)).code(),
+        Some(0)
+    );
 }
 
 #[test]
@@ -567,14 +713,20 @@ fn a_detached_watcher_outlives_the_command_that_started_it() {
     args.push("--detach".into());
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut command = sandbox.command(&args);
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let began = Instant::now();
     let mut parent = command.spawn().unwrap();
     // Its output is a pipe: it must end when the parent exits, not when
     // the watcher does.
     let (sender, outputs) = std::sync::mpsc::channel();
     for (stream, name) in [
-        (Box::new(parent.stdout.take().unwrap()) as Box<dyn Read + Send>, "stdout"),
+        (
+            Box::new(parent.stdout.take().unwrap()) as Box<dyn Read + Send>,
+            "stdout",
+        ),
         (Box::new(parent.stderr.take().unwrap()), "stderr"),
     ] {
         let sender = sender.clone();
@@ -595,14 +747,19 @@ fn a_detached_watcher_outlives_the_command_that_started_it() {
                 if let Some(held) = record(&state) {
                     sandbox.track(held["pid"].as_u64().unwrap() as u32, &state);
                 }
-                panic!("--detach's output stayed open after it exited ({:?})", began.elapsed());
+                panic!(
+                    "--detach's output stayed open after it exited ({:?})",
+                    began.elapsed()
+                );
             }
         }
     }
     assert_eq!(status.code(), Some(0), "{}", out.1);
     assert_eq!(
         out.0.trim_end(),
-        format!("conductor-watch {AGENT} watching for {OWNER}; park with park_needs=\"decision events\" park_clear_by={AGENT}")
+        format!(
+            "conductor-watch {AGENT} watching for {OWNER}; park with park_needs=\"decision events\" park_clear_by={AGENT}"
+        )
     );
     let held = record(&state).expect("the detached watcher's pid record");
     let pid = held["pid"].as_u64().unwrap() as u32;
@@ -610,14 +767,26 @@ fn a_detached_watcher_outlives_the_command_that_started_it() {
     let start = process::start(pid);
     assert!(start.is_some(), "the detached watcher is not running");
     thread::sleep(Duration::from_secs(2));
-    assert_eq!(process::start(pid), start, "the detached watcher did not outlive its parent");
-    assert!(fs::read_to_string(state.with_extension("log")).unwrap().contains("watching for"));
+    assert_eq!(
+        process::start(pid),
+        start,
+        "the detached watcher did not outlive its parent"
+    );
+    assert!(
+        fs::read_to_string(state.with_extension("log"))
+            .unwrap()
+            .contains("watching for")
+    );
     // Ready before "watching" was printed: registered, first poll done.
     assert_eq!(held["ready"], true);
 
     let stop = sandbox.run(&["--stop", "--state", &state.display().to_string()]);
     assert_eq!(stop.status.code(), Some(0));
-    wait_for("the detached watcher to exit", Duration::from_secs(10), || process::start(pid) != start);
+    wait_for(
+        "the detached watcher to exit",
+        Duration::from_secs(10),
+        || process::start(pid) != start,
+    );
     assert!(record(&state).is_none());
     assert_eq!(sandbox.board.count("detach"), 1);
 }
@@ -629,7 +798,10 @@ fn an_interrupt_ends_the_watcher_cleanly_and_releases_what_it_held() {
     let args = sandbox.watch_args(&state);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut command = sandbox.command(&args);
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -639,20 +811,37 @@ fn an_interrupt_ends_the_watcher_cleanly_and_releases_what_it_held() {
     }
     let mut child = command.spawn().unwrap();
     sandbox.track(child.id(), &state);
-    wait_for("the watcher's pid record", Duration::from_secs(20), || record(&state).is_some());
+    wait_for("the watcher's pid record", Duration::from_secs(20), || {
+        record(&state).is_some()
+    });
     interrupt(child.id());
     let status = exit_within(&mut child, Duration::from_secs(10));
     let mut stderr = String::new();
-    child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
     assert_eq!(status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("conductor-watch: exiting: interrupted"), "{stderr}");
+    assert!(
+        stderr.contains("conductor-watch: exiting: interrupted"),
+        "{stderr}"
+    );
     assert!(record(&state).is_none());
     assert_eq!(sandbox.board.count("detach"), 1);
     // The lock went with it: a new watcher starts on the same state.
     let mut next = sandbox.spawn(&state);
-    wait_for("a new watcher on the state", Duration::from_secs(20), || record(&state).is_some());
+    wait_for(
+        "a new watcher on the state",
+        Duration::from_secs(20),
+        || record(&state).is_some(),
+    );
     let _ = fs::write(state.with_extension("stop"), b"");
-    assert_eq!(exit_within(&mut next, Duration::from_secs(10)).code(), Some(0));
+    assert_eq!(
+        exit_within(&mut next, Duration::from_secs(10)).code(),
+        Some(0)
+    );
 }
 
 #[cfg(unix)]
@@ -684,11 +873,19 @@ fn a_gh_in_the_current_directory_is_never_run() {
     let work = sandbox.root.join("work");
     let marker = work.join("planted-ran");
     if cfg!(windows) {
-        fs::write(work.join("gh.cmd"), format!("@echo ran> \"{}\"\r\n@echo []\r\n", marker.display())).unwrap();
+        fs::write(
+            work.join("gh.cmd"),
+            format!("@echo ran> \"{}\"\r\n@echo []\r\n", marker.display()),
+        )
+        .unwrap();
         fs::write(work.join("gh.exe"), b"MZ").unwrap();
     } else {
         let gh = work.join("gh");
-        fs::write(&gh, format!("#!/bin/sh\ntouch '{}'\necho '[]'\n", marker.display())).unwrap();
+        fs::write(
+            &gh,
+            format!("#!/bin/sh\ntouch '{}'\necho '[]'\n", marker.display()),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -706,14 +903,23 @@ fn a_gh_in_the_current_directory_is_never_run() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", text(&out.stderr));
-    assert!(text(&out.stderr).contains("conductor-watch: gh is not installed or not on PATH"), "{}", text(&out.stderr));
+    assert!(
+        text(&out.stderr).contains("conductor-watch: gh is not installed or not on PATH"),
+        "{}",
+        text(&out.stderr)
+    );
     assert!(!marker.exists(), "the planted gh ran");
     // The owner was told, the message rings its park, and the row is released.
     let sent = sandbox.board.bodies("send");
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["to"], OWNER);
     assert_eq!(sent[0]["clears"], "decision events");
-    assert!(sent[0]["text"].as_str().unwrap().starts_with("conductor-watch stopped: \"gh is not installed or not on PATH\"."));
+    assert!(
+        sent[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("conductor-watch stopped: \"gh is not installed or not on PATH\".")
+    );
     assert_eq!(sandbox.board.count("detach"), 1);
     assert!(record(&state).is_none());
 }
@@ -732,11 +938,15 @@ fn session(sandbox: &Sandbox, args: &[String]) -> Child {
         use std::os::windows::process::CommandExt;
         let quoted: Vec<String> = args.iter().map(|arg| format!("\"{arg}\"")).collect();
         let system = std::env::var_os("SYSTEMROOT").expect("SYSTEMROOT");
-        let mut command = common::cli::cleared_command(&Path::new(&system).join("System32").join("cmd.exe"));
+        let mut command =
+            common::cli::cleared_command(&Path::new(&system).join("System32").join("cmd.exe"));
         command.raw_arg(format!(
             "/d /c \"\"{binary}\" conductor-watch {} --detach & \"{}\" -n 61 127.0.0.1 >nul\"",
             quoted.join(" "),
-            Path::new(&system).join("System32").join("PING.EXE").display()
+            Path::new(&system)
+                .join("System32")
+                .join("PING.EXE")
+                .display()
         ));
         // Its own group, sharing this console: the group this test ends.
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
@@ -752,7 +962,9 @@ fn session(sandbox: &Sandbox, args: &[String]) -> Child {
         let mut command = common::cli::cleared_command(Path::new("/bin/sh"));
         command
             .arg("-c")
-            .arg(format!("\"$0\" conductor-watch \"$@\" --detach; exec {sleep} 60"))
+            .arg(format!(
+                "\"$0\" conductor-watch \"$@\" --detach; exec {sleep} 60"
+            ))
             .arg(binary)
             .args(args);
         // It leads its own group, as a terminal's foreground job does.
@@ -773,7 +985,10 @@ fn session(sandbox: &Sandbox, args: &[String]) -> Child {
 /// closing console). The leader is this test's live, unreaped child.
 #[allow(unsafe_code)]
 fn end_session(leader: &mut Child) {
-    assert!(leader.try_wait().unwrap().is_none(), "the session ended by itself");
+    assert!(
+        leader.try_wait().unwrap().is_none(),
+        "the session ended by itself"
+    );
     #[cfg(unix)]
     // SAFETY: the group of a live child this test holds, so not reused.
     unsafe {
@@ -799,9 +1014,11 @@ fn a_detached_watcher_survives_the_end_of_the_session_that_started_it() {
     let state = sandbox.state("session");
     let args = sandbox.watch_args(&state);
     let mut leader = session(&sandbox, &args);
-    wait_for("the detached watcher to be ready", Duration::from_secs(45), || {
-        record(&state).is_some_and(|held| held["ready"] == true)
-    });
+    wait_for(
+        "the detached watcher to be ready",
+        Duration::from_secs(45),
+        || record(&state).is_some_and(|held| held["ready"] == true),
+    );
     let held = record(&state).unwrap();
     let pid = held["pid"].as_u64().unwrap() as u32;
     sandbox.track(pid, &state);
@@ -809,10 +1026,18 @@ fn a_detached_watcher_survives_the_end_of_the_session_that_started_it() {
     assert!(start.is_some());
     end_session(&mut leader);
     thread::sleep(Duration::from_secs(2));
-    assert_eq!(process::start(pid), start, "the detached watcher did not outlive its session");
+    assert_eq!(
+        process::start(pid),
+        start,
+        "the detached watcher did not outlive its session"
+    );
     let stop = sandbox.run(&["--stop", "--state", &state.display().to_string()]);
     assert_eq!(stop.status.code(), Some(0));
-    wait_for("the detached watcher to exit", Duration::from_secs(10), || process::start(pid) != start);
+    wait_for(
+        "the detached watcher to exit",
+        Duration::from_secs(10),
+        || process::start(pid) != start,
+    );
 }
 
 #[test]
@@ -820,7 +1045,11 @@ fn a_second_watcher_for_the_same_owner_is_refused_with_the_first_ones_record() {
     let sandbox = Sandbox::new();
     let first_state = sandbox.state("first");
     let mut first = sandbox.spawn(&first_state);
-    wait_for("the first watcher's pid record", Duration::from_secs(20), || record(&first_state).is_some());
+    wait_for(
+        "the first watcher's pid record",
+        Duration::from_secs(20),
+        || record(&first_state).is_some(),
+    );
     // Another state file for the same owner: the first watcher answers.
     let second_state = sandbox.root.join("elsewhere").join("second.json");
     let args = sandbox.watch_args(&second_state);
@@ -829,20 +1058,33 @@ fn a_second_watcher_for_the_same_owner_is_refused_with_the_first_ones_record() {
     assert_eq!(second.status.code(), Some(0), "{}", text(&second.stderr));
     assert_eq!(
         text(&second.stdout).trim_end(),
-        format!("conductor-watch {AGENT} already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by={AGENT}")
+        format!(
+            "conductor-watch {AGENT} already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by={AGENT}"
+        )
     );
     assert_eq!(sandbox.board.count("register"), 1);
     // --stop for that owner, given the other state file, stops the first.
-    let stop = sandbox.run(&["--stop", "--owner", OWNER, "--state", &second_state.display().to_string()]);
+    let stop = sandbox.run(&[
+        "--stop",
+        "--owner",
+        OWNER,
+        "--state",
+        &second_state.display().to_string(),
+    ]);
     assert_eq!(
         text(&stop.stdout).trim_end(),
         format!("conductor-watch {AGENT} asked to stop; it exits at its next poll")
     );
-    assert_eq!(exit_within(&mut first, Duration::from_secs(10)).code(), Some(0));
+    assert_eq!(
+        exit_within(&mut first, Duration::from_secs(10)).code(),
+        Some(0)
+    );
     // Near miss: two different owners on one machine both run.
     let mine = sandbox.state("mine");
     let mut one = sandbox.spawn(&mine);
-    wait_for("the owner's watcher", Duration::from_secs(20), || record(&mine).is_some());
+    wait_for("the owner's watcher", Duration::from_secs(20), || {
+        record(&mine).is_some()
+    });
     let theirs = sandbox.state("theirs");
     let mut other_args = sandbox.watch_args(&theirs);
     other_args[1] = OTHER.into();
@@ -855,7 +1097,9 @@ fn a_second_watcher_for_the_same_owner_is_refused_with_the_first_ones_record() {
         .spawn()
         .unwrap();
     sandbox.track(two.id(), &theirs);
-    wait_for("the other owner's watcher", Duration::from_secs(20), || record(&theirs).is_some());
+    wait_for("the other owner's watcher", Duration::from_secs(20), || {
+        record(&theirs).is_some()
+    });
     assert_eq!(sandbox.board.count("register"), 3);
     for (child, state) in [(&mut one, &mine), (&mut two, &theirs)] {
         fs::write(state.with_extension("stop"), b"").unwrap();
@@ -910,13 +1154,25 @@ fn the_watchers_files_live_in_private_folders() {
     let sandbox = Sandbox::new();
     let state = sandbox.root.join("fresh").join("watch.json");
     let mut watcher = sandbox.spawn(&state);
-    wait_for("the watcher's pid record", Duration::from_secs(20), || record(&state).is_some());
-    assert!(private(state.parent().unwrap()), "the state folder is not private");
-    let owners = sandbox.root.join("home").join(".pseudolife-mcp").join("watch");
+    wait_for("the watcher's pid record", Duration::from_secs(20), || {
+        record(&state).is_some()
+    });
+    assert!(
+        private(state.parent().unwrap()),
+        "the state folder is not private"
+    );
+    let owners = sandbox
+        .root
+        .join("home")
+        .join(".pseudolife-mcp")
+        .join("watch");
     assert!(owners.join(format!("{OWNER}.owner.json")).exists());
     assert!(private(&owners), "the owner folder is not private");
     fs::write(state.with_extension("stop"), b"").unwrap();
-    assert_eq!(exit_within(&mut watcher, Duration::from_secs(10)).code(), Some(0));
+    assert_eq!(
+        exit_within(&mut watcher, Duration::from_secs(10)).code(),
+        Some(0)
+    );
 }
 
 #[test]
@@ -933,7 +1189,11 @@ fn detach_reports_a_watcher_that_stops_before_its_first_poll() {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = sandbox.run(&args);
     assert_eq!(out.status.code(), Some(2), "{}", text(&out.stdout));
-    assert!(!text(&out.stdout).contains("watching for"), "{}", text(&out.stdout));
+    assert!(
+        !text(&out.stdout).contains("watching for"),
+        "{}",
+        text(&out.stdout)
+    );
     assert_eq!(
         text(&out.stderr).trim_end(),
         format!(
@@ -960,14 +1220,30 @@ fn a_detached_watcher_runs_from_its_own_folder_with_the_callers_repository() {
         .collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let path = std::env::join_paths([sandbox.root.join("bin")]).unwrap();
-    let out = sandbox.command_in(&args, path, &caller).stdin(Stdio::null()).output().unwrap();
+    let out = sandbox
+        .command_in(&args, path, &caller)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let held = record(&state).expect("the detached watcher's pid record");
     let pid = held["pid"].as_u64().unwrap() as u32;
     sandbox.track(pid, &state);
     let calls = fs::read_to_string(sandbox.root.join("gh-calls.txt")).unwrap();
-    assert!(calls.lines().next().unwrap().starts_with("repo view --json nameWithOwner"), "{calls}");
-    assert!(calls.lines().any(|line| line.starts_with("pr list -R example/demo ")), "{calls}");
+    assert!(
+        calls
+            .lines()
+            .next()
+            .unwrap()
+            .starts_with("repo view --json nameWithOwner"),
+        "{calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("pr list -R example/demo ")),
+        "{calls}"
+    );
     // It does not keep the caller's folder: that can go while it runs.
     #[cfg(target_os = "linux")]
     assert_eq!(
@@ -978,5 +1254,9 @@ fn a_detached_watcher_runs_from_its_own_folder_with_the_callers_repository() {
     let stop = sandbox.run(&["--stop", "--state", &state.display().to_string()]);
     assert_eq!(stop.status.code(), Some(0));
     let start = process::start(pid);
-    wait_for("the detached watcher to exit", Duration::from_secs(10), || process::start(pid) != start);
+    wait_for(
+        "the detached watcher to exit",
+        Duration::from_secs(10),
+        || process::start(pid) != start,
+    );
 }

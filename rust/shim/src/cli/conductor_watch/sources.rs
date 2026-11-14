@@ -9,7 +9,8 @@ use std::{
 };
 
 /// gh's `--json` fields the classifiers read.
-const PR_FIELDS: &str = "number,title,headRefOid,mergeable,mergeStateStatus,isDraft,statusCheckRollup";
+const PR_FIELDS: &str =
+    "number,title,headRefOid,mergeable,mergeStateStatus,isDraft,statusCheckRollup";
 const RUN_FIELDS: &str =
     "attempt,databaseId,workflowDatabaseId,workflowName,status,conclusion,headSha,event";
 /// gh paginates up to this; a pull request missing from the list is looked
@@ -161,9 +162,16 @@ const RUN_TYPES: [(&str, Allowed, bool); 7] = [
 
 /// `value` when it is a list of objects whose typed fields have those
 /// types; otherwise the reason, naming what `what` printed instead.
-fn records(value: Value, what: &str, types: &[(&str, Allowed, bool)]) -> Result<Vec<Value>, String> {
+fn records(
+    value: Value,
+    what: &str,
+    types: &[(&str, Allowed, bool)],
+) -> Result<Vec<Value>, String> {
     let Value::Array(items) = value else {
-        return Err(format!("{what} printed {}, not a list of objects{GH_FIX}", kind(&value)));
+        return Err(format!(
+            "{what} printed {}, not a list of objects{GH_FIX}",
+            kind(&value)
+        ));
     };
     check_items(&items, what, types, "a list")?;
     Ok(items)
@@ -177,7 +185,10 @@ fn check_items(
 ) -> Result<(), String> {
     for item in items {
         let Value::Object(fields) = item else {
-            return Err(format!("{what} printed {holder} holding {}, not objects{GH_FIX}", kind(item)));
+            return Err(format!(
+                "{what} printed {holder} holding {}, not objects{GH_FIX}",
+                kind(item)
+            ));
         };
         for (key, allowed, required) in types {
             let field = fields.get(*key);
@@ -219,7 +230,9 @@ impl<G: Gh> GitHub<'_, G> {
     async fn runs_on(&mut self, head: &str) -> Result<Vec<Value>, GhError> {
         let value = self
             .json(
-                &["run", "list", "--commit", head, "--limit", "100", "--json", RUN_FIELDS],
+                &[
+                    "run", "list", "--commit", head, "--limit", "100", "--json", RUN_FIELDS,
+                ],
                 "gh run list",
             )
             .await?;
@@ -229,8 +242,13 @@ impl<G: Gh> GitHub<'_, G> {
     /// The open pull requests. Only a head about to be reported green or
     /// cancelled has its workflow runs looked up, so a quiet poll costs one
     /// call; the runs can only hold or worsen what the rollup says.
-    pub(super) async fn prs(&mut self, old: Option<&Map<String, Value>>) -> Result<Map<String, Value>, GhError> {
-        let mut argv = vec!["pr", "list", "--state", "open", "--limit", PR_LIMIT, "--json", PR_FIELDS];
+    pub(super) async fn prs(
+        &mut self,
+        old: Option<&Map<String, Value>>,
+    ) -> Result<Map<String, Value>, GhError> {
+        let mut argv = vec![
+            "pr", "list", "--state", "open", "--limit", PR_LIMIT, "--json", PR_FIELDS,
+        ];
         let author = self.author.clone();
         if let Some(author) = author.as_deref() {
             argv.extend(["--author", author]);
@@ -244,7 +262,9 @@ impl<G: Gh> GitHub<'_, G> {
                 continue;
             }
             let before = old.and_then(|old| old.get(number));
-            if before.is_some_and(|before| before["head"] == pr["head"] && before["checks"] == pr["checks"]) {
+            if before.is_some_and(|before| {
+                before["head"] == pr["head"] && before["checks"] == pr["checks"]
+            }) {
                 continue;
             }
             let head = pr["head"].as_str().unwrap_or("").to_owned();
@@ -260,10 +280,15 @@ impl<G: Gh> GitHub<'_, G> {
         Ok(snap)
     }
 
-    pub(super) async fn master(&mut self, old: Option<&Map<String, Value>>) -> Result<Map<String, Value>, GhError> {
+    pub(super) async fn master(
+        &mut self,
+        old: Option<&Map<String, Value>>,
+    ) -> Result<Map<String, Value>, GhError> {
         let value = self
             .json(
-                &["run", "list", "--branch", "master", "--limit", "30", "--json", RUN_FIELDS],
+                &[
+                    "run", "list", "--branch", "master", "--limit", "30", "--json", RUN_FIELDS,
+                ],
                 "gh run list",
             )
             .await?;
@@ -276,7 +301,10 @@ impl<G: Gh> GitHub<'_, G> {
     pub(super) async fn closed_as(&mut self, number: &str) -> Option<String> {
         let value = self
             // `--`: the number (a state file's key) is never read as a flag.
-            .json(&["pr", "view", "--json", "state", "--", number], "gh pr view")
+            .json(
+                &["pr", "view", "--json", "state", "--", number],
+                "gh pr view",
+            )
             .await
             .ok()?;
         match value.get("state").and_then(Value::as_str) {
@@ -351,7 +379,10 @@ pub(super) fn suites(
             continue;
         };
         let commit: String = python_str(body.get("commit"), "").chars().take(8).collect();
-        let summary: String = python_str(body.get("summary"), "").chars().take(SUMMARY).collect();
+        let summary: String = python_str(body.get("summary"), "")
+            .chars()
+            .take(SUMMARY)
+            .collect();
         snap.insert(
             name,
             json!({
