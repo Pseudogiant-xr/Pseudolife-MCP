@@ -152,30 +152,17 @@ fn the_store_desktop_config_with_an_inherited_capability_ace_is_registered() {
         .join("Local/Packages/Claude_w7fixture/LocalCache/Roaming/Claude");
     fs::create_dir_all(&cache).unwrap();
     let sddl = "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681)";
-    let script = format!(
-        "$a = Get-Acl -LiteralPath '{}'; $a.SetSecurityDescriptorSddlForm('{sddl}'); Set-Acl -LiteralPath '{}' -AclObject $a",
-        cache.display(),
-        cache.display()
-    );
-    let set = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .unwrap();
-    assert!(
-        set.status.success(),
-        "{}",
-        String::from_utf8_lossy(&set.stderr)
-    );
+    // Built with the Windows API, not a PowerShell child: a Windows
+    // PowerShell started from a PowerShell 7 parent inherits its module path
+    // and cannot load Get-Acl (hosted windows-latest, stress 43536389201).
+    acl::set_dacl(&cache, sddl).expect("fixture could not build the Store folder's ACL");
     let config = cache.join("claude_desktop_config.json");
     fs::write(&config, br#"{"mcpServers": {"other": {"command": "/x"}}}"#).unwrap();
-    let acl = |path: &std::path::Path| {
-        String::from_utf8_lossy(&Command::new("icacls").arg(path).output().unwrap().stdout)
-            .into_owned()
-    };
+    let inherited = || acl::dacl(&config).expect("fixture could not read the config's ACL");
     assert!(
-        acl(&config).contains("S-1-15-3-1024"),
-        "the file inherits the capability ACE: {}",
-        acl(&config)
+        inherited().contains("S-1-15-3-1024"),
+        "fixture: the file did not inherit the capability ACE: {}",
+        inherited()
     );
     let output = home.run(&[]);
     let text = all_text(&output);
@@ -185,7 +172,7 @@ fn the_store_desktop_config_with_an_inherited_capability_ace_is_registered() {
     assert_eq!(written["mcpServers"]["other"]["command"], "/x");
     assert!(written["mcpServers"]["pseudolife-desktop"].is_object());
     assert!(
-        acl(&config).contains("S-1-15-3-1024"),
+        inherited().contains("S-1-15-3-1024"),
         "the file keeps its ACL"
     );
     // The %APPDATA% copy was never created: the package cache wins.
@@ -206,4 +193,98 @@ fn a_group_writable_desktop_config_is_registered() {
     assert_eq!(output.status.code(), Some(0), "{}", all_text(&output));
     let mode = fs::metadata(home.config()).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o664, "the file keeps its mode");
+}
+
+/// DACL fixtures through the Windows API (SDDL in, SDDL out).
+#[cfg(windows)]
+mod acl {
+    use std::{io, os::windows::ffi::OsStrExt, path::Path, ptr};
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{
+                ConvertSecurityDescriptorToStringSecurityDescriptorW,
+                ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
+                SE_FILE_OBJECT,
+            },
+            DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SetFileSecurityW,
+        },
+    };
+
+    fn wide(text: &std::ffi::OsStr) -> Vec<u16> {
+        text.encode_wide().chain([0]).collect()
+    }
+
+    /// Replace `path`'s DACL with `sddl` (protected, as written).
+    pub fn set_dacl(path: &Path, sddl: &str) -> io::Result<()> {
+        let text: Vec<u16> = sddl.encode_utf16().chain([0]).collect();
+        let name = wide(path.as_os_str());
+        // SAFETY: NUL-terminated buffers live through both calls; the
+        // descriptor is freed after SetFileSecurityW copied it.
+        unsafe {
+            let mut descriptor = ptr::null_mut();
+            if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                text.as_ptr(),
+                1,
+                &mut descriptor,
+                ptr::null_mut(),
+            ) == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            let set = SetFileSecurityW(
+                name.as_ptr(),
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                descriptor,
+            );
+            let error = io::Error::last_os_error();
+            LocalFree(descriptor);
+            if set == 0 {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// `path`'s DACL as SDDL.
+    pub fn dacl(path: &Path) -> io::Result<String> {
+        let name = wide(path.as_os_str());
+        // SAFETY: the descriptor and the string are LocalAlloc'd by the API
+        // and freed here; the string is read up to its returned length.
+        unsafe {
+            let mut descriptor = ptr::null_mut();
+            let status = GetNamedSecurityInfoW(
+                name.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut descriptor,
+            );
+            if status != 0 {
+                return Err(io::Error::from_raw_os_error(status as i32));
+            }
+            let mut text = ptr::null_mut();
+            let mut length = 0u32;
+            let converted = ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                &mut length,
+            );
+            let error = io::Error::last_os_error();
+            LocalFree(descriptor);
+            if converted == 0 {
+                return Err(error);
+            }
+            let sddl = String::from_utf16_lossy(std::slice::from_raw_parts(text, length as usize))
+                .trim_end_matches('\0')
+                .to_owned();
+            LocalFree(text.cast());
+            Ok(sddl)
+        }
+    }
 }
