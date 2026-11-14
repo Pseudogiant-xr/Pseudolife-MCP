@@ -709,3 +709,48 @@ def test_a_workflow_new_to_the_baseline_needs_an_accepted_reason_for_each_job(mo
     assert ci_budget.approved_definitions("new.yml", raw, {}, raw, [])[1] == {}
     record = {"workflow": "new.yml", "job": "guard", "before": None, "fingerprint": "g", "reason": "a new job"}
     assert ci_budget.approved_definitions("new.yml", raw, {}, raw, [record])[1] == {"guard": "g"}
+
+
+def test_a_removed_job_needs_an_accepted_reason_as_the_batch_check_does(monkeypatch):
+    # ops/integrate.py's member check wants a record for a job the baseline
+    # has and the workflow lost; `check` passed #1550 without one, and the
+    # batch tool left it out of batch 7 (14 November 2026).
+    monkeypatch.setattr(ci_budget, "read_fingerprint_baseline", lambda: {"new.yml": {"guard": "g", "gone": "x"}})
+    monkeypatch.setattr(ci_budget, "current_definitions", lambda name, workflow: {"guard": "g"})
+    assert ci_budget.unapproved_removals("new.yml", {}, {}, []) == ["gone"]
+    record = {"workflow": "new.yml", "job": "gone", "before": "x", "fingerprint": None,
+              "reason": "removed with the lite tier"}
+    assert ci_budget.unapproved_removals("new.yml", {}, {}, [record]) == []
+    # The near miss: a record against another baseline does not count, as in the gate.
+    assert ci_budget.unapproved_removals("new.yml", {}, {}, [dict(record, before="y")]) == ["gone"]
+
+
+def test_check_names_a_removed_job_without_a_reason():
+    # #1550's shape: the job leaves the workflow and its measured minutes
+    # leave the budget, so only the removal itself is left to explain.
+    workflow, raw = copy.deepcopy(load("ci.yml")), copy.deepcopy(load("ci.yml", resolved=False))
+    for target in (workflow, raw):
+        del target["jobs"]["frontend"]
+    entry = budget()
+    del entry["ci.yml"]["jobs"]["frontend"]
+    found = problems("ci.yml", workflow, entry, raw)
+    assert [problem for problem in found if "frontend" in problem] == [
+        next(problem for problem in found if "job frontend was removed since its minutes were measured" in problem)]
+
+
+def test_a_workflow_dropped_from_the_budget_still_needs_its_reasons(monkeypatch):
+    # The reviewer of 101e0ccba: the gate judges the merge base's workflows
+    # too, so a workflow deleted with its budget entry needs a reason per job.
+    monkeypatch.setattr(ci_budget, "read_fingerprint_baseline", lambda: {"gone.yml": {"a": "x", "b": "y"}})
+
+    def missing(name, raw=None):
+        raise FileNotFoundError(name)
+
+    monkeypatch.setattr(ci_budget, "current_definitions", missing)
+    assert ci_budget.unbudgeted_changes("gone.yml", []) == ["a", "b"]
+    records = [{"workflow": "gone.yml", "job": job, "before": before, "fingerprint": None, "reason": "deleted"}
+               for job, before in (("a", "x"), ("b", "y"))]
+    assert ci_budget.unbudgeted_changes("gone.yml", records) == []
+    # The near miss: a workflow still present and unchanged needs nothing.
+    monkeypatch.setattr(ci_budget, "current_definitions", lambda name, raw=None: {"a": "x", "b": "y"})
+    assert ci_budget.unbudgeted_changes("gone.yml", []) == []
