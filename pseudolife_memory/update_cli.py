@@ -2374,6 +2374,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print("pseudolife-mcp checkout-handover-v1")
         return 0
+    # A handed-off client update moves to this release's native client when
+    # one is published and runs here (update_bridge). It looks before the
+    # variables below are removed, so the native child gets them unchanged.
+    from pseudolife_memory import update_bridge
+    bridged = update_bridge.bridge(arguments, build_parser)
+    if isinstance(bridged, int):
+        return bridged
     # Read once and removed, so nothing this run starts (pip, claude, a
     # tunnel refresh) inherits them.
     handoff_from = os.environ.pop(HANDOFF_ENV, None)
@@ -2388,7 +2395,10 @@ def main(argv: list[str] | None = None) -> int:
         options.handoff_from = handoff_from
         options.handoff_report = Path(handoff_report) if handoff_report else None
         options.handoff_runtime = handoff_runtime or None
-    return Update(options).run()
+    update = Update(options)
+    if bridged:
+        update.step(bridged)
+    return update.run()
 
 
 if __name__ == "__main__":
