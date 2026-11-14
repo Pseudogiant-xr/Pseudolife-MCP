@@ -139,3 +139,71 @@ fn no_credential_for_a_token_file_exits_3_with_the_entry_written() {
     assert!(text.contains("WITHOUT a credential"), "{text}");
     assert!(home.config().is_file());
 }
+
+/// The Store (MSIX) Desktop's config folder grants a package capability SID
+/// full control by inheritance, so the file Desktop created there carries
+/// it. The shared writer accepts that file since #1549.
+#[cfg(windows)]
+#[test]
+fn the_store_desktop_config_with_an_inherited_capability_ace_is_registered() {
+    let home = Home::new();
+    let cache = home
+        .0
+        .join("Local/Packages/Claude_w7fixture/LocalCache/Roaming/Claude");
+    fs::create_dir_all(&cache).unwrap();
+    let sddl = "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681)";
+    let script = format!(
+        "$a = Get-Acl -LiteralPath '{}'; $a.SetSecurityDescriptorSddlForm('{sddl}'); Set-Acl -LiteralPath '{}' -AclObject $a",
+        cache.display(),
+        cache.display()
+    );
+    let set = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .unwrap();
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+    let config = cache.join("claude_desktop_config.json");
+    fs::write(&config, br#"{"mcpServers": {"other": {"command": "/x"}}}"#).unwrap();
+    let acl = |path: &std::path::Path| {
+        String::from_utf8_lossy(&Command::new("icacls").arg(path).output().unwrap().stdout)
+            .into_owned()
+    };
+    assert!(
+        acl(&config).contains("S-1-15-3-1024"),
+        "the file inherits the capability ACE: {}",
+        acl(&config)
+    );
+    let output = home.run(&[]);
+    let text = all_text(&output);
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    assert!(text.contains("entry: written"), "{text}");
+    let written: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    assert_eq!(written["mcpServers"]["other"]["command"], "/x");
+    assert!(written["mcpServers"]["pseudolife-desktop"].is_object());
+    assert!(
+        acl(&config).contains("S-1-15-3-1024"),
+        "the file keeps its ACL"
+    );
+    // The %APPDATA% copy was never created: the package cache wins.
+    assert!(!home.config().exists());
+}
+
+/// Under umask 002 (a private group per user) a config the user created is
+/// group-writable; the shared writer accepts it since #1549.
+#[cfg(unix)]
+#[test]
+fn a_group_writable_desktop_config_is_registered() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    fs::create_dir_all(home.config().parent().unwrap()).unwrap();
+    fs::write(home.config(), br#"{"mcpServers": {}}"#).unwrap();
+    fs::set_permissions(home.config(), fs::Permissions::from_mode(0o664)).unwrap();
+    let output = home.run(&[]);
+    assert_eq!(output.status.code(), Some(0), "{}", all_text(&output));
+    let mode = fs::metadata(home.config()).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o664, "the file keeps its mode");
+}
