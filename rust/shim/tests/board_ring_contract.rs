@@ -361,11 +361,26 @@ async fn board_ring_queued_hint_write_keeps_a_higher_seen_mark() {
 }
 /// A marker as the plugin's shell hooks wrote it before they wrote 0600:
 /// `printf > tmp && mv` under the user's umask, not the shim's owner-only
-/// writer. On POSIX that is 0644 under the common umask 022. POSIX only:
-/// the Windows marker check is the unchanged private-state ACL rule.
+/// writer. On POSIX that is 0644 under the common umask 022.
 #[cfg(unix)]
 fn hook_write(home: &Home, name: &str, text: &str) {
     hook_write_mode(home, name, text, 0o644);
+}
+/// A marker as `lifecycle.ps1` writes it on Windows: PowerShell's
+/// `[IO.File]::WriteAllText`, whose file carries an inherited, unprotected
+/// DACL rather than the shim's protected owner-only one (#1326).
+#[cfg(windows)]
+fn hook_write(home: &Home, name: &str, text: &str) {
+    // `-Command` joins trailing arguments into the script text, so the
+    // values travel in the environment.
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command"])
+        .arg("[IO.File]::WriteAllText($env:MARKER_PATH, $env:MARKER_TEXT)")
+        .env("MARKER_PATH", home.0.join(name))
+        .env("MARKER_TEXT", text)
+        .status()
+        .unwrap();
+    assert!(status.success(), "{name}");
 }
 #[cfg(unix)]
 fn hook_write_mode(home: &Home, name: &str, text: &str, mode: u32) {
@@ -378,7 +393,6 @@ fn hook_write_mode(home: &Home, name: &str, text: &str, mode: u32) {
     }
     std::fs::rename(&temp, home.0.join(name)).unwrap();
 }
-#[cfg(unix)]
 #[test]
 fn board_ring_liveness_reads_the_listener_records_the_stop_hook_writes() {
     // Found 2026-11-06 in the client/hook matrix: under the native shim the
@@ -409,7 +423,6 @@ fn board_ring_liveness_reads_the_listener_records_the_stop_hook_writes() {
         assert_eq!(liveness::armed_until_at(Some(&digest), 1000.0), 0.0);
     }
 }
-#[cfg(unix)]
 #[tokio::test]
 async fn board_ring_reads_and_raises_a_seen_mark_the_hook_wrote() {
     // The prompt and Stop hooks mark mail seen in `<key>.seen` under the

@@ -131,7 +131,7 @@ def test_ci_yml_names_the_guards_job():
 
 @pytest.mark.parametrize("workflow,skips,keeps", [
     ("rust.yml", ["rust", "parity-checks", "daemon-image"],
-     ["candidate", "candidate-harness", "fixtures", "source-mutants", "parity-live", "parity-selfhosted", "body-evidence"]),
+     ["candidate", "candidate-harness", "fixtures", "source-mutants", "parity-selfhosted"]),
     ("ci.yml", ["test", "test-lite-windows", "test-lite-macos", "frontend", "lock-resolve"],
      ["test-windows-nightly"]),
 ])

@@ -49,7 +49,7 @@ each exists because it was violated at least once.
    ops/integrate.py merge` once the batch's own CI passed at its built head,
    because a PR from any branch but `integrate/*` runs only the fast lanes
    (workflow and lock-file edits included).
-   - The `merge-forward` skill and item 11 are the only exceptions.
+   - The `merge-forward` skill is the only exception.
    - Read `docs/dev/merge-batches.md` before building, opening or merging a
      batch.
 5. **Rust-only batches skip the Python suite lanes**, on their master push
@@ -82,15 +82,19 @@ each exists because it was violated at least once.
    and raises a limit only with its reason (`rust/ci/test_ci_budget.py`),
    because every job shares the account's 20 hosted slots; read
    `docs/dev/ci-budget.md` before adding a job or shard.
-10. **A Python behaviour change that a `rust/cli_harness` row covers is
-    ported to Rust in the same PR, with those rows run locally**, because
-    the rows compare head Python with head Rust (read `rust/PARITY.md` to
-    find which rows a change reaches) and otherwise fail the batch.
-11. **A change the parity judges cover fails their cases by construction
-    until its base includes it**, because PR and batch runs use merge-base
-    Python as the oracle: the PR lists the failing cases, and only the
-    maintainer approves landing that batch red (read
-    `evals/rust_port/README.md` before deciding a judges failure is yours).
+10. **Python is frozen since 14 November 2026:** a change under
+    `pseudolife_memory/` (the Console build `pseudolife_memory/web/static/`
+    excepted) is made in Rust instead, because batch admission
+    (`ops/integrate.py`) and the `Python freeze` check refuse it unless the
+    PR carries the `freeze-exception` label, which marks a maintainer-ruled
+    exception.
+11. **Committed goldens are Rust regression snapshots:** parity shards
+    replay them and no PR, batch, push or nightly job compares against a
+    live Python oracle outside one named security step, so a change that
+    moves a golden on purpose updates
+    it in the same PR and says so (read `rust/cli_harness/README.md`
+    "Goldens after the freeze" first, because `--record` still records the
+    frozen Python).
 
 ## Install and update experience
 
