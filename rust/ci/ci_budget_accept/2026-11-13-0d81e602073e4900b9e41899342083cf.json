@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "53f970c03bdfbd83",
+  "fingerprint": "40d69d62974919af",
+  "reason": "Adds a weekday step (one date call), a grep of the diff for frozen-package paths and two more outputs (pytest_addopts, rust_only); the same seconds-long job."
+}

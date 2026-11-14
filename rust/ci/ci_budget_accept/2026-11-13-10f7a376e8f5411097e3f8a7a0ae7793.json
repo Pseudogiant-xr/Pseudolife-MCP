@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "bb217dd816ccb0b8",
+  "fingerprint": "f9595c2f5ac37c76",
+  "reason": "Sets PYTEST_ADDOPTS from scope, empty for an ordinary batch, so its cost holds. It is --include-frozen only for a batch carrying a freeze exception and on the weekly Sunday nightly; those runs collect the whole pre-freeze suite, which cost 27-37 minutes in this job (batch runs 43495728956, 43476091008, master push 43456549451)."
+}

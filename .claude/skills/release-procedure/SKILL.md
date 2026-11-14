@@ -88,6 +88,13 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    field fails in the suite rather than mid-CI. Nothing pins the packaged
    compose copy's tag to the version: check it by hand.
 
+   **While the release still publishes the Python package** (the wheel and
+   the Python daemon image, whose dependencies are floors), the cut's local
+   validation runs the whole suite with `--include-frozen`
+   (`pwsh ops/wsl-suite.ps1 tests/ --include-frozen`), since a run collects
+   only the live files otherwise and the frozen package's tests are what can
+   see a dependency regression.
+
    **The same PR also bumps the native crates** (`evals/rust_port/README.md`,
    the version-only release paragraph; #751 did it for 0.18.1): the
    `version` in `rust/shim/Cargo.toml` and in `rust/daemon/Cargo.toml`

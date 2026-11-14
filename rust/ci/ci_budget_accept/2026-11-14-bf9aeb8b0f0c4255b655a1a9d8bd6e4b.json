@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "92b7929dcce188df",
+  "fingerprint": "7ccb0ec627085695",
+  "reason": "Adds four quick live tests a Rust-only change can break (the ci_budget integration and three rust.yml pins) to the Rust-readers step; within the 9.0-minute estimate recorded in ci_budget.json."
+}

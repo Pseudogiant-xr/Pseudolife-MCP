@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "200ef2b514faec86",
+  "fingerprint": "a196208bd7989499",
+  "reason": "Python freeze (2026-11-14): the lane runs only the live files of its selection (14 frozen files and their picks left: embedded provider, backup, credentials, tunnel runtime, conductor watcher, flat migration and more), so its pytest step can only shorten; setup is unchanged."
+}

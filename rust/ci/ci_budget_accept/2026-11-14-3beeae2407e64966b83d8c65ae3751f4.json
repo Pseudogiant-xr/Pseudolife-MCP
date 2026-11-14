@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-linux",
+  "before": "ea88c14266b3fd67",
+  "fingerprint": null,
+  "reason": "Removed with the lite tier at the Python freeze (14 November 2026): the job ran the whole Python suite on embedded PostgreSQL, which the test job now covers: the live test files on every run, the frozen ones weekly and whenever a change touches the package. The removal saves its 25.3 measured runner-minutes per run (master push 43456549451, batches 43495728956 and 43476091008) and one of the account's hosted slots; ci_budget.json drops its entry and lowers the job limit to 7."
+}
