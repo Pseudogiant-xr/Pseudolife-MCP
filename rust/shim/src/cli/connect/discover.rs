@@ -1,7 +1,8 @@
 //! `connect_cli.discover`: one row per place a selected client keeps the
-//! daemon URL, for the JSON-file clients (Claude Code, Claude Desktop,
-//! Gemini CLI). A Codex config file, a User-scope daemon URL and an
-//! unattended-update schedule defer before discovery (see `mod.rs`).
+//! daemon URL (the Codex rows come from `codex.rs`, read asynchronously),
+//! plus the environment rows: the shell's own URL and the Windows
+//! User-scope one. An unattended-update schedule defers before discovery
+//! (see `mod.rs`).
 use super::files::{self, Read};
 use super::pyjson::{self, Dict, J};
 use super::{Cred, Defer, paths, url};
@@ -51,9 +52,15 @@ pub(super) struct Row {
     pub json: Option<JsonSpec>,
     /// `"_credential" in row`, and its value.
     pub credential: Option<Option<Cred>>,
+    /// A Codex row: the Codex home its app-server writes.
+    pub codex: Option<PathBuf>,
+    /// The User-scope environment row: the value it replaces.
+    pub user_env: Option<super::user_env::Value>,
+    /// The Codex registration row: the environment shown and confirmed.
+    pub codex_after: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-fn row(
+pub(super) fn row(
     client: &'static str,
     place: &'static str,
     file: Option<&Path>,
@@ -73,10 +80,13 @@ fn row(
         created: false,
         json: None,
         credential: None,
+        codex: None,
+        user_env: None,
+        codex_after: None,
     })
 }
 
-fn manual(
+pub(super) fn manual(
     client: &'static str,
     place: &'static str,
     file: Option<&Path>,
@@ -141,7 +151,7 @@ pub(super) fn after(env: &Dict, edits: &Edits) -> Dict {
     result
 }
 
-fn changes(env: &Dict, edits: &Edits) -> Result<Changes, Defer> {
+pub(super) fn changes(env: &Dict, edits: &Edits) -> Result<Changes, Defer> {
     let mut sorted: Vec<_> = edits.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let mut shown = Vec::new();
@@ -168,7 +178,7 @@ fn changes(env: &Dict, edits: &Edits) -> Result<Changes, Defer> {
 }
 
 /// `_credential(env)`: the file wins.
-fn credential(env: &Dict) -> Result<Option<Cred>, Defer> {
+pub(super) fn credential(env: &Dict) -> Result<Option<Cred>, Defer> {
     if let Some(value) = pyjson::get(env, FILE_KEY).filter(|v| v.truthy()) {
         return Ok(Some(Cred::File(value.py_str()?)));
     }
@@ -228,7 +238,7 @@ fn settings_edits(env: &Dict, ctx: &Ctx, fallback: Option<&str>) -> Edits {
     edits
 }
 
-fn notes(env: &Dict, ctx: &Ctx, edits: &Edits, command: Option<&str>) -> Vec<String> {
+pub(super) fn notes(env: &Dict, ctx: &Ctx, edits: &Edits, command: Option<&str>) -> Vec<String> {
     let mut found = Vec::new();
     if truthy(&after(env, edits), TOKEN_KEY) {
         found.push(format!(
@@ -294,7 +304,7 @@ fn register_command(client: &str, ctx: &Ctx) -> Result<String, Defer> {
     })
 }
 
-fn absent(client: &'static str, ctx: &Ctx) -> Result<Row, Defer> {
+pub(super) fn absent(client: &'static str, ctx: &Ctx) -> Result<Row, Defer> {
     let mut found = row(client, "registration", None, None, "absent")?;
     found.detail = format!(
         "no registration; connect never creates one. To register: {}",
@@ -584,17 +594,78 @@ fn environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             )?);
         }
     }
+    rows.extend(windows_environment_rows(ctx)?);
     Ok(rows)
 }
 
-pub(super) fn discover(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+/// The Windows User-scope daemon URL, which every new process inherits: a
+/// change row when it exists and names another daemon (`connect` re-points
+/// it), never one that creates it; when no User-scope value overrides it, a
+/// Machine-scope value naming another daemon is a manual row (`connect`
+/// never writes Machine scope).
+pub(super) fn windows_environment_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+    let backend = super::user_env::backend();
+    let normalised = |value: &str| -> Result<String, Defer> {
+        Ok(url::validated(value)?.unwrap_or_else(|()| value.to_owned()))
+    };
+    let user = match backend.user(URL_KEY) {
+        Ok(user) => user,
+        Err(cause) => {
+            return Ok(vec![manual(
+                "environment",
+                "user",
+                None,
+                Some(URL_KEY),
+                format!(
+                    "the Windows User-scope environment could not be read ({cause}); check it with `reg query HKCU\\Environment /v {URL_KEY}` and, if it names another daemon, set it with {}",
+                    super::user_env::powershell_set(URL_KEY, &ctx.url, "User")
+                ),
+            )?]);
+        }
+    };
+    if let Some(user) = user.filter(|user| !user.data.is_empty()) {
+        if normalised(&user.data)? == ctx.url {
+            return Ok(Vec::new());
+        }
+        let mut found = row("environment", "user", None, Some(URL_KEY), "change")?;
+        found.changes = vec![(
+            URL_KEY.to_owned(),
+            Some(url::shown(&user.data)?),
+            Some(ctx.url.clone()),
+        )];
+        found.notes.push(
+            "the Windows User-scope environment, which every new process inherits; programs already running keep the old value until they restart".to_owned(),
+        );
+        found.user_env = Some(user);
+        return Ok(vec![found]);
+    }
+    match backend.machine(URL_KEY) {
+        Ok(Some(machine)) if !machine.data.is_empty() && normalised(&machine.data)? != ctx.url => {
+            Ok(vec![manual(
+                "environment",
+                "machine",
+                None,
+                Some(URL_KEY),
+                format!(
+                    "the Windows Machine-scope environment sets {URL_KEY}={}, which every new process inherits while no User-scope value overrides it; connect never changes Machine scope. Set a User-scope value, which takes precedence: {}, or change the Machine-scope one in an administrator PowerShell",
+                    url::shown(&machine.data)?,
+                    super::user_env::powershell_set(URL_KEY, &ctx.url, "User")
+                ),
+            )?])
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Discovery; `codex` holds the Codex rows, read asynchronously from Codex's
+/// app-server (`super::codex::rows`), in their place in the plan.
+pub(super) fn discover(ctx: &Ctx, codex: Vec<Row>) -> Result<Vec<Row>, Defer> {
     let mut rows = Vec::new();
     if ctx.clients.contains(&"claude-code") {
         rows.extend(claude_rows(ctx)?);
     }
     if ctx.clients.contains(&"codex") {
-        // A config.toml defers before discovery; without one Codex is absent.
-        rows.push(absent("codex", ctx)?);
+        rows.extend(codex);
     }
     if ctx.clients.contains(&"claude-desktop") {
         rows.extend(desktop_rows(ctx)?);
