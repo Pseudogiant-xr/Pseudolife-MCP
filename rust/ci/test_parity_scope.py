@@ -56,6 +56,8 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     (["rust/shim/src/cli/update/engine.rs"], {"w1c-doctor", "w1c-connection"}),
     (["rust/shim/src/cli/backup/mod.rs"], {"w1c-doctor", "w1c-connection"}),
     (["rust/shim/src/cli/migrate_flat.rs"], set()),
+    # No row runs the installer steps; their goldens and contract binaries do.
+    (["rust/shim/src/cli/installer/engine.rs", "rust/shim/src/cli/installer/state.rs"], set()),
     (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing"}),
     # Helpers other commands import reach the whole binary (Codex review:
     # tunnel uses hook_json, board_audit uses lease).

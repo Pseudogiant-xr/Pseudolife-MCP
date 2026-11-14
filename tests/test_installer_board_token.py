@@ -6,7 +6,8 @@ registrations get a token file (plus, for Claude Code, a resumable board
 address), an existing Claude Code registration gains them in place, and the
 plugin's hooks get the file through ~/.claude/settings.json. Each block runs
 extracted from ops/install.sh against fake CLIs in a disposable home; the
-real ops/client_credentials.py does the file work.
+real ops/client_credentials.py does the file work, run by the stand-in
+native installer steps (native_client_stub.HELPER_SH).
 """
 from __future__ import annotations
 
@@ -14,9 +15,10 @@ import json
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 import pytest
+
+from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
 from tests.test_installer_existing_upgrade import (
@@ -54,8 +56,8 @@ class _Shell:
             "set -u\n"
             f"HOME='{self.path(self.home)}'\n"
             f"repo='{self.path(ROOT)}'\n"
-            f"installer_python() {{ printf '%s\\n' '{self.path(sys.executable)}'; }}\n"
-            "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
+            + native_stub.HELPER_SH
+            + "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
         )
         return subprocess.run([self.bash], input=prelude + body, capture_output=True,
                               text=True, timeout=120, env=self.env, check=False)
@@ -68,8 +70,7 @@ def _mint(shell: _Shell, env_file: Path, *, no_token: str = "", transport: str =
     return shell.run(
         extra + f"env_file='{shell.path(env_file)}'\nNO_TOKEN='{no_token}'\n"
         f"TRANSPORT='{transport}'\n"
-        # The token stage calls the shim-tooling check stage 4b defines first.
-        + _block("shim tooling") + _block("mint token")
+        + _block("mint token")
         + "\nprintf 'TOKEN_STATE=%s\\n' \"$TOKEN_STATE\"\n")
 
 
@@ -110,7 +111,7 @@ def test_open_loopback_installs_mint_nothing(bash, tmp_path, no_token, transport
 
 @pytest.mark.parametrize("no_token,transport,extra", [
     ("", "http", ""),
-    ("", "shim", "installer_python() { :; }\n"),
+    ("", "shim", ""),
     ("1", "shim", ""),
 ])
 @BASH
@@ -140,19 +141,6 @@ def test_http_registrations_against_a_gated_daemon_are_warned_about(bash, tmp_pa
     assert proc.returncode == 0, proc.stderr
     assert "HTTP registration sends no bearer token" in proc.stderr
     assert "fixture-existing" not in proc.stdout + proc.stderr
-
-
-@BASH
-def test_a_host_that_cannot_install_the_shim_mints_nothing(bash, tmp_path):
-    """Without a shim the registrations fall back to HTTP, which cannot
-    carry a token file: minting there would lock memory out."""
-    shell = _Shell(bash, tmp_path)
-    env_file = tmp_path / ".env"
-    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
-    proc = _mint(shell, env_file, extra="installer_python() { :; }\n")
-    assert proc.returncode == 0, proc.stderr
-    assert "TOKEN_STATE=no-shim" in proc.stdout
-    assert _minted(env_file) == []
 
 
 def test_installers_document_the_no_token_opt_out():
@@ -235,6 +223,7 @@ def test_plugin_hooks_keep_a_token_the_user_environment_supplies(bash, tmp_path)
 
 def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None = None,
           claude_json: Path | None = None, state_dir: str = "/fixture/claude-code-agents",
+          migrate_exit: int | None = None,
           ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Run the client-wiring loop with fake claude/gemini/pipx CLIs."""
     fake_bin = shell.tmp / "bin"
@@ -256,13 +245,6 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
             "if [ \"$1\" = mcp ] && [ \"$2\" = add ]; then exit 0; fi\n"
             "exit 91\n", encoding="utf-8")
         (fake_bin / name).chmod(0o755)
-    (fake_bin / "pipx").write_text(
-        "#!/bin/sh\n"
-        "if [ \"$1\" = environment ]; then printf '%s\\n' \"$FAKE_INSTALL_BIN\"; fi\n"
-        "exit 0\n", encoding="utf-8")
-    # Executable on POSIX: Linux refuses a stub without the bit (CI run
-    # 36331871190); Windows Git Bash runs it regardless.
-    (fake_bin / "pipx").chmod(0o755)
     helper = _between("ops/install.sh", "resolve_installed_shim() {",
                       "\n}\n\n# Two env pairs") + "\n}"
     loop = _between("ops/install.sh",
@@ -271,7 +253,7 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""PATH='{shell.path(installed_bin)}:{shell.path(fake_bin)}:/usr/bin:/bin'
 export PATH CALL_LOG='{shell.path(call_log)}' FAKE_CONFIG='{_q(config)}'
-export FAKE_INSTALL_BIN='{shell.path(installed_bin)}'
+export FAKE_LAUNCHER='{shell.path(installed_bin / "pseudolife-mcp")}' {"FAKE_KEEP_LAUNCHER=1" if migrate_exit is None else f"FAKE_MIGRATE_EXIT={migrate_exit}"}
 CLIENTS='{client}'
 TRANSPORT=shim
 CODEX_CREDENTIAL_BOOTSTRAP_FAILED='' CODEX_CONNECTION_CONFIGURED='' CODEX_CREDENTIAL_FILE=''
@@ -284,9 +266,8 @@ CLIENT_DAEMON_URL='http://127.0.0.1:8765'
 CLAUDE_AGENT_STATE_DIR='{_q(state_dir)}'
 CLAUDE_JSON='{shell.path(claude_json) if claude_json else ""}'
 configure_codex_runtime_defaults() {{ CODEX_RUNTIME_DEFAULTS=preserved; }}
-shim_process_table() {{ return 2; }}
 {helper}
-shim_runtime_python() {{ :; }}
+{native_stub.BASH}
 {loop}
 printf 'STATE=%s/%s\\n' "$MCP_CLAUDE" "$MCP_GEMINI"
 """
@@ -361,6 +342,31 @@ def test_existing_claude_code_registration_gains_the_credential_in_place(bash, t
     assert Path(env["PSEUDOLIFE_AGENT_STATE_DIR"]) == state_dir
     assert env["PSEUDOLIFE_MCP_NO_SPAWN"] == "1"
     assert "restart" in proc.stdout.lower()
+
+
+@BASH
+def test_a_registration_already_on_the_native_launcher_still_gains_the_credential(bash, tmp_path):
+    """The native step reports a registration that already runs the launcher
+    as current; the credential repair must still run for it (Codex review,
+    2026-11-14)."""
+    shell = _Shell(bash, tmp_path)
+    claude_json = shell.home / ".claude.json"
+    claude_json.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "type": "stdio", "command": "/opt/tools/pseudolife-mcp", "args": [],
+        "env": {"PSEUDOLIFE_WRITER_ID": "claude-code", "PSEUDOLIFE_MCP_NO_SPAWN": "1"}}}}),
+        encoding="utf-8")
+    existing = "Type: stdio\nCommand: /opt/tools/pseudolife-mcp\nEnvironment:\n  PSEUDOLIFE_MCP_NO_SPAWN=1"
+    token_file = shell.home / ".pseudolife-mcp" / "claude-code.token"
+    state_dir = shell.home / ".pseudolife-mcp" / "claude-code-agents"
+    proc, calls = _wire(shell, "claude", token_file=shell.path(token_file),
+                        existing=existing, claude_json=claude_json,
+                        state_dir=shell.path(state_dir), migrate_exit=4)
+    assert proc.returncode == 0, proc.stderr
+    assert "STATE=present-current/" in proc.stdout
+    assert "registration preserved; it already runs the native client" in proc.stdout
+    env = json.loads(claude_json.read_text(encoding="utf-8"))["mcpServers"][
+        "pseudolife-memory"]["env"]
+    assert Path(env["PSEUDOLIFE_MCP_TOKEN_FILE"]) == token_file
 
 
 @BASH

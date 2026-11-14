@@ -185,26 +185,6 @@ if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-
 }
 # <<< client update schedule flag <<<
 
-# Needed from here on: the client-only mode block asks this checkout's shim
-# code whether a daemon URL is loopback.
-function Get-InstallerPython {
-    # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
-    # independently: Store aliases and stale launchers must not block the
-    # next one. Never alters the user's PATH.
-    foreach ($candidate in @("python", "python3", "py")) {
-        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-        # Assigned: an if-expression unrolls a one-item array to a string, which
-        # splats as characters (py - 3).
-        $probeArgs = @()
-        if ($candidate -eq "py") { $probeArgs = @("-3") }
-        try {
-            $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-            if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
-        } catch { continue }
-    }
-    return $null
-}
-
 # >>> extractor modes >>>
 # The dream extractor modes, named for the extractor family, and the models
 # the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
@@ -314,14 +294,262 @@ if (Test-ModelBlank) {
 if ($Extractor) { Assert-ExtractorArgs }
 # <<< extractor modes <<<
 
+# >>> native client >>>
+# The client side (the stdio MCP shim every agent registers, and the
+# pseudolife-mcp CLI) is the native binary published with this checkout's
+# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
+# docs/dev/release-assets.md). It is fetched, verified against the release's
+# SHA256SUMS and run once from a private staging directory before anything on
+# this host changes; Install-ShimOnce then installs that exact archive with the
+# native runtime installer, which keeps every older runtime a running session
+# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
+# another http(s) directory URL, or a local directory, holding the archive and
+# SHA256SUMS.
+$script:nativeVersion = $null
+$script:nativeArchive = $null
+$script:nativeSums = $null
+$script:nativeStaged = $null
+$script:nativeStageDir = $null
+$script:nativeHelper = $null
+function Get-NativeTarget {
+    # This host's release target triple, or $null. PSEUDOLIFE_NATIVE_TARGET
+    # picks one of the five release targets instead (an emulated one, or a
+    # test's); any other value is $null.
+    if ($env:PSEUDOLIFE_NATIVE_TARGET) {
+        if ($env:PSEUDOLIFE_NATIVE_TARGET -cin @("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")) { return $env:PSEUDOLIFE_NATIVE_TARGET }
+        return $null
+    }
+    if ($IsWindows -or ($null -eq $IsWindows)) {
+        $arch = "$env:PROCESSOR_ARCHITEW6432$env:PROCESSOR_ARCHITECTURE"
+        if ($arch -match '^AMD64') { return "x86_64-pc-windows-msvc" }
+        return $null
+    }
+    $machine = (& uname -m 2>$null)
+    if ($IsLinux) {
+        if ($machine -in @("x86_64", "amd64")) { return "x86_64-unknown-linux-gnu" }
+        if ($machine -in @("aarch64", "arm64")) { return "aarch64-unknown-linux-gnu" }
+    }
+    if ($IsMacOS) {
+        if ($machine -eq "x86_64") { return "x86_64-apple-darwin" }
+        if ($machine -in @("arm64", "aarch64")) { return "aarch64-apple-darwin" }
+    }
+    return $null
+}
+function Stop-NativeInstall([string]$Cause, [string]$Fix) {
+    Remove-NativeStage
+    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix Nothing was changed.")
+    exit 1
+}
+function Remove-NativeStage {
+    # This run's staging directory; the verified download is kept.
+    if ($script:nativeStageDir -and (Test-Path -LiteralPath $script:nativeStageDir)) {
+        Remove-Item -LiteralPath $script:nativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $script:nativeStageDir = $null
+}
+function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
+    # "ok", "missing" (no such file there: an HTTP 404 or an absent local
+    # file) or the failure's message.
+    try {
+        if ($Base -match '^https?://') {
+            $part = "$Destination.part"
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Name" -OutFile $part -TimeoutSec 900 -ErrorAction Stop
+            } catch {
+                Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
+                $status = $null
+                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+                if ($status -eq 404) { return "missing" }
+                return "$($_.Exception.Message)"
+            }
+            Move-Item -LiteralPath $part -Destination $Destination -Force
+        } else {
+            $source = Join-Path $Base $Name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return "missing" }
+            Copy-Item -LiteralPath $source -Destination $Destination -Force
+        }
+        return "ok"
+    } catch { return "$($_.Exception.Message)" }
+}
+function Initialize-NativeClient {
+    # Fetch, verify, extract and run the release binary; refuses on any failure.
+    $pyproject = Get-Content -LiteralPath (Join-Path $repo "pyproject.toml") -Raw -ErrorAction SilentlyContinue
+    if ("$pyproject" -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+        Stop-NativeInstall "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    }
+    $script:nativeVersion = $Matches[1]
+    $target = Get-NativeTarget
+    if (-not $target) {
+        if ($env:PSEUDOLIFE_NATIVE_TARGET) {
+            Stop-NativeInstall "PSEUDOLIFE_NATIVE_TARGET names $($env:PSEUDOLIFE_NATIVE_TARGET), which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
+        }
+        Stop-NativeInstall "no native client is published for this platform ($env:PROCESSOR_ARCHITECTURE); releases carry Windows x86_64, Linux x86_64 and aarch64, and macOS Intel and Apple silicon" "Run this installer on one of those (a machine there can use a daemon elsewhere with -ClientOnly)."
+    }
+    $isZip = $target -like "*windows*"
+    $name = "pseudolife-mcp-$($script:nativeVersion)-$target." + $(if ($isZip) { "zip" } else { "tar.gz" })
+    $binaryName = if ($isZip) { "pseudolife-mcp.exe" } else { "pseudolife-mcp" }
+    $base = if ($env:PSEUDOLIFE_NATIVE_ARCHIVE_URL) { "$env:PSEUDOLIFE_NATIVE_ARCHIVE_URL".TrimEnd('/') } else { "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$($script:nativeVersion)" }
+    if ($base -match '^https?://([^/]*)') {
+        if ($Matches[1] -like '*@*') {
+            Stop-NativeInstall "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL."
+        }
+    }
+    $downloads = Join-Path (Join-Path (Join-Path $HOME ".pseudolife-mcp") "downloads") $script:nativeVersion
+    New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+    $script:nativeSums = Join-Path $downloads "SHA256SUMS"
+    $script:nativeArchive = Join-Path $downloads $name
+    $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums
+    if ($sumsFetch -eq "missing") {
+        Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
+    } elseif ($sumsFetch -ne "ok") {
+        Stop-NativeInstall "SHA256SUMS could not be downloaded from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+    }
+    $pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($name) + '$'
+    $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
+    if ($lines.Count -ne 1) {
+        Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
+    $expected = $lines[0].Substring(0, 64)
+    $have = (Test-Path -LiteralPath $script:nativeArchive -PathType Leaf) -and ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $expected)
+    if (-not $have) {
+        $archiveFetch = Get-NativeAsset $base $name $script:nativeArchive
+        if ($archiveFetch -ne "ok") {
+            Stop-NativeInstall "the download of $name from $base failed ($archiveFetch)" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+        }
+    }
+    if ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+        Remove-Item -LiteralPath $script:nativeArchive -Force
+        Stop-NativeInstall "$name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+    }
+    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pseudolife-native-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $stage | Out-Null
+    $script:nativeStageDir = $stage
+    try {
+        if ($isZip) {
+            Expand-Archive -LiteralPath $script:nativeArchive -DestinationPath $stage -Force
+        } else {
+            & tar -xzf $script:nativeArchive -C $stage $binaryName
+            if ($LASTEXITCODE -ne 0) { throw "tar exited $LASTEXITCODE" }
+        }
+    } catch {
+        Stop-NativeInstall "$name could not be unpacked ($($_.Exception.Message))" "Rerun; the verified archive is kept in $downloads."
+    }
+    $script:nativeStaged = Join-Path $stage $binaryName
+    if (-not (Test-Path -LiteralPath $script:nativeStaged -PathType Leaf)) {
+        Stop-NativeInstall "$name holds no $binaryName" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
+    if (-not $isZip) {
+        # tar keeps the archive's 0755; set it again without a PATH lookup.
+        try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
+    }
+    try {
+        $says = (& $script:nativeStaged version 2>&1 | Out-String).Trim()
+        $ran = ($LASTEXITCODE -eq 0)
+    } catch { $says = $_.Exception.Message; $ran = $false }
+    if (-not $ran) {
+        $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
+        Stop-NativeInstall "the downloaded client does not run on this host ($(($says -split "`n")[0]))" $runFix
+    }
+}
+function Get-NativeLauncherPath {
+    # The stable launcher's path, whether or not it exists yet.
+    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $env:PSEUDOLIFE_SHIM_LAUNCHER }
+    if ($IsWindows -or ($null -eq $IsWindows)) { return (Join-Path $env:LOCALAPPDATA "pseudolife-mcp\bin\pseudolife-mcp.exe") }
+    $data = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME ".local/share" }
+    return (Join-Path $data "pseudolife-mcp/bin/pseudolife-mcp")
+}
+function Get-NativeInstalledLauncher {
+    # The stable launcher when it is the native client, else $null.
+    $candidate = Get-NativeLauncherPath
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
+    try {
+        $capability = (& $candidate update --native-capability 2>$null | Select-Object -Last 1)
+    } catch { return $null }
+    if (($LASTEXITCODE -eq 0) -and ("$capability".Trim() -eq "pseudolife-mcp native-update-v1")) { return $candidate }
+    return $null
+}
+function Add-NativeLauncherToUserPath([string]$Launcher) {
+    # The launcher's directory goes first on the user PATH (HKCU\Environment
+    # only, %VAR% entries kept as written; ops/add-user-path.ps1), so
+    # `pseudolife-mcp` in a new terminal reaches it; an older copy further
+    # down is left in place. This run's PATH gets it too. Returns the one
+    # line to show, or $null.
+    if (-not ($IsWindows -or ($null -eq $IsWindows))) { return $null }
+    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $null }
+    $dir = Split-Path -Parent $Launcher
+    $env:PATH = $dir + [IO.Path]::PathSeparator + $env:PATH
+    try {
+        $state = (& (Join-Path $repo "ops/add-user-path.ps1") -Dir $dir | Select-Object -Last 1)
+    } catch {
+        $script:shimPathState = "failed"
+        return "the user PATH could not be updated ($($_.Exception.Message)); run the launcher by its full path"
+    }
+    if ("$state" -eq "current") { return $null }
+    return "$dir is now first on your user PATH; new terminals run pseudolife-mcp from there"
+}
+function Install-NativeClient {
+    # Install-ShimOnce's install: the verified archive into a new side-by-side
+    # runtime behind the stable launcher. Returns the launcher path, or $null.
+    if (-not $script:nativeStaged) { Initialize-NativeClient }
+    $launcherPath = Get-NativeLauncherPath
+    $before = $null
+    if (Get-NativeInstalledLauncher) { $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash }
+    # A failed install keeps the staged copy: the installer steps after this
+    # one still run it (Invoke-NativeHelper), and the script's end removes it.
+    try {
+        $launcher = & $script:nativeStaged runtime install --archive $script:nativeArchive --sha256sums $script:nativeSums --version $script:nativeVersion | Select-Object -Last 1
+    } catch { return $null }
+    $installExit = $LASTEXITCODE
+    if (($installExit -ne 0) -or (-not $launcher)) { return $null }
+    $launcher = "$launcher".Trim()
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
+    # The installer steps now run the launcher just installed: the same
+    # release as the staged copy, which is removed.
+    $script:nativeHelper = $launcher
+    Remove-NativeStage
+    $script:nativeStaged = $null
+    if ($before -and ($before -eq (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash)) {
+        Step "Native client $($script:nativeVersion) already installed at $launcher; nothing changed"
+    } else {
+        Step "Native client $($script:nativeVersion) installed at $launcher (running sessions keep the client they started with)"
+    }
+    $pathNote = Add-NativeLauncherToUserPath $launcher
+    if ($pathNote) {
+        if (-not $script:shimPathState) { $script:shimPathState = "linked" }
+        $script:shimPathNotes = @($pathNote)
+        Write-Host "  shim: $pathNote"
+    }
+    try { & $launcher installer expose 2>$null | Out-Null } catch { }
+    return $launcher
+}
+function Invoke-NativeHelper {
+    # One installer step of this run's verified native client: the staged
+    # copy until Install-NativeClient installs that release, then its
+    # launcher. Never a launcher found on the host, which may be an older
+    # release without these steps. Input piped to this function goes to it.
+    $exe = if ($script:nativeStaged) { $script:nativeStaged } else { $script:nativeHelper }
+    # Before a first install's stage 2 nothing is staged: exit 127, and a
+    # caller with a rule of its own (the loopback test) uses that.
+    if (-not $exe) { $global:LASTEXITCODE = 127; return }
+    if ($MyInvocation.ExpectingInput) { $input | & $exe installer @args } else { & $exe installer @args }
+}
+# <<< native client <<<
+# >>> native client stage >>>
+# Fetched and verified before anything here changes: a refusal leaves the
+# host as it was. A rerun reads its recorded choices through it, so it is
+# staged here; a first install stages it at stage 2, after its parameters
+# are checked, so a mistyped one is refused without a download.
+if (-not $ClientOnly -and -not $DaemonUrl -and -not $env:PSEUDOLIFE_MCP_DAEMON_URL -and (Test-Path -LiteralPath $envFile)) {
+    Initialize-NativeClient
+}
+# <<< native client stage <<<
+
 # >>> recorded choices >>>
 function Invoke-InstallerState {
-    $statePython = Get-InstallerPython
-    if (-not $statePython) { throw "Python >= 3.10 is needed to read recorded installer choices; install it and rerun." }
     if ($args[0] -in 'write-env', 'write-file', 'started', 'record') {
-        $input | & $statePython (Join-Path $repo "ops/installer_state.py") @args
+        $input | Invoke-NativeHelper state @args
     } else {
-        & $statePython (Join-Path $repo "ops/installer_state.py") @args
+        Invoke-NativeHelper state @args
     }
     if ($LASTEXITCODE -ne 0) { throw "Installer state could not be read or saved; fix the line above and rerun." }
 }
@@ -809,18 +1037,25 @@ function Get-DaemonUrlHost([string]$url) {
     return $name.ToLowerInvariant()
 }
 function Test-LoopbackUrl([string]$url) {
-    # The shim's own answer (daemon_url._is_loopback_url), so the installer
-    # and the shim never disagree on a form such as 127.0.0.01 or
-    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
-    # an import that failed) falls back to the host rule below.
-    $python = Get-InstallerPython
-    if ($python) {
-        try {
-            & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.daemon_url import _is_loopback_url; sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)" $repo $url 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 10) { return $true }
-            if ($LASTEXITCODE -eq 11) { return $false }
-        } catch { }
+    # The client's own answer, so the installer and the client never
+    # disagree on a form such as 127.0.0.01 or ::ffff:127.0.0.1. Exit 10/11
+    # are its answers; anything else falls back to the host rule below.
+    # Before the client is staged (a first install's parameters), only a host
+    # the rule below could read differently from it stages it: an unusual IP
+    # form or a name around localhost. An ordinary name or address is decided
+    # here, so a mistyped parameter is still refused without a download.
+    if (-not $script:nativeStaged -and -not $script:nativeHelper) {
+        $plain = Get-DaemonUrlHost $url
+        if ($plain -in "localhost", "::1") { return $true }
+        if ($plain -match 'localhost' -or $plain.Contains(":")) { Initialize-NativeClient | Out-Null }
+        elseif ($plain -match '[a-z]') { return $false }
+        elseif ($plain -notmatch '^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$') { Initialize-NativeClient | Out-Null }
     }
+    try {
+        Invoke-NativeHelper is-loopback $url 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 10) { return $true }
+        if ($LASTEXITCODE -eq 11) { return $false }
+    } catch { }
     $name = Get-DaemonUrlHost $url
     if ($name -eq "localhost") { return $true }
     # Dotted quads without leading zeros (Python's ipaddress rejects those).
@@ -978,7 +1213,11 @@ if ($interactive -and -not $script:installerRerun) {
 Invoke-BankTokenQuestion
 
 # -- 2. preflight --------------------------------------------------------------
-# The status field of an ops/client_credentials.py JSON report, or $null.
+# >>> native client late stage >>>
+if (-not $script:nativeStaged -and -not $script:nativeHelper) { Initialize-NativeClient }
+# <<< native client late stage <<<
+
+# The status field of an installer credentials step's JSON report, or $null.
 function Get-HelperStatus($output) {
     try { return [string](($output -join "`n") | ConvertFrom-Json).status } catch { return $null }
 }
@@ -990,20 +1229,17 @@ function Get-HelperStatus($output) {
 # shim's pair creates it after the shim is installed (the client-only pair
 # block), so here it must not exist, and only the daemon is checked.
 function Test-PairingCode([string]$value) {
-    # The shim's own rule (principals.normalize_pairing_code), asked with the
-    # value on stdin, never in an argument list. Exit 10/11 are its answers;
+    # The client's own rule, asked with the value on stdin, never in an
+    # argument list. Exit 10/11 are its answers;
     # anything else falls back to the same rule written here: 12 Crockford
     # base32 characters once case, dashes and surrounding whitespace are
     # ignored, O read as 0, and I and L as 1.
-    $python = Get-InstallerPython
-    if ($python) {
-        try {
-            $global:LASTEXITCODE = 0
-            "$value" | & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.principals import normalize_pairing_code; line = sys.stdin.buffer.readline().decode('utf-8', 'replace').rstrip(chr(13) + chr(10)); sys.exit(10 if normalize_pairing_code(line) else 11)" $repo 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 10) { return $true }
-            if ($LASTEXITCODE -eq 11) { return $false }
-        } catch { }
-    }
+    try {
+        $global:LASTEXITCODE = 0
+        "$value" | Invoke-NativeHelper pairing-code-valid 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 10) { return $true }
+        if ($LASTEXITCODE -eq 11) { return $false }
+    } catch { }
     $code = ("$value".Trim() -replace '-', '').ToUpperInvariant().Replace('O', '0').Replace('I', '1').Replace('L', '1')
     return ($code -cmatch '^[0-9A-HJKMNP-TV-Z]{12}$')
 }
@@ -1011,7 +1247,7 @@ function Assert-ClientTokenFile {
     # The shim's own check of the token file, on every OS: an owner-only
     # regular file (the ACL on Windows, mode bits on POSIX), no link, one
     # well-formed token. Stops the install when it cannot use it.
-    $tokenReport = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") check-token-file --path $script:TokenFile
+    $tokenReport = Invoke-NativeHelper credentials check-token-file --path $script:TokenFile
     if ("$(Get-HelperStatus $tokenReport)" -ne "ready") {
         $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
         throw "client-only install: the shim cannot use the token file ($problem): $($script:TokenFile). It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with -ReadToken to create it again"
@@ -1030,11 +1266,6 @@ function Invoke-ClientOnlyPreflight {
         exit 2
     }
     $script:TokenFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($script:TokenFile)
-    $tokenPython = Get-InstallerPython
-    if (-not $tokenPython) {
-        throw "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run"
-    }
-    $helper = Join-Path $repo "ops/client_credentials.py"
     if ($script:PairingCode) {
         # pair never replaces a file: refused here, before any code is spent.
         if (Test-Path -LiteralPath $script:TokenFile) {
@@ -1059,7 +1290,7 @@ function Invoke-ClientOnlyPreflight {
             $tokenValue = $null
             Step "That is a pairing code: the token file $($script:TokenFile) is created by pairing, once the shim is installed."
         } else {
-            $tokenReport = "$tokenValue" | & $tokenPython $helper write-token-file --path $script:TokenFile
+            $tokenReport = "$tokenValue" | Invoke-NativeHelper credentials write-token-file --path $script:TokenFile
             $tokenValue = $null
             if ("$(Get-HelperStatus $tokenReport)" -ne "written") {
                 $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
@@ -1308,8 +1539,7 @@ function Get-EnvValue($name) {
     return $null
 }
 if (-not $ClientOnly) {
-    $volumePython = Get-InstallerPython
-    $resolvedVolumes = @(& $volumePython (Join-Path $repo "ops/preflight.py") --env-file $envFile --volume-names)
+    $resolvedVolumes = @(Invoke-NativeHelper volume-names --repo $repo --env-file $envFile)
     if ($LASTEXITCODE -ne 0 -or $resolvedVolumes.Count -ne 2) { throw "Could not resolve Docker volumes; check ops/.env with ops/preflight.ps1 and rerun." }
     $bankVol, $stateVol = $resolvedVolumes
     $existingVolumes = @(docker volume ls --format '{{.Name}}')
@@ -1320,27 +1550,14 @@ if (-not $ClientOnly) {
 # <<< volumes <<<
 
 # -- 4b. daemon engine -----------------------------------------------------------
-# >>> shim tooling >>>
-# Whether stage 11 can be expected to install the shim: pipx, or a Python
-# >= 3.10 with pip outside a PEP 668 externally managed environment (where
-# `pip install --user` refuses). The helper needs that Python either way.
-function Test-ShimToolingReady($python) {
-    if (-not $python) { return $false }
-    if (Get-Command pipx -ErrorAction SilentlyContinue) { return $true }
-    try {
-        & $python -c "import os, sys, sysconfig, pip; marker = os.path.join(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED'); sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)" 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
-    } catch { return $false }
-}
-# <<< shim tooling <<<
 # >>> daemon engine >>>
-# The bearer stage 5b will have: one already set, or one it can mint
-# (which needs the shim's tooling). Rust is verified with an authenticated read.
+# The bearer stage 5b will have: one already set, or one it mints for the
+# shim transport. Rust is verified with an authenticated read.
 function Test-RustTokenExpected {
     if (-not $rustBearer) { return $false }
     if ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS -or
             (Get-EnvValue "PSEUDOLIFE_MCP_TOKEN") -or (Get-EnvValue "PSEUDOLIFE_MCP_TOKENS")) { return $true }
-    return ($Transport -eq 'shim' -and (Test-ShimToolingReady (Get-InstallerPython)))
+    return ($Transport -eq 'shim')
 }
 # The engine already installed is kept; a new install takes -Engine (default
 # rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
@@ -1348,7 +1565,7 @@ function Test-RustTokenExpected {
 # Rust pulls the release's image and provisions its models into their own
 # volume here, before any container starts, so a refusal starts nothing.
 function Invoke-EngineHelper {
-    & (Get-InstallerPython) (Join-Path $repo "ops/installer_engine.py") @args
+    Invoke-NativeHelper engine @args
 }
 $installedEngine = ""
 $composeEngine = ""
@@ -1515,7 +1732,6 @@ if (-not $ClientOnly) {
 # no Python for the shim falls back to HTTP, so it mints none.
 # >>> mint token >>>
 $tokenState = $null
-$tokenPython = $null
 # A client-only install never mints: the remote daemon's token is the file
 # the operator supplied. A token already set gates the daemon whatever this
 # run may mint, and the HTTP-registration warning and the board hint depend
@@ -1529,10 +1745,8 @@ if ($ClientOnly) {
     $tokenState = "opted-out"
 } elseif ($Transport -ne "shim") {
     $tokenState = "http"
-} elseif (-not (Test-ShimToolingReady ($tokenPython = Get-InstallerPython))) {
-    $tokenState = "no-shim"
 } else {
-    $mintOutput = & $tokenPython (Join-Path $repo "ops/client_credentials.py") mint --env-file $envFile
+    $mintOutput = Invoke-NativeHelper credentials mint --env-file $envFile
     switch ("$(Get-HelperStatus $mintOutput)") {
         "minted" {
             $tokenState = "minted"
@@ -1549,14 +1763,14 @@ if ($ClientOnly) {
 # >>> engine token >>>
 # The default Rust daemon is verified with an authenticated read, so it
 # follows the bearer this stage actually produced, not the one stage 4b
-# predicted (a host that cannot install the shim mints none).
+# predicted (a mint can still fail).
 if ($composeEngine -eq 'rust' -and $tokenState -notin 'minted', 'present') {
     if ($engineDefaulted) {
         $composeEngine = 'python'
         $engineFiles = @()
         Step "Daemon engine: python after all (no bearer token for the default Rust daemon: $tokenState)"
     } else {
-        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with -Engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
+        [Console]::Error.WriteLine("The Rust daemon needs its bearer token, and this install has none ($tokenState): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or rerun without -NoToken and -Transport http so the installer mints one; or rerun with -Engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun.")
         exit 2
     }
 }
@@ -1580,7 +1794,7 @@ if ($ClientOnly) {
             "  pseudolife-extractor:"
             "    profiles: [`"disabled`"]"
         ) -join "`n")
-        $overrideStatus = $wantedOverride | & (Get-InstallerPython) (Join-Path $repo "ops/installer_state.py") write-file --path $overrideFile
+        $overrideStatus = $wantedOverride | Invoke-NativeHelper state write-file --path $overrideFile
         if ($LASTEXITCODE -ne 0) { throw "Could not write this install's override; fix the line above and rerun." }
         if ($overrideStatus -eq 'unchanged') { Step "Sidecar override unchanged (disabled)." }
         else { Step "Sidecar disabled via ops/docker-compose.override.yml" }
@@ -1677,23 +1891,13 @@ function Move-ClaudeMarketplaceToHttps {
     # Up to 0.16.1 the marketplace was added by the owner/repo shorthand,
     # which Claude Code records as a github source and refreshes over SSH:
     # on a host with no GitHub SSH key the plugin stops updating (2026-10-04).
-    # ops/plugin_marketplace.py moves it to the HTTPS URL through Claude
-    # Code's own CLI (settings.json backed up and edited first), prints one
-    # line, and prints nothing when no marketplace is recorded.
-    $python = Get-InstallerPython
-    if (-not $python) {
-        $configDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
-        try {
-            $known = Get-Content (Join-Path $configDir "plugins\known_marketplaces.json") -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($known.$claudePluginMarketplace.source.source -eq "github") {
-                Write-Warning "the $claudePluginMarketplace plugin marketplace is recorded as a github source, which updates over SSH, and there is no Python 3.10+ here to move it to HTTPS; the README's Updating section has the steps"
-            }
-        } catch {}
-        return
-    }
-    $out = [string](& $python (Join-Path $repo "ops\plugin_marketplace.py") | Out-String).Trim()
+    # The native client's plugin-marketplace step moves it to the HTTPS URL
+    # through Claude Code's own CLI (settings.json backed up and edited
+    # first), prints one line, and prints nothing when no marketplace is
+    # recorded.
+    $out = [string](Invoke-NativeHelper plugin-marketplace | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning $(if ($out) { $out } else { "ops/plugin_marketplace.py failed" })
+        Write-Warning $(if ($out) { $out } else { "the plugin marketplace could not be moved to HTTPS" })
     } elseif ($out) {
         Step $out
     }
@@ -1848,249 +2052,33 @@ function Describe-LegacyHooks($state) {
 # Codex credential setup here and the registrars in section 11.
 #
 # The shim install itself is client-agnostic; memoize one attempt so
-# multi-provider runs don't run pipx/pip twice.
+# multi-provider runs install once.
 $script:shimInstallResult = $null
 $script:shimInstallPath = $null
 $script:shimUpgradeHeld = $null
-$script:shimPython = $null
 $script:shimManagerKind = $null
-$script:shimPipxVenv = $null
 $script:shimPathNotes = @()
 $script:shimPathState = $null
-function Resolve-InstalledShimPath($Manager = $null) {
-    $shimBinDir = $null
-    if ((-not $Manager) -or ($Manager.Cmd -eq "runtime")) {
-        # The launcher every client registers, once a complete side-by-side
-        # runtime stands behind it (pseudolife_memory/runtimes.py).
-        if (-not $script:shimPython) { $script:shimPython = Get-ShimRuntimePython }
-        if ($script:shimPython) {
-            # An interpreter that cannot be run (a stale PSEUDOLIFE_SHIM_PYTHON,
-            # a removed venv) is "no launcher", never a terminating error.
-            try {
-                $launcher = & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") launcher --if-installed 2>$null | Select-Object -Last 1
-            } catch { $launcher = $null; $LASTEXITCODE = 127 }
-            if (($LASTEXITCODE -eq 0) -and $launcher) { return "$launcher".Trim() }
-        }
-        if ($Manager) { return $null }
-    }
-    if (-not $Manager) {
-        if (Get-Command pipx -ErrorAction SilentlyContinue) {
-            $Manager = @{ Cmd = "pipx"; Args = @() }
-        } else {
-            foreach ($candidate in @(
-                @{ Cmd = "py"; Args = @("-3") },
-                @{ Cmd = "python"; Args = @() }
-            )) {
-                if (-not (Get-Command $candidate.Cmd -ErrorAction SilentlyContinue)) { continue }
-                $candidateCmd = $candidate.Cmd
-                $candidateArgs = $candidate.Args
-                & $candidateCmd @candidateArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null | Out-Null
-                if ($LASTEXITCODE -eq 0) { $Manager = $candidate; break }
-            }
-        }
-    }
-    if (-not $Manager) { return $null }
-    if ($Manager.Cmd -eq "pipx") {
-        $shimBinDir = (& pipx environment --value PIPX_BIN_DIR 2>$null | Select-Object -Last 1)
-    } else {
-        $managerCmd = $Manager.Cmd
-        $managerArgs = $Manager.Args
-        $shimBinDir = (& $managerCmd @managerArgs -c "import sysconfig; print(sysconfig.get_path('scripts', scheme=sysconfig.get_preferred_scheme('user')))" 2>$null | Select-Object -Last 1)
-    }
-    if (-not $shimBinDir) { return $null }
-    foreach ($shimName in @("pseudolife-mcp.exe", "pseudolife-mcp")) {
-        $candidatePath = Join-Path "$shimBinDir" $shimName
-        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
-            return (Resolve-Path -LiteralPath $candidatePath).Path
-        }
-    }
-    return $null
-}
-function Get-ShimRuntimePython {
-    # The interpreter that installs the side-by-side runtime:
-    # PSEUDOLIFE_SHIM_PYTHON names one explicitly (an operator keeping the
-    # shim on a particular interpreter; the tests, a fake), else the
-    # installer's own python.
-    if ($env:PSEUDOLIFE_SHIM_PYTHON) { return $env:PSEUDOLIFE_SHIM_PYTHON }
-    return (Get-InstallerPython)
-}
-# On Windows neither pipx nor pip can replace a shim that sessions are running,
-# and neither puts back what it removed first. pip 24.0 stashes an uninstall in
-# sorted order, so site-packages is already renamed to `~` siblings when the
-# running launcher raises WinError 32, from uninstall(), outside the try that
-# rolls back. `pipx install --force` deletes the venv with
-# rmtree(ignore_errors=True), taking everything that is not locked. On
-# 2026-09-25 this left a runtime without its own package. So an installed shim
-# that a session is running is left in place, still usable, and the rerun named.
-function Get-ShimProcessTable {
-    # $null off Windows, where an open or running file does not stop pip or pipx.
-    if (-not $IsWindows) { return $null }
-    $rows = @(Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId, ExecutablePath -ErrorAction Stop)
-    if (-not $rows) { throw "it came back empty" }
-    return $rows
-}
-function Get-ShimHeldPaths($Manager) {
-    # What a running session of the installed shim executes from: the whole
-    # pipx venv (its launcher and the venv's python.exe redirector both run
-    # there) and the installed launcher. A --user scripts directory holds other
-    # tools' launchers too, so only the shim's own launcher counts there.
-    $paths = @()
-    if ($Manager.Cmd -eq "pipx") {
-        $pipxHome = (& pipx environment --value PIPX_HOME 2>$null | Select-Object -Last 1)
-        if ($pipxHome) {
-            $venv = Join-Path (Join-Path "$pipxHome" "venvs") "pseudolife-mcp"
-            if (Test-Path -LiteralPath $venv -PathType Container) { $paths += $venv }
-        }
-    }
-    $launcher = Resolve-InstalledShimPath $Manager
-    if ($launcher) { $paths += $launcher }
-    return $paths
-}
-function Test-ShimUpgradeHeld($Manager) {
-    # $true when the installed shim must not be upgraded now; the reason is
-    # kept in $script:shimUpgradeHeld for the registration steps and the end.
-    $tableError = $null
-    $rows = $null
-    try { $rows = Get-ShimProcessTable } catch { $tableError = $_.Exception.Message }
-    if (($null -eq $tableError) -and ($null -eq $rows)) { return $false }
-    $held = @(Get-ShimHeldPaths $Manager | Where-Object { $_ } | ForEach-Object {
-        [IO.Path]::GetFullPath("$_").TrimEnd([IO.Path]::DirectorySeparatorChar)
-    })
-    # Nothing installed yet: nothing a session could be running.
-    if (-not $held) { return $false }
-    $rerun = "& `"$([IO.Path]::Combine($repo, 'ops', 'install.ps1'))`" (with the options you used)"
-    if ($null -ne $tableError) {
-        $script:shimUpgradeHeld = "Could not read the Windows process table ($tableError) to see whether a session is running the pseudolife-mcp shim from $($held -join ', '); it was left as it is rather than upgraded. Close every Claude Code / Codex session using it, then rerun: $rerun"
-        Write-Warning $script:shimUpgradeHeld
-        return $true
-    }
-    $running = @{}
-    foreach ($row in $rows) {
-        if (-not $row.ExecutablePath) { continue }
-        $image = [IO.Path]::GetFullPath("$($row.ExecutablePath)")
-        foreach ($root in $held) {
-            if ($image.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
-                $image.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-                $running[[long]$row.ProcessId] = [long]$row.ParentProcessId
-                break
-            }
-        }
-    }
-    if ($running.Count -eq 0) { return $false }
-    # A Claude session is the launcher plus the venv redirector it starts, a
-    # Codex one the redirector alone: each process tree counts once.
-    $sessions = @($running.Values | Where-Object { -not $running.ContainsKey($_) }).Count
-    $who = if ($sessions -eq 1) { "1 session is" } else { "$sessions sessions are" }
-    $what = if ($running.Count -eq 1) { "1 process" } else { "$($running.Count) processes" }
-    $tool = if ($Manager.Cmd -eq "pipx") { "pipx" } else { "pip" }
-    $script:shimUpgradeHeld = "$who running the pseudolife-mcp shim from $($held -join ', ') ($what); it was not upgraded, because on Windows $tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $rerun"
-    Write-Warning $script:shimUpgradeHeld
-    return $true
+function Resolve-InstalledShimPath {
+    # The stable launcher when it is the native client, else $null.
+    return (Get-NativeInstalledLauncher)
 }
 function Install-ShimOnce {
     if ($null -ne $script:shimInstallResult) { return $script:shimInstallResult }
-    # NOTE: every native command in here pipes to Out-Host — a PS function
-    # returns ALL uncaptured output, so a bare `pipx install` would pollute
-    # the boolean return and make failures read as success at the call site
-    # (the 2026-07-19 Invoke-WithRetry lesson; $LASTEXITCODE survives the pipe).
-    $shimInstalled = $false
-    $shimManager = $null
-    # Side-by-side runtime behind one launcher path (pseudolife_memory/
-    # runtimes.py): the checkout installs into a NEW runtime beside any
-    # older one, so nothing a running session uses is ever replaced, and the
+    # The native client (the native client block): a new runtime beside any
+    # older one, so nothing a running session uses is replaced, and the
     # launcher every client registers starts the newest complete runtime.
-    # pipx / pip --user below remain the fallback for a host whose python
-    # cannot make a virtualenv.
-    if (-not $script:shimPython) { $script:shimPython = Get-ShimRuntimePython }
-    if ($script:shimPython) {
-        try {
-            $launcher = & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") install --source $repo --python $script:shimPython | Select-Object -Last 1
-        } catch {
-            Write-Host "  shim runtime: the interpreter $script:shimPython could not be run ($($_.Exception.Message)); falling back to pipx / pip"
-            $launcher = $null; $LASTEXITCODE = 127
-        }
-        if (($LASTEXITCODE -eq 0) -and $launcher) {
-            $script:shimInstallPath = "$launcher".Trim()
-            $script:shimManagerKind = "runtime"
-            # `pseudolife-mcp` typed in a new terminal reaches the launcher too:
-            # its directory goes first on the user PATH (HKCU\Environment only;
-            # an older pipx or pip copy further down is left in place, never
-            # renamed while it may be running). Shown now and in the summary.
-            try {
-                $exposed = (& $script:shimPython (Join-Path $repo "ops\shim_runtime.py") --json expose) -join "`n" | ConvertFrom-Json
-                $script:shimPathState = "$($exposed.state)"
-                $script:shimPathNotes = @(@($exposed.detail, $exposed.hint) | Where-Object { $_ })
-                if ($script:shimPathState -eq "skipped") { $script:shimPathNotes = @() }
-            } catch {
-                $script:shimPathState = "failed"
-                $script:shimPathNotes = @("the user PATH step could not run ($($_.Exception.Message)); run the launcher by its full path")
-            }
-            foreach ($note in $script:shimPathNotes) { Write-Host "  shim: $note" }
-            # A pipx environment from an earlier install: registrations that
-            # still name it move to the launcher (Test-ShimRegistrationMigrates).
-            if (Get-Command pipx -ErrorAction SilentlyContinue) {
-                $pipxHome = (& pipx environment --value PIPX_HOME 2>$null | Select-Object -Last 1)
-                if ($pipxHome) {
-                    $venv = Join-Path (Join-Path "$pipxHome" "venvs") "pseudolife-mcp"
-                    if (Test-Path -LiteralPath $venv -PathType Container) { $script:shimPipxVenv = $venv }
-                }
-            }
-            $script:shimInstallResult = $true
-            return $true
-        }
-        Write-Warning "The side-by-side shim runtime could not be installed with $($script:shimPython) (see above); falling back to pipx / pip --user."
-    }
-    if (Get-Command pipx -ErrorAction SilentlyContinue) {
-        $pipxManager = @{ Cmd = "pipx"; Args = @() }
-        if (Test-ShimUpgradeHeld $pipxManager) {
-            $shimManager = $pipxManager
-        } else {
-            # --force also replaces an existing environment when the checkout's
-            # version matches the installed one, so a stale same-version PyPI shim
-            # cannot survive an installer rerun.
-            pipx install --force $repo 2>&1 | Out-Host
-            if ($LASTEXITCODE -eq 0) {
-                $shimManager = $pipxManager
-            } else {
-                Write-Warning "pipx install --force from the checkout failed (exit $LASTEXITCODE)."
-            }
-        }
+    # Only its last value: a stray pipeline write must not become the path.
+    $launcher = Install-NativeClient | Select-Object -Last 1
+    if ($launcher) {
+        $script:shimInstallPath = $launcher
+        $script:shimManagerKind = "runtime"
+        $script:shimInstallResult = $true
     } else {
-        # Probe every candidate interpreter independently - a stale/broken
-        # `py` launcher must not block falling through to a viable `python`.
-        $interpreterCandidates = @(
-            @{ Label = "py -3"; Cmd = "py"; Args = @("-3") },
-            @{ Label = "python"; Cmd = "python"; Args = @() }
-        ) | Where-Object { Get-Command $_.Cmd -ErrorAction SilentlyContinue }
-        foreach ($candidate in $interpreterCandidates) {
-            $exe = $candidate.Cmd
-            $exeArgs = $candidate.Args
-            & $exe @exeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { continue }
-            if (Test-ShimUpgradeHeld $candidate) {
-                $shimManager = @{ Cmd = $exe; Args = $exeArgs }
-                break
-            }
-            # A direct local requirement is rebuilt and reinstalled even at
-            # the same version; --upgrade also refreshes changed requirements.
-            & $exe @exeArgs -m pip install --user --upgrade $repo 2>&1 | Out-Host
-            if ($LASTEXITCODE -eq 0) {
-                $shimManager = @{ Cmd = $exe; Args = $exeArgs }
-                break
-            } else {
-                Write-Warning "$($candidate.Label) -m pip install from the checkout failed (exit $LASTEXITCODE)."
-            }
-        }
+        Write-Warning "The native client could not be installed from $($script:nativeArchive) (see above); rerun the installer, which reuses the verified download."
+        $script:shimInstallResult = $false
     }
-    if ($shimManager) {
-        $script:shimInstallPath = Resolve-InstalledShimPath $shimManager
-        $shimInstalled = [bool]$script:shimInstallPath
-        if (-not $shimInstalled) {
-            Write-Warning "Shim installation completed, but its installed executable was not found in the manager's scripts directory."
-        }
-    }
-    $script:shimInstallResult = $shimInstalled
-    return $shimInstalled
+    return $script:shimInstallResult
 }
 
 function Get-EnvFlag($cli) {
@@ -2116,27 +2104,29 @@ function Write-UnverifiedNoSpawnGuard([string]$client, [string]$verification) {
     Write-Host "  Re-run this installer after verifying the effective value with $verification."
 }
 function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
-    # $true once the client's registration runs the launcher (moved now, or
-    # already there). Only the side-by-side runtime takes a registration
-    # over; the file is backed up first. $RegisteredPath names the exact
-    # file the registration was found to run (a pipx bin-dir copy, a pip
-    # --user script), so it moves even when it is not under a known root.
-    # Exit 3 (nothing to move) and 1 (the write failed) both leave the
-    # registration as it was.
-    # Without a runtime python there is no launcher to move to, and the
-    # pipx / pip fallback must not be triggered for a registration that is
-    # only being looked at.
-    if (-not $script:shimPython) { $script:shimPython = Get-ShimRuntimePython }
-    if (-not $script:shimPython) { return $false }
+    # $true once the client's registration runs the native launcher (moved
+    # now, or already there).
+    # A pipx, pip --user or Python runtime registration moves (each changed
+    # file is backed up first); editable, self-spawning and unrecognised
+    # registrations stay as they are. $RegisteredPath is accepted for the
+    # callers' shape; the native step finds the registration itself.
     if (-not (Install-ShimOnce)) { return $false }
-    if ($script:shimManagerKind -ne "runtime") { return $false }
-    $migrateArgs = @("migrate", "--client", $Client, "--bare")
-    if ($script:shimPipxVenv) { $migrateArgs += @("--from", $script:shimPipxVenv) }
-    if ($RegisteredPath) { $migrateArgs += @("--from", $RegisteredPath) }
     try {
-        & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") @migrateArgs 2>&1 | Out-Host
+        $output = @(& $script:shimInstallPath installer migrate-registrations --client $Client 2>&1)
     } catch { return $false }
-    return ($LASTEXITCODE -eq 0)
+    $script:shimMigrated = $null
+    if ($output | Where-Object { "$_" -like "moved $Client to the native client*" }) { $script:shimMigrated = "moved" }
+    elseif ($output | Where-Object { "$_" -like "$Client already runs the native client*" }) {
+        $script:shimMigrated = "current"
+        # Where the old Python client stays is said even when the
+        # registration needed no edit (it named the stable launcher).
+        foreach ($line in $output) {
+            if ("$line" -match 'old Python client.*\)$') { Write-Host ("  " + ("$line" -replace '^[^(]*\(', '' -replace '\)$', '')) }
+        }
+        return $true
+    }
+    foreach ($line in $output) { Write-Host "  $line" }
+    return [bool]$script:shimMigrated
 }
 
 # Two env pairs ride each shim registration: PSEUDOLIFE_WRITER_ID (the shim
@@ -2348,124 +2338,108 @@ foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "codex") {
         $codexSetup = [pscustomobject]@{
             source = "skip"; status = "unavailable"; instructions = "skipped"
-            recovery = "Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
+            recovery = $null
         }
-        # Probe real interpreters; Windows Store aliases and old Python versions
-        # must not prevent trying the next candidate. Do not alter the user's PATH.
-        $codexPython = $null
-        foreach ($candidate in @("python", "python3", "py")) {
-            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-            # Assigned, as in Get-InstallerPython: an if-expression would splat "- 3".
-            $probeArgs = @()
-            if ($candidate -eq "py") { $probeArgs = @("-3") }
-            try {
-                $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-                if (($LASTEXITCODE -eq 0) -and $probe) { $codexPython = "$probe".Trim(); break }
-            } catch { continue }
+        $savedCredentialToken = [Environment]::GetEnvironmentVariable(
+            "PSEUDOLIFE_MCP_TOKEN", "Process")
+        $savedCredentialFile = [Environment]::GetEnvironmentVariable(
+            "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
+        $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
+            "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
+        # A client-only install: the remote daemon's token, from the
+        # operator's file on stdin, and its URL.
+        $installerToken = if ($ClientOnly) {
+            (Get-Content -LiteralPath $TokenFile -Raw).Trim()
+        } else { Get-EnvValue "PSEUDOLIFE_MCP_TOKEN" }
+        $installerUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
+        if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
+        try {
+            $credentialArgs = @("codex-credentials")
+            if ($installerToken) {
+                $credentialArgs += "--installer-token-stdin"
+            }
+            $credentialArgs += @("--installer-daemon-url", $installerUrl)
+            $credentialOutput = if ($installerToken) {
+                $installerToken | Invoke-NativeHelper @credentialArgs
+            } else {
+                Invoke-NativeHelper @credentialArgs
+            }
+            $credentialExit = $LASTEXITCODE
+            $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
+            if (($credentialExit -eq 0) -and
+                ($credentialResult.status -in "ready", "tokenless") -and
+                ($credentialResult.credential_file_configured -in $true, $false) -and
+                ($credentialResult.connection_configured -in $true, $false) -and
+                (-not $credentialResult.connection_configured -or
+                 $credentialResult.daemon_url -is [string]) -and
+                (-not $credentialResult.credential_file_configured -or
+                 $credentialResult.credential_file_path -is [string])) {
+                $codexConnectionConfigured = [bool]$credentialResult.connection_configured
+                if ($codexConnectionConfigured) {
+                    $codexCredentialUrl = [string]$credentialResult.daemon_url
+                    $env:PSEUDOLIFE_MCP_DAEMON_URL = $codexCredentialUrl
+                    $env:PSEUDOLIFE_MCP_TOKEN = $null
+                    $env:PSEUDOLIFE_MCP_TOKEN_FILE = $null
+                }
+                if ($credentialResult.credential_file_configured) {
+                    $codexCredentialFile = [string]$credentialResult.credential_file_path
+                    $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
+                    Step "Codex credential file ready; future rotations are picked up by new requests."
+                }
+            } else {
+                throw "Invalid credential setup result"
+            }
+        } catch {
+            $codexCredentialBootstrapFailed = $true
+            $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
         }
-        if ($codexPython) {
-            $savedCredentialToken = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_TOKEN", "Process")
-            $savedCredentialFile = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
-            $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
-            # A client-only install: the remote daemon's token, from the
-            # operator's file on stdin, and its URL.
-            $installerToken = if ($ClientOnly) {
-                (Get-Content -LiteralPath $TokenFile -Raw).Trim()
-            } else { Get-EnvValue "PSEUDOLIFE_MCP_TOKEN" }
-            $installerUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
-            if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
+        # pseudolife-mcp connect (the client-only connect block)
+        # re-pointed an existing registration already; one still naming
+        # another daemon is one it could not write, or connect did not
+        # run (a shim from before it).
+        if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
+            ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
+            $codexCredentialBootstrapFailed = $true
+            $codexSetup.recovery = if ($script:connectChecked) {
+                "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl where that Codex configuration sets it, or run pseudolife-mcp connect $DaemonUrl --client codex --token-file $TokenFile, then re-run."
+            } else {
+                "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
+            }
+            [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+            [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+            [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
+        }
+        if (-not $codexCredentialBootstrapFailed) {
+            $setupArgs = @("codex-hooks", "--checkout", $repo, "--source", $CodexHooks,
+                "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
+            if (-not $interactive -or $script:installerRerun) { $setupArgs += "--non-interactive" }
+            $setupLaunchFailed = $false
             try {
-                $credentialArgs = @((Join-Path $repo "ops/setup-codex-coordination.py"),
-                    "--credentials")
-                if ($installerToken) {
-                    $credentialArgs += "--installer-token-stdin"
-                }
-                $credentialArgs += @("--installer-daemon-url", $installerUrl)
-                $credentialOutput = if ($installerToken) {
-                    $installerToken | & $codexPython @credentialArgs
-                } else {
-                    & $codexPython @credentialArgs
-                }
-                $credentialExit = $LASTEXITCODE
-                $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
-                if (($credentialExit -eq 0) -and
-                    ($credentialResult.status -in "ready", "tokenless") -and
-                    ($credentialResult.credential_file_configured -in $true, $false) -and
-                    ($credentialResult.connection_configured -in $true, $false) -and
-                    (-not $credentialResult.connection_configured -or
-                     $credentialResult.daemon_url -is [string]) -and
-                    (-not $credentialResult.credential_file_configured -or
-                     $credentialResult.credential_file_path -is [string])) {
-                    $codexConnectionConfigured = [bool]$credentialResult.connection_configured
-                    if ($codexConnectionConfigured) {
-                        $codexCredentialUrl = [string]$credentialResult.daemon_url
-                        $env:PSEUDOLIFE_MCP_DAEMON_URL = $codexCredentialUrl
-                        $env:PSEUDOLIFE_MCP_TOKEN = $null
-                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $null
-                    }
-                    if ($credentialResult.credential_file_configured) {
-                        $codexCredentialFile = [string]$credentialResult.credential_file_path
-                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
-                        Step "Codex credential file ready; future rotations are picked up by new requests."
-                    }
-                } else {
-                    throw "Invalid credential setup result"
-                }
+                $setupOutput = Invoke-NativeHelper @setupArgs
+                $setupExit = $LASTEXITCODE
             } catch {
-                $codexCredentialBootstrapFailed = $true
-                $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+                $setupLaunchFailed = $true
+            } finally {
+                [Environment]::SetEnvironmentVariable(
+                    "PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+                [Environment]::SetEnvironmentVariable(
+                    "PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+                [Environment]::SetEnvironmentVariable(
+                    "PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
             }
-            # pseudolife-mcp connect (the client-only connect block)
-            # re-pointed an existing registration already; one still naming
-            # another daemon is one it could not write, or connect did not
-            # run (a shim from before it).
-            if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
-                ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
-                $codexCredentialBootstrapFailed = $true
-                $codexSetup.recovery = if ($script:connectChecked) {
-                    "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl where that Codex configuration sets it, or run pseudolife-mcp connect $DaemonUrl --client codex --token-file $TokenFile, then re-run."
-                } else {
-                    "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
+            try {
+                if ($setupLaunchFailed) { throw "Codex setup launch failed" }
+                $result = ($setupOutput -join "`n") | ConvertFrom-Json
+                if (($setupExit -notin 0, 1) -or
+                    ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
+                    ($result.source -notin "manual", "plugin", "skip") -or
+                    ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
+                    throw "Invalid Codex setup result"
                 }
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
-            }
-            if (-not $codexCredentialBootstrapFailed) {
-                $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
-                    "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
-                if (-not $interactive -or $script:installerRerun) { $setupArgs += "--non-interactive" }
-                $setupLaunchFailed = $false
-                try {
-                    $setupOutput = & $codexPython @setupArgs
-                    $setupExit = $LASTEXITCODE
-                } catch {
-                    $setupLaunchFailed = $true
-                } finally {
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
-                }
-                try {
-                    if ($setupLaunchFailed) { throw "Codex setup launch failed" }
-                    $result = ($setupOutput -join "`n") | ConvertFrom-Json
-                    if (($setupExit -notin 0, 1) -or
-                        ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
-                        ($result.source -notin "manual", "plugin", "skip") -or
-                        ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
-                        throw "Invalid Codex setup result"
-                    }
-                    $codexSetup = $result
-                    $codexSetupValid = $true
-                } catch {
-                    $codexSetup.recovery = "Codex setup did not return a valid result. Run python ops/setup-codex-hooks.py to retry."
-                }
+                $codexSetup = $result
+                $codexSetupValid = $true
+            } catch {
+                $codexSetup.recovery = "Codex setup did not return a valid result. Rerun this installer to retry."
             }
         }
         $hookState["codex"] = $codexSetup.status
@@ -2684,15 +2658,8 @@ function Register-Result($provider, $okState, $okMessage) {
     }
 }
 function Set-CodexRuntimeDefaults {
-    if (-not $codexPython) {
-        $mcpState["codex"] = "failed"
-        $script:codexRuntimeDefaults = "failed"
-        $script:codexRuntimeRecovery = "Install Python 3.10 or newer, then run python ops/setup-codex-coordination.py --runtime-defaults."
-        Write-Warning "Codex was registered, but its runtime defaults could not be configured because Python 3.10 or newer was not found."
-        return
-    }
     try {
-        $runtimeOutput = & $codexPython (Join-Path $repo "ops/setup-codex-coordination.py") --runtime-defaults
+        $runtimeOutput = Invoke-NativeHelper codex-runtime-defaults
         $runtimeExit = $LASTEXITCODE
         $runtimeResult = ($runtimeOutput -join "`n") | ConvertFrom-Json
         if (($runtimeExit -ne 0) -or ($runtimeResult.status -ne "ready") -or
@@ -2704,7 +2671,7 @@ function Set-CodexRuntimeDefaults {
     } catch {
         $mcpState["codex"] = "failed"
         $script:codexRuntimeDefaults = "failed"
-        $script:codexRuntimeRecovery = "Run python ops/setup-codex-coordination.py --runtime-defaults, then retry the Codex task."
+        $script:codexRuntimeRecovery = "Rerun this installer with -Client codex, then retry the Codex task."
         Write-Warning "Codex was registered, but its runtime defaults were not confirmed. $script:codexRuntimeRecovery"
     }
 }
@@ -2724,15 +2691,13 @@ $claudeJson = Join-Path $claudeConfigHome ".claude.json"
 function Get-ClientTokenFile([string]$principal) {
     # The token file it wrote or kept, or $null.
     if ($Transport -ne "shim") { return $null }
-    $clientPython = Get-InstallerPython
-    if (-not $clientPython) { return $null }
     $target = Join-Path $env:USERPROFILE ".pseudolife-mcp\$principal.token"
     # The values ride process-scoped env vars the helper reads by NAME -
     # never a command-line argument, never printed.
     $env:PSEUDOLIFE_INSTALLER_TOKEN = Get-DesktopTokenSource
     $env:PSEUDOLIFE_INSTALLER_TOKENS = Get-DesktopTokensSource
     try {
-        $clientOutput = & $clientPython (Join-Path $repo "ops/client_credentials.py") token-file --principal $principal --path $target
+        $clientOutput = Invoke-NativeHelper credentials token-file --principal $principal --path $target
     } finally {
         $env:PSEUDOLIFE_INSTALLER_TOKEN = $null
         $env:PSEUDOLIFE_INSTALLER_TOKENS = $null
@@ -2753,13 +2718,13 @@ $geminiTokenFile = if ($clients -notcontains "gemini") { $null } elseif ($Client
 # the file and the URL there as much as the plugin's hooks do.
 if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile) {
     $claudeSettingsHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
-    $settingsArgs = @((Join-Path $repo "ops/client_credentials.py"), "claude-settings-env",
+    $settingsArgs = @("credentials", "claude-settings-env",
         "--settings", (Join-Path $claudeSettingsHome "settings.json"),
         "--token-file", $claudeTokenFile, "--daemon-url", $clientDaemonUrl)
     # A client-only install's hooks must reach the remote daemon with the
     # operator's file, whatever an earlier local install left there.
     if ($ClientOnly) { $settingsArgs += "--replace" }
-    $settingsOutput = & (Get-InstallerPython) @settingsArgs
+    $settingsOutput = Invoke-NativeHelper @settingsArgs
     $settingsReport = try { ($settingsOutput -join "`n") | ConvertFrom-Json } catch { $null }
     switch ("$($settingsReport.status)") {
         "updated" {
@@ -2778,7 +2743,7 @@ if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile)
 foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "claude-desktop") {
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
-        # by ops/register_claude_desktop.py (absolute shim path - Desktop's
+        # by the native client's installer step (absolute shim path - Desktop's
         # sanitized PATH omits pipx/venv bin dirs; token FILE when gated). It is
         # named pseudolife-desktop so Code-tab sessions keep their own
         # per-session pseudolife-memory server.
@@ -2786,14 +2751,8 @@ foreach ($selectedClient in $clients) {
             Write-Warning "Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) - ignoring -Transport http for it."
         }
         $shimReady = Install-ShimOnce
-        $desktopPython = Get-InstallerPython
         if ((-not $shimReady) -or (-not $script:shimInstallPath)) {
-            Write-Warning "pseudolife-mcp shim installation did not yield a usable executable - Claude Desktop not wired. Re-run after fixing pipx/Python, or register by hand: python ops\register_claude_desktop.py --command <full path to pseudolife-mcp.exe>"
-            $mcpState["claude-desktop"] = "failed"
-            continue
-        }
-        if (-not $desktopPython) {
-            Write-Warning "No python >= 3.10 found to write claude_desktop_config.json - Claude Desktop not wired."
+            Write-Warning "pseudolife-mcp shim installation did not yield a usable executable - Claude Desktop not wired. Re-run once the native client installs."
             $mcpState["claude-desktop"] = "failed"
             continue
         }
@@ -2820,7 +2779,7 @@ foreach ($selectedClient in $clients) {
                 Write-Warning "The daemon is token-gated but no token source is set (environment or ops\.env) - the registrar can only reuse a credential already in the Desktop entry. If registration fails, configure a singular token or exactly one claude-desktop principal in PSEUDOLIFE_MCP_TOKENS."
             }
         }
-        & $desktopPython (Join-Path $repo "ops\register_claude_desktop.py") @desktopArgs 2>&1 | Out-Host
+        Invoke-NativeHelper claude-desktop @desktopArgs 2>&1 | Out-Host
         $env:PSEUDOLIFE_DESKTOP_TOKEN_SOURCE = $null
         $env:PSEUDOLIFE_DESKTOP_TOKENS_SOURCE = $null
         Register-Result "claude-desktop" "shim-env" "Wired into Claude Desktop as pseudolife-desktop via the pseudolife-mcp shim (claude_desktop_config.json) - fully quit and relaunch Desktop to load it."
@@ -2850,7 +2809,7 @@ foreach ($selectedClient in $clients) {
         if ($ClientOnly -and -not $codexCredentialFile) {
             # Without it Codex would reach whatever daemon its defaults name.
             $mcpState["codex"] = "failed"
-            Write-Warning "Codex was not registered: a client-only install points it at $clientDaemonUrl through the Codex credential setup, which did not run (it needs Python 3.10 or newer; see above). Fix that, then re-run."
+            Write-Warning "Codex was not registered: a client-only install points it at $clientDaemonUrl through the Codex credential setup, which did not finish (see above). Fix that, then re-run."
             continue
         }
         $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
@@ -2875,34 +2834,49 @@ foreach ($selectedClient in $clients) {
                     }
                 }
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "codex")) {
-                    Step "Codex registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                    $mcpState["codex"] = "present-migrated"
+                    if ($script:shimMigrated -eq "current") {
+                        Step "Codex registration preserved; it already runs the native client."
+                        $mcpState["codex"] = "present-current"
+                    } else {
+                        Step "Codex registration moved to the shim launcher; the native client is installed."
+                        $mcpState["codex"] = "present-migrated"
+                    }
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
                             Write-Warning "The existing Codex registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
                             $mcpState["codex"] = "failed"
                         } elseif (-not $bareRegisteredShim) {
-                            # a pipx or pip launcher registration moves to the side-by-side launcher
+                            # a pipx or pip launcher registration moves to the native launcher
                             if ($script:shimManagerKind -ne "runtime") {
-                                Step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                Step "Codex registration preserved; it runs the native client installed from this release."
                                 $mcpState["codex"] = "present-upgraded"
                             } elseif (Test-ShimRegistrationMigrates "codex" $registeredShim) {
-                                Step "Codex registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                                $mcpState["codex"] = "present-upgraded"
+                                if ($script:shimMigrated -eq "current") {
+                                    Step "Codex registration preserved; it already runs the native client."
+                                    $mcpState["codex"] = "present-current"
+                                } else {
+                                    Step "Codex registration moved to the shim launcher; the native client is installed."
+                                    $mcpState["codex"] = "present-upgraded"
+                                }
                             } else {
-                                Write-Warning "The Codex registration still names $registeredShim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops\\shim_runtime.py migrate --client codex --from `"$registeredShim`""
+                                Write-Warning "The Codex registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client codex"
                                 $mcpState["codex"] = "failed"
                             }
                         } elseif (Test-ShimRegistrationMigrates "codex") {
-                            Step "Codex registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
-                            $mcpState["codex"] = "present-upgraded"
+                            if ($script:shimMigrated -eq "current") {
+                                Step "Codex registration preserved; it already runs the native client."
+                                $mcpState["codex"] = "present-current"
+                            } else {
+                                Step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                $mcpState["codex"] = "present-upgraded"
+                            }
                         } else {
                         $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
                         $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
                         $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
                         if ($resolvedShimPath -and [string]::Equals($resolvedShimPath, $script:shimInstallPath, $pathComparison)) {
-                            Step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            Step "Codex registration preserved; it runs the native client installed from this release."
                             $mcpState["codex"] = "present-upgraded"
                         } else {
                             Write-Warning "The existing Codex registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
@@ -2910,7 +2884,7 @@ foreach ($selectedClient in $clients) {
                         }
                         }
                     } else {
-                        Write-Warning "The existing Codex registration was preserved, but its pseudolife-mcp shim upgrade failed - see the pip/pipx output above and re-run."
+                        Write-Warning "The existing Codex registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
                         $mcpState["codex"] = "failed"
                     }
                 } else {
@@ -2988,34 +2962,49 @@ foreach ($selectedClient in $clients) {
                     }
                 }
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "gemini")) {
-                    Step "Gemini CLI registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                    $mcpState["gemini"] = "present-migrated"
+                    if ($script:shimMigrated -eq "current") {
+                        Step "Gemini CLI registration preserved; it already runs the native client."
+                        $mcpState["gemini"] = "present-current"
+                    } else {
+                        Step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                        $mcpState["gemini"] = "present-migrated"
+                    }
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
                             Write-Warning "The existing Gemini CLI registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
                             $mcpState["gemini"] = "failed"
                         } elseif (-not $bareRegisteredShim) {
-                            # a pipx or pip launcher registration moves to the side-by-side launcher
+                            # a pipx or pip launcher registration moves to the native launcher
                             if ($script:shimManagerKind -ne "runtime") {
-                                Step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                Step "Gemini CLI registration preserved; it runs the native client installed from this release."
                                 $mcpState["gemini"] = "present-upgraded"
                             } elseif (Test-ShimRegistrationMigrates "gemini" $registeredShim) {
-                                Step "Gemini CLI registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                                $mcpState["gemini"] = "present-upgraded"
+                                if ($script:shimMigrated -eq "current") {
+                                    Step "Gemini CLI registration preserved; it already runs the native client."
+                                    $mcpState["gemini"] = "present-current"
+                                } else {
+                                    Step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                                    $mcpState["gemini"] = "present-upgraded"
+                                }
                             } else {
-                                Write-Warning "The Gemini CLI registration still names $registeredShim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops\\shim_runtime.py migrate --client gemini --from `"$registeredShim`""
+                                Write-Warning "The Gemini CLI registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client gemini"
                                 $mcpState["gemini"] = "failed"
                             }
                         } elseif (Test-ShimRegistrationMigrates "gemini") {
-                            Step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
-                            $mcpState["gemini"] = "present-upgraded"
+                            if ($script:shimMigrated -eq "current") {
+                                Step "Gemini CLI registration preserved; it already runs the native client."
+                                $mcpState["gemini"] = "present-current"
+                            } else {
+                                Step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                $mcpState["gemini"] = "present-upgraded"
+                            }
                         } else {
                         $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
                         $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
                         $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
                         if ($resolvedShimPath -and [string]::Equals($resolvedShimPath, $script:shimInstallPath, $pathComparison)) {
-                            Step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            Step "Gemini CLI registration preserved; it runs the native client installed from this release."
                             $mcpState["gemini"] = "present-upgraded"
                         } else {
                             Write-Warning "The existing Gemini CLI registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
@@ -3023,7 +3012,7 @@ foreach ($selectedClient in $clients) {
                         }
                         }
                     } else {
-                        Write-Warning "The existing Gemini CLI registration was preserved, but its pseudolife-mcp shim upgrade failed - see the pip/pipx output above and re-run."
+                        Write-Warning "The existing Gemini CLI registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
                         $mcpState["gemini"] = "failed"
                     }
                 } else {
@@ -3064,7 +3053,7 @@ foreach ($selectedClient in $clients) {
                 $mcpState["gemini"] = "failed"
             }
         } elseif ($ClientOnly) {
-            Write-Warning "Shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx or Python >=3.10 and re-run."
+            Write-Warning "Shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
             $mcpState["gemini"] = "failed"
         } else {
             if ($Transport -eq "shim") {
@@ -3094,34 +3083,49 @@ foreach ($selectedClient in $clients) {
                     }
                 }
                 if ((-not $managedRegisteredShim) -and (Test-ShimRegistrationMigrates "claude-code")) {
-                    Step "Claude Code registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                    $mcpState["claude"] = "present-migrated"
+                    if ($script:shimMigrated -eq "current") {
+                        Step "Claude Code registration preserved; it already runs the native client."
+                        $mcpState["claude"] = "present-current"
+                    } else {
+                        Step "Claude Code registration moved to the shim launcher; the native client is installed."
+                        $mcpState["claude"] = "present-migrated"
+                    }
                 } elseif ($managedRegisteredShim) {
                     if (Install-ShimOnce) {
                         if ($script:shimUpgradeHeld) {
                             Write-Warning "The existing Claude Code registration was preserved, but its pseudolife-mcp shim was not upgraded - see the warning above."
                             $mcpState["claude"] = "failed"
                         } elseif (-not $bareRegisteredShim) {
-                            # a pipx or pip launcher registration moves to the side-by-side launcher
+                            # a pipx or pip launcher registration moves to the native launcher
                             if ($script:shimManagerKind -ne "runtime") {
-                                Step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                Step "Claude Code registration preserved; it runs the native client installed from this release."
                                 $mcpState["claude"] = "present-upgraded"
                             } elseif (Test-ShimRegistrationMigrates "claude-code" $registeredShim) {
-                                Step "Claude Code registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                                $mcpState["claude"] = "present-upgraded"
+                                if ($script:shimMigrated -eq "current") {
+                                    Step "Claude Code registration preserved; it already runs the native client."
+                                    $mcpState["claude"] = "present-current"
+                                } else {
+                                    Step "Claude Code registration moved to the shim launcher; the native client is installed."
+                                    $mcpState["claude"] = "present-upgraded"
+                                }
                             } else {
-                                Write-Warning "The Claude Code registration still names $registeredShim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops\\shim_runtime.py migrate --client claude-code --from `"$registeredShim`""
+                                Write-Warning "The Claude Code registration still names $registeredShim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: & `"$($script:shimInstallPath)`" installer migrate-registrations --client claude-code"
                                 $mcpState["claude"] = "failed"
                             }
                         } elseif (Test-ShimRegistrationMigrates "claude-code") {
-                            Step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
-                            $mcpState["claude"] = "present-upgraded"
+                            if ($script:shimMigrated -eq "current") {
+                                Step "Claude Code registration preserved; it already runs the native client."
+                                $mcpState["claude"] = "present-current"
+                            } else {
+                                Step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                $mcpState["claude"] = "present-upgraded"
+                            }
                         } else {
                         $resolvedShim = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
                         $resolvedShimPath = if ($resolvedShim) { (Resolve-Path -LiteralPath $resolvedShim.Source).Path } else { $null }
                         $pathComparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
                         if ($resolvedShimPath -and [string]::Equals($resolvedShimPath, $script:shimInstallPath, $pathComparison)) {
-                            Step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            Step "Claude Code registration preserved; it runs the native client installed from this release."
                             $mcpState["claude"] = "present-upgraded"
                         } else {
                             Write-Warning "The existing Claude Code registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run."
@@ -3129,7 +3133,7 @@ foreach ($selectedClient in $clients) {
                         }
                         }
                     } else {
-                        Write-Warning "The existing Claude Code registration was preserved, but its pseudolife-mcp shim upgrade failed - see the pip/pipx output above and re-run."
+                        Write-Warning "The existing Claude Code registration was preserved, but its pseudolife-mcp native client install failed - see the message above and re-run."
                         $mcpState["claude"] = "failed"
                     }
                 } else {
@@ -3147,8 +3151,8 @@ foreach ($selectedClient in $clients) {
             # keeping any credential it already has. Anything else gets the
             # manual fix.
             $claudeCredentialOk = $false
-            if (($mcpState["claude"] -in "present-upgraded", "present-migrated") -and $claudeTokenFile) {
-                $claudeEnvOutput = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") registration-env --config $claudeJson --set "PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile" --set "PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl" --set "PSEUDOLIFE_AGENT_STATE_DIR=$claudeAgentStateDir"
+            if (($mcpState["claude"] -in "present-upgraded", "present-migrated", "present-current") -and $claudeTokenFile) {
+                $claudeEnvOutput = Invoke-NativeHelper credentials registration-env --config $claudeJson --set "PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile" --set "PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl" --set "PSEUDOLIFE_AGENT_STATE_DIR=$claudeAgentStateDir"
                 switch ("$(Get-HelperStatus $claudeEnvOutput)") {
                     "updated" {
                         $claudeCredentialOk = $true
@@ -3199,12 +3203,12 @@ foreach ($selectedClient in $clients) {
                     $mcpState["claude"] = "failed"
                 }
             } elseif ($ClientOnly) {
-                Write-Warning "Could not install the pseudolife-mcp shim (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx or Python >=3.10 and re-run."
+                Write-Warning "Could not install the pseudolife-mcp shim (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run."
                 $mcpState["claude"] = "failed"
             } else {
-                Write-Warning "Could not install the pseudolife-mcp shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above)."
+                Write-Warning "Could not install the pseudolife-mcp shim: the native client install failed (see warnings above)."
                 Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
-                Write-Host "  Install pipx or Python >=3.10 and re-run, or pass -Transport http to silence this."
+                Write-Host "  Re-run once that is fixed (the verified download is reused), or pass -Transport http to silence this."
                 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
                 Register-Result "claude" "http" "Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
             }
@@ -3272,7 +3276,7 @@ function Show-EndpointContainer {
 
 # >>> test login >>>
 # The test suite's own Postgres login (`pseudolife-mcp test-login create`,
-# pseudolife_memory/test_login_cli.py): a role that creates and drops its own
+# run by the installed native client): a role that creates and drops its own
 # databases and cannot connect to the bank, written to
 # ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
 # ops/.env. So no checkout or agent session needs ops/.env, which holds the
@@ -3282,28 +3286,18 @@ function Show-EndpointContainer {
 # Postgres container as its own superuser; a failure leaves the install
 # working.
 function Invoke-TestLoginSetup {
-    $py = Get-InstallerPython
-    if (-not $py) {
-        Write-Warning "No Python 3.10+ found, so the test suite's Postgres login was not set up. Later, from ${repo}: python -m pseudolife_memory.cli test-login create"
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        Write-Warning "The native client is unavailable (see above), so the test suite's Postgres login was not set up. Later: pseudolife-mcp test-login create"
         return
     }
     Step "Setting up the test suite's Postgres login (it cannot open the bank)..."
-    $savedPath = $env:PYTHONPATH
     $code = 1
     try {
-        $env:PYTHONPATH = if ($savedPath) { "$repo$([IO.Path]::PathSeparator)$savedPath" } else { "$repo" }
-        Push-Location $repo
-        try {
-            & $py -m pseudolife_memory.test_login_cli create
-            $code = $LASTEXITCODE
-        } finally { Pop-Location }
-    } catch {
-        $code = 1
-    } finally {
-        $env:PYTHONPATH = $savedPath
-    }
+        & $script:shimInstallPath test-login create
+        $code = $LASTEXITCODE
+    } catch { $code = 1 }
     if ($code -ne 0) {
-        Write-Warning "The test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later from ${repo}: python -m pseudolife_memory.test_login_cli create"
+        Write-Warning "The test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later: & `"$($script:shimInstallPath)`" test-login create"
     }
 }
 # <<< test login <<<
@@ -3316,10 +3310,10 @@ function Invoke-TestLoginSetup {
 # stages 9 through the '12. health' header), so no test ever reaches the
 # real systemctl / Task Scheduler calls below.
 # >>> shim autostart >>>
-# Runs after stage 11 on purpose: the shim install there (pipx, or pip
-# --user) is what puts the package where an interpreter imports it on a
-# host without a checkout venv, and the autostart script's interpreter pick
-# (ops\shim_python.py) finds it there instead of building a venv of its own.
+# Runs after stage 11 on purpose: the native client installed there runs
+# the extractor shim (`pseudolife-mcp extractor-shim`), so no interpreter is
+# involved. Its default prompt is evals\prompts\sonnet_extractor_v5.md
+# (rust/shim/src/extractor_shim/config.rs), read from this checkout via --repo.
 # A mode switch must tear down the OTHER family's autostart: an abandoned
 # shim task keeps making real CLI calls at every /health refresh, forever,
 # on a plan whose owner believes it is turned off. Best-effort like the
@@ -3339,25 +3333,29 @@ if (-not $claudeShimMode -and -not $ClientOnly) {
     Remove-ShimTask "Pseudolife Claude Shim" "Claude"
     Remove-ShimTask "Pseudolife Sonnet Shim" "Claude"   # pre-rename installs
 }
-if ($claudeShimMode) {
-    Step "Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
-    try {
-        & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
-    } catch {
-        Write-Warning "Shim autostart registration or start failed (registration: usually elevation; or no interpreter imports pseudolife_memory for the task - see the message above): $_"
-        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-shim-autostart.ps1):"
-        Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v5.md"
-    }
-} elseif ($codexShimMode) {
-    Step "Registering the Codex shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
-    try {
-        & (Join-Path $PSScriptRoot "install-codex-shim-autostart.ps1") -Port $ShimPort -Model $Model
-    } catch {
-        Write-Warning "Shim autostart registration failed (usually elevation; or no interpreter imports pseudolife_memory for the task - see the message above): $_"
-        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-codex-shim-autostart.ps1):"
-        Write-Host "    ops\install-codex-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-        Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
+$shimAutostartFamily = if ($claudeShimMode) { "claude" } elseif ($codexShimMode) { "codex" } else { $null }
+if ($shimAutostartFamily) {
+    $familyLabel = if ($shimAutostartFamily -eq "claude") { "Claude" } else { "Codex" }
+    Step "Registering the $familyLabel shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
+    $autostartArgs = @("extractor-shim", "install-autostart", $shimAutostartFamily, "--repo", $repo, "--port", "$ShimPort", "--model", $Model)
+    $rerun = "pseudolife-mcp " + ($autostartArgs -join " ")
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        Write-Warning "Shim autostart was not registered: the native client is unavailable (see above)."
+        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu: $rerun"
+    } else {
+        $autostartCode = 1
+        # The stable launcher, not the numbered runtime it starts: the task
+        # then runs whatever release a later update installs.
+        $autostartArgs += @("--native-exe", $script:shimInstallPath)
+        try {
+            & $script:shimInstallPath @autostartArgs
+            $autostartCode = $LASTEXITCODE
+        } catch { $autostartCode = 1 }
+        if ($autostartCode -ne 0) {
+            Write-Warning "Shim autostart registration or start failed (usually elevation - see the message above)."
+            Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop): & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
+            Write-Host "  Or start it manually: & `"$($script:shimInstallPath)`" extractor-shim $shimAutostartFamily --repo `"$repo`" --port $ShimPort --model $Model"
+        }
     }
 }
 # <<< shim autostart <<<
@@ -3429,15 +3427,16 @@ function Describe-Mcp($state) {
         "shim" { "stdio shim (writer id: daemon default in ops/.env)" }
         "http" { "HTTP (writer id: daemon default in ops/.env)" }
         "present" { "already wired (unchanged)" }
-        "present-upgraded" { "already wired; checkout shim upgraded" }
-        "present-migrated" { "already wired; registration moved to the shim launcher (side-by-side runtime installed, old file backed up)" }
+        "present-current" { "already wired (unchanged; it runs the native client)" }
+        "present-upgraded" { "already wired; it runs the native client from this release" }
+        "present-migrated" { "already wired; registration moved to the native launcher (old file backed up)" }
         "present-custom" { "already wired with custom command (unchanged)" }
         "failed" { "registration or shim upgrade FAILED - see the warning above and re-run" }
         default { "not wired" }
     }
 }
 function Get-McpMarker($state) {
-    if ($state -in "shim-env", "shim", "http", "present", "present-upgraded", "present-migrated", "present-custom") { "[x]" } else { "[!]" }
+    if ($state -in "shim-env", "shim", "http", "present", "present-current", "present-upgraded", "present-migrated", "present-custom") { "[x]" } else { "[!]" }
 }
 function Describe-Instr($state) {
     if (-not $state) { return "[-] Standing file        skipped" }
@@ -3541,29 +3540,23 @@ if ($script:shimPathNotes.Count -gt 0) {
 $boardHint = switch ($tokenState) {
     "opted-out" { " (installed with -NoToken; re-run without it to turn the board on)" }
     "http" { " (-Transport http registrations cannot carry a token file)" }
-    "no-shim" { " (no pipx or pip-capable Python >= 3.10 to install the shim, so no token was minted; install one and re-run)" }
     default { "" }
 }
 $boardFile = @($claudeTokenFile, $geminiTokenFile, $codexCredentialFile, $TokenFile) | Where-Object { $_ } | Select-Object -First 1
-$boardPython = Get-InstallerPython
-if (-not $boardPython) {
-    $boardLine = "unknown - no Python >= 3.10 to ask the daemon"
+$boardArgs = @("credentials", "board", "--daemon-url", $clientDaemonUrl)
+if ($boardFile) {
+    $boardArgs += @("--token-file", $boardFile)
 } else {
-    $boardArgs = @((Join-Path $repo "ops/client_credentials.py"), "board", "--daemon-url", $clientDaemonUrl)
-    if ($boardFile) {
-        $boardArgs += @("--token-file", $boardFile)
-    } else {
-        # The singular token rides a process-scoped env var, never an argument.
-        $env:PSEUDOLIFE_INSTALLER_TOKEN = Get-DesktopTokenSource
-    }
-    try {
-        $boardLine = (& $boardPython @boardArgs) -join " "
-        if (($LASTEXITCODE -ne 0) -or -not $boardLine) { $boardLine = "unknown" }
-    } catch {
-        $boardLine = "unknown"
-    } finally {
-        $env:PSEUDOLIFE_INSTALLER_TOKEN = $null
-    }
+    # The singular token rides a process-scoped env var, never an argument.
+    $env:PSEUDOLIFE_INSTALLER_TOKEN = Get-DesktopTokenSource
+}
+try {
+    $boardLine = (Invoke-NativeHelper @boardArgs) -join " "
+    if (($LASTEXITCODE -ne 0) -or -not $boardLine) { $boardLine = "unknown" }
+} catch {
+    $boardLine = "unknown"
+} finally {
+    $env:PSEUDOLIFE_INSTALLER_TOKEN = $null
 }
 if ($boardLine.StartsWith("on")) {
     Write-Host "  [x] Agent board          $boardLine"
@@ -3831,4 +3824,5 @@ if ($Tunnel -and -not $interactive) {
 } else {
     Write-Host "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
 }
+Remove-NativeStage
 Write-Host "Done. First session: tell your coding agent to remember something."

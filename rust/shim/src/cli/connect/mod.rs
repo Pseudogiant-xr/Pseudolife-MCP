@@ -29,14 +29,14 @@ use std::process::ExitCode;
 mod args;
 mod codex;
 mod discover;
-mod files;
+pub(in crate::cli) mod files;
 #[cfg(test)]
 #[path = "native_tests.rs"]
 mod native_tests;
-mod net;
-mod paths;
+pub(in crate::cli) mod net;
+pub(in crate::cli) mod paths;
 mod procs;
-mod pyjson;
+pub(in crate::cli) mod pyjson;
 mod url;
 mod user_env;
 

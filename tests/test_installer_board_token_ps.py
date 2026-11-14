@@ -4,7 +4,8 @@ The PowerShell twin of tests/test_installer_board_token.py: a default install
 mints a bearer token so the agent board is on, and every client the installer
 wires then carries it. Each block runs extracted from ops/install.ps1 under
 pwsh against fake CLIs in a disposable home; the real
-ops/client_credentials.py does the file work.
+ops/client_credentials.py does the file work, run by the stand-in native
+installer steps (native_client_stub.HELPER_PS).
 """
 from __future__ import annotations
 
@@ -14,9 +15,10 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 
 import pytest
+
+from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
 from tests.test_installer_existing_upgrade import _between, _fixture_env
@@ -57,8 +59,8 @@ class _PowerShell:
         prelude = (
             "$ErrorActionPreference = 'Stop'\n"
             f"$repo = '{_q(ROOT)}'\n"
-            f"function Get-InstallerPython {{ '{_q(sys.executable)}' }}\n"
-            "function Step($message) { Write-Output \"STEP: $message\" }\n"
+            + native_stub.HELPER_PS
+            + "function Step($message) { Write-Output \"STEP: $message\" }\n"
             + _function("Get-HelperStatus($output)") + "\n"
         )
         script = self.tmp / "run.ps1"
@@ -77,28 +79,15 @@ def _output(proc: subprocess.CompletedProcess[str]) -> str:
 # -- minting ------------------------------------------------------------------
 
 def _mint(ps: _PowerShell, env_file: Path, *, no_token: bool = False,
-          transport: str = "shim", python: str = "real", pipx: bool = False):
-    """``python``: ``real`` (this interpreter, which has pip), ``none``, or
-    ``broken`` (an interpreter that fails every call, as one whose pip
-    cannot install would fail the shim-tooling probe)."""
-    stub = ""
-    if python == "none":
-        stub = "function Get-InstallerPython { $null }\n"
-    elif python == "broken":
-        broken = ps.tmp / ("broken-python.cmd" if os.name == "nt" else "broken-python")
-        broken.write_text("@exit /b 1\r\n" if os.name == "nt" else "#!/bin/sh\nexit 1\n",
-                          encoding="utf-8")
-        broken.chmod(0o755)
-        stub = f"function Get-InstallerPython {{ '{_q(broken)}' }}\n"
-    if pipx:
-        stub += "function pipx { $global:LASTEXITCODE = 0 }\n"
-    stub += _function("Get-EnvValue($name)") + "\n"
+          transport: str = "shim", helper: str = ""):
+    """``helper``: a test-local ``Invoke-NativeHelper`` that replaces the
+    stand-in, for a native mint step that fails."""
+    stub = helper + _function("Get-EnvValue($name)") + "\n"
     return ps.run(
         f"$envFile = '{_q(env_file)}'\n"
         f"$NoToken = [switch]${'true' if no_token else 'false'}\n"
         f"$Transport = '{transport}'\n"
-        # The token stage calls the shim-tooling check stage 4b defines first.
-        + stub + _block("shim tooling") + _block("mint token")
+        + stub + _block("mint token")
         + "\nWrite-Output \"TOKEN_STATE=$tokenState\"\n")
 
 
@@ -107,19 +96,19 @@ def _minted(env_file: Path) -> list[str]:
                       env_file.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("no_token,transport,python", [
-    (False, "http", "real"),
-    (False, "shim", "none"),
-    (True, "shim", "real"),
+@pytest.mark.parametrize("no_token,transport", [
+    (False, "http"),
+    (False, "shim"),
+    (True, "shim"),
 ])
 def test_an_existing_token_is_reported_present_whatever_else_holds(tmp_path, no_token,
-                                                                   transport, python):
+                                                                   transport):
     """The daemon is gated by a token already in ops/.env whether or not
     this run could have minted one (final review, 2026-09-28)."""
     ps = _PowerShell(tmp_path)
     env_file = tmp_path / ".env"
     env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-existing\n", encoding="utf-8")
-    proc = _mint(ps, env_file, no_token=no_token, transport=transport, python=python)
+    proc = _mint(ps, env_file, no_token=no_token, transport=transport)
     assert proc.returncode == 0, _output(proc)
     assert "TOKEN_STATE=present" in proc.stdout
     assert "fixture-existing" not in _output(proc)
@@ -141,32 +130,30 @@ def test_default_install_mints_a_token_and_never_prints_it(tmp_path):
     assert _minted(env_file) == [token]
 
 
-@pytest.mark.parametrize("no_token,transport,python,state", [
-    (True, "shim", "real", "opted-out"),
-    (False, "http", "real", "http"),
-    # No shim can be installed, so stage 11 falls back to HTTP, which
-    # cannot carry a token file: minting one would lock every client out.
-    (False, "shim", "none", "no-shim"),
-    (False, "shim", "broken", "no-shim"),
+@pytest.mark.parametrize("no_token,transport,state", [
+    (True, "shim", "opted-out"),
+    (False, "http", "http"),
 ])
-def test_open_loopback_installs_mint_nothing(tmp_path, no_token, transport, python, state):
+def test_open_loopback_installs_mint_nothing(tmp_path, no_token, transport, state):
     ps = _PowerShell(tmp_path)
     env_file = tmp_path / ".env"
     env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
-    proc = _mint(ps, env_file, no_token=no_token, transport=transport, python=python)
+    proc = _mint(ps, env_file, no_token=no_token, transport=transport)
     assert proc.returncode == 0, _output(proc)
     assert f"TOKEN_STATE={state}" in proc.stdout
     assert _minted(env_file) == []
 
 
-def test_pipx_counts_as_shim_tooling_without_probing_pip(tmp_path):
-    # With pipx present the pip probe is skipped, so the broken interpreter
-    # gets as far as the mint itself (which it then fails).
+def test_a_failed_mint_step_leaves_the_board_off_and_says_so(tmp_path):
+    # The native mint step answers without a status: nothing is minted, and
+    # the warning names the manual fix.
     ps = _PowerShell(tmp_path)
     env_file = tmp_path / ".env"
     env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
-    proc = _mint(ps, env_file, python="broken", pipx=True)
+    proc = _mint(ps, env_file, helper=(
+        "function Invoke-NativeHelper { $global:LASTEXITCODE = 1; 'mint failed' }\n"))
     assert proc.returncode == 0, _output(proc)
+    assert _minted(env_file) == []
     assert "TOKEN_STATE=failed" in proc.stdout
     assert "Could not mint a bearer token" in _output(proc)
 
@@ -300,6 +287,8 @@ def _wire(ps: _PowerShell, client: str, *, token_file: str, existing: str | None
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""$env:PATH = '{_q(installed_bin)}' + [IO.Path]::PathSeparator + $env:PATH
 $env:FAKE_CONFIG = '{_q(config)}'
+$env:FAKE_LAUNCHER = '{_q(shim)}'
+$env:FAKE_KEEP_LAUNCHER = '1'
 $clients = @('{client}')
 $Transport = 'shim'
 $codexCredentialBootstrapFailed = $false
@@ -318,15 +307,8 @@ $claudeAgentStateDir = '{_q(state_dir)}'
 $claudeJson = '{_q(claude_json) if claude_json else ""}'
 function Set-CodexRuntimeDefaults {{ $script:codexRuntimeDefaults = 'preserved' }}
 {chr(10).join(fakes)}
-function global:pipx {{
-    $callArgs = @($args)
-    Add-Content -LiteralPath '{_q(call_log)}' -Value ('pipx|' + ($callArgs -join ' '))
-    if ($callArgs[0] -eq 'environment') {{ Write-Output '{_q(installed_bin)}' }}
-    $global:LASTEXITCODE = 0
-}}
 {helper}
-function Get-ShimProcessTable {{ $null }}
-function Get-ShimRuntimePython {{ $null }}
+{native_stub.POWERSHELL}
 {_function("Register-Result($provider, $okState, $okMessage)")}
 {loop}
 Write-Output ("STATE=" + $mcpState['{client}'])
@@ -478,14 +460,6 @@ def test_final_ladder_prints_one_board_line(tmp_path):
     [line] = [line for line in proc.stdout.splitlines() if "Agent board" in line]
     assert re.fullmatch(r"\s*\[!\] Agent board\s+off - no bearer token.*-NoToken.*", line)
     assert "HTTP registration" not in _output(proc)
-
-
-def test_board_line_names_missing_shim_tooling(tmp_path):
-    ps = _PowerShell(tmp_path)
-    proc = _board(ps, token_state="no-shim")
-    assert proc.returncode == 0, _output(proc)
-    [line] = [line for line in proc.stdout.splitlines() if "Agent board" in line]
-    assert "no pipx or pip-capable Python >= 3.10 to install the shim" in line
 
 
 def test_board_line_warns_when_a_gated_daemon_got_an_http_registration(tmp_path):

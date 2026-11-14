@@ -236,8 +236,11 @@ def test_ps_volume_creation_consumes_resolved_names_and_stops_on_failure(tmp_pat
     ps = _PowerShell(tmp_path)
     proc = ps.run(
         "$ClientOnly=$false\n$envFile='fixture.env'\n"
-        "function Get-InstallerPython { 'volume_helper' }\n"
-        "function volume_helper { 'custom-bank'; 'custom-state'; $global:LASTEXITCODE=0 }\n"
+        # The native client's volume-names step, answering resolved names.
+        "function Invoke-NativeHelper {\n"
+        "    if ($args[0] -ne 'volume-names') { throw \"unexpected native step $($args[0])\" }\n"
+        "    'custom-bank'; 'custom-state'; $global:LASTEXITCODE=0\n"
+        "}\n"
         + ps.stub_function("docker", "if ($args[1] -eq 'ls') { $global:LASTEXITCODE=0 } else { $global:LASTEXITCODE=1 }")
         + block + "\n'CONTINUED'\n")
     assert proc.returncode != 0
@@ -348,6 +351,7 @@ def test_preflight_refuses_a_foreign_stack_before_install_can_continue(tmp_path,
 @pytest.mark.parametrize("project", ["user-stack", "", "pseudolife-mcp"])
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 def test_extractor_removal_rechecks_project_and_uses_verified_id(tmp_path, script, project):
+    from tests.native_client_stub import HELPER_PS, HELPER_SH
     from tests.test_installer_client_only import _Shell, _stub
     from tests.test_installer_existing_upgrade import _bash_variants
     from tests.test_installer_client_only_ps import _PowerShell, _q, _output
@@ -365,7 +369,7 @@ def test_extractor_removal_rechecks_project_and_uses_verified_id(tmp_path, scrip
                              f"'{identifier} {project}'" + " }\n$global:LASTEXITCODE=0")
             + f"$ClientOnly=$false\n$overrideFile='{_q(override)}'\n"
             f"$OverrideMarker='{marker}'\n$LegacyOverrideMarker='old'\n$LegacyShimOverrideMarker='older'\n"
-            "function Test-ExtractorDisablesSidecar { $true }\n" + block)
+            "function Test-ExtractorDisablesSidecar { $true }\n" + HELPER_PS + block)
         output, calls = _output(proc), ps.logged()
     else:
         variants = _bash_variants()
@@ -376,7 +380,10 @@ def test_extractor_removal_rechecks_project_and_uses_verified_id(tmp_path, scrip
               f'if [ "$1" = inspect ]; then echo "{identifier} {project}"; fi\n')
         proc = shell.run(f"CLIENT_ONLY=''\noverride_file='{shell.path(override)}'\n"
                          f"OVERRIDE_MARKER='{marker}'\nLEGACY_OVERRIDE_MARKER=old\nLEGACY_SHIM_OVERRIDE_MARKER=older\n"
-                         "extractor_disables_sidecar() { return 0; }\n" + block)
+                         "extractor_disables_sidecar() { return 0; }\n" + HELPER_SH
+                         # The override is written through the installer's own state step.
+                         + next(line for line in text.splitlines() if line.startswith("installer_state() {"))
+                         + "\n" + block)
         output, calls = proc.stdout + proc.stderr, shell.logged()
     assert proc.returncode == 0, output
     removed = [call for call in calls if call.startswith("docker|rm")]

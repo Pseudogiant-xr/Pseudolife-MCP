@@ -152,6 +152,10 @@ SHIM_COMMANDS = {
     # backup's Docker tier is restore_cli's docker_backup, so restore_cli
     # reaches backup and backup's users' rows.
     "restore_cli": ("restore", "backup", "migrate_flat", "update", "doctor", "console"),
+    # No harness row runs `pseudolife-mcp installer` (its goldens and contract
+    # binaries test it), and nothing outside it imports it; it imports connect
+    # and update, so its rows must stay among theirs.
+    "installer": (),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }

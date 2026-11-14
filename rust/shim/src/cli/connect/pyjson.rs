@@ -10,7 +10,7 @@ use super::Defer;
 use std::fmt::Write as _;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum J {
+pub(in crate::cli) enum J {
     Null,
     Bool(bool),
     Int(String),
@@ -20,10 +20,10 @@ pub(super) enum J {
     Dict(Vec<(String, J)>),
 }
 
-pub(super) type Dict = Vec<(String, J)>;
+pub(in crate::cli) type Dict = Vec<(String, J)>;
 
 /// `d.get(key)` with Python's `None` for both an absent key and JSON null.
-pub(super) fn get<'a>(dict: &'a Dict, key: &str) -> Option<&'a J> {
+pub(in crate::cli) fn get<'a>(dict: &'a Dict, key: &str) -> Option<&'a J> {
     match dict.iter().find(|(k, _)| k == key).map(|(_, v)| v) {
         Some(J::Null) | None => None,
         Some(value) => Some(value),
@@ -31,12 +31,12 @@ pub(super) fn get<'a>(dict: &'a Dict, key: &str) -> Option<&'a J> {
 }
 
 /// `key in d`.
-pub(super) fn has(dict: &Dict, key: &str) -> bool {
+pub(in crate::cli) fn has(dict: &Dict, key: &str) -> bool {
     dict.iter().any(|(k, _)| k == key)
 }
 
 /// `d[key] = value`: an existing key keeps its position.
-pub(super) fn set(dict: &mut Dict, key: &str, value: J) {
+pub(in crate::cli) fn set(dict: &mut Dict, key: &str, value: J) {
     match dict.iter_mut().find(|(k, _)| k == key) {
         Some(slot) => slot.1 = value,
         None => dict.push((key.to_owned(), value)),
@@ -44,16 +44,16 @@ pub(super) fn set(dict: &mut Dict, key: &str, value: J) {
 }
 
 /// `d.pop(key, None)`.
-pub(super) fn remove(dict: &mut Dict, key: &str) {
+pub(in crate::cli) fn remove(dict: &mut Dict, key: &str) {
     dict.retain(|(k, _)| k != key);
 }
 
-pub(super) fn get_mut<'a>(dict: &'a mut Dict, key: &str) -> Option<&'a mut J> {
+pub(in crate::cli) fn get_mut<'a>(dict: &'a mut Dict, key: &str) -> Option<&'a mut J> {
     dict.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v)
 }
 
 impl J {
-    pub(super) fn truthy(&self) -> bool {
+    pub(in crate::cli) fn truthy(&self) -> bool {
         match self {
             J::Null => false,
             J::Bool(value) => *value,
@@ -65,14 +65,14 @@ impl J {
         }
     }
 
-    pub(super) fn as_dict(&self) -> Option<&Dict> {
+    pub(in crate::cli) fn as_dict(&self) -> Option<&Dict> {
         match self {
             J::Dict(values) => Some(values),
             _ => None,
         }
     }
 
-    pub(super) fn as_str(&self) -> Option<&str> {
+    pub(in crate::cli) fn as_str(&self) -> Option<&str> {
         match self {
             J::Str(value) => Some(value),
             _ => None,
@@ -80,7 +80,7 @@ impl J {
     }
 
     /// `str(value)`: a str as itself, anything else its repr.
-    pub(super) fn py_str(&self) -> Result<String, Defer> {
+    pub(in crate::cli) fn py_str(&self) -> Result<String, Defer> {
         Ok(match self {
             J::Str(value) => value.clone(),
             other => py_value_repr(other),
@@ -89,7 +89,7 @@ impl J {
 }
 
 /// Python's `str.isspace()`.
-pub(super) fn py_space(c: char) -> bool {
+pub(in crate::cli) fn py_space(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n'
@@ -111,7 +111,7 @@ pub(super) fn py_space(c: char) -> bool {
 }
 
 /// Python's `str.strip()` with no argument.
-pub(super) fn py_strip(text: &str) -> &str {
+pub(in crate::cli) fn py_strip(text: &str) -> &str {
     text.trim_matches(py_space)
 }
 
@@ -363,7 +363,7 @@ impl Reader<'_> {
 }
 
 /// `json.loads(text)`: `Ok(None)` when Python raises a JSONDecodeError.
-pub(super) fn loads(text: &str) -> Result<Option<J>, Defer> {
+pub(in crate::cli) fn loads(text: &str) -> Result<Option<J>, Defer> {
     let mut reader = Reader {
         text,
         at: 0,
@@ -404,7 +404,7 @@ fn int_equals_float(digits: &str, value: f64) -> bool {
 /// Python `==` between two values `json.loads` produced: dicts compare
 /// unordered, bool/int/float numerically and exactly, and NaN equals NaN
 /// because json returns one shared NaN object (identity wins in a dict).
-pub(super) fn py_eq(a: &J, b: &J) -> bool {
+pub(in crate::cli) fn py_eq(a: &J, b: &J) -> bool {
     if let (Some(x), Some(y)) = (numeric(a), numeric(b)) {
         return match (x, y) {
             (Number::Int(x), Number::Int(y)) => x == y,
@@ -431,7 +431,7 @@ pub(super) fn py_eq(a: &J, b: &J) -> bool {
 }
 
 /// Python `repr()` of a value `json.loads` produced.
-pub(super) fn py_value_repr(value: &J) -> String {
+pub(in crate::cli) fn py_value_repr(value: &J) -> String {
     match value {
         J::Null => "None".to_owned(),
         J::Bool(true) => "True".to_owned(),
@@ -525,7 +525,7 @@ fn shortest_digits(value: f64) -> (String, i32) {
 }
 
 /// Python float repr (`float_repr_style == 'short'`).
-pub(super) fn float_repr(value: f64) -> String {
+pub(in crate::cli) fn float_repr(value: f64) -> String {
     let mut out = String::new();
     if value.is_nan() {
         return "nan".to_owned();
@@ -660,14 +660,14 @@ fn append(value: &J, ascii: bool, level: usize, out: &mut String) {
 }
 
 /// `json.dumps(value, indent=2, ensure_ascii=ascii)`.
-pub(super) fn dumps(value: &J, ascii: bool) -> String {
+pub(in crate::cli) fn dumps(value: &J, ascii: bool) -> String {
     let mut out = String::new();
     append(value, ascii, 0, &mut out);
     out
 }
 
 /// Python `repr()` of a str (the dispatcher's pinned Unicode 14 rules).
-pub(super) fn py_repr(text: &str) -> String {
+pub(in crate::cli) fn py_repr(text: &str) -> String {
     crate::cli::mode_repr(text)
 }
 

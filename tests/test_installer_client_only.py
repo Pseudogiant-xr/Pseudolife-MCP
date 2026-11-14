@@ -23,6 +23,9 @@ import threading
 
 import pytest
 
+from tests import installer_sandbox
+from tests import native_client_stub as native_stub
+
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_client_install_ux import _heredoc_payload, _marker_block
 from tests.test_installer_existing_upgrade import (
@@ -98,24 +101,14 @@ class _Shell:
             f"PATH='{self.path(self.bin)}:/usr/bin:/bin'\n"
             f"export PATH CALL_LOG='{self.path(self.calls)}'\n"
             f"repo='{self.path(ROOT)}'\n"
-            f"installer_python() {{ printf '%s\\n' '{self.path(sys.executable)}'; }}\n"
-            # The side-by-side shim runtime is never really installed here:
-            # ops/shim_runtime.py install fails in the shim-install-failed
-            # scenario (FAKE_PIPX_EXIT), otherwise the launcher is the
-            # installed shim path and nothing migrates.
-            "export PSEUDOLIFE_SHIM_PYTHON=fake_runtime_python\n"
-            "fake_runtime_python() {\n"
-            "    case \"$1\" in *shim_runtime.py)\n"
-            "        [ \"${FAKE_PIPX_EXIT:-0}\" = 0 ] || return 1\n"
-            "        if [ \"$2\" = migrate ]; then return 3; fi\n"
-            "        printf '%s/pseudolife-mcp\\n' \"${FAKE_INSTALL_BIN:-/fixture/installed-bin}\"; return 0 ;;\n"
-            "    esac\n"
-            "    return 91\n"
-            "}\n"
+            # The native client's installer steps, answered by the Python
+            # helpers they replaced (native_helper_standin.py).
+            + native_stub.HELPER_SH +
             "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
         )
         env = dict(self.env)
         env.update(extra_env or {})
+        installer_sandbox.require(env, self.tmp)
         return subprocess.run([self.bash], input=prelude + body, capture_output=True,
                               text=True, encoding="utf-8", timeout=120, env=env, check=False)
 
@@ -124,7 +117,8 @@ class _Shell:
 def test_shell_fragment_transport_is_utf8_with_a_cp1252_parent(tmp_path, monkeypatch, direction):
     shell = object.__new__(_Shell)
     shell.bash = "fixture-bash"
-    shell.env = {}
+    shell.env = installer_sandbox.environment(tmp_path)
+    shell.tmp = tmp_path
     shell.home, shell.bin, shell.calls = (tmp_path / name for name in ("home", "bin", "calls"))
     monkeypatch.setattr(shell, "path", lambda path: "/fixture")
     payload = "memory ready" if direction == "ascii" else "memory ─ café"
@@ -203,13 +197,12 @@ def test_loopback_is_the_shims_own_answer(bash, tmp_path, url):
 
 @BASH
 def test_the_installer_asks_the_shims_helper(bash, tmp_path):
-    """The decision is the helper's, not a copy of its rule: a stand-in
-    interpreter answering "loopback" (exit 10) keeps even a remote URL local."""
+    """The decision is the native client's, not a copy of its rule: an
+    is-loopback step answering "loopback" (exit 10) keeps even a remote URL
+    local."""
     shell = _Shell(bash, tmp_path)
-    _stub(shell.bin / "fake-loopback-python", "exit 10\n")
     proc = _mode(shell, daemon_url=REMOTE,
-                 prelude=f"installer_python() {{ printf '%s\\n' "
-                         f"'{shell.path(shell.bin / 'fake-loopback-python')}'; }}\n")
+                 prelude='native_helper() { [ "$1" = is-loopback ] && return 10; return 2; }\n')
     assert proc.returncode == 0, proc.stderr
     assert "CLIENT_ONLY=\n" in proc.stdout
 
@@ -217,9 +210,11 @@ def test_the_installer_asks_the_shims_helper(bash, tmp_path):
 @pytest.mark.parametrize("url,client_only", [
     ("http://127.0.0.1:8765", ""), ("http://[::1]:8765", ""), (REMOTE, "1")])
 @BASH
-def test_without_python_the_host_rule_decides(bash, tmp_path, url, client_only):
+def test_without_the_clients_answer_the_host_rule_decides(bash, tmp_path, url, client_only):
+    """A native step that answers neither 10 nor 11 leaves the decision to
+    the installer's own host rule."""
     proc = _mode(_Shell(bash, tmp_path), daemon_url=url,
-                 prelude="installer_python() { :; }\n")
+                 prelude="native_helper() { return 1; }\n")
     assert proc.returncode == 0, proc.stderr
     assert f"CLIENT_ONLY={client_only}\n" in proc.stdout
 
@@ -769,11 +764,12 @@ def _assert_code_unseen(shell: _Shell, proc, code: str = PAIRING_CODE) -> None:
         assert code.strip() not in text and canonical not in text.upper().replace("-", ""), text
 
 
-def _is_code_sh(shell: _Shell, values: list[str], python: str | None = None) -> list[bool]:
-    """is_pairing_code on each value, fed on stdin as the preflight feeds it."""
+def _is_code_sh(shell: _Shell, values: list[str], helper_answers: bool = True) -> list[bool]:
+    """is_pairing_code on each value, fed on stdin as the preflight feeds it;
+    without ``helper_answers`` the native step answers neither 10 nor 11."""
     feed = shell.tmp / "values.txt"
     feed.write_bytes("".join(value + "\n" for value in values).encode("utf-8"))
-    prelude = (f"installer_python() {{ printf '%s\\n' '{python}'; }}\n" if python else "")
+    prelude = "" if helper_answers else "native_helper() { cat >/dev/null; return 1; }\n"
     proc = shell.run(
         prelude + _block("client-only preflight")
         + f"while IFS= read -r value; do\n"
@@ -783,19 +779,15 @@ def _is_code_sh(shell: _Shell, values: list[str], python: str | None = None) -> 
     return [line == "CODE" for line in proc.stdout.splitlines()]
 
 
-@pytest.mark.parametrize("fallback", [False, True], ids=["python", "shell-rule"])
+@pytest.mark.parametrize("fallback", [False, True], ids=["client", "shell-rule"])
 @BASH
 def test_a_pairing_code_is_recognised_exactly_as_pair_reads_one(bash, tmp_path, fallback):
     """The shape is the shim's own rule (principals.normalize_pairing_code),
     and the shell rule used when that cannot be asked gives the same answer."""
     from pseudolife_memory.principals import normalize_pairing_code
     shell = _Shell(bash, tmp_path)
-    python = None
-    if fallback:
-        _stub(shell.bin / "broken-python", "exit 1\n")
-        python = shell.path(shell.bin / "broken-python")
     values = CODE_FORMS + NOT_CODES
-    assert _is_code_sh(shell, values, python) == [
+    assert _is_code_sh(shell, values, helper_answers=not fallback) == [
         normalize_pairing_code(value) is not None for value in values]
 
 
@@ -982,6 +974,26 @@ def test_the_paired_token_file_is_checked_as_a_given_one_is(bash, tmp_path):
 
 # -- Codex: the credential helper gets the operator's token and the remote URL --
 
+# The native client's Codex steps, canned per test after native_stub.BASH;
+# every other step goes to the stand-in. ``credentials`` is the shell body of
+# the codex-credentials step, which the installer always feeds on stdin here.
+_HOOKS_READY = ("printf '{\"status\":\"ready\",\"source\":\"manual\","
+                "\"instructions\":\"covered-by-hooks\",\"recovery\":null}\\n'")
+
+
+def _codex_steps_sh(credentials: str) -> str:
+    return (native_stub.HELPER_SH.replace("native_helper()", "standin_helper()")
+            + "native_helper() {\n"
+              "    case \"$1\" in\n"
+              f"        codex-credentials) {credentials} ;;\n"
+              "        codex-runtime-defaults)\n"
+              "            printf '{\"status\":\"ready\",\"runtime_defaults\":\"configured\"}\\n' ;;\n"
+              f"        codex-hooks) {_HOOKS_READY} ;;\n"
+              "        *) standin_helper \"$@\" ;;\n"
+              "    esac\n"
+              "}\n")
+
+
 @BASH
 def test_codex_credentials_come_from_the_token_file_and_the_remote_url(bash, tmp_path):
     """Section 9 hands the Codex credential helper the token on stdin (never
@@ -990,18 +1002,11 @@ def test_codex_credentials_come_from_the_token_file_and_the_remote_url(bash, tmp
     shell = _Shell(bash, tmp_path)
     token = _token(shell)
     captured = tmp_path / "helper.txt"
-    _stub(shell.bin / "python3",
-          "case \"$1\" in\n"
-          "  -c) exec \"$FIXTURE_PYTHON\" \"$@\" ;;\n"
-          "  *setup-codex-coordination.py)\n"
-          "    { printf 'ARGS=%s\\n' \"$*\"; printf 'STDIN='; cat; printf '\\n'; } >\"$CAPTURED\"\n"
-          "    printf '{\"status\":\"ready\",\"credential_file_configured\":true,"
-          "\"connection_configured\":true,\"credential_file_path\":\"/fixture/codex/token\","
-          "\"daemon_url\":\"%s\"}\\n' \"$FIXTURE_URL\" ;;\n"
-          "  *setup-codex-hooks.py)\n"
-          "    printf '{\"status\":\"ready\",\"source\":\"manual\","
-          "\"instructions\":\"covered-by-hooks\",\"recovery\":null}\\n' ;;\n"
-          "esac\n")
+    steps = _codex_steps_sh(
+        "{ printf 'ARGS=%s\\n' \"$*\"; printf 'STDIN='; cat; printf '\\n'; } >\"$CAPTURED\"\n"
+        "            printf '{\"status\":\"ready\",\"credential_file_configured\":true,"
+        "\"connection_configured\":true,\"credential_file_path\":\"/fixture/codex/token\","
+        "\"daemon_url\":\"%s\"}\\n' \"$FIXTURE_URL\"")
     env_file = tmp_path / ".env"
     env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-local-token\n"
                         "PSEUDOLIFE_MCP_DAEMON_URL=http://127.0.0.1:8765\n", encoding="utf-8")
@@ -1012,12 +1017,12 @@ def test_codex_credentials_come_from_the_token_file_and_the_remote_url(bash, tmp
         f"repo='{shell.path(ROOT)}'\nenv_file='{shell.path(env_file)}'\n"
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
         "CLIENTS=codex CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD=''\n"
-        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + stages
+        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n"
+        + steps + stages
         + "\nprintf 'FILE=%s\\nURL=%s\\n' \"$CODEX_CREDENTIAL_FILE\" \"$CODEX_CREDENTIAL_URL\"\n",
         strict="set -euo pipefail",
         extra_env={"CAPTURED": str(captured), "FIXTURE_URL": REMOTE,
-                   "FIXTURE_PYTHON": _bash_fixture_path(bash, Path(sys.executable),
-                                                        shell.env)})
+                   "FAKE_LAUNCHER": _bash_fixture_path(bash, tmp_path / "native" / "pseudolife-mcp", shell.env)})
     assert proc.returncode == 0, proc.stderr
     helper = captured.read_text(encoding="utf-8")
     assert "--installer-token-stdin" in helper
@@ -1035,30 +1040,17 @@ CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_c
               '"credential_file_path":"/fixture/codex/token","daemon_url":"%s"}')
 
 
-def _codex_wiring(shell: _Shell, *, python_ok: bool = True, cred: str | None = None,
-                  cred_exit: int = 0, pipx_exit: int = 0, existing: str = ""):
-    """Sections 9 to 11 for a Codex-only client-only install, with stub
-    python, pipx and codex. Returns the run and the codex calls."""
+def _codex_wiring(shell: _Shell, *, cred: str | None = None,
+                  cred_exit: int = 0, native_exit: int = 0, existing: str = ""):
+    """Sections 9 to 11 for a Codex-only client-only install, with canned
+    Codex steps, the native client (``native_exit`` is its install result)
+    and a stub codex. Returns the run and the codex calls."""
     token = _token(shell)
     installed = shell.tmp / "installed-bin"
     installed.mkdir()
     _stub(installed / "pseudolife-mcp", "exit 0\n")
-    for name in ("python3", "python"):
-        _stub(shell.bin / name,
-              "case \"$1\" in\n"
-              "  -c) [ \"$FAKE_PY_OK\" = 1 ] || exit 1; exec \"$FIXTURE_PYTHON\" \"$@\" ;;\n"
-              "  *setup-codex-coordination.py)\n"
-              "    if [ \"$2\" = --runtime-defaults ]; then\n"
-              "      printf '{\"status\":\"ready\",\"runtime_defaults\":\"configured\"}\\n'; exit 0; fi\n"
-              "    cat >/dev/null; printf '%s\\n' \"$FAKE_CRED\"; exit \"$FAKE_CRED_EXIT\" ;;\n"
-              "  *setup-codex-hooks.py)\n"
-              "    printf '{\"status\":\"ready\",\"source\":\"manual\","
-              "\"instructions\":\"covered-by-hooks\",\"recovery\":null}\\n' ;;\n"
-              "esac\n")
-    _stub(shell.bin / "pipx",
-          "if [ \"$1\" = environment ]; then\n"
-          "  [ \"$3\" = PIPX_BIN_DIR ] && printf '%s\\n' \"$FAKE_INSTALL_BIN\"; exit 0; fi\n"
-          "exit \"$FAKE_PIPX_EXIT\"\n")
+    steps = _codex_steps_sh(
+        "cat >/dev/null; printf '%s\\n' \"$FAKE_CRED\"; return \"$FAKE_CRED_EXIT\"")
     _stub(shell.bin / "codex",
           "printf 'codex|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "if [ \"$1 $2\" = 'mcp get' ]; then\n"
@@ -1073,16 +1065,15 @@ def _codex_wiring(shell: _Shell, *, python_ok: bool = True, cred: str | None = N
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
         "CLIENTS=codex CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD=''\n"
         "AGENTS_FILE='' TRANSPORT=shim\n"
-        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + stages
+        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n"
+        + steps + stages
         + "\nprintf 'MCP_CODEX=%s\\n' \"$MCP_CODEX\"\n",
         strict="set -euo pipefail",
-        extra_env={"FAKE_PY_OK": "1" if python_ok else "0",
-                   "FIXTURE_PYTHON": _bash_fixture_path(shell.bash, Path(sys.executable),
-                                                        shell.env),
-                   "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
-                   "FAKE_CRED_EXIT": str(cred_exit), "FAKE_PIPX_EXIT": str(pipx_exit),
+        extra_env={"FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
+                   "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(native_exit),
                    "FAKE_EXISTING": existing,
-                   "FAKE_INSTALL_BIN": _bash_fixture_path(shell.bash, installed, shell.env)})
+                   "FAKE_LAUNCHER": _bash_fixture_path(shell.bash, installed / "pseudolife-mcp", shell.env),
+                   "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in shell.logged()
             if call.startswith("codex|mcp add") and "--help" not in call]
     return proc, adds
@@ -1100,11 +1091,10 @@ def test_codex_registers_with_the_remote_url_and_its_credential_file(bash, tmp_p
 
 
 @pytest.mark.parametrize("scenario,kwargs,says", [
-    ("no python", {"python_ok": False}, "Python 3.10"),
     ("credential setup failed",
      {"cred": '{"status":"needs-configuration","recovery":"fixture"}', "cred_exit": 1},
      "credential setup failed"),
-    ("shim install failed", {"pipx_exit": 1}, "stdio shim"),
+    ("shim install failed", {"native_exit": 1}, "stdio shim"),
     ("existing registration elsewhere",
      {"cred": CRED_READY % "http://127.0.0.1:8765",
       "existing": "pseudolife-memory\n  command: pseudolife-mcp\n"
@@ -1292,7 +1282,7 @@ def _copy_repo(tmp_path: Path) -> Path:
     wrote ops/.env or the compose override must not touch the real tree."""
     repo = tmp_path / "repo"
     for rel in ("ops/install.sh", "ops/install-hook.sh", "ops/client_credentials.py",
-                "ops/.env.example", "examples/CLAUDE.memory.md"):
+                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     (repo / "ops" / "install.sh").chmod(0o755)
@@ -1308,18 +1298,24 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     repo = _copy_repo(tmp_path)
     installed = tmp_path / "installed-bin"
     installed.mkdir()
-    _stub(installed / "pseudolife-mcp",
-          "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-          "if [ \"$1\" = connect ]; then\n"
-          "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
-          "exit 0\n")
+    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    # The staged client's installer steps are answered by the stand-in, which
+    # runs this checkout's helpers as the native client carries its own.
+    standin = shell.path(ROOT / "tests" / "native_helper_standin.py")
+    release_env = native_stub.write_release(
+        tmp_path / "release", version,
+        "if [ \"$1\" = installer ] && [ \"$2\" != migrate-registrations ]; then\n"
+        f"  shift; exec '{shell.path(sys.executable)}' '{standin}' '{shell.path(ROOT)}' \"$@\"\nfi\n"
+        "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+        "if [ \"$1\" = connect ]; then\n"
+        "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+        "exit 0\n")
+    release_env["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] = shell.path(tmp_path / "release")
+    # ops/install-hook.sh (the Claude session hook) still edits settings.json
+    # with python3 until it is moved to the native client.
     python = shell.path(sys.executable)
     for name in ("python3", "python"):
         _stub(shell.bin / name, f"exec '{python}' \"$@\"\n")
-    _stub(shell.bin / "pipx",
-          "printf 'pipx|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-          "if [ \"$1\" = environment ] && [ \"$3\" = PIPX_BIN_DIR ]; then "
-          "printf '%s\\n' \"$FAKE_INSTALL_BIN\"; fi\nexit 0\n")
     _stub(shell.bin / "claude",
           "printf 'claude|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "if [ \"$1 $2\" = 'mcp get' ]; then exit 1; fi\n"
@@ -1340,7 +1336,9 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
         f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
         "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
         extra_env={"FAKE_HEALTH": HEALTH_ON,
-                   "FAKE_INSTALL_BIN": _bash_fixture_path(bash, installed, shell.env),
+                   **release_env,
+                   "PSEUDOLIFE_SHIM_RUNTIMES": shell.path(installed / "runtimes"),
+                   "PSEUDOLIFE_SHIM_LAUNCHER": shell.path(installed / "pseudolife-mcp"),
                    "PYTHONPATH": str(ROOT),
                    # The installer's own environment carries an older credential.
                    "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})

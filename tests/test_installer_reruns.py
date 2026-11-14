@@ -5,6 +5,7 @@ import inspect
 
 import pytest
 
+from tests.native_client_stub import HELPER_PS, HELPER_SH
 from tests.test_installer_client_only import ROOT, _Shell, _block
 from tests.test_installer_client_only_ps import _PowerShell, _q, _output
 from tests.test_installer_existing_upgrade import _bash_variants
@@ -180,7 +181,7 @@ def test_managed_block_rewrite_is_quiet_and_keeps_timestamp_on_rerun(tmp_path, s
               "TRANSPORT": "shim", "NO_TOKEN": "1"}
     if script.endswith(".ps1"):
         ps = _PowerShell(tmp_path)
-        prefix = f"$envFile='{_q(env)}'\n$EnvBegin='{BEGIN}'\n$EnvEnd='{END}'\n"
+        prefix = HELPER_PS + f"$envFile='{_q(env)}'\n$EnvBegin='{BEGIN}'\n$EnvEnd='{END}'\n"
         names = {"EXTRACTOR": "Extractor", "MODEL": "Model", "EXTRACTOR_URL": "ExtractorUrl", "CLIENT": "Client",
                  "SHIM_PORT": "ShimPort", "INSTRUCTIONS": "Instructions", "CODEX_HOOKS": "CodexHooks",
                  "CLAUDE_PLUGIN": "ClaudePlugin", "CLAUDE_LEGACY_HOOKS": "ClaudeLegacyHooks", "TRANSPORT": "Transport", "NO_TOKEN": "NoToken"}
@@ -196,7 +197,7 @@ def test_managed_block_rewrite_is_quiet_and_keeps_timestamp_on_rerun(tmp_path, s
         if not variants:
             pytest.skip("Bash unavailable")
         shell = _Shell(variants[0], tmp_path)
-        prefix = f"env_file='{shell.path(env)}'\nENV_BEGIN='{BEGIN}'\nENV_END='{END}'\n"
+        prefix = HELPER_SH + f"env_file='{shell.path(env)}'\nENV_BEGIN='{BEGIN}'\nENV_END='{END}'\n"
         prefix += "".join(f"{key}='{value}'\n" for key, value in common.items())
         prefix += "CLIENT_ONLY=''\nDAEMON_URL=''\nEXPLICIT_ARGS=''\nCLIENT_LIST=codex\nWRITER_ID=codex\nBANK_LOCATION=local\nCLAUDE_MD=''\ncheck_extractor_args() { :; }\n"
         body = prefix + block(script, "recorded choices") + _block("extractor env") + block(script, "managed configuration")
@@ -216,7 +217,7 @@ def test_explicit_auto_port_overrides_a_recorded_custom_port(tmp_path, script):
     env.write_text(managed(PSEUDOLIFE_INSTALL_EXTRACTOR="openai-only", PSEUDOLIFE_INSTALL_MODEL="gpt-future",
                             PSEUDOLIFE_INSTALL_SHIM_PORT="8099"), encoding="utf-8")
     if script.endswith(".ps1"):
-        body = ("function Invoke-Fixture { param([int]$ShimPort)\n"
+        body = (HELPER_PS + "function Invoke-Fixture { param([int]$ShimPort)\n"
                 f"$envFile='{_q(env)}'\n$ClientOnly=$false\n$DaemonUrl=''\n$Extractor=''\n"
                 "$Model=''\n$ExtractorUrl=''\n$Client=''\nfunction Assert-ExtractorArgs { }\n"
                 + block(script, "recorded choices") + '\n"PORT=$ShimPort"\n}\nInvoke-Fixture -ShimPort 0\n')
@@ -227,7 +228,7 @@ def test_explicit_auto_port_overrides_a_recorded_custom_port(tmp_path, script):
         if not variants:
             pytest.skip("Bash unavailable")
         shell = _Shell(variants[0], tmp_path)
-        proc = shell.run(f"env_file='{shell.path(env)}'\nCLIENT_ONLY=''\nDAEMON_URL=''\nEXTRACTOR=''\n"
+        proc = shell.run(HELPER_SH + f"env_file='{shell.path(env)}'\nCLIENT_ONLY=''\nDAEMON_URL=''\nEXTRACTOR=''\n"
                          "MODEL=''\nEXTRACTOR_URL=''\nCLIENT=''\nSHIM_PORT=0\nEXPLICIT_ARGS=' --shim-port '\n"
                          "check_extractor_args() { :; }\n" + block(script, "recorded choices") + '\necho "PORT=$SHIM_PORT"\n')
         output = proc.stdout + proc.stderr
@@ -272,7 +273,7 @@ def test_resolved_instruction_choice_and_custom_target_survive_a_rerun(tmp_path,
         ps = _PowerShell(tmp_path)
         stage = source[source.index("# -- 10. standing"):source.index("# -- 11. wire")]
         invoke = block(script, "recorded choices").split("$script:installerRerun =", 1)[0]
-        prefix = (f"$repo='{_q(repo)}'\n$envFile='{_q(env)}'\n$overrideFile='{_q(repo / 'absent.yml')}'\n"
+        prefix = (HELPER_PS + f"$repo='{_q(repo)}'\n$envFile='{_q(env)}'\n$overrideFile='{_q(repo / 'absent.yml')}'\n"
                   f"$clients=@('{client}')\n$Client='{client}'\n$Extractor='sidecar'\n$Model=''\n$ExtractorUrl=''\n$ShimPort=0\n"
                   "$ClientOnly=$false\n$DaemonUrl=''\n$instructionChoice='auto'\n$Instructions='auto'\n$AgentsFile=''\n$claudePluginInstalled=$false\n"
                   + invoke
@@ -292,7 +293,7 @@ def test_resolved_instruction_choice_and_custom_target_survive_a_rerun(tmp_path,
         shell = _Shell(variants[0], tmp_path)
         stage = source[source.index("# ── 10. standing"):source.index("# ── 11. wire")]
         invoke = block(script, "recorded choices").split('INSTALLER_RERUN=""', 1)[0]
-        prefix = (f"repo='{shell.path(repo)}'\nenv_file='{shell.path(env)}'\noverride_file='{shell.path(repo / 'absent.yml')}'\n"
+        prefix = (HELPER_SH + f"repo='{shell.path(repo)}'\nenv_file='{shell.path(env)}'\noverride_file='{shell.path(repo / 'absent.yml')}'\n"
                   f"CLIENTS={client}\nCLIENT={client}\nEXTRACTOR=sidecar\nMODEL=''\nEXTRACTOR_URL=''\nSHIM_PORT=0\n"
                   "CLIENT_ONLY=''\nDAEMON_URL=''\nEXPLICIT_ARGS=''\nINSTRUCTIONS=auto\ninstruction_choice=auto\nAGENTS_FILE=''\nCLAUDE_PLUGIN_INSTALLED=''\n"
                   + invoke + 'compose_snapshot_json="$(installer_state fixture-plan --repo "$repo" --env-file "$env_file")"\n')
@@ -327,7 +328,7 @@ def test_a_recorded_endpoint_is_reused_without_an_extractor_flag(tmp_path, scrip
     if script.endswith(".ps1"):
         stage = source[source.index("# -- 3. extractor choice"):source.index("$claudeShimMode =")]
         proc = _PowerShell(tmp_path).run(
-            f"$envFile='{_q(env)}'\n$EnvBegin='{BEGIN}'\n$EnvEnd='{END}'\n"
+            HELPER_PS + f"$envFile='{_q(env)}'\n$EnvBegin='{BEGIN}'\n$EnvEnd='{END}'\n"
             "$Extractor=''\n$Model=''\n$ExtractorUrl=''\n$Client=''\n$ShimPort=0\n"
             "$ClientOnly=$false\n$DaemonUrl=''\n$interactive=$false\n"
             "function Assert-ExtractorArgs { }\n" + block(script, "recorded choices") + stage
@@ -339,7 +340,7 @@ def test_a_recorded_endpoint_is_reused_without_an_extractor_flag(tmp_path, scrip
             pytest.skip("Bash unavailable")
         shell = _Shell(variants[0], tmp_path)
         stage = source[source.index("# ── 3. extractor choice"):source.index('claude_shim_mode="";')]
-        proc = shell.run(f"env_file='{shell.path(env)}'\nENV_BEGIN='{BEGIN}'\nENV_END='{END}'\n"
+        proc = shell.run(HELPER_SH + f"env_file='{shell.path(env)}'\nENV_BEGIN='{BEGIN}'\nENV_END='{END}'\n"
                          "EXTRACTOR=''\nMODEL=''\nEXTRACTOR_URL=''\nCLIENT=''\nSHIM_PORT=0\n"
                          "CLIENT_ONLY=''\nDAEMON_URL=''\nEXPLICIT_ARGS=''\ncheck_extractor_args() { :; }\n"
                          + block(script, "recorded choices") + stage
@@ -367,7 +368,7 @@ def test_compose_runs_only_the_needed_step(tmp_path, script, plan):
             pytest.skip("Bash unavailable")
         shell = _Shell(variants[0], tmp_path)
         stage = source[source.index("# ── 7. bring the stack up"):source.index("# ── 8b. Claude Code plugin")]
-        proc = shell.run("CLIENT_ONLY=''\nenv_file=fixture.env\ncompose_file=fixture.yml\noverride_file=missing.yml\n"
+        proc = shell.run(HELPER_SH + "CLIENT_ONLY=''\nenv_file=fixture.env\ncompose_file=fixture.yml\noverride_file=missing.yml\n"
                          + f"installer_state() {{ echo '{{\"action\":\"{plan}\"}}'; }}\n" + stage)
         calls, output = shell.logged(), proc.stdout + proc.stderr
     assert proc.returncode == 0, output

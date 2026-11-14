@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "0c68fc4d053a291c",
+  "fingerprint": "4dd842b6f6328a4e",
+  "reason": "parity_scope.SHIM_COMMANDS maps the installer entry to no rows: a diff only under rust/shim/src/cli/installer now selects the floor shards instead of every W1-C shard, and every other diff selects what it did, so the job's cost is unchanged or lower."
+}

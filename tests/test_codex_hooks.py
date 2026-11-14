@@ -17,6 +17,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from tests import native_client_stub as native_stub
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # A hang guard for every hook and installer process this file runs, not a
@@ -736,8 +738,11 @@ def test_installer_hook_and_instruction_stages_together(
     ("ask", "auto", "skipped", None),
     ("no", "auto", "skipped", None),
 ])
-def test_installer_codex_without_python_reports_unavailable(
+def test_installer_codex_setup_that_cannot_run_reports_unavailable(
         tmp_path, shell, trust, instructions, expected, existing):
+    """When the native client's Codex steps fail outright, Codex is reported
+    unavailable with its recovery, nothing under the real home is touched,
+    and the standing-instruction fallback still honours the consent given."""
     home = tmp_path / "home"
     home.mkdir()
     codex_home = home / "custom codex"
@@ -752,9 +757,10 @@ def test_installer_codex_without_python_reports_unavailable(
     env = isolated_env(codex_home)
     env.update({"HOME": home.as_posix(), "USERPROFILE": home.as_posix()})
     result = run_installer_stages(tmp_path, shell, ROOT, env, "auto", trust, instructions,
-                                  missing_python=True)
+                                  helper_fails=True)
     assert f"RESULT:unavailable:{expected}" in result
-    assert "Install Python 3.10 or newer" in result
+    assert "Codex credential setup failed" in result
+    assert "Install Python" not in result
     assert not (home / ".codex").exists()
     assert target.exists() == (expected != "skipped")
     if expected == "appended":
@@ -864,8 +870,8 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
         "step() { :; }\n"
         "get_env() { case \"$1\" in PSEUDOLIFE_MCP_TOKEN) printf installer-file-token ;; "
         "PSEUDOLIFE_MCP_DAEMON_URL) printf http://127.0.0.1:9876 ;; esac; }\n"
-        + ("pipx() { if [ \"$1\" = environment ]; then printf '%s\\n' \"$FIXTURE_SHIM_BIN\"; fi; return 0; }\n"
-           if shim_available else "pipx() { return 1; }\n")
+        + (native_stub.NATIVE_FROM_SHIM_BIN_SH
+           if shim_available else native_stub.NATIVE_UNAVAILABLE_SH)
         +
         "codex() {\n"
         "  if [ \"$1 $2\" = 'mcp get' ]; then return 1; fi\n"
@@ -888,9 +894,6 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
     runtime_marker = tmp_path / "runtime-called"
     env = isolated_env(home)
     env.update({
-        # No side-by-side runtime install inside the slice: the fake has no
-        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
-        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(),
         "USERPROFILE": home.as_posix(),
         "PSEUDOLIFE_MCP_TOKEN": "ambient-static-token",
@@ -1025,14 +1028,7 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
-# The side-by-side runtime install is refused here (PSEUDOLIFE_SHIM_PYTHON
-# names this function), so the pipx path stays what this test drives.
-function fake-no-runtime {{ $global:LASTEXITCODE = 1 }}
-function pipx {{
-    $global:LASTEXITCODE=0
-    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
-}}
+{native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
     if ($args -contains '--help') {{ $global:LASTEXITCODE=0; return '--env' }}
@@ -1051,9 +1047,6 @@ function codex {{
 ''', encoding="utf-8")
     env = isolated_env(home)
     env.update({
-        # No side-by-side runtime install inside the slice: the fake has no
-        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
-        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
         "PYTHONPATH": str(ROOT), "FIXTURE_CREDENTIAL": str(credential_marker),
         "FIXTURE_HOOK": str(hook_marker), "FIXTURE_RUNTIME": str(runtime_marker),
@@ -1158,7 +1151,7 @@ print(json.dumps(result))
             "INSTRUCTIONS=auto\nCLAUDE_MD=''\nAGENTS_FILE=''\nTRANSPORT=shim\n"
             "step() { :; }\n"
             "get_env() { if [ \"$1\" = PSEUDOLIFE_MCP_DAEMON_URL ]; then printf '%s' \"$FIXTURE_INSTALLER_URL\"; fi; }\n"
-            "pipx() { if [ \"$1\" = environment ]; then printf '%s\\n' \"$FIXTURE_SHIM_BIN\"; fi; return 0; }\n"
+            + native_stub.NATIVE_FROM_SHIM_BIN_SH +
             "codex() {\n"
             " if [ \"$1 $2\" = 'mcp get' ]; then return 1; fi\n"
             " if [ \"$1 $2 $3\" = 'mcp add --help' ]; then [ \"$FIXTURE_ENV_SUPPORTED\" = 1 ] && echo --env; return 0; fi\n"
@@ -1183,14 +1176,7 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
-# The side-by-side runtime install is refused here (PSEUDOLIFE_SHIM_PYTHON
-# names this function), so the pipx path stays what this test drives.
-function fake-no-runtime {{ $global:LASTEXITCODE = 1 }}
-function pipx {{
-    $global:LASTEXITCODE=0
-    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
-}}
+{native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
     if ($args -contains '--help') {{
@@ -1242,9 +1228,6 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
     wrong_url = f"http://127.0.0.1:{wrong.server_port}"
     env = isolated_env(home)
     env.update({
-        # No side-by-side runtime install inside the slice: the fake has no
-        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
-        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
         "PYTHONPATH": str(ROOT), "FIXTURE_HOOK_HELPER": str(ROOT / "ops/setup-codex-hooks.py"),
         "FIXTURE_CREDENTIAL": str(credential_marker), "FIXTURE_RUNTIME": str(runtime_marker),
@@ -1314,35 +1297,6 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
             server.server_close()
         for worker in workers:
             worker.join(timeout=2)
-
-
-def test_powershell_shim_lookup_tolerates_an_unrunnable_interpreter(tmp_path):
-    """A PSEUDOLIFE_SHIM_PYTHON that cannot be run (a removed venv, a stale
-    override) must read as "no launcher" and fall through to pipx / pip,
-    never stop the installer with a terminating CommandNotFound under
-    $ErrorActionPreference = Stop (found by a full run on 2026-09-29)."""
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("pwsh not available")
-    source = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
-    functions = []
-    for name in ("Get-InstallerPython", "Get-ShimRuntimePython", "Resolve-InstalledShimPath"):
-        match = re.search(rf"(?ms)^function {re.escape(name)}\b.*?^}}", source)
-        assert match, name
-        functions.append(match[0])
-    driver = tmp_path / "driver.ps1"
-    driver.write_text(
-        "$ErrorActionPreference='Stop'\n"
-        f"$repo='{ROOT.as_posix()}'\n"
-        "$env:PSEUDOLIFE_SHIM_PYTHON='definitely-not-a-command-here'\n"
-        "function Get-Command($Name, $ErrorAction) { return $null }\n"
-        + "\n".join(functions) +
-        "\n$launcher = Resolve-InstalledShimPath @{ Cmd = 'runtime' }\n"
-        "if ($null -ne $launcher) { throw \"unexpected launcher $launcher\" }\n"
-        "Write-Output 'tolerated'\n", encoding="utf-8")
-    completed = subprocess.run([pwsh, "-NoProfile", "-File", str(driver)], capture_output=True, timeout=60)
-    assert completed.returncode == 0, (completed.stdout.decode(), completed.stderr.decode())
-    assert b"tolerated" in completed.stdout
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
@@ -1427,7 +1381,7 @@ print(json.dumps(result))
             " [ \"$1\" = PSEUDOLIFE_MCP_DAEMON_URL ] && printf '%s' \"$FIXTURE_INSTALLER_URL\"\n"
             " [ \"$1\" = PSEUDOLIFE_MCP_TOKEN ] && printf '%s' \"$FIXTURE_INSTALLER_TOKEN\"\n"
             " return 0\n}\n"
-            "pipx() { [ \"$1\" = environment ] && printf '%s\\n' \"$FIXTURE_SHIM_BIN\"; return 0; }\n"
+            + native_stub.NATIVE_FROM_SHIM_BIN_SH +
             "codex() {\n"
             " if [ \"$1 $2\" = 'mcp get' ]; then return 1; fi\n"
             " if [ \"$1 $2 $3\" = 'mcp add --help' ]; then echo --env; return 0; fi\n"
@@ -1453,14 +1407,7 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
-# The side-by-side runtime install is refused here (PSEUDOLIFE_SHIM_PYTHON
-# names this function), so the pipx path stays what this test drives.
-function fake-no-runtime {{ $global:LASTEXITCODE = 1 }}
-function pipx {{
-    $global:LASTEXITCODE=0
-    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
-}}
+{native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
     if ($args -contains '--help') {{ $global:LASTEXITCODE=0; return '--env' }}
@@ -1481,9 +1428,6 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
     _write_token_file(forwarded, "forwarded-fixture")
     env = isolated_env(home)
     env.update({
-        # No side-by-side runtime install inside the slice: the fake has no
-        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
-        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
         "PYTHONPATH": str(ROOT), "FIXTURE_HOOK_HELPER": str(ROOT / "ops/setup-codex-hooks.py"),
         "FIXTURE_CREDENTIAL": str(marker), "FIXTURE_CODEX_CALL": str(codex_call),
@@ -1587,11 +1531,30 @@ def test_bash_tokenless_connection_is_scoped_to_codex_context(
 
 
 def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions,
-                         missing_python=False, launch_throws=False):
+                         helper_fails=False, launch_throws=False):
+    """Run sections 9 and 10 of an installer with the native client's
+    installer steps answered by the stand-in helper (the Python helpers in
+    ``repo``). ``helper_fails``: every native step exits 1 with no output.
+    ``launch_throws`` (PowerShell): the credential step answers tokenless and
+    launching the hook step throws."""
     if shell == "powershell":
         text = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
         stages = text.split("# -- 9. session lifecycle hooks", 1)[1].split(
             "# -- 11. wire into selected MCP clients", 1)[0].split("\n", 1)[1]
+        if helper_fails:
+            helper = "function Invoke-NativeHelper { $global:LASTEXITCODE = 1 }\n"
+        elif launch_throws:
+            helper = (
+                "function Invoke-NativeHelper {\n"
+                "  if ($args[0] -eq 'codex-credentials') {\n"
+                "    $global:LASTEXITCODE = 0\n"
+                "    Write-Output '{\"status\":\"tokenless\",\"credential_file_configured\":false,\"connection_configured\":false}'\n"
+                "    return\n"
+                "  }\n"
+                "  throw 'fixture launch failure'\n"
+                "}\n")
+        else:
+            helper = native_stub.HELPER_PS
         script = tmp_path / "stages.ps1"
         script.write_text(
             "$ErrorActionPreference = 'Stop'\n"
@@ -1601,18 +1564,7 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
             "function Step($text) { Write-Host $text }\n"
             "function Get-EnvValue($name) { return $null }\n"
             "function Read-Host($text) { throw 'Unexpected second prompt' }\n"
-            + ("function Get-Command($Name) { return $null }\n" if missing_python else "")
-            + ("function Get-Command($Name) { if ($Name -eq 'python') { return 'python' }; return $null }\n"
-               "function python { $global:LASTEXITCODE = 0; Write-Output 'fixture-python' }\n"
-               "function fixture-python {\n"
-               "  if ($args[0] -like '*setup-codex-coordination.py') {\n"
-               "    $global:LASTEXITCODE = 0\n"
-               "    Write-Output '{\"status\":\"tokenless\",\"credential_file_configured\":false,\"connection_configured\":false}'\n"
-               "    return\n"
-               "  }\n"
-               "  throw 'fixture launch failure'\n"
-               "}\n"
-               if launch_throws else "")
+            + helper
             + stages + "\nWrite-Output ('RESULT:' + $hookState['codex'] + ':' + $instrState['codex'])\n",
             encoding="utf-8")
         return pwsh_run("-File", script, env=env).stdout
@@ -1628,8 +1580,7 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
         f"CLIENTS=codex\nCODEX_HOOKS={source}\nCODEX_HOOK_TRUST={trust}\nINSTRUCTIONS={instructions}\n"
         "CLAUDE_MD=''\nAGENTS_FILE=''\nstep() { echo \"$*\"; }\n"
         "get_env() { return 0; }\n"
-        + ("command() { case \"$*\" in '-v python'|'-v python3') return 1;; "
-           "*) builtin command \"$@\";; esac; }\n" if missing_python else "")
+        + ("native_helper() { return 1; }\n" if helper_fails else native_stub.HELPER_SH)
         + parts[1] + '\nprintf "RESULT:%s:%s\\n" "$HOOK_CODEX" "$INSTR_CODEX"\n',
         encoding="utf-8")
     result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,

@@ -14,6 +14,9 @@ import subprocess
 
 import pytest
 
+from tests import installer_sandbox
+from tests import native_client_stub as native_stub
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CLIENTS = ("codex", "claude", "gemini")
@@ -38,8 +41,13 @@ def _fixture_env(tmp_path: Path) -> dict[str, str]:
         "CODEX_HOME": str(fixture_home / "codex"),
         "HOME": str(fixture_home),
         "USERPROFILE": str(fixture_home),
+        # Set, so nothing falls back to the system's real folders.
+        "LOCALAPPDATA": str(fixture_home / "AppData" / "Local"),
+        "APPDATA": str(fixture_home / "AppData" / "Roaming"),
         "XDG_CONFIG_HOME": str(fixture_home / "config"),
     })
+    # Every harness built on this environment runs installer code.
+    installer_sandbox.require(env, tmp_path)
     return env
 
 
@@ -137,14 +145,11 @@ def _bash_variants() -> list[str]:
 
 def _run_bash_existing(
     bash: str, tmp_path: Path, *, client: str, config: str, manager_exit: int,
-    shadowed_path: bool = False, existing: bool = True, held: bool = False,
-    runtime: bool = False, migrate_exit: int = 3,
+    shadowed_path: bool = False, existing: bool = True, migrate_exit: int = 3,
 ) -> subprocess.CompletedProcess[bytes]:
-    """``held``: the Windows process table shows a session running the
-    installed shim; otherwise the harness is not on Windows. ``runtime``: a
-    python that installs the side-by-side runtime (its fake creates the
-    launcher and answers ``migrate`` with ``migrate_exit``); otherwise the
-    pipx fallback is the only shim path."""
+    """``manager_exit``: the native client install's result (0 installs);
+    ``migrate_exit``: 0 makes the launcher's registration move report a
+    move (native_client_stub)."""
     install = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
     helper = _between("ops/install.sh", "resolve_installed_shim() {", "\n}\n\n# Two env pairs") + "\n}"
     loop_start = 'for selected_client in $CLIENTS; do\n    if [ "$selected_client" = claude-desktop ]; then'
@@ -177,33 +182,6 @@ def _run_bash_existing(
         path = fake_bin / name
         path.write_text(script, encoding="utf-8")
         path.chmod(0o755)
-    pipx = fake_bin / "pipx"
-    pipx.write_text(
-        "#!/bin/sh\n"
-        "printf 'pipx|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-        "if [ \"$1\" = environment ]; then printf '%s\\n' \"$FAKE_INSTALL_BIN\"; exit 0; fi\n"
-        "exit \"$FAKE_MANAGER_EXIT\"\n",
-        encoding="utf-8",
-    )
-    pipx.chmod(0o755)
-    # The runtime python: ops/shim_runtime.py install writes the launcher
-    # (the installed shim path) and prints it; launcher --if-installed
-    # prints it once it exists; migrate answers with FAKE_MIGRATE_EXIT.
-    python3 = fake_bin / "python3"
-    python3.write_text(
-        "#!/bin/sh\n"
-        "printf 'python3|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
-        "case \"$1\" in *shim_runtime.py) ;; *) exit 91 ;; esac\n"
-        "if [ \"$2\" = install ]; then printf '#!/bin/sh\\nexit 0\\n' >\"$FAKE_LAUNCHER\"; chmod +x \"$FAKE_LAUNCHER\"; fi\n"
-        "if [ \"$2\" = install ] || [ \"$2\" = launcher ]; then\n"
-        "  if [ -f \"$FAKE_LAUNCHER\" ]; then printf '%s\\n' \"$FAKE_LAUNCHER\"; exit 0; fi\n"
-        "  exit 3\n"
-        "fi\n"
-        "if [ \"$2\" = migrate ]; then exit \"$FAKE_MIGRATE_EXIT\"; fi\n"
-        "exit 91\n",
-        encoding="utf-8",
-    )
-    python3.chmod(0o755)
     repo = str(ROOT).replace("'", "'\\''")
     fixture_env = _fixture_env(tmp_path / "bash-env")
     fake_bin_shell = _bash_fixture_path(bash, fake_bin, fixture_env).replace("'", "'\\''")
@@ -212,18 +190,13 @@ def _run_bash_existing(
     call_log_shell = _bash_fixture_path(bash, call_log, fixture_env).replace("'", "'\\''")
     config_shell = ("pseudolife-memory\n" + config).replace("'", "'\\''")
     path_prefix = f"{fake_bin_shell}:{installed_bin_shell}" if shadowed_path else f"{installed_bin_shell}:{fake_bin_shell}"
-    # CRLF rows, as powershell.exe writes them under Git Bash.
-    held_table = (
-        "shim_process_table() {\n"
-        "    printf '4242|1|%s\\r\\n' \"$(cygpath -m \"$fixture_shim\" 2>/dev/null || printf '%s' \"$fixture_shim\")\"\n"
-        "}" if held else "shim_process_table() { return 2; }")
     script = f"""set -u
 PATH='{path_prefix}:/usr/bin:/bin'
 export PATH CALL_LOG='{call_log_shell}'
 FAKE_CONFIG='{config_shell}'
 fixture_shim=$(cygpath -u '{installed_shim_shell}' 2>/dev/null || printf '%s' '{installed_shim_shell}')
 FAKE_CONFIG=${{FAKE_CONFIG//__INSTALLED_SHIM__/$fixture_shim}}
-  export FAKE_CONFIG FAKE_MANAGER_EXIT='{manager_exit}' FAKE_INSTALL_BIN='{installed_bin_shell}' FAKE_EXISTING='{"yes" if existing else "no"}'
+  export FAKE_CONFIG FAKE_NATIVE_EXIT='{manager_exit}' FAKE_EXISTING='{"yes" if existing else "no"}'
 export FAKE_LAUNCHER='{installed_bin_shell}/pseudolife-mcp' FAKE_MIGRATE_EXIT='{migrate_exit}'
 export PSEUDOLIFE_SHIM_RUNTIMES='{installed_bin_shell}/runtimes' PSEUDOLIFE_SHIM_LAUNCHER='{installed_bin_shell}/pseudolife-mcp'
 repo='{repo}'
@@ -239,8 +212,7 @@ SHIM_TRIED='' SHIM_OK='' SHIM_PATH='{installed_shim_shell}'
 step() {{ printf 'STEP: %s\\n' "$*"; }}
 configure_codex_runtime_defaults() {{ CODEX_RUNTIME_DEFAULTS=preserved; }}
 {helper}
-{held_table}
-shim_runtime_python() {{ {"echo python3" if runtime else ":"}; }}
+{native_stub.BASH}
 {marker}
 {describe}
 {loop}
@@ -271,10 +243,10 @@ def test_install_sh_upgrades_managed_shim_without_rewriting_registration(
     output = proc.stdout.decode(errors="replace")
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
     calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
-    assert f"pipx|install --force {ROOT}" in calls
+    assert "native|install" in calls
     assert not any(" mcp add" in call or " mcp remove" in call for call in calls)
     assert "STATE=present-upgraded" in output
-    assert "[x] already wired; checkout shim upgraded" in output
+    assert "[x] already wired; it runs the native client from this release" in output
 
 
 @pytest.mark.parametrize("client", CLIENTS)
@@ -295,26 +267,6 @@ def test_install_sh_reports_existing_shim_upgrade_failure_in_status(
 
 @pytest.mark.parametrize("client", CLIENTS)
 @pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
-def test_install_sh_never_calls_a_shim_sessions_run_upgraded(
-    bash: str, tmp_path: Path, client: str,
-) -> None:
-    proc = _run_bash_existing(
-        bash, tmp_path, client=client,
-        config=_managed_config(client), manager_exit=0, held=True,
-    )
-    output = (proc.stdout + proc.stderr).decode(errors="replace")
-    calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
-    assert proc.returncode == 0, output
-    assert not any(call.startswith("pipx|install") for call in calls)
-    assert not any(" mcp add" in call or " mcp remove" in call for call in calls)
-    assert "1 session is running the pseudolife-mcp shim" in output
-    assert "registration was preserved, but its pseudolife-mcp shim was not upgraded" in output
-    assert "STATE=failed" in output
-    assert "upgraded its pseudolife-mcp shim" not in output
-
-
-@pytest.mark.parametrize("client", CLIENTS)
-@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
 def test_install_sh_preserves_custom_stdio_registration_and_warns(
     bash: str, tmp_path: Path, client: str,
 ) -> None:
@@ -326,7 +278,7 @@ def test_install_sh_preserves_custom_stdio_registration_and_warns(
     output = (proc.stdout + proc.stderr).decode(errors="replace")
     calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
     assert proc.returncode == 0
-    assert not any(call.startswith("pipx|install ") for call in calls)
+    assert "launcher|installer migrate-registrations --client " + {"claude": "claude-code"}.get(client, client) in calls
     assert "custom registered command" in output
     assert "/opt/private/pseudolife-mcp" not in output
     assert "STATE=failed" in output
@@ -361,10 +313,12 @@ def test_install_sh_rerun_upgrades_exact_manager_absolute_registration(
     proc = _run_bash_existing(
         bash, tmp_path, client=client,
         config=_custom_config(client, "__INSTALLED_SHIM__", "1"), manager_exit=0,
+        migrate_exit=4,
     )
     output = proc.stdout.decode(errors="replace")
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
-    assert "STATE=present-upgraded" in output
+    assert "STATE=present-current\n" in output.replace("\r", "")
+    assert "registration preserved; it already runs the native client" in output
     assert "custom registered command" not in output
 
 
@@ -449,7 +403,7 @@ def test_install_sh_http_registration_needs_no_spawn_guard(
     assert proc.returncode == 0
     assert "STATE=present" in output
     assert "PSEUDOLIFE_MCP_NO_SPAWN" not in output
-    assert not any(call.startswith("pipx|install ") for call in calls)
+    assert "native|install" not in calls
 
 
 @pytest.mark.parametrize("client", CLIENTS)
@@ -472,10 +426,9 @@ def test_install_sh_flagless_fresh_cli_fails_before_registration(
 
 def _run_powershell_existing(
     tmp_path: Path, *, client: str, config: str, manager_exit: int,
-    shadowed_path: bool = False, existing: bool = True, held: bool = False,
-    runtime: bool = False, migrate_exit: int = 3,
+    shadowed_path: bool = False, existing: bool = True, migrate_exit: int = 3,
 ) -> subprocess.CompletedProcess[bytes]:
-    """``held``, ``runtime`` and ``migrate_exit`` as for ``_run_bash_existing``."""
+    """``manager_exit`` and ``migrate_exit`` as for ``_run_bash_existing``."""
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -489,7 +442,8 @@ def _run_powershell_existing(
     log = tmp_path / "calls.txt"
     installed_bin = tmp_path / "installed-bin"
     installed_bin.mkdir()
-    shim_name = "pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp"
+    # A .cmd on Windows: the stub launcher must run (an .exe cannot be a script).
+    shim_name = "pseudolife-mcp.cmd" if os.name == "nt" else "pseudolife-mcp"
     installed_shim = installed_bin / shim_name
     installed_shim.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     installed_shim.chmod(0o755)
@@ -504,10 +458,6 @@ def _run_powershell_existing(
     escaped_config = ("pseudolife-memory\n" + config.replace("__INSTALLED_SHIM__", str(installed_shim))).replace("'", "''")
     escaped_installed_shim = str(installed_shim).replace("'", "''")
     escaped_path_bin = str(old_bin if shadowed_path else installed_bin).replace("'", "''")
-    held_table = (
-        "function Get-ShimProcessTable { @([pscustomobject]@{ ProcessId = 4242; ParentProcessId = 1; "
-        f"ExecutablePath = '{escaped_installed_shim}' }}) }}" if held
-        else "function Get-ShimProcessTable { $null }")
     function_defs = []
     for name in CLIENTS:
         query = "list" if name == "gemini" else "get"
@@ -538,42 +488,21 @@ $mcpState = @{{}}
 $script:shimInstallResult = $null
 $script:shimInstallPath = '{escaped_installed_shim}'
 $script:shimUpgradeHeld = $null
-$script:shimPython = $null
 $script:shimManagerKind = $null
-$script:shimPipxVenv = $null
 $env:PATH = '{escaped_path_bin}' + [IO.Path]::PathSeparator + $env:PATH
 $env:FAKE_CONFIG = '{escaped_config}'
 $env:FAKE_EXISTING = '{"yes" if existing else "no"}'
-$env:FAKE_MANAGER_EXIT = '{manager_exit}'
+$env:FAKE_NATIVE_EXIT = '{manager_exit}'
+$env:FAKE_MIGRATE_EXIT = '{migrate_exit}'
+$env:FAKE_LAUNCHER = '{escaped_installed_shim}'
+$env:CALL_LOG = '{escaped_log}'
 function Step($message) {{ Write-Output "STEP: $message" }}
 function Set-CodexRuntimeDefaults {{ $script:codexRuntimeDefaults = 'preserved' }}
 {''.join(function_defs)}
-function global:pipx {{
-    $callArgs = @($args)
-    Add-Content -LiteralPath '{escaped_log}' -Value ('pipx|' + ($callArgs -join ' '))
-    if ($callArgs[0] -eq 'environment') {{ Write-Output '{str(installed_bin).replace("'", "''")}'; $global:LASTEXITCODE = 0; return }}
-    $global:LASTEXITCODE = [int]$env:FAKE_MANAGER_EXIT
-}}
-function global:python {{
-    # The runtime python: ops/shim_runtime.py install writes the launcher (the
-    # installed shim path) and prints it; launcher --if-installed prints it once
-    # it exists; migrate answers with FAKE_MIGRATE_EXIT.
-    $callArgs = @($args)
-    Add-Content -LiteralPath '{escaped_log}' -Value ('python|' + ($callArgs -join ' '))
-    if ($callArgs[0] -notlike '*shim_runtime.py') {{ $global:LASTEXITCODE = 91; return }}
-    if ($callArgs[1] -eq 'install') {{ Set-Content -LiteralPath '{escaped_installed_shim}' -Value 'fake' }}
-    if (($callArgs[1] -eq 'install') -or ($callArgs[1] -eq 'launcher')) {{
-        if (Test-Path -LiteralPath '{escaped_installed_shim}') {{ Write-Output '{escaped_installed_shim}'; $global:LASTEXITCODE = 0; return }}
-        $global:LASTEXITCODE = 3; return
-    }}
-    if ($callArgs[1] -eq 'migrate') {{ $global:LASTEXITCODE = {migrate_exit}; return }}
-    $global:LASTEXITCODE = 91
-}}
 $env:PSEUDOLIFE_SHIM_RUNTIMES = '{str(installed_bin / "runtimes").replace("'", "''")}'
 $env:PSEUDOLIFE_SHIM_LAUNCHER = '{escaped_installed_shim}'
 {helper}
-{held_table}
-function Get-ShimRuntimePython {{ {"'python'" if runtime else "$null"} }}
+{native_stub.POWERSHELL}
 {describe}
 {marker}
 {loop}
@@ -602,10 +531,10 @@ def test_install_ps1_upgrades_managed_shim_without_rewriting_registration(
     output = proc.stdout.decode(errors="replace")
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
     calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
-    assert f"pipx|install --force {ROOT}" in calls
+    assert "native|install" in calls
     assert not any("mcp add" in call or "mcp remove" in call for call in calls)
     assert "STATE=present-upgraded" in output
-    assert "[x] already wired; checkout shim upgraded" in output
+    assert "[x] already wired; it runs the native client from this release" in output
 
 
 @pytest.mark.parametrize("client", CLIENTS)
@@ -624,25 +553,6 @@ def test_install_ps1_reports_existing_shim_upgrade_failure_in_status(
 
 
 @pytest.mark.parametrize("client", CLIENTS)
-def test_install_ps1_never_calls_a_shim_sessions_run_upgraded(
-    tmp_path: Path, client: str,
-) -> None:
-    proc = _run_powershell_existing(
-        tmp_path, client=client,
-        config=_managed_config(client), manager_exit=0, held=True,
-    )
-    output = " ".join((proc.stdout + proc.stderr).decode(errors="replace").split())
-    calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
-    assert proc.returncode == 0, output
-    assert not any(call.startswith("pipx|install") for call in calls)
-    assert not any(" mcp add" in call or " mcp remove" in call for call in calls)
-    assert "1 session is running the pseudolife-mcp shim" in output
-    assert "registration was preserved, but its pseudolife-mcp shim was not upgraded" in output
-    assert "STATE=failed" in output
-    assert "upgraded its pseudolife-mcp shim" not in output
-
-
-@pytest.mark.parametrize("client", CLIENTS)
 def test_install_ps1_preserves_custom_stdio_registration_and_warns(
     tmp_path: Path, client: str,
 ) -> None:
@@ -654,7 +564,7 @@ def test_install_ps1_preserves_custom_stdio_registration_and_warns(
     output = (proc.stdout + proc.stderr).decode(errors="replace")
     calls = (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines()
     assert proc.returncode == 0
-    assert not any(call.startswith("pipx|install ") for call in calls)
+    assert "launcher|installer migrate-registrations --client " + {"claude": "claude-code"}.get(client, client) in calls
     assert "custom registered command" in output
     assert r"D:\Private\pseudolife-mcp.exe" not in output
     assert "STATE=failed" in output
@@ -687,10 +597,12 @@ def test_install_ps1_rerun_upgrades_exact_manager_absolute_registration(
     proc = _run_powershell_existing(
         tmp_path, client=client,
         config=_custom_config(client, "__INSTALLED_SHIM__", "1"), manager_exit=0,
+        migrate_exit=4,
     )
     output = proc.stdout.decode(errors="replace")
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
-    assert "STATE=present-upgraded" in output
+    assert "STATE=present-current\n" in output.replace("\r", "")
+    assert "registration preserved; it already runs the native client" in output
     assert "custom registered command" not in output
 
 
@@ -768,7 +680,7 @@ def test_install_ps1_http_registration_needs_no_spawn_guard(
     assert proc.returncode == 0
     assert "STATE=present" in output
     assert "PSEUDOLIFE_MCP_NO_SPAWN" not in output
-    assert not any(call.startswith("pipx|install ") for call in calls)
+    assert "native|install" not in calls
 
 
 @pytest.mark.parametrize("client", CLIENTS)
@@ -786,3 +698,39 @@ def test_install_ps1_flagless_fresh_cli_fails_before_registration(
     assert "registration was skipped" in output
     assert not any("mcp add" in call and "--help" not in call for call in calls)
     assert not any("mcp remove" in call for call in calls)
+
+
+# A registration naming another path that already resolves to the native
+# launcher (a ~/.local/bin link the native install relinked): the native step
+# reports it current, so the run says so and stays quiet on a rerun.
+@pytest.mark.parametrize("client", VISIBLE_ENV_CLIENTS)
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
+def test_install_sh_reports_a_registration_already_on_the_launcher_as_preserved(
+    bash: str, tmp_path: Path, client: str,
+) -> None:
+    proc = _run_bash_existing(
+        bash, tmp_path, client=client,
+        config=_custom_config(client, "/opt/tools/pseudolife-mcp", "1"),
+        manager_exit=0, migrate_exit=4,
+    )
+    output = (proc.stdout + proc.stderr).decode(errors="replace")
+    assert proc.returncode == 0, output
+    assert "STATE=present-current\n" in output
+    assert "registration preserved; it already runs the native client" in output
+    assert "registration moved" not in output
+
+
+@pytest.mark.parametrize("client", VISIBLE_ENV_CLIENTS)
+def test_install_ps1_reports_a_registration_already_on_the_launcher_as_preserved(
+    tmp_path: Path, client: str,
+) -> None:
+    proc = _run_powershell_existing(
+        tmp_path, client=client,
+        config=_custom_config(client, r"D:\tools\pseudolife-mcp.exe", "1"),
+        manager_exit=0, migrate_exit=4,
+    )
+    output = (proc.stdout + proc.stderr).decode(errors="replace").replace("\r", "")
+    assert proc.returncode == 0, output
+    assert "STATE=present-current\n" in output
+    assert "registration preserved; it already runs the native client" in output
+    assert "registration moved" not in output
