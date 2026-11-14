@@ -4,7 +4,8 @@
   foreign stack, an unrecorded bank or state volume, a changed Postgres
   password, a different checkout's daemon or its bearer, a lite bank, a busy
   port) is now the native client's `pseudolife-mcp installer
-  preflight-check`, with the same refusals as before.
+  preflight-check`, with the same refusals as before. Like the other
+  installer steps, it runs `docker` only from an absolute `PATH` directory.
 - `ops/install-hook.sh` no longer needs python3: its settings.json and
   hooks.json edits are the native client's `pseudolife-mcp installer
   hook-settings`, with the same hooks, backups and exit codes.

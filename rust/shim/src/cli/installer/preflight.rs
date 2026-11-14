@@ -99,7 +99,9 @@ struct RealHost;
 impl Host for RealHost {
     fn docker(&self, args: &[&str], input: Option<&str>, failure: Option<&str>) -> Result<String> {
         let unreached = || Refusal(DOCKER_UNSAFE.into());
-        let mut child = Command::new("docker")
+        // Only from an absolute PATH directory, as every installer step.
+        let docker = super::state::program_path("docker").ok_or_else(unreached)?;
+        let mut child = Command::new(docker)
             .args(args)
             .stdin(if input.is_some() {
                 Stdio::piped()
