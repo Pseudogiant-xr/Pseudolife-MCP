@@ -199,9 +199,10 @@ existing tests retain that guard.
 **`no-python-before-first-frame`:** the Rust candidate runs no Python
 interpreter before its first complete stdout frame is successfully written
 and flushed, except when it must spawn the local daemon. A remote daemon URL
-never runs Python. Local fallback spawning requires `PSEUDOLIFE_MCP_PYTHON`
-or `PSEUDOLIFE_MCP_SERVE_COMMAND` (a nonempty JSON argv array, preferred when
-both are set). Without either, the candidate takes the existing no-spawn wait
+never runs Python. Local fallback spawning requires
+`PSEUDOLIFE_MCP_SERVE_COMMAND` (a nonempty JSON argv array); since 14 November
+2026 `PSEUDOLIFE_MCP_PYTHON` starts nothing and gets its own named note,
+`PYTHON_SPAWN_RETIRED_NOTE`. Without it, the candidate takes the existing no-spawn wait
 and prints the named explanation `NO_CONFIGURED_SPAWN_NOTE`; it never invents
 `python` from PATH. This is `ported-with-substitution` for the Python oracle's
 `sys.executable` spawn. A configured command is passed as argv, without a shell.
@@ -1091,8 +1092,8 @@ retain their original runtime identities.
 
 The [break preparation](parity/phase-4-offline-break-source/) adds
 external-DSN transactions and the existing container-host deployment transport.
-The shared client's reviewed TLS policy is unchanged. The embedded lifecycle
-has the named `phase4-embedded-pg-deferred` refusal, and generic failures use
+The shared client's reviewed TLS policy is unchanged. A lite-tier bank gets the
+shared plain refusal (`cli/retired.rs`, since 14 November 2026), and generic failures use
 `native-pg-diagnostics` without driver details or copied interpreter classes.
 Regex 1.13.1 implements the producer's existing secret-shaped-text business
 guard; unsupported look-around is expressed as explicit ASCII boundary and

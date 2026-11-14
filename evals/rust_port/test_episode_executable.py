@@ -133,5 +133,6 @@ def test_shared_help_asset_matches_current_python_usage_literal_at_columns_80(mo
     tree = ast.parse((ROOT / "pseudolife_memory/cli.py").read_text(encoding="utf-8"))
     usage = next(ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign)
                  and any(isinstance(target, ast.Name) and target.id == "_USAGE" for target in node.targets))
-    assert (ROOT / "rust/shim/src/cli_help.txt").read_bytes() == usage.encode("utf-8")
+    from evals.rust_port.test_cli_dispatch_lane import native_help
+    assert (ROOT / "rust/shim/src/cli_help.txt").read_bytes() == native_help(usage.encode("utf-8"))
     assert "episode-start" in usage and "episode-end" in usage

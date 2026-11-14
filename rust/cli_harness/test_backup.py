@@ -58,6 +58,32 @@ def test_discovery_traceback_only_removes_interpreter_frames(class_name, code, m
         assert obs == before
 
 
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_pg_dump_missing_rule_retires_only_the_oracles_lite_extra(newline):
+    oracle = (b"backup failed: pg_dump not found \xe2\x80\x94 install PostgreSQL client tools or the "
+              b"pseudolife-mcp[lite] extra (whose embedded runtime bundles it)." + newline)
+    native = b"backup failed: pg_dump not found \xe2\x80\x94 install the PostgreSQL client tools." + newline
+    rules = ("backup-pg-dump-missing-native-text",)
+    assert not compare.diff(observation(oracle), observation(native), rules)
+    assert compare.diff(observation(oracle), observation(native), ())
+    # The native side keeping the oracle's words, another exit or file
+    # effect, other output around the line, or another line ending stay diffs.
+    assert compare.diff(observation(oracle), observation(oracle), rules)
+    assert compare.diff(observation(oracle), observation(native, exit=2), rules)
+    extra = observation(native)
+    extra["files"]["bank/backups/partial"] = "file:"
+    assert compare.diff(observation(oracle), extra, rules)
+    assert compare.diff(observation(b"x" + oracle), observation(b"x" + native), rules)
+    assert compare.diff(observation(oracle + b"x"), observation(native + b"x"), rules)
+    other = b"\r\n" if newline == b"\n" else b"\n"
+    assert compare.diff(observation(oracle), observation(native[:-len(newline)] + other), rules)
+    from .rows import backup
+    missing = {case.id: case.rules for case in backup.cases()
+               if case.id in ("dsn-pg-dump-missing", "dsn-pg-dump-relative-path-skipped")}
+    assert missing == {name: backup.RULES + rules for name in
+                       ("dsn-pg-dump-missing", "dsn-pg-dump-relative-path-skipped")}
+
+
 def _native_backup():
     import os
     from pathlib import Path

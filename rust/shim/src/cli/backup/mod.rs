@@ -148,7 +148,7 @@ fn default_data_dir() -> Result<PathBuf, u8> {
         return Ok(args::pathlib(Path::new(&raw)));
     }
     if let Some(lite) = lite_default()
-        && lite.join("embedded_pg").join("PG_VERSION").is_file()
+        && crate::cli::retired::is_lite_bank(&lite)
         && nonempty_env("PSEUDOLIFE_MCP_DATABASE_URL")
             .flatten()
             .is_none()
@@ -169,10 +169,11 @@ fn refused(message: &str) -> u8 {
     2
 }
 
+/// The shared lite-tier refusal (cli/retired.rs), as backup's refusals read.
 fn lite_refusal(dir: &Path) -> u8 {
     refused(&format!(
-        "{} holds a lite bank (embedded PostgreSQL), and the native client backs up a Docker bank (or the bank PSEUDOLIFE_MCP_DATABASE_URL names) only. Install the Docker bank (ops/install.sh, or ops\\install.ps1 on Windows; see \"Move a lite bank to Docker\" in docs/guide/configuration.md), or back this bank up with pseudolife-mcp 0.23.x. No backup was written",
-        dir.display()
+        "{} No backup was written",
+        crate::cli::retired::lite_bank_refusal(dir)
     ))
 }
 
@@ -391,10 +392,7 @@ fn main(arguments: Vec<OsString>) -> u8 {
             Err(message) => return failed(&message),
         },
         (Some(_), _) => {
-            return failed(
-                "pg_dump not found — install PostgreSQL client tools or the \
-                 pseudolife-mcp[lite] extra (whose embedded runtime bundles it).",
-            );
+            return failed("pg_dump not found — install the PostgreSQL client tools.");
         }
         (None, _) => None,
     };
