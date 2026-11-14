@@ -25,6 +25,10 @@ pub(super) struct Request {
     pub target_release: bool,
     /// For `--resume`: the earlier move found in this host's records.
     pub resume_move: String,
+    /// For `--resume`: the gated bank as that move's rollback read it.
+    pub resume_baseline: Option<super::record::Baseline>,
+    /// For `--resume`: whether the target daemon ran before that move began.
+    pub resume_target_was_running: bool,
 }
 
 /// The canonical argv, or `None` (the dispatcher defers it).
@@ -131,14 +135,18 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
     Some(format!("{text}. {NOTHING}"))
 }
 
-/// `move --rollback <id> [--yes] [--json]`: the rollback of a move this host
-/// left unfinished. Native only: Python's move has no such option, so the
-/// dispatcher reads this shape before `move_cli`'s argparse checks.
+/// `move --rollback <id> [--yes] [--json]`, the rollback of a move this host
+/// left unfinished, and `move --release-target <id> [--yes] [--json]`,
+/// which gives a rolled-back move's target back its own bank. Native only:
+/// Python's move has neither option, so the dispatcher reads these shapes
+/// before `move_cli`'s argparse checks.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Rollback {
     pub id: String,
     pub yes: bool,
     pub json: bool,
+    /// `--release-target` rather than `--rollback`.
+    pub release: bool,
 }
 
 pub(super) fn parse_rollback(arguments: &[OsString]) -> Option<Rollback> {
@@ -151,7 +159,8 @@ pub(super) fn parse_rollback(arguments: &[OsString]) -> Option<Rollback> {
     let mut index = 0;
     while index < words.len() {
         match words[index] {
-            "--rollback" if id.is_none() => {
+            flag @ ("--rollback" | "--release-target") if id.is_none() => {
+                rollback.release = flag == "--release-target";
                 index += 1;
                 id = Some((*words.get(index)?).to_owned());
             }

@@ -127,8 +127,8 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
     let refuse = &mut reply.refusals;
     match (&claim, resuming) {
         (Some(held), false) => refuse.push(format!(
-            "move {} (from bank {}) holds this target; on its source host roll it back (pseudolife-mcp move --rollback {}) or resume it (--resume)",
-            held.move_id, held.source_bank, held.move_id
+            "move {} (from bank {}) holds this target; on its source host roll it back (pseudolife-mcp move --rollback {}), resume it (--resume), or, once it is rolled back, give this target back its own bank (pseudolife-mcp move --release-target {})",
+            held.move_id, held.source_bank, held.move_id, held.move_id
         )),
         (Some(held), true) if held.move_id != ask.resume_move => refuse.push(format!(
             "this target is held by move {}, not move {}; resume that move on its own source host instead",
@@ -304,10 +304,7 @@ impl Place for Here {
         super::super::http_json(url, std::time::Duration::from_secs(5))
     }
     fn home(&self) -> Option<PathBuf> {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .filter(|h| !h.is_empty())
-            .map(PathBuf::from)
+        super::super::home_dir()
     }
     fn nearest(&self, path: &Path) -> Option<(PathBuf, PathBuf, Option<u64>)> {
         path.ancestors().find_map(|probe| {
@@ -438,17 +435,18 @@ impl super::ops::Site for Site2 {
             Err(if said.is_empty() { text } else { said })
         }
     }
-    fn restore(&mut self, args: &[String], abort_file: &Path) -> (i32, String) {
+    fn restore(&mut self, args: &[String], abort_file: Option<&Path>) -> (i32, String) {
         let program = match std::env::current_exe() {
             Ok(program) => program,
             Err(error) => return (1, format!("this program cannot be found: {error}")),
         };
-        match std::process::Command::new(program)
-            .args(args)
-            .env(crate::cli::restore_cli::MOVE_ABORT_ENV, abort_file)
-            .stdin(std::process::Stdio::null())
-            .output()
-        {
+        let mut command = std::process::Command::new(program);
+        command.args(args).stdin(std::process::Stdio::null());
+        match abort_file {
+            Some(file) => command.env(crate::cli::restore_cli::MOVE_ABORT_ENV, file),
+            None => command.env_remove(crate::cli::restore_cli::MOVE_ABORT_ENV),
+        };
+        match command.output() {
             Ok(output) => {
                 let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
                 text.push_str(&String::from_utf8_lossy(&output.stderr));
@@ -524,7 +522,7 @@ fn run_ops() -> u8 {
         return 0;
     }
     let mut site = Site2 { docker, missing };
-    let needs_lock = request.op.changes() && !matches!(request.op, Op::Restore);
+    let needs_lock = takes_lock(&request.op);
     let answer = if needs_lock {
         let Some(directory) = super::super::data_dir() else {
             print_answer(&refuse(
@@ -548,6 +546,19 @@ fn run_ops() -> u8 {
                 directory.display()
             )),
         }
+    } else if matches!(request.op, Op::Restore | Op::GiveBack)
+        && let Some(directory) = super::super::data_dir()
+        && let Err(super::super::LockRefusal::Busy(pid)) =
+            super::super::with_update_lock(&directory, || ())
+    {
+        // The restore takes the update lock itself and refuses at once when
+        // it is held: answered as busy here, so the source waits for it.
+        Answer {
+            busy: true,
+            ..refuse(format!(
+                "another update, restore or backup holds the target's update lock (pid {pid}); wait for it to finish, then retry the move"
+            ))
+        }
     } else {
         super::ops::perform(&mut site, &request, &mut reader)
     };
@@ -555,6 +566,31 @@ fn run_ops() -> u8 {
     0
 }
 
+/// Whether the helper takes the target's update lock around `op`: every
+/// operation that changes the target, `abort` included (so a step still
+/// running there finishes first), but `restore` and `give-back`, which run
+/// this client's restore, which takes that lock itself and reads the move's
+/// abort under it.
+fn takes_lock(op: &super::protocol::Op) -> bool {
+    use super::protocol::Op;
+    op.changes() && !matches!(op, Op::Restore | Op::GiveBack)
+}
+
 fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
     answer(here, ask)
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::super::protocol::Op;
+
+    #[test]
+    fn abort_waits_for_the_targets_lock_and_restores_take_it_themselves() {
+        assert!(super::takes_lock(&Op::Abort));
+        assert!(super::takes_lock(&Op::Ungate));
+        assert!(super::takes_lock(&Op::Release));
+        assert!(!super::takes_lock(&Op::Restore));
+        assert!(!super::takes_lock(&Op::GiveBack));
+        assert!(!super::takes_lock(&Op::State { tables: Vec::new() }));
+    }
 }

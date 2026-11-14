@@ -34,6 +34,23 @@ pub(super) enum Phase {
     RolledBack,
     /// Failed before the commit point, and some undo did not succeed.
     RollbackIncomplete,
+    /// `move --release-target` began giving the target back its own bank.
+    Releasing,
+    /// The target has its own bank back and is free; the moved bank is kept
+    /// in the files `kept` names.
+    Released,
+}
+
+/// The gated target bank as a finished rollback read it, stopped behind its
+/// gate: what a resume compares with before it replaces that bank, so writes
+/// the bank took since then are never replaced unseen.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct Baseline {
+    /// User-data rows per table ([`super::probe::served_filter`]).
+    pub user_counts: std::collections::BTreeMap<String, i64>,
+    /// The write counters ([`super::protocol::State::mutations`]).
+    pub mutations: std::collections::BTreeMap<String, i64>,
 }
 
 /// The effects a move may have taken, each set (and written) before the
@@ -107,6 +124,10 @@ pub(super) struct Record {
     pub restored_counts: std::collections::BTreeMap<String, i64>,
     /// The restored target's mutation counters before it first started.
     pub restored_mutations: Option<std::collections::BTreeMap<String, i64>>,
+    /// The gated target bank as the last finished rollback read it (`None`:
+    /// it could not be read whole, so a resume cannot rule out writes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gated_baseline: Option<Baseline>,
     /// The source bank's containers, database, role, port and image as the
     /// preflight found them: a rollback works from these, since a fenced
     /// database refuses the queries that would find them again.
@@ -127,9 +148,15 @@ pub(super) struct Record {
     /// Commands that undo what was done, in order, for a person.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub manual_rollback: Vec<String>,
-    /// Commands left to run after the commit point.
+    /// Commands left to run after the commit point. Written before the
+    /// commit as everything the move still has to do, so a move killed
+    /// right after it still names them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub follow_ups: Vec<String>,
+    /// After `move --release-target`: the target's files that hold the moved
+    /// bank as it stood there, with any writes it took.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kept: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

@@ -74,6 +74,12 @@ pub(in crate::cli) enum Op {
     /// every forward operation of the move. Taken under the target's update
     /// lock, so an operation still running there finishes first.
     Abort,
+    /// `move --release-target`: restore the target's own bank from the
+    /// safety backup its first restore of this move took, leaving the daemon
+    /// stopped behind its gate. That restore's own safety backup keeps the
+    /// moved bank, with any writes it took. Once it has finished it is never
+    /// run again, so a rerun never restores over a newer bank.
+    GiveBack,
 }
 
 impl Op {
@@ -102,6 +108,7 @@ impl Op {
             Self::Restore => "restore",
             Self::Release => "release",
             Self::Abort => "abort",
+            Self::GiveBack => "give-back",
         }
     }
 }
@@ -180,4 +187,7 @@ pub(in crate::cli) struct Answer {
     /// Refused only because another operation holds the target's update
     /// lock: worth waiting for.
     pub busy: bool,
+    /// For `give-back`: the files that now hold the moved bank as it stood
+    /// on the target, with any writes it took (the restore's safety backup).
+    pub kept: Vec<String>,
 }

@@ -498,3 +498,158 @@ fn a_move_record_this_client_cannot_read_blocks_a_move() {
     assert!(stderr.contains("could be an unfinished move"), "{stderr}");
     assert_quiet(&socket);
 }
+
+/// A record of a move to `root@box` whose rollback left the target holding
+/// its restored bank, with `extra` fields.
+fn rolled_back_to_box(extra: &str) -> String {
+    format!(
+        r#"{{"version":1,"move_id":"{MOVE_ID}","target":"root@box","target_url":"http://100.64.0.2:8765","source_bank":"75d0c7a836eb6af5","phase":"rolled_back","committed":false,"flags":{{"claimed":true,"target_restored":true}}{extra}}}"#
+    )
+}
+
+#[test]
+fn release_target_answers_from_the_record_and_names_what_it_keeps() {
+    let home = Home::new("release");
+    let (socket, url) = listener();
+    let release = |args: &[&str]| rollback(&home.0, &url, args);
+    // A malformed ID never names a path.
+    let output = release(&["--release-target", "../../etc"]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    // No record of that move here.
+    let output = release(&["--release-target", MOVE_ID]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("this host has no record of move"),
+        "{output:?}"
+    );
+    // A committed move's target is not released.
+    plant(&home.0, &record("moved", true, r#""moved_written":true"#));
+    let output = release(&["--release-target", MOVE_ID, "--yes"]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    // A move not yet rolled back is rolled back first.
+    plant(
+        &home.0,
+        &record("moving", false, r#""source_stopped":true"#),
+    );
+    let output = release(&["--release-target", MOVE_ID, "--yes"]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("roll it back first"),
+        "{output:?}"
+    );
+    // One that never restored into the target has nothing to give back.
+    plant(&home.0, &record("rolled_back", false, r#""claimed":true"#));
+    let output = release(&["--release-target", MOVE_ID, "--yes"]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("nothing to give back"),
+        "{output:?}"
+    );
+    // One whose target keeps the restored bank needs --yes without a
+    // terminal: it replaces the target's bank.
+    plant(&home.0, &rolled_back_to_box(""));
+    let output = release(&["--release-target", MOVE_ID]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("this run is not interactive: re-run with --yes"),
+        "{output:?}"
+    );
+    // Released: --json names the files that keep the moved bank.
+    plant(
+        &home.0,
+        &rolled_back_to_box(r#","kept":["/home/dev/k/a.sql.gz","/home/dev/k/a.tgz"]"#)
+            .replace("rolled_back", "released"),
+    );
+    let output = release(&["--release-target", MOVE_ID, "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["moved"], false);
+    assert_eq!(report["released"], true);
+    assert_eq!(
+        report["kept"],
+        serde_json::json!(["/home/dev/k/a.sql.gz", "/home/dev/k/a.tgz"])
+    );
+    assert!(
+        report["message"]
+            .as_str()
+            .unwrap()
+            .contains("/home/dev/k/a.sql.gz")
+    );
+    assert_quiet(&socket);
+}
+
+#[test]
+fn a_resume_keeps_the_moves_own_folder_and_never_resumes_over_parked_writes() {
+    let home = Home::new("resume-dir");
+    let (socket, url) = listener();
+    let resume = [DRY, &["--resume"]].concat();
+    // The move's files on the target are in ~/w1: a resume names no other.
+    plant(&home.0, &rolled_back_to_box(r#","work_dir":"~/w1""#));
+    let output = run(
+        &home.0,
+        &url,
+        "80",
+        &[&resume[..], &["--target-work-dir", "~/w2"]].concat(),
+    );
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(&format!(
+            "move {MOVE_ID} keeps its files on root@box in ~/w1"
+        )),
+        "{output:?}"
+    );
+    // A target that took writes is never resumed over; the refusal names
+    // the way out.
+    plant(
+        &home.0,
+        &rolled_back_to_box(r#","parked_writes":"entries: 1 rows""#),
+    );
+    let output = run(&home.0, &url, "80", &resume);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!("pseudolife-mcp move --release-target {MOVE_ID}")),
+        "{stderr}"
+    );
+    assert_quiet(&socket);
+}
+
+#[test]
+fn a_release_that_did_not_finish_and_a_commit_killed_before_its_follow_ups_are_named() {
+    let home = Home::new("release-unfinished");
+    let (socket, url) = listener();
+    plant(
+        &home.0,
+        &rolled_back_to_box("").replace("rolled_back", "releasing"),
+    );
+    let want = format!(
+        "move: move {MOVE_ID} was rolled back, and giving root@box back its own bank did not finish; finish it first with pseudolife-mcp move --release-target {MOVE_ID}. Nothing was changed\n"
+    );
+    assert_answer(&run(&home.0, &url, "80", DRY), 4, "", &want);
+    // Past its commit point, with steps left: --rollback names them.
+    plant(
+        &home.0,
+        &record(
+            "moved",
+            true,
+            r#""moved_written":true"#,
+        )
+        .replace(
+            r#""flags""#,
+            r#""follow_ups":["ssh dev@target systemctl --user enable --now pseudolife-update.timer"],"flags""#,
+        ),
+    );
+    let output = rollback(&home.0, &url, &["--rollback", MOVE_ID, "--json"]);
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["moved"], true);
+    assert!(
+        report["message"]
+            .as_str()
+            .unwrap()
+            .contains("systemctl --user enable --now pseudolife-update.timer"),
+        "{report}"
+    );
+    assert_quiet(&socket);
+}

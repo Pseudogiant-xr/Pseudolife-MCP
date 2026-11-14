@@ -22,9 +22,10 @@ model of both hosts with a fault at every call;
 `restore_cli/move_native/tests.rs` and `ops.rs` use recording fakes; and
 `tests/cli_move_contract.rs` runs through the binary.
 
-`move --rollback <move id>` is native only: Python's move has no such
-option. The dispatcher reads that shape before `move_cli`'s argparse checks,
-so the oracle's usage error for it is not compared either.
+`move --rollback <move id>` and `move --release-target <move id>` are native
+only: Python's move has neither option. The dispatcher reads those shapes
+before `move_cli`'s argparse checks, so the oracle's usage error for them is
+not compared either.
 
 ## What runs before the first effect (checked)
 

@@ -10,20 +10,24 @@ use super::engine::{self, Outcome};
 use super::record::{Files, Flags, Phase, Record, Store, valid_id};
 use super::{NOTHING, Plan, say};
 
-/// The home this client keeps its records under.
+/// The home this client keeps its records under: the update lock's.
 pub(super) fn home() -> Option<PathBuf> {
-    let set = |key: &str| std::env::var_os(key).filter(|value| !value.is_empty());
-    set("HOME")
-        .or_else(|| set("USERPROFILE"))
-        .map(PathBuf::from)
+    super::super::home_dir()
 }
 
-/// Every record this host keeps, newest first.
 /// Every record this host keeps, newest first, or the first that cannot be
 /// read: a record nobody can read could be an unfinished move.
 pub(super) fn records(store: &mut Files) -> Result<Vec<Record>, String> {
-    let Ok(entries) = std::fs::read_dir(&store.moves) else {
-        return Ok(Vec::new());
+    let entries = match std::fs::read_dir(&store.moves) {
+        Ok(entries) => entries,
+        // No moves folder: this host never moved a bank.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(format!(
+                "this host's move records in {} cannot be listed ({error})",
+                store.moves.display()
+            ));
+        }
     };
     let mut ids: Vec<String> = entries
         .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
@@ -41,14 +45,15 @@ pub(super) fn records(store: &mut Files) -> Result<Vec<Record>, String> {
     Ok(found)
 }
 
-/// A record whose move neither committed nor finished its rollback.
+/// A record whose move neither committed nor finished its rollback, or
+/// whose release of its target did not finish.
 pub(super) fn unfinished(record: &Record) -> bool {
     !record.committed
-        && matches!(
-            record.phase,
-            Phase::Started | Phase::Moving | Phase::RollbackIncomplete
-        )
-        && record.flags != Flags::default()
+        && (record.phase == Phase::Releasing
+            || matches!(
+                record.phase,
+                Phase::Started | Phase::Moving | Phase::RollbackIncomplete
+            ) && record.flags != Flags::default())
 }
 
 /// The last effect a record says may have happened, in step order.
@@ -93,6 +98,12 @@ fn last_effect(flags: &Flags) -> &'static str {
 
 /// The refusal while an unfinished move's record stands.
 pub(super) fn unfinished_refusal(record: &Record) -> String {
+    if record.phase == Phase::Releasing {
+        return format!(
+            "move {} was rolled back, and giving {} back its own bank did not finish; finish it first with pseudolife-mcp move --release-target {}",
+            record.move_id, record.target, record.move_id
+        );
+    }
     if record.flags.moved_written {
         return format!(
             "move {} to {} may have passed its commit point: its record says moved.json may have reached this host's daemon, and the record was not marked committed. Run pseudolife-mcp move --rollback {}: it reads this host's /data/moved.json and finishes the move if it committed, or rolls it back if it did not",
@@ -235,6 +246,12 @@ pub(super) fn transaction(
         target_running: target.running,
         local_dir: super::source::local_dir(&store, &id),
         resume: !request.resume_move.is_empty(),
+        resume_baseline: request.resume_baseline.clone(),
+        original_target_running: if request.resume_move.is_empty() {
+            target.running
+        } else {
+            request.resume_target_was_running
+        },
     };
     if !request.json {
         say(true, &super::render(plan, false));
@@ -312,16 +329,9 @@ pub(super) fn rollback(request: &Rollback) -> u8 {
         }
         Err(why) => return refuse(request.json, 4, &format!("{why}. {NOTHING}")),
     };
-    if record.committed || record.phase == Phase::RolledBack {
+    if let Some(outcome) = engine::answered_by_record(&record) {
         // Answered from the record alone: nothing to run.
-        let mut none = NoHosts;
-        let id = record.move_id.clone();
-        return report(
-            request.json,
-            &id,
-            &engine::roll_back(&mut none, record),
-            true,
-        );
+        return report(request.json, &record.move_id, &outcome, true);
     }
     if let Err(why) = confirm(
         request.yes,
@@ -384,6 +394,129 @@ pub(super) fn rollback(request: &Rollback) -> u8 {
     }
 }
 
+/// `move --release-target <id>`.
+pub(super) fn release(request: &Rollback) -> u8 {
+    let Some(home) = home() else {
+        return refuse(
+            request.json,
+            4,
+            &format!("this host has no home directory, so it keeps no move records. {NOTHING}"),
+        );
+    };
+    let mut store = Files::under_home(&home);
+    if !valid_id(&request.id) {
+        return refuse(
+            request.json,
+            2,
+            &format!(
+                "{:?} is not a move ID (pseudolife-mcp prints it as YYYYMMDD-HHMMSS-xxxxxxxx). {NOTHING}",
+                request.id
+            ),
+        );
+    }
+    let record = match store.load(&request.id) {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            return refuse(
+                request.json,
+                4,
+                &format!(
+                    "this host has no record of move {} (under {}). {NOTHING}",
+                    request.id,
+                    store.moves.display()
+                ),
+            );
+        }
+        Err(why) => return refuse(request.json, 4, &format!("{why}. {NOTHING}")),
+    };
+    // What the record alone answers (committed, released, not rolled back,
+    // never restored there) needs no host.
+    let runs = !record.committed
+        && matches!(record.phase, Phase::RolledBack | Phase::Releasing)
+        && record.flags.target_restored;
+    if !runs {
+        let mut none = NoHosts;
+        let id = record.move_id.clone();
+        let outcome = engine::release_target(&mut none, record.clone());
+        return report_release(request.json, &id, &outcome, &record.kept);
+    }
+    if let Err(why) = confirm(
+        request.yes,
+        &format!(
+            "Give {} back its own bank, keeping move {}'s copy of this host's bank there in a backup?",
+            record.target, record.move_id
+        ),
+    ) {
+        return refuse(request.json, 2, &why);
+    }
+    let docker = match super::docker_program() {
+        Ok(program) => super::super::docker::Real {
+            program,
+            interruptible: false,
+        },
+        Err(why) => return refuse(request.json, 4, &format!("{why}. {NOTHING}")),
+    };
+    let ssh = match super::remote::Ssh::find() {
+        Ok(ssh) => ssh,
+        Err(why) => return refuse(request.json, 4, &format!("{why}. {NOTHING}")),
+    };
+    let mut live = super::source::Live {
+        docker,
+        ssh,
+        source: record.source.clone(),
+        to: record.target.clone(),
+        store,
+    };
+    let id = record.move_id.clone();
+    let mut again = Files::under_home(&home);
+    let outcome = locked(|| match again.load(&id) {
+        Ok(Some(now)) if now == record => engine::release_target(&mut live, record),
+        Ok(_) => engine::Outcome {
+            code: engine::EXIT_REFUSED,
+            message: format!(
+                "the record of move {id} changed while you confirmed; run pseudolife-mcp move --release-target {id} again to act on what it says now. {NOTHING}"
+            ),
+        },
+        Err(why) => engine::Outcome {
+            code: engine::EXIT_REFUSED,
+            message: format!("{why}. {NOTHING}"),
+        },
+    });
+    match outcome {
+        Ok(outcome) => {
+            let kept = Files::under_home(&home)
+                .load(&id)
+                .ok()
+                .flatten()
+                .map(|r| r.kept)
+                .unwrap_or_default();
+            report_release(request.json, &id, &outcome, &kept)
+        }
+        Err(why) => refuse(request.json, 4, &why),
+    }
+}
+
+/// `--release-target`'s outcome; under `--json` it names the files that
+/// keep the moved bank.
+fn report_release(json: bool, move_id: &str, outcome: &Outcome, kept: &[String]) -> u8 {
+    if json {
+        let doc = json!({
+            "move_id": move_id,
+            "moved": false,
+            "released": outcome.code == engine::EXIT_OK,
+            "kept": kept,
+            "exit": outcome.code,
+            "message": outcome.message,
+        });
+        say(true, &format!("{doc}\n"));
+    } else if outcome.code == engine::EXIT_OK {
+        say(true, &format!("{}\n", outcome.message));
+    } else {
+        say(false, &format!("move: {}\n", outcome.message));
+    }
+    outcome.code
+}
+
 /// For a rollback the record alone answers: any host call is a bug.
 struct NoHosts;
 
@@ -398,6 +531,9 @@ impl engine::Hosts for NoHosts {
         unreachable!()
     }
     fn source_healthy(&mut self, _: std::time::Duration) -> bool {
+        unreachable!()
+    }
+    fn source_bank(&mut self) -> Option<String> {
         unreachable!()
     }
     fn source_policy(&mut self, _: &str) -> Result<(), String> {
@@ -418,7 +554,7 @@ impl engine::Hosts for NoHosts {
     fn write_file(&mut self, _: &std::path::Path, _: &[u8]) -> Result<engine::Artifact, String> {
         unreachable!()
     }
-    fn moved_marker(&mut self) -> Result<Option<String>, String> {
+    fn moved_marker(&mut self) -> Result<engine::Marker, String> {
         unreachable!()
     }
     fn read_only(&mut self, _: bool) -> Result<(), String> {

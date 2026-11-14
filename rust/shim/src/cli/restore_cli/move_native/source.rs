@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::engine::{Artifact, Dump, Hosts};
+use super::engine::{Artifact, Dump, Hosts, Marker};
 use super::probe::{self, Facts};
 use super::protocol::{Answer, Op, Request};
 use super::record::{Files, Record, Store};
@@ -117,7 +117,7 @@ fn sha256_of(path: &Path) -> Result<(String, u64), String> {
 /// How long one target operation may take.
 fn op_time(op: &Op) -> Duration {
     match op {
-        Op::Receive { .. } | Op::Snapshot | Op::Restore => BULK,
+        Op::Receive { .. } | Op::Snapshot | Op::Restore | Op::GiveBack => BULK,
         _ => Duration::from_secs(10 * 60),
     }
 }
@@ -257,6 +257,14 @@ impl Hosts for Live {
         }
     }
 
+    fn source_bank(&mut self) -> Option<String> {
+        let url = format!("{}/health", self.source.health_url);
+        crate::cli::restore_cli::http_json(&url, Duration::from_secs(5))?
+            .get("bank")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }
+
     fn source_policy(&mut self, policy: &str) -> Result<(), String> {
         let daemon = self.source.daemon.clone();
         let ran = self.run(&["update", &format!("--restart={policy}"), &daemon], SHORT);
@@ -306,7 +314,17 @@ impl Hosts for Live {
     fn dump(&mut self, dir: &Path) -> Result<Dump, String> {
         crate::board::state::private_dir(dir)
             .map_err(|_| format!("cannot create the private folder {}", dir.display()))?;
-        self.terminate_others()?;
+        // Ended, not just told to end: a session from before the read-only
+        // setting could otherwise still commit after the dump's snapshot.
+        let ended = end_sessions(self, Self::terminate_others, Self::sessions, || {
+            std::thread::sleep(Duration::from_secs(1))
+        })?;
+        if !ended {
+            return Err(format!(
+                "sessions to {} remain after they were ended, so the final dump could miss their writes",
+                self.source.db
+            ));
+        }
         let path = dir.join("pseudolife_memory.sql.gz");
         let part = dir.join("pseudolife_memory.sql.gz.part");
         let _ = std::fs::remove_file(&part);
@@ -371,14 +389,12 @@ impl Hosts for Live {
         .map_err(|why| format!("cannot set ALLOW_CONNECTIONS {allow} on {db}: {why}"))?;
         if on {
             // Every session the fence now refuses to replace must end.
-            for _ in 0..10 {
-                self.terminate_others()?;
-                if self.sessions()? == 0 {
-                    return Ok(());
-                }
-                std::thread::sleep(Duration::from_secs(1));
+            let ended = end_sessions(self, Self::terminate_others, Self::sessions, || {
+                std::thread::sleep(Duration::from_secs(1))
+            })?;
+            if !ended {
+                return Err(format!("sessions to {db} remain after the fence"));
             }
-            return Err(format!("sessions to {db} remain after the fence"));
         }
         Ok(())
     }
@@ -437,7 +453,7 @@ impl Hosts for Live {
         })
     }
 
-    fn moved_marker(&mut self) -> Result<Option<String>, String> {
+    fn moved_marker(&mut self) -> Result<Marker, String> {
         let daemon = self.source.daemon.clone();
         let ran = self.run(&["inspect", "-f", "{{.Image}}", &daemon], SHORT);
         let image = String::from_utf8_lossy(&ran.stdout).trim().to_owned();
@@ -464,16 +480,17 @@ impl Hosts for Live {
             SHORT,
         );
         match (ran.fault.is_some(), ran.code) {
-            (false, 0) => serde_json::from_slice::<Value>(&ran.stdout)
+            // A file that names no move is no commit point: the move counts
+            // its commit only once a whole marker was written.
+            (false, 0) => Ok(serde_json::from_slice::<Value>(&ran.stdout)
                 .ok()
                 .and_then(|doc| {
                     doc.get("move_id")
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 })
-                .map(Some)
-                .ok_or_else(|| "/data/moved.json does not name a move".to_owned()),
-            (false, 3) => Ok(None),
+                .map_or(Marker::NamesNone, Marker::Names)),
+            (false, 3) => Ok(Marker::Absent),
             _ => Err(probe::why(&ran)),
         }
     }
@@ -636,5 +653,76 @@ mod tests {
         for name in ["", "A", "1a", "a-b", "a\"b", "a;b", &"a".repeat(64)] {
             assert!(!valid_database(name), "{name:?}");
         }
+    }
+}
+
+/// Ends the database's other sessions and waits until none is left (up to
+/// ten tries, `pause` between them): `Ok(false)` when some remain.
+fn end_sessions<T>(
+    it: &mut T,
+    terminate: fn(&mut T) -> Result<(), String>,
+    count: fn(&mut T) -> Result<i64, String>,
+    mut pause: impl FnMut(),
+) -> Result<bool, String> {
+    for _ in 0..10 {
+        terminate(it)?;
+        if count(it)? == 0 {
+            return Ok(true);
+        }
+        pause();
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::end_sessions;
+
+    struct Db {
+        /// Sessions left after each termination, in turn.
+        left: Vec<i64>,
+        terminated: usize,
+    }
+
+    fn terminate(db: &mut Db) -> Result<(), String> {
+        db.terminated += 1;
+        Ok(())
+    }
+
+    fn count(db: &mut Db) -> Result<i64, String> {
+        Ok(if db.left.is_empty() {
+            0
+        } else {
+            db.left.remove(0)
+        })
+    }
+
+    #[test]
+    fn the_dump_waits_until_the_ended_sessions_are_gone() {
+        // Told to end, two sessions take a moment to go.
+        let mut db = Db {
+            left: vec![2, 1, 0],
+            terminated: 0,
+        };
+        assert_eq!(end_sessions(&mut db, terminate, count, || {}), Ok(true));
+        assert_eq!(db.terminated, 3);
+        // One that never goes is reported, not dumped past.
+        let mut db = Db {
+            left: vec![1; 20],
+            terminated: 0,
+        };
+        assert_eq!(end_sessions(&mut db, terminate, count, || {}), Ok(false));
+        assert_eq!(db.terminated, 10);
+    }
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::super::protocol::Op;
+
+    #[test]
+    fn the_give_back_gets_the_restores_time() {
+        assert_eq!(super::op_time(&Op::GiveBack), super::op_time(&Op::Restore));
+        assert!(super::op_time(&Op::Restore) > super::op_time(&Op::Stop));
     }
 }

@@ -24,8 +24,18 @@
 - `pseudolife-mcp move --rollback <move id>` runs the same rollback from a
   move's record (`~/.pseudolife-mcp/moves/<move id>/`) after the move process
   died without it. Every later `move` on that host refuses, naming that
-  command, until it has run.
-- `--resume` retries a rolled-back move whose restore ran on the target.
+  command, until it has run. If the move died past its commit point, it lists
+  what the move still had to do (exit 5).
+- `--resume` retries a rolled-back move whose restore ran on the target. It
+  does so only while that bank is still gated, with the row counts and write
+  counters the rollback read. Otherwise it refuses before any change, naming
+  `--release-target`.
+- `pseudolife-mcp move --release-target <move id>` gives such a target back
+  its own bank, from the safety backup the move's first restore took of it,
+  and frees it for a new move. The moved bank, with any writes it took there,
+  is kept in that restore's own safety backup, which the output and `--json`
+  name. It refuses while this host's daemon is not serving, and each of its
+  steps is safe to repeat.
 - The target's half runs in its native client (move protocol 2): each
   operation is safe to repeat and is journalled on the target. Each change is
   refused unless the target's claim names the move, so a second move into the

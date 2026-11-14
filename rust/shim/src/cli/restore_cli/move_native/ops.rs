@@ -31,6 +31,23 @@ const CLAIM: &str = "claim.json";
 /// Written by `abort`: the move's forward steps no longer run here.
 const ABORTED: &str = "aborted";
 const GATE: &str = "/data/move.json";
+/// Names the safety backup the move's first restore took of the target's
+/// own bank, written when that backup is taken.
+const OWN_BANK: &str = "own-bank.json";
+/// `give-back`'s progress: begun (with the safety backups that existed
+/// then), then done (with the files that keep the moved bank).
+const GIVE_BACK: &str = "give-back.json";
+/// Written once the give-back's restore finished: the restore it runs
+/// refuses, under its own update lock, while this exists, so a helper left
+/// over from a lost link never restores over the bank given back.
+const GIVE_BACK_DONE: &str = "give-back-done";
+/// Written before the move's first restore over the target's own bank: the
+/// safety backups there before it, so its own backup is found even if the
+/// helper died before `own-bank.json` was written.
+const OWN_PENDING: &str = "own-bank-pending.json";
+/// The restore's safety backup names (`safety.rs`).
+const SAFETY_DUMP: &str = "pseudolife_safety_memory-";
+const SAFETY_STATE: &str = "pseudolife_safety_state-";
 const TIMER: &str = "pseudolife-update.timer";
 
 /// What the target host offers the operations.
@@ -42,8 +59,9 @@ pub(super) trait Site {
     /// `systemctl --user <args>`: its stdout when it exits 0.
     fn systemctl(&mut self, args: &[&str]) -> Result<String, String>;
     /// This client's own `restore` with `args`, told the move's abort marker
-    /// (which it reads under its own update lock): its exit code and output.
-    fn restore(&mut self, args: &[String], abort_file: &Path) -> (i32, String);
+    /// (which it reads under its own update lock; `None` for the release,
+    /// which runs after the abort): its exit code and output.
+    fn restore(&mut self, args: &[String], abort_file: Option<&Path>) -> (i32, String);
 }
 
 /// The claim a move holds on the target.
@@ -320,20 +338,29 @@ fn state<S: Site>(site: &mut S, base: &Path, folder: &Path, tables: &[String]) -
                     .collect::<BTreeMap<_, _>>();
             }
         }
-        // A plain daemon start changes only meta and retrieval_events
-        // (measured 14 November 2026 on the first Linux dev box: one restart
-        // of the 0.21.0 daemon on a 12-entry bank moved meta's updates by 2
-        // and retrieval_events' inserts by 1, and no other table's).
-        state.mutations = probe::query(
-            &mut bank,
-            &facts.user,
-            facts.port,
-            &facts.db,
-            "SELECT coalesce(json_object_agg(relname, n_tup_ins + n_tup_upd + n_tup_del), '{}'::json) FROM pg_stat_user_tables WHERE schemaname = 'public' AND relname NOT IN ('meta', 'retrieval_events')",
-        )
-        .ok()
-        .and_then(|row| serde_json::from_str::<BTreeMap<String, i64>>(&row).ok());
     }
+    // Whatever tables were asked for: a resume compares these before it
+    // replaces the gated bank. A plain daemon start changes only meta and
+    // retrieval_events (measured once, 14 November 2026, on the first Linux
+    // dev box: one restart of the 0.21.0 daemon on a 12-entry bank moved
+    // meta's updates by 2 and retrieval_events' inserts by 1, and no other
+    // table's); a later daemon that writes elsewhere on start makes a served
+    // target read as having taken writes, which parks the move, never loses
+    // one.
+    let mut bank = Bank {
+        docker,
+        pg: facts.pg.clone(),
+        daemon: facts.daemon.clone(),
+    };
+    state.mutations = probe::query(
+        &mut bank,
+        &facts.user,
+        facts.port,
+        &facts.db,
+        "SELECT coalesce(json_object_agg(relname, n_tup_ins + n_tup_upd + n_tup_del), '{}'::json) FROM pg_stat_user_tables WHERE schemaname = 'public' AND relname NOT IN ('meta', 'retrieval_events')",
+    )
+    .ok()
+    .and_then(|row| serde_json::from_str::<BTreeMap<String, i64>>(&row).ok());
     state
 }
 
@@ -445,24 +472,102 @@ fn snapshot<D: Docker>(docker: &mut D, folder: &Path) -> Result<(), String> {
         .map_err(|error| format!("cannot move {} into place: {error}", part.display()))
 }
 
-fn restore<S: Site>(site: &mut S, folder: &Path) -> Answer {
-    let (dump, state_archive) = match manifest(folder) {
-        Ok(files) => files,
-        Err(why) => return failed(why),
+/// The stamps of the restore safety backups in `dir`, each with its files
+/// (the dump may be missing when the bank had no database).
+fn safety_pairs(dir: &Path) -> BTreeMap<String, Vec<PathBuf>> {
+    let mut pairs: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return pairs;
     };
-    let facts: Facts = match site.docker().and_then(probe::gather) {
-        Ok(facts) => facts,
-        Err(why) => return failed(format!("cannot read the target's bank: {why}")),
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let stamp = name
+            .strip_prefix(SAFETY_DUMP)
+            .and_then(|rest| rest.strip_suffix(".sql.gz"))
+            .or_else(|| {
+                name.strip_prefix(SAFETY_STATE)
+                    .and_then(|rest| rest.strip_suffix(".tgz"))
+            });
+        if let Some(stamp) = stamp {
+            pairs
+                .entry(stamp.to_owned())
+                .or_default()
+                .push(entry.path());
+        }
+    }
+    for files in pairs.values_mut() {
+        files.sort();
+    }
+    pairs
+}
+
+/// The safety backup of the target's own bank, as `own-bank.json` names it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+struct OwnBank {
+    dump: String,
+    state: String,
+    taken_at: String,
+    /// The target's own bank's fingerprint before the move replaced it
+    /// (`None`: a fresh bank with no identity yet).
+    fingerprint: Option<String>,
+}
+
+/// After a restore of this move: the first safety backup taken of a bank
+/// that was not the moved one is the target's own bank, recorded once.
+fn record_own_bank(
+    folder: &Path,
+    before: &BTreeMap<String, Vec<PathBuf>>,
+    own: bool,
+    now: &str,
+    fingerprint: Option<String>,
+) {
+    let path = folder.join(OWN_BANK);
+    if !own || path.exists() {
+        return;
+    }
+    let after = safety_pairs(&folder.join("safety"));
+    let Some(files) = after
+        .iter()
+        .filter(|(stamp, _)| !before.contains_key(*stamp))
+        .map(|(_, files)| files)
+        .next()
+    else {
+        return;
     };
+    let named = |prefix: &str| {
+        files
+            .iter()
+            .find(|f| {
+                f.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(prefix))
+            })
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let record = OwnBank {
+        dump: named(SAFETY_DUMP),
+        state: named(SAFETY_STATE),
+        taken_at: now.to_owned(),
+        fingerprint,
+    };
+    if let Ok(bytes) = serde_json::to_vec_pretty(&record) {
+        let _ = crate::board::state::atomic_create(&path, &bytes);
+    }
+}
+
+/// `restore` of `dump` and `state` into the target's bank, left stopped,
+/// with its safety backup in the move's folder.
+fn restore_args(dump: &Path, state: &Path, folder: &Path, facts: &Facts) -> Vec<String> {
     let path = |p: &Path| p.to_string_lossy().into_owned();
-    let args = vec![
+    vec![
         "restore".to_owned(),
         "--yes".to_owned(),
         "--leave-stopped".to_owned(),
         "--backup-file".to_owned(),
-        path(&dump),
+        path(dump),
         "--state-archive".to_owned(),
-        path(&state_archive),
+        path(state),
         "--safety-dir".to_owned(),
         path(&folder.join("safety")),
         "--container".to_owned(),
@@ -475,8 +580,383 @@ fn restore<S: Site>(site: &mut S, folder: &Path) -> Answer {
         facts.user.clone(),
         "--db-port".to_owned(),
         facts.port.to_string(),
-    ];
-    let (code, output) = site.restore(&args, &folder.join(ABORTED));
+    ]
+}
+
+/// `give-back`'s progress, in the move's folder.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct GiveBackMark {
+    /// `begun` or `done`.
+    pub phase: String,
+    /// The safety backups that existed when it first began.
+    pub before: Vec<String>,
+    /// Once done: the files that keep the moved bank.
+    pub kept: Vec<String>,
+    /// The containers and database it restores into, as read when it
+    /// began: a restore cut short can leave no bank to read them from.
+    pub facts: Option<Facts>,
+}
+
+/// The safety backup of the target's own bank: as `own-bank.json` names
+/// it, or, when the helper died before writing that, the first backup taken
+/// after `own-bank-pending.json` listed what was there before.
+fn own_backup(folder: &Path) -> Result<OwnBank, String> {
+    let own_path = folder.join(OWN_BANK);
+    match std::fs::read(&own_path) {
+        Ok(bytes) => {
+            return serde_json::from_slice(&bytes).map_err(|error| {
+                format!(
+                    "{} cannot be read ({error}), so the target's own bank cannot be found; nothing was changed",
+                    own_path.display()
+                )
+            });
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "{} cannot be read ({error}), so the target's own bank cannot be found; nothing was changed",
+                own_path.display()
+            ));
+        }
+        Err(_) => {}
+    }
+    let missing = || {
+        format!(
+            "{} is missing: this move recorded no safety backup of the target's own bank, so it cannot be given back; nothing was changed",
+            own_path.display()
+        )
+    };
+    let pending: Pending = std::fs::read(folder.join(OWN_PENDING))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .ok_or_else(missing)?;
+    let files = safety_pairs(&folder.join("safety"))
+        .into_iter()
+        .find(|(stamp, _)| !pending.before.contains(stamp))
+        .map(|(_, files)| files)
+        .ok_or_else(missing)?;
+    let named = |prefix: &str| {
+        files
+            .iter()
+            .find(|f| {
+                f.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(prefix))
+            })
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    Ok(OwnBank {
+        dump: named(SAFETY_DUMP),
+        state: named(SAFETY_STATE),
+        taken_at: String::new(),
+        fingerprint: pending.fingerprint,
+    })
+}
+
+/// Whether this move's first restore over the target's own bank began, and
+/// that bank's fingerprint before it.
+fn own_began(folder: &Path) -> (bool, Option<String>) {
+    if let Some(own) = std::fs::read(folder.join(OWN_BANK))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OwnBank>(&bytes).ok())
+    {
+        return (true, own.fingerprint);
+    }
+    match std::fs::read(folder.join(OWN_PENDING))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Pending>(&bytes).ok())
+    {
+        Some(pending) => (true, pending.fingerprint),
+        None => (folder.join(OWN_PENDING).exists(), None),
+    }
+}
+
+/// What `own-bank-pending.json` holds: written before the move's first
+/// restore, so its presence means that restore began.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+struct Pending {
+    before: Vec<String>,
+    fingerprint: Option<String>,
+}
+
+fn read_mark(folder: &Path) -> Result<GiveBackMark, String> {
+    let path = folder.join(GIVE_BACK);
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|error| format!("{} cannot be read ({error})", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(GiveBackMark::default()),
+        Err(error) => Err(format!("{} cannot be read ({error})", path.display())),
+    }
+}
+
+fn write_mark(folder: &Path, mark: &GiveBackMark) -> Result<(), String> {
+    let path = folder.join(GIVE_BACK);
+    let part = folder.join(format!("{GIVE_BACK}.part"));
+    let bytes = serde_json::to_vec_pretty(mark).map_err(|e| e.to_string())?;
+    std::fs::write(&part, bytes)
+        .and_then(|()| std::fs::rename(&part, &path))
+        .map_err(|error| format!("cannot write {} ({error})", path.display()))
+}
+
+/// What `give-back` does next, from its mark and the target's bank.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Next {
+    /// Done before: answer the kept files, restore nothing.
+    Done,
+    /// This move never restored over the target's bank: there is nothing to
+    /// give back, only the gate and the claim to lift.
+    Untouched,
+    /// Restore the target's own bank (the first time, or again after an
+    /// interrupted restore of it).
+    Restore,
+    /// Refused, with why.
+    Refuse(String),
+}
+
+/// The give-back's decision. It restores only over the moved bank, or over
+/// the half-restored own bank its own earlier run began: never over a bank
+/// it finished giving back, which may since have taken writes.
+pub(super) fn give_back_next(
+    mark: &GiveBackMark,
+    bank: Option<&str>,
+    source_bank: &str,
+    running: Option<bool>,
+    gated: Option<bool>,
+    own: (bool, Option<&str>),
+) -> Next {
+    let (began, own_bank) = own;
+    if mark.phase == "done" {
+        return if bank == Some(source_bank) || own_bank.is_some_and(|own| bank != Some(own)) {
+            Next::Refuse("the target was given back its own bank, but reads another bank now; check it by hand before anything else".to_owned())
+        } else {
+            Next::Done
+        };
+    }
+    if running != Some(false) {
+        return Next::Refuse(
+            "the target daemon is not stopped (or cannot be read); stop it, then rerun".to_owned(),
+        );
+    }
+    if gated != Some(true) {
+        return Next::Refuse(format!(
+            "{GATE} is not present (or cannot be read) on the target, so its bank is not held for this move; nothing was changed"
+        ));
+    }
+    if mark.phase == "begun" || bank == Some(source_bank) {
+        return Next::Restore;
+    }
+    if !began {
+        // This move's restore never began: the bank is the target's own.
+        return Next::Untouched;
+    }
+    // The move's restore began and did not leave the moved bank: a copy cut
+    // short (no identity), or the target's own bank still whole. Any other
+    // bank is not this move's to replace.
+    if bank.is_none() || bank == own_bank {
+        return Next::Restore;
+    }
+    Next::Refuse(format!(
+        "the target's bank is not this move's moved bank (it reads {}), so there is nothing of this move's to give back; nothing was changed",
+        bank.unwrap_or("no bank identity")
+    ))
+}
+
+/// `give-back`: the target's own bank back, from the safety backup this
+/// move's first restore took of it. That restore's own safety backup keeps
+/// the moved bank, which is never deleted.
+fn give_back<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer {
+    let mut answer = give_back_steps(site, folder, source_bank);
+    // Whether its restore of the target's own bank began (now or in an
+    // earlier run): until then a refusal changed nothing.
+    if !answer.ok {
+        answer.restore_dropped = read_mark(folder).map_or(true, |mark| !mark.phase.is_empty());
+    }
+    answer
+}
+
+fn give_back_steps<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer {
+    let mut mark = match read_mark(folder) {
+        Ok(mark) => mark,
+        Err(why) => return failed(why),
+    };
+    let docker = match site.docker() {
+        Ok(docker) => docker,
+        Err(why) => return failed(why),
+    };
+    let facts: Facts = match (probe::gather(docker), &mark.facts) {
+        (Ok(facts), _) => facts,
+        // Its own restore was cut short, perhaps with the database dropped:
+        // restore again into the containers it named when it began.
+        (Err(_), Some(saved)) if mark.phase == "begun" => Facts {
+            meta_fingerprint: None,
+            ..saved.clone()
+        },
+        (Err(why), _) => return failed(format!("cannot read the target's bank: {why}")),
+    };
+    let is_running = running(docker);
+    let is_gated = image(docker).ok().and_then(|image| gated(docker, &image));
+    let (began, own_bank) = own_began(folder);
+    match give_back_next(
+        &mark,
+        facts.meta_fingerprint.as_deref(),
+        source_bank,
+        is_running,
+        is_gated,
+        (began, own_bank.as_deref()),
+    ) {
+        Next::Untouched => {
+            mark.phase = "done".to_owned();
+            if let Err(why) = write_mark(folder, &mark) {
+                return failed(format!("{why}; nothing was changed"));
+            }
+            let _ = std::fs::write(folder.join(GIVE_BACK_DONE), b"");
+            return done();
+        }
+        Next::Done => {
+            let _ = std::fs::write(folder.join(GIVE_BACK_DONE), b"");
+            let mut answer = done();
+            answer.kept = mark.kept;
+            return answer;
+        }
+        Next::Refuse(why) => return failed(why),
+        Next::Restore => {}
+    }
+    let own = match own_backup(folder) {
+        Ok(own) => own,
+        Err(why) => return failed(why),
+    };
+    for (what, file) in [("database", &own.dump), ("state", &own.state)] {
+        if file.is_empty() || !Path::new(file).is_file() {
+            return failed(format!(
+                "the safety backup of the target's own {what} ({}) is missing, so its own bank cannot be given back; nothing was changed",
+                if file.is_empty() {
+                    "not recorded"
+                } else {
+                    file.as_str()
+                }
+            ));
+        }
+        if crate::cli::restore_cli::gzip::stream(Path::new(file), |_| {
+            Ok::<(), crate::cli::restore_cli::gzip::Stop>(())
+        })
+        .is_err()
+        {
+            return failed(format!(
+                "the safety backup of the target's own {what} ({file}) does not read back, so its own bank cannot be given back; nothing was changed"
+            ));
+        }
+    }
+    if mark.phase != "begun" {
+        mark = GiveBackMark {
+            phase: "begun".to_owned(),
+            before: safety_pairs(&folder.join("safety")).into_keys().collect(),
+            kept: Vec::new(),
+            facts: Some(facts.clone()),
+        };
+        if let Err(why) = write_mark(folder, &mark) {
+            return failed(format!("{why}; nothing was changed"));
+        }
+    }
+    let args = restore_args(Path::new(&own.dump), Path::new(&own.state), folder, &facts);
+    let (code, output) = site.restore(&args, Some(&folder.join(GIVE_BACK_DONE)));
+    if code != 0 {
+        let mut answer = failed(format!(
+            "the restore of the target's own bank exited {code} ({}); rerun move --release-target to finish it",
+            output.lines().last().unwrap_or("")
+        ));
+        answer.detail = output;
+        return answer;
+    }
+    let kept: Vec<String> = safety_pairs(&folder.join("safety"))
+        .into_iter()
+        .filter(|(stamp, _)| !mark.before.contains(stamp))
+        .flat_map(|(_, files)| files)
+        .map(|f| f.to_string_lossy().into_owned())
+        .collect();
+    if kept.is_empty() {
+        return failed(format!(
+            "the target's own bank was restored, but no safety backup of the moved bank appeared in {}; look there before anything else",
+            folder.join("safety").display()
+        ));
+    }
+    // Done as soon as the restore finished, so no rerun restores again.
+    mark.phase = "done".to_owned();
+    mark.kept = kept.clone();
+    if let Err(why) = write_mark(folder, &mark) {
+        return failed(format!(
+            "{why}; the target's own bank is back: rerun move --release-target to finish"
+        ));
+    }
+    if let Err(error) = std::fs::write(folder.join(GIVE_BACK_DONE), b"") {
+        return failed(format!(
+            "cannot write {} ({error}); the target's own bank is back: rerun move --release-target to finish",
+            folder.join(GIVE_BACK_DONE).display()
+        ));
+    }
+    let bank = site
+        .docker()
+        .and_then(probe::gather)
+        .map(|facts| facts.meta_fingerprint);
+    let theirs = match &bank {
+        Ok(bank) => {
+            bank.as_deref() != Some(source_bank)
+                && own_bank
+                    .as_deref()
+                    .is_none_or(|own| bank.as_deref() == Some(own))
+        }
+        Err(_) => false,
+    };
+    if !theirs {
+        return failed(
+            "after the restore the target does not read back as its own bank; it stays stopped behind its gate"
+                .to_owned(),
+        );
+    }
+    let mut answer = done();
+    answer.kept = kept;
+    answer
+}
+
+fn restore<S: Site>(site: &mut S, folder: &Path, source_bank: &str) -> Answer {
+    let (dump, state_archive) = match manifest(folder) {
+        Ok(files) => files,
+        Err(why) => return failed(why),
+    };
+    let facts: Facts = match site.docker().and_then(probe::gather) {
+        Ok(facts) => facts,
+        Err(why) => return failed(format!("cannot read the target's bank: {why}")),
+    };
+    // Which bank this restore replaces: the target's own only the first
+    // time (every restore of this move takes a safety backup, so none in its
+    // folder means none ran before), never a half-restored copy.
+    let before = safety_pairs(&folder.join("safety"));
+    let own = before.is_empty()
+        && !folder.join(OWN_PENDING).exists()
+        && facts.meta_fingerprint.as_deref() != Some(source_bank);
+    if own {
+        // Before the restore begins: it began, over this bank.
+        let pending = Pending {
+            before: Vec::new(),
+            fingerprint: facts.meta_fingerprint.clone(),
+        };
+        let written = serde_json::to_vec(&pending)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| {
+                crate::board::state::atomic_create(&folder.join(OWN_PENDING), &bytes)
+                    .map_err(|e| e.to_string())
+            });
+        if let Err(why) = written {
+            return failed(format!(
+                "cannot record which bank this restore replaces in {} ({why}); nothing was restored",
+                folder.display()
+            ));
+        }
+    }
+    let args = restore_args(&dump, &state_archive, folder, &facts);
+    let (code, output) = site.restore(&args, Some(&folder.join(ABORTED)));
+    let now = site.now();
+    record_own_bank(folder, &before, own, &now, facts.meta_fingerprint.clone());
     let tail: String = output
         .lines()
         .rev()
@@ -669,13 +1149,24 @@ pub(super) fn perform<S: Site>(site: &mut S, request: &Request, payload: &mut dy
             }
         }
         Op::Start | Op::Gate | Op::Ungate | Op::StartGated => {
-            gate_and_start(site, &folder, request)
+            gate_and_start(site, &folder, &claims, request)
         }
         Op::Snapshot => match site.docker().and_then(|d| snapshot(d, &folder)) {
             Ok(()) => done(),
             Err(why) => failed(why),
         },
-        Op::Restore => restore(site, &folder),
+        Op::Restore | Op::GiveBack => {
+            let source_bank = match read_claim(&claims) {
+                Ok(Some(claim)) => claim.source_bank,
+                Ok(None) => return failed("no move holds this target's claim"),
+                Err(why) => return failed(why),
+            };
+            if matches!(op, Op::Restore) {
+                restore(site, &folder, &source_bank)
+            } else {
+                give_back(site, &folder, &source_bank)
+            }
+        }
         Op::Abort => match std::fs::write(folder.join(ABORTED), b"") {
             Ok(()) => done(),
             Err(error) => failed(format!("cannot mark the move as rolling back: {error}")),
@@ -729,7 +1220,12 @@ fn claim<S: Site>(site: &mut S, base: &Path, move_id: &str, source_bank: &str) -
     }
 }
 
-fn gate_and_start<S: Site>(site: &mut S, folder: &Path, request: &Request) -> Answer {
+fn gate_and_start<S: Site>(
+    site: &mut S,
+    folder: &Path,
+    claims: &Path,
+    request: &Request,
+) -> Answer {
     let docker = match site.docker() {
         Ok(docker) => docker,
         Err(why) => return failed(why),
@@ -776,7 +1272,26 @@ fn gate_and_start<S: Site>(site: &mut S, folder: &Path, request: &Request) -> An
                 }
             }
         }
-        Op::Ungate => ungate(docker),
+        Op::Ungate => {
+            // Ungate is for the target's own bank only: never while the
+            // target reads the moved bank.
+            let source_bank = match read_claim(claims) {
+                Ok(Some(claim)) => claim.source_bank,
+                Ok(None) => String::new(),
+                Err(why) => return failed(why),
+            };
+            match probe::gather(docker) {
+                Ok(facts) if facts.meta_fingerprint.as_deref() == Some(source_bank.as_str()) => {
+                    Err(format!(
+                        "the target reads the moved bank, so {GATE} stays; only the move starts that bank"
+                    ))
+                }
+                Ok(_) => ungate(docker),
+                Err(why) => Err(format!(
+                    "cannot read the target's bank ({why}), so {GATE} stays"
+                )),
+            }
+        }
         Op::StartGated => ungate(docker).and_then(|()| start(docker)),
         _ => {
             // The target's own bank only: a gate means it holds the moved one.
@@ -874,7 +1389,7 @@ mod tests {
         fn systemctl(&mut self, _args: &[&str]) -> Result<String, String> {
             Ok("enabled".into())
         }
-        fn restore(&mut self, args: &[String], _abort_file: &Path) -> (i32, String) {
+        fn restore(&mut self, args: &[String], _abort_file: Option<&Path>) -> (i32, String) {
             self.restored.push(args.to_vec());
             self.restore_answer.clone()
         }
@@ -1179,7 +1694,7 @@ mod abort_tests {
         fn systemctl(&mut self, _args: &[&str]) -> Result<String, String> {
             Ok("enabled".into())
         }
-        fn restore(&mut self, _args: &[String], _abort_file: &Path) -> (i32, String) {
+        fn restore(&mut self, _args: &[String], _abort_file: Option<&Path>) -> (i32, String) {
             (0, String::new())
         }
     }
@@ -1234,5 +1749,134 @@ mod abort_tests {
         assert!(ask(&mut site, claim(true), false).ok);
         assert!(ask(&mut site, Op::TimerPause, false).ok);
         let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+#[cfg(test)]
+mod give_back_tests {
+    use super::*;
+
+    const BANK: &str = "75d0c7a836eb6af5";
+
+    fn mark(phase: &str) -> GiveBackMark {
+        GiveBackMark {
+            phase: phase.to_owned(),
+            ..GiveBackMark::default()
+        }
+    }
+
+    #[test]
+    fn give_back_restores_only_over_the_moved_bank_or_its_own_cut_short_restore() {
+        let stopped = (Some(false), Some(true));
+        let decide = |m: &GiveBackMark,
+                      bank: Option<&str>,
+                      (running, gated): (Option<bool>, Option<bool>)| {
+            give_back_next(m, bank, BANK, running, gated, (true, None))
+        };
+        // The moved bank, stopped and gated: restore the target's own.
+        assert_eq!(decide(&mark(""), Some(BANK), stopped), Next::Restore);
+        // Its own restore was cut short: whatever the bank reads, again.
+        assert_eq!(decide(&mark("begun"), None, stopped), Next::Restore);
+        assert_eq!(
+            decide(&mark("begun"), Some("other"), stopped),
+            Next::Restore
+        );
+        // Given back already: never again, even once that bank runs and
+        // takes writes.
+        assert_eq!(
+            decide(&mark("done"), None, (Some(true), Some(false))),
+            Next::Done
+        );
+        assert_eq!(
+            decide(&mark("done"), Some("own"), (Some(true), Some(false))),
+            Next::Done
+        );
+        // Refused: done but the moved bank is back; not this move's bank;
+        // running; ungated; unreadable.
+        for (m, bank, at) in [
+            (mark("done"), Some(BANK), stopped),
+            (mark(""), Some("other"), stopped),
+            (mark(""), Some(BANK), (Some(true), Some(true))),
+            (mark(""), Some(BANK), (Some(false), Some(false))),
+            (mark(""), Some(BANK), (None, Some(true))),
+            (mark(""), Some(BANK), (Some(false), None)),
+        ] {
+            assert!(
+                matches!(decide(&m, bank, at), Next::Refuse(_)),
+                "{m:?} {bank:?} {at:?}"
+            );
+        }
+        let with_own = |m: &GiveBackMark, bank: Option<&str>, own: (bool, Option<&str>)| {
+            give_back_next(m, bank, BANK, Some(false), Some(true), own)
+        };
+        // The move's restore never began: the target's own bank, untouched.
+        assert_eq!(
+            with_own(&mark(""), Some("other"), (false, None)),
+            Next::Untouched
+        );
+        assert_eq!(with_own(&mark(""), None, (false, None)), Next::Untouched);
+        // It began and left no moved bank: a copy cut short after its drop
+        // (no identity), or the target's own bank still whole.
+        assert_eq!(with_own(&mark(""), None, (true, None)), Next::Restore);
+        assert_eq!(
+            with_own(&mark(""), Some("own"), (true, Some("own"))),
+            Next::Restore
+        );
+        // Some other bank is not this move's to replace.
+        assert!(matches!(
+            with_own(&mark(""), Some("other"), (true, Some("own"))),
+            Next::Refuse(_)
+        ));
+        // Given back, but another bank there now: refused.
+        assert!(matches!(
+            with_own(&mark("done"), Some("other"), (true, Some("own"))),
+            Next::Refuse(_)
+        ));
+        assert_eq!(
+            with_own(&mark("done"), Some("own"), (true, Some("own"))),
+            Next::Done
+        );
+    }
+
+    #[test]
+    fn the_first_backup_of_a_bank_that_is_not_the_moved_one_is_recorded_as_the_targets_own() {
+        let folder =
+            std::env::temp_dir().join(format!("move-own-{}", uuid::Uuid::new_v4().simple()));
+        let safety = folder.join("safety");
+        std::fs::create_dir_all(&safety).unwrap();
+        let pair = |stamp: &str| {
+            for name in [
+                format!("{SAFETY_DUMP}{stamp}.sql.gz"),
+                format!("{SAFETY_STATE}{stamp}.tgz"),
+            ] {
+                std::fs::write(safety.join(name), b"x").unwrap();
+            }
+        };
+        pair("20261114-000000-aaaaaaaa");
+        // A restore over the moved bank (a resume's) records nothing.
+        let before = safety_pairs(&safety);
+        pair("20261114-010000-bbbbbbbb");
+        record_own_bank(&folder, &before, false, "now", None);
+        assert!(!folder.join(OWN_BANK).exists());
+        // Over the target's own bank: its new backup is recorded.
+        record_own_bank(&folder, &before, true, "now", None);
+        let own: OwnBank =
+            serde_json::from_slice(&std::fs::read(folder.join(OWN_BANK)).unwrap()).unwrap();
+        assert!(
+            own.dump.ends_with("20261114-010000-bbbbbbbb.sql.gz"),
+            "{own:?}"
+        );
+        assert!(
+            own.state.ends_with("20261114-010000-bbbbbbbb.tgz"),
+            "{own:?}"
+        );
+        // Once: a later restore never replaces that record.
+        let before = safety_pairs(&safety);
+        pair("20261114-020000-cccccccc");
+        record_own_bank(&folder, &before, true, "later", None);
+        let again: OwnBank =
+            serde_json::from_slice(&std::fs::read(folder.join(OWN_BANK)).unwrap()).unwrap();
+        assert_eq!(again, own);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

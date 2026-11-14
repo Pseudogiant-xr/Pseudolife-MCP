@@ -303,6 +303,7 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
     // only once the move starts it, and the move checks it then (before the
     // commit point).
     if !request.resume_move.is_empty() {
+        resume_check(world, request)?;
         return Ok(Plan {
             to,
             target_url,
@@ -551,10 +552,65 @@ fn say(stdout: bool, text: &str) -> bool {
     }
 }
 
-/// `move --rollback <id>`: `None` for any other argv.
+/// Before a resume changes anything: the target's gated bank must still be
+/// as the move's last rollback left it (gated, with no write since), or the
+/// resume would replace writes that exist nowhere else.
+fn resume_check<W: World>(world: &mut W, request: &Request) -> Result<(), String> {
+    let mut tables: Vec<String> = request
+        .resume_baseline
+        .as_ref()
+        .map(|b| b.user_counts.keys().cloned().collect())
+        .unwrap_or_default();
+    tables.sort();
+    let ask = protocol::Request {
+        protocol: protocol::PROTOCOL,
+        move_id: request.resume_move.clone(),
+        work_dir: request.target_work_dir.clone().unwrap_or_default(),
+        rollback: false,
+        op: protocol::Op::State { tables },
+    };
+    let mut body = serde_json::to_vec(&ask).map_err(|e| e.to_string())?;
+    body.push(b'\n');
+    let to = request.to.clone();
+    let ran = world.remote()?.run(
+        &to,
+        &remote::sh(&script(protocol::PROTOCOL)),
+        &body,
+        PROBE_TIME,
+    );
+    let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
+    let Some(framed) = stdout.lines().find_map(|line| line.strip_prefix(FRAME)) else {
+        return Err(remote::lost(&to, &ran));
+    };
+    let answer: protocol::Answer = serde_json::from_str(framed).map_err(|_| {
+        format!("the native move helper on {to} answered something this client cannot read; update both clients (pseudolife-mcp update) so they match, then retry")
+    })?;
+    let state = answer.state.ok_or_else(|| {
+        format!(
+            "the move helper on {to} did not say what its bank holds: {}",
+            answer.error
+        )
+    })?;
+    let writes = engine::since_baseline(request.resume_baseline.as_ref(), &state);
+    if writes.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "move {id} is not resumed: {to}'s gated bank may have taken writes since the move's last rollback ({}), and a resume would replace them. Give {to} back its own bank, keeping that bank in a backup there, with pseudolife-mcp move --release-target {id}; then run a new move",
+        writes.join("; "),
+        id = request.resume_move
+    ))
+}
+
+/// `move --rollback <id>` or `move --release-target <id>`: `None` for any
+/// other argv.
 pub(in crate::cli) fn run_rollback(arguments: &[OsString]) -> Option<u8> {
     let rollback = argv::parse_rollback(arguments)?;
-    Some(command::rollback(&rollback))
+    Some(if rollback.release {
+        command::release(&rollback)
+    } else {
+        command::rollback(&rollback)
+    })
 }
 
 /// `move` for the argv `move_cli` passed on: `None` keeps the deferral for
@@ -590,8 +646,54 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
         }
         if request.resume {
             match command::resumable(&records, &request.to) {
-                Some(earlier) => request.resume_move = earlier.move_id.clone(),
+                Some(earlier) => {
+                    // The move's files on the target are where it put them:
+                    // a resume uses that folder, never another.
+                    match &request.target_work_dir {
+                        Some(dir) if *dir != earlier.work_dir => {
+                            return Some(finish(
+                                &request,
+                                Err(format!(
+                                    "move {} keeps its files on {} in {}; resume it without --target-work-dir (or with that one)",
+                                    earlier.move_id,
+                                    request.to,
+                                    if earlier.work_dir.is_empty() {
+                                        "~/.pseudolife-mcp/moves"
+                                    } else {
+                                        &earlier.work_dir
+                                    }
+                                )),
+                            ));
+                        }
+                        _ => {}
+                    }
+                    request.target_work_dir =
+                        (!earlier.work_dir.is_empty()).then(|| earlier.work_dir.clone());
+                    request.resume_move = earlier.move_id.clone();
+                    request.resume_baseline = earlier.gated_baseline.clone();
+                    request.resume_target_was_running = earlier.target_was_running;
+                }
                 None => {
+                    let parked = records.iter().find(|r| {
+                        !r.committed
+                            && r.phase == record::Phase::RolledBack
+                            && r.flags.target_restored
+                            && r.parked_writes.is_some()
+                            && r.target == request.to
+                    });
+                    if let Some(parked) = parked {
+                        return Some(finish(
+                            &request,
+                            Err(format!(
+                                "move {} to {} is not resumed: its target's gated bank took writes that are not in this host's bank ({}), and a resume would replace them. Give {} back its own bank, keeping that bank in a backup there, with pseudolife-mcp move --release-target {}; then run a new move",
+                                parked.move_id,
+                                parked.target,
+                                parked.parked_writes.clone().unwrap_or_default(),
+                                parked.target,
+                                parked.move_id
+                            )),
+                        ));
+                    }
                     return Some(finish(
                         &request,
                         Err(format!(

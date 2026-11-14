@@ -182,6 +182,21 @@ pub(super) fn with_update_lock<T>(
     Ok(result)
 }
 
+/// This user's home: `USERPROFILE`, else `HOME`. The update lock, a
+/// move's records and a target's claim all live under it, so they are
+/// found the same way from every shell.
+pub(super) fn home_dir() -> Option<PathBuf> {
+    pick_home(std::env::var_os("USERPROFILE"), std::env::var_os("HOME"))
+}
+
+fn pick_home(
+    userprofile: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    let set = |value: Option<std::ffi::OsString>| value.filter(|v| !v.is_empty());
+    set(userprofile).or_else(|| set(home)).map(PathBuf::from)
+}
+
 /// The data directory: `PSEUDOLIFE_MCP_DATA_DIR`, else
 /// `<home>/.pseudolife-mcp` (the update lock's home).
 fn data_dir() -> Option<PathBuf> {
@@ -189,8 +204,7 @@ fn data_dir() -> Option<PathBuf> {
     if let Some(dir) = set("PSEUDOLIFE_MCP_DATA_DIR") {
         return Some(PathBuf::from(dir));
     }
-    let home = set("USERPROFILE").or_else(|| set("HOME"))?;
-    Some(PathBuf::from(home).join(".pseudolife-mcp"))
+    Some(home_dir()?.join(".pseudolife-mcp"))
 }
 
 /// The embedded PostgreSQL of a lite bank on this host, if there is one.
@@ -498,5 +512,23 @@ pub(super) mod tests {
             Some(serde_json::json!(true))
         );
         server.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod home_tests {
+    #[test]
+    fn the_lock_the_records_and_the_claim_find_one_home() {
+        let pick = |u: Option<&str>, h: Option<&str>| {
+            super::pick_home(u.map(Into::into), h.map(Into::into))
+        };
+        // Windows sets both, and they can differ: USERPROFILE is the one.
+        assert_eq!(
+            pick(Some("C:/Users/u"), Some("/home/u")),
+            Some("C:/Users/u".into())
+        );
+        assert_eq!(pick(None, Some("/home/u")), Some("/home/u".into()));
+        assert_eq!(pick(Some(""), Some("/home/u")), Some("/home/u".into()));
+        assert_eq!(pick(None, None), None);
     }
 }

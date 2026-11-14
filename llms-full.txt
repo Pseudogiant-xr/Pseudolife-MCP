@@ -12972,19 +12972,46 @@ and the move exits 6, printing:
 - where the data is;
 - the next command.
 
-Writes the target took while it served (rows added or removed, and rows
-changed in place, which its write counters show) are named and kept in its
-gated bank, and a later `--resume` never replaces them.
+Writes the target took while it served are named and kept in its gated bank,
+and a later `--resume` never replaces them. These are rows added or removed,
+and rows changed in place, which its write counters show.
 
 **If the move process itself dies** (a closed console, a power loss), every
 later `move` on this host refuses until you run `pseudolife-mcp move
---rollback <move id>`, which runs the same rollback from the move's record in
-`~/.pseudolife-mcp/moves/<move id>/`.
+--rollback <move id>`. It runs the same rollback from the move's record in
+`~/.pseudolife-mcp/moves/<move id>/`. If the move had already passed its
+commit point, the bank lives on the target. Then `--rollback` lists what the
+move still had to do (exit 5): point the clients at the target, and restore
+the target's restart policy and update timer.
 
 **`--resume`** retries a rolled-back move whose restore ran on the target,
-replacing that move's own restored bank there. Both hosts keep the move's files
-(a full copy of the bank) under `~/.pseudolife-mcp/moves/<move id>` until you
-remove them: the report names both folders and their sizes.
+replacing that move's own restored bank there. It does so only while that
+bank is still as the rollback left it: gated, with the same row counts and
+write counters. Otherwise it refuses before changing anything, because the
+bank may hold writes that exist nowhere else.
+
+**`pseudolife-mcp move --release-target <move id>`** frees a target that
+still holds a rolled-back move's restored bank, writes or not. It:
+1. restores the target's own bank from the safety backup the move's first
+   restore took of it;
+2. starts the target's daemon again if it was running;
+3. releases the target for a new move.
+
+The moved bank, with any writes it took on the target, ends in that restore's
+own safety backup there, and the output (and `--json`) names the files.
+Nothing is deleted. If the move's restore was cut short there, the copy it
+left is replaced the same way. If the restore never ran, nothing is restored:
+the target is only ungated and released.
+
+It refuses when this host's daemon is not serving its bank: your bank is this
+host's after the rollback, so the target's copy is not released while no bank
+is served. It also refuses a target that holds some other bank. Each step is
+safe to repeat. A rerun after an interruption finishes the release, and never
+restores over a bank it has finished giving back.
+
+Both hosts keep the move's files (a full copy of the bank) under
+`~/.pseudolife-mcp/moves/<move id>` until you remove them: the report names
+both folders and their sizes.
 
 **ssh and Docker.** ssh runs with `BatchMode=yes` and no option that touches
 host-key checking. A host key that is unknown or has changed fails with ssh's

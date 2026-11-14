@@ -25,7 +25,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::protocol::{Answer, Op, PROTOCOL, Request, State};
-use super::record::{Flags, Phase, RECORD_VERSION, Record, Undo};
+use super::record::{Baseline, Flags, Phase, RECORD_VERSION, Record, Undo};
 
 pub(super) const EXIT_OK: u8 = 0;
 pub(super) const EXIT_ROLLED_BACK: u8 = 1;
@@ -45,6 +45,13 @@ const SOURCE_WAIT: Duration = Duration::from_secs(120);
 const ABORT_BUSY_WAIT: Duration = Duration::from_secs(4 * 60 * 60);
 const ABORT_PAUSE: Duration = Duration::from_secs(15);
 const ABORT_LOST_TRIES: u32 = 3;
+/// How long a forward step waits while another operation (a backup or an
+/// update there) holds the target's update lock, before the move rolls back
+/// rather than keep the stopped source down longer: a design bound, not a
+/// measurement.
+const FORWARD_BUSY_WAIT: Duration = Duration::from_secs(30 * 60);
+/// How long `--release-target` gives the source to answer its health check.
+const RELEASE_SOURCE_WAIT: Duration = Duration::from_secs(10);
 
 /// The final dump: where it is, its digest, and each table's row count.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -74,6 +81,8 @@ pub(super) trait Hosts {
     /// Whether the source daemon runs, read fresh (`None`: unreadable).
     fn source_running(&mut self) -> Option<bool>;
     fn source_healthy(&mut self, wait: Duration) -> bool;
+    /// The bank fingerprint the source daemon's `/health` names, read now.
+    fn source_bank(&mut self) -> Option<String>;
     fn source_policy(&mut self, policy: &str) -> Result<(), String>;
     /// Enable or disable this host's unattended update.
     fn schedule(&mut self, enable: bool) -> Result<(), String>;
@@ -91,9 +100,9 @@ pub(super) trait Hosts {
     /// Write `/data/moved.json` into the stopped source (`Some`), or
     /// remove it (`None`).
     fn moved(&mut self, body: Option<&str>) -> Result<(), String>;
-    /// The move ID in the source's `/data/moved.json` (`None`: no such
-    /// file); `Err` when it cannot be read.
-    fn moved_marker(&mut self) -> Result<Option<String>, String>;
+    /// What the source's `/data/moved.json` says; `Err` when this host's
+    /// Docker cannot be asked.
+    fn moved_marker(&mut self) -> Result<Marker, String>;
     /// One helper operation on the target. `Err` is a lost link or an
     /// unreadable answer: the operation may or may not have run.
     fn target(&mut self, request: &Request, payload: Option<&Path>) -> Result<Answer, String>;
@@ -109,6 +118,18 @@ pub(super) trait Hosts {
     fn sleep(&mut self, pause: Duration);
     /// One progress line for the user.
     fn say(&mut self, line: &str);
+}
+
+/// The source's `/data/moved.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Marker {
+    Absent,
+    /// It names this move ID.
+    Names(String),
+    /// It is there but names no move (cut short, or not a marker): no move
+    /// counts its commit until a whole marker is written, so it is no
+    /// move's commit point.
+    NamesNone,
 }
 
 /// What the preflight found, which the transaction needs.
@@ -134,6 +155,12 @@ pub(super) struct Plan {
     pub local_dir: PathBuf,
     /// `--resume`: the target may already hold this move's restored bank.
     pub resume: bool,
+    /// Whether the target daemon ran before the move first began (a
+    /// resumed move's target is stopped behind its gate by then).
+    pub original_target_running: bool,
+    /// For `--resume`: the gated bank as the earlier rollback read it, which
+    /// the target's bank must still match before it is replaced.
+    pub resume_baseline: Option<Baseline>,
 }
 
 /// How the move ended.
@@ -200,10 +227,37 @@ impl<H: Hosts> Run<'_, H> {
 
     /// One target operation that must succeed. A lost link, a refusal and
     /// an unreadable answer all stop the move.
+    /// One request, waiting while another operation (a backup or an update
+    /// there) holds the target's update lock, up to a bound.
+    fn ask(
+        &mut self,
+        request: &Request,
+        payload: Option<&Path>,
+    ) -> Result<Result<Answer, String>, Stop> {
+        let mut waited = Duration::ZERO;
+        loop {
+            match self.hosts.target(request, payload) {
+                Ok(answer) if !answer.ok && answer.busy && waited < FORWARD_BUSY_WAIT => {
+                    if waited.is_zero() {
+                        self.hosts.say(&format!(
+                            "waiting for the target's update lock before {} (another update, restore or backup holds it)",
+                            request.op.name()
+                        ));
+                    }
+                    self.check_interrupt()?;
+                    self.hosts.sleep(ABORT_PAUSE);
+                    waited += ABORT_PAUSE;
+                }
+                other => return Ok(other),
+            }
+        }
+    }
+
     fn target(&mut self, op: Op, payload: Option<&Path>) -> Result<Answer, Stop> {
         let name = op.name();
         let request = self.request(op);
-        match self.hosts.target(&request, payload) {
+        let result = self.ask(&request, payload)?;
+        match result {
             Ok(answer) => {
                 if let Some(state) = &answer.state {
                     self.last_state = Some(state.clone());
@@ -354,11 +408,28 @@ impl<H: Hosts> Run<'_, H> {
             return Err(Stop::new("the target daemon did not read back as stopped"));
         }
         self.step("check the target's bank is still empty")?;
-        let state = self.target(Op::State { tables: Vec::new() }, None)?;
+        let tables = if plan.resume {
+            baseline_tables(plan.resume_baseline.as_ref(), &self.record.dump_counts)
+        } else {
+            Vec::new()
+        };
+        let state = self.target(Op::State { tables }, None)?;
         let state = state.state.unwrap_or_default();
-        // A resumed move replaces its own earlier restored bank; any other
-        // used bank is never overwritten.
+        // A resumed move replaces its own earlier restored bank, and only
+        // while that bank is still as its last rollback left it: gated, with
+        // no write since. Any other used bank is never overwritten.
         let own = plan.resume && state.bank.as_deref() == Some(plan.source_bank.as_str());
+        if own {
+            let writes = since_baseline(plan.resume_baseline.as_ref(), &state);
+            if !writes.is_empty() {
+                let found = writes.join("; ");
+                self.record.parked_writes = Some(found.clone());
+                self.save()?;
+                return Err(Stop::new(format!(
+                    "the target's gated bank may have taken writes since this move's last rollback ({found}), so the resume does not replace it"
+                )));
+            }
+        }
         if state.empty != Some(true) && !own {
             return Err(Stop::new(
                 "the target's bank is no longer empty; move never overwrites a used bank",
@@ -374,7 +445,7 @@ impl<H: Hosts> Run<'_, H> {
         self.step("restore the target from the copied backup")?;
         self.mark(|f| f.target_restored = true)?;
         let request = self.request(Op::Restore);
-        match self.hosts.target(&request, None) {
+        match self.ask(&request, None)? {
             Ok(answer) if answer.ok => {}
             Ok(answer) => {
                 if !answer.restore_dropped {
@@ -442,6 +513,10 @@ impl<H: Hosts> Run<'_, H> {
         // The commit point.
         self.check_interrupt()?;
         self.hosts.say("commit: mark the stopped source as moved");
+        // Everything the move still has to do after its commit, so a move
+        // killed past the commit point still names it; struck off below as
+        // each step succeeds.
+        self.record.follow_ups = planned_follow_ups(&self.record);
         self.mark(|f| f.moved_written = true)?;
         // No interrupt is read from here until the commit is written: a
         // signal now waits for the commit point's outcome.
@@ -503,6 +578,16 @@ impl<H: Hosts> Run<'_, H> {
     fn after_commit(&mut self) {
         let plan = self.plan;
         let to = &plan.to;
+        // From the planned list to what is left: each step below adds itself
+        // back only if it fails.
+        let failed_save: Vec<String> = self
+            .record
+            .follow_ups
+            .iter()
+            .filter(|line| line.starts_with("the move record could not be written"))
+            .cloned()
+            .collect();
+        self.record.follow_ups = failed_save;
         if self.record.flags.target_policy_paused {
             let policy = self.record.target_policy.clone();
             if self
@@ -571,6 +656,16 @@ fn files_line(record: &Record) -> String {
     } else {
         record.remote_folder.clone()
     };
+    if record.flags.target_restored && !record.committed && record.phase != Phase::Released {
+        return format!(
+            "the move's files, each a full copy of the bank, are kept: {} ({}) on this host, for you to remove, and {} ({}) on {}, which holds the target's own backup and what --resume or --release-target needs: keep it until one of them has run",
+            record.local_dir,
+            size(local),
+            remote,
+            size(record.remote_bytes),
+            record.target
+        );
+    }
     format!(
         "the move's files, each a full copy of the bank, are kept for you to remove: {} ({}) on this host and {} ({}) on {}",
         record.local_dir,
@@ -651,10 +746,13 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
         source_policy: plan.source_policy.clone(),
         work_dir: plan.work_dir.clone(),
         local_dir: plan.local_dir.to_string_lossy().into_owned(),
-        target_was_running: plan.target_running,
+        target_was_running: plan.original_target_running,
         schedule_enable: plan.schedule_enable.clone(),
         source: plan.source.clone(),
         target_image: plan.target_image.clone(),
+        // Kept as the earlier record had it, so a resume refused before it
+        // changed anything leaves the record as resumable as it was.
+        gated_baseline: plan.resume_baseline.clone(),
         ..Record::default()
     };
     let mut record = record;
@@ -726,29 +824,8 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
 
 /// Runs the rollback of a record a move left unfinished (`move --rollback`).
 pub(super) fn roll_back<H: Hosts>(hosts: &mut H, record: Record) -> Outcome {
-    if record.committed {
-        return Outcome {
-            code: EXIT_REFUSED,
-            message: format!(
-                "move {} passed its commit point: the bank lives on {} and a committed move is not rolled back. Nothing was changed",
-                record.move_id, record.target
-            ),
-        };
-    }
-    if record.phase == Phase::RolledBack {
-        return Outcome {
-            code: EXIT_OK,
-            message: match &record.parked_writes {
-                Some(tables) => format!(
-                    "move {} was already rolled back; nothing to do. The target {} keeps writes it took while it served ({tables}) in its gated bank",
-                    record.move_id, record.target
-                ),
-                None => format!(
-                    "move {} was already rolled back; nothing to do",
-                    record.move_id
-                ),
-            },
-        };
+    if let Some(outcome) = answered_by_record(&record) {
+        return outcome;
     }
     let mut back = Back {
         hosts,
@@ -756,6 +833,80 @@ pub(super) fn roll_back<H: Hosts>(hosts: &mut H, record: Record) -> Outcome {
         state: None,
     };
     back.run("rolling back by request (move --rollback)")
+}
+
+/// What `move --rollback` answers from a record alone (committed, rolled
+/// back or released), or `None` when there is a rollback to run.
+pub(super) fn answered_by_record(record: &Record) -> Option<Outcome> {
+    let id = &record.move_id;
+    let to = &record.target;
+    if record.committed {
+        if record.follow_ups.is_empty() {
+            return Some(Outcome {
+                code: EXIT_REFUSED,
+                message: format!(
+                    "move {id} passed its commit point: the bank lives on {to} and a committed move is not rolled back. Nothing was changed"
+                ),
+            });
+        }
+        // Killed past its commit point: what it had left to do, which no
+        // rerun does for it.
+        return Some(Outcome {
+            code: EXIT_FOLLOW_UPS,
+            message: format!(
+                "move {id} passed its commit point: the bank lives on {to} and a committed move is not rolled back. It did not finish; finish by hand:\n  {}",
+                record.follow_ups.join("\n  ")
+            ),
+        });
+    }
+    match record.phase {
+        Phase::Released => Some(Outcome {
+            code: EXIT_OK,
+            message: format!(
+                "move {id} was rolled back, and {to} was given back its own bank; nothing to do. {}",
+                kept_line(record)
+            ),
+        }),
+        Phase::Releasing => Some(Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "move {id} was rolled back, and giving {to} back its own bank did not finish; finish it with pseudolife-mcp move --release-target {id}. Nothing was changed"
+            ),
+        }),
+        Phase::RolledBack => Some(Outcome {
+            code: EXIT_OK,
+            message: match (&record.parked_writes, record.flags.target_restored) {
+                (Some(tables), _) => format!(
+                    "move {id} was already rolled back; nothing to do. The target {to} keeps writes it took while it served ({tables}) in its gated bank. To free that target, keeping those writes in a backup there: pseudolife-mcp move --release-target {id}"
+                ),
+                (None, true) => format!(
+                    "move {id} was already rolled back; nothing to do. The target {to} keeps the restored bank behind its gate: finish the move with pseudolife-mcp move --resume, or give {to} back its own bank with pseudolife-mcp move --release-target {id}"
+                ),
+                (None, false) => format!("move {id} was already rolled back; nothing to do"),
+            },
+        }),
+        _ => None,
+    }
+}
+
+/// Where the moved bank's copy is, after a release.
+fn kept_line(record: &Record) -> String {
+    if record.kept.is_empty() {
+        return if record.phase == Phase::Released {
+            format!(
+                "The move's restore never replaced {}'s bank, so there was nothing of it to keep there",
+                record.target
+            )
+        } else {
+            String::new()
+        };
+    }
+    format!(
+        "The moved bank as it stood on {}, with any writes it took there, is kept in {} on {}; nothing was deleted",
+        record.target,
+        record.kept.join(" and "),
+        record.target
+    )
 }
 
 /// The rollback: R1 to R16 in order, every undo attempted, I2 checked on a
@@ -862,8 +1013,9 @@ impl<H: Hosts> Back<'_, H> {
     /// A fresh reading of the target, counting the dump's tables when the
     /// target may have served.
     fn read(&mut self) -> Result<State, String> {
-        let served = self.record.flags.gate_lifting || self.record.flags.target_started;
-        let tables = if served {
+        let flags = &self.record.flags;
+        let counted = flags.gate_lifting || flags.target_started || flags.target_restored;
+        let tables = if counted {
             self.record.dump_counts.keys().cloned().collect()
         } else {
             Vec::new()
@@ -884,15 +1036,31 @@ impl<H: Hosts> Back<'_, H> {
         // commit point is never rolled back.
         if flags.moved_written && !self.record.committed {
             match self.hosts.moved_marker() {
-                Ok(Some(id)) if id == self.record.move_id => return self.committed_after_all(),
-                Ok(_) => {}
+                Ok(Marker::Names(id)) if id == self.record.move_id => {
+                    return self.committed_after_all();
+                }
+                Ok(Marker::Names(other)) => {
+                    self.record.phase = Phase::RollbackIncomplete;
+                    self.save();
+                    return self.incomplete(
+                        reason,
+                        &format!(
+                            "this host's /data/moved.json names move {other}, not this one, so nothing was rolled back"
+                        ),
+                        false,
+                    );
+                }
+                Ok(Marker::NamesNone) => self.hosts.say(
+                    "rollback: this host's /data/moved.json names no move (its write was cut short), so it is no commit point; the rollback goes on and removes it",
+                ),
+                Ok(Marker::Absent) => {}
                 Err(why) => {
                     self.record.phase = Phase::RollbackIncomplete;
                     self.save();
                     return self.incomplete(
                         reason,
                         &format!(
-                            "whether the source holds /data/moved.json for this move cannot be read ({why}), so the move may have passed its commit point and nothing was rolled back"
+                            "this host's Docker could not be asked whether /data/moved.json names this move ({why}), so the move may have passed its commit point and nothing was rolled back; once docker answers here (docker ps), rerun the rollback"
                         ),
                         false,
                     );
@@ -912,7 +1080,11 @@ impl<H: Hosts> Back<'_, H> {
             complete = false;
         }
         let mut proved = !needs_proof;
-        let mut parked: Option<String> = None;
+        // Writes a resume found in the gated bank before it would replace it.
+        let mut parked: Option<String> = self.record.parked_writes.clone();
+        let served = flags.gate_lifting || flags.target_started;
+        // What a bank this move never served shows of someone else's writes.
+        let mut found: Vec<String> = Vec::new();
         if needs_proof {
             if flags.gate_lifting || flags.target_started {
                 let result = self.op(Op::Stop).map(|_| ());
@@ -921,16 +1093,51 @@ impl<H: Hosts> Back<'_, H> {
             for _ in 0..3 {
                 match self.read() {
                     Ok(state) if state.running == Some(true) => {
+                        if flags.target_restored && !served {
+                            found.push(
+                                "the gated bank was found running, so it may have served writes"
+                                    .to_owned(),
+                            );
+                        }
                         let result = self.op(Op::Stop).map(|_| ());
                         self.attempt("stop the target daemon again", result);
                     }
                     Ok(state) if state.running == Some(false) => {
                         if state.gated != Some(true) {
+                            if flags.target_restored && !served {
+                                found.push(
+                                    "the bank was found without /data/move.json, so it may have been started"
+                                        .to_owned(),
+                                );
+                            }
                             let result = self.op(Op::Gate).map(|_| ());
                             self.attempt("keep the target from starting (/data/move.json)", result);
                             continue;
                         }
                         proved = true;
+                        if flags.target_restored && !served {
+                            // This run's own restore, if it got that far, or
+                            // the reading the last rollback kept.
+                            let reference = if flags.gate_written {
+                                self.record
+                                    .restored_mutations
+                                    .clone()
+                                    .map(|mutations| Baseline {
+                                        user_counts: self.record.restored_counts.clone(),
+                                        mutations,
+                                    })
+                            } else {
+                                self.record.gated_baseline.clone()
+                            };
+                            if let Some(reference) = reference {
+                                found.extend(since_baseline(Some(&reference), &state));
+                            }
+                            if !found.is_empty() {
+                                let mut all: Vec<String> = parked.iter().cloned().collect();
+                                all.extend(found.iter().cloned());
+                                parked = Some(all.join("; "));
+                            }
+                        }
                         if flags.gate_lifting || flags.target_started {
                             // User rows only, as they stood before the first
                             // start: a plain daemon start adds none.
@@ -947,6 +1154,15 @@ impl<H: Hosts> Back<'_, H> {
                             if !differs.is_empty() {
                                 parked = Some(differs.join("; "));
                             }
+                        }
+                        // The gated bank as this rollback leaves it: what a
+                        // resume must still find before it replaces it.
+                        if flags.target_restored && parked.is_none() {
+                            self.record.gated_baseline =
+                                state.mutations.clone().map(|mutations| Baseline {
+                                    user_counts: state.user_counts.clone(),
+                                    mutations,
+                                });
                         }
                         break;
                     }
@@ -1070,15 +1286,11 @@ impl<H: Hosts> Back<'_, H> {
             self.save();
             let note = if flags.target_restored {
                 format!(
-                    "; the target keeps the restored bank stopped behind /data/move.json, and its claim ({} on {}). Rerun the move with --resume to finish it; or, to give {} back its own bank, remove that claim and restore its own state from {}/target-original-state.tgz and its database from the safety backup beside it",
+                    "; the target keeps the restored bank stopped behind /data/move.json, and its claim ({} on {}). Rerun the move with --resume to finish it, or give {} back its own bank with pseudolife-mcp move --release-target {}",
                     claim_path(),
                     self.record.target,
                     self.record.target,
-                    if self.record.remote_folder.is_empty() {
-                        format!("~/.pseudolife-mcp/moves/{}", self.record.move_id)
-                    } else {
-                        self.record.remote_folder.clone()
-                    }
+                    self.record.move_id
                 )
             } else {
                 String::new()
@@ -1130,6 +1342,152 @@ impl<H: Hosts> Back<'_, H> {
         self.incomplete(reason, &why, false)
     }
 
+    /// `--release-target`'s steps, each safe to repeat: whatever a killed
+    /// run did, a rerun finishes it, and never restores over a bank the
+    /// release already gave back.
+    fn release(&mut self) -> Outcome {
+        let id = self.record.move_id.clone();
+        let to = self.record.target.clone();
+        let bank = self.record.source_bank.clone();
+        self.record.phase = Phase::Releasing;
+        self.save();
+        let unfinished = |back: &mut Self, step: &str, why: String| {
+            back.record.rollback.push(Undo {
+                step: step.to_owned(),
+                ok: false,
+                detail: why.clone(),
+            });
+            back.save();
+            Outcome {
+                code: EXIT_INCOMPLETE,
+                message: format!(
+                    "giving {to} back its own bank did not finish: {step} failed ({why}).\n  running now: this host's daemon, serving your bank ({bank})\n  served: yes, by this host's daemon\n  data: your bank here; on {to}, the moved copy stays stopped behind /data/move.json until its own bank is back\n  next: pseudolife-mcp move --release-target {id} (each step is safe to repeat)"
+                ),
+            }
+        };
+        let state = match self.read() {
+            Ok(state) => state,
+            Err(why) => return unfinished(self, "read the target's state", why),
+        };
+        // Neither this move's claim nor its bank is there any more: a run
+        // killed after the release's last step finished it.
+        if state.claim.as_deref() != Some(id.as_str())
+            && state.bank.as_deref() != Some(bank.as_str())
+        {
+            if self.record.kept.is_empty() {
+                self.record.phase = Phase::RolledBack;
+                self.save();
+                return Outcome {
+                    code: EXIT_REFUSED,
+                    message: format!(
+                        "{to} holds neither move {id}'s claim nor its bank, so there is nothing of this move's to give back. Your bank is this host's ({bank}), which this host's daemon serves. Nothing was changed"
+                    ),
+                };
+            }
+            self.record.phase = Phase::Released;
+            self.save();
+            return Outcome {
+                code: EXIT_OK,
+                message: format!(
+                    "released: {to} has its own bank back and is free for a new move. Your bank is this host's ({bank}), which this host's daemon serves. {}",
+                    kept_line(&self.record)
+                ),
+            };
+        }
+        if state.bank.as_deref() == Some(bank.as_str()) {
+            if state.running != Some(false)
+                && let Err(why) = self.op(Op::Stop)
+            {
+                return unfinished(self, "stop the target daemon", why);
+            }
+            if state.gated != Some(true)
+                && let Err(why) = self.op(Op::Gate)
+            {
+                return unfinished(self, "keep the target from starting (/data/move.json)", why);
+            }
+        }
+        self.hosts
+            .say("release: restore the target's own bank (its restore keeps the moved bank in a safety backup)");
+        let request = Request {
+            protocol: PROTOCOL,
+            move_id: id.clone(),
+            work_dir: self.record.work_dir.clone(),
+            rollback: true,
+            op: Op::GiveBack,
+        };
+        let mut waited = Duration::ZERO;
+        let result = loop {
+            match self.hosts.target(&request, None) {
+                Ok(answer) if !answer.ok && answer.busy && waited < FORWARD_BUSY_WAIT => {
+                    if waited.is_zero() {
+                        self.hosts.say(
+                            "release: waiting for the target's update lock (another update, restore or backup holds it)",
+                        );
+                    }
+                    self.hosts.sleep(ABORT_PAUSE);
+                    waited += ABORT_PAUSE;
+                }
+                other => break other,
+            }
+        };
+        let kept = match result {
+            Ok(answer) if answer.ok => answer.kept,
+            // Refused before its restore began: nothing changed there, and
+            // the move stays as its rollback left it.
+            Ok(answer) if !answer.restore_dropped => {
+                self.record.phase = Phase::RolledBack;
+                self.save();
+                return Outcome {
+                    code: EXIT_REFUSED,
+                    message: format!(
+                        "{to} cannot be given back its own bank: {}. Your bank is this host's ({bank}), which this host's daemon serves; {to} still holds move {id}'s copy behind /data/move.json",
+                        answer.error
+                    ),
+                };
+            }
+            Ok(answer) => return unfinished(self, "restore the target's own bank", answer.error),
+            Err(lost) => {
+                return unfinished(
+                    self,
+                    "restore the target's own bank",
+                    format!("the target did not answer ({lost}); its outcome is unknown"),
+                );
+            }
+        };
+        self.record.kept = kept;
+        self.save();
+        self.hosts
+            .say("release: lift the gate from the target's own bank");
+        if let Err(why) = self.op(Op::Ungate) {
+            return unfinished(self, "remove the gate from the target's own bank", why);
+        }
+        if self.record.target_was_running {
+            let running = self.read().ok().and_then(|s| s.running);
+            if running != Some(true)
+                && let Err(why) = self.op(Op::Start)
+            {
+                return unfinished(self, "start the target's own daemon", why);
+            }
+        }
+        if let Err(why) = self.op(Op::Release) {
+            return unfinished(self, "release the target's claim", why);
+        }
+        self.record.phase = Phase::Released;
+        self.save();
+        Outcome {
+            code: EXIT_OK,
+            message: format!(
+                "released: {to} has its own bank back{} and is free for a new move. Your bank is this host's ({bank}), which this host's daemon serves. {}",
+                if self.record.target_was_running {
+                    " and runs again"
+                } else {
+                    ""
+                },
+                kept_line(&self.record)
+            ),
+        }
+    }
+
     /// The source holds this move's `moved.json`: the move passed its commit
     /// point, so the record says so and nothing is rolled back.
     fn committed_after_all(&mut self) -> Outcome {
@@ -1137,21 +1495,11 @@ impl<H: Hosts> Back<'_, H> {
         self.record.phase = Phase::MovedFollowUps;
         let to = self.record.target.clone();
         let url = self.record.target_url.clone();
-        let mut steps = vec![format!(
-            "pseudolife-mcp connect {url} --token-file <a file holding a token of {to}'s> --yes   # point this machine's clients at the moved bank"
-        )];
-        if self.record.flags.target_policy_paused {
-            steps.push(format!(
-                "ssh {to} docker update --restart={} pseudolife-mcp-daemon",
-                self.record.target_policy
-            ));
-        }
-        if self.record.flags.target_timer_paused {
-            steps.push(format!(
-                "ssh {to} systemctl --user enable --now pseudolife-update.timer"
-            ));
-        }
-        steps.push(format!("ssh {to} rm -f {}", claim_path()));
+        let steps = if self.record.follow_ups.is_empty() {
+            planned_follow_ups(&self.record)
+        } else {
+            self.record.follow_ups.clone()
+        };
         self.record.follow_ups = steps.clone();
         self.save();
         Outcome {
@@ -1219,8 +1567,8 @@ impl<H: Hosts> Back<'_, H> {
         ));
         let next = if finished {
             format!(
-                "look at those rows in the gated bank on {} (start it by hand on a spare host, or export them); remove that bank when they are kept or not needed",
-                self.record.target
+                "decide about those writes: pseudolife-mcp move --release-target {} gives {} back its own bank and keeps the gated bank, writes and all, in a backup there that it names",
+                self.record.move_id, self.record.target
             )
         } else {
             format!("pseudolife-mcp move --rollback {}", self.record.move_id)
@@ -1238,6 +1586,134 @@ impl<H: Hosts> Back<'_, H> {
             ),
         }
     }
+}
+
+/// Everything a move has left after its commit point, as commands for a
+/// person: written before the commit, struck off as each step succeeds.
+fn planned_follow_ups(record: &Record) -> Vec<String> {
+    let to = &record.target;
+    let url = &record.target_url;
+    let mut steps = vec![format!(
+        "pseudolife-mcp connect {url} --token-file <a file holding a token of {to}'s> --yes   # point this machine's clients at the moved bank"
+    )];
+    if record.flags.target_policy_paused {
+        steps.push(format!(
+            "ssh {to} docker update --restart={} pseudolife-mcp-daemon",
+            record.target_policy
+        ));
+    }
+    if record.flags.target_timer_paused {
+        steps.push(format!(
+            "ssh {to} systemctl --user enable --now pseudolife-update.timer"
+        ));
+    }
+    steps.push(format!("ssh {to} rm -f {}", claim_path()));
+    steps
+}
+
+/// The tables a resume counts on the target: its own dump's and those its
+/// baseline names.
+fn baseline_tables(baseline: Option<&Baseline>, dump: &BTreeMap<String, i64>) -> Vec<String> {
+    let mut tables: Vec<String> = dump.keys().cloned().collect();
+    if let Some(baseline) = baseline {
+        tables.extend(baseline.user_counts.keys().cloned());
+    }
+    tables.sort();
+    tables.dedup();
+    tables
+}
+
+/// What a resume finds in the gated bank since its baseline: writes, or
+/// every reason they cannot be ruled out (which counts as writes: a resume
+/// never replaces what it cannot rule out).
+pub(super) fn since_baseline(baseline: Option<&Baseline>, state: &State) -> Vec<String> {
+    let mut found = Vec::new();
+    if state.gated != Some(true) {
+        found.push(format!(
+            "the bank is {} behind /data/move.json, so it may have been started",
+            if state.gated == Some(false) {
+                "no longer"
+            } else {
+                "not known to be"
+            }
+        ));
+    }
+    let Some(baseline) = baseline else {
+        found.push(
+            "no reading of the gated bank was kept at this move's last rollback, so writes since cannot be ruled out"
+                .to_owned(),
+        );
+        return found;
+    };
+    found.extend(differing(&baseline.user_counts, &state.user_counts));
+    found.extend(changed(Some(&baseline.mutations), state.mutations.as_ref()));
+    found
+}
+
+/// `move --release-target <id>`: gives the target back its own bank, for a
+/// rolled-back move whose target kept the restored one. The moved bank,
+/// writes and all, ends in the restore's safety backup there, which the
+/// answer names; nothing is deleted.
+pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome {
+    let id = record.move_id.clone();
+    let to = record.target.clone();
+    if record.committed {
+        return Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "move {id} passed its commit point: the bank lives on {to}, which is not released. Nothing was changed"
+            ),
+        };
+    }
+    match record.phase {
+        Phase::Released => {
+            return Outcome {
+                code: EXIT_OK,
+                message: format!(
+                    "{to} was already given back its own bank by move {id}; nothing to do. {}",
+                    kept_line(&record)
+                ),
+            };
+        }
+        Phase::RolledBack | Phase::Releasing => {}
+        _ => {
+            return Outcome {
+                code: EXIT_REFUSED,
+                message: format!(
+                    "move {id} is not rolled back (its record says {:?}); roll it back first with pseudolife-mcp move --rollback {id}. Nothing was changed",
+                    record.phase
+                ),
+            };
+        }
+    }
+    if !record.flags.target_restored {
+        return Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "move {id} never restored into {to}, so {to} keeps its own bank and there is nothing to give back. Nothing was changed"
+            ),
+        };
+    }
+    // The bank the user keeps is this host's: it must be serving, or the
+    // release could leave no bank served anywhere.
+    let serving = hosts.source_running() == Some(true)
+        && hosts.source_healthy(RELEASE_SOURCE_WAIT)
+        && hosts.source_bank().as_deref() == Some(record.source_bank.as_str());
+    if !serving {
+        return Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "this host's daemon is not serving its bank, and move {id} no longer holds it stopped: your bank is this host's ({}), so {to}'s copy is not released while nothing serves it. Start this host's daemon (docker start {}) and check that its /health names that bank, then rerun. Nothing was changed",
+                record.source_bank, record.source.daemon
+            ),
+        };
+    }
+    let mut back = Back {
+        hosts,
+        record,
+        state: None,
+    };
+    back.release()
 }
 
 /// The commands that undo what the record says was done, in rollback order,
