@@ -824,6 +824,71 @@ def test_a_rerun_that_timed_out_after_an_earlier_pass_keeps_a_member_out(world, 
     assert FAILING in capsys.readouterr().out
 
 
+def _freeze_runs(*runs: tuple[str, str]) -> list[dict]:
+    """Python freeze runs on one head, one per event: (conclusion, start)."""
+    return [_run("Python freeze", conclusion, started=f"2026-11-14T01:{minute}:00Z",
+                 workflow="Python freeze") for conclusion, minute in runs]
+
+
+# #1537 at a5629d8fd: the push's run failed before the conductor added
+# `freeze-exception`, two runs were cancelled, and the label event's run
+# passed. gh pr checks shows only the last; build read every run.
+LABELLED_AFTER_OPENING = (("FAILURE", "00"), ("CANCELLED", "01"), ("CANCELLED", "02"), ("SUCCESS", "03"))
+
+
+def test_a_check_is_judged_by_its_latest_run_on_the_head(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=_freeze_runs(*LABELLED_AFTER_OPENING))
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #11 " in out and FAILING not in out
+
+
+@pytest.mark.parametrize("runs", [
+    (("SUCCESS", "00"), ("FAILURE", "05")),
+    # A rerun of the pre-label run replays an event without the label: when
+    # it fails again it is the latest run, and the head stays out.
+    (*LABELLED_AFTER_OPENING, ("FAILURE", "10")),
+], ids=["newer-failure", "failed-rerun-of-the-old-run"])
+def test_a_newer_failure_still_outweighs_an_older_success(world, capsys, runs):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=_freeze_runs(*runs))
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert FAILING in out and "(Python freeze)" in out and "merged #11 " not in out
+
+
+@pytest.mark.parametrize("runs, opens", [
+    (LABELLED_AFTER_OPENING, True),
+    ((*LABELLED_AFTER_OPENING, ("FAILURE", "10")), False),
+], ids=["latest-passed", "latest-failed"])
+def test_open_judges_a_members_checks_by_their_latest_run(world, capsys, runs, opens):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+    assert _build() == 0
+    capsys.readouterr()
+    world.gh.ready[1]["statusCheckRollup"] = _freeze_runs(*runs)
+
+    code = _open(world)
+
+    err = capsys.readouterr().err
+    if opens:
+        assert code == 0, err
+    else:
+        assert code == 2 and "#11's own CI is now failing" in err
+        assert world.remote_branches() == []
+
+
 def test_open_refuses_a_member_whose_own_job_timed_out_after_build(world, capsys):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})

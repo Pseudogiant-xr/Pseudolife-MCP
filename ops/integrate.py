@@ -482,7 +482,8 @@ def _checks_why(rollup: list[dict] | None) -> tuple[str, str]:
     counted = [check for check in rollup or [] if not _report_only(check)]
     word, why = _counted_checks_why(counted if rollup else rollup)
     if word == "failing" and not why:
-        red = sorted({_check_name(check) for check in counted if _check_state(check) in FAILED})
+        red = sorted({_check_name(check) for check in _latest_checks(counted)
+                      if _check_state(check) in FAILED})
         why = ", ".join(red)
     return word, why
 
@@ -497,10 +498,17 @@ def _counted_checks_why(rollup: list[dict] | None) -> tuple[str, str]:
     annotations that cannot be read leave the head `unverified` (retry).
     A FAILURE of a gate job counts as cancelled when it failed at its
     cancelled-need step only because jobs it needs were cancelled
-    (`_gate_cancelled`); any other failure is `failing` before any read."""
+    (`_gate_cancelled`); any other failure is `failing` before any read.
+
+    Each check is judged by its latest run on the head (`_latest_checks`), as
+    `merge` and `gh pr checks` judge it: a head carries one run per event
+    for workflows such as Python freeze, so a failure made before a
+    `freeze-exception` label is superseded by the labelled event's run, and
+    a newer failure still outweighs an older success."""
     if not rollup:
         return "none", ""
-    failures = [check for check in rollup if _check_state(check) in FAILED]
+    latest_runs = _latest_checks(rollup)
+    failures = [check for check in latest_runs if _check_state(check) in FAILED]
     if any(_check_state(check) != "FAILURE"
            or not _ACTIONS_JOB.search(check.get("detailsUrl") or "")
            for check in failures):
@@ -511,7 +519,7 @@ def _counted_checks_why(rollup: list[dict] | None) -> tuple[str, str]:
         gates = _local_gates(local)
         if not all(_gate_named(check, gates) for check in failures):
             return "failing", ""            # the checkout defines no such gate
-    latest = {id(check) for check in _latest_checks(rollup)}
+    latest = {id(check) for check in latest_runs}
     pending = cancelled = False
     unread = ""                             # the first read that failed
     runs: dict = {}
@@ -535,7 +543,7 @@ def _counted_checks_why(rollup: list[dict] | None) -> tuple[str, str]:
                 return "failing", ""
             cancelled = True
             unread = unread or (why if timed_out is None else "")
-    pending = any(_unfinished(check) for check in rollup
+    pending = any(_unfinished(check) for check in latest_runs
                   if _check_state(check) != CANCELLED)
     return (("unverified", unread) if unread else ("pending", "") if pending
             else ("cancelled", "") if cancelled else ("green", ""))

@@ -1,6 +1,8 @@
 """The Python freeze guard decides on an ordinary pull request's changed paths only."""
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -182,13 +184,49 @@ def test_the_workflow_reruns_on_label_changes_and_passes_the_labels():
     assert job["name"] == "Python freeze" and "if" not in job and not job.get("continue-on-error")
     checkout, guard = job["steps"]
     assert checkout["with"]["fetch-depth"] == 2
-    assert guard["env"]["PR_LABELS"] == "${{ toJSON(github.event.pull_request.labels.*.name) }}"
+    # The labels as they are when the job runs, never the event's: a rerun
+    # replays its event, which may predate the label or its removal.
+    assert workflow["permissions"] == {"contents": "read", "pull-requests": "read"}
+    assert guard["env"]["PR_NUMBER"] == "${{ github.event.pull_request.number }}"
+    assert guard["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "PR_LABELS" not in guard["env"]
+    assert "pull_request.labels" not in yaml.safe_dump(workflow)
     assert guard["env"]["HEAD_REPO"] == "${{ github.event.pull_request.head.repo.full_name }}"
     # The base commit's script decides (a PR editing the guard cannot pass
     # its own check); only a base without one falls back to the head's.
     assert 'git show HEAD^1:rust/ci/python_freeze.py > "$script"' in guard["run"]
     assert 'python3 "$script" --head-ref' in guard["run"]
-    assert '--labels "$PR_LABELS"' in guard["run"]
+    assert '--labels "$labels"' in guard["run"]
+
+
+def _label_lines():
+    """The guard step's lines that read the labels, up to the script."""
+    import yaml
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/python-freeze.yml")
+                              .read_text(encoding="utf-8"))
+    run = workflow["jobs"]["python-freeze"]["steps"][1]["run"]
+    return run.split('script="$RUNNER_TEMP/python_freeze.py"', 1)[0]
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,
+                    reason="the guard step runs in bash on ubuntu-latest; on Windows `bash` may be WSL's")
+@pytest.mark.parametrize("answer, code, expected", [
+    ('["ready-to-batch","freeze-exception"]', 0, '["ready-to-batch","freeze-exception"]'),
+    ("", 1, "[]"),   # the read failed: judge with no labels
+], ids=["read", "read-failed"])
+def test_the_guard_reads_the_labels_when_it_runs(tmp_path, answer, code, expected):
+    fake = tmp_path / "gh"
+    fake.write_text(f"#!/usr/bin/env bash\necho \"$*\" > {tmp_path.as_posix()}/argv\n"
+                    f"printf '%s' '{answer}'\nexit {code}\n", encoding="utf-8", newline="\n")
+    fake.chmod(0o755)
+    script = _label_lines() + 'printf "%s" "$labels" > "$OUT"\n'
+    env = {**os.environ, "BASE_REPO": "owner/repo", "PR_NUMBER": "1537", "OUT": str(tmp_path / "labels"),
+           "PATH": f"{tmp_path.as_posix()}{os.pathsep}{os.environ['PATH']}"}
+    result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "labels").read_text() == expected
+    assert (tmp_path / "argv").read_text().split()[:2] == ["api", "repos/owner/repo/pulls/1537"]
+    assert ("could not read" in result.stdout) == bool(code)
 
 
 @pytest.mark.parametrize("path", [
