@@ -8,7 +8,7 @@ import pytest
 import ci_budget
 from ci_budget import BUDGET, load, problems, pull_request_reachable, reachable_names
 
-WORKFLOWS = ("rust.yml", "ci.yml")
+WORKFLOWS = ("rust.yml", "ci.yml", "python-freeze.yml")
 
 
 def budget(*, legacy=False):
@@ -30,22 +30,23 @@ def test_the_budget_covers_every_workflow_that_runs_on_pull_requests():
     # Read from the triggers, so a new workflow file cannot run unbudgeted.
     assert set(ci_budget.pull_request_workflows()) == set(WORKFLOWS) == set(budget())
     for name, entry in budget().items():
-        assert len(entry["measured_on"]) >= 2, name
+        # A workflow no hosted run has measured yet carries only estimates.
+        assert len(entry["measured_on"]) >= 2 or all("estimate" in job for job in entry["jobs"].values()), name
         assert set(entry["limits"]) == {"jobs", "runner_minutes", "longest_job_minutes",
                                         "critical_path_minutes", "why"}, name
 
 
 def test_a_full_rust_run_is_what_a_batch_starts():
     workflow = load("rust.yml")
-    # frozen-probes runs only on ordinary PRs, never in a batch, but the
-    # budget cannot read scope's `full`, so it is counted with the rest.
-    assert pull_request_reachable(workflow) == ["scope", "rust", "frozen-probes", "fixtures", "candidate",
+    # The frozen judge probes, cli-live, judges and the H5 suites left with
+    # the Python freeze (14 November 2026).
+    assert pull_request_reachable(workflow) == ["scope", "rust", "fixtures", "candidate",
                                                 "candidate-harness", "parity-pool", "parity-checks",
                                                 "daemon-image", "parity"]
     names = reachable_names(workflow)
-    assert "Parity checks / ubuntu-latest / h5-light" in names
-    assert "Parity checks / windows-latest / h5-light" not in names
-    assert "Parity checks / windows-latest / cli-live" not in names
+    assert "Parity checks / windows-latest / cli-store" in names
+    assert not [name for name in names if "h5-" in name or "cli-live" in name or "judges" in name]
+    assert pull_request_reachable(load("python-freeze.yml")) == ["python-freeze"]
     assert pull_request_reachable(load("ci.yml")) == ["scope", "guards", "lock-resolve", "test", "test-lite-linux",
                                                       "test-lite-windows", "test-lite-macos", "frontend"]
 
@@ -115,7 +116,7 @@ def test_an_estimate_counts_until_it_is_measured():
                                                    "Extra / ubuntu-latest", "Extra / windows-latest"])
 
 
-@pytest.mark.parametrize("limit, words", [("jobs", "job count 44 is over its limit"),
+@pytest.mark.parametrize("limit, words", [("jobs", "job count 29 is over its limit"),
                                           ("runner_minutes", "runner-minutes per full run, over the limit"),
                                           ("longest_job_minutes", "limit for one job"),
                                           ("critical_path_minutes", "slowest chain of needs")])
@@ -693,3 +694,17 @@ def test_profile_prices_remain_authored_data_in_a_budget_merge():
     merged = ci_budget.merge_budget_data(before, ours, theirs)
     assert merged["rust.yml"]["profiles"] == ours["rust.yml"]["profiles"]
     assert merged["rust.yml"]["jobs"]["Scope"] == {"minutes": 0.3}
+
+
+def test_a_workflow_new_to_the_baseline_needs_an_accepted_reason_for_each_job(monkeypatch):
+    # ops/integrate.py treats a workflow the generated baseline does not name
+    # as all-new (every job's earlier definition None); the local check does
+    # the same instead of refusing it outright, and still asks for a reason.
+    monkeypatch.setattr(ci_budget, "read_fingerprint_baseline", lambda: {"rust.yml": {"rust": "r"}})
+    assert ci_budget.recorded_definitions("new.yml", {}) == ({}, False)
+    assert ci_budget.recorded_definitions("rust.yml", {}) == ({"rust": "r"}, False)
+    raw = {"jobs": {"guard": {"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]}}}
+    monkeypatch.setattr(ci_budget, "current_definitions", lambda name, workflow: {"guard": "g"})
+    assert ci_budget.approved_definitions("new.yml", raw, {}, raw, [])[1] == {}
+    record = {"workflow": "new.yml", "job": "guard", "before": None, "fingerprint": "g", "reason": "a new job"}
+    assert ci_budget.approved_definitions("new.yml", raw, {}, raw, [record])[1] == {"guard": "g"}

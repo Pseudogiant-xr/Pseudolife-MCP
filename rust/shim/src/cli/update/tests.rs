@@ -1178,3 +1178,40 @@ fn native_update_checkout_rollback_to_rust_keeps_its_model_overlay() {
             < restore.find("rollback.json").unwrap()
     );
 }
+
+/// macOS keeps the temporary folder below a symlink (`/var` ->
+/// `/private/var`), and private state refuses any redirected ancestor, so a
+/// scratch folder made under the raw path failed there (the hand-off's report
+/// folder, the Codex marketplace refresh). Built here with a symlinked
+/// temporary root on any Unix.
+#[cfg(unix)]
+#[test]
+fn private_scratch_resolves_a_symlinked_temporary_folder() {
+    use std::os::unix::fs::PermissionsExt;
+    let base = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("pseudolife-scratch-test-{}", uuid::Uuid::new_v4()));
+    let real = base.join("private-var");
+    fs::create_dir_all(&real).unwrap();
+    let link = base.join("var");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    // The defect: private state below the link is refused as a redirect.
+    assert!(crate::board::state::private_dir(&link.join("direct")).is_err());
+    let made = seams::private_scratch_in(link.clone(), "pseudolife-test").unwrap();
+    assert!(made.starts_with(&real), "{}", made.display());
+    assert_eq!(
+        fs::metadata(&made).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    // The root the shadow role script is written under is resolved too.
+    assert_eq!(
+        seams::temp_root(),
+        fs::canonicalize(std::env::temp_dir()).unwrap()
+    );
+    // A link that cannot be resolved names the variable to change.
+    let broken = base.join("broken");
+    std::os::unix::fs::symlink(base.join("missing"), &broken).unwrap();
+    let error = seams::private_scratch_in(broken, "pseudolife-test").unwrap_err();
+    assert!(error.contains("set TMPDIR to a real folder"), "{error}");
+    let _ = fs::remove_dir_all(&base);
+}

@@ -132,7 +132,7 @@ def _python_310_in_an_older_checkout(monkeypatch, tmp_path):
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "no-launcher"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
     monkeypatch.setattr(tunnel_runtime, "installed_launcher", lambda: None)
-    monkeypatch.setattr(tunnel_runtime.shutil, "which", lambda name: None)
+    monkeypatch.setattr(tunnel_runtime, "find_program", lambda name: None)
     monkeypatch.setattr(tunnel_runtime.sys, "base_prefix", tunnel_runtime.sys.prefix)
     monkeypatch.setattr(tunnel_runtime, "checked_path", lambda path: Path(path))
     monkeypatch.setattr(tunnel_service, "checked_path", lambda path: Path(path))

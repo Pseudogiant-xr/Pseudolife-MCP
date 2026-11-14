@@ -426,27 +426,41 @@ fn add_registration(
     Ok(())
 }
 pub fn find_registrations() -> Result<Vec<Registration>> {
+    find_selected_registrations(|_| true)
+}
+/// As `find_registrations`, reading only the files of the clients `selected`
+/// admits, so an unreadable configuration of another client cannot block them.
+pub fn find_selected_registrations(selected: impl Fn(&str) -> bool) -> Result<Vec<Registration>> {
     let mut found = Vec::new();
-    let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(home)
-        .join(".claude.json");
-    json_registrations("claude-code", claude, &[SERVER], &mut found)?;
-    for path in desktop_files()? {
+    if selected("claude-code") {
+        let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(home)
+            .join(".claude.json");
+        json_registrations("claude-code", claude, &[SERVER], &mut found)?;
+    }
+    if selected("claude-desktop") {
+        for path in desktop_files()? {
+            json_registrations(
+                "claude-desktop",
+                path,
+                &["pseudolife-desktop", SERVER],
+                &mut found,
+            )?;
+        }
+    }
+    if selected("gemini") {
         json_registrations(
-            "claude-desktop",
-            path,
-            &["pseudolife-desktop", SERVER],
+            "gemini",
+            home().join(".gemini/settings.json"),
+            &[SERVER],
             &mut found,
         )?;
     }
-    json_registrations(
-        "gemini",
-        home().join(".gemini/settings.json"),
-        &[SERVER],
-        &mut found,
-    )?;
     let path = codex_home().join("config.toml");
+    if !selected("codex") {
+        return Ok(found);
+    }
     if let Some(bytes) = read_optional(&path)? {
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| "Codex config is not UTF-8")?
@@ -612,37 +626,11 @@ fn migrate_codex(text: &str, launcher: &Path, args: &[String]) -> Result<Vec<u8>
     Ok(output.into_bytes())
 }
 
+/// `name` in an absolute `PATH` directory, never the current directory:
+/// `program_lookup.find_program`'s rule (PATHEXT's launchable extensions in
+/// its order on Windows). An entry that is not UTF-8 is still searched.
 pub fn absolute_command(name: &str) -> Option<PathBuf> {
-    let names: Vec<_> = if cfg!(windows) {
-        [".exe", ".com", ".cmd", ".bat"]
-            .iter()
-            .map(|e| format!("{name}{e}"))
-            .collect()
-    } else {
-        vec![name.to_owned()]
-    };
-    for directory in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
-        if !directory.is_absolute() {
-            continue;
-        }
-        for name in &names {
-            let path = directory.join(name);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if !path
-                    .metadata()
-                    .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-                {
-                    continue;
-                }
-            }
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    None
+    crate::cli::program_lookup::find_program_path(name)
 }
 pub fn expose_launcher(layout: &Layout) -> Value {
     #[cfg(unix)]

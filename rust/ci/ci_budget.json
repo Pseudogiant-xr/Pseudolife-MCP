@@ -1,11 +1,11 @@
 {
   "rust.yml": {
     "limits": {
-      "jobs": 44,
-      "runner_minutes": 447,
+      "jobs": 29,
+      "runner_minutes": 291,
       "longest_job_minutes": 34,
       "critical_path_minutes": 33,
-      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8% 2026-11-05: startup consolidation keeps both logical parts and schema checks in one shard per OS, reducing the physical-job ceiling from 43 to 41; other limits are unchanged. 2026-11-06: one late hosted Linux-pool planner adds one brief job (0.5 min estimated) before the parity burst. The fallback ceiling stays fully hosted; enabling one measured Linux cli-startup shard removes its hosted allocation. Other limits are unchanged. 2026-11-14 (issue #1519): the report-only frozen judge probes leave the Rust job for a job of their own per OS, because a lost probe runner failed Rust / ubuntu-latest twice on 2026-11-13. Those two jobs run only on ordinary pull requests (scope full == false) and never in a batch, but this budget cannot tell, so they are counted: jobs 42 -> 44 and runner minutes 410 -> 447, exactly their estimated 19 + 18 minutes, which leaves a batch the same headroom as before. Longest job and critical path are unchanged."
+      "why": "2026-10-24 Rust CI speed pass (#922, #924), measured on the runs below: job count at its measured 43; runner minutes (374.2) and longest job (19.7) about 10% above; critical path 28.1 with the harness build's cache cold on pull-request refs (about 22 once master has saved it), so 33, which still refuses parity waiting on the Rust job (38 or more); 2026-10-26 (#967, PDF ingest): longest job 25 -> 34. Rust / windows-latest measured 31.4 (median of runs 40209914303 and 40223580054): about 26 before this change (#965's run 40223499916, 26.1, and master push 40218426648, 24.2, had already passed the 19.7 the old limit rested on), plus about 4.6 for the PDF tests: provisioning the pinned PDFium library (1.2), pdfium-render compiled in each daemon override build (+1.7) and the Nextest steps (+0.8). 34 is the measured 31.4 plus about 8% 2026-11-05: startup consolidation keeps both logical parts and schema checks in one shard per OS, reducing the physical-job ceiling from 43 to 41; other limits are unchanged. 2026-11-06: one late hosted Linux-pool planner adds one brief job (0.5 min estimated) before the parity burst. The fallback ceiling stays fully hosted; enabling one measured Linux cli-startup shard removes its hosted allocation. Other limits are unchanged. 2026-11-14 (issue #1519): the report-only frozen judge probes leave the Rust job for a job of their own per OS, because a lost probe runner failed Rust / ubuntu-latest twice on 2026-11-13. Those two jobs run only on ordinary pull requests (scope full == false) and never in a batch, but this budget cannot tell, so they are counted: jobs 42 -> 44 and runner minutes 410 -> 447, exactly their estimated 19 + 18 minutes, which leaves a batch the same headroom as before. Longest job and critical path are unchanged. 2026-11-14 (the Python freeze, maintainer ruling): the live-comparison jobs left CI (frozen judge probes, the cli-live and judges suites and every H5 suite: 15 budgeted jobs), so the limits fall to what remains: jobs 29, runner minutes 291 (the 264.7 budgeted minutes plus about 10%, most of them still the pre-freeze measurements of shards that lost their live passes, so a re-measure lowers them). Longest job and critical path are unchanged."
     },
     "pip_no_compile": true,
     "needs_without_data": {
@@ -13,7 +13,7 @@
         "*": "the required Parity gate reads every gated job's result"
       },
       "source-mutants": {
-        "candidate": "nightly only: its 74 jobs start only once the candidate compiles, so a broken build spends no runners on them"
+        "candidate": "weekly only: its jobs (two per shard) start only once the candidate compiles, so a broken build spends no runners on them"
       },
       "stress-report": {
         "stress-plan": "reports only a loop that was planned"
@@ -62,13 +62,8 @@
         "minutes": 6.8
       },
       "Parity checks / ubuntu-latest / cli-store": {
-        "minutes": 6.0
-      },
-      "Parity checks / ubuntu-latest / cli-live": {
-        "minutes": 14.2
-      },
-      "Parity checks / ubuntu-latest / judges": {
-        "minutes": 5.5
+        "minutes": 8.0,
+        "estimate": "The measured 6.0 plus what moved from cli-live with the Python freeze (2026-11-14): the body and security golden replays and the kept live security checks (startup refusals, two remote-bind scenarios), parts of cli-live's measured Linux body 0.7 and security 4.0 min (batch runs 43449162029, 43418298157) whose live passes and six mutants left; about 2 min added."
       },
       "Parity checks / ubuntu-latest / w1c-doctor": {
         "minutes": 10.8
@@ -82,18 +77,6 @@
       "Parity checks / ubuntu-latest / w1c-connect": {
         "minutes": 6.8
       },
-      "Parity checks / ubuntu-latest / h5-w1a": {
-        "minutes": 8.4
-      },
-      "Parity checks / ubuntu-latest / h5-daemon-mutants": {
-        "minutes": 4.9
-      },
-      "Parity checks / ubuntu-latest / h5-graph-mutants": {
-        "minutes": 8.6
-      },
-      "Parity checks / ubuntu-latest / h5-light": {
-        "minutes": 7.5
-      },
       "Parity checks / windows-latest / eval": {
         "minutes": 11.2
       },
@@ -101,10 +84,8 @@
         "minutes": 12.7
       },
       "Parity checks / windows-latest / cli-store": {
-        "minutes": 11.8
-      },
-      "Parity checks / windows-latest / judges": {
-        "minutes": 11.0
+        "minutes": 15.0,
+        "estimate": "The measured 11.8 plus what moved from cli-live with the Python freeze (2026-11-14): the body and security golden replays and the kept live security checks, parts of hosted Windows' body 2.5 and security 8.6 min (parity_scope.py's batch measurement) whose live passes and six mutants left; about 3 min added."
       },
       "Parity checks / windows-latest / w1c-doctor": {
         "minutes": 14.1
@@ -117,24 +98,6 @@
       },
       "Parity checks / windows-latest / w1c-connect": {
         "minutes": 12.3
-      },
-      "Parity checks / windows-latest / h5-audit": {
-        "minutes": 7.1
-      },
-      "Parity checks / windows-latest / h5-backup": {
-        "minutes": 3.8
-      },
-      "Parity checks / windows-latest / h5-w1a": {
-        "minutes": 12.0
-      },
-      "Parity checks / windows-latest / h5-background": {
-        "minutes": 5.0
-      },
-      "Parity checks / windows-latest / h5-daemon-mutants": {
-        "minutes": 14.0
-      },
-      "Parity checks / windows-latest / h5-graph-mutants": {
-        "minutes": 21.3
       },
       "Rust daemon / disposable image": {
         "minutes": 5.4
@@ -156,14 +119,6 @@
       "Parity / Linux pool plan": {
         "minutes": 0.5,
         "estimate": "One late hosted checkout plus two standard-library variable GETs, with no build or install. Estimate 0.5 min versus Scope 0.2 min in the budget; remeasure from the first two enabled master or batch runs. The routed Linux cli-startup shard measured hosted 9.70 and 11.98 min in runs 42114883218 and 42133608663; its self-hosted twins took 10.95 and 12.13 min."
-      },
-      "Frozen judge probes (report only) / ubuntu-latest": {
-        "minutes": 19.0,
-        "estimate": "Ordinary PRs only (scope full == 'false'); never runs in a batch. The same steps' times in Rust / ubuntu-latest on ordinary-PR runs: probe step median 13.7 min (21 passes, 10.0-15.8, runs 43056784506 to 43392781569, 2026-11-11 to 2026-11-13); setup about 1.5 min (job 131777314608: checkout, Python deps, runtime 23 s, toolchain and cache 29 s); the debug candidate build 20-40 s warm there, estimated 3 min cold here."
-      },
-      "Frozen judge probes (report only) / windows-latest": {
-        "minutes": 18.0,
-        "estimate": "Ordinary PRs only (scope full == 'false'); never runs in a batch. The same steps' times in Rust / windows-latest on ordinary-PR runs: probe step median 8.4 min (22 passes, 6.7-9.6, runs 43056784506 to 43392781569, 2026-11-11 to 2026-11-13); setup about 3 min (job 131776517042: checkout 18 s, Python deps, runtime 53 s, toolchain and cache 52 s); the debug candidate build 53-94 s warm there, estimated 6 min cold here."
       }
     },
     "profiles": {
@@ -199,19 +154,17 @@
   "ci.yml": {
     "limits": {
       "jobs": 8,
-      "runner_minutes": 67,
-      "longest_job_minutes": 25,
-      "critical_path_minutes": 27,
-      "why": "2026-10-24: measured on the runs below, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above"
+      "runner_minutes": 96,
+      "longest_job_minutes": 41,
+      "critical_path_minutes": 41,
+      "why": "2026-11-14 (issue #1408): re-measured on master push 43456549451 and batches 43495728956 and 43476091008, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run). The test job grew from 22.4 to 34.0 minutes (27.1-37.3 across those runs and batch 43525635914, whose first attempt the 35-minute pytest bound killed), so the runner-minute, longest-job and critical-path limits are about 10% above the slowest: 87.1 -> 96, 37.3 -> 41, scope -> test 37.5 -> 41. What they buy: a suite as slow as today's finishes instead of costing a batch cycle."
     },
     "pip_no_compile": false,
     "needs_without_data": {},
     "measured_on": [
-      40074592538,
-      40071746672,
-      40068731867,
-      39989124855,
-      39988057818
+      43456549451,
+      43495728956,
+      43476091008
     ],
     "jobs": {
       "scope": {
@@ -221,22 +174,40 @@
         "minutes": 1.9
       },
       "lock-resolve": {
-        "minutes": 0.6
+        "minutes": 0.5
       },
       "test": {
-        "minutes": 22.4
+        "minutes": 34.0
       },
       "test-lite-linux": {
-        "minutes": 21.7
+        "minutes": 25.3
       },
       "test-lite-windows": {
-        "minutes": 5.0
+        "minutes": 12.1
       },
       "test-lite-macos": {
-        "minutes": 8.8
+        "minutes": 12.6
       },
       "frontend": {
-        "minutes": 0.3
+        "minutes": 0.5
+      }
+    }
+  },
+  "python-freeze.yml": {
+    "limits": {
+      "jobs": 1,
+      "runner_minutes": 2,
+      "longest_job_minutes": 2,
+      "critical_path_minutes": 2,
+      "why": "2026-11-14: one checkout and one standard-library script on ubuntu-latest (the Python freeze guard); limits about twice the estimate until a hosted run measures it"
+    },
+    "pip_no_compile": false,
+    "needs_without_data": {},
+    "measured_on": [],
+    "jobs": {
+      "Python freeze": {
+        "minutes": 0.5,
+        "estimate": "The guards job's checkout plus a standard-library script: checkout about 10 s and the script under 5 s on ubuntu-latest (guards job, run 43463055555); 0.5 min covers runner start."
       }
     }
   }
