@@ -117,7 +117,16 @@ The separate lifecycle test holds health probes at a provider socket handshake,
 checks cached responses while a refresh is blocked, then observes failure and
 recovery after releasing each probe. Ordinary calls have a separate startup
 budget from the intentional timeout condition; a blocked provider witnesses
-the latter. Every lifecycle failure identifies its provider and oracle arm.
+the latter. The lifecycle suite's HTTP slices run only the native shim, with
+the native-executable stub (batch launchers are covered by the contract suite):
+their checks hold per
+implementation, so the Python shim's arm could fail only on Python behaviour,
+yet it gated every Rust job (#1314). The timeout body it used to compare across
+arms, with the fixture CLI path normalized, is now checked against the bytes
+derived from the journalled argv, and
+`test_native_lifecycle.py` pins that derivation to the bytes both shims returned.
+`test_lifecycle.py` still runs the Python shims' own timeout tree kill.
+Every lifecycle failure identifies its provider.
 The HTTP fixture sends each request's unchanged headers and body together;
 Python's early refusals can otherwise close between separate writes on Windows.
 Transport errors are never retried. The native HTTP unit regression separately
@@ -131,11 +140,11 @@ PSEUDOLIFE_TEST_REAL_AUTOSTART=1 cargo test --manifest-path rust/Cargo.toml -p p
 
 The differential harness launches both implementations with disposable stub
 provider executables. It compares HTTP status and response-body bytes,
-normalizing generated completion/tool IDs and the fixture CLI path in timeout
-diagnostics, and compares recorded argv (with instruction-file paths normalized),
+normalizing generated completion/tool IDs, and compares recorded argv (with instruction-file paths normalized),
 stdin bytes, instruction-file bytes and child environment. It covers routes,
-models, prompt overrides, tools, errors, timeout descendant cleanup, serialized
-calls, health refresh and managed configuration. Windows exercises native
+models, prompt overrides, tools, errors and managed configuration; the lifecycle
+suite above covers timeout descendant cleanup, serialized calls and health
+refresh on the native shim alone. Windows exercises native
 executables and batch launchers separately. A dev-only fixture crate compiles
 the stub and waiting launcher for Cargo's target triple and embeds their bytes
 in the integration test. Nextest archives therefore need no compiler or rustup

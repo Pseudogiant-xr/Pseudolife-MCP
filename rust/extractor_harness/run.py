@@ -3,8 +3,8 @@
 Invoke through the extractor_shim Cargo integration test, which supplies the
 target-native --stub-exe fixture alongside --binary.
 
-Only generated completion/tool IDs, per-process instruction-file paths and
-the fixture CLI path in timeout diagnostics are normalized. HTTP status and response bodies are then compared as bytes;
+Only generated completion/tool IDs and per-process instruction-file paths
+are normalized. HTTP status and response bodies are then compared as bytes;
 argv, stdin, instruction bytes and selected child environment are compared too.
 """
 from __future__ import annotations
@@ -339,77 +339,105 @@ def health_differential(binary, root):
     return count
 
 
+def timeout_body(argv, seconds):
+    """The timeout error both shims return for a printable argv: subprocess.TimeoutExpired's text.
+
+    `argv` is the provider command as the stub journalled it, the fixture CLI
+    shown as '<cli>'. It is derived rather than pasted, so a launch-model
+    change moves both sides. (Python's repr also escapes non-printable
+    characters such as U+00A0, which the native repr leaves as they are.)
+    """
+    return json.dumps({"error": f"Command '{argv!r}' timed out after {float(seconds)} seconds"}).encode()
+
+
 def lifecycle(binary, root):
-    """Both arms must serialize, reap descendants, recover and refresh once."""
+    """The native shim must serialize, reap descendants, recover and refresh once.
+
+    Only the native arm runs. These assertions are per arm, so the Python
+    shim's arm could fail only on Python behaviour, never on a native defect,
+    yet it gated every Rust job (#1314). Its one cross-arm check, equal
+    timeout bytes, is now an expected body built from the journalled argv.
+    """
     count = 0
     for kind in ("claude", "codex"):
-        timeout_answers = []
-        for arm, exe in (("python", None), ("rust", binary)):
-            print(f"START lifecycle {kind}/{arm}", flush=True)
-            # Normal calls need a process-start budget independent of the tiny
-            # timeout formerly used to exercise the timeout error format.
-            with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=5) as (port, plan, journal, _, cli):
-                plan.write_text(json.dumps({**canned(kind, "OK"), "sleep": .1}))
-                with concurrent.futures.ThreadPoolExecutor(2) as pool:
-                    calls = [pool.submit(call, port, "POST", "/chat/completions", {}) for _ in range(2)]
-                    answers = [c.result() for c in calls]
-                    assert all(answer[0] == 200 for answer in answers), (kind, arm, "serialized calls", answers)
-                timeline = Path(str(journal) + ".timeline").read_text().splitlines()
-                assert timeline == ["start", "end"] * 3, (arm, "calls overlapped", timeline)
-                with provider_gate() as gate, concurrent.futures.ThreadPoolExecutor(1) as pool:
-                    plan.write_text(json.dumps({"gate": gate.getsockname()[1]}))
-                    response = pool.submit(call, port, "POST", "/chat/completions", {})
-                    with accept_provider(gate) as witness:
-                        status, body = response.result(timeout=10)
-                        assert status == 500 and b"timed out after 5.0 seconds" in body, (kind, arm, status, body)
-                        # The timeout must kill this blocked provider; it cannot
-                        # succeed because a fixed-duration stub sleep elapsed.
-                        try:
-                            assert witness.recv(1) == b"", (kind, arm, "provider survived timeout")
-                        except ConnectionResetError:
-                            pass
-                encoded_cli = json.dumps(repr(str(cli)))[1:-1].encode()
-                body = body.replace(encoded_cli, b"'<cli>'")
-                timeout_answers.append(body)
-                plan.write_text(json.dumps(canned(kind, "recovered")))
-                recovered = call(port, "POST", "/chat/completions", {})
-                assert recovered[0] == 200, (kind, arm, "recovery", recovered)
-                count += 3
-            print(f"END lifecycle {kind}/{arm}", flush=True)
-        assert timeout_answers[0] == timeout_answers[1], (kind, "timeout bytes", timeout_answers)
-    for arm, exe in (("python", None), ("rust", binary)):
-        print(f"START health refresh {arm}", flush=True)
-        with server(exe, "codex", root / f"refresh-{arm}", canned("codex", "OK"), ttl=0) as (port, plan, journal, _, _):
-            with provider_gate() as failed, provider_gate() as recovered, concurrent.futures.ThreadPoolExecutor(1) as pool:
-                plan.write_text(json.dumps({"rc": 1, "stderr": "Not logged in", "gate": failed.getsockname()[1]}))
-                # TTL zero requests refresh immediately. The provider handshake
-                # holds it in flight until every stale response has returned.
-                first = pool.submit(call, port, "GET", "/health")
-                with accept_provider(failed) as failing:
-                    answer = first.result(timeout=10)
-                    assert answer[0] == 200, (arm, "initial cached health", answer)
-                    for _ in range(2):
-                        answer = call(port, "GET", "/health")
-                        assert answer[0] == 200, (arm, "stale health", answer)
-                    assert len(journal_rows(journal)) == 2, (arm, "duplicate failed refresh")
-                    # Change the next plan only after the in-flight provider
-                    # acknowledged reading the failure plan.
-                    plan.write_text(json.dumps({**canned("codex", "OK"), "gate": recovered.getsockname()[1]}))
-                    failing.sendall(b"release")
-                wait_health(port, 503, arm)
-                # Seeing the new snapshot need not mean the refresh worker has
-                # cleared its in-flight flag yet; keep driving health until the
-                # recovery provider acknowledges its invocation.
-                with accept_provider(recovered, lambda: wait_health(port, 503, arm)) as recovering:
-                    answer = call(port, "GET", "/health")
-                    assert answer[0] == 503, (arm, "cached failure while recovering", answer)
-                    assert len(journal_rows(journal)) == 3, (arm, "duplicate recovery refresh")
-                    plan.write_text(json.dumps(canned("codex", "OK")))
-                    recovering.sendall(b"release")
-                wait_health(port, 200, arm)
-                count += 3
-        print(f"END health refresh {arm}", flush=True)
+        count += lifecycle_arm(binary, kind, root)
+    count += health_refresh(binary, root)
     return count
+
+
+def lifecycle_arm(exe, kind, root):
+    arm = "rust"
+    print(f"START lifecycle {kind}/{arm}", flush=True)
+    # Normal calls need a process-start budget independent of the tiny
+    # timeout formerly used to exercise the timeout error format.
+    seconds = 5
+    with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=seconds) as (port, plan, journal, _, cli):
+        plan.write_text(json.dumps({**canned(kind, "OK"), "sleep": .1}))
+        with concurrent.futures.ThreadPoolExecutor(2) as pool:
+            calls = [pool.submit(call, port, "POST", "/chat/completions", {}) for _ in range(2)]
+            answers = [c.result() for c in calls]
+            assert all(answer[0] == 200 for answer in answers), (kind, arm, "serialized calls", answers)
+        timeline = Path(str(journal) + ".timeline").read_text().splitlines()
+        assert timeline == ["start", "end"] * 3, (kind, arm, "calls overlapped", timeline)
+        with provider_gate() as gate, concurrent.futures.ThreadPoolExecutor(1) as pool:
+            plan.write_text(json.dumps({"gate": gate.getsockname()[1]}))
+            response = pool.submit(call, port, "POST", "/chat/completions", {})
+            with accept_provider(gate) as witness:
+                status, body = response.result(timeout=10)
+                assert status == 500 and b"timed out after 5.0 seconds" in body, (kind, arm, status, body)
+                # The timeout must kill this blocked provider; it cannot
+                # succeed because a fixed-duration stub sleep elapsed.
+                try:
+                    assert witness.recv(1) == b"", (kind, arm, "provider survived timeout")
+                except ConnectionResetError:
+                    pass
+        encoded_cli = json.dumps(repr(str(cli)))[1:-1].encode()
+        body = body.replace(encoded_cli, b"'<cli>'")
+        argv = ["<cli>", *journal_rows(journal)[-1]["argv"]]
+        # The stub journals an instruction file as '<instructions>' while the
+        # shim quotes its real path; this empty request passes none.
+        assert "<instructions>" not in argv and not any(a.startswith("model_instructions_file=") for a in argv), (kind, arm, argv)
+        assert body == timeout_body(argv, seconds), (kind, arm, "timeout bytes", body, argv)
+        plan.write_text(json.dumps(canned(kind, "recovered")))
+        recovered = call(port, "POST", "/chat/completions", {})
+        assert recovered[0] == 200, (kind, arm, "recovery", recovered)
+    print(f"END lifecycle {kind}/{arm}", flush=True)
+    return 3
+
+
+def health_refresh(exe, root):
+    arm = "codex/rust"
+    print(f"START health refresh {arm}", flush=True)
+    with server(exe, "codex", root / "refresh-rust", canned("codex", "OK"), ttl=0) as (port, plan, journal, _, _):
+        with provider_gate() as failed, provider_gate() as recovered, concurrent.futures.ThreadPoolExecutor(1) as pool:
+            plan.write_text(json.dumps({"rc": 1, "stderr": "Not logged in", "gate": failed.getsockname()[1]}))
+            # TTL zero requests refresh immediately. The provider handshake
+            # holds it in flight until every stale response has returned.
+            first = pool.submit(call, port, "GET", "/health")
+            with accept_provider(failed) as failing:
+                answer = first.result(timeout=10)
+                assert answer[0] == 200, (arm, "initial cached health", answer)
+                for _ in range(2):
+                    answer = call(port, "GET", "/health")
+                    assert answer[0] == 200, (arm, "stale health", answer)
+                assert len(journal_rows(journal)) == 2, (arm, "duplicate failed refresh")
+                # Change the next plan only after the in-flight provider
+                # acknowledged reading the failure plan.
+                plan.write_text(json.dumps({**canned("codex", "OK"), "gate": recovered.getsockname()[1]}))
+                failing.sendall(b"release")
+            wait_health(port, 503, arm)
+            # Seeing the new snapshot need not mean the refresh worker has
+            # cleared its in-flight flag yet; keep driving health until the
+            # recovery provider acknowledges its invocation.
+            with accept_provider(recovered, lambda: wait_health(port, 503, arm)) as recovering:
+                answer = call(port, "GET", "/health")
+                assert answer[0] == 503, (arm, "cached failure while recovering", answer)
+                assert len(journal_rows(journal)) == 3, (arm, "duplicate recovery refresh")
+                plan.write_text(json.dumps(canned("codex", "OK")))
+                recovering.sendall(b"release")
+            wait_health(port, 200, arm)
+    print(f"END health refresh {arm}", flush=True)
+    return 3
 
 
 @contextlib.contextmanager
@@ -508,6 +536,7 @@ def main():
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_transport.py"))], check=True)
     if args.suite != "contract":
+        subprocess.run([sys.executable, str(Path(__file__).with_name("test_native_lifecycle.py"))], check=True)
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_lifecycle.py"))], check=True)
     with tempfile.TemporaryDirectory(prefix="r6-extractor-") as scratch:
         root = Path(scratch)

@@ -243,8 +243,14 @@ pub(in crate::cli) fn abspath(path: &Path) -> Option<PathBuf> {
     Some(clean)
 }
 
+/// Unix paths have no verbatim prefix.
+#[cfg(unix)]
+pub(super) fn strip_verbatim(path: PathBuf) -> PathBuf {
+    path
+}
+
 #[cfg(not(unix))]
-fn strip_verbatim(path: PathBuf) -> PathBuf {
+pub(super) fn strip_verbatim(path: PathBuf) -> PathBuf {
     let Some(text) = path.to_str() else {
         return path;
     };

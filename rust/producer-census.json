@@ -263,7 +263,7 @@
     "ops/install.sh": "c96916dcf81674b9ee92dbe16ac19c84d729965345ba78c276e6abfc52749a14",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "c4f2803528fce087b78b362613c9c89ea44583998327470c5ee17e5ba5eeed1e",
+    "ops/integrate.py": "59daf1abb1d4ded107501c02eed5c3029b0db3584443afc6f98b1921e3dccdb4",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -379,15 +379,17 @@
     "rust/shim/src/cli/conductor_watch/help.txt": "468959b8c93dbafe83667555307c315f429e07e4b851c799c63cd323f73bb41f",
     "rust/shim/src/cli/conductor_watch/mod.rs": "7e15d422116039117664115e05684efab5fd860594353f8728a58a36355ec939",
     "rust/shim/src/cli/conductor_watch/tests.rs": "d17d38e37bc4457b7641961f4eb9ffa874b6ac07f7b56d5a614f95b2b02fc284",
-    "rust/shim/src/cli/connect/args.rs": "309738853da64a4e56da43f5b7d80d5a11615cb8d95cf58a13e815bc42cb3de8",
-    "rust/shim/src/cli/connect/discover.rs": "2a4f4639b13cbb606eba7834074bc837468a70efb26a0f3708847d1f47a6d5a5",
+    "rust/shim/src/cli/connect/args.rs": "7f0a429dc2dbe724845f600ef146ed22063c7e2ef65f7980c1cb0d058d614209",
+    "rust/shim/src/cli/connect/codex.rs": "cdc440e6813a25def597d49a85916bcef1da3626f5b0e43c26149eb1959d62a6",
+    "rust/shim/src/cli/connect/discover.rs": "6aac28eb1e81817d9f11d288b726556d055b9d38ffb63444f5bb285b7204da79",
     "rust/shim/src/cli/connect/files.rs": "cb4e42e280a5cffa1e460d2186223503303e7fa5f347de626cb28fc7a4d8df8f",
-    "rust/shim/src/cli/connect/mod.rs": "5da2eb88f5b60d534928927f26e283f83ce65c038f06b6c3b0e91010b113a45c",
+    "rust/shim/src/cli/connect/mod.rs": "d34cdda8e6d0541d513de9a933431020e0178d795429db249b99f22080b2ddac",
     "rust/shim/src/cli/connect/net.rs": "ae7cd27e47097bdb65ce43ac5447477b64aeea1d595f30f4701da634bfefd85e",
-    "rust/shim/src/cli/connect/paths.rs": "8287c0bf03146afde612d804439d9773a5ed6207b9e96181caf83b23cd094a0e",
+    "rust/shim/src/cli/connect/paths.rs": "2621ab6cdd88e1a6d36b3b17843899e21dcb3ce8c3867f348c989def988ca79c",
     "rust/shim/src/cli/connect/procs.rs": "a3fb96f2e74ca08458529758cc854fe52c6e706825e937940a99aaf16b2aeaf7",
     "rust/shim/src/cli/connect/pyjson.rs": "f491c5f992dac5e5204e53e44cdb6eee1368039efa77ad66678fc433064b78c3",
     "rust/shim/src/cli/connect/url.rs": "35f46fcc79c903793a0f1cf720a3ea7fd6d9b05956004e387a3a1b6fdc441a5f",
+    "rust/shim/src/cli/connect/user_env.rs": "f72616eda206ddd518b21ce46e88c92ccf52985541c8eafdb2d5b405725b0bad",
     "rust/shim/src/cli/console/args.rs": "f05a52c1811d288596a7990da70ae4923ba945aacb4f7e6f9e55db03aa6fdb5a",
     "rust/shim/src/cli/console/browser.rs": "58d9d16136d29d7158d877ff0a5f76a4a97358a538f709add11eb31d74dbc98c",
     "rust/shim/src/cli/console/launch.rs": "44a036ed8eb8dcd23b53baee868691be0e54f9803cc46d790cc9f5d525eee106",
@@ -421,7 +423,20 @@
     "rust/shim/src/cli/hook_http.rs": "b6041ceaf0a7a7cb976d843412acc94c4957988e96d004b3e875fabe82ad990c",
     "rust/shim/src/cli/hook_json.rs": "ec016389716157c2eed558af5dab9774fbbc98d256e6a8e9e7784e8b73cc7602",
     "rust/shim/src/cli/host_connection.rs": "7b3423379687a70960ea50bf0e8f2d47560633f7d1950997bc5aebd9a933278c",
-    "rust/shim/src/cli/installer/mod.rs": "8c606f3c538d78b5aa2d2111fad6a1d3c508186fc0777c4df939075148113a08",
+    "rust/shim/src/cli/installer/claude_desktop.rs": "57e98c5729fa533b07b8ad4aef2b5ca345ae7c69d8ba39c396c41126c42f97f5",
+    "rust/shim/src/cli/installer/codex_config.rs": "3a02fe62ce9c3d829602dec6455bdf06441ae62affe4b990e2fddeea9fbb7f7b",
+    "rust/shim/src/cli/installer/codex_hooks/definitions.rs": "990567f0468940de26a0b551533c66854c7f8372665c87e0b649ce10472b7239",
+    "rust/shim/src/cli/installer/codex_hooks/instructions.rs": "efb5b434df30ac5939390667d2733faf4081874c52f0f1ca6638c596e3372c4d",
+    "rust/shim/src/cli/installer/codex_hooks/manual.rs": "1a8adf418a45432789358f7ab9595918838c9662e2dce9df7ad776c239f52b1e",
+    "rust/shim/src/cli/installer/codex_hooks/mod.rs": "a6394aabba9f0b094f64ecbbafbe01b88c190c9d42edf74f4b4576409dc8f10e",
+    "rust/shim/src/cli/installer/codex_hooks/plugin.rs": "ef98cce37aa49ac85d7b3e9d0fb03044f81201bab6a73b5da424907e598ee633",
+    "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json": "47062d9732320bce54746c14b58e179b94dc6fa090ac5ecc77071b154ab96f9f",
+    "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json": "db0b6087ee7e5f88ec3e1f14ec0ce4fac7af27bc83de55967d20c240f2aba4b5",
+    "rust/shim/src/cli/installer/codex_hooks/tests.rs": "1a297845937eb6ce523a58d08b35782b96d24c098101f5dcfebc37196538ecfa",
+    "rust/shim/src/cli/installer/codex_hooks/trust.rs": "0748d21422f3a9bdd6ce78fd43c34a4c3911dccd743ad19bde287cb9b0c9f332",
+    "rust/shim/src/cli/installer/codex_hooks/verify.rs": "8e4c7d5f66f063daed3891ed70e8af516c5ba654d7dcf246e96f33e0d97e98d6",
+    "rust/shim/src/cli/installer/fake_codex.rs": "737aafe78fcfb76e6604c1eb38e7398cc8d8f9f60e54ce8a8411fd2cfbdf6c7e",
+    "rust/shim/src/cli/installer/mod.rs": "9015b675fb3a5f892cc74ec4c1500c2dea2fe48a957bdcb5926aa8bc5dd22ff0",
     "rust/shim/src/cli/lease/args.rs": "db400d0c3dccf356a5dd7aaa4f47a590a8a5647a523fbe6db8fc5f1c054e3e2a",
     "rust/shim/src/cli/lease/assets/break_help.txt": "91061e2163b2ae009990a3007553b849ae2e2cc9306a8027695302e535b671e5",
     "rust/shim/src/cli/lease/assets/break_usage.txt": "51c6d7ec574a72ba5a48db3c6ff5f5a3b90ee285b18c14b1a649b902bcd5853f",
@@ -576,13 +591,13 @@
     "rust/shim/src/sent_json.rs": "6986f9f3fdabeb695c12a5b2e6d0e6e72a19288f4eaa284b8287f9d8709db5cc",
     "rust/shim/src/sent_jsonb.rs": "d9265b4adb2842160310fd5410bd8c9224933bf09acce6ff48143d21022cc46e",
     "rust/shim/src/sent_serve.rs": "335fd96af4c5eac802e5102f09154552e32705899bc81f990ae95ddba0dd0234",
-    "rust/shim/src/setup/codex.rs": "75bef12418824d29c7a43b833fb5c8d8f58cd610799a15581b100e39ccb72257",
+    "rust/shim/src/setup/codex.rs": "d4a40d8203e42dc5c186e46b8b95446eab0f2cbc7bb4f9a2d49b283982ca92f9",
     "rust/shim/src/setup/codex/credentials.rs": "7e1fa0f5c83f0f2cd6028ea35657ac668837a8d7474eb2eef9e797be467de3a6",
     "rust/shim/src/setup/codex/outcome.rs": "90e02f436771a9a98126c961794aa073a679e8f6761d0aeb97f7bbda7f9bce04",
     "rust/shim/src/setup/codex/rpc.rs": "f34b24cd56b219020fd6e33c7c5fe1e055055f3c11b86bbf4f9f05cb42775bbe",
     "rust/shim/src/setup/files.rs": "2fee5450911d8b26c973f3b46584789c66c8834da1d48306e056e0fe5addefff",
     "rust/shim/src/setup/files/removal.rs": "04043c7892167877dc824ef9fc465cc8d918d7fb73549799f44a3fbf6962e891",
-    "rust/shim/src/setup/mod.rs": "bae8e68ff423bf4e1ec2e2544363ce0ed7460958b79fee1fd858b5c4b9822dba",
+    "rust/shim/src/setup/mod.rs": "5e9a310c806fa7eb20539c495a7f1928e7b09f542d54a51d621179e8388b70d1",
     "rust/shim/src/subscriptions.rs": "bd3b8522e1266a15316598a2a2ccbb965dbe1e7fa9ed556140a22c877f0e97a9",
     "rust/shim/src/upstream.rs": "44c78d8044fde7fb8c4fe39f928063748f87271a1c4d6f50bbfa7622879db16d",
     "rust/shim/src/wire_compatibility.rs": "e51c066fded5c2f6e4a9f3d1412fd9725ac1d26aff51ad10009e4d7fc6f0a283",
@@ -1561,6 +1576,32 @@
             "channel": "argv",
             "complete": false,
             "expression": ": error: {error}\\n\",",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:296",
+          "shape": {
+            "argv_source": "briefing --hook-json\",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--hook-json\",",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:297",
+          "shape": {
+            "argv_source": "briefing --hook-json\",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--hook-json\",",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -2577,19 +2618,6 @@
             "channel": "argv",
             "complete": false,
             "expression": "`.\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:1087",
-          "shape": {
-            "argv_source": "doctor ` from a client's environment for the full check\"",
-            "channel": "argv",
-            "complete": false,
-            "expression": "` from a client's environment for the full check\"",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -4199,19 +4227,6 @@
             "channel": "argv",
             "complete": false,
             "expression": ":\"",
-            "omitted_optional": null,
-            "parameters": {}
-          }
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:94",
-          "shape": {
-            "argv_source": "invite <machine>` on the daemon host (an invited principal is admitted to the board)\";",
-            "channel": "argv",
-            "complete": false,
-            "expression": "<machine>` on the daemon host (an invited principal is admitted to the board)\";",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -5896,6 +5911,110 @@
           }
         },
         {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:300",
+          "shape": {
+            "argv_source": "prompt-hook \",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\",",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:301",
+          "shape": {
+            "argv_source": "prompt-hook \",",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\",",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:481",
+          "shape": {
+            "argv_source": "prompt-hook \"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:673",
+          "shape": {
+            "argv_source": "prompt-hook \"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:365",
+          "shape": {
+            "argv_source": "prompt-hook \"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:557",
+          "shape": {
+            "argv_source": "prompt-hook \"",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:1030",
+          "shape": {
+            "argv_source": "prompt-hook \"}]}],",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\"}]}],",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:1050",
+          "shape": {
+            "argv_source": "prompt-hook \".to_owned()));",
+            "channel": "argv",
+            "complete": false,
+            "expression": "\".to_owned()));",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
           "evidence": "documented",
           "location": "docs/guide/episodes.md:292",
           "shape": {
@@ -6737,7 +6856,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/setup/codex.rs:441",
+          "location": "rust/shim/src/setup/codex.rs:448",
           "shape": {
             "argv": [
               {
@@ -7760,7 +7879,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/discover.rs:247",
+          "location": "rust/shim/src/cli/connect/discover.rs:257",
           "shape": {
             "argv_source": "update --clients-only`, or `python ops/shim_runtime.py migrate` from a checkout, moves it)\"",
             "channel": "argv",
@@ -10433,7 +10552,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:94",
+          "location": "rust/shim/src/cli/connect/mod.rs:102",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -10968,7 +11087,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:94",
+          "location": "rust/shim/src/cli/connect/mod.rs:102",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -23186,6 +23305,52 @@
         {
           "dynamic": "unresolved",
           "evidence": "unverified",
+          "forwarded_from_tool": "memory_agents",
+          "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:408",
+          "mapping_source": "pseudolife_memory/coordination.py:835",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": true,
+            "parameters": {
+              "action": {
+                "expression": "list"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
+          "forwarded_from_tool": "memory_agents",
+          "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:256",
+          "mapping_source": "pseudolife_memory/coordination.py:835",
+          "shape": {
+            "channel": "body",
+            "complete": false,
+            "expression": "Tool forwarding filters defaults/nulls and may rename fields; inspect tool_shape and mapping_source.",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "tool_shape": {
+            "channel": "parameters",
+            "complete": true,
+            "parameters": {
+              "action": {
+                "expression": "list"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "unverified",
           "location": "ops/setup-codex-coordination.py:52",
           "shape": {
             "channel": "body",
@@ -24985,6 +25150,32 @@
           "usage": "reference"
         },
         {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:571",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:983",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
           "evidence": "documented",
           "location": "docs/guide/configuration.md:1392",
           "shape": {
@@ -25539,19 +25730,6 @@
             "parameters": {}
           },
           "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:75",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
         }
       ]
     },
@@ -25720,7 +25898,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/discover.rs:240",
+          "location": "rust/shim/src/cli/connect/discover.rs:250",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -27941,6 +28119,1641 @@
         },
         {
           "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:186",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:124",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:130",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:136",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:14",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:142",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:148",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:154",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:162",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:168",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:174",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:180",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:186",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:192",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:20",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:240",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:246",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:252",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:258",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:26",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:264",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:270",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:278",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:284",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:290",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:296",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:302",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:308",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:32",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:364",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:374",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:38",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:384",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:396",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:406",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:418",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:427",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:449",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:459",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:46",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:469",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:489",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:499",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:52",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:546",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:556",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:566",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:578",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:58",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:588",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:600",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:619",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:64",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:641",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:651",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:661",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:681",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:691",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:70",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:76",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:8",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:124",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:130",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:136",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:14",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:142",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:148",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:154",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:162",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:168",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:174",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:180",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:186",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:192",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:20",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:248",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:258",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:26",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:268",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:280",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:290",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:302",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:311",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:32",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:333",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:343",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:353",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:373",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:38",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:383",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:430",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:440",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:450",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:46",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:462",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:472",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:484",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:503",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:52",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:525",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:535",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:545",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:565",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:575",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:58",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:64",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:70",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:76",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:8",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "1"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
           "location": "rust/shim/src/cli/update/clients/codex.rs:687",
           "shape": {
             "channel": "environment",
@@ -28866,6 +30679,32 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/doorbell_seen.rs:202",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:380",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:52",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34014,20 +35853,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:303",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:71",
+          "location": "rust/shim/src/cli/connect/user_env.rs:3",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -34106,6 +35932,58 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/host_connection.rs:88",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:50",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:619",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:12",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:311",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37273,7 +39151,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:74",
+          "location": "rust/shim/src/cli/doctor/handshake.rs:164",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -37286,7 +39164,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/handshake.rs:164",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:49",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:618",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40674,32 +42565,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:73",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:849",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/cli/connect/net.rs:94",
           "shape": {
             "channel": "environment",
@@ -40870,6 +42735,58 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/expose/mod.rs:294",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:14",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:428",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:54",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:310",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42358,6 +44275,45 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/expose/mod.rs:294",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:432",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:448",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:59",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43892,19 +45848,6 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/mod.rs:72",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
           "location": "rust/shim/src/cli/console/mod.rs:51",
           "shape": {
             "channel": "environment",
@@ -44005,6 +45948,97 @@
             "parameters": {}
           },
           "usage": "assignment-candidate"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:12",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:51",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:53",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:56",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:60",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:13",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:309",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
         },
         {
           "dynamic": "unresolved",
@@ -48020,7 +50054,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1907",
+          "location": "ops/integrate.py:1914",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -49196,7 +51230,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/discover.rs:524",
+          "location": "rust/shim/src/cli/connect/discover.rs:534",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49223,6 +51257,45 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/doctor/clients.rs:376",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:276",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:48",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:617",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49757,7 +51830,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/discover.rs:271",
+          "location": "rust/shim/src/cli/connect/discover.rs:281",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -49772,7 +51845,37 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/discover.rs:536",
+          "location": "rust/shim/src/cli/connect/discover.rs:546",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "literal": "claude-desktop"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:350",
+          "shape": {
+            "channel": "environment",
+            "complete": true,
+            "omitted_optional": null,
+            "parameters": {
+              "value": {
+                "expression": "{DEFAULT_WRITER_ID"
+              }
+            }
+          },
+          "usage": "assignment"
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/claude_desktop.rs:8",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -50728,6 +52831,22 @@
             "parameters": {
               "limit": {
                 "literal": ""
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:365",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {
+              "limit": {
+                "literal": "100"
               }
             }
           }
@@ -52554,6 +54673,18 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/board.rs:551",
+          "shape": {
+            "channel": "query",
+            "complete": false,
+            "expression": "Request helper, URL suffix or body requires resolution at this location.",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:355",
           "shape": {
             "channel": "query",
             "complete": false,
@@ -57900,6 +60031,66 @@
               }
             }
           }
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:408",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "children",
+              "expect",
+              "lease",
+              "name",
+              "park_clear_by",
+              "park_expires",
+              "park_needs",
+              "park_reason",
+              "park_resume",
+              "path",
+              "project",
+              "repository_id",
+              "status",
+              "task",
+              "worktree"
+            ],
+            "parameters": {
+              "action": {
+                "expression": "list"
+              }
+            }
+          }
+        },
+        {
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:256",
+          "shape": {
+            "channel": "parameters",
+            "complete": true,
+            "omitted_optional": [
+              "children",
+              "expect",
+              "lease",
+              "name",
+              "park_clear_by",
+              "park_expires",
+              "park_needs",
+              "park_reason",
+              "park_resume",
+              "path",
+              "project",
+              "repository_id",
+              "status",
+              "task",
+              "worktree"
+            ],
+            "parameters": {
+              "action": {
+                "expression": "list"
+              }
+            }
+          }
         }
       ]
     },
@@ -62711,6 +64902,22 @@
             "parameters": {
               "approval_mode": {
                 "expression": "\"approve\" under '\n                f'{table} in Codex config.toml"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/installer/codex_hooks/trust.rs:166",
+          "shape": {
+            "channel": "parameters",
+            "complete": false,
+            "expression": "approval_mode = \\\"approve\\\" under {table} in Codex config.toml), so a thread woken by board mail can receive, ack and send without an approval prompt. No other tool was approved.{see}\"\n        ",
+            "omitted_optional": null,
+            "parameters": {
+              "approval_mode": {
+                "expression": "\\\"approve\\\" under {table} in Codex config.toml), so a thread woken by board mail can receive, ack and send without an approval prompt. No other tool was approved.{see}\""
               }
             }
           }
@@ -68755,16 +70962,102 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/installer/mod.rs:13",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:39",
       "name": "installer",
       "shape": {
-        "argv_source": "installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\";",
+        "argv_source": "installer claude-desktop --command ABSOLUTE_PATH [--writer-id ID] [--daemon-url URL] [--token-file PATH | --default-token-file PATH] [--token-from-env VAR] [--tokens-from-env VAR] [--config PATH] [--dry-run] [--skip-shim-check] [--json]\";",
         "channel": "argv",
         "complete": false,
-        "expression": "migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\";",
+        "expression": "claude-desktop --command ABSOLUTE_PATH [--writer-id ID] [--daemon-url URL] [--token-file PATH | --default-token-file PATH] [--token-from-env VAR] [--tokens-from-env VAR] [--config PATH] [--dry-run] [--skip-shim-check] [--json]\";",
         "parameters": {
-          "--client": {
-            "expression": "claude-code|claude-desktop|codex|gemini]..."
+          "--command": {
+            "expression": "ABSOLUTE_PATH"
+          },
+          "--config": {
+            "expression": "PATH]"
+          },
+          "--daemon-url": {
+            "expression": "URL]"
+          },
+          "--default-token-file": {
+            "expression": "PATH]"
+          },
+          "--dry-run": {
+            "literal": true
+          },
+          "--skip-shim-check": {
+            "expression": "[--json]\";"
+          },
+          "--token-file": {
+            "expression": "PATH"
+          },
+          "--token-from-env": {
+            "expression": "VAR]"
+          },
+          "--tokens-from-env": {
+            "expression": "VAR]"
+          },
+          "--writer-id": {
+            "expression": "ID]"
+          }
+        }
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:27",
+      "name": "installer",
+      "shape": {
+        "argv_source": "installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\";",
+        "channel": "argv",
+        "complete": false,
+        "expression": "codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\";",
+        "parameters": {
+          "--installer-daemon-url": {
+            "expression": "URL]"
+          }
+        }
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:28",
+      "name": "installer",
+      "shape": {
+        "argv_source": "installer codex-runtime-defaults\";",
+        "channel": "argv",
+        "complete": false,
+        "expression": "codex-runtime-defaults\";",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "cli",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:41",
+      "name": "installer",
+      "shape": {
+        "argv_source": "installer codex-hooks --checkout DIR [--source auto|manual|plugin|skip] [--trust ask|yes|no] [--instructions auto|append|skip] [--non-interactive]\";",
+        "channel": "argv",
+        "complete": false,
+        "expression": "codex-hooks --checkout DIR [--source auto|manual|plugin|skip] [--trust ask|yes|no] [--instructions auto|append|skip] [--non-interactive]\";",
+        "parameters": {
+          "--checkout": {
+            "expression": "DIR"
+          },
+          "--instructions": {
+            "expression": "auto|append|skip]"
+          },
+          "--source": {
+            "expression": "auto|manual|plugin|skip]"
+          },
+          "--trust": {
+            "expression": "ask|yes|no]"
           }
         }
       }
@@ -72273,20 +74566,6 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/connect/mod.rs:1087",
-      "method": "POST",
-      "name": "/health",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "static",
-      "kind": "route",
       "location": "rust/shim/src/cli/console/tests.rs:719",
       "method": "GET",
       "name": "/api/console/sessions",
@@ -72390,6 +74669,20 @@
       "name": "/api/coordination/{action}",
       "shape": {
         "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:346",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
         "complete": false,
         "expression": "Request helper, URL suffix or body requires resolution at this location.",
         "parameters": {}
@@ -75876,34 +78169,6 @@
       "evidence": "unverified",
       "kind": "route",
       "location": "rust/shim/src/cli/briefing_hook.rs:689",
-      "method": null,
-      "name": "/health",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
-      "location": "rust/shim/src/cli/connect/mod.rs:1075",
-      "method": null,
-      "name": "/health",
-      "shape": {
-        "channel": "body",
-        "complete": false,
-        "expression": "Request helper, URL suffix or body requires resolution at this location.",
-        "parameters": {}
-      }
-    },
-    {
-      "dynamic": "unresolved",
-      "evidence": "unverified",
-      "kind": "route",
-      "location": "rust/shim/src/cli/connect/mod.rs:840",
       "method": null,
       "name": "/health",
       "shape": {
@@ -101958,103 +104223,31 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/discover.rs:240",
+      "location": "rust/shim/src/cli/connect/discover.rs:250",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_STATE_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/discover.rs:247",
+      "location": "rust/shim/src/cli/connect/discover.rs:257",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:update"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/discover.rs:524",
+      "location": "rust/shim/src/cli/connect/discover.rs:534",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:1075",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:1087",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:doctor"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:1087",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:303",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:71",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:72",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:73",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:74",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:75",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_AGENT_STATE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:840",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:849",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:94",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:invite"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:94",
+      "location": "rust/shim/src/cli/connect/mod.rs:102",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/mod.rs:94",
+      "location": "rust/shim/src/cli/connect/mod.rs:102",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
@@ -102141,6 +104334,12 @@
       "location": "rust/shim/src/cli/connect/paths.rs:84",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/user_env.rs:3",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
@@ -103004,9 +105203,285 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/mod.rs:13",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:12",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:14",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:276",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_WRITER_ID"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:39",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:installer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:428",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:432",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:448",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:48",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_WRITER_ID"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:49",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:50",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:51",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:53",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:54",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:56",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:59",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKENS"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:60",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:617",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_WRITER_ID"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:618",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_NO_SPAWN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/claude_desktop.rs:619",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:27",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:installer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_config.rs:28",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:installer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:296",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:briefing"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:297",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:briefing"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:300",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/definitions.rs:301",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:12",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:13",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:309",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:310",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:311",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:41",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:installer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:571",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:481",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json:673",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:365",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json:557",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:1030",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:1050",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:prompt-hook"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:380",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:408",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/tests.rs:983",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/trust.rs:166",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "tool:memory_message"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:256",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "coordination:agents"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:346",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:355",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/hook/coordination-start"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:365",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "route:GET /api/episodes"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/installer/codex_hooks/verify.rs:52",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_DIGEST_DIR"
     },
     {
       "dynamic": "unresolved",
@@ -105763,7 +108238,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/setup/codex.rs:441",
+      "location": "rust/shim/src/setup/codex.rs:448",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:shim"
     },

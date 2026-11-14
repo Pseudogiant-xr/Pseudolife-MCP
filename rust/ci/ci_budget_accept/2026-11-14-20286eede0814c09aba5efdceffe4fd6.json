@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "f3e61581c78da942",
+  "fingerprint": "3143d8fe2b5d35c3",
+  "reason": "Adds one file to the lane's pytest command: tests/test_update_bridge.py, the update bridge's tests (#1537), which exercise POSIX spawning and private scratch modes the macOS lane covers. Estimated from a POSIX run: 45 tests in 1.98 s on the Linux dev box (14 November 2026), against a lane measured in minutes; no other step changed."
+}
