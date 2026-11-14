@@ -8,11 +8,11 @@
       "scope": "53f970c03bdfbd83",
       "test": "953b718efb3dafdf",
       "test-lite-linux": "ea88c14266b3fd67",
-      "test-lite-macos": "f3e61581c78da942",
-      "test-lite-windows": "8d99314724dc5541"
+      "test-lite-macos": "3143d8fe2b5d35c3",
+      "test-lite-windows": "f18af06d339169a0"
     },
     "python-freeze.yml": {
-      "python-freeze": "11925709ebd29f33"
+      "python-freeze": "966b18bec375a6a2"
     },
     "rust.yml": {
       "candidate": "4ecb836547864d17",

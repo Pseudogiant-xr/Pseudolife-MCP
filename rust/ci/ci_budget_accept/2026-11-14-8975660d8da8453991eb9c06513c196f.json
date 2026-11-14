@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "8d99314724dc5541",
+  "fingerprint": "f18af06d339169a0",
+  "reason": "Adds one file to the lane's pytest list: tests/test_update_bridge.py, the update bridge's tests (#1537), Windows-sensitive because the bridge spawns the native updater and its scratch directories rely on Windows ACLs. Measured locally: 45 tests in 2.34 s on the Windows host (14 November 2026), against a lane measured in minutes; no other step changed."
+}

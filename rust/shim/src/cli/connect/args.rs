@@ -1,7 +1,7 @@
 //! Canonical argv only: the target URL first, then each option at most once
-//! with its value as the next argument. Pairing (`--code`, `--read-code`),
-//! help, abbreviations, `--opt=value`, `--` and values that start with `-`
-//! defer, as does anything that is not valid Unicode.
+//! with its value as the next argument. Help, abbreviations, `--opt=value`,
+//! `--` and values that start with `-` defer, as does anything that is not
+//! valid Unicode.
 use std::ffi::OsString;
 
 #[derive(Debug, Default)]
@@ -9,6 +9,10 @@ pub(super) struct Args {
     pub url: String,
     pub token_file: Option<String>,
     pub read_token: bool,
+    /// `--code`: a pairing code from `pseudolife-mcp invite`.
+    pub code: Option<String>,
+    /// `--read-code`: the pairing code, read from stdin.
+    pub read_code: bool,
     pub client: Option<String>,
     pub dry_run: bool,
     pub yes: bool,
@@ -40,6 +44,8 @@ pub(super) fn parse(values: &[OsString]) -> Option<Args> {
             "--token-file" => args.token_file = Some(value()?),
             "--client" => args.client = Some(value()?),
             "--read-token" => args.read_token = true,
+            "--code" => args.code = Some(value()?),
+            "--read-code" => args.read_code = true,
             "--dry-run" => args.dry_run = true,
             "--yes" => args.yes = true,
             "--json" => args.json = true,
@@ -73,6 +79,13 @@ mod tests {
         assert!(args.dry_run && args.json && !args.yes);
         assert!(parse(&argv(&["http://h:1"])).is_some());
         assert!(parse(&argv(&["http://h:1", "--yes", "--json"])).is_some());
+        let paired = parse(&argv(&["http://h:1", "--code", "AAAA-BBBB-CCCC", "--yes"])).unwrap();
+        assert_eq!(paired.code.as_deref(), Some("AAAA-BBBB-CCCC"));
+        assert!(
+            parse(&argv(&["http://h:1", "--read-code"]))
+                .unwrap()
+                .read_code
+        );
     }
 
     #[test]
@@ -82,8 +95,8 @@ mod tests {
             &["http://h:1", "--yes", "--yes"],
             &["http://h:1", "--token-file=t"],
             &["http://h:1", "--token"],
-            &["http://h:1", "--code", "AAAA-BBBB-CCCC"],
-            &["http://h:1", "--read-code"],
+            &["http://h:1", "--code"],
+            &["http://h:1", "--code", "--yes"],
             &["http://h:1", "--token-file", "-t"],
             &["http://h:1", "--client"],
             &["http://h:1", "--client", ""],

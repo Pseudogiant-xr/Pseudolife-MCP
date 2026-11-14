@@ -120,6 +120,7 @@ live test_codex_doorbell.py
 live test_codex_doorbell_probe.py
 live test_codex_doorbell_revision.py
 live test_codex_hook_launcher.py
+live test_codex_hook_native_golden.py
 live test_codex_hook_runtime_trust.py
 live test_codex_hook_setup.py
 live test_codex_hook_setup_edges.py
@@ -534,6 +535,7 @@ live test_tunnel_runtime.py
 live test_tunnel_service.py
 live test_unattended_update.py
 live test_update_backup_connection.py
+live test_update_bridge.py
 live test_update_cli.py
 live test_update_client_handoff.py
 live test_update_clients.py

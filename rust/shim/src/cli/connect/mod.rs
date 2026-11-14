@@ -1,15 +1,16 @@
-//! `pseudolife-mcp connect` (PARITY CLI-CONNECT) at Python oracle
-//! `pseudolife_memory/connect_cli.py`: re-point this machine's existing
-//! JSON-file client registrations (Claude Code with its settings copy,
-//! Claude Desktop, Gemini CLI) at a daemon, after an unauthenticated health
-//! probe, a plan, and verification of every credential against the target;
-//! writes are all or nothing with backups beside each file.
+//! `pseudolife-mcp connect`: re-point this machine's existing client
+//! registrations (Claude Code with its settings copy, Codex through its own
+//! app-server, Claude Desktop, Gemini CLI) and a Windows User-scope daemon
+//! URL at a daemon, after an unauthenticated health probe, a plan, and
+//! verification of every credential against the target; writes are all or
+//! nothing with backups beside each file. With `--code` / `--read-code` it
+//! first pairs this machine (the native `pair` transport), only on an
+//! applying run.
 //!
-//! Deferred before any effect: pairing (`--code` / `--read-code`), a Codex
-//! `config.toml` (its app-server writes Codex's config), an interactive
-//! confirmation or token prompt, a Windows User-scope daemon URL, an
-//! unattended-update schedule, and every input whose Python reading this
-//! module cannot reproduce exactly (see `pyjson`, `url`, `paths`).
+//! Deferred before any effect: an interactive confirmation, token or code
+//! prompt on a terminal, an unattended-update schedule, and every input
+//! whose Python reading this module cannot reproduce exactly (see `pyjson`,
+//! `url`, `paths`).
 //!
 //! A refused stdout (a closed pipe) changes only the final status: the
 //! oracle's stdout is block-buffered, so its prints succeed, every step
@@ -26,13 +27,18 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod args;
+mod codex;
 mod discover;
 mod files;
+#[cfg(test)]
+#[path = "native_tests.rs"]
+mod native_tests;
 mod net;
 mod paths;
 mod procs;
 mod pyjson;
 mod url;
+mod user_env;
 
 use discover::{Ctx, Row};
 use pyjson::J;
@@ -76,6 +82,8 @@ const STATE_KEY: &str = "PSEUDOLIFE_AGENT_STATE";
 const SERVER: &str = "pseudolife-memory";
 const DESKTOP_SERVER: &str = "pseudolife-desktop";
 const DEFAULT_URL: &str = "http://127.0.0.1:8765";
+/// The token file a pairing run names before the daemon names its principal.
+const PAIRED_TOKEN_FILE: &str = "~/.pseudolife-mcp/<principal>.token (name from the daemon)";
 const CLIENTS: [&str; 4] = ["claude-code", "codex", "claude-desktop", "gemini"];
 
 const EXIT_OK: u8 = 0;
@@ -121,6 +129,8 @@ struct Report {
     restart: Option<J>,
     rollback: Vec<J>,
     error: Option<String>,
+    /// `--code`/`--read-code`: the redeemed pairing, after the other keys.
+    pairing: Option<J>,
     /// A stdout write or flush failed: the run carries on, and the final
     /// status becomes `EXIT_STDOUT_REFUSED`.
     stdout_refused: Cell<bool>,
@@ -136,6 +146,7 @@ impl Report {
             daemon: None,
             rows: Vec::new(),
             verification: Vec::new(),
+            pairing: None,
             warnings: Vec::new(),
             notes: Vec::new(),
             restart: None,
@@ -190,7 +201,7 @@ impl Report {
         if self.json {
             let text = |value: &Option<String>| value.clone().map_or(J::Null, J::Str);
             let strings = |values: &[String]| J::List(values.iter().cloned().map(J::Str).collect());
-            let data = J::Dict(vec![
+            let mut data = vec![
                 ("url".into(), text(&self.url)),
                 ("remote".into(), self.remote.map_or(J::Null, J::Bool)),
                 ("dry_run".into(), J::Bool(self.dry_run)),
@@ -208,8 +219,11 @@ impl Report {
                 ("rollback".into(), J::List(self.rollback.clone())),
                 ("error".into(), text(&self.error)),
                 ("exit".into(), J::Int(code.to_string())),
-            ]);
-            self.out(&pyjson::dumps(&data, true));
+            ];
+            if let Some(pairing) = &self.pairing {
+                data.push(("pairing".into(), pairing.clone()));
+            }
+            self.out(&pyjson::dumps(&J::Dict(data), true));
         }
         if self.stdout_refused.get() {
             EXIT_STDOUT_REFUSED
@@ -298,21 +312,6 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         Ok(code) => Some(ExitCode::from(code)),
         Err(Defer) => None,
     }
-}
-
-/// A Windows User-scope `PSEUDOLIFE_MCP_DAEMON_URL` (`HKCU\Environment`).
-fn user_environment_url_set() -> Result<bool, Defer> {
-    if !cfg!(windows) {
-        return Ok(false);
-    }
-    let root = paths::env_truthy("SystemRoot")?.ok_or(Defer)?;
-    let output = std::process::Command::new(PathBuf::from(root).join("System32").join("reg.exe"))
-        .args(["query", r"HKCU\Environment", "/v", URL_KEY])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .map_err(|_| Defer)?;
-    Ok(output.status.success())
 }
 
 /// `connect_cli.scheduled_update()` found a schedule on this machine.
@@ -470,6 +469,10 @@ struct Step {
 struct WriteFailed {
     path: PathBuf,
     reason: String,
+    /// What a transaction that compensated itself did (Codex's app-server
+    /// write), in the rollback list's shape; its files are not this run's
+    /// to restore.
+    events: Vec<J>,
 }
 
 /// `_apply_json`'s read-back: `Ok(Some(reason))` raises `_WriteFailed`
@@ -508,6 +511,7 @@ fn apply_json(row: &mut Row, steps: &mut Vec<Step>) -> Result<(), WriteFailed> {
             return Err(WriteFailed {
                 reason: files::os_error_name(&error).to_owned(),
                 path,
+                events: Vec::new(),
             });
         }
     };
@@ -563,7 +567,11 @@ fn apply_json(row: &mut Row, steps: &mut Vec<Step>) -> Result<(), WriteFailed> {
     row.created |= created;
     match outcome {
         Ok(None) => Ok(()),
-        Ok(Some(reason)) => Err(WriteFailed { path, reason }),
+        Ok(Some(reason)) => Err(WriteFailed {
+            path,
+            reason,
+            events: Vec::new(),
+        }),
         Err(fail) => {
             steps[record].written = files::bytes(&path).ok().flatten();
             Err(WriteFailed {
@@ -572,6 +580,7 @@ fn apply_json(row: &mut Row, steps: &mut Vec<Step>) -> Result<(), WriteFailed> {
                     files::Fail::Helper(message) => message,
                     files::Fail::Name(name) => name.to_owned(),
                 },
+                events: Vec::new(),
             })
         }
     }
@@ -731,6 +740,59 @@ fn health_ok(health: &Option<J>) -> bool {
 }
 
 /// Read stdin's first bytes the way `stream.read(MAX_TOKEN_BYTES + 3)` does.
+/// Re-point the Windows User-scope daemon URL a change row names, keeping
+/// its registry type, and tell running programs; the note to print, or the
+/// failure (the registrations are already re-pointed) with the one command
+/// that finishes it.
+fn apply_user_env(
+    rows: &[Row],
+    url: &str,
+    backend: &dyn user_env::Backend,
+) -> Result<Option<String>, String> {
+    let Some(old) = rows
+        .iter()
+        .find(|row| row.state == "change" && row.user_env.is_some())
+        .and_then(|row| row.user_env.clone())
+    else {
+        return Ok(None);
+    };
+    let before = url::shown(&old.data).unwrap_or_else(|_| "another daemon".to_owned());
+    let wanted = user_env::Value {
+        kind: old.kind.clone(),
+        data: url.to_owned(),
+    };
+    match backend.set_user(URL_KEY, &wanted) {
+        Ok(()) => {
+            backend.broadcast();
+            Ok(Some(format!(
+                "the Windows User-scope {URL_KEY} now names {url} (it named {before}); new processes inherit it, and programs already running keep the old value until they restart"
+            )))
+        }
+        Err(cause) => Err(format!(
+            "the client registrations now name {url} (backups above), but the Windows User-scope {URL_KEY} was not changed ({cause}) and still names {before}; finish it in PowerShell: {}",
+            user_env::powershell_set(URL_KEY, url, "User")
+        )),
+    }
+}
+
+/// Discovery with the Codex rows, read from Codex's app-server when Codex
+/// is selected and its registration exists.
+async fn discover_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+    let codex = if ctx.clients.contains(&"codex") {
+        codex::rows(ctx, &codex::AppServer).await?
+    } else {
+        Vec::new()
+    };
+    discover::discover(ctx, codex)
+}
+
+/// One line from stdin (`--read-code` without a terminal).
+fn stdin_line() -> String {
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+    line
+}
+
 fn stdin_token() -> Vec<u8> {
     let mut data = Vec::new();
     let _ = std::io::stdin()
@@ -742,9 +804,10 @@ fn stdin_token() -> Vec<u8> {
 
 async fn connect(args: args::Args) -> Result<u8, Defer> {
     // An interactive question or token prompt is never answered natively.
-    if (!args.dry_run && !args.yes || args.read_token) && procs::stdin_is_tty() {
+    if (!args.dry_run && !args.yes || args.read_token || args.read_code) && procs::stdin_is_tty() {
         return Err(Defer);
     }
+    let pairing = args.code.is_some() || args.read_code;
     // ---- the plan: nothing below may defer once anything is printed ----
     let url = match url::validated(&args.url)? {
         Ok(url) => url,
@@ -766,6 +829,19 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
             format!("--client takes {} or all (got {shown})", CLIENTS.join(", ")),
         ));
     };
+    if pairing && args.read_token {
+        return Ok(Report::new(args.json).fail(
+            EXIT_USAGE,
+            "--code/--read-code pair a new token and --read-token stores one you already have; pass one of them"
+                .to_owned(),
+        ));
+    }
+    if args.code.is_some() && args.read_code {
+        return Ok(Report::new(args.json).fail(
+            EXIT_USAGE,
+            "give the pairing code with --code or --read-code, not both".to_owned(),
+        ));
+    }
     if args.read_token && args.token_file.is_none() {
         return Ok(Report::new(args.json).fail(
             EXIT_USAGE,
@@ -777,35 +853,58 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         .as_deref()
         .map(token_file_path)
         .transpose()?;
-    if args.read_token
+    if (args.read_token || pairing)
         && let Some(token_file) = &token_file
         && std::fs::symlink_metadata(token_file).is_ok()
     {
+        let flag = if args.read_token {
+            "--read-token"
+        } else {
+            "pairing"
+        };
         return Ok(Report::new(args.json).fail(
             EXIT_USAGE,
             format!(
-                "{token_file} already exists; --read-token creates a token file but never replaces one"
+                "{token_file} already exists; {flag} creates a token file but never replaces one"
             ),
         ));
     }
+    // The code is read once, and never echoed or reported.
+    let code = if pairing {
+        let text = match &args.code {
+            Some(code) => code.clone(),
+            None => stdin_line(),
+        };
+        match crate::cli::pairing::normalize_for_connect(&text) {
+            Some(code) => Some(code),
+            None => {
+                return Ok(Report::new(args.json).fail(
+                    EXIT_USAGE,
+                    "that is not a pairing code: it has 12 letters and digits, shown as XXXX-XXXX-XXXX (nothing was changed)"
+                        .to_owned(),
+                ));
+            }
+        }
+    } else {
+        None
+    };
     let remote = !url::is_loopback(&url)?;
     let all_clients = selected.len() == CLIENTS.len();
-    if user_environment_url_set()? || (all_clients && schedule_found()?) {
+    if all_clients && schedule_found()? {
         return Err(Defer);
     }
-    if selected.contains(&"codex") && std::fs::read(paths::codex_config()?).is_ok() {
-        return Err(Defer);
-    }
-    // Discovery reads only files and prints nothing, so it runs (and may
-    // defer) before any request; the oracle runs it after /health.
-    let ctx = Ctx {
+    // Discovery prints nothing, so it runs (and may defer) before any
+    // request; the oracle runs it after /health.
+    let mut ctx = Ctx {
         url: url.clone(),
         remote,
-        token_file: token_file.clone(),
+        token_file: token_file
+            .clone()
+            .or_else(|| pairing.then(|| PAIRED_TOKEN_FILE.to_owned())),
         clients: selected.clone(),
         layout: paths::layout()?,
     };
-    let mut rows = discover::discover(&ctx)?;
+    let mut rows = discover_rows(&ctx).await?;
     // `_bytes` raises on anything but FileNotFoundError; read every target
     // now so such a file defers before any effect.
     for row in rows.iter().filter(|row| row.state == "change") {
@@ -850,6 +949,14 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
             ),
         ));
     }
+    if pairing && auth != Some(J::Bool(true)) {
+        return Ok(report.fail(
+            EXIT_REFUSED,
+            format!(
+                "the daemon at {url} does not report authentication, and pairing needs a daemon with a bearer token. Nothing was changed"
+            ),
+        ));
+    }
     let version = pyjson::get(&health_dict, "version").cloned();
     let version_shown = match &version {
         Some(value) if value.truthy() => value.py_str()?,
@@ -883,6 +990,29 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
     let manual = rows.iter().filter(|row| row.state == "manual").count();
     let client_row =
         |row: &Row, states: &[&str]| CLIENTS.contains(&row.client) && states.contains(&row.state);
+    if pairing {
+        let mut sharing: Vec<&str> = rows
+            .iter()
+            .filter(|row| row.place == "registration" && client_row(row, &["current", "change"]))
+            .map(|row| row.client)
+            .collect();
+        sharing.sort_unstable();
+        sharing.dedup();
+        if sharing.len() > 1
+            && !report.warn(format!(
+                "{} clients ({}) will share one principal through this pairing code; invite one name per client (`pseudolife-mcp invite <name>` on the daemon host, then one `connect --code` per client with --client) to keep their writes apart",
+                sharing.len(),
+                sharing.join(", ")
+            ))
+        {
+            return Ok(EXIT_STDERR_REFUSED);
+        }
+    }
+    let unpaired = if pairing {
+        " The pairing code was not redeemed: run the installer with it instead (option 2, or --pairing-code / -PairingCode)"
+    } else {
+        ""
+    };
     if !rows
         .iter()
         .any(|row| client_row(row, &["current", "change"]))
@@ -892,7 +1022,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
             return Ok(report.fail(
                 EXIT_NOTHING,
                 format!(
-                    "no registration connect can write was found for {names}: {} manual action (listed above).",
+                    "no registration connect can write was found for {names}: {} manual action (listed above).{unpaired}",
                     places(manual)
                 ),
             ));
@@ -900,16 +1030,20 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         return Ok(report.fail(
             EXIT_NOTHING,
             format!(
-                "no registration of the shim was found for {names}; register a client first (the commands are above), or run the installer."
+                "no registration of the shim was found for {names}; register a client first (the commands are above), or run the installer.{unpaired}"
             ),
         ));
     }
     let changes = rows.iter().filter(|row| row.state == "change").count();
     if args.dry_run {
-        report.note(
-            "dry run: nothing was written and no token was sent; the credentials are verified only on a real run"
-                .to_owned(),
-        );
+        report.note(format!(
+            "dry run: nothing was written and no token was sent; the credentials are verified only on a real run{}",
+            if pairing {
+                "; the pairing code was not redeemed"
+            } else {
+                ""
+            }
+        ));
         return Ok(report.finish(EXIT_OK));
     }
     if changes == 0 {
@@ -952,6 +1086,78 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         }
     }
 
+    // ---- pair: the code is spent from here on ----
+    let mut kept = String::new();
+    if let Some(code) = &code {
+        // The paired file is never in `created`, so no failure below removes
+        // the only copy of a token the daemon now accepts.
+        let paired = match crate::cli::pairing::redeem_for_connect(
+            &url,
+            code,
+            token_file.as_deref(),
+        )
+        .await
+        {
+            Ok(paired) => paired,
+            Err(()) => {
+                return Ok(report.fail(
+                    EXIT_REFUSED,
+                    "pairing did not complete: the pairing request could not be made here. No client configuration was written"
+                        .to_owned(),
+                ));
+            }
+        };
+        let field = |key: &str| paired[key].as_str().map(str::to_owned);
+        report.pairing = Some(J::Dict(
+            ["state", "principal", "tier", "bank", "token_file"]
+                .iter()
+                .map(|key| ((*key).to_owned(), field(key).map_or(J::Null, J::Str)))
+                .collect(),
+        ));
+        for line in paired["warnings"].as_array().into_iter().flatten() {
+            if let Some(line) = line.as_str()
+                && !report.warn(line.to_owned())
+            {
+                return Ok(EXIT_STDERR_REFUSED);
+            }
+        }
+        if paired["exit"].as_i64() != Some(0) && paired["exit"].as_str() != Some("0") {
+            return Ok(report.fail(
+                EXIT_REFUSED,
+                format!(
+                    "pairing did not complete: {}. No client configuration was written",
+                    field("error").unwrap_or_else(|| "the daemon gave no reason".to_owned())
+                ),
+            ));
+        }
+        let Some(paired_file) = field("token_file") else {
+            return Ok(report.fail(
+                EXIT_REFUSED,
+                "pairing completed but named no token file. No client configuration was written"
+                    .to_owned(),
+            ));
+        };
+        kept = format!(
+            " The paired token file {paired_file} is kept: the code is spent, and the daemon accepts this token"
+        );
+        report.say(&format!(
+            "paired: {} on {url}; token file {paired_file}",
+            field("principal")
+                .unwrap_or_else(|| "a principal whose name could not be used".to_owned())
+        ));
+        ctx.token_file = Some(paired_file);
+        rows = match discover_rows(&ctx).await {
+            Ok(rows) => rows,
+            Err(Defer) => {
+                return Ok(report.fail(
+                    EXIT_REFUSED,
+                    format!("the client registrations could not be read again after pairing. Nothing was written.{kept}"),
+                ));
+            }
+        };
+        report.rows = rows.iter().map(Row::public).collect();
+    }
+
     // ---- verify every credential against the target ----
     let auth_required = auth != Some(J::Bool(false));
     let (results, warnings) = match verify(&ctx, &rows, auth_required).await {
@@ -960,7 +1166,10 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
             for path in &created {
                 let _ = std::fs::remove_file(path);
             }
-            return Ok(report.fail(EXIT_REFUSED, format!("{failure}. Nothing was written.")));
+            return Ok(report.fail(
+                EXIT_REFUSED,
+                format!("{failure}. Nothing was written.{kept}"),
+            ));
         }
     };
     report.verification = results.clone();
@@ -974,12 +1183,24 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
 
     // ---- apply, all or nothing ----
     let mut steps = Vec::new();
-    for row in rows.iter_mut() {
-        if row.state != "change" || row.json.is_none() {
+    let mut codex_done = false;
+    for index in 0..rows.len() {
+        if rows[index].state != "change" {
             continue;
         }
-        if let Err(failure) = apply_json(row, &mut steps) {
-            let outcome = rollback(&steps, &created);
+        let applied = if rows[index].json.is_some() {
+            apply_json(&mut rows[index], &mut steps)
+        } else if rows[index].codex.is_some() && !codex_done {
+            codex_done = true;
+            let mut codex_rows: Vec<&mut Row> =
+                rows.iter_mut().filter(|row| row.codex.is_some()).collect();
+            codex::apply(&ctx, &mut codex_rows, &mut steps, &codex::AppServer).await
+        } else {
+            continue;
+        };
+        if let Err(failure) = applied {
+            let mut outcome = failure.events.clone();
+            outcome.extend(rollback(&steps, &created));
             for item in &outcome {
                 let item = item.as_dict().expect("an outcome");
                 let field = |key: &str| {
@@ -1003,7 +1224,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
             return Ok(report.fail(
                 EXIT_FAILED,
                 format!(
-                    "writing {} failed ({}); every file this run wrote was rolled back as listed above.",
+                    "writing {} failed ({}); every file this run wrote was rolled back as listed above.{kept}",
                     show(&failure.path),
                     failure.reason
                 ),
@@ -1032,6 +1253,17 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
             field("board")
         ));
     }
+    // ---- the Windows User-scope daemon URL, after the registrations ----
+    // A failure here leaves the registrations re-pointed: the restart notes
+    // and the post-apply check still run, then the run ends with it.
+    let user_env_failure = match apply_user_env(&rows, &url, user_env::backend().as_ref()) {
+        Ok(Some(line)) => {
+            report.note(line);
+            None
+        }
+        Ok(None) => None,
+        Err(line) => Some(line),
+    };
     let restarted = restart(&ctx, &rows);
     let detail = restarted
         .as_dict()
@@ -1054,7 +1286,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
     report.note(format!(
         "the agent board keys each session's address by the daemon URL, so sessions get new addresses on {url}; the old state stays in place, and peers see this machine's sessions under the new ones"
     ));
-    let pending: Vec<String> = match discover::discover(&ctx) {
+    let pending: Vec<String> = match discover_rows(&ctx).await {
         Ok(again) => again
             .iter()
             .filter(|row| CLIENTS.contains(&row.client) && row.state == "change")
@@ -1076,17 +1308,24 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         } else {
             pending.join(", ")
         };
+        let check = format!(
+            "applied, but the post-apply check failed: {what}. The backups are listed above; restore them or re-run connect"
+        );
         return Ok(report.fail(
             EXIT_UNVERIFIED,
-            format!(
-                "applied, but the post-apply check failed: {what}. The backups are listed above; restore them or re-run connect"
-            ),
+            match user_env_failure {
+                Some(line) => format!("{line}. Also: {check}"),
+                None => check,
+            },
         ));
     }
     report.note(
         "post-apply check: every place names the daemon, and it answers /health; run `pseudolife-mcp doctor` from a client's environment for the full check"
             .to_owned(),
     );
+    if let Some(line) = user_env_failure {
+        return Ok(report.fail(EXIT_UNVERIFIED, line));
+    }
     Ok(report.finish(EXIT_OK))
 }
 
