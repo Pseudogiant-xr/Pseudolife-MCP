@@ -261,7 +261,7 @@
    "p": "pseudolife_memory/cli.py",
    "d": [
     "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio · channel → optional preview transport",
-    "briefing / prompt-hook / doctor / backup / export / import / board-audit / coordination-recovery / wait-mail / conductor-watch (also delegate-watch) / lease / maintainer / test-login / doorbell-prompt-seen / episode-start / episode-end subcommands; version (runtime path and source) and help; host lifecycle: update · connect / invite / pair / expose / tunnel / move",
+    "briefing / prompt-hook / doctor / backup / export / import / board-audit / coordination-recovery / wait-mail / conductor-watch (also delegate-watch) / lease / maintainer / test-login / doorbell-prompt-seen / episode-start / episode-end subcommands; version (runtime path and source) and help; host lifecycle: update · connect / invite / pair / expose / tunnel / move · restore · console · migrate-flat",
     "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
    ]
   },
@@ -1023,7 +1023,7 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 57",
+   "s": "DDL · SCHEMA_META_VERSION 59",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
@@ -1226,7 +1226,7 @@
    "s": "checkout-mode wrapper over pseudolife-mcp update",
    "p": "ops/update.ps1",
    "d": [
-    "Maps its switches onto pseudolife_memory/update_cli.py through ops/update.py --checkout <repo> (the code pseudolife-mcp update runs); -ClientsOnly is refused (ops/update_clients.py); -NoTestLogin / --no-test-login pass --no-test-login through (skips the checkout-mode test-suite login step)",
+    "Maps its switches onto pseudolife_memory/update_cli.py through ops/update.py --checkout <repo>, or onto the installed native updater with -Native / --native or PSEUDOLIFE_NATIVE_UPDATE=1, or when no Python 3.10+ is found; -ClientsOnly is refused (ops/update_clients.py); -NoTestLogin / --no-test-login pass --no-test-login through (skips the checkout-mode test-suite login step)",
     "Refuses a dirty tree, or one git cannot describe, unless -AllowDirty",
     "Stamps git sha / dirty / build time into image labels + /health build",
     "backup → rollback tag <tag>-pre-update-<ts> (rollback tags retained, not pruned: legacy names cannot prove project ownership)",
@@ -1411,11 +1411,54 @@
    "x": 1760,
    "y": 440,
    "t": "release.yml",
-   "s": "PyPI · GHCR · MCP registry",
+   "s": "native archives · PyPI · GHCR · MCP registry",
    "p": ".github/workflows/release.yml",
    "d": [
     "Tag == pyproject and both server.json versions guarded before build; OIDC, human-approved pypi environment",
-    "After publish: images pushes pseudolife-daemon:<ver> / latest and pseudolife-pg:18 / 18-<ver> to GHCR and verifies them pullable by digest; registry publishes server.json via OIDC"
+    "Before PyPI: rust-assets builds the five native archives, rust-assets-bundle adds pseudolife-compose-<ver>.tar.gz and SHA256SUMS (checked with sha256sum --check), and rust-assets-publish attaches them to the GitHub release; publish (PyPI) needs it, so a failed native build stops the release before PyPI",
+    "After publish: images pushes pseudolife-daemon:<ver> / latest and pseudolife-pg:18 / 18-<ver> to GHCR and verifies them pullable by digest; rust-image pushes pseudolife-daemon-rust:<ver> when PSEUDOLIFE_PUBLISH_RUST_DAEMON is true; registry publishes server.json via OIDC"
+   ]
+  },
+  {
+   "id": "nativeassets",
+   "g": "release",
+   "x": 1600,
+   "y": 440,
+   "t": "native release assets",
+   "s": "five archives · compose bundle · SHA256SUMS",
+   "p": "rust/ci/release_assets.py",
+   "d": [
+    "pseudolife-mcp-<ver>-<target>.tar.gz (.zip on Windows) for x86_64 and aarch64 Linux (glibc), x86_64 and aarch64 macOS, x86_64 Windows, each holding the one native binary; pseudolife-compose-<ver>.tar.gz; SHA256SUMS over all six",
+    "On the GitHub release before PyPI publishes (docs/dev/release-assets.md); the update bridge and the native installer download them and check SHA256SUMS before running anything"
+   ]
+  },
+  {
+   "id": "rustdaemon",
+   "g": "daemon",
+   "x": 1000,
+   "y": 40,
+   "t": "rust/daemon",
+   "s": "pseudolife-daemon · default Docker engine",
+   "p": "rust/daemon",
+   "d": [
+    "The Docker tier's default daemon since 0.23.0, image ghcr.io/<owner>/pseudolife-daemon-rust:<ver> (debian:bookworm-slim, no Python); pseudolife-mcp update --engine rust | python switches engines on the same bank",
+    "Requires PSEUDOLIFE_MCP_DATABASE_URL: no file mode and no embedded lite Postgres; models are provisioned at install or first start into the pseudolife_rust_models volume",
+    "The Python daemon (daemon.py) is frozen and still runs a host that chose --engine python"
+   ]
+  },
+  {
+   "id": "nativecli",
+   "g": "transport",
+   "x": 330,
+   "y": 960,
+   "t": "rust/shim",
+   "s": "native client · pseudolife-mcp without Python",
+   "p": "rust/shim",
+   "d": [
+    "Crate pseudolife-stdio, released as the pseudolife-mcp binary: the stdio shim and the CLI in one program, installed as a numbered runtime (runtime.json kind native) behind the same launcher as the Python runtimes",
+    "Native: update (with the client-handoff-v1 hand-off), backup and restore of a Docker bank, connect, console, conductor-watch, doctor and the hook leaves; move only as --dry-run; the expose change step and most of tunnel print \"mode '<mode>' is deferred in this candidate\" and exit 1 (rust/shim/src/cli.rs dispatch)",
+    "Refuses a lite-tier bank, serve and embedded (cli/retired.rs); starts a local daemon only from PSEUDOLIFE_MCP_SERVE_COMMAND",
+    "A 0.23.x Python client's update moves the machine to it (update_bridge.py) when the release's archive for its platform downloads, verifies and runs; PSEUDOLIFE_SHIM_ENGINE=python keeps Python"
    ]
   },
   {
@@ -1594,7 +1637,7 @@
    "x": 1080,
    "y": 1895,
    "t": "update_cli.py",
-   "s": "pseudolife-mcp update · the one deploy implementation",
+   "s": "pseudolife-mcp update · the Python client's updater",
    "p": "pseudolife_memory/update_cli.py",
    "d": [
     "Release mode: newest PyPI version → refuse a downgrade → docker pull the GHCR daemon image → backup → rollback tag <current>-pre-update-<stamp> (tags retained) → compose up -d --no-deps pseudolife-daemon (GHCR overlay) → health expecting that version → clients (not with --daemon-only)",
@@ -1670,6 +1713,36 @@
    "f": "cc",
    "t": "shim",
    "l": "stdio JSON-RPC",
+   "k": "data"
+  },
+  {
+   "f": "relN",
+   "t": "nativeassets",
+   "l": "attach before PyPI",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "nativeassets",
+   "l": "update bridge: download + SHA256SUMS check",
+   "k": "deploy"
+  },
+  {
+   "f": "updatecli",
+   "t": "nativecli",
+   "l": "update bridge: native client steps",
+   "k": "deploy"
+  },
+  {
+   "f": "compose",
+   "t": "rustdaemon",
+   "l": "runs (default engine)",
+   "k": "deploy"
+  },
+  {
+   "f": "nativecli",
+   "t": "rustdaemon",
+   "l": "HTTP per tool call",
    "k": "data"
   },
   {
