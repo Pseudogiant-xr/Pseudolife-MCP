@@ -205,3 +205,28 @@ def test_legacy_fragment_cannot_choose_its_own_before_fingerprint(monkeypatch, t
                     "fingerprint": new["test"], "reason": "forged prior definition"})
     with pytest.raises(ValueError, match="unverified legacy cost data"):
         batch._budget_member_evidence("base", SimpleNamespace(sha="member"))
+
+
+def test_every_job_without_a_reason_is_named_at_once(monkeypatch, tmp_path):
+    # The batch tool named only the first such job, so a pull request
+    # missing two records was refused twice, one build apart.
+    before = {"jobs": {name: {"runs-on": "ubuntu-latest", "steps": [{"run": "echo before"}]}
+                       for name in ("lint", "test")}}
+    current = copy.deepcopy(before)
+    for name in ("lint", "test"):
+        current["jobs"][name]["steps"][0]["run"] = "echo after"
+    old = ci_budget.definition_fingerprints("ci.yml", before)
+    budget = {"ci.yml": {"jobs": {"lint": {"minutes": 1.0}, "test": {"minutes": 1.0}}, "measured_on": [1, 2]}}
+    baseline = json.dumps({"schema": 1, "workflows": {"ci.yml": old}})
+    data = {("base", batch.CI_FINGERPRINTS): baseline, ("common", batch.CI_FINGERPRINTS): baseline,
+            ("member", batch.CI_FINGERPRINTS): baseline,
+            ("common", ".github/workflows/ci.yml"): yaml.safe_dump(before),
+            ("member", ".github/workflows/ci.yml"): yaml.safe_dump(current),
+            ("common", batch.CI_BUDGET): json.dumps(budget), ("member", batch.CI_BUDGET): json.dumps(budget)}
+    monkeypatch.setattr(batch, "_budget_tools", lambda _: (ci_budget, None, None))
+    monkeypatch.setattr(batch, "_budget_text", lambda rev, path: data.get((rev, path)))
+    monkeypatch.setattr(batch, "_out", lambda *args: "common" if args[0] == "merge-base" else str(tmp_path.resolve()))
+    monkeypatch.setattr(batch, "_budget_records", lambda rev, module: [])
+    with pytest.raises(ValueError, match=r"ci\.yml/lint, ci\.yml/test changed without a reviewed cost reason; "
+                                         r"run ci_budget\.py accept for each"):
+        batch._budget_member_evidence("base", SimpleNamespace(sha="member"))
