@@ -801,6 +801,7 @@
     },
     {
       "name": "engine-without-docker-and-choices",
+      "needs": "no-docker",
       "steps": [
         {
           "argv": [
@@ -872,6 +873,7 @@
     },
     {
       "name": "volume-names-without-docker",
+      "needs": "no-docker",
       "files": {
         "repo/ops/.env.example": "PSEUDOLIFE_BANK_VOLUME=b\n"
       },

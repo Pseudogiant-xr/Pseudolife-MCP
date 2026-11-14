@@ -72,6 +72,23 @@ def _environment(home: Path, extra: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def docker_outside_path() -> Path | None:
+    """A ``docker.exe`` the recorded Python helpers would start with ``PATH``
+    pointed at an empty folder. They start ``docker`` by bare name, and on
+    Windows ``CreateProcess`` also searches the Python interpreter's own
+    folder and the system and Windows directories, where the hosted
+    ``windows-latest`` image keeps ``docker.exe``. The native steps search
+    absolute ``PATH`` directories only, so ``cli_installer_goldens.rs`` runs
+    every case on every host."""
+    if os.name != "nt":
+        return None
+    root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    for folder in (Path(sys.executable).parent, root / "System32", root / "System", root):
+        if (folder / "docker.exe").is_file():
+            return folder / "docker.exe"
+    return None
+
+
 def run_case(case: dict) -> dict:
     """The case run against the Python helpers: each step's exit, stdout and
     stderr, and the files it names afterwards, placeholdered."""
@@ -121,6 +138,9 @@ def run_case(case: dict) -> dict:
 
 @pytest.mark.parametrize("case", _cases(), ids=lambda case: case["name"])
 def test_python_helper_matches_the_recorded_answer(case):
+    if case.get("needs") == "no-docker" and (docker := docker_outside_path()):
+        pytest.skip(f"the Python helpers would start {docker} even with an empty PATH, so they cannot "
+                    "replay a case without Docker here; the native steps still run it")
     observed = run_case(case)
     if RECORD:
         recorded = json.loads(GOLDENS.read_text(encoding="utf-8"))
