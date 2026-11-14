@@ -1,0 +1,3 @@
+### Changed (2026-11-14 — a batch build says everything that would still refuse a waiting pull request)
+- `python ops/integrate.py build`, and its `--dry-run`, now also judge each labelled pull request that sits the batch out as not ready (a pending replay, a failing head) as if it were ready, against master alone. For each one it prints `#N, once ready:` with what would still refuse it: the Python freeze, a refused parent its head carries, the CI budget check, or a conflict with master. If nothing would, it says so. A pending replay no longer hides those refusals until it finishes.
+- The CI budget check names every job missing a reviewed cost reason at once, not only the first.
