@@ -9244,6 +9244,29 @@ three of each kind. For nonstandard names, pass `--container <postgres>`
 and `--daemon-container <daemon>`; `--db`, `--user` and `--db-port` override
 the database identity otherwise read from the daemon configuration.
 
+The daemon keeps serving throughout: nothing is stopped. The dump is the
+database at one moment (pg_dump's snapshot) and `/data` is archived just
+after it, so writes made between the two can be in one and not the other;
+for a pair taken at one instant, stop the daemon first. Each file is
+written under a `.part` name, read back (the dump's completion marker, the
+archive read to its end with restore's path checks) and only then renamed,
+so the two printed paths exist and are complete; a failure or Ctrl-C
+leaves no file under a backup name and says `No backup was written`. If a
+file in `/data` changes while it is archived, `tar` exits 1 and the backup
+fails with that cause: run it again (or stop the daemon first). Backup
+refuses an `--out` inside the daemon's `/data` volume (the archive would
+contain itself), a missing database, and a lite bank, which needs the
+Docker install. Rotation removes only files with this command's exact
+names (`pseudolife_memory-<date>-<time>-<8 hex>.sql.gz` and
+`pseudolife_state-…tgz`), never restore's safety pairs or a file a
+restore journal names, and never one of the newest three of each kind. A
+safety pair an earlier native restore wrote under those names is kept by
+the `pseudolife_restore-<timestamp>.txt` note beside it; one the Python
+restore wrote has no note and the same names as a backup, so it rotates
+like one, as it did under the Python backup. A
+staging directory a killed restore left in `/data` is left out of the
+archive.
+
 Restore **replaces** the existing bank:
 
 ```bash
