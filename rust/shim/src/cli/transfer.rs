@@ -1,7 +1,7 @@
 //! `export` / `import`: the logical bank transfer (`transfer_cli.py`) on an
 //! explicit `PSEUDOLIFE_MCP_DATABASE_URL`.
 //!
-//! The embedded lite tier defers by name before any effect;
+//! A lite-tier bank is refused plainly before any effect;
 //! every non-canonical argv or input shape
 //! defers through the dispatcher's generic line.
 use std::{
@@ -19,7 +19,7 @@ mod sql;
 
 const EXPORT_HELP: &str = include_str!("transfer/export_help.txt");
 const IMPORT_HELP: &str = include_str!("transfer/import_help.txt");
-const NO_DATABASE: &str = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL (Docker tier: postgresql://pseudolife:<POSTGRES_PASSWORD from ops/.env>@127.0.0.1:5433/pseudolife_memory) or use a lite data dir that holds a bank.\n";
+const NO_DATABASE: &str = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL (Docker tier: postgresql://pseudolife:<POSTGRES_PASSWORD from ops/.env>@127.0.0.1:5433/pseudolife_memory).\n";
 
 /// `transfer_cli.py` table roster and meta policy, in its order.
 pub(super) const EXPORTED_TABLES: [&str; 27] = [
@@ -217,33 +217,6 @@ fn lite_default_dir() -> Option<PathBuf> {
     Some(base.join("pseudolife-mcp"))
 }
 
-/// Without a DSN: `Some(true)` for a lite bank the oracle may attach to (a
-/// named deferral), `Some(false)` for the "no database configured" refusal.
-fn lite_bank(data_dir: Option<&OsString>) -> Option<bool> {
-    let data_dir = match data_dir {
-        Some(value) => PathBuf::from(value),
-        None => match std::env::var_os("PSEUDOLIFE_MCP_DATA_DIR").filter(|v| !v.is_empty()) {
-            Some(value) => PathBuf::from(value),
-            None => {
-                // With pg0 installed the oracle uses an existing lite default;
-                // without it no lite bank is ever attached, so checking the
-                // default's marker is exact for both installs.
-                let lite = lite_default_dir()?;
-                if lite.try_exists().ok()? {
-                    lite
-                } else {
-                    std::env::current_dir().ok()?.join("data")
-                }
-            }
-        },
-    };
-    data_dir
-        .join("embedded_pg")
-        .join("PG_VERSION")
-        .try_exists()
-        .ok()
-}
-
 fn emit(stream: &mut dyn Write, text: &str) -> bool {
     stream
         .write_all(&super::text_bytes(text))
@@ -339,9 +312,11 @@ pub(super) fn run(mode: &str, arguments: Vec<OsString>) -> Option<ExitCode> {
     let dsn = match std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").filter(|v| !v.is_empty()) {
         Some(dsn) => dsn.into_string().ok()?,
         None => {
-            if lite_bank(data_dir)? {
+            let explicit = data_dir.map(PathBuf::from);
+            if let Some(bank) = crate::cli::retired::find_lite_bank(explicit.as_deref()) {
                 let message = format!(
-                    "pseudolife-stdio: mode '{mode}' on the embedded lite tier is deferred in this candidate (needs native embedded_pg)\n"
+                    "{mode} refused: {}\n",
+                    crate::cli::retired::lite_bank_refusal(&bank)
                 );
                 let ok = emit(&mut io::stderr().lock(), &message);
                 return Some(if ok {

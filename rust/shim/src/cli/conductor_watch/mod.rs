@@ -1,19 +1,22 @@
-//! `conductor-watch`: what `pseudolife-mcp conductor-watch` answers before
-//! its lock.
+//! `conductor-watch`: wake the conductor session with board mail only when
+//! something needs a decision.
 //!
-//! Oracle: `pseudolife_memory/conductor_watch_cli.py` (`main` up to the
-//! state's lock: `parser`, `resolve_owner`, `default_state`, `_stop`,
-//! `_running`, `_foreign`, `_already`), and `cli.py`'s notice for the
-//! deprecated name `delegate-watch`. Answered natively: help and argparse's
-//! errors (at `COLUMNS=80`), `--stop` (by `--state`, `--owner` or the
-//! session's digest), the owner refusals, and a start that finds a watcher
-//! already running on its state (same owner: exit 0; another: exit 2),
-//! with or without `--detach`. Everything else defers before any effect:
-//! the watch itself (from the lock on: the board, `gh`, the state file and
-//! ledger), `--detach` with no watcher running, and the inputs listed in
-//! `rust/cli_harness/rows/conductor_watch.md`. The only write here is
-//! `--stop`'s empty `.stop` file beside a running watcher's state.
+//! This file answers what comes before the watch: help and argument
+//! errors, `--stop` (by `--state`, `--owner` or the session's digest), the
+//! owner refusals, and a start that finds a watcher already running on its
+//! state (same owner: exit 0; another: exit 2), with or without `--detach`.
+//! `start.rs` runs the watch (`watch.rs`) in the foreground or detached.
+//! The argument spellings listed in `rust/cli_harness/rows/conductor_watch.md`
+//! still defer before any effect.
+//!
+//! `--stop` never kills: it writes the `.stop` request only when the pid
+//! record names a live process whose start time is the one recorded, and
+//! the watcher, which checks for the request every second, exits cleanly.
 mod args;
+mod events;
+mod sources;
+mod start;
+mod watch;
 
 use super::pyjson::{self, J};
 use std::{
@@ -88,6 +91,8 @@ struct Out {
     code: u8,
     /// `--stop`'s request file, written before the streams.
     stop_file: Option<PathBuf>,
+    /// No watcher runs on the state: start one (after the notice).
+    start: Option<start::Start>,
 }
 
 impl Out {
@@ -131,10 +136,10 @@ fn alive(pid: i64) -> bool {
 }
 
 /// `_process_start(pid)`: an opaque token for when `pid` started, `None`
-/// when it cannot be read. The oracle reads Windows's creation FILETIME and
-/// Linux's `/proc/<pid>/stat` field 22; elsewhere it runs `ps`, which this
-/// port does not, so that defers.
-#[cfg_attr(windows, allow(unsafe_code))]
+/// when it cannot be read (then `running` lets the state's lock decide):
+/// Windows's creation FILETIME, Linux's `/proc/<pid>/stat` field 22,
+/// macOS's `proc_pidinfo` start time; other systems read none.
+#[cfg_attr(any(windows, target_os = "macos"), allow(unsafe_code))]
 fn process_start(pid: u32) -> Res<Option<String>> {
     #[cfg(windows)]
     {
@@ -168,20 +173,42 @@ fn process_start(pid: u32) -> Res<Option<String>> {
     }
     #[cfg(target_os = "linux")]
     {
-        // A stat that cannot be read, does not decode or has no field 22
-        // falls through to `ps` there, which this port does not run: defer.
-        let raw = fs::read(format!("/proc/{pid}/stat")).map_err(|_| Defer)?;
-        let text = String::from_utf8(raw).map_err(|_| Defer)?;
-        let tail = text.rsplit_once(')').ok_or(Defer)?.1;
-        tail.split_whitespace()
-            .nth(19)
-            .map(|field| Some(field.to_owned()))
-            .ok_or(Defer)
+        // Field 22, counted after the name's last `)`; everything after the
+        // name is ASCII, so a name that is not UTF-8 is read lossily. A stat
+        // that cannot be read, or has no field 22, is not provable (`None`):
+        // the caller's lock rule then decides.
+        let Ok(raw) = fs::read(format!("/proc/{pid}/stat")) else {
+            return Ok(None);
+        };
+        Ok(stat_start(&raw))
     }
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(target_os = "macos")]
     {
+        // The kernel's start time for `pid`, in place of the oracle's `ps`.
+        // SAFETY: `info` is a live, zeroed, correctly sized out-parameter.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let Ok(pid) = libc::c_int::try_from(pid) else {
+            return Ok(None);
+        };
+        // SAFETY: `info` outlives the call, and `size` is its exact size, so
+        // the kernel writes inside it.
+        let read = unsafe {
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
+        };
+        if read != size {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "{}.{:06}",
+            info.pbi_start_tvsec, info.pbi_start_tvusec
+        )))
+    }
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+    {
+        // No start time read here: not provable, so the lock decides.
         let _ = pid;
-        Err(Defer)
+        Ok(None)
     }
 }
 
@@ -249,13 +276,85 @@ fn running(state: &Path) -> Res<Option<pyjson::Dict>> {
     }
     let recorded = pyjson::get(&record, "process_start");
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let current = process_start(pid as u32)?;
-    if let (Some(recorded), Some(current)) = (recorded, current)
+    let started = process_start(pid as u32)?;
+    if let (Some(recorded), Some(current)) = (recorded, started.clone())
         && recorded != &J::Str(current)
+        && !legacy_start_matches(recorded, started.as_deref())
     {
         return Ok(None);
     }
+    // Proven only when both start times were read and agree. Otherwise (no
+    // recorded time, or a process this user cannot query) the state's lock
+    // decides: a watcher holds it for its whole life, so a free lock means
+    // the record outlived its watcher, whatever now has that pid.
+    if (recorded.is_none() || started.is_none()) && !lock_held(state)? {
+        return Ok(None);
+    }
     Ok(Some(record))
+}
+
+/// Field 22 of a Linux `/proc/<pid>/stat`, counted after the name's last
+/// `)`. The fields after the name are ASCII, so a name that is not UTF-8
+/// is read lossily; no field 22 is `None` (not provable).
+#[cfg(any(target_os = "linux", test))]
+fn stat_start(raw: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(raw)
+        .rsplit_once(')')
+        .and_then(|(_, tail)| tail.split_whitespace().nth(19).map(str::to_owned))
+}
+
+/// Whether a watcher holds the lock beside `state`.
+fn lock_held(state: &Path) -> Res<bool> {
+    Ok(matches!(
+        super::lease::lock::probe(&with_suffix(state, ".lock")?),
+        Ok(Some(true))
+    ))
+}
+
+/// The per-owner lock and the note naming the state its holder watches:
+/// one watcher per owner, whatever state file each start was given.
+pub(super) fn owner_files(home: &Path, owner: &str) -> (PathBuf, PathBuf) {
+    let folder = home.join(".pseudolife-mcp").join("watch");
+    (
+        folder.join(format!("{owner}.owner.lock")),
+        folder.join(format!("{owner}.owner.json")),
+    )
+}
+
+/// The state file of the watcher that holds `owner`'s lock, if one does.
+pub(super) fn owner_watcher(home: &Path, owner: &str) -> Option<PathBuf> {
+    let (lock, note) = owner_files(home, owner);
+    if !matches!(super::lease::lock::probe(&lock), Ok(Some(true))) {
+        return None;
+    }
+    let note: serde_json::Value = serde_json::from_slice(&fs::read(note).ok()?).ok()?;
+    note["state"].as_str().map(PathBuf::from)
+}
+
+/// Whether `recorded` is the start time a Python watcher wrote for the
+/// process whose native token is `current`: on macOS it ran `ps -o
+/// lstart=`, local time as `Fri Nov 14 14:09:28 2026`, so a watcher still
+/// running from before an upgrade is still found. Elsewhere the Python and
+/// native tokens are the same.
+fn legacy_start_matches(recorded: &J, current: Option<&str>) -> bool {
+    let (J::Str(recorded), Some(current)) = (recorded, current) else {
+        return false;
+    };
+    cfg!(target_os = "macos")
+        && current
+            .split_once('.')
+            .and_then(|(seconds, _)| seconds.parse::<i64>().ok())
+            .and_then(lstart)
+            .is_some_and(|rendered| rendered == recorded.trim())
+}
+
+/// `ps -o lstart=` for a start at `seconds` since the epoch, in local time.
+fn lstart(seconds: i64) -> Option<String> {
+    use chrono::TimeZone;
+    chrono::Local
+        .timestamp_opt(seconds, 0)
+        .single()
+        .map(|at| at.format("%a %b %e %H:%M:%S %Y").to_string())
 }
 
 /// `resolve_digest_path(session)`: the session's digest file.
@@ -430,6 +529,7 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
         Some(state) => Some(super::wait_mail::pathlib(Path::new(state))),
         None => default_state(owner.as_ref().ok().map(String::as_str), context)?,
     };
+    let home = crate::credentials::python_home_with(|key| (context.var)(key));
     if args.stop {
         let Some(state) = state else {
             return Ok(Out::say(
@@ -437,6 +537,16 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
                 EXIT_SETUP,
             ));
         };
+        // The owner's watcher may run on another state file (one started
+        // from another session or shell): stop that one.
+        if running(&state)?.is_none()
+            && let Ok(owner) = &owner
+            && let Some(other) = owner_watcher(&home, owner)
+            && other != state
+            && running(&other)?.is_some()
+        {
+            return stop(&other);
+        }
         return stop(&state);
     }
     let owner = match owner {
@@ -449,9 +559,35 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
         }
     };
     let state = state.ok_or(Defer)?;
-    let Some(record) = running(&state)? else {
-        // `--detach` spawns a watcher; the foreground run takes the lock.
-        return Err(Defer);
+    // One watcher per owner: one already watching for this owner from
+    // another state file answers the start.
+    let record = match running(&state)? {
+        Some(record) => Some(record),
+        None => match owner_watcher(&home, &owner) {
+            Some(other) if other != state => running(&other)?,
+            _ => None,
+        },
+    };
+    let Some(record) = record else {
+        // `--detach` starts a watcher; the foreground run takes the lock.
+        let files = watch::Files {
+            pid: with_suffix(&state, ".pid")?,
+            lock: with_suffix(&state, ".lock")?,
+            stop: with_suffix(&state, ".stop")?,
+            log: with_suffix(&state, ".log")?,
+            ledger: with_suffix(&state, ".ledger")?,
+            state,
+        };
+        return Ok(Out {
+            start: Some(start::Start {
+                owner,
+                files,
+                args,
+                argv: argv.to_vec(),
+                home,
+            }),
+            ..Out::default()
+        });
     };
     if pyjson::get(&record, "owner") != Some(&J::Str(owner.clone())) {
         return foreign(&record, &owner, &state);
@@ -582,6 +718,14 @@ pub(super) fn run(mode: &str, values: Vec<OsString>) -> Option<ExitCode> {
         Err(_) => return Some(ExitCode::from(1)),
     };
     let mut out = out;
+    if let Some(start) = out.start.take() {
+        let code = if start.args.detach {
+            start::detach(&start)
+        } else {
+            start::foreground(&start)
+        };
+        return Some(ExitCode::from(code));
+    }
     if let Some(path) = out.stop_file.take() {
         // The pid file was just read beside it, so its directory exists
         // (the oracle's mkdir is a no-op). A refused write changed nothing:

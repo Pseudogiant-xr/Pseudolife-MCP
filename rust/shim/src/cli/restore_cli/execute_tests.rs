@@ -18,23 +18,23 @@ use super::{
     execute::{self, Context, Host},
 };
 
-const RUN_TAG: &str = "0123456789abcdef";
-const STAMP: &str = "20261114-000000-abcdef01";
+pub(super) const RUN_TAG: &str = "0123456789abcdef";
+pub(super) const STAMP: &str = "20261114-000000-abcdef01";
 const DF: &str =
     "Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 1 1 99999999 1% /\n";
 
-fn gz(data: &[u8]) -> Vec<u8> {
+pub(super) fn gz(data: &[u8]) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data).unwrap();
     encoder.finish().unwrap()
 }
 
-fn dump() -> Vec<u8> {
+pub(super) fn dump() -> Vec<u8> {
     gz(b"SELECT 1;\n-- PostgreSQL database dump complete\n")
 }
 
 /// A one-file tar.gz (`./config.yaml`), as `tar czf - -C /data .` makes.
-fn archive() -> Vec<u8> {
+pub(super) fn archive() -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     let mut header = tar::Header::new_gnu();
     header.set_size(3);
@@ -58,10 +58,10 @@ fn listing() -> Vec<u8> {
 }
 
 /// A temporary directory, removed on drop.
-struct Dir(PathBuf);
+pub(super) struct Dir(pub(super) PathBuf);
 
 impl Dir {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let path = std::env::temp_dir().join(format!("pl-exec-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
@@ -77,29 +77,39 @@ impl Drop for Dir {
 /// A `docker` that answers by argv shape, like the real one would for a
 /// healthy bank, and fails or interrupts its `fail_at`-th call.
 #[derive(Default)]
-struct Fake {
-    calls: Vec<Vec<String>>,
-    inputs: Vec<Option<PathBuf>>,
-    fail_at: Option<usize>,
+pub(super) struct Fake {
+    pub(super) calls: Vec<Vec<String>>,
+    pub(super) inputs: Vec<Option<PathBuf>>,
+    pub(super) fail_at: Option<usize>,
     /// Fail the first call with this label.
-    fail_on: Option<&'static str>,
+    pub(super) fail_on: Option<&'static str>,
     /// Fail every call with this label.
-    fail_always: Option<&'static str>,
-    interrupt_at: Option<usize>,
+    pub(super) fail_always: Option<&'static str>,
+    pub(super) interrupt_at: Option<usize>,
     /// An interrupt that arrives just after this call succeeded.
-    interrupt_after: Option<usize>,
-    interrupted: bool,
-    interruptible: bool,
+    pub(super) interrupt_after: Option<usize>,
+    pub(super) interrupted: bool,
+    pub(super) interruptible: bool,
     /// helper id -> its script.
-    helpers: HashMap<String, String>,
+    pub(super) helpers: HashMap<String, String>,
     /// A safety dump that lacks the completion marker.
-    truncated_dump: bool,
+    pub(super) truncated_dump: bool,
     /// What the staging helper lists instead of [`listing`].
-    extracted: Option<Vec<u8>>,
+    pub(super) extracted: Option<Vec<u8>>,
     /// The free-space helper's mount table shows this mount below /data.
-    df_nested: Option<&'static str>,
+    pub(super) df_nested: Option<&'static str>,
     /// The swap helper's mount table shows this mount below /data.
-    swap_nested: Option<&'static str>,
+    pub(super) swap_nested: Option<&'static str>,
+    /// `docker inspect <name>` answers.
+    pub(super) docs: HashMap<String, String>,
+    /// The database-exists probe answers `f`.
+    pub(super) absent_db: bool,
+    /// Each state archive's helper fails once with the next of these as
+    /// tar's stderr (exit 1), in order, before the archive is written.
+    pub(super) archive_failures: Vec<&'static str>,
+    /// The first call with this label never runs, for this reason (a
+    /// spawn failure, a timeout, an output file that cannot be created).
+    pub(super) fault_on: Option<(&'static str, &'static str)>,
 }
 
 impl Docker for Fake {
@@ -116,6 +126,28 @@ impl Docker for Fake {
             Input::Null => None,
             Input::File(path) => Some(path.to_path_buf()),
         });
+        // The real runner creates its output file new, never over one.
+        if let Output::File(path) = output
+            && path.exists()
+        {
+            return Ran {
+                code: 1,
+                failed: true,
+                fault: Some(format!("{} cannot be created (it exists)", path.display())),
+                ..Ran::default()
+            };
+        }
+        if let Some((wanted, fault)) = self.fault_on
+            && label(args) == wanted
+        {
+            self.fault_on = None;
+            return Ran {
+                code: 1,
+                failed: true,
+                fault: Some(fault.to_owned()),
+                ..Ran::default()
+            };
+        }
         let write = |bytes: &[u8]| {
             if let Output::File(path) = output {
                 std::fs::write(path, bytes).unwrap();
@@ -174,6 +206,15 @@ impl Docker for Fake {
             ["start", "-a", helper] => {
                 let script = self.helpers.get(*helper).cloned().unwrap_or_default();
                 if script.starts_with("tar czf") {
+                    if !self.archive_failures.is_empty() {
+                        let stderr = self.archive_failures.remove(0);
+                        write(b"partial");
+                        return Ran {
+                            code: 1,
+                            stderr: stderr.as_bytes().to_vec(),
+                            ..Ran::default()
+                        };
+                    }
                     write(&archive());
                     ok("")
                 } else if let (Some(mount), true) = (self.df_nested, script.contains("df -Pk")) {
@@ -211,6 +252,13 @@ impl Docker for Fake {
                 }
                 ok("")
             }
+            ["inspect", name] if self.docs.contains_key(*name) => ok(&self.docs[*name]),
+            _ if a
+                .iter()
+                .any(|arg| arg.contains("SELECT EXISTS(SELECT 1 FROM pg_database")) =>
+            {
+                ok(if self.absent_db { "f\n" } else { "t\n" })
+            }
             _ => ok(""),
         }
     }
@@ -229,13 +277,15 @@ impl Docker for Fake {
 }
 
 #[derive(Default)]
-struct FakeHost {
-    info: Vec<String>,
-    errors: Vec<String>,
-    health: Option<Value>,
-    health_calls: usize,
+pub(super) struct FakeHost {
+    pub(super) info: Vec<String>,
+    pub(super) errors: Vec<String>,
+    pub(super) health: Option<Value>,
+    pub(super) health_calls: usize,
     /// How many runs this setup made before this one.
-    run: u32,
+    pub(super) run: u32,
+    /// The host's free space is under the floor.
+    pub(super) no_space: bool,
 }
 
 impl Host for FakeHost {
@@ -265,7 +315,15 @@ impl Host for FakeHost {
     fn now(&mut self) -> String {
         "2026-11-14T00:00:00+11:00".into()
     }
-    fn host_space(&mut self, _directory: &str) -> Step<()> {
+    fn host_space(&mut self, directory: &str) -> Step<()> {
+        if self.no_space {
+            return Err(Stop(
+                format!(
+                    "less than 8 GiB is free on {directory}; free at least 8 GiB there, then retry. Nothing was changed"
+                ),
+                2,
+            ));
+        }
         Ok(())
     }
 }
@@ -348,7 +406,7 @@ impl Setup {
     }
 }
 
-fn ready_host() -> FakeHost {
+pub(super) fn ready_host() -> FakeHost {
     FakeHost {
         health: Some(json!({"status": "ok", "ready": true})),
         ..FakeHost::default()
@@ -356,7 +414,7 @@ fn ready_host() -> FakeHost {
 }
 
 /// The happy path's Docker calls, by a short label each.
-fn label(call: &[String]) -> String {
+pub(super) fn label(call: &[String]) -> String {
     let a: Vec<&str> = call.iter().map(String::as_str).collect();
     let text = a.join(" ");
     match a.as_slice() {
@@ -452,12 +510,12 @@ fn a_successful_restore_runs_every_step_in_order_and_clears_its_journal() {
     let safety = Path::new(&setup.plan.safety_dir);
     assert!(
         safety
-            .join(format!("pseudolife_memory-{STAMP}.sql.gz"))
+            .join(format!("pseudolife_safety_memory-{STAMP}.sql.gz"))
             .is_file()
     );
     assert!(
         safety
-            .join(format!("pseudolife_state-{STAMP}.tgz"))
+            .join(format!("pseudolife_safety_state-{STAMP}.tgz"))
             .is_file()
     );
     assert!(
@@ -467,7 +525,7 @@ fn a_successful_restore_runs_every_step_in_order_and_clears_its_journal() {
     );
     assert!(
         !safety
-            .join(format!("pseudolife_memory-{STAMP}.sql.gz.part"))
+            .join(format!("pseudolife_safety_memory-{STAMP}.sql.gz.part"))
             .exists()
     );
     assert!(!setup.journal().exists());
@@ -477,7 +535,7 @@ fn a_successful_restore_runs_every_step_in_order_and_clears_its_journal() {
         .find(|line| line.starts_with("If this restore fails"))
         .unwrap();
     assert!(
-        recovery.contains(&format!("pseudolife_memory-{STAMP}.sql.gz")),
+        recovery.contains(&format!("pseudolife_safety_memory-{STAMP}.sql.gz")),
         "{recovery}"
     );
     assert!(
@@ -670,7 +728,7 @@ fn check_failure_at(index: usize, interrupt: bool) {
 
 fn shown(setup: &Setup, kind: &str) -> String {
     let path = Path::new(&setup.plan.safety_dir).join(format!(
-        "pseudolife_{kind}-{STAMP}.{}",
+        "pseudolife_safety_{kind}-{STAMP}.{}",
         if kind == "memory" { "sql.gz" } else { "tgz" }
     ));
     execute::shell_word(&format!("--backup-file={}", path.to_string_lossy()))
@@ -753,6 +811,29 @@ fn an_incomplete_safety_dump_stops_before_anything_is_dropped() {
         std::fs::read_dir(safety).unwrap().next().is_none(),
         "no partial file is left"
     );
+}
+
+#[test]
+fn an_interrupted_restores_journal_names_its_state_archive_for_backup_rotation() {
+    let setup = Setup::new(true);
+    let mut docker = Fake {
+        fail_on: Some("replay"),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 1);
+    let journal: Value =
+        serde_json::from_str(&std::fs::read_to_string(setup.journal()).unwrap()).unwrap();
+    let archive = setup.args.state_archive.clone().unwrap();
+    assert_eq!(
+        journal["state_archive"].as_str(),
+        Some(archive.to_string_lossy().as_ref()),
+        "{journal}"
+    );
+    // Backup reads it back: the archive, named unlike any backup, is
+    // never rotated while the journal stands.
+    let protected = super::docker_backup::journal_files(&setup.data_dir()).unwrap();
+    assert!(protected.contains(&archive), "{protected:?}");
 }
 
 #[test]
@@ -1163,7 +1244,8 @@ fn a_mount_the_swap_finds_below_data_leaves_the_state_unchanged_and_says_so() {
         "{text}"
     );
     // A command that can succeed: the database alone, as it was.
-    let dump = Path::new(&setup.plan.safety_dir).join(format!("pseudolife_memory-{STAMP}.sql.gz"));
+    let dump =
+        Path::new(&setup.plan.safety_dir).join(format!("pseudolife_safety_memory-{STAMP}.sql.gz"));
     let database_back = format!(
         "Put the database back as it was before this restore (this run did not change the state volume) with:\n  pseudolife-mcp restore {} --container=p",
         execute::shell_word(&format!("--backup-file={}", dump.to_string_lossy()))
@@ -1224,8 +1306,8 @@ fn a_failure_with_an_earlier_journal_names_both_safety_backups() {
 ",
     );
     let safety = Path::new(&setup.plan.safety_dir);
-    let first = safety.join(format!("pseudolife_memory-{STAMP}.sql.gz"));
-    let second = safety.join("pseudolife_memory-20261114-000000-abcde001.sql.gz");
+    let first = safety.join(format!("pseudolife_safety_memory-{STAMP}.sql.gz"));
+    let second = safety.join("pseudolife_safety_memory-20261114-000000-abcde001.sql.gz");
     let date = "2026-11-14T00:00:00+11:00";
     assert!(
         text.contains(&format!(
@@ -1278,7 +1360,7 @@ fn a_third_failed_run_names_the_first_incidents_pair_and_its_own() {
             execute::shell_word(&format!(
                 "--backup-file={}",
                 safety
-                    .join(format!("pseudolife_memory-{stamp}.sql.gz"))
+                    .join(format!("pseudolife_safety_memory-{stamp}.sql.gz"))
                     .to_string_lossy()
             ))
         };

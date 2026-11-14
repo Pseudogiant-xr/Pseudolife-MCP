@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "200ef2b514faec86",
+  "fingerprint": "e0966c76f4c7f67c",
+  "reason": "Sets PYTEST_ADDOPTS from scope: empty for an ordinary batch, --include-frozen for a batch carrying a freeze exception and on the weekly Sunday nightly. This lane names its files, all live, so the switch adds none and its cost holds."
+}

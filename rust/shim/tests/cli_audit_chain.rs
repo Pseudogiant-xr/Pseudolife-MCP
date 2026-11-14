@@ -418,7 +418,7 @@ fn bank_actions_distinguish_a_missing_bank_from_an_unsupported_dsn() {
                 assert_eq!(
                     output.stderr,
                     cli::native_text(
-                        "board-audit: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)\n"
+                        "board-audit: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)\n"
                     ),
                     "{args:?}"
                 );

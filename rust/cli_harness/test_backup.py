@@ -58,6 +58,32 @@ def test_discovery_traceback_only_removes_interpreter_frames(class_name, code, m
         assert obs == before
 
 
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_pg_dump_missing_rule_retires_only_the_oracles_lite_extra(newline):
+    oracle = (b"backup failed: pg_dump not found \xe2\x80\x94 install PostgreSQL client tools or the "
+              b"pseudolife-mcp[lite] extra (whose embedded runtime bundles it)." + newline)
+    native = b"backup failed: pg_dump not found \xe2\x80\x94 install the PostgreSQL client tools." + newline
+    rules = ("backup-pg-dump-missing-native-text",)
+    assert not compare.diff(observation(oracle), observation(native), rules)
+    assert compare.diff(observation(oracle), observation(native), ())
+    # The native side keeping the oracle's words, another exit or file
+    # effect, other output around the line, or another line ending stay diffs.
+    assert compare.diff(observation(oracle), observation(oracle), rules)
+    assert compare.diff(observation(oracle), observation(native, exit=2), rules)
+    extra = observation(native)
+    extra["files"]["bank/backups/partial"] = "file:"
+    assert compare.diff(observation(oracle), extra, rules)
+    assert compare.diff(observation(b"x" + oracle), observation(b"x" + native), rules)
+    assert compare.diff(observation(oracle + b"x"), observation(native + b"x"), rules)
+    other = b"\r\n" if newline == b"\n" else b"\n"
+    assert compare.diff(observation(oracle), observation(native[:-len(newline)] + other), rules)
+    from .rows import backup
+    missing = {case.id: case.rules for case in backup.cases()
+               if case.id in ("dsn-pg-dump-missing", "dsn-pg-dump-relative-path-skipped")}
+    assert missing == {name: backup.RULES + rules for name in
+                       ("dsn-pg-dump-missing", "dsn-pg-dump-relative-path-skipped")}
+
+
 def _native_backup():
     import os
     from pathlib import Path
@@ -155,20 +181,28 @@ def test_help_uses_the_terminal_when_columns_is_unusable():
                 os.close(slave)
 
     # Explicit widths also cover the cached 80-column help and wider wrapping.
+    # The expected help is the frozen Python CLI's, recorded through the same
+    # 100-column pty (fixtures/backup-help.linux.json), since the freeze.
+    import json
+    from pathlib import Path
+    recorded = json.loads((Path(__file__).resolve().parent / "fixtures" / "backup-help.linux.json")
+                          .read_text(encoding="utf-8"))["cases"]
     for columns in [None, "invalid", "0", "-1", "80", "120"]:
-        want = help_output([sys.executable, "-m", "pseudolife_memory.cli"], columns)
-        assert want[0] == 0
-        assert help_output([native], columns) == want
+        want = recorded["unset" if columns is None else columns]
+        code, stdout, stderr = help_output([native], columns)
+        assert (code, stdout.decode("utf-8"), stderr.decode("utf-8")) == (
+            want["exit"], want["stdout"], want["stderr"]), columns
 
 
 @pytest.mark.parametrize("option", [
     "--container", "--daemon-container", "--db", "--user", "--db-port",
     "--c", "--daemon", "--u", "--db-p",
-    # These became ambiguous when the Docker selectors were added.
-    "--d", "--da",
 ])
 @pytest.mark.parametrize("inline", [False, True])
-def test_docker_selectors_defer_before_bank_effects(tmp_path, option, inline):
+def test_docker_selectors_choose_the_docker_tier_before_bank_effects(tmp_path, option, inline):
+    """A Docker selector chooses the native Docker tier, as Python's
+    ``run_backup`` does, even beside ``--data-dir``: with no docker program
+    it refuses naming Docker, and the file-mode bank is left alone."""
     import os
     import subprocess
     bank = tmp_path / "bank"
@@ -176,43 +210,83 @@ def test_docker_selectors_defer_before_bank_effects(tmp_path, option, inline):
     config = bank / "config.yaml"
     config.write_bytes(b"storage: files\n")
     out = tmp_path / "backups"
+    home = tmp_path / "home"
+    home.mkdir()
     selector = [f"{option}=5432"] if inline else [option, "5432"]
+    # The update lock lands in the throwaway home; docker is a missing program.
+    env = dict(os.environ, PSEUDOLIFE_MCP_DATA_DIR=str(home),
+               PSEUDOLIFE_DOCKER=str(tmp_path / "no-docker"))
     result = subprocess.run([_native_backup(), "backup", "--data-dir", str(bank),
                              "--out", str(out), *selector],
-                            capture_output=True, timeout=10)
+                            capture_output=True, timeout=10, env=env)
     assert (result.returncode, result.stdout, result.stderr) == (
-        1, b"", ("pseudolife-stdio: mode 'backup' is deferred in this candidate"
-                  + os.linesep).encode(),
+        2, b"", ("backup failed: Docker was not found: no `docker` program is on PATH (only absolute "
+                  "PATH entries are searched); install Docker, or set PSEUDOLIFE_DOCKER to the docker "
+                  "program's full path, then retry. No backup was written" + os.linesep).encode(),
     )
     assert not out.exists()
     assert list(bank.iterdir()) == [config]
     assert config.read_bytes() == b"storage: files\n"
+    # The lock was taken and released there, never in the real home.
+    assert sorted(path.name for path in home.iterdir()) == ["update.lock"]
 
 
-@pytest.mark.parametrize("arguments", [
-    ["--containerized", "pg"], ["--db-port-extra=5432"], ["--unknown"],
-    ["--", "--container", "pg"], ["--out=--container", "--unknown"],
-])
-def test_unknown_options_keep_python_errors(arguments):
+@pytest.mark.parametrize("option", ["--d", "--da"])
+@pytest.mark.parametrize("inline", [False, True])
+def test_prefixes_the_docker_selectors_made_ambiguous_keep_python_errors(tmp_path, option, inline):
+    """``--d`` and ``--da`` became ambiguous when the Docker selectors were
+    added: both refuse them as argparse does, before any tier or effect."""
     import os
     import subprocess
     import sys
-    env = dict(os.environ, COLUMNS="80")
-    expected = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli",
-                               "backup", *arguments], env=env,
+    bank = tmp_path / "bank"
+    bank.mkdir()
+    selector = [f"{option}=5432"] if inline else [option, "5432"]
+    argv = ["backup", "--data-dir", str(bank), *selector]
+    env = dict(os.environ, COLUMNS="80", PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "home"),
+               PSEUDOLIFE_DOCKER=str(tmp_path / "no-docker"))
+    expected = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", *argv], env=env,
                               capture_output=True, timeout=10)
-    actual = subprocess.run([_native_backup(), "backup", *arguments], env=env,
-                            capture_output=True, timeout=10)
+    actual = subprocess.run([_native_backup(), *argv], env=env, capture_output=True, timeout=10)
     assert expected.returncode == 2
+    assert b"ambiguous option: " + option.encode() in expected.stderr
     assert (actual.returncode, actual.stdout, actual.stderr) == (
         expected.returncode, expected.stdout, expected.stderr,
     )
+    assert list(bank.iterdir()) == []
+    assert not (tmp_path / "home").exists()
+
+
+# What the frozen Python CLI prints for an unrecognised backup option at 80
+# columns, recorded on Windows and Linux on 14 November 2026 (only the line
+# separator differs). A deliberate change to the native backup help edits
+# this and fixtures/backup-help.linux.json by hand; from then on they
+# describe the native CLI.
+BACKUP_USAGE = ("usage: pseudolife-mcp backup [-h] [--data-dir DATA_DIR] [--out OUT]\n"
+                "                             [--keep-days KEEP_DAYS] [--container CONTAINER]\n"
+                "                             [--daemon-container DAEMON_CONTAINER] [--db DB]\n"
+                "                             [--user USER] [--db-port DB_PORT]\n")
+
+
+@pytest.mark.parametrize("arguments, unrecognized", [
+    (["--containerized", "pg"], "--containerized pg"), (["--db-port-extra=5432"], "--db-port-extra=5432"),
+    (["--unknown"], "--unknown"), (["--", "--container", "pg"], "-- --container pg"),
+    (["--out=--container", "--unknown"], "--unknown"),
+])
+def test_unknown_options_keep_python_errors(arguments, unrecognized):
+    import os
+    import subprocess
+    env = dict(os.environ, COLUMNS="80")
+    actual = subprocess.run([_native_backup(), "backup", *arguments], env=env,
+                            capture_output=True, timeout=10)
+    expected = BACKUP_USAGE + f"pseudolife-mcp backup: error: unrecognized arguments: {unrecognized}\n"
+    assert (actual.returncode, actual.stdout, actual.stderr) == (
+        2, b"", expected.replace("\n", os.linesep).encode())
 
 
 def test_nss_errors_keep_numeric_ownership_and_empty_names(tmp_path):
     import os
     import subprocess
-    import sys
     import tarfile
     compiler = _nss_compiler()
     native = _native_backup()
@@ -232,8 +306,9 @@ struct group *getgrgid(gid_t id) { errno=EIO; return 0; }
     (bank / "state").write_bytes(b"state")
     env = {key: value for key, value in os.environ.items() if "DATABASE_URL" not in key}
     env.update(LD_PRELOAD=str(library), PSEUDOLIFE_MCP_DATA_DIR=str(bank))
-    for label, command in [("oracle", [sys.executable, "-m", "pseudolife_memory.cli"]),
-                           ("native", [native])]:
+    # The native CLI only, since the Python freeze: the oracle ran the frozen
+    # Python backup under the same assertions.
+    for label, command in [("native", [native])]:
         out = tmp_path / label
         result = subprocess.run([*command, "backup", "--data-dir", str(bank), "--out", str(out)],
                                 env=env, capture_output=True, timeout=10)
@@ -248,7 +323,6 @@ struct group *getgrgid(gid_t id) { errno=EIO; return 0; }
 def test_non_utf8_nss_names_roundtrip_through_binary_pax(tmp_path):
     import os
     import subprocess
-    import sys
     import tarfile
     compiler = _nss_compiler()
     native = _native_backup()
@@ -281,8 +355,9 @@ struct group *getgrgid(gid_t id) { static struct group p; memset(&p,0,sizeof p);
     os.symlink(b"state-\xff", os.fsencode(bank) + b"/link-\xfe")
     env = {key: value for key, value in os.environ.items() if "DATABASE_URL" not in key}
     env.update(LD_PRELOAD=str(library), PSEUDOLIFE_MCP_DATA_DIR=str(bank))
-    for label, command in [("oracle", [sys.executable, "-m", "pseudolife_memory.cli"]),
-                           ("native", [native])]:
+    # The native CLI only, since the Python freeze: the oracle ran the frozen
+    # Python backup under the same assertions.
+    for label, command in [("native", [native])]:
         out = tmp_path / label
         result = subprocess.run([*command, "backup", "--data-dir", str(bank), "--out", str(out)],
                                 env=env, capture_output=True, timeout=10)

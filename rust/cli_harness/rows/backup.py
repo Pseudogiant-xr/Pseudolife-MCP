@@ -4,9 +4,10 @@ Argparse argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
 inline or separate values, repeated and abbreviated options, pathlib path
 spellings and Python floats; help follows COLUMNS. The bank is the explicit
 ``PSEUDOLIFE_MCP_DATABASE_URL``; without one, a data dir holding no embedded
-bank is archived in file mode. Every case that would need the lite tier's
-embedded instance defers (Rust tests cover the deferrals; this row compares
-only answered cases).
+bank is archived in file mode. A lite bank (an embedded instance) is
+refused natively, naming the Docker install, and the Docker tier runs
+natively; this row keeps Docker unreachable and compares only the file and
+DSN cases (Rust tests cover the rest).
 
 Contract per arm: exit code, both streams byte-exact (the timestamp in the
 two new file names is normalized against the arm's own clock window), every
@@ -391,9 +392,32 @@ def discovery_traceback(obs: dict) -> None:
             obs["stderr"] = base64.b64encode(match["error"]).decode()
 
 
+_PG_DUMP_MISSING = re.compile(
+    rb"\Abackup failed: pg_dump not found \xe2\x80\x94 install PostgreSQL client tools or the "
+    rb"pseudolife-mcp\[lite\] extra \(whose embedded runtime bundles it\)\.(?P<newline>\r?\n)\Z")
+
+
+@normalize.rule("backup-pg-dump-missing-native-text")
+def pg_dump_missing_native_text(obs: dict) -> None:
+    """Oracle only (``ORACLE_RULES``): the frozen oracle's missing-pg_dump
+    refusal also suggests the retired lite extra; the native one names the
+    PostgreSQL client tools alone. Only a stderr that is exactly the
+    oracle's line changes, keeping its line ending; the exit, the files and
+    the native side printing the oracle's words still compare."""
+    stderr = base64.b64decode(obs["stderr"])
+    match = _PG_DUMP_MISSING.match(stderr)
+    if match:
+        native = (b"backup failed: pg_dump not found \xe2\x80\x94 install the PostgreSQL client tools."
+                  + match["newline"])
+        obs["stderr"] = base64.b64encode(native).decode()
+
+
+normalize.ORACLE_RULES.add("backup-pg-dump-missing-native-text")
+
 # ---------------------------------------------------------------- cases
 
 RULES = ("backup-files",)
+PG_DUMP_MISSING_RULES = RULES + ("backup-pg-dump-missing-native-text",)
 
 
 @normalize.rule("backup-restoration")
@@ -408,6 +432,17 @@ def _have_pg0() -> bool:
 
 
 def cases() -> list[Case]:
+    """Every case with Docker unreachable: both arms detect a Docker bank
+    by inspecting the stack's containers, and a host running them (a
+    developer's machine) must never be backed up or probed by this row."""
+    sep = "\\" if WINDOWS else "/"
+    out = _cases()
+    for case in out:
+        case.env.setdefault("PSEUDOLIFE_DOCKER", f"{{HOME}}{sep}no-docker")
+    return out
+
+
+def _cases() -> list[Case]:
     # DSN cases need the bundled pg_dump this host's home carries.
     have_pg0 = _have_pg0()
     dsn = _source() if have_pg0 else "postgresql://unused"
@@ -519,10 +554,11 @@ def cases() -> list[Case]:
         Case("dsn-pg-dump-relative-path-skipped", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://unused",
                   "PATH": os.pathsep.join(["", ".", "bin", f"{{HOME}}{sep}no-bin"])},
-             setup=with_decoy_pg_dump(tree()), rules=RULES, programs=("pg_dump", "docker")),
+             setup=with_decoy_pg_dump(tree()), rules=PG_DUMP_MISSING_RULES,
+             programs=("pg_dump", "docker")),
         Case("dsn-pg-dump-missing", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
-             setup=tree(), platforms=dsn_platforms, rules=RULES, programs=("pg_dump",)),
+             setup=tree(), platforms=dsn_platforms, rules=PG_DUMP_MISSING_RULES, programs=("pg_dump",)),
         Case("dsn-pg-dump-fails", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": absent, **no_pg_dump},
              setup=with_pg0(tree()), after=drop_pg0, platforms=dsn_platforms, rules=RULES, timeout=60,
@@ -570,8 +606,8 @@ MUTANTS = [
            'format!("pg_dump failed: {}", python_strip(&text))',
            'format!("pg_dump failed: {}", text)', ("dsn-pg-dump-fails",)),
     Mutant("backup-stdout-failure-exit", "backup", B + "mod.rs",
-           "    } else {\n        120\n    })",
-           "    } else {\n        0\n    })",
+           "    } else {\n        120\n    }\n}",
+           "    } else {\n        0\n    }\n}",
            ("file-mode-stdout-closed",)),
     Mutant("backup-argparse-repeat-first-wins", "backup", B + "args.rs",
            '"--data-dir" => args.data_dir = Some(pathlib(Path::new(value))),',
@@ -582,8 +618,8 @@ MUTANTS = [
            'pub(in crate::cli) fn width() -> usize {\n    std::env::var("IGNORED_COLUMNS")',
            ("help-columns-40",)),
     Mutant("backup-help-closed-exit-1", "backup", B + "mod.rs",
-           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                120',
-           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                1',
+           'return if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                120',
+           'return if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                1',
            ("help-stdout-closed-help", "help-stdout-closed-h")),
     Mutant("backup-dot-join-keeps-prefix", "backup", B + "args.rs",
            '    pathlib(&base.join(name))', '    base.join(name)',

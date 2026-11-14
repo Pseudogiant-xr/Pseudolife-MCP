@@ -26,6 +26,7 @@ mod pairing;
 pub(crate) mod program_lookup;
 mod pyjson;
 mod restore_cli;
+pub mod retired;
 mod test_login;
 mod transfer;
 mod tunnel;
@@ -38,10 +39,10 @@ pub(crate) fn process_table() -> Result<Option<connect::ProcessTable>, ()> {
 }
 
 const HELP: &str = include_str!("cli_help.txt");
+// Modes whose own arm returns `None` for shapes it does not handle yet; the
+// generic line names them. `serve`, `embedded` and `board-audit` answer every
+// shape themselves (main.rs, the arm below, main.rs), so none is listed.
 const DEFERRED_MODES: &[&str] = &[
-    "serve",
-    "embedded",
-    "board-audit",
     "doctor",
     "connect",
     "invite",
@@ -204,10 +205,22 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     {
         return Some(code);
     }
-    if mode == "move"
-        && let Some(code) = move_cli::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(ExitCode::from(code));
+    if mode == "move" {
+        let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
+        if let Some(code) = move_cli::run(arguments.clone()) {
+            return Some(ExitCode::from(code));
+        }
+        // What move_cli passes on: the native dry run, or its refusals.
+        if let Some(code) = restore_cli::move_native::run(&arguments) {
+            return Some(ExitCode::from(code));
+        }
+    }
+    // Hidden: the target half of `move`'s preflight, run over ssh.
+    if mode == "move-target" {
+        let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
+        return Some(ExitCode::from(restore_cli::move_native::target::run(
+            &arguments,
+        )));
     }
     if mode == "tunnel"
         && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())
@@ -223,6 +236,10 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
         && let Some(code) = console::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
+    }
+    if mode == "embedded" {
+        crate::stderrln!("{}", retired::embedded_message());
+        return Some(ExitCode::from(1));
     }
     if mode == "expose"
         && let Some(code) = expose::run(std::env::args_os().skip(2).collect())

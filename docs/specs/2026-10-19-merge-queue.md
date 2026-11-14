@@ -151,7 +151,6 @@ would still merge. Before enabling the queue, add these jobs to the
 | Check | Workflow | Skipped when |
 | --- | --- | --- |
 | `guards` | CI | the change is not Rust-only |
-| `test-lite-linux` | CI | the change is Rust-only |
 | `test-lite-windows` | CI | the change is Rust-only |
 | `test-lite-macos` | CI | the change is Rust-only |
 | `frontend` | CI | never |

@@ -137,8 +137,10 @@ SHIM_COMMANDS = {
     "update": ("update", "doctor", "console"),
     # console and conductor_watch also read move's argv and stream helpers;
     # expose reads them too, and connect's stdin check, so connect's rows
-    # include expose's.
-    "connect": ("connect", "expose", "move", "console", "conductor_watch", "restore"), "doctor": ("doctor", "console"), "console": ("console",),
+    # include expose's; restore_cli reads that check too, so they include
+    # restore_cli's.
+    "connect": ("connect", "expose", "move", "console", "conductor_watch", "restore", "backup",
+                "migrate_flat", "update", "doctor"), "doctor": ("doctor", "console"), "console": ("console",),
     "conductor_watch": ("conductor_watch",),
     # The import scan also reads move's help text ("use `expose status`")
     # as a use of expose, so expose's rows include move's.
@@ -147,7 +149,9 @@ SHIM_COMMANDS = {
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
-    "restore_cli": ("restore",),
+    # backup's Docker tier is restore_cli's docker_backup, so restore_cli
+    # reaches backup and backup's users' rows.
+    "restore_cli": ("restore", "backup", "migrate_flat", "update", "doctor", "console"),
     # No harness row runs `pseudolife-mcp installer` (its goldens and contract
     # binaries test it), and nothing outside it imports it; it imports connect
     # and update, so its rows must stay among theirs.

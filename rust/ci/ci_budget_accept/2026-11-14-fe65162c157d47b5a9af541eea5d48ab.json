@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "53f970c03bdfbd83",
+  "fingerprint": "fea2d407b8bf12cd",
+  "reason": "Renames the frozen switch output (pytest_addopts to include_frozen=true); the same seconds-long job."
+}

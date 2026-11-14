@@ -29,6 +29,9 @@ pub(super) struct Ran {
     pub failed: bool,
     /// Killed because the user interrupted restore.
     pub interrupted: bool,
+    /// Why a `failed` command never ran or never finished, for messages
+    /// (`None` when it ran to its end, or for an interrupt).
+    pub fault: Option<String>,
 }
 
 impl Ran {
@@ -213,9 +216,10 @@ impl Docker for Real {
         input: Input<'_>,
         output: Output<'_>,
     ) -> Ran {
-        let failed = Ran {
+        let failed = |fault: String| Ran {
             code: 1,
             failed: true,
+            fault: Some(fault),
             ..Ran::default()
         };
         let mut command = Command::new(&self.program);
@@ -228,7 +232,9 @@ impl Docker for Real {
                 Ok(file) => {
                     command.stdin(file);
                 }
-                Err(_) => return failed,
+                Err(error) => {
+                    return failed(format!("{} cannot be read ({error})", path.display()));
+                }
             },
         }
         match output {
@@ -239,13 +245,20 @@ impl Docker for Real {
                 Ok(file) => {
                     command.stdout(file);
                 }
-                Err(_) => return failed,
+                Err(error) => {
+                    return failed(format!("{} cannot be created ({error})", path.display()));
+                }
             },
         }
         own_group(&mut command);
         let mut child = match command.spawn() {
             Ok(child) => child,
-            Err(_) => return failed,
+            Err(error) => {
+                return failed(format!(
+                    "{} cannot be started ({error})",
+                    self.program.display()
+                ));
+            }
         };
         let deadline = Instant::now() + timeout;
         // The readers report over a channel, never through a join: a
@@ -276,6 +289,14 @@ impl Docker for Real {
                 code: 1,
                 failed: true,
                 interrupted,
+                fault: (!interrupted).then(|| {
+                    let seconds = timeout.as_secs();
+                    if seconds >= 60 && seconds.is_multiple_of(60) {
+                        format!("it did not finish within {} minutes", seconds / 60)
+                    } else {
+                        format!("it did not finish within {seconds} seconds")
+                    }
+                }),
                 ..Ran::default()
             }
         };
@@ -310,7 +331,7 @@ impl Docker for Real {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() >= deadline => return stop(&mut child, false),
                 Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-                Err(_) => return failed,
+                Err(error) => return failed(format!("its exit could not be read ({error})")),
             }
         };
         Ran {
@@ -319,6 +340,7 @@ impl Docker for Real {
             stderr: stderr.unwrap_or_default(),
             failed: false,
             interrupted: false,
+            fault: None,
         }
     }
 }

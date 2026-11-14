@@ -18,8 +18,8 @@ Argv and resolution (`run_transfer` 579-629):
 - `PSEUDOLIFE_MCP_DATABASE_URL` set and non-empty selects the explicit-DSN
   path (571). Empty or unset: `data_dir = --data-dir or _default_data_dir`
   (602, backup_cli 180-188); a bank marker `<data_dir>/embedded_pg/PG_VERSION`
-  (574) defers by name (`mode '<m>' on the embedded lite tier is deferred ...
-  (needs native embedded_pg)`), otherwise the "no database configured" refusal
+  (574) is refused plainly as a retired lite-tier bank (`<mode> refused: <dir>
+  holds a lite-tier bank ...`, exit 1), otherwise the "no database configured" refusal
   on stderr, exit 1 (604-611). An existing lite default dir is the data dir
   (pg0 installed) or irrelevant (pg0 absent: never attached), so checking its
   marker is exact for both installs. Both outcomes are decided before path
@@ -166,8 +166,8 @@ diagnostics; future/malformed-version refusals retain the oracle's guard text.
   DSN not understood or connection failure. Import DDL permission/lock failures
   now produce a native failure after rolling back schema initialization;
   NULL stamps and missing tables are repaired by the shared generated plan.
-- `mode '<m>' on the embedded lite tier is deferred ... (needs native
-  embedded_pg)`.
+- `<mode> refused: <dir> holds a lite-tier bank (embedded PostgreSQL) ...`
+  (the shared lite-tier refusal, `rust/shim/src/cli/retired.rs`).
 - `import lost the answer to its COMMIT (native-pg-diagnostics); it may
   have been committed: inspect the target bank before retrying`, exit 1:
   the COMMIT's answer was FATAL or PANIC, or never came (the connection was

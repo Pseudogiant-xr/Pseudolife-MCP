@@ -470,25 +470,43 @@ fn resolved(path: &Path) -> Option<PathBuf> {
     result.is_absolute().then_some(result)
 }
 
-/// Admit the data dir's tree before any effect. Defers when the output dir
-/// would be the data dir or sit inside an archived child (Python would
-/// archive its own partial file), when a child cannot be resolved the way
-/// `Path.resolve()` resolves it (a symlink loop), and for unsupported shapes.
-pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
-    let out = resolved(bdir)?;
-    let data = fs::canonicalize(data_dir).ok()?;
+/// Why [`admit`] refused the data dir's tree.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Unadmitted {
+    /// The backup directory is the data dir or inside what is archived
+    /// (Python would archive its own partial file).
+    Inside,
+    /// This path cannot be resolved the way `Path.resolve()` resolves it
+    /// (a symlink loop, a link that cannot be followed, an unreadable entry).
+    Unresolved(PathBuf),
+    /// This entry is a shape the archive cannot write the way restore reads
+    /// it back.
+    Unsupported(PathBuf),
+}
+
+/// Admit the data dir's tree before any effect: refused when the output dir
+/// would be the data dir or sit inside an archived child, when a child
+/// cannot be resolved the way `Path.resolve()` resolves it, and for
+/// unsupported shapes.
+pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Result<(), Unadmitted> {
+    let unresolved = |path: &Path| Unadmitted::Unresolved(path.to_path_buf());
+    let out = resolved(bdir).ok_or_else(|| unresolved(bdir))?;
+    let data = fs::canonicalize(data_dir).map_err(|_| unresolved(data_dir))?;
     #[cfg(windows)]
     let output_ancestors = if out.starts_with(&data) {
         std::collections::HashSet::new()
     } else {
-        output_ancestor_identities(&out)?
+        output_ancestor_identities(&out).ok_or_else(|| unresolved(bdir))?
     };
     #[cfg(windows)]
-    if !output_ancestors.is_empty() && output_ancestors.contains(&directory_identity(&data)?) {
-        return None;
+    if !output_ancestors.is_empty()
+        && output_ancestors
+            .contains(&directory_identity(&data).ok_or_else(|| unresolved(data_dir))?)
+    {
+        return Err(Unadmitted::Inside);
     }
     if data == out {
-        return None;
+        return Err(Unadmitted::Inside);
     }
     // mkdir creates missing children before tar.add lists them. Containment
     // must therefore include children that do not exist at preflight time.
@@ -496,30 +514,30 @@ pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
         let mut parts = relative.components();
         if let Some(first) = parts.next()
             && parts.next().is_some()
-            && !EXCLUDE.contains(&first.as_os_str().to_str()?)
+            && !EXCLUDE.contains(&first.as_os_str().to_str().ok_or_else(|| unresolved(bdir))?)
         {
-            return None;
+            return Err(Unadmitted::Inside);
         }
     }
-    for (name, path) in top_children(data_dir)? {
+    for (name, path) in top_children(data_dir).ok_or_else(|| unresolved(data_dir))? {
         if is_excluded(&name) {
             continue;
         }
-        let meta = metadata(&path).ok()?;
+        let meta = metadata(&path).map_err(|_| unresolved(&path))?;
         let target = match fs::canonicalize(&path) {
             Ok(target) => Some(target),
             Err(error) if error.kind() == io::ErrorKind::NotFound && meta.is_symlink() => None,
-            Err(_) => return None,
+            Err(_) => return Err(unresolved(&path)),
         };
         if target.as_ref() == Some(&out) {
             continue;
         }
-        if !is_link(&path, &meta)?
+        if !is_link(&path, &meta).ok_or_else(|| unresolved(&path))?
             && target
                 .as_ref()
                 .is_some_and(|target| out.starts_with(target))
         {
-            return None;
+            return Err(Unadmitted::Inside);
         }
         supported(
             &path,
@@ -529,9 +547,10 @@ pub(super) fn admit(data_dir: &Path, bdir: &Path) -> Option<()> {
             &mut HashSet::new(),
             #[cfg(windows)]
             &output_ancestors,
-        )?;
+        )
+        .ok_or_else(|| Unadmitted::Unsupported(path.clone()))?;
     }
-    Some(())
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -935,6 +954,30 @@ pub(super) fn write(data_dir: &Path, bdir: &Path, ts: &str) -> io::Result<PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admission_names_which_cause_it_found() {
+        let root = std::env::temp_dir().join(format!("pl-admit-{}", uuid::Uuid::new_v4().simple()));
+        let data = root.join("data");
+        fs::create_dir_all(data.join("sub")).unwrap();
+        fs::write(data.join("sub").join("f"), b"x").unwrap();
+        // The backup directory is the data dir, or inside an archived child.
+        assert_eq!(admit(&data, &data), Err(Unadmitted::Inside));
+        assert_eq!(
+            admit(&data, &data.join("sub").join("out")),
+            Err(Unadmitted::Inside)
+        );
+        // Its own backups directory, and a directory outside, are admitted.
+        assert_eq!(admit(&data, &data.join("backups")), Ok(()));
+        assert_eq!(admit(&data, &root.join("elsewhere")), Ok(()));
+        // A data dir that cannot be resolved names itself.
+        let missing = root.join("missing");
+        assert_eq!(
+            admit(&missing, &root.join("elsewhere")),
+            Err(Unadmitted::Unresolved(missing.clone()))
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn state_archives_leave_out_the_bank_password_and_installed_runtimes() {
