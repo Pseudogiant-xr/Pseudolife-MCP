@@ -1399,7 +1399,7 @@ step "Preflight..."
 if [ -n "$CLIENT_ONLY" ]; then
     client_only_preflight
 else
-    "$repo/ops/preflight.sh" --client "$CLIENT_LIST" || {
+    PSEUDOLIFE_NATIVE_CLI="$NATIVE_STAGED" "$repo/ops/preflight.sh" --client "$CLIENT_LIST" || {
         echo "Preflight failed — fix the line(s) above and re-run." >&2; exit 1; }
 fi
 
@@ -2032,7 +2032,7 @@ claude_legacy_answer() {  # prints the reply; fails when there is no terminal
 }
 cleanup_claude_legacy_hooks() {
     legacy_rc=0
-    legacy_report=$("$repo/ops/install-hook.sh" --client claude --remove-legacy --dry-run \
+    legacy_report=$(PSEUDOLIFE_NATIVE_CLI="$NATIVE_STAGED" "$repo/ops/install-hook.sh" --client claude --remove-legacy --dry-run \
         </dev/null 2>&1) || legacy_rc=$?
     case "$legacy_rc" in
         0) ;;
@@ -2058,7 +2058,7 @@ cleanup_claude_legacy_hooks() {
         return 0
     fi
     legacy_rc=0
-    legacy_report=$("$repo/ops/install-hook.sh" --client claude --remove-legacy \
+    legacy_report=$(PSEUDOLIFE_NATIVE_CLI="$NATIVE_STAGED" "$repo/ops/install-hook.sh" --client claude --remove-legacy \
         </dev/null 2>&1) || legacy_rc=$?
     printf '%s\n' "$legacy_report"
     if [ "$legacy_rc" = 0 ]; then
@@ -2424,7 +2424,7 @@ for selected_client in $CLIENTS; do
         continue
     fi
     step "Installing $selected_client session hook..."
-    "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
+    PSEUDOLIFE_NATIVE_CLI="$NATIVE_STAGED" "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
     if [ "$selected_client" = claude ]; then HOOK_CLAUDE=hook; else HOOK_CODEX=hook; fi
 done
 
@@ -3555,7 +3555,7 @@ if [ "${HOOK_CLAUDE:-}" = deferred ]; then
             shim_command=pseudolife-mcp ;;
         esac
         step "Installing claude session hook..."
-        "$repo/ops/install-hook.sh" --client claude "" "$shim_command briefing --hook-json"
+        PSEUDOLIFE_NATIVE_CLI="$NATIVE_STAGED" "$repo/ops/install-hook.sh" --client claude "" "$shim_command briefing --hook-json"
         HOOK_CLAUDE=hook
     else
         echo "WARNING: the Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)." >&2

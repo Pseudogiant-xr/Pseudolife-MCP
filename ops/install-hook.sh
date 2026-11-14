@@ -8,8 +8,8 @@
 #   ops/install-hook.sh /path/to/settings.json
 #   ops/install-hook.sh --remove-legacy [--dry-run] [/path/to/settings.json]
 #
-# Backs up settings.json first; re-running is a no-op once installed. Uses
-# python3 (no jq dependency) for the JSON edit.
+# Backs up settings.json first; re-running is a no-op once installed. The
+# JSON edit is the native client's (no jq or Python dependency).
 #
 # --remove-legacy removes the Claude Code hooks this script and the installers
 # wrote, once the pseudolife-memory plugin provides them. It removes only
@@ -84,185 +84,28 @@ case "$COMMAND" in
   *) COORDINATION_COMMAND="pseudolife-mcp briefing --hook-json --coordination" ;;
 esac
 
-# Prefer python3 but accept python (verified runnable — Windows ships a
-# python3 Store stub that "exists" yet exits with an install nag).
-PYBIN=""
-for c in python3 python; do
-  if "$c" -c "" >/dev/null 2>&1; then PYBIN="$c"; break; fi
-done
-[ -n "$PYBIN" ] || { echo "python3 is required" >&2; exit 1; }
+# The JSON edits are the native client's (`installer hook-settings`): the
+# binary named by PSEUDOLIFE_NATIVE_CLI (the installer passes its verified
+# copy), else PSEUDOLIFE_SHIM_LAUNCHER, else the stable launcher, the order
+# ops/update.sh uses. Nothing here looks for Python.
+NATIVE_CLI="${PSEUDOLIFE_NATIVE_CLI:-${PSEUDOLIFE_SHIM_LAUNCHER:-}}"
+if [ -z "$NATIVE_CLI" ]; then
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+      NATIVE_CLI="$(cygpath -u "${LOCALAPPDATA:-$HOME/AppData/Local}" 2>/dev/null || printf '%s' "${LOCALAPPDATA:-$HOME/AppData/Local}")/pseudolife-mcp/bin/pseudolife-mcp.exe" ;;
+    *) NATIVE_CLI="${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp" ;;
+  esac
+fi
+if [ ! -f "$NATIVE_CLI" ]; then
+  echo "The native pseudolife-mcp client edits $SETTINGS_PATH, and it is not installed at $NATIVE_CLI: run ops/install.sh, which installs it, or set PSEUDOLIFE_NATIVE_CLI to its binary. Nothing changed." >&2
+  exit 1
+fi
 
 if [ -n "$REMOVE_LEGACY" ]; then
   rc=0
   SETTINGS_PATH="$SETTINGS_PATH" DRY_RUN="$DRY_RUN" UPS_COMMAND="$UPS_COMMAND" \
     LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" COORDINATION_LINE="$COORDINATION_LINE" \
-    "$PYBIN" - <<'PY' || rc=$?
-import json, os, shutil, stat, sys, tempfile, time
-
-sys.stdout.reconfigure(errors="replace")
-path = os.environ["SETTINGS_PATH"]
-plugin_id = "pseudolife-memory@pseudolife-mcp"
-# Exact commands this script and the installers ever wrote, by event. A
-# substring match would also delete a user's own command that merely
-# mentions one (ops/setup-codex-hooks.py applies the same rule). The
-# check-in was an unconditional echo on 2026-09-24, then the briefing
-# command with --coordination (COORDINATION_COMMAND above).
-briefings = ("pseudolife-mcp briefing --hook-json",
-             "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json")
-shipped = {
-    "SessionStart": {
-        *briefings,
-        *(f"{b} --coordination" for b in briefings),
-        f"echo '{os.environ['COORDINATION_LINE']}'",
-        "pseudolife-mcp episode-start",
-    },
-    # The memory-change note (2026-09-26) and the static line it replaced.
-    "UserPromptSubmit": {"pseudolife-mcp prompt-hook",
-                         "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook",
-                         os.environ["UPS_COMMAND"], os.environ["LEGACY_UPS_COMMAND"]},
-    "SessionEnd": {"pseudolife-mcp episode-end"},
-}
-needles = ("pseudolife-mcp briefing", "pseudolife-mcp prompt-hook", "mid-session discipline",
-           "Pseudolife coordination:", "pseudolife-mcp episode-start",
-           "pseudolife-mcp episode-end")
-
-
-def is_shipped(event, hook):
-    # Only strings can be ours; a list or object there is someone else's.
-    known = shipped.get(event, ())
-    if not isinstance(hook, dict) or hook.get("type") != "command":
-        return False
-    command = hook.get("command")
-    windows = hook.get("commandWindows", command)
-    return (isinstance(command, str) and command in known
-            and isinstance(windows, str) and windows in known)
-
-
-def unique_keys(pairs):
-    # A duplicate would be silently dropped on rewrite (.NET refuses the
-    # object outright): leave such a file to the user.
-    seen = set()
-    for key, _ in pairs:
-        if key in seen:
-            raise ValueError(f"duplicate key {key!r}")
-        seen.add(key)
-    return dict(pairs)
-
-
-def show(event, command):
-    command = " ".join(command.split())
-    return f"  {event}: {command if len(command) <= 100 else command[:97] + '...'}"
-
-
-def plugin_active(settings):
-    enabled = settings.get("enabledPlugins")
-    if not isinstance(enabled, dict) or enabled.get(plugin_id) is not True:
-        return False
-    record = os.path.join(os.path.dirname(os.path.abspath(path)),
-                          "plugins", "installed_plugins.json")
-    try:
-        with open(record, encoding="utf-8-sig") as f:
-            data = json.load(f)
-        records = data["plugins"][plugin_id]
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
-    records = records if isinstance(records, list) else [records]
-    # A project-scoped install runs in that project only.
-    return any(isinstance(r, dict) and r.get("scope", "user") == "user" for r in records)
-
-
-if not os.path.exists(path):
-    print(f"No settings file at {path} - nothing to remove.")
-    sys.exit(3)
-try:
-    with open(path, "rb") as f:
-        raw = f.read()
-    obj = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique_keys)
-except (OSError, ValueError) as exc:
-    print(f"Could not read {path}: {exc}", file=sys.stderr)
-    sys.exit(1)
-hooks = obj.get("hooks") if isinstance(obj, dict) else None
-hooks = hooks if isinstance(hooks, dict) else {}
-
-found, lookalikes = [], []
-for event, groups in hooks.items():
-    for group in groups if isinstance(groups, list) else []:
-        entries = group.get("hooks") if isinstance(group, dict) else None
-        for hook in entries if isinstance(entries, list) else []:
-            command = hook.get("command") if isinstance(hook, dict) else None
-            if not isinstance(command, str):
-                continue
-            if is_shipped(event, hook):
-                found.append(show(event, command))
-            elif any(n in command for n in needles):
-                lookalikes.append(show(event, command))
-
-if found:
-    print(f"Installer-written hooks in {path} (the pseudolife-memory plugin provides these now):")
-    print("\n".join(found))
-else:
-    print(f"No installer-written Pseudolife hooks in {path}.")
-if lookalikes:
-    print("Left alone - not an exact installer-written entry; review by hand:")
-    print("\n".join(lookalikes))
-if not found:
-    sys.exit(3)
-if not plugin_active(obj):
-    print("Not removed: the pseudolife-memory plugin is not installed and enabled for all "
-          "projects, so these may be the only Pseudolife hooks that run.")
-    sys.exit(4)
-if os.environ.get("DRY_RUN"):
-    sys.exit(0)
-
-# Emptied groups go; an emptied event stays an empty list, as this script's
-# episode-hook clean-up leaves it.
-for event in list(hooks):
-    groups = hooks[event]
-    if event not in shipped or not isinstance(groups, list):
-        continue
-    kept_groups = []
-    for group in groups:
-        entries = group.get("hooks") if isinstance(group, dict) else None
-        if isinstance(entries, list):
-            kept = [h for h in entries if not is_shipped(event, h)]
-            if len(kept) != len(entries):
-                if not kept:
-                    continue
-                group = {**group, "hooks": kept}
-        kept_groups.append(group)
-    hooks[event] = kept_groups
-
-text = json.dumps(obj, indent=2, ensure_ascii=False) + "\n"
-if b"\r\n" in raw:
-    text = text.replace("\n", "\r\n")
-# Write through a symlink (dotfile setups link settings.json into a repo),
-# as install mode does, rather than replacing the link with a file.
-target = os.path.realpath(path)
-tmp = None
-try:
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    backup, n = f"{path}.bak-{stamp}", 1
-    while os.path.exists(backup):
-        backup, n = f"{path}.bak-{stamp}-{n}", n + 1
-    shutil.copy2(path, backup)
-    print(f"Backed up -> {backup}")
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target),
-                               prefix=os.path.basename(target) + ".", suffix=".tmp-pseudolife")
-    with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-        f.write(text)
-    shutil.copymode(target, tmp)
-    os.replace(tmp, target)
-except OSError as exc:
-    if tmp and os.path.exists(tmp):
-        try:
-            os.chmod(tmp, stat.S_IREAD | stat.S_IWRITE)
-            os.remove(tmp)
-        except OSError:
-            pass
-    print(f"Could not write {path}: {exc}", file=sys.stderr)
-    sys.exit(1)
-print(f"Removed {len(found)} installer-written hook entries from {path}.")
-PY
+    "$NATIVE_CLI" installer hook-settings remove-legacy || rc=$?
   exit "$rc"
 fi
 
@@ -278,106 +121,7 @@ SETTINGS_PATH="$SETTINGS_PATH" BRIEFING_COMMAND="$COMMAND" \
   PROMPT_COMMAND="$PROMPT_COMMAND" UPS_COMMAND="$UPS_COMMAND" \
   LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" DISCIPLINE_LINE="$DISCIPLINE_LINE" \
   COORDINATION_COMMAND="$COORDINATION_COMMAND" \
-  LEGACY_COORDINATION_LINE="$COORDINATION_LINE" "$PYBIN" - <<'PY'
-import json, os
-
-path = os.environ["SETTINGS_PATH"]
-briefing_cmd = os.environ["BRIEFING_COMMAND"]
-prompt_cmd = os.environ["PROMPT_COMMAND"]
-# The static line the note replaced, as the installers wrote it (Codex's
-# PowerShell pair included).
-static_cmds = {os.environ["UPS_COMMAND"], os.environ["LEGACY_UPS_COMMAND"],
-               f"Write-Output '{os.environ['DISCIPLINE_LINE']}'"}
-coordination_cmd = os.environ["COORDINATION_COMMAND"]
-legacy_line = os.environ["LEGACY_COORDINATION_LINE"]
-
-obj = {}
-if os.path.exists(path):
-    with open(path, encoding="utf-8") as f:
-        obj = json.load(f)
-
-hooks = obj.setdefault("hooks", {})
-hooks.setdefault("SessionStart", [])
-hooks.setdefault("SessionEnd", [])
-
-
-def has_command(groups, needle, *, coordination=False):
-    return any(needle in (h.get("command") or "")
-               and ("--coordination" in (h.get("command") or "")) == coordination
-               for g in groups for h in (g.get("hooks") or []))
-
-
-def add_group(groups, command):
-    groups.append({"hooks": [{"type": "command", "command": command}]})
-
-
-def drop_exact(groups, commands):
-    """Remove hooks whose command (and commandWindows, when set) is exactly
-    one of ``commands``: a user's own hook that merely mentions the same
-    words stays."""
-    def ours(h):
-        return (h.get("command") in commands
-                and h.get("commandWindows", h.get("command")) in commands)
-    removed = False
-    for g in groups:
-        before = len(g.get("hooks") or [])
-        g["hooks"] = [h for h in (g.get("hooks") or []) if not ours(h)]
-        removed = removed or len(g["hooks"]) != before
-    groups[:] = [g for g in groups if g.get("hooks")]
-    return removed
-
-
-if has_command(hooks["SessionStart"], "pseudolife-mcp briefing"):
-    print(f"Briefing hook already present in {path} - skipping.")
-else:
-    add_group(hooks["SessionStart"], briefing_cmd)
-    print(f"Installed SessionStart briefing hook -> {path}")
-    print(f"  command: {briefing_cmd}")
-
-if drop_exact(hooks["SessionStart"],
-              {f"echo '{legacy_line}'", f"Write-Output '{legacy_line}'"}):
-    print("Removed the unconditional coordination check-in hook.")
-if not has_command(hooks["SessionStart"], "pseudolife-mcp briefing", coordination=True):
-    add_group(hooks["SessionStart"], coordination_cmd)
-    print(f"Installed SessionStart coordination hook -> {path}")
-    print(f"  command: {coordination_cmd}")
-
-hooks.setdefault("UserPromptSubmit", [])
-if drop_exact(hooks["UserPromptSubmit"], static_cmds):
-    print("Removed the static mid-session discipline hook.")
-if has_command(hooks["UserPromptSubmit"], "pseudolife-mcp prompt-hook"):
-    print(f"Memory-change hook already present in {path} - skipping.")
-else:
-    add_group(hooks["UserPromptSubmit"], prompt_cmd)
-    print(f"Installed UserPromptSubmit memory-change hook -> {path}")
-    print(f"  command: {prompt_cmd}")
-
-# Episode hooks are OBSOLETE since the 2026-06-30 session-scoped episodes
-# rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
-# (see docs/guide/episodes.md). Earlier installer versions added
-# them — remove any we find so old installs converge too.
-
-
-def drop_command(groups, needle):
-    removed = False
-    for g in groups:
-        before = len(g.get("hooks") or [])
-        g["hooks"] = [h for h in (g.get("hooks") or [])
-                      if needle not in (h.get("command") or "")]
-        removed = removed or len(g["hooks"]) != before
-    groups[:] = [g for g in groups if g.get("hooks")]
-    return removed
-
-
-if drop_command(hooks["SessionStart"], "pseudolife-mcp episode-start"):
-    print("Removed obsolete episode-start hook (daemon owns episodes now).")
-if drop_command(hooks["SessionEnd"], "pseudolife-mcp episode-end"):
-    print("Removed obsolete episode-end hook (daemon owns episodes now).")
-
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(obj, f, indent=2)
-    f.write("\n")
-PY
+  LEGACY_COORDINATION_LINE="$COORDINATION_LINE" "$NATIVE_CLI" installer hook-settings install || exit 1
 
 if [ "$CLIENT" = codex ]; then
   echo ""

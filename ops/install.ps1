@@ -1356,7 +1356,14 @@ if ($ClientOnly) {
     # `&` on a .ps1 only refreshes $LASTEXITCODE when the script exits explicitly;
     # clear the stale value a prior native command may have left.
     $global:LASTEXITCODE = 0
-    & (Join-Path $PSScriptRoot "preflight.ps1") -Client $clientList
+    # Its Docker ownership check is a step of this run's verified client.
+    $savedNativeCli = $env:PSEUDOLIFE_NATIVE_CLI
+    $env:PSEUDOLIFE_NATIVE_CLI = if ($script:nativeStaged) { $script:nativeStaged } else { $script:nativeHelper }
+    try {
+        & (Join-Path $PSScriptRoot "preflight.ps1") -Client $clientList
+    } finally {
+        $env:PSEUDOLIFE_NATIVE_CLI = $savedNativeCli
+    }
     if ($LASTEXITCODE -ne 0) { throw "Preflight failed - fix the line(s) above and re-run." }
 }
 

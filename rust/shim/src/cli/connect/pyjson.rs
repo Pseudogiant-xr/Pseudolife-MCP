@@ -132,6 +132,9 @@ struct Reader<'a> {
     text: &'a str,
     at: usize,
     depth: usize,
+    /// The first repeated key of the first object to close with one: what
+    /// an `object_pairs_hook` refusing duplicates raises on.
+    duplicate: Option<String>,
 }
 
 impl Reader<'_> {
@@ -302,6 +305,7 @@ impl Reader<'_> {
     fn object(&mut self) -> Result<J, Stop> {
         self.at += 1;
         let mut dict = Vec::new();
+        let mut repeated: Option<String> = None;
         self.space();
         if self.peek() == Some(b'}') {
             self.at += 1;
@@ -319,6 +323,9 @@ impl Reader<'_> {
             self.at += 1;
             self.space();
             let value = self.value()?;
+            if repeated.is_none() && has(&dict, &key) {
+                repeated = Some(key.clone());
+            }
             // dict assignment: a repeated key keeps its first place.
             set(&mut dict, &key, value);
             self.space();
@@ -329,6 +336,9 @@ impl Reader<'_> {
                 }
                 Some(b'}') => {
                     self.at += 1;
+                    if self.duplicate.is_none() {
+                        self.duplicate = repeated;
+                    }
                     return Ok(J::Dict(dict));
                 }
                 _ => return Err(Stop::Syntax),
@@ -364,10 +374,19 @@ impl Reader<'_> {
 
 /// `json.loads(text)`: `Ok(None)` when Python raises a JSONDecodeError.
 pub(in crate::cli) fn loads(text: &str) -> Result<Option<J>, Defer> {
+    Ok(loads_noting_duplicates(text)?.map(|(value, _)| value))
+}
+
+/// `json.loads` with the first repeated key an `object_pairs_hook` that
+/// refuses duplicates would raise on (inner objects close first).
+pub(in crate::cli) fn loads_noting_duplicates(
+    text: &str,
+) -> Result<Option<(J, Option<String>)>, Defer> {
     let mut reader = Reader {
         text,
         at: 0,
         depth: 0,
+        duplicate: None,
     };
     reader.space();
     let value = match reader.value() {
@@ -376,7 +395,7 @@ pub(in crate::cli) fn loads(text: &str) -> Result<Option<J>, Defer> {
         Err(Stop::Defer) => return Err(Defer),
     };
     reader.space();
-    Ok((reader.at == text.len()).then_some(value))
+    Ok((reader.at == text.len()).then_some((value, reader.duplicate)))
 }
 
 fn numeric(value: &J) -> Option<Number<'_>> {
