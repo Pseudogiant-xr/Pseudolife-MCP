@@ -339,7 +339,11 @@ def test_a_mapped_shim_entry_reaches_only_its_rows(entry):
     ("backup_help.txt", True),
     ("maintainer/mod.rs", True),
     ("doctor/mod.rs", True),
-    ("connect/mod.rs", False),
+    # connect's stdin check is read by restore_cli, whose docker_backup is
+    # backup's Docker tier: a connect change reaches update and doctor too.
+    ("connect/mod.rs", True),
+    # The near miss: a command no doctor dependency imports.
+    ("transfer.rs", False),
 ])
 def test_runtime_hook_trust_dependencies_select_doctor(path, doctor):
     suites, _ = select("pull_request", ["rust/shim/src/cli/" + path])

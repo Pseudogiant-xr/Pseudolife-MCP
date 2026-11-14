@@ -36,6 +36,8 @@ options:
   --lease LEASE         full-suite lease to watch, repeatable (default: full-
                         suite, full-suite@box)
   --lease-cli LEASE_CLI
+                        accepted for compatibility and ignored: lease states
+                        are read natively
 
 Start it from the conductor session with --detach; it prints its board id.
 Then park waiting_peer with park_needs="decision events" and

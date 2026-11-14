@@ -80,9 +80,10 @@ answer reported as certainly rolled back, and a refused COMMIT reported as
 an unknown outcome. Pure CPU controls reject clock,
 duration, audit-prefix/hash and PID tampering.
 
-External DSNs and retained container transport are admitted. Native embedded
-PostgreSQL remains the named `phase4-embedded-pg-deferred` refusal (blocker:
-native `embedded_pg`); native operator admission tests exercise it. Safe
+External DSNs and retained container transport are admitted. A lite-tier bank
+(embedded PostgreSQL) gets the shared plain refusal (`lease: <action> refused:
+<dir> holds a lite-tier bank ...`; the lite tier was retired on 14 November
+2026); native operator admission tests exercise it. Safe
 native PostgreSQL diagnostic classes replace interpreter exception names.
 Noncanonical argparse/path shapes remain excluded.
 

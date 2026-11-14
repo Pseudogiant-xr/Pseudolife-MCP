@@ -1200,6 +1200,8 @@ def _copy_of_the_checkout(dest: Path) -> Path:
     for path in TESTS.glob("*.py"):
         if not path.name.startswith("test_"):
             shutil.copy2(path, dest / "tests" / path.name)
+    # The frozen/live classification conftest reads at load (tests/suite_classes.py).
+    shutil.copy2(TESTS / "suite_classes.txt", dest / "tests" / "suite_classes.txt")
     shutil.copy2(ROOT / "pyproject.toml", dest / "pyproject.toml")
     return dest
 

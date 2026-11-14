@@ -507,21 +507,74 @@ def without_refusal_bookkeeping(state):
     return state
 
 
+def start_delta(before, state, rules):
+    """What one start changed in the seeded template, in a form a golden holds.
+
+    The template's rows carry the seeders' own clocks, so its full post-state
+    would not repeat between recordings. The delta keeps every row the start
+    wrote, exactly (a new row's clock columns as tokens, per ``rules``), the
+    first column (the key) of each template row it rewrote or removed, and
+    each catalog row it added or removed. Rows are counted as multisets, so a
+    duplicated row is a change. A table's rows sit under ``rows`` so that a
+    difference reads like the live comparison's
+    (``/rows/public.entries/rows: ...``).
+    """
+    from collections import Counter
+    from run import golden_scrub
+
+    def changed(old_rows, new_rows):
+        old = Counter(json.dumps(row, sort_keys=True) for row in old_rows)
+        new = Counter(json.dumps(row, sort_keys=True) for row in new_rows)
+        return sorted((new - old).elements()), sorted((old - new).elements())
+
+    after = dbstate.normalize(state, rules, before)
+    written, replaced, catalog = {}, {}, {}
+    for table in sorted(set(before["rows"]) | set(after["rows"])):
+        added, removed = changed(before["rows"].get(table, {}).get("rows", []),
+                                 after["rows"].get(table, {}).get("rows", []))
+        if added:
+            written[table] = {"rows": [json.loads(row) for row in added]}
+        if removed:
+            replaced[table] = {"rows": sorted(json.dumps(json.loads(row)[0]) for row in removed)}
+    for name in sorted(set(before["catalog"]) | set(after["catalog"])):
+        added, removed = changed(before["catalog"].get(name, []), after["catalog"].get(name, []))
+        if added or removed:
+            catalog[name] = {"added": [json.loads(row) for row in added],
+                             "removed": [json.loads(row) for row in removed]}
+    return golden_scrub({"rows": written, "replaced": replaced, "catalog_rows": catalog})
+
+
+def reaches(difference, wanted):
+    """Whether a difference is at a mutant's expected path. A start delta
+    omits a table the start left alone, so a mutant that stops a start
+    writing a table at all differs from the golden one level up: the
+    table itself (``/rows/public.entries: only in python``)."""
+    if difference.startswith(wanted):
+        return True
+    table = wanted[:-len("/rows:")] + ":" if wanted.startswith("/rows/") and wanted.endswith("/rows:") else None
+    return table is not None and difference.startswith(table)
+
+
 def epoch(state):
     table = state["rows"]["public.meta"]
     key, value = table["columns"].index("key"), table["columns"].index("value")
     return next(row[value] for row in table["rows"] if row[key] == "writer_lease_epoch")
 
 
-def cell(binary, number, case, result, mutant=None):
-    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(3)]
+def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
+    """One case on cloned banks. With ``oracle`` the Python service starts
+    beside Rust and each stage compares the two; without it (golden checking)
+    only Rust starts, and ``expected`` (the case's committed snapshot and
+    database stages) is its expectation. Python seeds the template either way."""
+    arms = ("python", "rust") if oracle else ("rust",)
+    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
     try:
         with tempfile.TemporaryDirectory(prefix="pl-pgs-startup-") as scratch:
             root = Path(scratch)
             config = (ZERO_TIME_CONFIG if case == "zero-timestamp-seating" else
                       CUSTOM_CONFIG if case in {"preset-rename", "deep-overflow"} else None)
-            homes = [daemons.make_home(root, kind, config) for kind in ("seed", "python", "rust")]
+            homes = [daemons.make_home(root, kind, config) for kind in ("seed", *arms)]
             template = pg.create(names[0])
             created.append(names[0])
             invoke(binary, "python", template, homes[0], root / "seed.json", seed_case=case)
@@ -540,7 +593,7 @@ def cell(binary, number, case, result, mutant=None):
             result["stages"] = []
             for restart in range(2):
                 outputs, states, windows = [], [], []
-                for kind, dsn, home in zip(("python", "rust"), dsns, homes[1:]):
+                for kind, dsn, home in zip(arms, dsns, homes[1:]):
                     output, window = invoke(binary, kind, dsn, home, root / f"{kind}-{restart}.json", mutant=mutant, case=case)
                     outputs.append(output)
                     states.append(dbstate.dump(dsn))  # immediately after each arm
@@ -550,8 +603,8 @@ def cell(binary, number, case, result, mutant=None):
                 expected_error = ("stale-hydrated-dimensions" if case in STALE_FAILURES
                                   else REQUIRED_FAILURES[case][3] if case in REQUIRED_FAILURES
                                   else "coordination-highwater")
-                semantic_diffs = dbstate.diff(*(normalized_result(output) for output in outputs))
-                for kind, output, state in zip(("python", "rust"), outputs, states):
+                semantic_diffs = dbstate.diff(*(normalized_result(output) for output in outputs)) if oracle else []
+                for kind, output, state in zip(arms, outputs, states):
                     if output["ok"] != expected_ok:
                         semantic_diffs.append(f"{kind}: expected ok={expected_ok}")
                     elif not expected_ok and normalized_result(output)["error"] != expected_error:
@@ -586,13 +639,21 @@ def cell(binary, number, case, result, mutant=None):
                             f"/{kind}/resident_tags"))
                 rules = {("relations", "created_at"): "clock"}
                 stage = {
-                    "restart": restart, "snapshots": dict(zip(("python", "rust"), outputs)),
+                    "restart": restart, "snapshots": dict(zip(arms, outputs)),
                     "snapshot_diffs": semantic_diffs,
-                    "db_diffs": dbstate.diff(*(dbstate.normalize(state, rules, before) for state in states)),
                     "clock_diffs": [difference for state, window in zip(states, windows)
                                     for difference in clock_diffs(state, before, window)],
-                    "windows": dict(zip(("python", "rust"), windows)),
+                    "windows": dict(zip(arms, windows)),
+                    "database": {kind: start_delta(before, state, rules) for kind, state in zip(arms, states)},
                 }
+                if oracle:
+                    stage["db_diffs"] = dbstate.diff(*(dbstate.normalize(state, rules, before) for state in states))
+                if expected is not None:
+                    # The golden is the left side, which dbstate.diff labels "python".
+                    stage["golden_diffs"] = dbstate.diff(
+                        expected["snapshot"][restart], normalized_result(stage["snapshots"]["rust"]))
+                    stage["db_golden_diffs"] = dbstate.diff(
+                        expected["database"][restart], stage["database"]["rust"])
                 if initial is not None:
                     stage["idempotence_diffs"] = [
                         difference for old, new in zip(initial[1], states)
@@ -637,6 +698,10 @@ def main(argv=None):
     golden_mode = parser.add_mutually_exclusive_group()
     golden_mode.add_argument("--record-goldens", action="store_true")
     golden_mode.add_argument("--check-goldens", action="store_true")
+    golden_mode.add_argument("--record-candidate", action="store_true",
+                             help="re-record the golden from the Rust candidate (candidate_record.py); a dry "
+                                  "run unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--seed-cell", choices=CASES, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -651,24 +716,37 @@ def main(argv=None):
         parser.error("--record-goldens requires the complete startup matrix")
     if args.only and args.part:
         parser.error("--only and --part select cases differently; give one")
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if args.record_candidate and (args.part or args.mutants):
+        parser.error("--record-candidate takes the whole matrix or --only; check the result with "
+                     "--check-goldens --mutants")
     binary = args.rust_test_bin.resolve()
     if not binary.is_file():
         parser.error("--rust-test-bin must name the built daemon Cargo test executable")
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    if args.record_candidate:
+        return record_candidate(args, binary)
     payload = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
                "normalizers": NORMALIZERS, "cells": []}
     number = time.time_ns()
     golden_path = HERE / "goldens" / "startup-hydration.json"
     goldens = json.loads(golden_path.read_text()) if args.check_goldens else None
+    oracle = goldens is None
+
+    def expected(case):
+        if not goldens:
+            return None
+        if case not in goldens["cases"] or case not in goldens.get("database", {}):
+            raise RuntimeError(f"startup-hydration.json has no committed golden for {case}; record it with "
+                               "`python rust/daemon/harness/startup_ci.py --record-goldens`")
+        return {"snapshot": goldens["cases"][case], "database": goldens["database"][case]}
+
     for index, case in enumerate(args.only or (part_cases(args.part) if args.part else CASES)):
         result = {"case": case}
         payload["cells"].append(result)
         try:
-            cell(binary, number + index * 3, case, result)
-            if goldens and not failed(result):
-                for stage_index, stage in enumerate(result["stages"]):
-                    stage["golden_diffs"] = dbstate.diff(
-                        goldens["cases"][case][stage_index], normalized_result(stage["snapshots"]["rust"]))
+            cell(binary, number + index * 3, case, result, expected=expected(case), oracle=oracle)
         except Exception as error:
             result["error"] = str(error)
         args.out.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
@@ -679,17 +757,21 @@ def main(argv=None):
         for index, (mutant, (mutant_case, wanted_path)) in enumerate(MUTANTS.items()):
             result = {"case": mutant_case}
             try:
-                cell(binary, number + 1000 + index * 3, mutant_case, result, mutant=mutant)
+                cell(binary, number + 1000 + index * 3, mutant_case, result, mutant=mutant,
+                     expected=expected(mutant_case), oracle=oracle)
             except Exception as error:
                 result["error"] = str(error)
             stages = result.get("stages", [])
             # An infrastructure failure is never proof of a source mutant.
             infrastructure_failed = bool(result.get("error") or result.get("cleanup_errors") or any(
                 stage.get("clock_diffs") or stage.get("epoch_diffs") for stage in stages))
-            differences = [difference for stage in stages for key in ("snapshot_diffs", "db_diffs")
-                           for difference in stage[key]]
+            # Live, a mutant shows as a Python/Rust difference; checking
+            # goldens, as a difference from the committed stage.
+            differences = [difference for stage in stages
+                           for key in ("snapshot_diffs", "db_diffs", "golden_diffs", "db_golden_diffs")
+                           for difference in stage.get(key, [])]
             caught = not infrastructure_failed and len(stages) == 2 and any(
-                difference.startswith(wanted_path) for difference in differences)
+                reaches(difference, wanted_path) for difference in differences)
             payload["mutants"][mutant] = {
                 "caught": caught, "expected_path": wanted_path,
                 "differences": differences,
@@ -702,8 +784,46 @@ def main(argv=None):
     if args.record_goldens and not bad:
         golden_path.write_text(json.dumps({"normalizers": NORMALIZERS, "oracle_head": payload["head"],
             "cases": {result["case"]: [normalized_result(s["snapshots"]["python"]) for s in result["stages"]]
-                      for result in payload["cells"]}}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+                      for result in payload["cells"]},
+            "database": {result["case"]: [s["database"]["python"] for s in result["stages"]]
+                         for result in payload["cells"]}}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return int(bad)
+
+
+def record_candidate(args, binary):
+    """--record-candidate: each selected case starts on the candidate alone
+    and is classed against startup-hydration.json (candidate_record.py)."""
+    import candidate_record
+    why = candidate_record.refuse_mutant_environment()
+    if why:
+        print(f"startup record-candidate refused: {why}", flush=True)
+        return 1
+    golden_path = HERE / "goldens" / "startup-hydration.json"
+    recording = candidate_record.Recording(golden_path, ("cases", "database"), binary, whole=not args.only,
+                                           defined=list(CASES))
+    recording.write = args.write
+    payload = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
+               "normalizers": NORMALIZERS, "cells": []}
+    number = time.time_ns()
+    for index, case in enumerate(args.only or CASES):
+        result = {"case": case}
+        payload["cells"].append(result)
+        try:
+            cell(binary, number + index * 3, case, result, oracle=False)
+        except Exception as error:
+            result["error"] = str(error)
+        stages = result.get("stages", [])
+        failures = ([f"error: {result['error']}"] if result.get("error") else []) + [
+            f"cleanup: {e}" for e in result.get("cleanup_errors", [])] + [
+            d for stage in stages for d in candidate_record.stage_failures(stage)]
+        observed = ({"cases": [normalized_result(stage["snapshots"]["rust"]) for stage in stages],
+                     "database": [stage["database"]["rust"] for stage in stages]}
+                    if len(stages) == 2 else None)
+        recording.observe(case, observed, failures, candidate_record.round_trip)
+    code = recording.finish(args.write, "python rust/daemon/harness/startup_ci.py --out <scratch>/startup.json")
+    payload["record_candidate"] = recording.report
+    args.out.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    return code
 
 
 if __name__ == "__main__":

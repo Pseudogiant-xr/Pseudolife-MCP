@@ -37,9 +37,18 @@ Python-extracted archive with no missing or mismatched members, preserved
 hardlink identity and omitted sockets. Restoration observations are compared
 without substitution; matching failures in both arms still fail the gate.
 
-Deferred by name, before any effect: anything that could need the lite tier's
-embedded instance (no DSN and `<data>/embedded_pg/PG_VERSION` present, or no
-`--data-dir`/`PSEUDOLIFE_MCP_DATA_DIR` while the lite default dir exists);
+The two missing-pg_dump cases declare `backup-pg-dump-missing-native-text`
+(oracle only): the frozen oracle's refusal also suggests the retired lite
+extra, and the native one names the PostgreSQL client tools alone. Only a
+stderr that is exactly the oracle's line is rewritten, keeping its line
+ending; the exit code, the files and the native side printing the oracle's
+words still compare.
+
+Refused before any effect, in the shared lite-tier wording, when no
+`PSEUDOLIFE_MCP_DATABASE_URL` is set: a lite bank (`embedded_pg/PG_VERSION`
+in the data dir, or a marker that cannot be checked; or in the lite default
+dir when neither `--data-dir` nor `PSEUDOLIFE_MCP_DATA_DIR` is given).
+Deferred by name, before any effect:
 an output dir that resolves (symlinks and junctions followed) to the data dir or below
 one of its archived children; Windows output aliases whose ancestor identities
 match the source root or an archived directory; non-UTF-8 PostgreSQL discovery

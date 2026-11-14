@@ -12,7 +12,7 @@ use std::{
     process::{Command, Output},
 };
 
-const NO_DATABASE: &str = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL (Docker tier: postgresql://pseudolife:<POSTGRES_PASSWORD from ops/.env>@127.0.0.1:5433/pseudolife_memory) or use a lite data dir that holds a bank.\n";
+const NO_DATABASE: &str = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL (Docker tier: postgresql://pseudolife:<POSTGRES_PASSWORD from ops/.env>@127.0.0.1:5433/pseudolife_memory).\n";
 /// Parses, and nothing listens there: no test reaches a connection attempt
 /// except the one that checks the deferral after a refused connection.
 const UNREACHABLE: &str = "postgresql://nobody@127.0.0.1:9/pl_cf_absent";
@@ -141,7 +141,7 @@ fn without_a_dsn_or_lite_bank_both_modes_refuse() {
 }
 
 #[test]
-fn an_embedded_bank_marker_defers_by_name_without_touching_it() {
+fn a_lite_bank_is_refused_plainly_without_touching_it() {
     let home = Home::new("lite");
     let explicit = home.0.join("bank");
     fs::create_dir_all(explicit.join("embedded_pg")).unwrap();
@@ -160,19 +160,22 @@ fn an_embedded_bank_marker_defers_by_name_without_touching_it() {
     fs::write(lite_default.join("embedded_pg").join("PG_VERSION"), "18\n").unwrap();
     let before = home.entries();
     for mode in ["export", "import"] {
-        let line = cli::native_text(&format!(
-            "pseudolife-stdio: mode '{mode}' on the embedded lite tier is deferred in this candidate (needs native embedded_pg)\n"
-        ));
+        let line = |bank: &std::path::Path| {
+            cli::native_text(&format!(
+                "{mode} refused: {}\n",
+                pseudolife_stdio::cli::retired::lite_bank_refusal(bank)
+            ))
+        };
         let mut tail: Vec<&str> = if mode == "import" {
             vec!["x.zip"]
         } else {
             vec![]
         };
         let output = home.command(mode).args(&tail).output().unwrap();
-        assert_stderr(&output, 1, &line);
+        assert_stderr(&output, 1, &line(&lite_default));
         tail.extend(["--data-dir", explicit.to_str().unwrap()]);
         let output = home.command(mode).args(&tail).output().unwrap();
-        assert_stderr(&output, 1, &line);
+        assert_stderr(&output, 1, &line(&explicit));
         let output = home
             .command(mode)
             .args(if mode == "import" {
@@ -183,10 +186,10 @@ fn an_embedded_bank_marker_defers_by_name_without_touching_it() {
             .env("PSEUDOLIFE_MCP_DATA_DIR", &explicit)
             .output()
             .unwrap();
-        assert_stderr(&output, 1, &line);
+        assert_stderr(&output, 1, &line(&explicit));
     }
     assert_eq!(home.entries(), before);
-    // An existing lite default without a bank resolves to it and refuses.
+    // An existing lite default without a bank is no lite bank: the no-database refusal.
     fs::remove_dir_all(lite_default.join("embedded_pg")).unwrap();
     let output = home.command("export").output().unwrap();
     assert_stderr(&output, 1, &cli::native_text(NO_DATABASE));

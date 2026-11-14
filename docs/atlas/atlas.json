@@ -1402,7 +1402,7 @@
    "d": [
     "~8.3k test functions vs a real pgvector pg18 service (job test); offline, CPU torch; job test also sets PSEUDOLIFE_TEST_LOGIN_ADMIN_URL (the service's superuser), so tests/test_test_login_cli.py makes a test-login role there and runs a PG-backed slice under it",
     "Separate from evals/ — those never run in CI",
-    "Also test-lite-linux / test-lite-windows / test-lite-macos (embedded PG lanes) and frontend (type check, vitest, committed-build diff)"
+    "Also test-lite-windows / test-lite-macos (Windows and macOS lanes over the live test files) and frontend (type check, vitest, committed-build diff)"
    ]
   },
   {
