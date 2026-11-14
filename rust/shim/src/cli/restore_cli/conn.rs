@@ -1,8 +1,9 @@
 //! `update_cli._backup_connection_values`, as `DockerBank.__init__` uses it:
 //! every exception is caught there, so only success (and its values) or
 //! failure matters. The daemon's `PSEUDOLIFE_MCP_DATABASE_URL` is parsed by
-//! libpq through psycopg's `conninfo_to_dict`; this leaf reads the subset of
-//! spellings whose libpq parse it is sure of and is `Unsure` otherwise.
+//! libpq through psycopg's `conninfo_to_dict`; this module reads the subset
+//! of spellings whose libpq parse it is sure of, and any other spelling
+//! fails, so the caller refuses and names the explicit selectors.
 use std::collections::BTreeMap;
 
 use serde_json::Value;
@@ -17,7 +18,6 @@ pub(super) enum Resolved {
         port: i128,
     },
     Fail,
-    Unsure,
 }
 
 /// Keywords every supported libpq accepts; another keyword may be valid in
@@ -45,11 +45,20 @@ fn conninfo(raw: &str) -> Option<Result<BTreeMap<String, String>, ()>> {
         .strip_prefix("postgresql://")
         .or_else(|| raw.strip_prefix("postgres://"));
     if let Some(rest) = rest {
-        // libpq's URI parser: no query, percent escape, IPv6 literal or host
-        // list in the spellings read here.
-        if rest.contains(['?', '%', '[', ']', ',']) {
+        // libpq's URI parser for one host name or IPv4 address: an IPv6
+        // literal or a host list is not read here. Components may carry
+        // percent escapes, and `?key=value&...` options override them.
+        if rest.contains(['[', ']', ',', '#']) {
             return None;
         }
+        let (rest, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let decode = |text: &str| -> Option<String> {
+            percent_encoding::percent_decode_str(text)
+                .decode_utf8()
+                .ok()
+                .map(|value| value.into_owned())
+                .filter(|value| !value.contains('\0'))
+        };
         let mut rest = rest;
         if let Some(at) = rest.find(['@', '/'])
             && rest.as_bytes()[at] == b'@'
@@ -57,12 +66,12 @@ fn conninfo(raw: &str) -> Option<Result<BTreeMap<String, String>, ()>> {
             let userinfo = &rest[..at];
             let user = userinfo.split(':').next().unwrap_or("");
             if !user.is_empty() {
-                fields.insert("user".to_owned(), user.to_owned());
+                fields.insert("user".to_owned(), decode(user)?);
             }
             if let Some((_, password)) = userinfo.split_once(':')
                 && !password.is_empty()
             {
-                fields.insert("password".to_owned(), password.to_owned());
+                fields.insert("password".to_owned(), decode(password)?);
             }
             rest = &rest[at + 1..];
         }
@@ -75,17 +84,25 @@ fn conninfo(raw: &str) -> Option<Result<BTreeMap<String, String>, ()>> {
             None => (netloc, None),
         };
         if !host.is_empty() {
-            fields.insert("host".to_owned(), host.to_owned());
+            fields.insert("host".to_owned(), decode(host)?);
         }
         if let Some(port) = port
             && !port.is_empty()
         {
-            fields.insert("port".to_owned(), port.to_owned());
+            fields.insert("port".to_owned(), decode(port)?);
         }
         if let Some(dbname) = dbname
             && !dbname.is_empty()
         {
-            fields.insert("dbname".to_owned(), dbname.to_owned());
+            fields.insert("dbname".to_owned(), decode(dbname)?);
+        }
+        for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+            let (key, value) = pair.split_once('=')?;
+            let key = decode(key)?;
+            if !KEYWORDS.contains(&key.as_str()) {
+                return None;
+            }
+            fields.insert(key, decode(value)?);
         }
         return Some(Ok(fields));
     }
@@ -151,8 +168,8 @@ pub(super) fn truthy(value: &Value) -> bool {
 pub(super) fn resolve(daemon: &Value, postgres: &Value) -> Resolved {
     match values(daemon, postgres) {
         Some(Some(found)) => found,
-        Some(None) => Resolved::Fail,
-        None => Resolved::Unsure,
+        // A spelling this module does not read is not resolved safely.
+        Some(None) | None => Resolved::Fail,
     }
 }
 
@@ -206,7 +223,7 @@ fn values(daemon: &Value, postgres: &Value) -> Option<Option<Resolved>> {
     }
     let host = or(setting("host", "PGHOST"), "");
     let address = or(setting("hostaddr", "PGHOSTADDR"), "");
-    let port = match python_int(&or(setting("port", "PGPORT"), "5432"))? {
+    let port = match python_int(&or(setting("port", "PGPORT"), "5432")) {
         Ok(port) => port,
         Err(()) => return fail,
     };
@@ -387,24 +404,37 @@ mod tests {
             assert_eq!(resolve(&daemon(url), &postgres()), Resolved::Fail, "{url}");
         }
         for url in [
-            "postgresql://u@pseudolife-pg/db?sslmode=disable",
-            "postgresql://u%40x@pseudolife-pg/db",
+            "postgresql://u@pseudolife-pg/db?unknown=1",
+            "postgresql://u@pseudolife-pg/db?host=elsewhere",
             "postgresql://u@[::1]/db",
             "host = pseudolife-pg",
             "host='pseudolife-pg'",
             "unknown=1",
         ] {
-            assert_eq!(
-                resolve(&daemon(url), &postgres()),
-                Resolved::Unsure,
-                "{url}"
-            );
+            assert_eq!(resolve(&daemon(url), &postgres()), Resolved::Fail, "{url}");
         }
         let mut odd = daemon("postgresql://u@pseudolife-pg/db");
         odd["Config"]["Env"] = json!("A=B");
-        assert_eq!(resolve(&odd, &postgres()), Resolved::Unsure);
+        assert_eq!(resolve(&odd, &postgres()), Resolved::Fail);
         odd["Config"]["Env"] = json!(null);
         assert_eq!(resolve(&odd, &postgres()), Resolved::Fail);
+    }
+
+    #[test]
+    fn escapes_and_query_options_are_read() {
+        assert_eq!(
+            resolve(
+                &daemon(
+                    "postgresql://p%40ss:x%2Fy@pseudolife-pg/my%20db?sslmode=disable&port=5433"
+                ),
+                &postgres()
+            ),
+            Resolved::Ok {
+                user: "p@ss".into(),
+                db: "my db".into(),
+                port: 5433
+            }
+        );
     }
 
     #[test]
@@ -423,7 +453,7 @@ mod tests {
         );
         assert_eq!(
             resolve(&daemon("hostaddr=fe80::1 user=u"), &postgres()),
-            Resolved::Unsure
+            Resolved::Fail
         );
     }
 

@@ -383,26 +383,6 @@ def invite_written(obs: dict) -> None:
     db["tables"]["principals"] = sorted(json.dumps(row, sort_keys=True) for row in rows)
 
 
-_RECURSION = re.compile(rb"\ATraceback \(most recent call last\):\r?\n.*"
-                        rb"\nRecursionError: maximum recursion depth exceeded[^\r\n]*\r?\n\Z",
-                        re.DOTALL)
-
-
-@normalize.rule("invite-recursion-traceback")
-def invite_recursion_traceback(obs: dict) -> None:
-    """Declared: a ``/health`` nested past CPython's recursion limit kills
-    the oracle with an uncaught ``RecursionError`` (exit 1, a traceback
-    naming its own source files); the candidate prints its deferral line,
-    exit 1. Only that traceback with exit 1 maps; the request both sent and
-    the unchanged bank stay compared."""
-    if obs.get("arm") != "python":
-        return
-    stderr = base64.b64decode(obs["stderr"])
-    if obs["exit"] == 1 and not base64.b64decode(obs["stdout"]) and _RECURSION.match(stderr):
-        native = DEFERRAL.replace("\n", "\r\n") if core.WINDOWS else DEFERRAL
-        obs["stderr"] = base64.b64encode(native.encode()).decode()
-
-
 @normalize.rule("invite-deferral")
 def invite_deferral(obs: dict) -> None:
     """A declared deferral case: the candidate must print the dispatcher's
@@ -523,9 +503,7 @@ LIVE_ONLY = frozenset({
     "invite-someone-else", "invite-someone-else-json", "reinvite-keeps-someone-else",
     "reinvite-keeps-someone-else-json", "reinvite-mine", "invite-mine-json",
     "reinvite-pending-someone-else", "paired-someone-else", "paired-mine-json",
-    # Its report is the daemon's auth value nested to the limit and
-    # pretty-printed: 2.6 MB of indentation, compared live only.
-    "health-nested-at-limit-json", "defer-tailscale-present", "defer-config-yaml",
+    "defer-tailscale-present", "defer-config-yaml",
     "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
     "list-config-names-normalised"})
 
@@ -725,7 +703,9 @@ def _cases() -> list[core.Case]:
                   ["laptop", "--port", str(port), "--url", "u"], daemon=_daemon(port, health())))
 
     # /health values only CPython's reader holds: lone surrogates, nesting
-    # up to its measured recursion limit, integers past 4300 digits.
+    # up to expose_cli's 100-bracket bound (past it, as far as CPython's
+    # recursion limit and beyond, the answer is "not the daemon"), integers
+    # past 4300 digits.
     def nested(depth: int, **over) -> bytes:
         fields = {k: v for k, v in health(**over).items() if k != "auth"}
         return json.dumps(fields)[:-1].encode() + b', "auth": ' + \
@@ -737,10 +717,12 @@ def _cases() -> list[core.Case]:
             ("health-surrogate-bank", health(bank="b\udc00"), False, ()),
             ("health-surrogate-bank-json", health(bank="b\udc00"), True, ()),
             ("health-surrogate-in-list-json", health(schema=["\ud800", {"\udc00": 1}]), True, ()),
-            # 984 nested in the object: 985 containers, the invite limit.
-            ("health-nested-at-limit", nested(984), False, ()),
-            ("health-nested-at-limit-json", nested(984), True, ()),
-            ("health-nested-past-limit", nested(985), False, ("invite-recursion-traceback",)),
+            # 99 nested in the object: 100 containers, expose_cli's bound.
+            ("health-nested-at-bound", nested(99), False, ()),
+            ("health-nested-at-bound-json", nested(99), True, ()),
+            ("health-nested-past-bound", nested(100), False, ()),
+            # Past CPython's recursion limit, which raised before the bound.
+            ("health-nested-past-recursion-limit", nested(985), True, ()),
             ("health-int-past-limit", json.dumps(health())[:-1].encode()
              + b', "x": 1' + b"0" * 4300 + b"}", False, ())):
         port = free_port()

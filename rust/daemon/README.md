@@ -61,7 +61,10 @@ without a Python daemon. Golden mode replays every scenario's responses
 except the five timing scenarios (`lease-held`, `reaper`, `null-embedding`,
 `unconstrained-dims`, `db-lost`), which ask both daemons the same question at
 the same moment and are live-only. It checks bank state only where the bank
-starts empty, since a seeded template carries run-specific values. `gen_schema_sql.py --check` and
+starts empty, since a seeded template carries run-specific values.
+`run.py golden --record-candidate` and `w2e.py golden --record-candidate`
+re-record goldens from the Rust candidate through that same replay path
+(a dry run unless `--write`; see [`rust/DEV.md`](../DEV.md)). `gen_schema_sql.py --check` and
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
 

@@ -245,8 +245,12 @@ pub(crate) fn make_private(file: &File) -> Result<(), CredentialError> {
 pub(crate) enum MarkerDistrust {
     /// Owned by a principal other than this user, SYSTEM or Administrators.
     Owner(String),
-    /// This principal, not this user, SYSTEM or Administrators, can write it.
-    Writer(String),
+    /// This principal, not this user, SYSTEM or Administrators, can write
+    /// it: its name as people read it, and its SID as `S-1-...` text.
+    Writer { name: String, sid: String },
+    /// An entry this rule does not read (a callback or object entry), or a
+    /// malformed list: it may grant anything, so it is not trusted.
+    Unreadable,
     /// The file has no DACL, so every principal can write it.
     NoDacl,
 }
@@ -257,6 +261,7 @@ pub(crate) enum MarkerDistrust {
 /// its folder grants), and a backdated marker is swept as a day old.
 const MARKER_WRITE_RIGHTS: u32 = 0x0002 // FILE_WRITE_DATA
     | 0x0004 // FILE_APPEND_DATA
+    | 0x0010 // FILE_WRITE_EA (part of FILE_GENERIC_WRITE)
     | 0x0100 // FILE_WRITE_ATTRIBUTES
     | 0x0001_0000 // DELETE
     | 0x0004_0000 // WRITE_DAC
@@ -307,6 +312,7 @@ unsafe fn token_user() -> Option<Vec<usize>> {
 
 /// This process's account as people read it (`DOMAIN\name`), for a fix line
 /// that must name the account rather than a shell variable.
+#[cfg(test)]
 pub(crate) fn current_user_name() -> Option<String> {
     // SAFETY: the token buffer owns the SID for the duration of the lookup.
     unsafe {
@@ -339,15 +345,53 @@ unsafe fn sid_name(sid: *mut c_void) -> String {
                 format!("{domain}\\{name}")
             };
         }
+        sid_string(sid).unwrap_or_else(|| "an unreadable principal".into())
+    }
+}
+
+/// A SID as `S-1-...` text, which icacls takes as `*S-1-...` whatever the
+/// display language and whatever characters the account name holds.
+unsafe fn sid_string(sid: *mut c_void) -> Option<String> {
+    unsafe {
         let mut text = ptr::null_mut();
         if windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW(sid, &mut text) == 0
             || text.is_null()
         {
-            return "an unreadable principal".into();
+            return None;
         }
         let _text = Descriptor(text.cast());
         let length = (0..).take_while(|&i| *text.add(i) != 0).count();
-        String::from_utf16_lossy(std::slice::from_raw_parts(text, length))
+        Some(String::from_utf16_lossy(std::slice::from_raw_parts(
+            text, length,
+        )))
+    }
+}
+
+/// This process's account as `S-1-...` text (see [`sid_string`]).
+pub(crate) fn current_user_sid() -> Option<String> {
+    // SAFETY: the token buffer owns the SID for the duration of the call.
+    unsafe {
+        let user = token_user()?;
+        sid_string((*(user.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid)
+    }
+}
+
+/// The display name Windows gives the SID written as `text` (`S-1-1-0`):
+/// account names are localised, so tests compare against this, not English.
+#[cfg(test)]
+pub(crate) fn sid_name_of(text: &str) -> String {
+    use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
+    let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+    // SAFETY: a live NUL-terminated buffer; the converted SID is freed by its
+    // guard after the lookup copied the name out.
+    unsafe {
+        let mut sid = ptr::null_mut();
+        assert!(
+            ConvertStringSidToSidW(wide.as_ptr(), &mut sid) != 0,
+            "{text}"
+        );
+        let _sid = Descriptor(sid);
+        sid_name(sid)
     }
 }
 
@@ -408,18 +452,14 @@ unsafe fn access_distrust(
         let Some(acl) = dacl.as_ref() else {
             return Some(MarkerDistrust::NoDacl);
         };
-        let unreadable = || {
-            Some(MarkerDistrust::Writer(
-                "an access rule that cannot be read".into(),
-            ))
-        };
+        let unreadable = || Some(MarkerDistrust::Unreadable);
         // A malformed list (an entry count or size its entries do not
         // match) is refused before any entry is read.
         if Security::IsValidAcl(dacl) == 0 {
             return unreadable();
         }
         for index in 0..acl.AceCount as u32 {
-            let Some((header, bytes)) = ace_at(acl, index) else {
+            let Some((header, bytes)) = ace_at(dacl, index) else {
                 return unreadable();
             };
             // An inherit-only entry grants nothing on this file (on a folder
@@ -453,7 +493,10 @@ unsafe fn access_distrust(
                 && inherit_only
                 && Security::IsWellKnownSid(sid, Security::WinCreatorOwnerSid) != 0;
             if !(trusted_marker_principal(sid, user) || creator) {
-                return Some(MarkerDistrust::Writer(sid_name(sid)));
+                return Some(MarkerDistrust::Writer {
+                    name: sid_name(sid),
+                    sid: sid_string(sid).unwrap_or_default(),
+                });
             }
         }
         None
@@ -464,11 +507,23 @@ unsafe fn access_distrust(
 /// wholly inside the list and is at least a header long; `None` otherwise.
 ///
 /// # Safety
-/// `acl` must be an ACL that `IsValidAcl` accepted, live for `'a`.
-unsafe fn ace_at(acl: &Security::ACL, index: u32) -> Option<(&Security::ACE_HEADER, &[u8])> {
+/// `acl` must be null or point to an ACL whose `AclSize` bytes are all
+/// readable, live for `'a`, and every entry before `index` must lie inside
+/// those bytes: `GetAce` reads the size of each earlier entry to step past
+/// it, without checking it against `AclSize`. Callers walk the entries in
+/// order and stop at the first `None`, which keeps that true even for a list
+/// `IsValidAcl` was not asked about; this function's own bounds then keep
+/// the entry it returns inside the list.
+unsafe fn ace_at<'a>(
+    acl: *const Security::ACL,
+    index: u32,
+) -> Option<(&'a Security::ACE_HEADER, &'a [u8])> {
     unsafe {
-        let start = acl as *const Security::ACL as usize;
-        let end = start + acl.AclSize as usize;
+        // The list's own size bounds every entry. GetAce is given the raw
+        // pointer the caller holds, not one derived from a reference to the
+        // 8-byte header, since it reads the entries past it.
+        let start = acl as usize;
+        let end = start + acl.as_ref()?.AclSize as usize;
         let mut ace = ptr::null_mut();
         if Security::GetAce(acl, index, &mut ace) == 0 {
             return None;
@@ -489,16 +544,109 @@ unsafe fn ace_at(acl: &Security::ACL, index: u32) -> Option<(&Security::ACE_HEAD
 }
 
 /// [`marker_distrust`] over raw ACL bytes, with this token's user as owner
-/// and user: lets tests hand the rule a malformed list.
+/// and user: lets tests hand the rule a malformed list. Safe because it
+/// asserts the header fits and its `AclSize` does not run past the buffer,
+/// which bounds every read the rule makes.
 #[cfg(test)]
 pub(crate) fn marker_distrust_raw(acl: &mut [u32]) -> Option<MarkerDistrust> {
-    // SAFETY: the buffer is live and u32-aligned for the call; the token
-    // buffer outlives the SID it holds.
+    assert!(acl.len() >= 2, "an ACL header is 8 bytes");
+    assert!(
+        (acl[0] >> 16) as usize <= acl.len() * 4,
+        "AclSize runs past the buffer"
+    );
+    // SAFETY: the buffer is live, u32-aligned and as long as its AclSize for
+    // the call; the token buffer outlives the SID it holds.
     unsafe {
         let token = token_user().expect("token user");
         let user = (*(token.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid;
         marker_distrust(user, acl.as_mut_ptr().cast(), user)
     }
+}
+
+/// [`ace_at`] on raw list bytes that skip `IsValidAcl`, as (type, size):
+/// lets tests reach its own bounds checks. Safe for the same reason as
+/// [`marker_distrust_raw`].
+#[cfg(test)]
+pub(crate) fn ace_at_raw(acl: &[u32], index: u32) -> Option<(u8, u16)> {
+    assert!(acl.len() >= 2 && (acl[0] >> 16) as usize <= acl.len() * 4);
+    // SAFETY: as above; the earlier entries are walked first, as ace_at
+    // requires, and the header and slice do not outlive the buffer.
+    unsafe {
+        for earlier in 0..index {
+            ace_at(acl.as_ptr().cast(), earlier)?;
+        }
+        ace_at(acl.as_ptr().cast(), index).map(|(header, bytes)| {
+            assert_eq!(bytes.len(), header.AceSize as usize);
+            (header.AceType, header.AceSize)
+        })
+    }
+}
+
+/// `path` as a NUL-terminated verbatim path, as std's own open uses, so a
+/// path longer than MAX_PATH (the rollback sibling of a long target) still
+/// opens.
+fn verbatim(path: &Path) -> io::Result<Vec<u16>> {
+    const SLASH: u16 = b'\\' as u16;
+    let absolute = std::path::absolute(path)?;
+    let plain: Vec<u16> = absolute.as_os_str().encode_wide().collect();
+    let prefix = [SLASH, SLASH, b'?' as u16, SLASH];
+    let mut wide: Vec<u16> = if plain.starts_with(&prefix) {
+        plain
+    } else if plain.starts_with(&[SLASH, SLASH]) {
+        // A share: \\server\share becomes \\?\UNC\server\share.
+        prefix
+            .iter()
+            .copied()
+            .chain("UNC".encode_utf16())
+            .chain(plain[1..].iter().copied())
+            .collect()
+    } else {
+        prefix.iter().copied().chain(plain).collect()
+    };
+    if wide.contains(&0) {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    wide.push(0);
+    Ok(wide)
+}
+
+/// Create the folder `path` with an owner-only DACL from the moment it
+/// exists. A folder created plainly and protected afterwards gives anything
+/// another task creates in it during that gap (the handshake cache's own
+/// folder) inherited entries the protection then strips, leaving it with
+/// none (#1538 review); its protected DACL passes nothing on, so what is
+/// created in it later gets explicit default entries instead. The caller
+/// still applies [`make_private`] to set the owner explicitly.
+pub(crate) fn create_dir_owner_only(path: &Path) -> io::Result<()> {
+    use windows_sys::Win32::{
+        Security::SECURITY_ATTRIBUTES, Storage::FileSystem::CreateDirectoryW,
+    };
+    let wide = verbatim(path)?;
+    let sddl: Vec<u16> = "D:P(A;;FA;;;OW)".encode_utf16().chain([0]).collect();
+    // SAFETY: live NUL-terminated buffers; the converted descriptor is owned
+    // by its guard and outlives CreateDirectoryW, which copies it.
+    unsafe {
+        let mut descriptor = ptr::null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            1,
+            &mut descriptor,
+            ptr::null_mut(),
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let _descriptor = Descriptor(descriptor);
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor,
+            bInheritHandle: 0,
+        };
+        if CreateDirectoryW(wide.as_ptr(), &attributes) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 /// Create `path` as a new file whose DACL is owner-only from the moment it
@@ -518,29 +666,7 @@ pub(crate) fn create_owner_only(path: &Path) -> io::Result<File> {
             FILE_SHARE_READ, FILE_SHARE_WRITE,
         },
     };
-    // A verbatim path, as std's own open uses, so a path longer than
-    // MAX_PATH (the rollback sibling of a long target) still opens.
-    const SLASH: u16 = b'\\' as u16;
-    let absolute = std::path::absolute(path)?;
-    let plain: Vec<u16> = absolute.as_os_str().encode_wide().collect();
-    let verbatim = [SLASH, SLASH, b'?' as u16, SLASH];
-    let mut wide: Vec<u16> = if plain.starts_with(&verbatim) {
-        plain
-    } else if plain.starts_with(&[SLASH, SLASH]) {
-        // A share: \\server\share becomes \\?\UNC\server\share.
-        verbatim
-            .iter()
-            .copied()
-            .chain("UNC".encode_utf16())
-            .chain(plain[1..].iter().copied())
-            .collect()
-    } else {
-        verbatim.iter().copied().chain(plain).collect()
-    };
-    if wide.contains(&0) {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    wide.push(0);
+    let wide = verbatim(path)?;
     let sddl: Vec<u16> = "D:P(A;;FA;;;OW)".encode_utf16().chain([0]).collect();
     // SAFETY: live NUL-terminated buffers; the converted descriptor is owned
     // by its guard and outlives CreateFileW, which copies it; the returned
@@ -615,6 +741,28 @@ pub(crate) fn dacl_sddl(file: &File) -> String {
         let _text = Descriptor(text.cast());
         let length = (0..).take_while(|&i| *text.add(i) != 0).count();
         String::from_utf16_lossy(std::slice::from_raw_parts(text, length))
+    }
+}
+
+/// The (volume, file index) of the open folder `directory`, refusing a
+/// reparse point or anything not a folder: read through the same handle a
+/// check is made on, so a cached result belongs to that object.
+pub(crate) fn folder_identity(directory: &File) -> Result<(u64, u64), CredentialError> {
+    let invalid = CredentialError("folder must be a plain folder");
+    // SAFETY: the handle stays live for the call; the structure is exactly
+    // sized and initialized.
+    unsafe {
+        let mut info: BY_HANDLE_FILE_INFORMATION = mem::zeroed();
+        if GetFileInformationByHandle(directory.as_raw_handle() as HANDLE, &mut info) == 0
+            || info.dwFileAttributes & 0x10 == 0
+            || info.dwFileAttributes & 0x400 != 0
+        {
+            return Err(invalid);
+        }
+        Ok((
+            info.dwVolumeSerialNumber as u64,
+            ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+        ))
     }
 }
 
@@ -698,7 +846,7 @@ pub(crate) fn protected_without_inheritance(path: &Path) -> bool {
             return false;
         }
         for index in 0..acl.AceCount as u32 {
-            let Some((header, _)) = ace_at(acl, index) else {
+            let Some((header, _)) = ace_at(dacl, index) else {
                 return false;
             };
             let flags = header.AceFlags as u32;

@@ -304,17 +304,10 @@ pub fn hand_off(
     note(Note::Step(format!(
         "the client steps after the shim continue in runtime {name} ({version}), the release just installed"
     )));
-    let scratch = std::env::temp_dir().join(format!("pseudolife-handoff-{}", uuid::Uuid::new_v4()));
-    if crate::board::state::private_dir(&scratch).is_err() {
-        return Some((
-            failed(
-                &name,
-                &version,
-                "no private scratch directory for its report",
-            ),
-            None,
-        ));
-    }
+    let scratch = match super::super::seams::private_scratch("pseudolife-handoff") {
+        Ok(scratch) => scratch,
+        Err(why) => return Some((failed(&name, &version, &why), None)),
+    };
     let report_file = scratch.join("report.json");
     let env = child_env(parent.pid, &report_file, parent.runtime_dir.as_deref());
     let args = child_args(&version, parent.daemon_url, parent.allow_downgrade);
