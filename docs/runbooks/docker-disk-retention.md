@@ -19,7 +19,7 @@ automate aggressively.
 
 | Trigger | Script | Default policy |
 |---|---|---|
-| After every healthy deploy | `ops/update.ps1` / `.sh` (`pseudolife_memory/update_cli.py`), the build-cache prune after health (last) | age 168h, 20GB ceiling, fstrim |
+| After every healthy deploy | `ops/update.ps1` / `.sh` (`pseudolife_memory/update_cli.py`, or the native updater), the build-cache prune after health (last) | age 168h, 20GB ceiling, fstrim |
 | Weekly, if registered | Scheduled Task → `ops/prune-build-cache.ps1` | age 168h, 20GB ceiling, fstrim |
 
 The deploy hook only passes `-MaxAgeHours`; `-MaxUsedSpaceGB` therefore

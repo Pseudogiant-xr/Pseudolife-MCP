@@ -884,7 +884,12 @@ when the board refuses it. A state file it cannot read gets a fresh baseline.
 running. The first run records what is already true and reports nothing for
 it; its state, log and a one-line-per-message ledger live beside the
 session's digest, else under `~/.pseudolife-mcp/watch/` (`--state` moves
-them).
+them). One watcher runs per owner: a second start answers with the
+running watcher's board id. In the native client a message holds at most
+20 events and 6000 bytes and says how many more follow, text copied from
+GitHub or a suite result is quoted with anything outside printable ASCII
+escaped, `gh` is found only in absolute `PATH` directories, and
+`--lease-cli` is accepted but ignored.
 
 **Upgrading across the conductor's rename**, from a release where the grant
 was the lease `delegate:<project>`, recorded as `lease_delegate`, and its rings
@@ -1152,8 +1157,16 @@ passkey offer, so the link is for the HTTPS address when you set one up):
 when a browser is signed in already, from the passkey setup or an earlier
 install, it says so in one line and opens nothing. An unattended install
 names the command instead, and a client-only install names it in its
-summary. `console` never hands the link to a terminal browser (lynx, w3m):
-it prints it instead. `pseudolife-mcp update` names it when the daemon offers sign-in and
+summary. `console` never hands the link to a terminal browser (lynx, w3m,
+elinks): it prints it instead. It chooses the browser as Python's
+`webbrowser` module does: the first entry of `BROWSER`, else the Windows
+default, the macOS default, or on Linux a desktop browser when `DISPLAY` or
+`WAYLAND_DISPLAY` is set; the link goes to it as one argument. The native
+client does not start every such browser yet: on macOS, and on Linux when
+the desktop's default is a browser Python starts directly (Firefox or
+Chrome, say) rather than through `xdg-open`, it stops with `mode 'console'
+is deferred in this candidate` before minting a code. Set `BROWSER`, or use
+`--no-open` and open the printed link yourself. `pseudolife-mcp update` names it when the daemon offers sign-in and
 no browser is signed in yet, and the update that moves the bank to schema
 v59 says, once, which principals are now treated as yours.
 
@@ -2814,10 +2827,12 @@ also capped (below, and by the daemon's `wake` caps under
   another user owns or others can write, since that could forge or suppress
   a wake, and prints one `pseudolife-mcp: ignoring <path>: …` line naming the
   fix (`rm` it for another user's file; update the plugin or `chmod 600` it
-  for a writable one). On Windows the native shim still requires a protected
-  owner-only ACL, which hook-written files lack, so board mail does not wake
-  a session there yet
-  ([#1326](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1326)).
+  for a writable one). On Windows the native shim applies the same rule to
+  the access list: the owner must be this user, SYSTEM or Administrators,
+  and no other account may be able to write, delete or backdate the file, so
+  hook-written markers wake a session there too. A marker that fails prints
+  the same `ignoring` line, naming who can write it and the fix (delete the
+  file, or make its folder private to this account).
 - A watcher listens for as long as the session stays open: at most
   1,209,540 s (14 days) after the turn that armed it, under the hook's
   `timeout` of 1,209,600 s, which Claude Code enforces on `asyncRewake` hooks.
@@ -3604,6 +3619,76 @@ from (on POSIX it also moves the default `~/.local/bin`). A host whose Python ca
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
 
+### The native client
+
+The native client is the same shim and `pseudolife-mcp` command as one
+program with no Python. Its runtime is a numbered directory holding that
+binary (`runtime.json` says `"kind": "native"`) behind the same launcher,
+so the registrations and the `PATH` entry above stay as they are.
+
+**How a machine moves to it.** A release-mode `pseudolife-mcp update` (or
+`--clients-only`) started from an installed 0.23.x Python client installs
+the new release's Python runtime, and the client steps continue in that
+runtime ([below](#the-client-steps-after-a-new-shim-runtime)). That code
+downloads the release's `SHA256SUMS` and its native archive for this
+platform from the GitHub release, checks the archive against its digest,
+and runs the binary twice to confirm it is that release; only then does
+anything change. It prints
+
+```text
+==> moving this machine to the native client: native <version> (<target>) runs the client steps
+```
+
+and the native updater finishes the run: it installs a native runtime,
+moves each registration to the launcher (backing each file up beside
+itself), and runs the plugin and Codex steps. Running sessions keep the
+runtime they started with, and new sessions start on the native client.
+Native archives are built for Linux
+x86_64 and arm64 (glibc), macOS Intel and Apple silicon, and Windows x64.
+
+- **When it cannot move**, nothing about the move has changed: the update keeps the
+  Python client, finishes the client steps with it, and says why in one
+  line, `==> the native client was not installed (<cause>); the Python
+  client was kept and this run's own code finishes the client steps` (no
+  archive for this platform, a download or digest failure, a binary that
+  does not run here).
+- **To keep the Python client**, start `update` from the Python client
+  with `PSEUDOLIFE_SHIM_ENGINE=python` set; the native updater does not read
+  the variable, so it works only before the machine moves. If the native
+  client steps start and fail, the run ends with `the native client steps
+  ended with exit <code>; to keep the Python client instead, rerun with
+  PSEUDOLIFE_SHIM_ENGINE=python set`.
+- **Not moved:** a pip or lite install, which `update` upgrades in place;
+  a checkout deploy; an update started from 0.22.0 or earlier, which has
+  no client hand-off; and a machine whose Python client is already this
+  release (an installer run installs the Python client), which moves on its
+  update to a later release.
+
+**What the native client refuses.** Each refusal names the way forward:
+
+- A lite-tier bank (`backup`, `restore`, `export`, `import`, `invite`,
+  `maintainer`, `lease`, `board-audit`): move the bank to the Docker tier
+  with the pip release (`pseudolife-mcp` 0.23.x), which still opens it,
+  following [Move a lite bank to Docker](#move-a-lite-bank-to-docker).
+- `pseudolife-mcp serve`: it does not run the memory daemon, which is the
+  Docker tier's `pseudolife-daemon`; start that with `docker compose -f
+  ops/docker-compose.yml up -d`, or install the Docker tier first.
+- `pseudolife-mcp embedded`: retired with file mode; use the Docker tier.
+- Starting a local daemon itself: the shim starts one only from
+  `PSEUDOLIFE_MCP_SERVE_COMMAND`, a JSON argv array (for example
+  `["/path/to/start-daemon"]`); `PSEUDOLIFE_MCP_PYTHON` no longer starts
+  one. With neither, the shim waits for a daemon and its note names the
+  Docker command.
+
+**Not in the native client yet:** a shape it does not handle stops with
+`pseudolife-stdio: mode '<mode>' is deferred in this candidate` and exit 1,
+having changed nothing. Among them: the change step of `expose tailscale`
+and `expose off` ([Remote bank](remote-bank.md#expose-the-daemon-with-one-command)),
+`connect`'s questions and prompts ([Moving a client to a new daemon](remote-bank.md#moving-a-client-to-a-new-daemon))
+and most of `tunnel` ([tunnels](tunnels.md)). `move` checks and plans a
+move with `--dry-run` but refuses to perform one
+([Moving a bank](remote-bank.md#moving-a-bank)).
+
 **Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
 checkout. Run inside one, a 0.16.x updater can record the wrong version in the
 `runtime.json` of the runtime it installs (it reads a stale build's metadata
@@ -4117,7 +4202,10 @@ pseudolife-mcp restore --backup-file <dump.sql.gz> --state-archive <state.tgz>
 It asks once:
 `Restore replaces the existing bank after taking a safety backup. Continue? [y/N]`
 Use `--yes` to consent without a prompt; a noninteractive call without it
-refuses and restores nothing. Before replacement it stops the daemon and
+refuses and restores nothing (`rerun with --yes to confirm`, exit 2). Only
+a real console counts as a terminal, so on Windows stdin and stdout
+redirected to `NUL` refuse too. A dump or state archive whose compressed
+data is corrupt is refused (exit 2) before anything changes. Before replacement it stops the daemon and
 saves the current database and state as a safety pair outside any checkout,
 defaulting to `~/.pseudolife-mcp/backups` regardless of the data-dir setting.
 `--safety-dir <directory outside a checkout>` selects another location;
@@ -4307,7 +4395,8 @@ environment: set `PATH` (so it finds `docker`) and any
 
 ### Pip and lite banks
 
-The pip tiers (lite / host-process) also use `pseudolife-mcp backup`:
+The pip tiers (lite / host-process) also use `pseudolife-mcp backup`
+from the Python client (the native client refuses a lite bank):
 same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so
 the artifact restores under any role — rehearsed in the test suite
 against a role-named PostgreSQL 18; since the Docker tier's 16→18 bump
@@ -4326,6 +4415,10 @@ that produced no dump never rotates dumps, and rotation only ever
 deletes files the tool itself wrote.
 
 ### Move a lite bank to Docker
+
+Run these steps with the pip release (`pseudolife-mcp` 0.23.x), which
+still opens a lite bank; the native client refuses one and points here
+([The native client](#the-native-client)).
 
 An initialized lite bank is deliberately refused by the Docker installer. A
 backup alone does not clear that guard: preserve the stopped cluster before
@@ -4459,9 +4552,12 @@ one is the daemon's job.
 
 ## Updating: `pseudolife-mcp update`
 
-The installed shim carries the update (`pseudolife_memory/update_cli.py`;
-`ops/update.ps1` and `ops/update.sh` are thin wrappers over the same code
-for a checkout). It needs no checkout.
+The installed shim carries the update: the Python client's
+`pseudolife_memory/update_cli.py`, or the native client's own updater
+([The native client](#the-native-client)). `ops/update.ps1` and
+`ops/update.sh` are thin wrappers for a checkout, which run the Python
+updater unless given `--native` (`-Native`) or `PSEUDOLIFE_NATIVE_UPDATE=1`,
+or when no Python 3.10 or newer is found. It needs no checkout.
 
 **The first update from 0.15.0 or earlier** has no such command (that
 shim answers "unknown mode", and that daemon never checks for a release,
@@ -4470,14 +4566,15 @@ so nothing announces it): from a checkout, `git pull`, then
 `pipx install --force "pseudolife-mcp[lite]==<version>"` or
 `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
 extra only for a lite install). After that, `pseudolife-mcp update`
-exists. The installers do not put the shim launcher's directory
-(`~/.local/share/pseudolife-mcp/bin`, `%LOCALAPPDATA%\pseudolife-mcp\bin`)
-on `PATH`; until you add it, run the launcher by the full path the
-installer and the session notices print.
+exists. The installers make `pseudolife-mcp` typed in a terminal reach the
+shim launcher ([Where the shim lives](#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher));
+in a terminal opened before that, or when `~/.local/bin` is not on `PATH`,
+run the launcher by the full path the installer and the session notices
+print.
 
 | command | what it does |
 |---|---|
-| `pseudolife-mcp update` | Docker tier: pull the daemon image of the newest release on PyPI (`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>` for the Rust engine, `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` for the Python one; a host that never chose an engine moves to Rust, see [Daemon engine](install-and-move.md)), pull the release's PostgreSQL image when that container differs from the release's definition, back the bank up, recreate that one service and wait until it is healthy (the previous one is restored on failure), tag the running image `…-pre-update-<stamp>`, recreate the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
+| `pseudolife-mcp update` | Docker tier: pull the daemon image of the newest release on PyPI (`ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>` for the Rust engine, `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>` for the Python one; a host that never chose an engine moves to Rust, see [Daemon engine](install-and-move.md)), pull the release's PostgreSQL image when that container differs from the release's definition, back the bank up, recreate that one service and wait until it is healthy (the previous one is restored on failure), tag the running image `…-pre-update-<stamp>`, recreate the daemon container, wait for `/health` at that version, then the client side. From a 0.23.x Python client, the client side also moves the machine to the native client when the release's archive for this platform downloads, verifies and runs, and otherwise keeps the Python client and says why ([The native client](#the-native-client); `PSEUDOLIFE_SHIM_ENGINE=python` keeps Python). Pip / lite: upgrade the package where it is installed; restart nothing; the client is not moved. |
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step (+ refreshing running saved tunnels), or the daemon; the steps after a newly installed shim runtime run in that runtime ([below](#the-client-steps-after-a-new-shim-runtime)). On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release; a silent or unversioned endpoint is refused, and `--daemon-only` is refused naming the daemon's host |
@@ -4602,9 +4699,9 @@ runtime <runtime> (<version>) predates the client hand-off, so this run's own co
 The hand-off runs in the release being *replaced*. An update from 0.22.0
 or earlier therefore still runs the client steps with the old code: run
 `pseudolife-mcp update --clients-only` a second time to apply the new
-release's client-step changes. The native (Rust) updater keeps that
-two-run shape for now
-([#1308](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1308)).
+release's client-step changes. The native updater hands off the same way
+as the Python one, so a single native update run applies the new
+release's client steps.
 
 ### Changing daemon bearer settings
 
