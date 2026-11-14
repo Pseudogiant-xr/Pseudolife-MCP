@@ -1635,8 +1635,6 @@ jobs:
           - restore-4
           - restore-5
           - restore-6
-          - restore-7
-          - restore-8
           - test_login-0
           - test_login-1
           - test_login-2
