@@ -743,6 +743,20 @@ fn run_command(argv: &[String]) -> Result<String, Refusal> {
     output_within(argv, Duration::from_secs(30)).map_err(|_| Refusal(CHECK_FAILED.into()))
 }
 
+/// The program the installer steps run for `program`: one named without a
+/// path is found only in an absolute `PATH` directory
+/// (`program_lookup::find_program_path`), never in the current directory, the
+/// running program's directory or the Windows system and Windows directories
+/// that the loader would otherwise also search; a path is run as given.
+/// `None` when no absolute `PATH` directory holds it.
+pub(in crate::cli) fn program_path(program: &str) -> Option<PathBuf> {
+    let has_separator = program.contains('/') || (cfg!(windows) && program.contains('\\'));
+    if has_separator || Path::new(program).components().count() != 1 {
+        return Some(PathBuf::from(program));
+    }
+    crate::cli::program_lookup::find_program_path(program)
+}
+
 /// Python `subprocess.run(argv, text=True, errors="replace", timeout=...)`
 /// for a successful run: stdout with universal newlines, stderr discarded
 /// (it may carry resolved credentials). `Err(Unreached)` when the program
@@ -750,6 +764,7 @@ fn run_command(argv: &[String]) -> Result<String, Refusal> {
 /// when it exits nonzero.
 pub(super) fn output_within(argv: &[String], timeout: Duration) -> Result<String, NotRun> {
     let (program, rest) = argv.split_first().ok_or(NotRun::Unreached)?;
+    let program = program_path(program).ok_or(NotRun::Unreached)?;
     let mut child = Command::new(program)
         .args(rest)
         .stdin(Stdio::null())

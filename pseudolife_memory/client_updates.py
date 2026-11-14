@@ -78,6 +78,7 @@ from pathlib import Path
 from pseudolife_memory import __version__
 from pseudolife_memory import runtimes as _runtimes
 from pseudolife_memory.plugin_hooks import HOOK_SCRIPTS, hooks_digest
+from pseudolife_memory.program_lookup import find_program
 
 # The checkout this module runs from, when it does (the package sits at its
 # root); an installed package has no checkout and ``checkout_root()`` is None.
@@ -92,7 +93,9 @@ INSTALLER_HINT = "run the installer (ops/install.sh or ops\\install.ps1) with cl
 # ── seams ───────────────────────────────────────────────────────────────────
 
 def which(name: str) -> str | None:
-    return shutil.which(name)
+    """A program found only in an absolute PATH directory, never the
+    current directory (``program_lookup.find_program``)."""
+    return find_program(name)
 
 
 def home() -> Path:
@@ -1454,24 +1457,9 @@ _MARKETPLACE_READ_TIMEOUT_S = 120
 
 
 def _git_executable() -> str | None:
-    """Git from an absolute PATH directory, without shutil.which's implicit
-    Windows working-directory search (the Codex doorbell's resolver rule)."""
-    if os.name == "nt":
-        pathext = os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD"
-        names = [f"git{ext}" for ext in pathext.split(os.pathsep)
-                 if ext.lower() in (".com", ".exe", ".bat", ".cmd")]
-    else:
-        names = ["git"]
-    for directory in os.environ.get("PATH", "").split(os.pathsep):
-        directory = directory.strip().strip('"')
-        # Path.is_absolute also rejects drive-relative Windows paths.
-        if not directory or not Path(directory).is_absolute():
-            continue
-        for name in names:
-            candidate = Path(directory) / name
-            if candidate.is_file() and (os.name == "nt" or os.access(candidate, os.X_OK)):
-                return str(candidate)
-    return None
+    """Git from an absolute PATH directory, never the current directory
+    (``program_lookup.find_program``)."""
+    return find_program("git")
 
 
 def _marketplace_hooks_json(codex_home: Path) -> tuple[bytes | None, str]:

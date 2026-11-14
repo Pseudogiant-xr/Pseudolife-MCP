@@ -165,7 +165,7 @@ pub fn valid_digest(digest: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 pub fn hash_file(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut file = fs::File::open(path).map_err(|e| crate::board::state::denied_cause(path, &e))?;
     let mut digest = Sha256::new();
     let mut buf = [0; 65536];
     loop {

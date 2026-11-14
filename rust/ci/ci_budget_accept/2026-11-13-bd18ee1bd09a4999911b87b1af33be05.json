@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "200ef2b514faec86",
+  "fingerprint": "8d99314724dc5541",
+  "reason": "Adds tests/test_program_lookup.py to the lane: the lookup helper has Windows-only branches (PATHEXT, drive-relative PATH entries), so its tests must run on Windows. They only plant files in a temporary directory and start nothing; the whole file ran in under two seconds on a Windows workstation on 2026-11-14."
+}

@@ -23,6 +23,7 @@ import sys
 import time
 
 from .codex_coordination import thread_id_from_meta
+from pseudolife_memory.program_lookup import find_program
 
 # Recent Pseudolife activity suppresses an intended-idle park wake; it does
 # not establish native turn state. Explicit capped unknown-state urgency
@@ -146,22 +147,9 @@ def resolve_codex_command(environ=None) -> list[str] | None:
     if explicit:
         path = Path(explicit).expanduser()
         return [str(path)] if path.is_absolute() and path.is_file() else None
-    if os.name == "nt":
-        pathext = environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD"
-        names = [f"codex{ext}" for ext in pathext.split(os.pathsep)
-                 if ext.lower() in _WINDOWS_LAUNCHABLE]
-    else:
-        names = ["codex"]
-    for directory in environ.get("PATH", "").split(os.pathsep):
-        directory = directory.strip().strip('"')
-        # Path, not os.path.isabs: on Windows "\dir" is relative to the
-        # current drive, and os.path.isabs accepts it.
-        if not directory or not Path(directory).is_absolute():
-            continue
-        for name in names:
-            candidate = os.path.join(directory, name)
-            if os.path.isfile(candidate) and (os.name == "nt" or os.access(candidate, os.X_OK)):
-                return [candidate]
+    found = find_program("codex", environ)
+    if found:
+        return [found]
     if os.name == "nt":
         local = environ.get("LOCALAPPDATA", "").strip().strip('"')
         if local and Path(local).is_absolute():

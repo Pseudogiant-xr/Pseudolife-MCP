@@ -1,5 +1,11 @@
 {
  "normalizers": "harness/w2e.py normalize_state, pack",
+ "recorded_from_candidate": {
+  "candidate_sha256": "4e68292a8134ce4a672bf414f548c21f103a763003daa2959e07db47e223dabf",
+  "commit": "e87a73178032df0e0ba925582cc1f018d57dfea6",
+  "platform": "windows",
+  "rust_tree": "modified"
+ },
  "scenario": "review-propose-list-rationale",
  "steps": [
   {
@@ -7,7 +13,7 @@
    "op": {
     "op": "init"
    },
-   "python": null,
+   "response": null,
    "state": {
     "catalog": {
      "column_types": [
@@ -16372,12 +16378,12 @@
      "extensions": [
       [
        "plpgsql",
-       "1.0",
+       "<fixture version>",
        "pg_catalog"
       ],
       [
        "vector",
-       "0.8.7",
+       "<fixture version>",
        "public"
       ]
      ],
@@ -18547,7 +18553,7 @@
        "bigint",
        1,
        1,
-       1
+       2
       ],
       [
        "public",
@@ -19200,17 +19206,6 @@
       ],
       "rows": [
        [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1793991796.9524465,
-         "copied": 0
-        }
-       ],
-       [
-        "dream_ack_secret_v1",
-        "11f6aab8068a9ba8875ad1495f757bbb7698bad195a3acc330bb2789eb82061d"
-       ],
-       [
         "schema_version",
         59
        ],
@@ -19615,7 +19610,7 @@
     "name": "memory_graph_review",
     "op": "tool"
    },
-   "python": {
+   "response": {
     "isError": false,
     "value": {
      "proposed": 5,
@@ -19759,7 +19754,7 @@
        "bigint",
        1,
        1,
-       1
+       2
       ],
       [
        "public",
@@ -20026,17 +20021,6 @@
       ],
       "rows": [
        [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1793991796.9524465,
-         "copied": 0
-        }
-       ],
-       [
-        "dream_ack_secret_v1",
-        "11f6aab8068a9ba8875ad1495f757bbb7698bad195a3acc330bb2789eb82061d"
-       ],
-       [
         "schema_version",
         59
        ],
@@ -20282,7 +20266,7 @@
     "name": "memory_graph_review",
     "op": "tool"
    },
-   "python": {
+   "response": {
     "isError": true,
     "value": {
      "error": "internal_error",
@@ -20427,7 +20411,7 @@
        "bigint",
        1,
        1,
-       1
+       2
       ],
       [
        "public",
@@ -20701,17 +20685,6 @@
       ],
       "rows": [
        [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1793991796.9524465,
-         "copied": 0
-        }
-       ],
-       [
-        "dream_ack_secret_v1",
-        "11f6aab8068a9ba8875ad1495f757bbb7698bad195a3acc330bb2789eb82061d"
-       ],
-       [
         "schema_version",
         59
        ],
@@ -20962,7 +20935,7 @@
     "name": "memory_graph_review",
     "op": "tool"
    },
-   "python": {
+   "response": {
     "isError": true,
     "value": {
      "error": "internal_error",
@@ -21107,7 +21080,7 @@
        "bigint",
        1,
        1,
-       1
+       2
       ],
       [
        "public",
@@ -21388,17 +21361,6 @@
       ],
       "rows": [
        [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1793991796.9524465,
-         "copied": 0
-        }
-       ],
-       [
-        "dream_ack_secret_v1",
-        "11f6aab8068a9ba8875ad1495f757bbb7698bad195a3acc330bb2789eb82061d"
-       ],
-       [
         "schema_version",
         59
        ],
@@ -21633,7 +21595,7 @@
     "name": "memory_graph_review",
     "op": "tool"
    },
-   "python": {
+   "response": {
     "isError": false,
     "value": {
      "automatic_decisions": [],
@@ -21904,7 +21866,7 @@
        "bigint",
        1,
        1,
-       1
+       2
       ],
       [
        "public",
@@ -22184,17 +22146,6 @@
        "value"
       ],
       "rows": [
-       [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1793991796.9524465,
-         "copied": 0
-        }
-       ],
-       [
-        "dream_ack_secret_v1",
-        "11f6aab8068a9ba8875ad1495f757bbb7698bad195a3acc330bb2789eb82061d"
-       ],
        [
         "schema_version",
         59

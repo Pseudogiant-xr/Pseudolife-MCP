@@ -4055,9 +4055,87 @@ defaulting to `~/.pseudolife-mcp/backups` regardless of the data-dir setting.
 it must also be outside the state mount being replaced. If the destination
 database is absent, only its existing state is safety-archived.
 The state archive is opt-in: omit `--state-archive` for a database-only
-restore. By default restore starts the daemon and waits for readiness;
-`--leave-stopped` keeps it stopped. A daemon without a published health
-port needs `--daemon-url <url>` or `--leave-stopped`.
+restore. By default restore starts the daemon and waits up to ten minutes
+for it to report ready (a Rust daemon's first start can provision its
+models first); `--leave-stopped` keeps it stopped. A daemon without a
+published health port needs `--daemon-url <http://...>` or
+`--leave-stopped`.
+
+Before it stops anything, restore reads the dump and the state archive to
+their ends. The archive must be one GNU `tar` extracts exactly as restore
+checks it: POSIX extended headers (`path`, `linkpath`, `size`) and GNU long
+names are read, and numeric fields and the ustar prefix are read as tar
+reads them. Only plain files, links and directories are read (a member
+whose final name ends in `/` is a directory); any other member type, a
+link or directory with a non-zero size, a hard link to anything but a plain
+file before it, an extended header that repeats or empties a name or size,
+a GNU long name over 1 MiB, a sparse member,
+a global extended header that sets a name or size, a damaged header
+anywhere, a `move.json` that is not a plain file, or anything but zeros
+after the end marker is refused, with the reason.
+
+The state is not judged by its headers alone. Before the database is
+dropped, restore extracts the archive into a fresh staging directory in the
+daemon's `/data` volume (`/data/.pseudolife-restore-<run>`) and checks what
+`tar` actually wrote: only plain files, directories and symlinks; every
+symlink relative and leading, through the tree's own links, to a place
+inside it as it will be once it is `/data`; no file sharing its inode with
+anything outside it; no setuid or setgid file (a setgid directory, as a
+group-shared `/data` has, is restored); nothing mounted inside it. If that check refuses, the
+staging directory is removed, the daemon starts again and nothing was
+changed. After the replay the old state (except `move.json`) is removed
+and the staged entries are renamed into place. `/data` itself keeps its
+own owner and mode. A top-level `.pseudolife-restore-<run>` directory (one
+a killed restore left behind; the name is that prefix and exactly 16
+lowercase hex digits, so a directory of your own with a similar name is
+kept) is never part of the state: restore removes one before its safety
+backup, the safety backup leaves it out, and restore never extracts one
+from an archive.
+
+Restore replaces only the `/data` volume. A daemon with another volume or
+filesystem mounted inside it (for example at `/data/models`) is refused
+before anything is stopped when `--state-archive` is given, because
+replacing `/data` would empty that volume and could not replace it: mount
+that volume outside `/data`, or restore the database alone without
+`--state-archive`. Restore reads both the daemon's `docker inspect` mounts
+and the mount table a helper over its volumes sees, which also shows a
+filesystem mounted below a host folder bind-mounted as `/data` (Docker
+binds are recursive). Should one appear only after the database was
+replaced, the swap still refuses before removing anything, says the state
+volume is unchanged, and offers the database-only command that puts the
+database back.
+A lite (embedded PostgreSQL) bank is
+refused: restore replaces a Docker bank only, so install the Docker bank
+first ([Move a lite bank to Docker](#move-a-lite-bank-to-docker)).
+Restore runs the `docker` it finds on an absolute `PATH` entry (never the
+current directory), or the full path in `PSEUDOLIFE_DOCKER`.
+
+**If restore fails or is interrupted.** Each step runs only after the one
+before it succeeded, and the first failure or Ctrl-C ends the run there
+with the bank's state and the command to run next. Up to the database
+drop the bank is unchanged: a staging directory is removed before the
+daemon is started again (one a killed run left behind is removed by the
+next restore before its safety backup). Once the drop
+has begun the daemon is left stopped, so it never serves a half-restored
+bank, and the message names the recovery command for the safety backup
+(`pseudolife-mcp restore --backup-file <safety dump> --state-archive
+<safety state> ... --yes`) and the command that finishes this restore.
+The same recovery command is written beside the safety pair as
+`pseudolife_restore-<timestamp>.txt` before the drop, for a run killed
+outright. Restore also records `restore-in-progress-<bank>.json` in
+`~/.pseudolife-mcp` (or `PSEUDOLIFE_MCP_DATA_DIR`) before the drop and
+removes it once the database and state are restored (a journal it cannot
+remove is reported, to delete by hand). A later restore of the same bank
+sees it. If that run fails before its own drop it changed nothing and
+leaves the daemon stopped, and gives both courses: if the bank was not
+repaired since the interrupted restore, recover it from that restore's
+safety backup; if it was, start the daemon and delete the journal. Every
+message after its own drop names both safety backups with their dates:
+the bank as it was before the interrupted restore, and as it was
+immediately before this run (the incomplete bank the interrupted restore
+left, unless it was repaired since). Rerunning either
+command after an interruption at any step is safe. Safety backups are
+never rotated.
 
 **Free space:** Docker update, backup and restore check for at least
 **8 GiB free** in Docker storage and the host filesystems used for backups.
@@ -4066,7 +4144,10 @@ each container on the selected backup destination's filesystem (the backup direc
 restore's safety directory), not the system temporary directory, and check
 the floor on that destination before writing anything there; the staging
 files are removed on success, failure or interruption. Restore also checks
-PostgreSQL's writable mounts and, when replacing state, the state mounts.
+PostgreSQL's writable mounts and, when replacing state, the state mounts;
+`/data` must have 8 GiB free beyond the archive's size plus what it
+unpacks to, since the new state is extracted beside the old one from a copy
+of the archive.
 A low-space refusal says
 `less than 8 GiB is free on <location>; free at least 8 GiB there, then retry. Nothing was changed`.
 Free space on the named filesystem and rerun the same command. These

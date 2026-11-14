@@ -311,8 +311,22 @@ impl Board {
                         status.mode = Mode::Adapter(adapter);
                         status.checkin = true;
                     }
-                    Ok(Err(failure)) if !failure.transient() => {
+                    Ok(Err(failure)) if !failure.retried_in_background() => {
                         board.report_unavailable(&failure);
+                    }
+                    Ok(Err(failure)) if !failure.transient() => {
+                        // Another start of this session holds a fresh
+                        // reservation of the same state file.
+                        let state = board.config(None, None).state;
+                        let shown = state
+                            .as_deref()
+                            .map(|path| format!(" ({})", path.display()))
+                            .unwrap_or_default();
+                        let note = format!(
+                            "pseudolife-mcp: another start of this session is registering with the same private state{shown} ({}); memory proxy remains active and registration is retried in the background until that start saves it or its reservation goes stale (60 s).",
+                            failure.code
+                        );
+                        board.begin_retry_with(false, Some(note)).await;
                     }
                     _ => {
                         board.begin_retry(false).await;
@@ -332,18 +346,19 @@ impl Board {
             .state_file
             .clone()
             .or_else(|| self.config(None, None).state);
-        let line = unavailable_line(failure.code, state.as_deref());
+        let line = unavailable_line(failure, state.as_deref());
         crate::stderrln!("{line}");
     }
 }
-/// The one stderr line printed when board registration stopped for good
-/// (Python `coordination_unavailable_line`, same text). A saved address
-/// refused at startup names that file, the cause and the fix; any other
-/// cause keeps the generic checklist.
-fn unavailable_line(code: &str, state: Option<&std::path::Path>) -> String {
+/// The one stderr line printed when board registration stopped for good:
+/// the step that failed, its code, the cause and the one fix. A saved
+/// address refused at startup names that file; a refused private state names
+/// why it was refused (`state::diagnose`).
+fn unavailable_line(failure: &adapter::Failure, state: Option<&std::path::Path>) -> String {
     let where_state = state
         .map(|path| format!(" ({})", path.display()))
         .unwrap_or_default();
+    let code = failure.code;
     if code == "bank_identity_mismatch" {
         // A principal change on the same bank re-registers at startup, so
         // what still lands here is a saved address for another bank (or a
@@ -352,8 +367,40 @@ fn unavailable_line(code: &str, state: Option<&std::path::Path>) -> String {
             "pseudolife-mcp: coordination unavailable; memory proxy remains active. The saved board address{where_state} is bound to a different bank than this daemon serves, or the bank did not prove it, so it was kept and not used. Point this client back at that bank, or move the file aside and restart the session to register a new address on this one."
         );
     }
+    let stopped = match failure.step {
+        Some(step) => format!("Board registration stopped at {} ({code})", step.describe()),
+        None => format!("Board registration stopped ({code})"),
+    };
+    let refused = matches!(failure.status, Some(401 | 403));
+    let cause = match code {
+        "unauthorized" | "authentication_required" | "invalid_credential" => {
+            "the daemon refused this client's bearer token. Fix: check the configured token (PSEUDOLIFE_MCP_TOKEN or its token file) and restart the session.".to_owned()
+        }
+        "principal_not_allowed" => "the daemon does not let this login use the board. Fix: allow this token's principal in the daemon's coordination settings, then restart the session.".to_owned(),
+        "credential_unavailable" | "credential_changed" => "the bearer token became unavailable or changed meanwhile. Fix: finish the credential setup, then restart the session.".to_owned(),
+        // A refused bank check (HTTP 403 on /context) arrives as
+        // context_unavailable too; it is an access refusal, handled below.
+        "invalid_response" | "context_unavailable" if !refused => "the daemon's answer was not a board answer. Fix: check that the daemon URL points at a Pseudolife daemon that serves coordination.".to_owned(),
+        "state_unavailable" | "invalid_state" | "reservation_changed" => {
+            let what = match code {
+                "state_unavailable" => "the private state could not be created, read or written",
+                "invalid_state" => "the private state was refused",
+                _ => "the private state kept changing under another process",
+            };
+            // The fix follows what a fresh look at the file and its folder
+            // finds; without a permission or redirect cause, say what else
+            // the code means rather than guess at permissions.
+            match state.and_then(state::diagnose) {
+                Some(reason) => format!("{what}, because {reason}. Fix: make that folder private to this user (or move the file aside), then restart the session."),
+                None if code == "state_unavailable" => format!("{what}. Fix: check that this user can write that folder and its disk has space, then restart the session."),
+                None => format!("{what}. Fix: move the file aside (it may hold a record this client cannot read), then restart the session."),
+            }
+        }
+        _ if refused => "the daemon refused the request (HTTP 401/403). Fix: check the configured token and the daemon's access settings, then restart the session.".to_owned(),
+        _ => "Check the daemon's coordination setting, authentication and private adapter state, then restart the session.".to_owned(),
+    };
     format!(
-        "pseudolife-mcp: coordination unavailable; memory proxy remains active. Check the daemon's coordination setting, authentication and private adapter state{where_state}."
+        "pseudolife-mcp: coordination unavailable; memory proxy remains active. {stopped}{where_state}: {cause}"
     )
 }
 impl Board {
@@ -525,6 +572,11 @@ impl Board {
         Some(body.iter().any(|byte| !byte.is_ascii_whitespace()))
     }
     async fn begin_retry(self: &Arc<Self>, probe: bool) {
+        self.begin_retry_with(probe, None).await;
+    }
+    /// [`begin_retry`](Self::begin_retry) announcing `note` instead of the
+    /// usual line for a registration that did not complete.
+    async fn begin_retry_with(self: &Arc<Self>, probe: bool, note: Option<String>) {
         self.status.lock().await.mode = Mode::Pending;
         if probe {
             if self.options.codex {
@@ -538,9 +590,12 @@ impl Board {
             }
         } else {
             self.status.lock().await.checkin = true;
-            crate::stderrln!(
-                "pseudolife-mcp: coordination registration did not complete at startup (daemon unreachable or slow); memory proxy remains active and registration is retried in the background."
-            );
+            match note {
+                Some(note) => crate::stderrln!("{note}"),
+                None => crate::stderrln!(
+                    "pseudolife-mcp: coordination registration did not complete at startup (daemon unreachable or slow); memory proxy remains active and registration is retried in the background."
+                ),
+            }
         }
         let board = self.clone();
         self.tasks.spawn(async move {
@@ -580,7 +635,7 @@ impl Board {
                         if board.closing.load(Ordering::Acquire) { adapter.close().await; return; }
                         let mut status = board.status.lock().await; status.mode = Mode::Adapter(adapter); status.note = Some(policy::REGISTERED);crate::stderrln!("pseudolife-mcp: coordination registered after a startup delay; board tools are available."); return;
                     }
-                    Ok(Err(failure)) if !failure.transient() => { let mut status = board.status.lock().await; status.mode = Mode::Stopped; status.note = Some(policy::STOPPED);board.report_unavailable(&failure); return; }
+                    Ok(Err(failure)) if !failure.retried_in_background() => { let mut status = board.status.lock().await; status.mode = Mode::Stopped; status.note = Some(policy::STOPPED);board.report_unavailable(&failure); return; }
                     _ => {}
                 }
             }
@@ -766,6 +821,16 @@ impl Board {
             Ok(Ok(_)) => ("", None, None, None),
             Err(_) => ("timeout", None, None, None),
         };
+        let failure = match &result {
+            Ok(Err(failure)) => failure.clone(),
+            _ => adapter::Failure {
+                code: failure_code,
+                status: None,
+                binding: None,
+                state_file: None,
+                step: None,
+            },
+        };
         if let Ok(Ok(adapter)) = result {
             if self.closing.load(Ordering::Acquire) {
                 adapter.close().await;
@@ -809,7 +874,7 @@ impl Board {
                 // Name the saved file only for a refusal about one: the
                 // bound or legacy record the adapter loaded (Python's
                 // registry line, `error.state_file`).
-                let line = unavailable_line(failure_code, state_file.as_deref());
+                let line = unavailable_line(&failure, state_file.as_deref());
                 crate::stderrln!("{line}");
             }
             Err(entry.failure_hint.clone())
@@ -1135,5 +1200,142 @@ mod home_tests {
             options.state_root,
             home.join(".codex").join("pseudolife/agents")
         );
+    }
+}
+
+#[cfg(test)]
+mod unavailable_line_tests {
+    use super::{
+        adapter::{Failure, Step},
+        unavailable_line,
+    };
+
+    fn failure(code: &'static str, status: Option<u16>, step: Option<Step>) -> Failure {
+        Failure {
+            code,
+            status,
+            binding: None,
+            state_file: None,
+            step,
+        }
+    }
+
+    #[test]
+    fn a_stopped_registration_names_its_step_code_cause_and_fix() {
+        let state = std::env::temp_dir()
+            .join("pseudolife-line-test")
+            .join("key.json");
+        let line = unavailable_line(
+            &failure("state_unavailable", None, Some(Step::PrivateState)),
+            Some(&state),
+        );
+        assert!(
+            line.starts_with("pseudolife-mcp: coordination unavailable; memory proxy remains active. Board registration stopped at the private state (state_unavailable) ("),
+            "{line}"
+        );
+        assert!(line.contains(&state.display().to_string()), "{line}");
+        assert!(
+            line.contains("could not be created, read or written"),
+            "{line}"
+        );
+        // Nothing wrong with its permissions now (the folder does not
+        // exist): the fix is about writability and space, not privacy.
+        assert!(
+            line.contains("Fix: check that this user can write that folder and its disk has space"),
+            "{line}"
+        );
+        assert!(
+            !line.contains("Check the daemon's coordination setting"),
+            "{line}"
+        );
+
+        // A folder others can use is named as the cause, with the privacy fix.
+        let open =
+            std::env::temp_dir().join(format!("pseudolife-line-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir(&open).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(open.join("key.json"), b"{}").unwrap();
+            std::fs::set_permissions(
+                open.join("key.json"),
+                std::fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+        }
+        #[cfg(windows)]
+        crate::credentials::windows_security::set_dacl_sddl(
+            &open,
+            "D:(A;;FA;;;OW)(A;OICI;FA;;;WD)",
+        )
+        .unwrap();
+        let line = unavailable_line(
+            &failure("invalid_state", None, Some(Step::PrivateState)),
+            Some(&open.join("key.json")),
+        );
+        let _ = std::fs::remove_dir_all(&open);
+        assert!(
+            line.contains("the private state was refused, because ")
+                && line.contains("Fix: make that folder private to this user"),
+            "{line}"
+        );
+
+        // A bank check the daemon refused (403 on /context) is an access
+        // refusal, not a wrong server.
+        let line = unavailable_line(
+            &failure("context_unavailable", Some(403), Some(Step::BankCheck)),
+            None,
+        );
+        assert!(line.contains("stopped at the bank check (context_unavailable): the daemon refused the request (HTTP 401/403)"), "{line}");
+        assert!(!line.contains("not a board answer"), "{line}");
+
+        let line = unavailable_line(
+            &failure("unauthorized", Some(401), Some(Step::BankCheck)),
+            None,
+        );
+        assert!(line.contains("stopped at the bank check (unauthorized): the daemon refused this client's bearer token. Fix: check the configured token"), "{line}");
+
+        let line = unavailable_line(
+            &failure("request_refused", Some(403), Some(Step::Registration)),
+            None,
+        );
+        assert!(line.contains("stopped at registration (request_refused): the daemon refused the request (HTTP 401/403)"), "{line}");
+
+        let line = unavailable_line(
+            &failure("invalid_state", None, Some(Step::StateSave)),
+            Some(&state),
+        );
+        assert!(
+            line.contains("stopped at saving the private state (invalid_state)")
+                && line.contains("the private state was refused"),
+            "{line}"
+        );
+
+        // A code with no specific cause keeps the checklist, after the step.
+        let line = unavailable_line(
+            &failure("instance_not_found", Some(404), Some(Step::Attach)),
+            None,
+        );
+        assert!(
+            line.contains(
+                "stopped at attach (instance_not_found): Check the daemon's coordination setting"
+            ),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn only_a_fresh_reservation_held_elsewhere_joins_the_background_retry() {
+        assert!(failure("registration_in_progress", None, None).retried_in_background());
+        assert!(failure("transport_unavailable", None, None).retried_in_background());
+        assert!(!failure("registration_in_progress", None, None).transient());
+        for code in [
+            "reservation_changed",
+            "state_unavailable",
+            "invalid_state",
+            "unauthorized",
+        ] {
+            assert!(!failure(code, None, None).retried_in_background(), "{code}");
+        }
     }
 }

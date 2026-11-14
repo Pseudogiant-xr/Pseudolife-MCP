@@ -2444,3 +2444,200 @@ def test_every_source_mutant_matches_its_source_exactly_once():
             if 1 not in counts:
                 stale.append(f"{mutant.id}: {max(counts)} matches in {mutant.file}")
     assert stale == []
+
+
+# ---- --record-candidate: re-recording a golden from the Rust candidate ------------
+
+
+_DEFERRED = b"pseudolife-stdio: mode 'probe' is deferred in this candidate\n"
+
+
+def _candidate_rig(tmp_path, monkeypatch, outputs: dict, committed: dict | None = None):
+    """A fake row ``probe`` whose cases (``outputs``' keys, in order) answer
+    ``outputs[id]`` on the candidate, with its golden for this platform in
+    ``tmp_path / goldens`` holding ``committed`` (case id -> observation)."""
+    import json  # noqa: PLC0415
+    from cli_harness import runner  # noqa: PLC0415
+    from cli_harness.rows import _daemon  # noqa: PLC0415
+    goldens = tmp_path / "goldens"
+    goldens.mkdir()
+    monkeypatch.setattr(runner, "GOLDENS", goldens)
+    monkeypatch.setattr(runner.rows, "ROWS", {"probe": "CLI-PROBE"})
+    monkeypatch.setattr(runner.rows, "load", lambda row: [core.Case(cid, []) for cid in outputs])
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(_daemon, "ORACLE", dict(_daemon.ORACLE))
+    ran = []
+
+    def run_arm(case, target, home):
+        ran.append(case.id)
+        return {**outputs[case.id], "home": str(home)}
+
+    monkeypatch.setattr(core, "run_arm", run_arm)
+    candidate = tmp_path / ("pseudolife-stdio.exe" if core.WINDOWS else "pseudolife-stdio")
+    candidate.write_bytes(b"not a real binary")
+    path = goldens / f"probe.{core.PLATFORM}.json"
+    if committed is not None:
+        golden = {"row": "CLI-PROBE", "platform": core.PLATFORM, "oracle_commit": "0" * 40,
+                  "oracle_commit_source": "git",
+                  "cases": {cid: dict(o, home=None) for cid, o in committed.items()}}
+        path.write_text(json.dumps(golden, indent=1, ensure_ascii=True) + "\n",
+                        encoding="utf-8", newline="\n")
+    return runner, candidate, path, ran
+
+
+def _run_candidate(runner, candidate, *extra):
+    return runner.main(["--row", "probe", "--record-candidate", "--candidate", str(candidate),
+                        *extra])
+
+
+def test_record_candidate_reports_unchanged_changed_and_new_and_dry_run_writes_nothing(
+        tmp_path, monkeypatch, capsys):
+    same = obs(stdout=b"same\n")
+    runner, candidate, path, ran = _candidate_rig(
+        tmp_path, monkeypatch,
+        {"same": same, "moved": obs(stdout=b"after\n"), "added": obs(stdout=b"added\n")},
+        committed={"same": same, "moved": obs(stdout=b"before\n")})
+    before = path.read_bytes()
+    assert _run_candidate(runner, candidate) == 1  # something would change
+    out = capsys.readouterr().out
+    assert "  unchanged same" in out and "  CHANGED moved" in out and "  new added" in out
+    # The changed case shows the replay's own difference, labelled for review.
+    assert "stdout: golden    'before\\n'" in out and "stdout: candidate 'after\\n'" in out
+    assert "stdout: 'added\\n'" in out  # what the new case would assert
+    assert "would change (1 changed, 1 new, 0 removed)" in out
+    assert path.read_bytes() == before and ran == ["same", "moved", "added"]
+
+
+def test_record_candidate_exits_zero_when_every_case_is_unchanged(tmp_path, monkeypatch, capsys):
+    same = obs(exit=3, stderr=b"refused\n")
+    runner, candidate, path, _ = _candidate_rig(tmp_path, monkeypatch, {"same": same},
+                                                committed={"same": same})
+    before = path.read_bytes()
+    assert _run_candidate(runner, candidate) == 0
+    assert _run_candidate(runner, candidate, "--write") == 0
+    assert "nothing to change" in capsys.readouterr().out and path.read_bytes() == before
+
+
+def test_record_candidate_write_replaces_exactly_the_selected_changed_cases(
+        tmp_path, monkeypatch, capsys):
+    import hashlib  # noqa: PLC0415
+    import json  # noqa: PLC0415
+    runner, candidate, path, ran = _candidate_rig(
+        tmp_path, monkeypatch,
+        {"same": obs(stdout=b"same\n"), "moved": obs(stdout=b"after\n"),
+         "skipped": obs(stdout=b"would change too\n")},
+        committed={"same": obs(stdout=b"same\n"), "moved": obs(stdout=b"before\n"),
+                   "skipped": obs(stdout=b"recorded\n"), "stale": obs()})
+    other_os = "linux" if core.PLATFORM == "windows" else "windows"
+    other_path = path.with_name(f"probe.{other_os}.json")
+    other_path.write_text(json.dumps({"cases": {"moved": obs()}}), encoding="utf-8")
+    other_before = other_path.read_bytes()
+    committed = json.loads(path.read_text(encoding="utf-8"))
+    assert _run_candidate(runner, candidate, "--case", "same", "--case", "moved",
+                          "--write") == 0
+    out = capsys.readouterr().out
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    assert ran == ["same", "moved"]
+    # Only the changed selected case is replaced; every other entry is as
+    # committed, a stale one included, since a --case recording never removes.
+    assert base64.b64decode(golden["cases"]["moved"]["stdout"]) == b"after\n"
+    for cid in ("same", "skipped", "stale"):
+        assert golden["cases"][cid] == committed["cases"][cid]
+    assert list(golden["cases"]) == ["same", "moved", "skipped", "stale"]
+    assert golden["oracle_commit"] == "0" * 40
+    stamp = golden[runner.CANDIDATE_PROVENANCE]
+    assert list(stamp) == ["moved"] and stamp["moved"]["platform"] == core.PLATFORM
+    assert stamp["moved"]["rust_tree"] in ("clean", "modified", "unknown")
+    assert stamp["moved"]["candidate_sha256"] == hashlib.sha256(b"not a real binary").hexdigest()
+    # The other platform's golden is untouched, and the run says how to redo it there.
+    assert other_path.read_bytes() == other_before
+    assert f"probe.{other_os}.json is not touched" in out
+    assert "--row probe --case same --case moved --record-candidate" in out
+
+
+def test_record_candidate_whole_row_removes_a_case_the_row_no_longer_defines(
+        tmp_path, monkeypatch, capsys):
+    import json  # noqa: PLC0415
+    same = obs(stdout=b"same\n")
+    runner, candidate, path, _ = _candidate_rig(tmp_path, monkeypatch, {"same": same},
+                                                committed={"same": same, "gone": obs()})
+    assert _run_candidate(runner, candidate) == 1
+    assert "  removed gone" in capsys.readouterr().out
+    assert "gone" in json.loads(path.read_text(encoding="utf-8"))["cases"]
+    assert _run_candidate(runner, candidate, "--write") == 0
+    assert list(json.loads(path.read_text(encoding="utf-8"))["cases"]) == ["same"]
+
+
+def test_record_candidate_writes_a_golden_the_row_did_not_have(tmp_path, monkeypatch):
+    import json  # noqa: PLC0415
+    runner, candidate, path, _ = _candidate_rig(tmp_path, monkeypatch,
+                                                {"added": obs(stdout=b"added\n")})
+    assert _run_candidate(runner, candidate, "--write") == 0
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    assert golden["row"] == "CLI-PROBE" and golden["platform"] == core.PLATFORM
+    assert "oracle_commit" not in golden and list(golden["cases"]) == ["added"]
+    assert golden["cases"]["added"]["home"] is None
+    # What was written replays green against the same candidate output.
+    assert runner.main(["--row", "probe", "--golden", "--candidate", str(candidate)]) == 0
+
+
+@pytest.mark.parametrize("kind", ["vacuous", "deferred", "host-path"])
+def test_record_candidate_refuses_and_writes_nothing_for_the_row(tmp_path, monkeypatch, capsys,
+                                                                 kind):
+    bad = {"vacuous": obs(stdout=b"", vacuous="no stdout where the case requires output"),
+           "deferred": obs(exit=1, stderr=_DEFERRED),
+           "host-path": obs(stdout=str(Path.home()).encode() + b"\n")}[kind]
+    runner, candidate, path, _ = _candidate_rig(
+        tmp_path, monkeypatch, {"good": obs(stdout=b"after\n"), "bad": bad},
+        committed={"good": obs(stdout=b"before\n")})
+    before = path.read_bytes()
+    assert _run_candidate(runner, candidate, "--write") == 1
+    out = capsys.readouterr().out
+    reason = {"vacuous": "its observation is vacuous", "deferred": "printed a deferral",
+              "host-path": "would not replay against the run it came from"}[kind]
+    assert "REFUSED: " in out and reason in out
+    assert "nothing written for probe" in out and path.read_bytes() == before
+
+
+def test_record_candidate_records_a_deferral_only_when_allowed(tmp_path, monkeypatch):
+    import json  # noqa: PLC0415
+    runner, candidate, path, _ = _candidate_rig(tmp_path, monkeypatch,
+                                                {"deferred": obs(exit=1, stderr=_DEFERRED)})
+    assert _run_candidate(runner, candidate, "--write") == 1 and not path.exists()
+    assert _run_candidate(runner, candidate, "--write", "--allow-deferral") == 0
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    assert base64.b64decode(golden["cases"]["deferred"]["stderr"]) == _DEFERRED
+
+
+def test_record_candidate_keeps_an_unchanged_deferral_case_without_the_flag(
+        tmp_path, monkeypatch):
+    deferred = obs(exit=1, stderr=_DEFERRED)
+    runner, candidate, _, _ = _candidate_rig(tmp_path, monkeypatch, {"d": deferred},
+                                             committed={"d": deferred})
+    assert _run_candidate(runner, candidate) == 0
+
+
+@pytest.mark.parametrize("flag", ["--write", "--allow-deferral"])
+def test_write_and_allow_deferral_need_record_candidate(tmp_path, monkeypatch, flag):
+    runner, candidate, _, _ = _candidate_rig(tmp_path, monkeypatch, {"c": obs()})
+    with pytest.raises(SystemExit) as refused:
+        runner.main(["--row", "probe", "--golden", "--candidate", str(candidate), flag])
+    assert refused.value.code == 2
+
+
+def test_replay_passes_on_oracle_goldens_and_ignores_candidate_provenance(
+        tmp_path, monkeypatch, capsys):
+    import json  # noqa: PLC0415
+    runner, candidate, path, _ = _candidate_rig(
+        tmp_path, monkeypatch, {"oracle": obs(stdout=b"o\n"), "native": obs(stdout=b"n\n")},
+        committed={"oracle": obs(stdout=b"o\n"), "native": obs(stdout=b"n\n")})
+    golden = json.loads(path.read_text(encoding="utf-8"))
+    # An oracle-recorded golden (no provenance at all) replays green.
+    assert runner.main(["--row", "probe", "--golden", "--candidate", str(candidate)]) == 0
+    # Provenance naming another commit, platform and binary changes nothing.
+    golden[runner.CANDIDATE_PROVENANCE] = {"native": {
+        "commit": "f" * 40, "rust_tree": "modified", "platform": "elsewhere",
+        "candidate_sha256": "0" * 64}}
+    path.write_text(json.dumps(golden), encoding="utf-8")
+    assert runner.main(["--row", "probe", "--golden", "--candidate", str(candidate)]) == 0
+    assert capsys.readouterr().out.count("2/2 match") == 2

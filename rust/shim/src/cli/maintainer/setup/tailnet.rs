@@ -14,7 +14,7 @@ async fn call(binary: &std::path::Path, args: &[&str]) -> system::Output {
     system::run(&command, 30).await
 }
 pub(super) async fn detect() -> Result<Option<Tailnet>> {
-    let Some(binary) = system::tailscale() else {
+    let Some(binary) = system::tailscale()? else {
         return Ok(None);
     };
     let output = call(&binary, &["status", "--json"]).await;

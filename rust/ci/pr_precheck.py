@@ -32,6 +32,7 @@ PYTHON_ROOTS = {
     "move": ("move_cli",),
     "tunnel": ("tunnel_cli",),
     "console": ("console_cli",),
+    "expose": ("expose_cli",),
     "restore": ("restore_cli", "docker_backup_restore"),
     "conductor_watch": ("conductor_watch_cli",),
     "update": ("update_cli",),
@@ -187,13 +188,19 @@ def windows_differs(root: Path, row: str) -> bool:
 
 
 def select(files: list[str] | None, root: Path = ROOT) -> dict:
+    """The rows whose committed goldens this PR replays.
+
+    Since the Python freeze (14 November 2026) nothing here compares against
+    a live Python oracle: the frozen judge probes left CI (``judges`` is
+    always empty), and so did the rows whose only CI replay read a recording
+    made from the oracle in the same run (parity_scope.UNREPLAYED_ROWS).
+    """
+    from parity_scope import UNREPLAYED_ROWS
     owners = python_owners(root)
     reached = set(ROWS) if files is None else {row for path in files for row in rows_for(path, owners)}
-    linux = [row for row in ROWS if row in reached]
+    linux = [row for row in ROWS if row in reached and row not in UNREPLAYED_ROWS]
     windows = [row for row in linux if windows_differs(root, row)]
-    selected = set(JUDGES) if files is None else {group for path in files for group in judges_for(path, source_graph(root), owners)}
-    return {"schema": 1, "linux": linux, "windows": windows,
-            "judges": [group for group in JUDGES if group in selected]}
+    return {"schema": 1, "linux": linux, "windows": windows, "judges": []}
 
 
 def changed_files() -> list[str] | None:

@@ -1359,3 +1359,42 @@ fn a_new_release_moves_the_bundle_and_leaves_the_approved_commands_alone() {
     let listed = listed_manual(&world);
     manual::vet(&listed.iter().collect::<Vec<_>>(), &world.home, true).unwrap();
 }
+
+#[tokio::test]
+async fn an_instruction_file_that_cannot_be_written_is_reported_not_silent() {
+    // Hooks ready, the requested memory block refused: the step still
+    // exits 0 (the hooks work), but the report and stderr say what failed.
+    let world = World::new();
+    fs::create_dir_all(world.home.join("AGENTS.md")).unwrap();
+    let report = world.run("manual", "yes", "append").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    assert_eq!(report.instructions, "skipped");
+    assert_eq!(report.exit(), 0);
+    let json = report.json();
+    let error = &json["instructions_error"];
+    assert!(
+        error["file"]
+            .as_str()
+            .is_some_and(|f| f.ends_with("AGENTS.md")),
+        "{json}"
+    );
+    assert!(
+        error["cause"].as_str().is_some_and(|c| !c.is_empty()),
+        "{json}"
+    );
+    assert!(
+        report
+            .backups
+            .iter()
+            .all(|b| !b.to_string_lossy().starts_with(r"\\?\")),
+        "{:?}",
+        report.backups
+    );
+    let lines = stderr_lines(&report);
+    assert!(
+        lines.iter().any(|l| l.contains("AGENTS.md")
+            && l.contains("not written")
+            && l.contains("rerun the installer")),
+        "{lines:?}"
+    );
+}

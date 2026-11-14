@@ -626,37 +626,11 @@ fn migrate_codex(text: &str, launcher: &Path, args: &[String]) -> Result<Vec<u8>
     Ok(output.into_bytes())
 }
 
+/// `name` in an absolute `PATH` directory, never the current directory:
+/// `program_lookup.find_program`'s rule (PATHEXT's launchable extensions in
+/// its order on Windows). An entry that is not UTF-8 is still searched.
 pub fn absolute_command(name: &str) -> Option<PathBuf> {
-    let names: Vec<_> = if cfg!(windows) {
-        [".exe", ".com", ".cmd", ".bat"]
-            .iter()
-            .map(|e| format!("{name}{e}"))
-            .collect()
-    } else {
-        vec![name.to_owned()]
-    };
-    for directory in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
-        if !directory.is_absolute() {
-            continue;
-        }
-        for name in &names {
-            let path = directory.join(name);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if !path
-                    .metadata()
-                    .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-                {
-                    continue;
-                }
-            }
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    None
+    crate::cli::program_lookup::find_program_path(name)
 }
 pub fn expose_launcher(layout: &Layout) -> Value {
     #[cfg(unix)]

@@ -12,8 +12,7 @@ from parity_scope import ALL, FLOOR, ROW_SUITES, SHARDS, SHIM_COMMANDS, SUITES, 
 from test_workflow import CODE_CHANGES, DOCS_ONLY_CHANGES, W1C_SUITES
 
 ROOT = Path(__file__).resolve().parents[2]
-# Windows' live comparisons, and the H5 suites each OS runs in or around
-# the Linux h5-light composite.
+# The pairs the matrix always leaves out: none since the Python freeze.
 STATIC = [dict(pair) for pair in parity_scope.STATIC_EXCLUDE]
 
 
@@ -45,17 +44,19 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     # A row, its golden or its spec reaches the shard that runs it.
     (["rust/cli_harness/rows/doctor.py"], {"w1c-doctor"}),
     (["rust/cli_harness/goldens/test_login.linux.json"], {"w1c-connection"}),
-    (["rust/cli_harness/rows/invite.md", "rust/cli_harness/rows/audit.py"], {"w1c-pairing", "h5-audit"}),
+    (["rust/cli_harness/rows/invite.md", "rust/cli_harness/rows/audit.py"], {"w1c-pairing"}),
+    # Rows no shard replays since the freeze reach the floor only.
+    (["rust/cli_harness/rows/backup.py", "rust/cli_harness/goldens/migrate_flat.linux.json"], set()),
     (["rust/cli_harness/rows/mail.py", "rust/cli_harness/specs/CLI-LEASE-core.md"], set()),
     # Python tests the harness never imports: the floor's MCP catalogue step.
     (["tests/test_shim.py", "tests/conftest.py"], set()),
-    # One command's shim code reaches its rows and the judges.
+    # One command's shim code reaches its rows.
     # Doctor's users include console (its registration search).
-    (["rust/shim/src/cli/doctor/mod.rs"], {"w1c-doctor", "w1c-connection", "judges"}),
-    (["rust/shim/src/cli/update/engine.rs"], {"w1c-doctor", "w1c-connection", "judges"}),
-    (["rust/shim/src/cli/backup/mod.rs"], {"h5-backup", "w1c-doctor", "w1c-connection",
-                                           "judges"}),
-    (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing", "judges"}),
+    (["rust/shim/src/cli/doctor/mod.rs"], {"w1c-doctor", "w1c-connection"}),
+    (["rust/shim/src/cli/update/engine.rs"], {"w1c-doctor", "w1c-connection"}),
+    (["rust/shim/src/cli/backup/mod.rs"], {"w1c-doctor", "w1c-connection"}),
+    (["rust/shim/src/cli/migrate_flat.rs"], set()),
+    (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing"}),
     # Helpers other commands import reach the whole binary (Codex review:
     # tunnel uses hook_json, board_audit uses lease).
     (["rust/shim/src/cli/hook_json.rs"], set(parity_scope.SHIM) - set(FLOOR)),
@@ -63,16 +64,17 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     (["rust/shim/src/cli/pairing/invite.rs"], set(parity_scope.SHIM) - set(FLOOR)),
     (["rust/shim/src/cli/wait_mail.rs"], set(parity_scope.SHIM) - set(FLOOR)),
     (["rust/shim/src/main.rs"], set(parity_scope.SHIM) - set(FLOOR)),
-    # The daemon crate: its rows, not the CLI-only shards.
-    (["rust/daemon/src/server.rs"], {"h5-background", "h5-daemon-mutants", "h5-graph-mutants"}),
-    (["evals/rust_port/cli_argv.py"], {"judges"}),
+    # The daemon crate: its shards (the floor), not the CLI-only ones.
+    (["rust/daemon/src/server.rs"], set()),
+    # No shard runs the differential instrument's own tests or its oracle
+    # binding since the Python freeze (14 November 2026).
+    (["evals/rust_port/cli_argv.py"], set()),
+    (["evals/rust_port/oracle_selection.py", "evals/rust_port/phase1_oracle.py"], set()),
     (["evals/rust_baseline/ci.py"], set()),
 ])
 def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     suites, _ = select("pull_request", files)
-    # Linux runs h5-audit, h5-backup and h5-background inside h5-light.
-    light = {"h5-light"} if extra & set(parity_scope.LINUX_LIGHT) else set()
-    assert set(suites) == set(FLOOR) | extra | light
+    assert set(suites) == set(FLOOR) | extra
     assert suites == [suite for suite in SUITES if suite in suites]
 
 
@@ -80,7 +82,6 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     ".github/workflows/rust.yml", "rust/ci/coverage_plan.py", "rust/ci/parity_scope.py",
     "rust/Cargo.lock", "rust/rust-toolchain.toml", "rust/shared/float_repr.rs",
     "rust/daemon/harness/run.py",
-    "evals/rust_port/oracle_selection.py", "evals/rust_port/phase1_oracle.py",
     "pseudolife_memory/cli/doctor.py", "plugin/hooks/session-start.sh", "ops/Dockerfile.pg",
     "pyproject.toml", "uv.lock", "examples/hooks.py", "something/new.rs", "Rust/daemon/src/x.rs",
     # Shared CLI harness code: the daemon harness's disposable banks import
@@ -92,9 +93,8 @@ def test_a_pull_request_runs_the_floor_and_what_it_reaches(files, extra):
     "tests/test_coordination_audit.py",
     # evals/rust_port modules the harness imports.
     "evals/rust_port/sent_http.py", "evals/rust_port/processes.py", "evals/rust_port/harness.py",
-    # Reached through relative imports, and the packages' __init__ (reviewer,
-    # 2026-10-20: oracle_selection imports .oracle_pins).
-    "evals/rust_port/oracle_pins.py", "evals/rust_port/__init__.py", "tests/__init__.py",
+    # The packages' __init__.
+    "evals/rust_port/__init__.py", "tests/__init__.py",
 ])
 def test_anything_it_cannot_place_runs_every_suite(path):
     assert reached(path) == ALL
@@ -116,9 +116,12 @@ def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch
                                          encoding="utf-8")
     for name in ("e", "f", "g", "h"):
         (tmp_path / f"tests/{name}.py").write_text("y = 2\n", encoding="utf-8")
-    # evals.rust_port: the oracle modules seed the closure; a relative import
-    # from one of them is reached though no harness names it.
-    (tmp_path / "evals/rust_port/oracle_selection.py").write_text("from .pins import P\n", encoding="utf-8")
+    # evals.rust_port: what the harnesses import seeds the closure, and a
+    # relative import from one of those is reached though no harness names
+    # it. The oracle modules no longer seed it (no shard binds an oracle).
+    (tmp_path / "rust/seeder.py").write_text("from evals.rust_port.fixtures import F\n", encoding="utf-8")
+    (tmp_path / "evals/rust_port/fixtures.py").write_text("from .pins import P\n", encoding="utf-8")
+    (tmp_path / "evals/rust_port/oracle_selection.py").write_text("from .unrelated import Q\n", encoding="utf-8")
     (tmp_path / "evals/rust_port/pins.py").write_text("P = 1\n", encoding="utf-8")
     (tmp_path / "evals/rust_port/unrelated.py").write_text("Q = 1\n", encoding="utf-8")
     monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
@@ -126,7 +129,8 @@ def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch
     try:
         assert parity_scope.harness_imports("tests") == {"a", "b", "d", "e", "f", "g", "h"}
         rust_port = parity_scope.harness_imports("evals.rust_port")
-        assert {"oracle_selection", "pins"} <= rust_port and "unrelated" not in rust_port
+        assert {"fixtures", "pins"} <= rust_port
+        assert not {"oracle_selection", "unrelated"} & rust_port
     finally:
         parity_scope.harness_imports.cache_clear()
 
@@ -144,11 +148,18 @@ def test_ordinary_pr_precheck_imports_do_not_widen_batch_routing(tmp_path, monke
     assert "batch_seeder" in imports("tests") and "early_seeder" not in imports("tests")
 
 
-def test_the_floor_is_cli_w1a_and_eval():
+def test_the_floor_is_cli_and_eval():
     # The brief from the 2026-10-20 root-cause report: cli, h5-w1a and eval
-    # on every Rust pull request; cli is now five shards (2026-10-24).
-    assert set(FLOOR) == {"eval", "cli", "cli-store", "cli-startup", "cli-live", "h5-w1a"}
+    # on every Rust pull request; cli became five shards (2026-10-24), and
+    # cli-live and h5-w1a left with the Python freeze (14 November 2026).
+    assert set(FLOOR) == {"eval", "cli", "cli-store", "cli-startup"}
     assert set(FLOOR) <= set(SUITES)
+
+
+def test_no_suite_left_that_held_only_live_comparisons():
+    assert not {"cli-live", "judges", "h5-audit", "h5-backup", "h5-w1a", "h5-background",
+                "h5-daemon-mutants", "h5-graph-mutants", "h5-light"} & set(SUITES)
+    assert parity_scope.STATIC_EXCLUDE == () and parity_scope.ORACLE_MODULES == ()
 
 
 def test_startup_parts_share_one_physical_suite_on_each_os():
@@ -157,7 +168,7 @@ def test_startup_parts_share_one_physical_suite_on_each_os():
     values = parity_scope.pruned(SUITES, [], "workflow_dispatch")
     pairs = {(os_name, suite) for os_name in parity_scope.SYSTEMS for suite in values["suite"]
              if not any(rule.get("os") == os_name and rule.get("suite") == suite for rule in values["exclude"])}
-    assert len(pairs) == 29
+    assert len(pairs) == 16
     assert {(os_name, "cli-startup") for os_name in parity_scope.SYSTEMS} <= pairs
 
 
@@ -277,12 +288,12 @@ def test_the_plan_pages_counted_as_docs_are_read_by_no_code():
 
 def test_every_row_has_a_suite_and_w1c_rows_match_their_shards():
     from rust.cli_harness import rows
-    assert set(ROW_SUITES) == set(rows.ROWS)
     for shard in SHARDS:
         if shard["suite"] in W1C_SUITES:
             assert {row for row, suite in ROW_SUITES.items() if suite == shard["suite"]} == \
                 set(re.findall(r"'([a-z_]+)'", shard["w1c_rows"]))
-    assert {row for row, suite in ROW_SUITES.items() if suite.startswith("h5-")} == {"audit", "backup", "migrate_flat"}
+    assert set(ROW_SUITES) | set(parity_scope.UNREPLAYED_ROWS) == set(rows.ROWS)
+    assert not set(ROW_SUITES) & set(parity_scope.UNREPLAYED_ROWS)
     assert set(ROW_SUITES.values()) <= set(SUITES)
 
 
@@ -348,7 +359,7 @@ def test_every_mapped_shim_entry_exists():
     cli = ROOT / "rust/shim/src/cli"
     for entry, row_names in SHIM_COMMANDS.items():
         assert (cli / entry).exists(), entry
-        assert set(row_names) <= set(ROW_SUITES), entry
+        assert set(row_names) <= set(ROW_SUITES) | set(parity_scope.UNREPLAYED_ROWS), entry
 
 
 @pytest.mark.parametrize("files", [
@@ -371,13 +382,13 @@ def test_the_output_is_one_line_of_json(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(parity_scope, "changed_files", lambda: ["rust/cli_harness/rows/doctor.py"])
     assert parity_scope.main(["--event", "pull_request", "--github-output", str(output)]) == 0
     lines = output.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2 and lines[0].startswith("parity=") and lines[1].startswith("selfhosted=")
+    assert len(lines) == 3 and lines[0].startswith("parity=") and lines[1].startswith("selfhosted=")
+    assert lines[2] == "parity_any=true"
     values = json.loads(lines[0].removeprefix("parity="))
-    assert values["suite"] == ["eval", "cli", "cli-store", "cli-startup", "cli-live",
-                               "w1c-doctor", "h5-w1a"]
+    assert values["suite"] == ["eval", "cli", "cli-store", "cli-startup", "w1c-doctor"]
     printed = capsys.readouterr().out
     assert "rust/cli_harness/rows/doctor.py -> w1c-doctor" in printed
-    assert "running 7 of 17 suites" in printed
+    assert "running 5 of 8 suites" in printed
 
 
 @pytest.mark.parametrize("event, files", [("push", ["rust/cli_harness/rows/doctor.py"]),
@@ -404,6 +415,8 @@ def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
     batch = next(s for s in scope["steps"] if s.get("id") == "batch")
     assert scope["steps"].index(batch) < scope["steps"].index(step)
     assert scope["outputs"]["parity_selfhosted"] == "${{ steps.parity.outputs.selfhosted }}"
+    assert scope["outputs"]["parity_any"] == "${{ steps.parity.outputs.parity_any }}"
+    assert "needs.scope.outputs.parity_any != 'false'" in jobs["parity-checks"]["if"]
     for name, suite, include in (
             ("parity-checks", parity_scope.SUITE_EXPRESSION, parity_scope.INCLUDE_EXPRESSION),
             ("parity-selfhosted", parity_scope.SELFHOSTED_SUITE_EXPRESSION,
@@ -416,8 +429,8 @@ def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
     # Only the hosted matrix has an os axis to exclude pairs from.
     assert jobs["parity-checks"]["strategy"]["matrix"]["exclude"] == parity_scope.EXCLUDE_EXPRESSION
     assert "exclude" not in jobs["parity-selfhosted"]["strategy"]["matrix"]
-    # The Windows live job is one fixed shard, not chosen per diff.
-    assert jobs["parity-live"]["strategy"]["matrix"]["suite"] == ["cli-live"]
+    # The Windows live job left with the Python freeze (14 November 2026).
+    assert "parity-live" not in jobs
 
 
 @pytest.mark.parametrize("event, files", [("schedule", None), ("workflow_dispatch", None),
@@ -425,7 +438,7 @@ def test_the_scope_job_publishes_the_matrix_and_both_parity_lanes_use_it():
 def test_every_selfhosted_job_has_a_runner(tmp_path, monkeypatch, event, files):
     # An include entry matching no runner x suite combination becomes a job
     # with no runner, routed to an unserved label and queued for a day (Opus
-    # review of 53fd499d: h5-light, which the hosted matrix runs on Linux only).
+    # review of 53fd499d: h5-light, which the hosted matrix ran on Linux only).
     monkeypatch.setattr(parity_scope, "changed_files", lambda: files)
     output = tmp_path / "github_output"
     assert parity_scope.main(["--event", event, "--github-output", str(output)]) == 0
@@ -456,10 +469,9 @@ def test_resolve_expands_the_full_matrix_once():
 
 
 # A master push whose merged batch passed some (os, suite) pairs on the same
-# tree (ops/ci_batch_passed.py) leaves them out of its matrix. eval and judges
-# never leave: they compare against the event-selected oracle, the merge base
-# on a pull request and the pushed head on a push, so the batch's pass is not
-# the push's result.
+# tree (ops/ci_batch_passed.py) leaves them out of its matrix. Since the
+# Python freeze no suite compares against an event-selected oracle, so any
+# pair may leave, and a push whose batch passed them all runs none.
 
 def checks(*pairs):
     return [f"Parity checks / {os_name} / {suite}" for os_name, suite in pairs]
@@ -497,40 +509,34 @@ def test_a_push_with_nothing_passed_runs_the_full_matrix():
 
 
 def test_a_push_leaves_out_exactly_the_pairs_its_batch_passed():
-    passed = checks(("windows-latest", "h5-w1a"), ("ubuntu-latest", "w1c-doctor"),
+    passed = checks(("windows-latest", "w1c-pairing"), ("ubuntu-latest", "w1c-doctor"),
                     ("windows-latest", "w1c-doctor"))
     values = parity_scope.pruned(SUITES, passed, "push")
     combos = expand(values)
-    assert pairs_of(combos) == FULL_PAIRS - {("windows-latest", "h5-w1a"), ("ubuntu-latest", "w1c-doctor"),
+    assert pairs_of(combos) == FULL_PAIRS - {("windows-latest", "w1c-pairing"), ("ubuntu-latest", "w1c-doctor"),
                                              ("windows-latest", "w1c-doctor")}
     # A suite passed on both systems leaves the suite list and its include
     # entry, or GitHub would add an os-less job for the entry.
     assert "w1c-doctor" not in values["suite"]
     assert "w1c-doctor" not in {entry["suite"] for entry in values["include"]}
     # A suite passed on one system keeps its include for the other.
-    assert {"os": "windows-latest", "suite": "h5-w1a"} in values["exclude"]
-    ubuntu_w1a = next(c for c in combos if c["suite"] == "h5-w1a")
-    assert ubuntu_w1a["os"] == "ubuntu-latest" and ubuntu_w1a["job_timeout"] == 56
+    assert {"os": "windows-latest", "suite": "w1c-pairing"} in values["exclude"]
+    ubuntu_pairing = next(c for c in combos if c["suite"] == "w1c-pairing")
+    assert ubuntu_pairing["os"] == "ubuntu-latest" and ubuntu_pairing["job_timeout"] == 40
     assert all("os" in combo for combo in combos)
 
 
-def test_cli_live_passed_on_linux_leaves_the_matrix_entirely():
-    # Hosted Windows' cli-live is always excluded (parity-live runs it), so
-    # a Linux pass removes the last pair, and with it the include entry.
-    values = parity_scope.pruned(SUITES, checks(("ubuntu-latest", "cli-live")), "push")
-    assert "cli-live" not in values["suite"]
-    assert "cli-live" not in {entry["suite"] for entry in values["include"]}
-    assert ("ubuntu-latest", "cli-live") not in pairs_of(expand(values))
-    assert all("os" in combo for combo in expand(values))
-
-
-def test_eval_and_judges_always_run_on_a_push():
+def test_a_push_whose_batch_passed_every_pair_runs_none(tmp_path):
     everything = checks(*FULL_PAIRS)
     values = parity_scope.pruned(SUITES, everything, "push")
-    assert values["suite"] == ["eval", "judges"]
-    assert pairs_of(expand(values)) == {(os_name, suite) for os_name in ("ubuntu-latest", "windows-latest")
-                                        for suite in ("eval", "judges")}
-    assert parity_scope.EVENT_BOUND == ("eval", "judges")
+    assert values["suite"] == [] and values["include"] == []
+    # GitHub refuses a matrix with an empty suite list, so the scope job says
+    # so and the workflow skips parity-checks (the Parity gate accepts that).
+    output = tmp_path / "github_output"
+    assert parity_scope.main(["--event", "push", "--batch-passed", json.dumps(everything),
+                              "--github-output", str(output)]) == 0
+    assert output.read_text(encoding="utf-8").splitlines()[2] == "parity_any=false"
+    assert not hasattr(parity_scope, "EVENT_BOUND")
 
 
 @pytest.mark.parametrize("name", [
@@ -563,41 +569,22 @@ def run_main(tmp_path, *arguments):
     output = tmp_path / "github_output"
     assert parity_scope.main([*arguments, "--github-output", str(output)]) == 0
     lines = output.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2 and lines[0].startswith("parity=") and lines[1].startswith("selfhosted=")
+    assert len(lines) == 3 and lines[0].startswith("parity=") and lines[1].startswith("selfhosted=")
     values = json.loads(lines[0].removeprefix("parity="))
     assert json.loads(lines[1].removeprefix("selfhosted=")) == parity_scope.selfhosted(values)
+    assert lines[2] == f"parity_any={str(bool(values['suite'])).lower()}"
     return values
 
 
 def test_main_takes_the_batch_list_on_a_push(tmp_path, capsys):
-    passed = json.dumps(checks(("ubuntu-latest", "h5-light"), ("windows-latest", "h5-backup"),
+    passed = json.dumps(checks(("ubuntu-latest", "eval"), ("windows-latest", "eval"),
                                ("windows-latest", "cli")))
     values = run_main(tmp_path, "--event", "push", "--batch-passed", passed)
-    assert "h5-backup" not in values["suite"] and "h5-light" not in values["suite"]
+    assert "eval" not in values["suite"]
     assert {"os": "windows-latest", "suite": "cli"} in values["exclude"]
     printed = capsys.readouterr().out
     assert ("parity: the merged batch passed these on the same tree, so they are left out: "
-            "ubuntu-latest/h5-light, windows-latest/cli, windows-latest/h5-backup") in printed
-
-
-def test_linux_runs_the_short_h5_suites_inside_h5_light():
-    from coverage_plan import COMPOSITES
-    assert COMPOSITES["h5-light"] == parity_scope.LINUX_LIGHT
-    pairs = pairs_of(expand(parity_scope.pruned(SUITES, [], "push")))
-    assert ("ubuntu-latest", "h5-light") in pairs and ("windows-latest", "h5-light") not in pairs
-    for suite in parity_scope.LINUX_LIGHT:
-        assert ("windows-latest", suite) in pairs and ("ubuntu-latest", suite) not in pairs
-    shard = next(entry for entry in SHARDS if entry["suite"] == "h5-light")
-    budgets = {entry["suite"]: entry["h5_timeout"] for entry in SHARDS if entry["suite"] in parity_scope.LINUX_LIGHT}
-    assert shard["h5_timeout"] >= sum(budgets.values())
-
-
-@pytest.mark.parametrize("suite", ["h5-audit", "h5-backup", "h5-background"])
-def test_a_pull_request_reaching_a_short_h5_suite_runs_h5_light(suite):
-    row = {"h5-audit": "rust/cli_harness/rows/audit.py", "h5-backup": "rust/cli_harness/rows/backup.py"}.get(suite)
-    files = [row] if row else ["rust/daemon/src/server.rs"]
-    suites, _ = select("pull_request", files)
-    assert suite in suites and "h5-light" in suites
+            "ubuntu-latest/eval, windows-latest/cli, windows-latest/eval") in printed
 
 
 @pytest.mark.parametrize("raw", ["", "[]", "not json", '{"a": 1}', "[1, 2]", '"text"'])
