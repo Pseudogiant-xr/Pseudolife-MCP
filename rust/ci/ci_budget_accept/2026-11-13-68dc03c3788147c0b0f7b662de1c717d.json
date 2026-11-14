@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "frozen-probes",
+  "before": "d300a5394671f24c",
+  "fingerprint": null,
+  "reason": "Python freeze (2026-11-14): the report-only frozen judge probes compared candidates with the frozen Python live, which CI no longer does; the job is removed, so ordinary pull requests that selected judges no longer pay its two shards (estimated 19 and 18 minutes when it was added)."
+}

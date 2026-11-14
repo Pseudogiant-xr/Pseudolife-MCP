@@ -710,7 +710,9 @@ def test_the_report_has_one_row_per_iteration_and_passes_only_when_all_pass_at_o
 
 def test_dispatch_inputs():
     inputs = raw_workflow().get("on", raw_workflow().get(True))["workflow_dispatch"]["inputs"]
-    assert inputs["mode"]["options"] == ["ci", "wait-mail", "stress", "body-evidence"]
+    # The wait-mail capture and body-evidence modes left with the Python
+    # freeze (14 November 2026).
+    assert inputs["mode"]["options"] == ["ci", "stress"]
     assert inputs["selection"]["type"] == "string"
     assert inputs["iterations"] == {**inputs["iterations"], "type": "number", "default": 20}
     assert inputs["os"]["options"] == ["windows-latest", "ubuntu-latest"]
@@ -851,15 +853,15 @@ def test_a_cargo_iteration_gets_the_rust_jobs_setup_and_not_the_parity_lanes():
     for name in ("Install checkout and test dependencies", "Prepare disposable PostgreSQL"):
         assert step_named(loop, name)["if"] == CARGO_POSTGRES, name
     rust = raw_workflow()["jobs"]["rust"]
-    # The Rust job also exports the selected oracle's package metadata, which
-    # cli_version_contract reads (Codex review of 50ca4be5). It binds only
-    # where the event oracle does, so both steps stay best-effort here: on a
-    # branch the test that needs it fails rather than passing.
+    # cli_version_contract reads PSEUDOLIFE_PORT_ORACLE_ROOT (Codex review of
+    # 50ca4be5). Since the Python freeze the Rust job points it at the
+    # checkout's own pyproject.toml, and a cargo iteration does the same,
+    # without continue-on-error: no oracle export can fail any more.
     bind = step_named(loop, "Bind the event-selected Python oracle when the dispatch has one")
     assert "if" not in bind and bind["continue-on-error"] is True
-    metadata = step_named(loop, "Prepare selected package metadata for the Rust identity contract")
-    assert metadata["if"] == "env.STRESS_KIND == 'cargo'" and metadata["continue-on-error"] is True
-    assert metadata["run"] == step_named(rust, "Prepare selected package metadata for the Rust identity contract")["run"]
+    metadata = step_named(loop, "Point the Rust identity contract at the checkout's package metadata")
+    assert metadata["if"] == "env.STRESS_KIND == 'cargo'" and not metadata.get("continue-on-error")
+    assert metadata["run"] == step_named(rust, "Point the Rust identity contract at the checkout's package metadata")["run"]
     names = [step.get("name") for step in loop["steps"]]
     assert names.index(bind["name"]) < names.index(metadata["name"]) < names.index("Run the selection once")
     fixture = step_named(loop, "Install the Python SDK fixture dependency")
@@ -891,7 +893,7 @@ def test_a_stress_loop_runs_no_ordinary_ci_job():
     jobs = raw_workflow()["jobs"]
     for name in ("rust", "daemon-image", "parity-checks", "parity"):
         assert CI_ONLY in jobs[name]["if"] and "wait-mail" not in jobs[name]["if"], name
-    for name in ("parity-live", "parity-selfhosted", "source-mutants"):
+    for name in ("parity-selfhosted", "source-mutants"):
         assert "inputs.mode == 'ci'" in jobs[name]["if"] and "pull_request" not in jobs[name]["if"], name
 
 
