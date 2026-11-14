@@ -1,4 +1,4 @@
-"""Release gates: the Rust image stays opt-in; the native client archives publish with every approved release."""
+"""Release gates: the Rust image stays opt-in; the native client archives publish with every release, before PyPI."""
 from pathlib import Path
 from fnmatch import fnmatchcase
 
@@ -9,9 +9,9 @@ import pytest
 EXPECTED_GATES = {
     **{name: "github.event_name == 'release'" for name in ("build", "publish", "images", "registry")},
     "rust-image": "github.event_name == 'release' && vars.PSEUDOLIFE_PUBLISH_RUST_DAEMON == 'true'",
-    "rust-assets": "!cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.publish.result == 'success'))",
+    "rust-assets": "!cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.build.result == 'success'))",
     "rust-assets-bundle": "!cancelled() && needs.rust-assets.result == 'success'",
-    "rust-assets-publish": "!cancelled() && github.event_name == 'release' && needs.publish.result == 'success' && needs.rust-assets-bundle.result == 'success'",
+    "rust-assets-publish": "!cancelled() && github.event_name == 'release' && needs.build.result == 'success' && needs.rust-assets-bundle.result == 'success'",
 }
 
 
@@ -51,8 +51,8 @@ def test_dispatch_cannot_reach_any_publisher():
     assert_release_gates(jobs)
     for name in ("rust-assets", "rust-assets-bundle"):
         assert jobs[name]["permissions"] == {"contents": "read"}
-    assert jobs["rust-assets"]["needs"] == "publish"
-    assert "publish" in jobs["rust-assets-publish"]["needs"]
+    assert jobs["rust-assets"]["needs"] == "build"
+    assert jobs["rust-assets-publish"]["needs"] == ["build", "rust-assets-bundle"]
 
 
 def test_bundle_rerun_downloads_only_target_archives():
@@ -77,7 +77,7 @@ def test_native_versions_are_checked_before_pypi_publish():
                  if step.get("run", "").strip() == "python rust/ci/release_assets.py version")
     build = next(i for i, step in enumerate(steps) if "python -m build" in step.get("run", ""))
     assert guard < build
-    assert jobs["publish"]["needs"] == "build"
+    assert jobs["publish"]["needs"] == ["build", "rust-assets-publish"]
 
 
 def test_asset_upload_verifies_downloads_and_supports_partial_retry():
@@ -92,3 +92,37 @@ def test_asset_upload_verifies_downloads_and_supports_partial_retry():
     assert steps[verify]["working-directory"] == "release-assets"
     assert any(step.get("uses", "").startswith("actions/checkout@") for step in steps[:upload])
     assert any(step.get("uses", "").startswith("actions/setup-python@") for step in steps[:upload])
+
+
+def _needs(job) -> list[str]:
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _upstream(jobs, name) -> set[str]:
+    """Every job `name` waits for, directly or through another job."""
+    seen, todo = set(), _needs(jobs[name])
+    while todo:
+        job = todo.pop()
+        if job not in seen:
+            seen.add(job)
+            todo.extend(_needs(jobs[job]))
+    return seen
+
+
+def test_native_archives_reach_the_release_before_pypi():
+    # The updaters learn that a release exists from PyPI (`update` and the
+    # 0.23.x bridge read pypi.org's JSON, then fetch that tag's GitHub assets),
+    # and PyPI cannot be unpublished: the archives and SHA256SUMS are attached
+    # before PyPI or anything after it publishes, and a failed native build
+    # stops the release before PyPI.
+    root = Path(__file__).resolve().parents[1]
+    jobs = yaml.safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))["jobs"]
+    for publisher in ("publish", "images", "rust-image", "registry"):
+        assert "rust-assets-publish" in _upstream(jobs, publisher), publisher
+    for native in ("rust-assets", "rust-assets-bundle", "rust-assets-publish"):
+        assert not {"publish", "images", "rust-image", "registry"} & _upstream(jobs, native), native
+        assert "build" in _upstream(jobs, native), native
+    # No status function: publish runs only when every job it needs succeeded.
+    gate = jobs["publish"]["if"]
+    assert not any(word in gate for word in ("always()", "!cancelled()", "failure()", ".result")), gate

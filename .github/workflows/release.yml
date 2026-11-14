@@ -3,9 +3,11 @@
 # Trigger: publishing a GitHub release (a deliberate act, not a raw tag
 # push). Flow: guard that the release tag matches pyproject.toml AND
 # server.json (both version fields) → build sdist+wheel → twine check →
-# publish, gated on the `pypi` environment (configure it in Settings →
-# Environments with a required reviewer, so every upload pauses for
-# one-click human approval).
+# build the five native archives, assemble and verify SHA256SUMS, attach them
+# to the release → publish, gated on the `pypi` environment (configure it in
+# Settings → Environments with a required reviewer, so every upload pauses
+# for one-click human approval). PyPI waits for the native assets because the
+# updaters learn a release exists from PyPI and then download its archives.
 #
 # PyPI side (one-time): project pseudolife-mcp → Settings → Publishing →
 # add Trusted Publisher: owner Pseudogiant-xr, repo Pseudolife-MCP,
@@ -94,7 +96,11 @@ jobs:
 
   publish:
     if: github.event_name == 'release'
-    needs: build
+    # PyPI is what tells `pseudolife-mcp update` (and the 0.23.x bridge) that a
+    # release exists, and it cannot be unpublished: it waits until the native
+    # archives and SHA256SUMS are on the GitHub release, so a failed native
+    # build stops the release here, before anything irreversible.
+    needs: [build, rust-assets-publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The `pypi` environment carries the Trusted Publisher binding and the
@@ -245,11 +251,11 @@ jobs:
 
   rust-assets:
     name: Native release / ${{ matrix.target }}
-    needs: publish
-    # The status function admits the build-only dispatch after publish is skipped;
-    # a release builds them once the human-approved publish job succeeded. The
+    needs: build
+    # The status function admits the build-only dispatch after build is skipped;
+    # a release builds them once the version guards in build passed. The
     # installers download these archives, so every release carries them.
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.publish.result == 'success')) }}
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.build.result == 'success')) }}
     permissions:
       contents: read
     strategy:
@@ -321,8 +327,11 @@ jobs:
           if-no-files-found: error
 
   rust-assets-publish:
-    needs: [publish, rust-assets-bundle]
-    if: ${{ !cancelled() && github.event_name == 'release' && needs.publish.result == 'success' && needs.rust-assets-bundle.result == 'success' }}
+    # Before PyPI: the GitHub release is already public (publishing it starts
+    # this workflow), so attaching its assets publishes nothing new; PyPI and
+    # everything after it wait for this job.
+    needs: [build, rust-assets-bundle]
+    if: ${{ !cancelled() && github.event_name == 'release' && needs.build.result == 'success' && needs.rust-assets-bundle.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
