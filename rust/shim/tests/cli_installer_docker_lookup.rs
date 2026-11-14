@@ -1,13 +1,16 @@
 //! The installer steps run `docker` only from an absolute `PATH` directory.
 //!
 //! A program named without a path is otherwise also looked up where the
-//! loader searches by itself: the current directory, the running program's
-//! own directory and (on Windows) the system and Windows directories, where
-//! the hosted `windows-latest` image keeps `docker.exe`. Each case plants a
-//! `docker` that answers differently from a missing one, in one of those
-//! places, with `PATH` holding none, and checks that the step reports Docker
-//! as unreachable rather than running the plant. The control puts the same
-//! plant on an absolute `PATH` directory and checks that it is run.
+//! loader searches by itself: the running program's own directory, a
+//! relative `PATH` entry and (on Windows) the system and Windows directories,
+//! where the hosted `windows-latest` image keeps `docker.exe`; Python's
+//! `CreateProcess` also searched the current directory. Each case plants a
+//! `docker` in one of those places, with `PATH` holding none, and checks that
+//! every step reports Docker as unreachable rather than running the plant.
+//! The plant succeeds and prints text, so a step that ran it answers
+//! differently on every platform, and on Unix it also leaves a marker file
+//! per step. The control puts the same plant on an absolute `PATH` directory
+//! and checks that every step runs it.
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -16,14 +19,13 @@ use std::{
 
 /// `volume-names` when `docker` cannot be started at all.
 const UNREACHED: &str = "FAIL Cannot inspect Docker safely.";
-/// `volume-names` when a `docker` ran and exited nonzero.
-const RAN: &str = "FAIL Cannot resolve ops/.env with Docker Compose.";
 /// `engine detect` when `docker` cannot be started at all.
 const NO_DOCKER: &str = "Cannot reach Docker; start Docker and rerun the installer.";
-/// `preflight-check` when `docker` cannot be started or fails.
+/// `preflight-check` when `docker` cannot be started at all.
 const PREFLIGHT_UNSAFE: &str = "Cannot inspect Docker safely.";
-/// `engine detect` when a `docker` ran and exited nonzero.
-const ENGINE_RAN: &str = "Cannot inspect the existing daemon container";
+/// The variable naming the file the Unix plant creates when it is run.
+const MARKER: &str = "INSTALLER_LOOKUP_MARKER";
+const STEPS: [&str; 3] = ["volume-names", "engine", "preflight-check"];
 
 struct Scratch(PathBuf);
 impl Drop for Scratch {
@@ -44,24 +46,26 @@ fn scratch(tag: &str) -> Scratch {
     Scratch(root)
 }
 
-/// The file the shell-script plant creates when it is run.
-const MARKER: &str = "INSTALLER_LOOKUP_MARKER";
-
-/// A `docker` that runs and fails whatever it is asked: a copy of this
-/// package's binary on Windows, a shell script elsewhere that also leaves
-/// the `MARKER` file (the preflight check answers alike for a docker that
-/// could not start and one that failed, so only the file tells them apart).
+/// A `docker` that succeeds and prints text whatever it is asked: on Windows
+/// a renamed copy of `cmd.exe` (with no `/c` it prints its banner and exits 0
+/// at the end of its empty input), elsewhere a shell script that also creates
+/// the `MARKER` file.
 fn plant(dir: &Path) {
     fs::create_dir_all(dir).unwrap();
     if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot").expect("SystemRoot");
         fs::copy(
-            env!("CARGO_BIN_EXE_pseudolife-stdio"),
+            Path::new(&root).join("System32").join("cmd.exe"),
             dir.join("docker.exe"),
         )
         .unwrap();
     } else {
         let path = dir.join("docker");
-        fs::write(&path, format!("#!/bin/sh\n: > \"${MARKER}\"\nexit 3\n")).unwrap();
+        fs::write(
+            &path,
+            format!("#!/bin/sh\n: > \"${MARKER}\"\necho planted\nexit 0\n"),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -70,7 +74,14 @@ fn plant(dir: &Path) {
     }
 }
 
-fn run(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr, args: &[&str]) -> Output {
+fn run(
+    program: &Path,
+    root: &Path,
+    cwd: &Path,
+    path: &std::ffi::OsStr,
+    step: &str,
+    args: &[&str],
+) -> Output {
     let home = root.join("home");
     let mut command = Command::new(program);
     command.env_clear();
@@ -86,7 +97,7 @@ fn run(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr, args: &[
         .env("APPDATA", home.join("Roaming"))
         .env("PATH", path)
         .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:1")
-        .env(MARKER, root.join("ran"))
+        .env(MARKER, root.join(format!("ran-{step}")))
         .arg("installer")
         .args(args)
         .current_dir(cwd)
@@ -95,56 +106,52 @@ fn run(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr, args: &[
         .unwrap()
 }
 
-/// What the steps answered, and whether the shell-script plant was run.
+/// Each step's stderr, and which steps ran the Unix plant.
 struct Answers {
     volumes: String,
     engine: String,
     preflight: String,
-    ran: bool,
+    ran: Vec<&'static str>,
 }
 
 fn answers(program: &Path, root: &Path, cwd: &Path, path: &std::ffi::OsStr) -> Answers {
     let repo = root.join("home/repo");
     let repo = repo.to_str().unwrap();
     let env_file = root.join("home/repo/ops/.env");
-    let volumes = run(
+    let env_file = env_file.to_str().unwrap();
+    let stderr = |output: Output| String::from_utf8_lossy(&output.stderr).into_owned();
+    let volumes = stderr(run(
         program,
         root,
         cwd,
         path,
-        &[
-            "volume-names",
-            "--repo",
-            repo,
-            "--env-file",
-            env_file.to_str().unwrap(),
-        ],
-    );
-    let engine = run(
+        STEPS[0],
+        &["volume-names", "--repo", repo, "--env-file", env_file],
+    ));
+    let engine = stderr(run(
         program,
         root,
         cwd,
         path,
+        STEPS[1],
         &["engine", "detect", "--repo", repo],
-    );
-    let preflight = run(
+    ));
+    let preflight = stderr(run(
         program,
         root,
         cwd,
         path,
-        &[
-            "preflight-check",
-            "--repo",
-            repo,
-            "--env-file",
-            env_file.to_str().unwrap(),
-        ],
-    );
+        STEPS[2],
+        &["preflight-check", "--repo", repo, "--env-file", env_file],
+    ));
     Answers {
-        volumes: String::from_utf8_lossy(&volumes.stderr).into_owned(),
-        engine: String::from_utf8_lossy(&engine.stderr).into_owned(),
-        preflight: String::from_utf8_lossy(&preflight.stderr).into_owned(),
-        ran: root.join("ran").exists(),
+        volumes,
+        engine,
+        preflight,
+        ran: STEPS
+            .into_iter()
+            .filter(|step| root.join(format!("ran-{step}")).exists())
+            .collect(),
     }
 }
 
@@ -165,13 +172,19 @@ fn assert_not_run(where_: &str, answers: Answers) {
     );
     assert!(
         preflight.contains(PREFLIGHT_UNSAFE),
-        "{where_}: preflight-check answered {preflight}"
+        "{where_}: preflight-check ran the planted docker: {preflight}"
     );
-    assert!(!ran, "{where_}: a step ran the planted docker");
+    assert!(
+        ran.is_empty(),
+        "{where_}: these steps ran the planted docker: {ran:?}"
+    );
 }
 
 #[test]
 fn a_docker_in_the_current_directory_is_never_run() {
+    // A guard: Rust's own lookup already skips the current directory, which
+    // Python's CreateProcess searched, so this case is not red against the
+    // bare-name start; it keeps the native steps from regaining that search.
     let root = scratch("cwd");
     let home = root.0.join("home");
     plant(&home);
@@ -186,9 +199,9 @@ fn a_docker_in_the_current_directory_is_never_run() {
 
 #[test]
 fn a_docker_found_only_outside_path_beside_the_program_is_never_run() {
-    // The loader also searches the running program's own directory, as it
-    // searches the Windows system directories: a docker reachable only there
-    // is not on PATH, so it is not run.
+    // Windows' loader also searches the running program's own directory, as
+    // it searches the system directories: a docker reachable only there is
+    // not on PATH, so it is not run. (Unix never searches there.)
     let root = scratch("app");
     let app = root.0.join("app");
     fs::create_dir_all(&app).unwrap();
@@ -224,30 +237,39 @@ fn a_docker_on_a_relative_path_entry_is_never_run() {
 
 #[test]
 fn a_docker_on_an_absolute_path_directory_is_run() {
-    // The control: the same plant where the lookup does search is run, so
-    // the cases above would see it.
+    // The control: the same plant where the lookup does search is run by
+    // every step, so the cases above would see it.
     let root = scratch("control");
     let tools = root.0.join("tools");
     plant(&tools);
     let Answers {
         volumes,
         engine,
+        preflight,
         ran,
-        ..
     } = answers(
         Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")),
         &root.0,
         &root.0.join("home"),
         tools.as_os_str(),
     );
-    // Only the shell-script plant leaves the file.
-    assert_eq!(ran, !cfg!(windows), "the planted docker's marker");
     assert!(
-        volumes.starts_with(RAN),
+        !volumes.starts_with(UNREACHED),
         "volume-names did not run docker from PATH: {volumes}"
     );
     assert!(
-        engine.contains(ENGINE_RAN),
+        !engine.starts_with(NO_DOCKER),
         "engine detect did not run docker from PATH: {engine}"
     );
+    assert!(
+        !preflight.contains(PREFLIGHT_UNSAFE),
+        "preflight-check did not run docker from PATH: {preflight}"
+    );
+    // Only the shell-script plant leaves the files.
+    let expected: Vec<&str> = if cfg!(windows) {
+        Vec::new()
+    } else {
+        STEPS.to_vec()
+    };
+    assert_eq!(ran, expected, "the steps whose plant marker exists");
 }
