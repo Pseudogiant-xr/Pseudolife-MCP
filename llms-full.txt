@@ -12912,9 +12912,20 @@ first, and if one write fails the files already written are restored.
   `~/.claude.json`, a `.mcp.json`), a project's `.claude/settings*.json`,
   non-stdio registrations, Claude Desktop's old `pseudolife-memory` entry
   name (the installer's Desktop step migrates it), Codex settings that come
-  from another Codex config layer, a `PSEUDOLIFE_MCP_DAEMON_URL` in your
-  shell or Windows user environment, and a scheduled unattended update
-  (the report names the `--schedule` command to re-run). Edit those by hand.
+  from another Codex config layer, and a `PSEUDOLIFE_MCP_DAEMON_URL` in your
+  shell or the Windows Machine-scope environment. Edit those by hand.
+- **Also re-pointed:**
+  - **The Windows User-scope environment:** a `PSEUDOLIFE_MCP_DAEMON_URL`
+    there that names another daemon (programs already running keep the old
+    value until they restart).
+  - **The unattended-update schedules:** with every client selected, a
+    schedule that `update --schedule` installed here, the daemon's or this
+    client machine's. It is re-created for the new URL, keeping its daily
+    time.
+  - **What stays manual:** a schedule `connect` cannot re-create exactly as
+    written, or the daemon's schedule after the daemon moved to another
+    machine, is a `manual` row naming the command to run. `connect` never
+    creates or removes a schedule.
 - **Afterwards:** restart the sessions the report lists (and fully quit and
   relaunch Claude Desktop when its entry changed). Each session gets a new
   board address on the new URL.

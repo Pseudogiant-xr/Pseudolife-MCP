@@ -53,8 +53,9 @@ def test_an_unreadable_or_empty_pull_request_diff_runs_every_suite(files):
     # One command's shim code reaches its rows.
     # Doctor's users include console (its registration search).
     (["rust/shim/src/cli/doctor/mod.rs"], {"w1c-doctor", "w1c-connection"}),
-    (["rust/shim/src/cli/update/engine.rs"], {"w1c-doctor", "w1c-connection"}),
-    (["rust/shim/src/cli/backup/mod.rs"], {"w1c-doctor", "w1c-connection"}),
+    # Update's users include connect (its schedule code), and backup's include update.
+    (["rust/shim/src/cli/update/engine.rs"], {"w1c-doctor", "w1c-connection", "w1c-connect"}),
+    (["rust/shim/src/cli/backup/mod.rs"], {"w1c-doctor", "w1c-connection", "w1c-connect"}),
     (["rust/shim/src/cli/migrate_flat.rs"], set()),
     (["rust/shim/src/cli/transfer/mod.rs"], {"w1c-pairing"}),
     # Helpers other commands import reach the whole binary (Codex review:

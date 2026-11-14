@@ -126,32 +126,36 @@ DAEMON = ("cli", "cli-store", "cli-startup", "eval")
 # helpers (lease, pairing, hook_http, hook_json, doorbell_*) are left out:
 # other commands import them. test_parity_scope.py scans the shim source and
 # fails if another command starts using a mapped entry.
+# update, backup, restore_cli and connect import one another in a cycle:
+# update imports its private backup module, backup's Docker tier is
+# restore_cli's docker_backup, restore_cli reads connect's stdin check, and
+# connect re-creates an unattended-update schedule through update's schedule
+# code. A user's rows must cover what it imports, so around a cycle the four
+# entries carry one row set: each one's rows and its other users' (doctor
+# shares update's Codex hook checks; console reads doctor's registration
+# search; expose, move and conductor_watch read connect's helpers).
+UPDATE_CYCLE = ("update", "doctor", "console", "connect", "expose", "move", "conductor_watch",
+                "restore", "backup", "migrate_flat")
 SHIM_COMMANDS = {
-    # The conservative import scan also sees update's private backup module.
-    # Doctor shares update's Codex hook checks; its dependencies inherit that row,
-    # and console's, which reads doctor's registration search.
-    "backup": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
-    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
+    "backup": UPDATE_CYCLE,
+    "backup_help.txt": UPDATE_CYCLE,
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
-    "update": ("update", "doctor", "console"),
+    "update": UPDATE_CYCLE,
     # console and conductor_watch also read move's argv and stream helpers;
-    # expose reads them too, and connect's stdin check, so connect's rows
-    # include expose's; restore_cli reads that check too, so they include
-    # restore_cli's.
-    "connect": ("connect", "expose", "move", "console", "conductor_watch", "restore", "backup",
-                "migrate_flat", "update", "doctor"), "doctor": ("doctor", "console"), "console": ("console",),
+    # expose reads them too, and connect's stdin check (UPDATE_CYCLE).
+    "connect": UPDATE_CYCLE, "doctor": ("doctor", "console"), "console": ("console",),
     "conductor_watch": ("conductor_watch",),
     # The import scan also reads move's help text ("use `expose status`")
     # as a use of expose, so expose's rows include move's.
     "expose": ("expose", "move", "console", "conductor_watch"),
-    "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
+    # maintainer imports update's code, so it reaches the cycle's rows.
+    "maintainer": ("maintainer", "maintainer_setup") + UPDATE_CYCLE,
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
-    # backup's Docker tier is restore_cli's docker_backup, so restore_cli
-    # reaches backup and backup's users' rows.
-    "restore_cli": ("restore", "backup", "migrate_flat", "update", "doctor", "console"),
+    # backup's Docker tier is restore_cli's docker_backup (UPDATE_CYCLE).
+    "restore_cli": UPDATE_CYCLE,
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }

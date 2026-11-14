@@ -25,6 +25,7 @@ use std::ffi::OsString;
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod args;
 mod codex;
@@ -37,6 +38,8 @@ mod net;
 mod paths;
 mod procs;
 mod pyjson;
+mod schedule;
+mod terminal;
 mod url;
 mod user_env;
 
@@ -308,35 +311,48 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         .enable_all()
         .build()
         .ok()?;
-    match runtime.block_on(connect(args)) {
+    let result = runtime.block_on(interruptible(args));
+    // A question's stdin read may still be pending after an interrupt; the
+    // process ends now rather than waiting for its line.
+    runtime.shutdown_background();
+    match result {
         Ok(code) => Some(ExitCode::from(code)),
         Err(Defer) => None,
     }
 }
 
-/// `connect_cli.scheduled_update()` found a schedule on this machine.
-fn schedule_found() -> Result<bool, Defer> {
-    if cfg!(windows) {
-        let status = std::process::Command::new("schtasks")
-            .args(["/Query", "/TN", "Pseudolife Unattended Update", "/XML"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        return Ok(status.is_ok_and(|status| status.success()));
-    }
-    if cfg!(target_os = "linux") {
-        let base = match paths::env_truthy("XDG_CONFIG_HOME")? {
-            Some(value) => PathBuf::from(value),
-            None => PathBuf::from(paths::env_truthy("HOME")?.ok_or(Defer)?).join(".config"),
+/// The apply is running: an interrupt now waits until everything it wrote
+/// is written or rolled back, since it is all or nothing.
+static APPLYING: AtomicBool = AtomicBool::new(false);
+/// An interrupt arrived while the apply was running.
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// `connect`, still stopped by Ctrl-C after a prompt without echo: on POSIX
+/// the prompt's SIGINT listener leaves Tokio's handler installed for the
+/// rest of the process, which would otherwise swallow every later Ctrl-C.
+async fn interruptible(args: args::Args) -> Result<u8, Defer> {
+    #[cfg(unix)]
+    if (args.read_code || args.read_token) && terminal::interactive() {
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .map_err(|_| Defer)?;
+        let listen = async move {
+            loop {
+                interrupt.recv().await;
+                if APPLYING.load(Ordering::SeqCst) {
+                    INTERRUPTED.store(true, Ordering::SeqCst);
+                } else {
+                    return Ok(130);
+                }
+            }
         };
-        let unit = base
-            .join("systemd")
-            .join("user")
-            .join("pseudolife-update.service");
-        return Ok(std::fs::read_to_string(unit).is_ok());
+        return tokio::select! {
+            biased;
+            code = listen => code,
+            result = connect(args) => result,
+        };
     }
-    Ok(false)
+    connect(args).await
 }
 
 /// urllib sends a DEL (0x7F) inside a bearer; reqwest's header type refuses
@@ -769,10 +785,22 @@ fn apply_user_env(
             )))
         }
         Err(cause) => Err(format!(
-            "the client registrations now name {url} (backups above), but the Windows User-scope {URL_KEY} was not changed ({cause}) and still names {before}; finish it in PowerShell: {}",
+            "{}the Windows User-scope {URL_KEY} was not changed ({cause}) and still names {before}; finish it in PowerShell: {}",
+            if files_moved(rows) {
+                format!("the client registrations now name {url} (backups above), but ")
+            } else {
+                String::new()
+            },
             user_env::powershell_set(URL_KEY, url, "User")
         )),
     }
+}
+
+/// Some client file was re-pointed (a JSON registration or Codex), so a
+/// later failure says the registrations already name the new daemon.
+fn files_moved(rows: &[Row]) -> bool {
+    rows.iter()
+        .any(|row| row.state == "change" && (row.json.is_some() || row.codex.is_some()))
 }
 
 /// Discovery with the Codex rows, read from Codex's app-server when Codex
@@ -803,10 +831,6 @@ fn stdin_token() -> Vec<u8> {
 }
 
 async fn connect(args: args::Args) -> Result<u8, Defer> {
-    // An interactive question or token prompt is never answered natively.
-    if (!args.dry_run && !args.yes || args.read_token || args.read_code) && procs::stdin_is_tty() {
-        return Err(Defer);
-    }
     let pairing = args.code.is_some() || args.read_code;
     // ---- the plan: nothing below may defer once anything is printed ----
     let url = match url::validated(&args.url)? {
@@ -873,6 +897,18 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
     let code = if pairing {
         let text = match &args.code {
             Some(code) => code.clone(),
+            None if terminal::interactive() => match terminal::hidden("pairing code: ").await {
+                Ok(line) => line,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => return Ok(130),
+                Err(error) => {
+                    return Ok(Report::new(args.json).fail(
+                        EXIT_USAGE,
+                        format!(
+                            "the pairing code could not be read from the terminal ({error}); give it with --code, or write it on stdin with no terminal attached (nothing was changed)"
+                        ),
+                    ));
+                }
+            },
             None => stdin_line(),
         };
         match crate::cli::pairing::normalize_for_connect(&text) {
@@ -889,10 +925,6 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         None
     };
     let remote = !url::is_loopback(&url)?;
-    let all_clients = selected.len() == CLIENTS.len();
-    if all_clients && schedule_found()? {
-        return Err(Defer);
-    }
     // Discovery prints nothing, so it runs (and may defer) before any
     // request; the oracle runs it after /health.
     let mut ctx = Ctx {
@@ -905,6 +937,10 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         layout: paths::layout()?,
     };
     let mut rows = discover_rows(&ctx).await?;
+    // A Ctrl-C that stopped a scheduler query during discovery stops the run.
+    if schedule::backend().cancelled() {
+        return Ok(130);
+    }
     // `_bytes` raises on anything but FileNotFoundError; read every target
     // now so such a file defers before any effect.
     for row in rows.iter().filter(|row| row.state == "change") {
@@ -1057,19 +1093,40 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         });
         return Ok(report.finish(EXIT_OK));
     }
+    // ---- confirm, before any authenticated request ----
     if !args.yes {
-        return Ok(report.fail(
-            EXIT_USAGE,
-            "this run is not interactive: re-run with --yes to apply the plan above (nothing was changed)"
-                .to_owned(),
-        ));
+        if !terminal::interactive() {
+            return Ok(report.fail(
+                EXIT_USAGE,
+                "this run is not interactive: re-run with --yes to apply the plan above (nothing was changed)"
+                    .to_owned(),
+            ));
+        }
+        if !terminal::ask("Apply these changes? [y/N] ").await {
+            return Ok(report.fail(EXIT_USAGE, "not confirmed; nothing was changed".to_owned()));
+        }
     }
     let mut created: Vec<PathBuf> = Vec::new();
     if args.read_token
         && let Some(token_file) = &token_file
     {
         // Read only now, just before the write, as the oracle reads it.
-        let data = stdin_token();
+        let data = if terminal::interactive() {
+            match terminal::hidden("token: ").await {
+                Ok(line) => line.trim_end_matches(['\r', '\n']).as_bytes().to_vec(),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => return Ok(130),
+                Err(error) => {
+                    return Ok(report.fail(
+                        EXIT_USAGE,
+                        format!(
+                            "the token could not be read from the terminal ({error}); write it on stdin with no terminal attached, or give --token-file an existing file without --read-token (nothing was changed)"
+                        ),
+                    ));
+                }
+            }
+        } else {
+            stdin_token()
+        };
         match files::write_token_file(std::path::Path::new(token_file), &data) {
             Ok(()) => created.push(PathBuf::from(token_file)),
             Err(files::TokenFail::Helper(message)) => {
@@ -1182,6 +1239,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
     }
 
     // ---- apply, all or nothing ----
+    APPLYING.store(true, Ordering::SeqCst);
     let mut steps = Vec::new();
     let mut codex_done = false;
     for index in 0..rows.len() {
@@ -1253,17 +1311,33 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
             field("board")
         ));
     }
-    // ---- the Windows User-scope daemon URL, after the registrations ----
+    // ---- the Windows User-scope daemon URL and the unattended-update
+    // schedules, after the registrations ----
     // A failure here leaves the registrations re-pointed: the restart notes
-    // and the post-apply check still run, then the run ends with it.
-    let user_env_failure = match apply_user_env(&rows, &url, user_env::backend().as_ref()) {
-        Ok(Some(line)) => {
-            report.note(line);
-            None
-        }
-        Ok(None) => None,
-        Err(line) => Some(line),
-    };
+    // and the post-apply check still run, then the run ends with every one.
+    let mut late_failures = Vec::new();
+    match apply_user_env(&rows, &url, user_env::backend().as_ref()) {
+        Ok(Some(line)) => report.note(line),
+        Ok(None) => {}
+        Err(line) => late_failures.push(line),
+    }
+    let (notes, failures) = schedule::apply(
+        &rows,
+        &url,
+        files_moved(&rows),
+        schedule::backend().as_ref(),
+    );
+    for line in notes {
+        report.note(line);
+    }
+    late_failures.extend(failures);
+    APPLYING.store(false, Ordering::SeqCst);
+    if INTERRUPTED.load(Ordering::SeqCst) || schedule::backend().cancelled() {
+        late_failures.push(
+            "interrupted: the changes above were written, and the restart notes and the post-apply check did not run; re-run connect to check them".to_owned(),
+        );
+        return Ok(report.fail(130, late_failures.join(". Also: ")));
+    }
     let restarted = restart(&ctx, &rows);
     let detail = restarted
         .as_dict()
@@ -1311,20 +1385,15 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         let check = format!(
             "applied, but the post-apply check failed: {what}. The backups are listed above; restore them or re-run connect"
         );
-        return Ok(report.fail(
-            EXIT_UNVERIFIED,
-            match user_env_failure {
-                Some(line) => format!("{line}. Also: {check}"),
-                None => check,
-            },
-        ));
+        late_failures.push(check);
+        return Ok(report.fail(EXIT_UNVERIFIED, late_failures.join(". Also: ")));
     }
     report.note(
         "post-apply check: every place names the daemon, and it answers /health; run `pseudolife-mcp doctor` from a client's environment for the full check"
             .to_owned(),
     );
-    if let Some(line) = user_env_failure {
-        return Ok(report.fail(EXIT_UNVERIFIED, line));
+    if !late_failures.is_empty() {
+        return Ok(report.fail(EXIT_UNVERIFIED, late_failures.join(". Also: ")));
     }
     Ok(report.finish(EXIT_OK))
 }

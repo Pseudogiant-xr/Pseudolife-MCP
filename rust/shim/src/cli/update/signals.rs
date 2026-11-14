@@ -14,6 +14,9 @@ static COMMAND: Mutex<()> = Mutex::new(());
 static RECEIVED: AtomicI32 = AtomicI32::new(0);
 static LATEST: AtomicI32 = AtomicI32::new(0);
 static COUNT: AtomicUsize = AtomicUsize::new(0);
+/// A cancelling signal arrived during this process's run, never reset: a
+/// caller that keeps going after a command returns (`connect`) checks it.
+static CANCELLED: AtomicBool = AtomicBool::new(false);
 static SUSPEND: AtomicBool = AtomicBool::new(false);
 static STOPPED_NANOS: AtomicU64 = AtomicU64::new(0);
 thread_local! { static DEPTH: Cell<usize> = const { Cell::new(0) }; }
@@ -23,6 +26,7 @@ extern "C" fn receive(signal: libc::c_int) {
         SUSPEND.store(true, Ordering::Relaxed);
     } else {
         let _ = RECEIVED.compare_exchange(0, signal, Ordering::Relaxed, Ordering::Relaxed);
+        CANCELLED.store(true, Ordering::Relaxed);
         LATEST.store(signal, Ordering::Relaxed);
         COUNT.fetch_add(1, Ordering::Release);
     }
@@ -82,6 +86,10 @@ impl Guard {
         }
         Ok(guard)
     }
+}
+
+pub(super) fn cancelled() -> bool {
+    CANCELLED.load(Ordering::Relaxed)
 }
 
 pub(super) fn received() -> i32 {
