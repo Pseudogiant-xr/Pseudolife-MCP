@@ -1,3 +1,0 @@
-### Security (2026-11-13 — `pseudolife-mcp console` hands the browser only a real sign-in link)
-
-- `pseudolife-mcp console` now opens a link only when it holds nothing but the Console's address, a sign-in code in the daemon's own alphabet and, if you asked for one, the page; any other answer is refused (exit 4). Before, a link could carry `&`, `|`, `^` or `"` after the code, and on Windows a `BROWSER` setting that names a `.bat` or `.cmd` file runs through `cmd.exe`, so whatever answered at the daemon's address could have run a command on your machine. Without such a `BROWSER` setting nothing ran. The native command (`pseudolife-stdio`) applies the same check and never starts a batch file.

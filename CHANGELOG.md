@@ -6,6 +6,492 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-14 — An ordinary `pseudolife-mcp update` moves a machine from the Python client to the native client, and every release now carries the native client archives before it reaches PyPI; the native client backs up and restores a Docker bank, plans a bank move, pairs with `connect`, opens the Console and runs conductor-watch with no Python, and refuses what it no longer does (a lite-tier bank, `serve`, `embedded`) in plain words; programs are never found in the current directory; and Python is frozen, so fixes land in Rust
+
+### Changed (2026-11-14 — an ordinary update moves a Python client to the native client)
+- When an installed Python updater (0.23.x) hands this release's client steps to its new Python runtime, that runtime now moves the machine to the native client. It downloads this release's native archive for the platform and its `SHA256SUMS` over HTTPS from the GitHub release (or `PSEUDOLIFE_NATIVE_ARCHIVE_URL`, the same override the native installer reads), verifies the digest, checks that the binary runs, and runs the native updater's client steps in its place. The native updater then installs the native runtime, activates the native launcher and moves the client registrations to it. One `pseudolife-mcp update` does all of this; no installer rerun is needed.
+- Nothing changes when the release has no native client for the platform, the download or digest check fails, the binary does not run here (an old glibc, for example), or `PSEUDOLIFE_SHIM_ENGINE=python` is set. One line says why the Python client was kept, and the client steps finish in Python as before. Once the native updater has started, its result is the run's.
+- Deprecated: the Python client. A host on the Python client moves to the native client at its next ordinary update wherever a native client is published for its platform.
+
+### Fixed (2026-11-14 — a release reaches PyPI only once its native archives are on GitHub)
+- The release workflow now builds, verifies and attaches the five native
+  client archives and `SHA256SUMS` to the GitHub release before it
+  publishes to PyPI. `pseudolife-mcp update`, including the 0.23.x update
+  bridge, learns that a release exists from PyPI. Before this change, an
+  update run between the PyPI upload and the archive upload (the whole
+  native build, often more than an hour) found no native archive and
+  stayed on the Python client until the next release. A failed native build now stops the release before PyPI, which
+  cannot be unpublished. The images and the MCP registry still follow PyPI.
+
+### Fixed (2026-11-14 — a native install over a Python client on Windows no longer locks the user out of it) [#1538]
+
+- On Windows the native client protected every folder it keeps private state in, even one that already held another client's files, by replacing the folder's access list with one that has no inheritable entry. Every file there whose access was only inherited — the Python client's runtimes, its launcher, hook-written digest markers — was left with an empty access list: unreadable, and the native install then failed with "Access is denied".
+- The native client now protects only folders it creates, and existing folders that are still empty. A folder that already holds content is used as it is when it is safe — owned by this user, SYSTEM or Administrators, and no other account can add, delete or replace what is in it — and is otherwise refused with one line naming the folder, who can change it, and the fix. Nothing the client did not create has its access changed.
+- A runtime or launcher file left unreadable by an earlier native client now fails with its cause and the repair (`icacls "<folder>" /reset /T`, run as its owner) instead of a bare "Access is denied".
+
+### Fixed (2026-11-14 — Windows board wakes and private folders hold up in more layouts)
+
+- On Windows the native client now also checks the folder a board marker is read from: an account that can delete entries in that folder could suppress a wake whatever the marker's own access list says, so such a folder is refused with one line naming it and the fix. The default digest folder in the user's profile passes.
+- Folders the client creates for private state are owner-only from the moment they exist, so a folder another task creates inside one meanwhile (the handshake cache's) keeps its access. A handshake cache that cannot be saved now says so once, with the cause, instead of failing silently.
+- The fix printed for a refused folder or marker names accounts by SID, works when pasted in cmd, PowerShell 5.1 and PowerShell 7 (a path a shell would expand gets a PowerShell form, and says so), and an access-list entry the client cannot read gets a fix that removes it.
+
+### Fixed (2026-11-14 — board mail wakes a Windows session on the native client) [#1326]
+
+- On Windows the native client refused every digest marker the plugin hooks write (`<key>.wake`, `<key>.<token>.wake-armed`, `<key>.seen`, `<key>.reprint`), because it required the protected, owner-only access list of its own private state, which files written by Git Bash and PowerShell never have. So the Stop-hook board-mail wake could not fire there and a hook-written `.seen` was ignored.
+- It now applies the marker rule the POSIX client already uses: the owner must be this user, SYSTEM or Administrators, and no other account may be able to write, delete or backdate the file. A marker another account can write or owns is still refused, with one line naming the file, who can write it, and the fix. The hooks and their definitions are unchanged.
+
+### Fixed (2026-11-14 — the native client no longer starts without a board address on a first Windows start) [#1324]
+
+- On a first start (no saved board state yet) the native client's handshake cache and its board registration both created the private state folder at the same moment. When the cache won, the board's folder creation failed, registration stopped for good, and board calls such as `memory_agents update` failed with `instance_authentication_required`. Reproduced on the Windows dev VM; a folder that appears meanwhile is now treated like one that already existed, so registration goes ahead and the cache folder stays usable.
+- A start that finds another start of the same session still holding its state file's reservation now retries in the background (and says so) instead of stopping.
+- When registration does stop, its one stderr line now names the step that failed (the bank check, the private state, registration, saving the private state, or attach), the failure code, the cause and the fix, and says when the private state was refused because its file or folder lets other accounts in or sits behind a symlink or junction.
+
+### Fixed (2026-11-14 — the native updater's Codex step and client hand-off work on macOS)
+- On macOS the temporary folder sits below a symlink (`/var` -> `/private/var`), and the native client's private-state check refuses any redirected ancestor. So the native updater could not create its private scratch folders: the Codex marketplace refresh failed before it started, and so did the client hand-off's report folder and the `--shadow` role script. These folders are now made under the temporary folder with its symlinks resolved (Unix; Windows is unchanged). A failure names the folder and the check to make.
+
+### Fixed (2026-11-14 — the native updater applies a release's client steps in one run) [#1308]
+- The native (Rust) `pseudolife-mcp update` used to run the plugin cache, Codex hook and tunnel steps with the code of the release it was replacing, so a release's new client-step behaviour ran only on a second `pseudolife-mcp update --clients-only`. After the shim step installs a runtime of another release, the updater now hands the remaining steps to that runtime (`<runtime> update --clients-only --tag <its version> --daemon-url <url>`, plus `--allow-downgrade` when given), whose ladder, Codex steps, result and exit code are the run's.
+- A runtime that cannot start fails the run with the cause and the retry (`update --clients-only --tag <version> --reinstall`); the older code never stands in for it. A target release that predates the hand-off finishes the steps in the running updater, with one line saying so.
+- The hand-off speaks the Python updater's `client-handoff-v1` contract: the `PSEUDOLIFE_UPDATE_HANDOFF`, `PSEUDOLIFE_UPDATE_HANDOFF_REPORT` and `PSEUDOLIFE_UPDATE_HANDOFF_RUNTIME` variables (read once and removed at startup), the update lock borrowed from the parent's pid, and the same JSON report fields. A native runtime answers `update --client-handoff-protocols` with its version and protocols.
+
+### Added (2026-11-14 — the native client restores a Docker bank)
+
+- `pseudolife-mcp restore` in the native (Rust) client now replaces a
+  Docker bank end to end: it checks the dump and state archive, asks at a
+  terminal (or takes `--yes`), stops the daemon, takes and verifies a
+  safety backup, stages and replays the dump, replaces the state volume
+  and starts the daemon again. Before, every confirmed run stopped at the
+  first change with "deferred in this candidate", so a native client could
+  not restore a backup at all.
+- Every failure or Ctrl-C stops at that step and names the bank's state and
+  the command to run next. Once the database drop has begun the daemon is
+  left stopped, the safety backup's recovery command is printed and also
+  written beside the safety pair (`pseudolife_restore-<timestamp>.txt`),
+  and a `restore-in-progress-<bank>.json` journal in the data directory
+  makes a later run of that bank name both safety backups with their
+  dates: as before the interrupted restore, and as immediately before it
+  (the incomplete bank, unless repaired since); a later run that fails
+  before its own drop gives both courses, recover or (if repaired) start
+  the daemon and delete the journal.
+  This covers the restore items of #1497 (an interrupt after the drop now
+  prints the recovery command; a corrupt deflate stream is refused) and of
+  #1507 (a wrong-typed `docker inspect` field is the `cannot inspect`
+  refusal; a Ctrl-C at the confirmation prompt ends the run with nothing
+  changed).
+- The state archive check is never more permissive than the `tar` that
+  extracts it (probed against GNU tar 1.34 in the daemon image): POSIX
+  extended headers are now read, numeric fields and the ustar prefix are
+  read as tar reads them, and a member ending in `/` is a directory by its
+  final name, while only the member types a state archive holds are read
+  (plain files, links, directories); any other type, a link or directory
+  with a non-zero size, a hard link to anything but a plain file before
+  it, an extended header that repeats or empties a name or size, a GNU long
+  name over 1 MiB, a sparse member, a global extended header that sets a
+  name or size, a damaged header anywhere, a `move.json` that is not a
+  plain file and data after the end marker are refused with their reason.
+- The state is also judged by what `tar` actually extracts: before the
+  database is dropped, the archive is extracted into a staging directory
+  in `/data` and the extracted tree is checked (only plain files,
+  directories and relative symlinks that stay inside it, no inode shared
+  with anything outside it, no setuid or setgid file). A refusal there,
+  or a failure or Ctrl-C while staging, leaves the bank unchanged; after
+  the replay the staged tree is renamed into place. `/data` must have 8 GiB
+  free beyond the archive's size plus what it unpacks to. A daemon with a
+  volume or filesystem mounted inside `/data` (from `docker inspect` and
+  from the mount table, which also shows one below a bind-mounted host
+  folder) is refused before anything stops when the state is restored,
+  since replacing `/data` would empty that volume.
+- A lite bank is refused with a line naming the Docker install; restore
+  runs `docker` only from absolute `PATH` entries or `PSEUDOLIFE_DOCKER`'s
+  full path; the restarted daemon gets up to ten minutes to report ready.
+
+### Changed (2026-11-14 — the native client refuses what it no longer does in plain words)
+- A lite-tier bank (an embedded PostgreSQL cluster in a data directory) is refused with one message that names the bank's directory, says the lite tier is retired and names the fix: move the bank to the Docker tier with the pip release (pseudolife-mcp 0.23.x), which still opens it, following "Move a lite bank to Docker" in `docs/guide/configuration.md` (back up the stopped bank first, then install the Docker tier with `ops/install.sh`, or `ops\install.ps1` on Windows). This covers `backup`, `export`, `import`, `invite`, `maintainer` (including `maintainer setup`, which used to tell you to run a Python command), `lease` and `board-audit`; each keeps its own exit status. The lite default directory merely existing is no longer treated as a lite bank, since the native client installs its own runtimes there.
+- `pseudolife-mcp serve` refuses and says the daemon is the separate `pseudolife-daemon` binary in the Docker tier, instead of starting a bounded test server on port 8765. `pseudolife-mcp embedded` refuses as retired with file mode. Neither prints "deferred in this candidate" any more.
+- The stdio shim no longer starts a Python daemon from `PSEUDOLIFE_MCP_PYTHON`; only `PSEUDOLIFE_MCP_SERVE_COMMAND` starts a local daemon. When no local daemon answers and nothing starts one, the shim's stderr note and the instructions the client shows its agent name the cause and the fix (start the Docker tier's daemon with `docker compose -f ops/docker-compose.yml up -d`, or set `PSEUDOLIFE_MCP_SERVE_COMMAND`), and no longer suggest `pseudolife-mcp serve`.
+- The no-bank and no-database messages of `export`, `import`, `lease`, `maintainer`, `board-audit` and `invite` no longer suggest a lite data dir.
+
+### Added (2026-11-14 — the native client plans a bank move)
+
+- `pseudolife-mcp move --dry-run` in the native (Rust) client now checks
+  both hosts of a Docker bank move and prints the plan, where it used to stop
+  with "mode 'move' is deferred in this candidate". It changes nothing on
+  either host: it takes no update lock, writes no file of its own (the native
+  launcher keeps only its usual runtime usage lock) and runs only reads
+  (Docker `version` and `inspect`, read-only PostgreSQL queries, `du` of
+  `/data`, `/health`). The
+  target's half runs in the native client on the target, reached over
+  key-based ssh; a target without the native client, with an older one, or
+  with a different move protocol is refused with the fix. A target must be an
+  installed Docker bank (one compose stack, not a source checkout) that is
+  healthy, empty (a fresh bank's own warm-up search aside), at least the
+  source's schema and PostgreSQL major version, with room for the move's
+  files and the restore's 8 GiB margin; `--target-url` must reach the
+  target's own daemon, and for a fresh target, which has no identity yet,
+  the plan says the URL is matched only by release and schema.
+- ssh never prompts and never weakens host-key checking: an unknown or
+  changed host key fails with ssh's refusal and the fix. `ssh` and `docker`
+  are found only in absolute `PATH` directories.
+- Without `--dry-run`, and for `--expose-target`, `--resume`, carried tokens
+  (pass `--no-keep-tokens`), `--target-env-file`, `--target-compose-file` and
+  `--target-checkout`, the native client refuses before any effect, naming
+  what to do instead; the move itself arrives in a later release.
+- A source daemon on the host network is read where it binds
+  (`PSEUDOLIFE_MCP_HOST` / `PSEUDOLIFE_MCP_PORT`, default
+  `127.0.0.1:8765`), as the Python move's fixed source address did.
+
+### Added (2026-11-14 — native Codex and Claude Desktop setup steps for the installers)
+- The native client gains four hidden installer steps that replace the Python helpers the installers ran for Codex and Claude Desktop, so these steps need no Python on the host: `pseudolife-mcp installer codex-credentials` (was `ops/setup-codex-coordination.py --credentials`), `installer codex-runtime-defaults` (was `--runtime-defaults`), `installer codex-hooks --checkout <repo>` (was `ops/setup-codex-hooks.py`) and `installer claude-desktop` (was `ops/register_claude_desktop.py`). Each takes the arguments the installers pass today (plus `--checkout`, the repository root, for the hook step, and an optional `--json` for Desktop) and prints the report they already read. The installers switch to them in a follow-up change.
+- Codex hook approvals carry over: the native hook setup writes exactly the hook definitions the Python setup wrote, so Codex keeps every approval and nobody is asked to approve the hooks again. A golden recorded from the Python setup on Windows and Linux pins this, and a run against a real Codex over a home the Python setup had approved changed nothing.
+- Unlike the Python scripts, these steps replace Codex's `hooks.json` and `AGENTS.md`, the hook launchers and pointer, and Claude Desktop's configuration atomically. Each displaced file is kept in a private recovery folder beside it, where the Python scripts left plain copies that could hold a bearer token.
+
+### Changed (2026-11-14 — `connect` pairs, re-points Codex and the Windows User-scope URL natively)
+- `pseudolife-mcp connect <url> --code <code>` (or `--read-code`) now runs natively end to end. On an applying run, after the plan, it redeems the pairing code through the native `pair` transport, keeps the owner-only token file whatever happens next, and points the selected clients at it. A dry run never redeems the code, and the code is never printed.
+- Codex is re-pointed through Codex's own app-server (`[mcp_servers.pseudolife-memory.env]` and the hooks' connection file), never by editing `config.toml` text. A Codex that cannot be started is a manual row naming why.
+- On Windows, a User-scope `PSEUDOLIFE_MCP_DAEMON_URL` that names another daemon is now re-pointed by `connect` itself: a change row under the same confirmation, keeping its registry type and telling running programs that the environment changed; programs already running keep the old value until they restart. `connect` never creates one (the registrations, the Claude Code settings copy and the Codex connection file carry the URL for every client) and never writes Machine scope: a Machine-scope value that no User-scope value overrides is a manual row with the command to run. If the write fails after the registrations were re-pointed, the run says so and prints the one PowerShell line that finishes it.
+
+### Fixed (2026-11-14 — the native client edits a group-writable client configuration) [#1545]
+- On hosts with the default umask `002` (Debian, Ubuntu), `~/.claude.json` and the other client configuration files are mode `0664`. The native client refused to edit them, so `pseudolife-mcp installer migrate-registrations` and the native updater could not move a registration to the native launcher. The native configuration writer no longer refuses a file because other accounts may write it (on Windows, an ACL that grants them write). The client already reads that file as it is, and refusing protected nothing. The edit keeps the file's owner, group and mode (or its ACL on Windows), or narrows them: group write is dropped when the group cannot be kept or a POSIX ACL widened the group bits. The backup of the displaced copy is made private (`0600`, or owner-only on Windows). A file owned by another account or with another hard link is refused, naming the path, the cause and the fix.
+- The native client exposes the Claude Code marketplace source migration on its own (`migrate_marketplace`), for the installers that ran `ops/plugin_marketplace.py`.
+
+### Added (2026-11-14 — conductor-watch runs natively, with no Python)
+
+- `pseudolife-mcp conductor-watch` (and its deprecated name `delegate-watch`)
+  now runs its watch in the native client, in the foreground and with
+  `--detach`, on Windows and Linux (macOS takes the same code, which no CI
+  job builds yet). It reports the same events as before:
+  - pull requests opened, merged, closed, green, failing, cancelled or newly
+    conflicting;
+  - master workflows failing or green again;
+  - new suite results;
+  - a full-suite lease going free.
+
+  They are batched into one board message that rings an owner parked on
+  "decision events".
+- **Messages:** each holds at most 20 events and 6000 bytes, and says how
+  many more follow in the next one. Text copied from GitHub or a suite
+  result (titles, check and workflow names, summaries) is quoted, with
+  anything outside printable ASCII escaped, and the message's first line
+  says so.
+- **gh lookup:** only absolute `PATH` directories, never the current
+  directory, so a `gh` planted in a checkout is not run.
+- **One watcher per owner:** a start for an owner whose watcher already runs,
+  on any state file, is answered with that watcher's board id, and `--stop`
+  given the owner finds it.
+- **Private files:** the watcher's state, pid, lock, log and ledger live in
+  folders only this account can use, as the rest of the client's state
+  does.
+- **The board row:**
+  - It stays attached while the watcher runs, also while gh does.
+  - Every exit sets its status to `stopped: <reason>` and detaches it.
+  - The owner is mailed before each exit while the board can be reached:
+    max age, the `--until-lease` lease lost, an interrupt, a stop, or a
+    reason to give up.
+  - After a hard kill, the board shows the row unattached within a minute,
+    and its status overdue within three polls.
+- **`--stop`** still only asks. It writes the stop request only for a live
+  process whose start time is the recorded one; when a start time cannot be
+  read, the state's lock decides, so a reused pid never counts as a watcher.
+  The watcher notices the request within a second, also while gh runs.
+- **Interrupts:** Ctrl-C, Ctrl-Break, SIGTERM and SIGHUP end the watch the
+  same clean way.
+- **`--detach`:**
+  - It starts the native client itself, outside the caller's console and
+    process group, and outside its job where allowed.
+  - The watcher runs from its state's folder, so it does not keep the
+    caller's folder in use; the caller's repository is named for it.
+  - It reports the watcher running only once it registered and finished
+    its first poll (within 45 s), and otherwise says why it stopped.
+  - Where a Windows job will end the watcher with the session, it says so.
+- **`--lease-cli`** is accepted and ignored for this release (lease states
+  are read natively); it will be removed later.
+
+### Changed (2026-11-14 — every release carries the native client archives)
+- The release workflow now attaches the five native `pseudolife-mcp`
+  archives (Linux x86_64 and aarch64, macOS Intel and Apple silicon,
+  Windows x86_64), the compose bundle and `SHA256SUMS` to every approved
+  release. They no longer wait for the `PSEUDOLIFE_PUBLISH_RUST_ASSETS`
+  repository variable, which is now unused. The build-only workflow
+  dispatch is unchanged.
+- The native CLI gains an installer-only step, `pseudolife-mcp installer
+  migrate-registrations`, that moves Claude Code, Claude Desktop, Codex
+  and Gemini CLI registrations made by a pipx, `pip --user` or Python
+  runtime install to the native launcher, with a private backup of each
+  changed file. Editable checkout installs and self-spawning
+  registrations stay as they are, and the old Python client stays on
+  disk, unregistered. The installers start using it in a later change.
+- `PSEUDOLIFE_NATIVE_ARCHIVE_URL` points the native client's release
+  download at another directory of archives and `SHA256SUMS` (a mirror or
+  a test server). The archive is checked against that directory's
+  `SHA256SUMS`, which proves it arrived intact, not who published it.
+
+### Added (2026-11-14 — the native client backs up a Docker bank)
+
+- `pseudolife-mcp backup` in the native (Rust) client now backs up a
+  Docker bank, where it used to stop with "mode 'backup' is deferred in
+  this candidate": it dumps the database through its PostgreSQL container
+  and archives the daemon's `/data` through a read-only helper while the
+  daemon keeps serving. It shares restore's verified backup: each file is
+  read back before it is renamed, so the printed pair exists and is
+  complete, and a failure or Ctrl-C leaves no file under a backup name.
+- Rotation (`--keep-days`, default 7) works by pair: a dump and the state
+  archive with the same timestamp are kept or removed together, the newest
+  three pairs always stay, and a file whose partner is missing is never
+  removed but listed as `kept unpaired:`. It removes only this command's
+  exactly named files and never a file a restore journal names (the state
+  archive a failed restore would finish with included). Restore's safety
+  pair is now named `pseudolife_safety_memory-…` and
+  `pseudolife_safety_state-…`, which rotation never matches; a pair an
+  earlier native restore wrote under the backup names is kept by its
+  `pseudolife_restore-<timestamp>.txt` note, while one the Python restore
+  wrote has no note and rotates like a backup, as it did under the Python
+  backup. A data directory that cannot be listed or a restore journal that
+  cannot be read skips rotation for that run with a warning saying why; the
+  backup still succeeds. A `.part` file a killed backup left is removed by
+  the next backup once it has been unchanged for 10 minutes.
+- When `tar` reports a file in `/data` changing or vanishing while it was
+  archived, backup takes the archive again (up to three attempts, 10
+  seconds apart), keeping the verified dump, and says which attempt it
+  kept; if every attempt meets a change it fails with tar's line and says to
+  retry when the daemon is quieter or stop it for the backup. Other
+  failures name their true cause (an unwritable directory, a timeout, a
+  program that could not start, tar's or Docker's own last line), and a
+  published file that could not be removed again is named rather than
+  "No backup was written".
+- If Docker is installed but cannot be asked whether the bank containers
+  exist, backup without `--data-dir` refuses with that cause instead of
+  archiving a data directory without its database and exiting 0.
+- A held update lock now names every command that takes it: "another
+  pseudolife-mcp update, restore or backup is running", in both backup and
+  restore.
+- A lite bank is refused with a line naming the Docker install; an `--out`
+  inside the daemon's `/data` volume and a missing database are refused
+  before anything is written. The file tier's refusals now name which cause
+  they found: a backup directory inside the data directory, a path that
+  cannot be resolved, or an entry the archive cannot write.
+
+### Changed (2026-11-14 — the frozen Python package's tests stop running by default)
+- Every `tests/test_*.py` file is classified `live` or `frozen` in `tests/suite_classes.txt`, whose header states the rules. A test run, local or CI, collects only the live ones: tests of anything that still changes or ships, of the suite's own infrastructure, and of the modules the open freeze exceptions (#1539, #1537) change. `pytest --include-frozen` adds the 218 files that test only the frozen `pseudolife_memory` package, and naming one without it is refused with that switch. `tests/test_suite_classes.py` fails when a test file is unclassified or a frozen one names something that survives.
+- The suite lock counts a run as full against the live files.
+- CI: `test-lite-linux` (the whole suite on embedded PostgreSQL) is gone with the lite tier; the Windows and macOS lanes run the live files of their selections; a Rust-only batch's master push skips the Python lanes too, the next nightly runs them on master's tip (`ops/ci_push_passed.py --not-if-job-passed guards`), and `guards` runs every live test that reads a `rust/` file, with a throwaway PostgreSQL.
+- The frozen tests still run in CI where they can find something: the `test` lane adds `--include-frozen` to its own pytest command line (never through `PYTEST_ADDOPTS`, which the suite's own child pytest runs would inherit) for a change to the package (a freeze exception) and in the weekly nightly (Sunday UTC), since the package still ships with floor-only dependencies; `rust/ci/stress.py` passes the switch for a selection under `tests/`.
+
+### Changed (2026-11-14 — Python is frozen and CI stops comparing Rust with it)
+- A new `Python freeze` check (`.github/workflows/python-freeze.yml`) fails an ordinary pull request that changes anything under `pseudolife_memory/` other than the Console build output in `pseudolife_memory/web/static/`; a change the maintainer ruled an exception carries the `freeze-exception` label. Integration batches are exempt.
+- Rust CI no longer runs a live Python oracle beside the candidate: the frozen judge probes, the `judges` and `cli-live` parity suites, every H5 suite, the Windows `Parity live` job, the nightly body evidence job and the wait-mail capture are gone, and every remaining parity shard replays committed goldens only. A batch drops from 29 parity shards to 16.
+- The CLI source mutants run weekly (Sunday) instead of nightly.
+- `rust/ci/inventory.py` now refuses any pull request, batch, push or scheduled job step that starts a live comparison, and names every CLI row and daemon scenario no shard replays.
+- Batch admission is the freeze's gate: `python ops/integrate.py build` applies master's guard to what each member's merge changes on the batch branch (refusing when master has lost its guard; the batch that introduces it is judged with its own copy) and drops a member that touches `pseudolife_memory/` without the `freeze-exception` label; `open` and `merge` refuse a batch with any other commit, a generated commit touching the package, or a member whose label has gone. The guard compares the package prefix case-insensitively, runs its base commit's copy of the script, and reruns when a pull request is retargeted.
+- The Rust job's in-process comparison of Codex connection planning with the frozen Python (`setup_codex_parity.py`) is gone; `rust/shim/tests/setup_codex.rs` asserts those rules.
+
+### Fixed (2026-11-14 — a pull request labelled `freeze-exception` after it was opened can join a batch)
+
+- `ops/integrate.py build` and `open` judged a member's CI by every run on its head, so the `Python freeze` run made at the push, before the label, kept the pull request out after the label's own run had passed. The batch tool now counts a failed run unless a later run of the same check finished passing or failing after it, so the labelled event's passing run replaces the stale failure; a newer failure still keeps a head out, and a run still going, cancelled or skipped replaces no failure.
+- The `Python freeze` check reads the pull request's labels when it runs instead of from its event, so a rerun of a run made before the label was added passes, and one made before it was removed fails. If the labels cannot be read it judges without them, which refuses only a change that needs the exception; rerun it once the API answers.
+
+### Fixed (2026-11-13 — restore and update no longer take NUL for a person at a terminal on Windows)
+
+- On Windows, `pseudolife-mcp restore` without `--yes`, run with stdin and
+  stdout redirected to `NUL`, now refuses with `rerun with --yes to
+  confirm` (exit 2) instead of printing its question and reading an empty
+  answer. `update`'s optional questions (the test suite's login, the
+  maintainer passkeys) skip themselves the same way. Only a real console
+  counts as a terminal now; the native restore makes the same check.
+
+### Fixed (2026-11-13 — an interrupted restore names its recovery command)
+
+- Pressing Ctrl-C during `pseudolife-mcp restore` after the database drop
+  has begun now stops the daemon and prints the same `Recover with
+  pseudolife-mcp restore --backup-file <safety backup> ...` command a
+  failure there prints, then exits as interrupted. Before, the interrupt
+  left a dropped or half-replayed bank with no instruction naming the
+  safety backup. A Ctrl-C while the daemon is being stopped, after a
+  failure there or after a first Ctrl-C, still prints it, saying to stop
+  the daemon first.
+
+### Fixed (2026-11-13 — restore and backup refuse unusable `docker inspect` output cleanly)
+
+- `pseudolife-mcp restore` and `backup` now answer `docker inspect` output
+  that is a JSON object, or nested too deeply to parse, with the usual
+  `cannot inspect <container>; restore its Docker container configuration
+  and retry` (exit 2) instead of a `KeyError` or `RecursionError`
+  traceback. The native restore now refuses the JSON object too, where it
+  deferred to Python before.
+
+### Fixed (2026-11-13 — restore and backup refuse a corrupt gzip stream instead of crashing)
+
+- `pseudolife-mcp restore` given a dump or state archive whose deflate data
+  is corrupt now refuses it as unreadable (exit 2, nothing restored) instead
+  of printing a `zlib.error` traceback. `update` and `migrate-flat`, which
+  share the dump check, now read such a dump as incomplete too.
+- A safety or update backup whose dump or state archive comes out of Docker
+  corrupt now fails with a clean error naming the retry, after the daemon
+  is restarted, instead of a traceback; the state backup's error now says
+  it is the copy out of Docker that failed rather than blaming an input.
+- The native CLI now refuses a corrupt deflate stream and a gzip CRC or
+  length mismatch in either file, where it deferred to Python before.
+
+### Security (2026-11-13 — Programs are never found in the current directory)
+
+- `pseudolife-mcp expose` looked for `tailscale` the way Python's
+  `shutil.which` does, which on Windows searches the current directory
+  before `PATH`, and on every system follows a relative or empty `PATH`
+  entry into it. A `tailscale.cmd`, `tailscale.exe` or `tailscale.bat` left
+  in the folder you ran `expose` from (a downloaded or cloned folder, say)
+  was run instead of Tailscale, and after `expose tailscale --yes` it was
+  the program asked to change this machine's Tailscale Serve settings.
+  `expose` now finds programs only in absolute `PATH` directories (and the
+  usual Tailscale install location), never in the current directory.
+- The same rule now finds the other programs Pseudolife locates and then
+  runs by the path it found. In the Python commands: `pg_dump` for
+  `backup`, `codex` for Codex setup and the Codex doorbell (a desktop Codex
+  install only under an absolute `LOCALAPPDATA`), `tailscale` for
+  `maintainer setup` and the address `invite` prints, `git`, `pipx`, `pwsh`
+  and `bash` for `update`, `claude`, `pipx` and Python for the client
+  updates, the `pseudolife-mcp` launcher a tunnel service is registered
+  with, and the interpreter new shim runtimes are built from (a name that
+  is not found stays a bare name, never a file or `pyvenv.cfg` in the
+  current directory). In the native (Rust) commands: `pg_dump` for
+  `backup`, `codex` for Codex setup (the same `LOCALAPPDATA` rule), and
+  `tailscale` for `expose`, `maintainer setup` and `invite`; the client
+  updates' `git` and `claude`, already looked for in absolute directories
+  only, now follow `PATHEXT`'s order. The checks of whether `docker` is
+  installed (`update`, `maintainer setup`) follow it in both.
+- Not covered yet: a program started by its bare name, such as `docker`
+  (and `git`, `pwsh` and `bash` in the native `update`), is still found by
+  the operating system's or runtime's own search, which on Windows
+  includes the current directory unless `NoDefaultCurrentDirectoryInExePath`
+  is set.
+
+### Added (2026-11-13 — native restore refusals before Docker)
+
+- The native CLI now answers `pseudolife-mcp restore`'s checks that come
+  before any Docker command, matching the Python command's exit code and
+  messages: argparse's help and usage errors at 80 columns, an unreadable or
+  incomplete dump, a state archive that is unreadable or holds unsafe paths
+  or links, and the refusal without `--yes` when no terminal can answer.
+  The interactive prompt and archives with PAX or sparse members still defer
+  by name, before the update lock, a Docker command or any write; what a
+  confirmed restore answers natively is in the entry on its Docker checks.
+
+### Changed (2026-11-13 — native restore answers its Docker checks)
+
+- The native `pseudolife-mcp restore` now reads state archives whose members
+  carry GNU long names or links, which GNU tar writes for any path over 100
+  bytes, exactly as the Python command does, instead of deferring them.
+- Confirmed with `--yes`, it now answers, as the Python command does, every
+  refusal that comes before the command changes anything: another update
+  holding the update lock, a container that cannot be inspected, a database
+  connection that cannot be resolved, a bad port, a missing image or `/data`
+  mount, a stopped PostgreSQL, no health port, a failed database probe, a
+  safety directory inside a checkout or the state mount, and too little free
+  space. Where the Python command would stop the daemon or start the safety
+  backup, it still defers, before taking the lock or writing anything.
+
+### Added (2026-11-13 — Native `expose status` and expose's checks)
+
+- The Rust CLI answers `pseudolife-mcp expose status` (with `--json`), the
+  help and argument errors of `expose`, and every check `expose tailscale`
+  and `expose off` make before changing anything (the local daemon, the
+  `tailscale` CLI, the current serve on the port, the tailnet address), with
+  each refusal, "already exposed" and "not exposed", byte for byte as the
+  Python command does. Changing the serve config, and the confirmation
+  question, are not native yet: the Rust CLI reports them as deferred and
+  `pseudolife-mcp expose` keeps running the Python command for them.
+
+### Added (2026-11-13 — Native conductor-watch help, stop and setup refusals)
+
+- The Rust CLI answers `pseudolife-mcp conductor-watch` (and its deprecated
+  name `delegate-watch`) up to the point where the watcher would start, byte
+  for byte as the Python command does: `--help` and its argument errors,
+  `--stop`, the refusals for a missing or unreadable owner, and a start that
+  finds a watcher already running on its state, with or without
+  `--detach`. Starting the watch itself is not native yet: the Rust CLI
+  reports it as deferred, and `pseudolife-mcp conductor-watch` keeps running
+  the Python command.
+
+### Fixed (2026-11-13 — native updater no longer asks Codex to approve the Claude-only StopFailure hook)
+
+- The native `pseudolife-mcp update` and `doctor` now leave the plugin's
+  Claude-only `StopFailure` hook out of their Codex checks, as the Python
+  updater has since 7 November 2026. Codex never runs that handler, so the
+  native path reported `codex_hooks` as needing approval on every update,
+  read Codex's runtime as not loaded, and treated a plugin update that only
+  added the event as a changed definition to re-approve. The shared Codex
+  consent cases now pin the skip for both implementations, and the Python
+  half of that comparison now runs in CI on Linux and Windows.
+
+### Fixed (2026-11-13 — `expose` answers output it cannot read instead of crashing)
+
+- `pseudolife-mcp expose` stopped with a Python traceback, several times
+  after it had already changed the serve configuration, when `tailscale`
+  printed output that is not UTF-8, JSON nested very deeply, a
+  `Self.TailscaleIPs` that is a number, or text holding a lone surrogate.
+  Each now gets the ordinary answer: "could not read what `tailscale ...`
+  printed (...)", with exit 4 when nothing was changed, and after a change
+  exit 5 with how to check `tailscale serve status` and undo it. `expose off`
+  now also exits 5 with that advice when its result cannot be read back
+  after the removal ran (it exited 4, which means nothing changed).
+- `expose` accepted an address written in another script's digits (or with
+  an octet over 255, or a leading zero) as the tailnet address and could
+  print it as the client URL. Only an ASCII dotted quad is an address now,
+  and `--port` takes only ASCII digits.
+
+### Changed (2026-11-13 — the native `console` opens the signed-in Console in a browser itself)
+
+- The Rust CLI candidate (`pseudolife-stdio`) now answers the `console` sign-in that opens a browser, `--unless-signed-in` and an empty `--revoke` itself instead of handing them to Python. It picks the browser exactly as Python's `webbrowser` does (the `BROWSER` variable, the desktop's default handler, `DISPLAY`/`WAYLAND_DISPLAY` on Linux) and passes the sign-in link to it as a single argument, never through a shell. Launchers it does not reproduce yet (the macOS default, the Firefox/Chrome remote-control launchers on Linux, a Windows `BROWSER` program that is not a full `.exe` path) still go to Python before any sign-in code is made.
+
+### Security (2026-11-13 — `pseudolife-mcp console` hands the browser only a real sign-in link)
+
+- `pseudolife-mcp console` now opens a link only when it holds nothing but the Console's address, a sign-in code in the daemon's own alphabet and, if you asked for one, the page; any other answer is refused (exit 4). Before, a link could carry `&`, `|`, `^` or `"` after the code, and on Windows a `BROWSER` setting that names a `.bat` or `.cmd` file runs through `cmd.exe`, so whatever answered at the daemon's address could have run a command on your machine. Without such a `BROWSER` setting nothing ran. The native command (`pseudolife-stdio`) applies the same check and never starts a batch file.
+
+### Fixed (2026-11-13 — `pseudolife-mcp console` refuses a malformed answer instead of crashing)
+
+- `pseudolife-mcp console` no longer ends in a Python traceback when whatever answers at the daemon's address sends something malformed: an `error` that is a list or object, an expiry time that is not a number, a sign-in code other than the one in its link, a session-list time this machine cannot show, text with a lone surrogate, nesting too deep to parse, or a reply that is not readable HTTP. Each is now refused with a message naming the problem (exit 4), before any browser opens or any line of the list prints. The native command (`pseudolife-stdio`) gives the same refusals, except for an answer nested too deep or a reply that is not readable HTTP, which it still hands to Python.
+- `pseudolife-mcp console --revoke ""` is now a usage error (exit 2) instead of signing a browser in.
+- The command no longer starts the Elinks terminal browser, which takes over the terminal when no Elinks window is open; it prints the link instead, as it already did for lynx, links and w3m.
+
+### Fixed (2026-11-13 — conductor-watch no longer crashes on odd input)
+
+- `pseudolife-mcp conductor-watch` ended in a Python traceback, or
+  misbehaved silently, on several inputs it now handles:
+  - `--max-age 5ſ` (a non-ASCII letter that folds to a unit) is argparse's
+    "not a duration" error, in `lease` too.
+  - A `--state` with no file name (`""`, `.`, `..`) is a usage error naming
+    `--state`.
+  - `--settle nan` is refused; it never sent a batch.
+  - A `--max-age` too large for the clock is capped at 100 years.
+  - `gh` output of the wrong shape (JSON that is not a list of objects, a
+    field of the wrong type, output that is not JSON) is a failed poll,
+    `gh failed (n/5): gh pr list printed a JSON object, not a list of
+    objects (...)`, and the watcher gives up after five in a row, as it does
+    for any other `gh` failure.
+  - A suite result that is JSON but not an object is skipped with one
+    `skipped` ledger line.
+  - A state file it cannot read gets a fresh baseline with one `reset`
+    ledger line.
+  - A state it cannot write is refused before the watcher registers on the
+    board (exit 2, naming the file and `--state`); a write that fails later
+    tells the owner.
+  - An unwritable `--stop` request or `--detach` log is exit 2 with the
+    reason.
+  - A pid record out of range or nested too deep names no watcher.
+  - On Linux, a `/proc/<pid>/stat` that is not UTF-8 is read as unreadable.
+- The native shim's `conductor-watch` gives the same answers where it
+  answers before the watcher starts: the `--state`, `--settle nan` and
+  `--max-age` refusals, a pid record out of range read as no watcher, and
+  an unwritable `--stop` request refused with exit 2 and the reason. The
+  watch itself and `--detach` still run on Python.
+
+### Added (2026-11-12 — Native Console sign-in links, list and sign-out)
+
+- The Rust CLI answers `pseudolife-mcp console --no-open`, `console --list`
+  and `console --revoke SESSION_ID` (each with `--json`), their help and
+  their argument, credential and daemon refusals, byte for byte as the Python
+  command does. A sign-in that would open a browser, and
+  `--unless-signed-in`, are not native yet: the Rust CLI reports them as
+  deferred, and `pseudolife-mcp console` keeps running the Python command.
+
 ## [0.23.1] - 2026-11-12 — Nothing in the Rust daemon or PostgreSQL containers runs as root, and `pseudolife-mcp update` brings an existing host's PostgreSQL container in line with the release itself; a release update no longer deletes the shim runtime it is still running from; and a compacted or resumed session on the Rust daemon gets its own handoff back
 
 ### Fixed (2026-11-12 — `pseudolife-mcp update` now applies the release's PostgreSQL settings)
