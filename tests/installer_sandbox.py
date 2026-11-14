@@ -17,7 +17,6 @@ unset asks the system for the real folder instead.
 """
 from __future__ import annotations
 
-import functools
 import os
 import subprocess
 import tempfile
@@ -34,7 +33,9 @@ class RealHomeRefused(RuntimeError):
     """An installer was about to start outside a disposable home."""
 
 
-@functools.lru_cache(maxsize=None)
+_GIT_BASH_TMP: list[str] = []
+
+
 def _git_bash_tmp() -> str | None:
     """The Windows folder Git Bash mounts at ``/tmp``, as Git Bash answers it.
 
@@ -42,8 +43,11 @@ def _git_bash_tmp() -> str | None:
     so with ``TEMP`` pointed elsewhere (an 8.3 short-name folder, as the
     hosted runner reaches its own) ``tempfile.gettempdir()`` is a different
     folder. ``None`` when Git Bash cannot be asked: a ``/tmp`` path is then
-    not resolved, and so refused.
+    not resolved, and so refused. Only an answer is kept, so one slow start
+    under load is asked again rather than refusing for the rest of the run.
     """
+    if _GIT_BASH_TMP:
+        return _GIT_BASH_TMP[0]
     from tests.ops_harness import find_bash
 
     bash = find_bash()
@@ -55,7 +59,10 @@ def _git_bash_tmp() -> str | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     folder = answer.stdout.strip()
-    return folder if answer.returncode == 0 and folder else None
+    if answer.returncode != 0 or not folder:
+        return None
+    _GIT_BASH_TMP.append(folder)
+    return folder
 
 
 def _resolved(value: str | os.PathLike[str]) -> Path:

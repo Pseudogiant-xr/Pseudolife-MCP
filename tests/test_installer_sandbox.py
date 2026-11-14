@@ -160,3 +160,12 @@ def test_a_git_bash_tmp_path_is_read_where_git_bash_mounts_tmp(tmp_path):
     with pytest.raises(installer_sandbox.RealHomeRefused, match="HOME"):
         installer_sandbox.require(env, tmp_path)
 
+
+@pytest.mark.skipif(os.name != "nt", reason="Git Bash path spelling")
+def test_a_git_bash_tmp_path_is_refused_when_git_bash_cannot_be_asked(tmp_path, monkeypatch):
+    monkeypatch.setattr(installer_sandbox, "_git_bash_tmp", lambda: None)
+    env = installer_sandbox.environment(tmp_path)
+    env["HOME"] = "/tmp/anything/home"
+    with pytest.raises(installer_sandbox.RealHomeRefused, match="HOME"):
+        installer_sandbox.require(env, tmp_path)
+
