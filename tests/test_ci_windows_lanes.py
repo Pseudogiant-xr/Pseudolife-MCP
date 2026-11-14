@@ -101,14 +101,6 @@ def test_every_listed_file_and_test_exists():
             assert tests <= top_level_tests(path), (path, tests - top_level_tests(path))
 
 
-def test_the_landed_exceptions_tests_left_the_windows_lanes():
-    # They ran here while the freeze exceptions that changed backup_cli and
-    # update_cli (#1539, #1537) were open (tests/suite_classes.txt rule 3);
-    # both landed on 14 November 2026, so the files are frozen again.
-    for files, named, _ in lanes():
-        assert "tests/test_docker_backup_restore.py" not in files | set(named)
-
-
 def listed_files():
     return {path for files, named, _ in lanes() for path in files | set(named)}
 

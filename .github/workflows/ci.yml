@@ -6,9 +6,8 @@
 #                       since the 2026-08-14 16→18 bump), every test on the
 #                       real embedding weights (PSEUDOLIFE_TEST_EMBEDDER=real);
 #   * test-lite-windows — the product paths that differ on Windows (embedded
-#                       provider, backup round trip, shim daemon spawn,
-#                       credential ACLs, tunnel DPAPI and process handling,
-#                       the msvcrt locks) on a real Windows runner, with no
+#                       provider, shim daemon spawn, credential ACLs, the
+#                       msvcrt locks) on a real Windows runner, with no
 #                       retries. Windows runners cannot host service
 #                       containers at all, so embedded PG is the only
 #                       Postgres coverage possible there; the FULL suite on
@@ -741,7 +740,7 @@ jobs:
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
     # Windows plumbing that starts real processes and shells (installer
-    # matrix, Codex hook setup and doorbell, coordination digest and adapter,
+    # matrix, Codex hook setup, coordination digest,
     # wait-mail, update CLI, register-claude-desktop, the stop-wake hook's
     # timing tests, the rest of the suite lock, shim and conductor watcher).
     # The 2026-10-20 CI flake review found the Windows flakes live here, so
@@ -801,8 +800,8 @@ jobs:
 
       - name: Windows plumbing (one recorded retry)
         # Tests the merge gate names from a split file are deselected here, so
-        # each runs in one Windows lane. The last nine files hold Windows-only tests that no CI lane
-        # ran before 2026-10-20.
+        # each runs in one Windows lane. The last seven files hold
+        # Windows-only tests that no CI lane ran before 2026-10-20.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-

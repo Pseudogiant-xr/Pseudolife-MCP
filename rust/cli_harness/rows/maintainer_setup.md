@@ -60,7 +60,7 @@ Validation after integration:
 ```text
 cargo test -p pseudolife-stdio --test cli_maintainer_setup_contract
 cargo test -p pseudolife-stdio cli::maintainer::setup
-python -m pytest -q tests/test_maintainer_setup.py rust/cli_harness/test_maintainer_setup_native.py
+python -m pytest -q --include-frozen tests/test_maintainer_setup.py rust/cli_harness/test_maintainer_setup_native.py
 python rust/cli_harness --row maintainer_setup --candidate <native-binary>
 python rust/cli_harness --row maintainer_setup --golden --candidate <native-binary>
 ```
