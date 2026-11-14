@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "ae533ea0bf5ced90",
+  "fingerprint": "927523e26c260993",
+  "reason": "Moves the report-only frozen-judge probe step (run only on ordinary PRs with judges selected) to the frozen-probes job and publishes only the goldens group; no step a batch runs changes, so the full-run price holds. Ordinary PRs that selected judges lose that step: 10.0-15.8 min on Linux, 6.7-9.6 min on Windows (2026-11-11 to 2026-11-13)."
+}
