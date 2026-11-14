@@ -128,6 +128,14 @@ pub struct Report {
 }
 
 impl Report {
+    /// Records a displaced file's backup in the spelling the user can use:
+    /// the ordinary one, or the verbatim `\\?\` one only where Windows needs
+    /// it (`setup::codex::resolved_path`). The writers return the verbatim
+    /// spelling of the paths they canonicalized.
+    pub(super) fn backed_up(&mut self, path: PathBuf) {
+        let path = crate::setup::codex::resolved_path(&path).unwrap_or(path);
+        self.backups.push(path);
+    }
     pub fn json(&self) -> Value {
         let mut out = Map::new();
         out.insert("source".into(), json!(self.source));
@@ -434,7 +442,7 @@ async fn hook_setup<H: Host>(
             .await?;
             for key in ["backup", "connection_backup"] {
                 if let Some(path) = credential[key].as_str() {
-                    report.backups.push(PathBuf::from(path));
+                    report.backed_up(PathBuf::from(path));
                 }
             }
             for (key, value) in credential.as_object().into_iter().flatten() {

@@ -105,7 +105,7 @@ fn write(
             ))
         })?;
     if old.is_some() {
-        report.backups.push(backup);
+        report.backed_up(backup);
     }
     report.instructions_path = Some(path);
     Ok("appended")

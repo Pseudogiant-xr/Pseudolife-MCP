@@ -1360,6 +1360,51 @@ fn a_new_release_moves_the_bundle_and_leaves_the_approved_commands_alone() {
     manual::vet(&listed.iter().collect::<Vec<_>>(), &world.home, true).unwrap();
 }
 
+/// Each reported backup is in the spelling `setup::codex::resolved_path`
+/// gives it: the ordinary one, and the verbatim `\\?\` one only where
+/// Windows needs it (an ordinary spelling of 260 UTF-16 units or more, or
+/// one that does not resolve back to the same file), so a deep TEMP, or an
+/// 8.3 alias that expands to one, is reported as the product resolves it.
+fn assert_backups_in_resolved_spelling(backups: &[PathBuf]) {
+    let pairs: Vec<_> = backups
+        .iter()
+        .map(|b| (b.clone(), crate::setup::codex::resolved_path(b).ok()))
+        .collect();
+    assert!(
+        pairs
+            .iter()
+            .all(|(b, resolved)| resolved.as_ref() == Some(b)),
+        "{pairs:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_existing_instruction_file_is_backed_up_and_reported_in_its_resolved_spelling() {
+    // The memory block is appended to an AGENTS.md that already exists, so
+    // the displaced file's backup is reported, as the hooks' backups are.
+    let world = World::new();
+    fs::write(
+        world.home.join("AGENTS.md"),
+        "# Mine
+",
+    )
+    .unwrap();
+    let report = world.run("manual", "yes", "append").await;
+    assert_eq!(report.status, "ready", "{:?}", report.recovery);
+    assert_eq!(report.instructions, "appended");
+    assert!(
+        report
+            .backups
+            .iter()
+            .any(|b| b.parent().is_some_and(|folder| folder
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with(".client-native-backup-")))),
+        "{:?}",
+        report.backups
+    );
+    assert_backups_in_resolved_spelling(&report.backups);
+}
+
 #[tokio::test]
 async fn an_instruction_file_that_cannot_be_written_is_reported_not_silent() {
     // Hooks ready, the requested memory block refused: the step still
@@ -1382,18 +1427,8 @@ async fn an_instruction_file_that_cannot_be_written_is_reported_not_silent() {
         error["cause"].as_str().is_some_and(|c| !c.is_empty()),
         "{json}"
     );
-    // Each backup is reported in the spelling `resolved_path` gives it: the
-    // ordinary one, and the verbatim `\\?\` one only where the ordinary
-    // spelling would reach Win32's 260-character limit (a deep TEMP, or an
-    // 8.3 alias that expands to one), which nothing else can open.
-    assert!(
-        report
-            .backups
-            .iter()
-            .all(|b| crate::setup::codex::resolved_path(b).is_ok_and(|resolved| &resolved == b)),
-        "{:?}",
-        report.backups
-    );
+    assert!(!report.backups.is_empty());
+    assert_backups_in_resolved_spelling(&report.backups);
     let lines = stderr_lines(&report);
     assert!(
         lines.iter().any(|l| l.contains("AGENTS.md")
