@@ -1,18 +1,22 @@
 # CLI-MOVE-REFUSALS contract (`move`, refusals before any effect)
 
 Oracle: `pseudolife_memory/move_cli.py` and `codex_connection._validated_daemon_url`
-at origin/master 151c3faa. Candidate: `rust/shim/src/cli/move_cli.rs`.
+at origin/master 151c3faa. Candidate: `rust/shim/src/cli/move_cli.rs` (the
+refusals Python makes before any effect) and, for the argv it passes on,
+`rust/shim/src/cli/restore_cli/move_native/` (the native dry run).
 Harness row: `move` (`rust/cli_harness/rows/move.py`). Oracle test:
 `tests/test_move_cli.py::test_usage_errors_exit_2`.
 
 ## Scope
 
-The move itself (CLI-MOVE) stays deferred: it reads the hardcoded
-`SOURCE_URL = "http://127.0.0.1:8765"` (`move_cli.py:105`, no environment
-seam), drives roughly forty docker and ssh exchanges, spawns
-`sys.executable -m pseudolife_memory.cli connect` (`move_cli.py:1642`), and
-rolls back on signals. This row ports only what the command decides from
-its argv before any of that.
+Since the maintainer's ruling of 14 November 2026 (works, not matches),
+`move` is rebuilt as a native feature rather than ported. This row compares
+the two where they still answer alike: what the command decides from its
+argv before any effect. The native dry run (`--dry-run`: both hosts checked
+read-only, the target's half in the hidden `move-target` helper over ssh)
+and its own refusals are not compared (below); they are tested in Rust
+(`restore_cli/move_native/tests.rs` against recording fakes of both hosts,
+and `tests/cli_move_contract.rs` through the binary).
 
 ## What runs before the first effect (checked)
 
@@ -48,23 +52,40 @@ its argv before any of that.
 `--json`, each at most once, with each value the next argument, valid
 Unicode, not starting with `-`.
 
+## Not compared (the native behaviour is by design)
+
+Each of these was a case of this row while the native command deferred:
+
+- Every argv that passes the checks above: the native module answers it.
+  Without `--dry-run` it refuses, naming it; with `--dry-run` it refuses, in
+  this order, `--target-checkout`, `--expose-target`, `--resume`,
+  `--target-env-file` / `--target-compose-file`, a missing `--target-url`,
+  carried tokens (no `--no-keep-tokens`) and a relative `--target-work-dir`
+  (exit 2), and otherwise runs the read-only preflight (exit 0 with the
+  plan, or 4 with its refusal). The oracle would contact the live daemon,
+  so these never ran it; `tests/cli_move_contract.rs` pins each answer.
+- `--target-url` values whose validity differs between Python releases
+  (bracketed hosts, empty userinfo, empty or `+`/leading-zero ports, `_` or
+  non-ASCII in a host): the native client decides them
+  (`argv.rs` `origin`, tested by `target_urls_are_origins`).
+- `--json` with a `Mover.run` refusal (a C0 `--to`, a CR/LF checkout): the
+  oracle prints a JSON report with a fresh move id; the native client
+  answers the `--to` check as text, as without `--json`, and a checkout as
+  unsupported.
+
+`move-valid-refused`, `move-json-control` and `move-isspace-separators`
+left the row's mutants with them: the first changes only the answer to
+valid argv, which `tests/cli_move_contract.rs` pins; the other two are now
+equivalent mutants (each turns a `--to` refusal into a deferral, and the
+native module then prints the same `--to` refusal).
+
 ## Deferred (the dispatcher's `mode 'move' is deferred` line, exit 1)
 
-- Every argv that passes all the checks above (`--dry-run`, `--resume`,
-  `--yes`, `--json` included): the oracle would go on to the source GET.
-- `--target-url` values whose validity differs between Python releases or
-  that this port does not decide (`_validated_daemon_url` answered only for
-  plain `http(s)://host[:port][/][?][#]`, with `Invalid` answered only where
-  some required part is certainly wrong): bracketed hosts, empty userinfo
-  (`http://@box`), empty or non-ASCII-digit ports, `+`/`-`/`_` in a port,
-  non-ASCII or other punctuation in a host.
 - Argparse shapes: `--opt=value`, abbreviations, repeated options,
   positionals, a missing value, any value starting with `-` (so the oracle's
   `--to` starts-with-`-` refusal, reachable only through `--to=-x`,
   `--to -1`, `--to -` or a spaced value, always defers here), `--help` with
   other arguments, help or usage at any `COLUMNS` other than `80`.
-- `--json` with a `Mover.run` refusal (C0 `--to`, CR/LF checkout): the
-  oracle prints its JSON report, which carries a fresh move id and clock.
 - Non-Unicode argv.
 - Any non-ASCII argument when CPython would not decode a POSIX argv as
   UTF-8: UTF-8 mode (`PYTHONUTF8=1`, or `PYTHONUTF8` unset or empty under
@@ -97,17 +118,20 @@ The oracle runs only argv that refuse before any effect, with `PATH` set to
 an empty directory and every proxy variable naming a recording listener;
 a once-per-process positive control proves the oracle's own HTTP reader
 (`move_cli.Runner.get_json`) reaches that listener for a loopback URL, so
-no request could reach the live daemon on 8765. Argv that passes
-validation runs a verified stub `pseudolife_memory.cli` in the Python arm,
-never the oracle; the candidate must print the deferral and make no
-request. The Rust contract test `rust/shim/tests/cli_move_contract.rs`
-checks the same deferrals against a bound listener that every proxy and
-daemon variable names, which must see no connection.
+no request could reach the live daemon on 8765. The argv shapes that still
+defer run a verified stub `pseudolife_memory.cli` in the Python arm, never
+the oracle; the candidate must print the deferral and make no request. The
+Rust contract test `rust/shim/tests/cli_move_contract.rs` checks the native
+answers and the deferrals against a bound listener that every proxy and
+daemon variable names, which must see no connection, with `PATH` holding
+nothing (no docker, no ssh), so a native dry run refuses at its first need,
+ssh, before any connection.
 
 A direct socket (a hardcoded `127.0.0.1:8765`) would bypass both
 listeners, so the leaf's source is scanned for network, process, file and
 raw-OS names, and for any crate module but the dispatcher's
-`super::text_bytes`: by `the_leaf_source_reaches_no_io_beyond_its_answer`
+`super::text_bytes` (the native module is a separate file, reached
+through the dispatcher): by `the_leaf_source_reaches_no_io_beyond_its_answer`
 in the contract test, and by every harness case on the source the
 candidate binary was built from (the mutant copy under `--mutants`). The
 `move-direct-socket` mutant inserts such a connect behind `if false`, so it
