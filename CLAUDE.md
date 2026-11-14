@@ -52,8 +52,10 @@ each exists because it was violated at least once.
    - The `merge-forward` skill is the only exception.
    - Read `docs/dev/merge-batches.md` before building, opening or merging a
      batch.
-5. **Rust-only batches skip the Python suite lanes** and the master push
-   runs them, because the workflows decide lanes from the diff
+5. **Rust-only batches skip the Python suite lanes**, on their master push
+   too, and the next nightly (on master's tip) runs them, while `guards`
+   runs the live tests that read `rust/`, because the workflows decide lanes from
+   the diff
    (`docs/dev/merge-batches.md` "What CI runs where", read when a batch's
    lane set looks wrong).
 6. **Deploy only via `pseudolife-mcp update`** (backup → rollback tag →
@@ -151,6 +153,14 @@ touched, with no retrofit sweep.
 
 ## Running tests
 
+- **Frozen test files:** a run collects only the live files of
+  `tests/suite_classes.txt` (`--include-frozen` adds the rest), because the
+  frozen package's code no longer changes (`docs/dev/merge-batches.md` "What
+  CI runs where" says when the frozen files still run; read it before
+  relying on them).
+- A new test file adds its line there: a test of a freeze-exception change,
+  or of anything that survives, is live; read the header of
+  `tests/suite_classes.txt`.
 - **Exit codes:** never pipe a test run through a pager, since the pipe
   replaces pytest's exit code; redirect, or use `set -o pipefail; ... | tee
   log | tail -60`:
@@ -191,7 +201,8 @@ touched, with no retrofit sweep.
   `.ps1` launchers; code resting on signals, kill, file locks, detached
   sessions; Windows daemon lifecycle) run that platform's affected tests
   natively as a targeted run, and those files are in its CI lite lane
-  (`test-lite-windows` / `test-lite-macos`); an unbounded Windows change
+  (`test-lite-windows` / `test-lite-macos`; a freeze-exception change's
+  tests are live, so they can be); an unbounded Windows change
   takes the Windows dev VM's native full suite, and macOS has only CI.
 - **Docs-only changes** (`git diff --name-only origin/master...` lists only
   `*.md`, `llms.txt` / `llms-full.txt` and non-code files under `docs/`)

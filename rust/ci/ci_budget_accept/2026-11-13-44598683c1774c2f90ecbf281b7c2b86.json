@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "53f970c03bdfbd83",
+  "fingerprint": "c2a21b87129f6b8a",
+  "reason": "Python freeze (2026-11-14): a master push is classified by its merge (git diff HEAD^1) like a pull request, and the nightly's push-reuse step also reads the push run's job list; the same few-second steps, so 0.2 min holds."
+}

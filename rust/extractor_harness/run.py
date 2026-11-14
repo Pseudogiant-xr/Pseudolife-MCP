@@ -3,15 +3,17 @@
 Invoke through the extractor_shim Cargo integration test, which supplies the
 target-native --stub-exe fixture alongside --binary.
 
-Only generated completion/tool IDs, per-process instruction-file paths and
-the fixture CLI path in timeout diagnostics are normalized. HTTP status and response bodies are then compared as bytes;
+Only generated completion/tool IDs and per-process instruction-file paths
+are normalized. HTTP status and response bodies are then compared as bytes;
 argv, stdin, instruction bytes and selected child environment are compared too.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import concurrent.futures
+import hashlib
 import http.client
 import importlib.util
 import json
@@ -26,6 +28,12 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+# The recorders' shared vocabulary, loaded by file: rust/daemon/harness has
+# its own run.py and other names this harness must not resolve to.
+_record_spec = importlib.util.spec_from_file_location(
+    "candidate_record", ROOT / "rust/daemon/harness/candidate_record.py")
+candidate_record = importlib.util.module_from_spec(_record_spec)
+_record_spec.loader.exec_module(candidate_record)
 spec = importlib.util.spec_from_file_location("autostart_oracle", ROOT / "ops/shim_autostart.py")
 autostart_oracle = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(autostart_oracle)
@@ -205,6 +213,262 @@ def journal_rows(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+# The contract suite: CI checks the native shim against committed snapshots
+# (goldens/contract.<platform>.json); --record-goldens runs the Python shim
+# beside it and records where the two agree; --record-candidate re-records
+# from the native shim alone (rust/daemon/harness/candidate_record.py).
+GOLDENS = Path(__file__).with_name("goldens")
+PLATFORM = "windows" if os.name == "nt" else "linux"
+PROMPT_FILE = ROOT / "evals/prompts/assistant_facts_provenance.txt"
+PROMPT_TOKEN = "<production prompt>"
+# A longer string is stored as its length and digest (run.py's golden_scrub does the same).
+LONG = 4096
+
+
+def contract_golden():
+    return GOLDENS / f"contract.{PLATFORM}.json"
+
+
+# The live Python files a recording proves the native shim against. A
+# change to one asks for --record-goldens again (test_contract_golden.py).
+PYTHON_SOURCES = ("evals/claude_shim.py", "evals/codex_shim.py", "ops/shim_autostart.py")
+
+
+def provider_models(kind):
+    """The native shim's listed models for ``kind``, in its order
+    (``Kind::models`` in rust/shim/src/extractor_shim/config.rs; test_prompt.py
+    pins the same set to the Python shims)."""
+    native = (ROOT / "rust/shim/src/extractor_shim/config.rs").read_text(encoding="utf-8")
+    arm = "Claude" if kind == "claude" else "Codex"
+    block = re.search(rf"Self::{arm} => &\[(.*?)\]", native.split("pub fn models", 1)[1], re.S)
+    return re.findall(r'"([^"]+)"', block[1])
+
+
+def models_body(text, kind):
+    """A /models body with its run of the provider's listed models (after the
+    launch model, which stays literal and pins the default) as one token,
+    when it is exactly the native list in its order. A model release changes
+    that list on both sides and leaves this snapshot alone; a dropped,
+    reordered or foreign entry leaves the body as it is, and differs."""
+    if not isinstance(text, str) or not text.startswith('{"object": "list", "data": ['):
+        return text
+    launch = re.match(r'\{"object": "list", "data": \[\{"id": "([^"]*)", "object": "model"\}', text)
+    if not launch:
+        return text
+    rest = [model for model in provider_models(kind) if model != launch[1]]
+    run_text = ", ".join(f'{{"id": "{model}", "object": "model"}}' for model in rest)
+    if not rest or f", {run_text}, " not in text:
+        return text
+    return text.replace(f", {run_text}, ", f', {{"id": "<{kind} listed models>", "object": "model"}}, ', 1)
+
+
+def tokens(value, prompt):
+    """A snapshot with the production prompt's text as a token and every
+    string longer than LONG as its length and digest. Model IDs stay
+    literal: /models is handled by models_body, and an argv or response
+    model is the behaviour under test."""
+    if isinstance(value, dict):
+        return {key: tokens(item, prompt) for key, item in value.items()}
+    if isinstance(value, list):
+        return [tokens(item, prompt) for item in value]
+    if isinstance(value, str):
+        value = value.replace(prompt, PROMPT_TOKEN)
+        if len(value) > LONG:
+            # Still exact, without storing the long request bodies themselves.
+            value = f"<{len(value)} chars sha256:{hashlib.sha256(value.encode('utf-8', 'surrogatepass')).hexdigest()}>"
+        return value
+    return value
+
+
+def python_sources():
+    """The digests of PYTHON_SOURCES, line endings normalised."""
+    return {name: hashlib.sha256((ROOT / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+            for name in PYTHON_SOURCES}
+
+
+def body_text(body: bytes):
+    """A response body as the snapshot stores it: text when it is UTF-8, its
+    base64 otherwise, so the bytes are compared exactly either way."""
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"base64": base64.b64encode(body).decode()}
+
+
+def _same_dir(left, right):
+    try:
+        return os.path.normcase(os.path.realpath(left)) == os.path.normcase(os.path.realpath(right))
+    except (OSError, ValueError):
+        return False
+
+
+def journal_snapshot(rows):
+    """Journal rows with the instruction file's bytes as text, so the prompt
+    inside them can be a token; anything else in base64 stays as recorded."""
+    out = []
+    for row in rows:
+        row = dict(row)
+        # A shim the harness starts without its own cwd runs in the
+        # harness's, wherever that was launched (the checkout by hand,
+        # rust/shim under cargo test): a host path no golden may hold.
+        # The stub already names the fixture's own root <root>.
+        if isinstance(row.get("cwd"), str) and _same_dir(row["cwd"], os.getcwd()):
+            row["cwd"] = "<harness cwd>"
+        if row.get("instructions"):
+            raw = base64.b64decode(row["instructions"])
+            try:
+                row["instructions"] = {"text": raw.decode("utf-8")}
+            except UnicodeDecodeError:
+                pass
+        out.append(row)
+    return out
+
+
+class Contract:
+    """Where the contract slices' observations go. Recording (``record``)
+    starts both shims and keeps an observation only where they agree;
+    checking (``check``, what CI runs) and ``candidate`` start the native shim
+    alone. Each observation is keyed by slice, launcher and provider."""
+
+    def __init__(self, mode):
+        self.mode = mode
+        self.prompt = PROMPT_FILE.read_text(encoding="utf-8")
+        self.observed: dict[str, object] = {}
+
+    def arms(self, binary):
+        return (("python", None), ("rust", binary)) if self.mode == "record" else (("rust", binary),)
+
+    @staticmethod
+    def launcher():
+        if os.name != "nt":
+            return "script"
+        return "exe" if STUB_EXE else "batch"
+
+    def settle(self, key, per_arm):
+        """Keep one observation per key: in recording, the two shims' agreed
+        one (a difference fails, as the live comparison always did)."""
+        snapshots = [tokens(observation, self.prompt) for observation in per_arm]
+        if self.mode == "record":
+            assert snapshots[0] == snapshots[1], (key, "the Python and native shims differ", snapshots)
+        if key in self.observed:
+            raise AssertionError(f"contract key {key} observed twice")
+        self.observed[key] = snapshots[-1]
+
+    def finish(self, binary, write=False):
+        """Check, record or re-record the golden; the number of cases."""
+        path = contract_golden()
+        committed = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+        named = host_paths(self.observed)
+        if named:
+            where = sorted(key for key, value in self.observed.items() if host_paths(value))
+            raise AssertionError("a contract snapshot names a host path (" + ", ".join(named) + ") in "
+                                 + ", ".join(where) + "; a golden must not hold one")
+        if self.mode == "record":
+            golden = {"normalizers": {
+                "ids": "generated completion and tool-call IDs (normalize)",
+                "prompt": f"the production prompt's text as {PROMPT_TOKEN}",
+                "models": "a /models body's run of the provider's listed models, exactly in the native "
+                          "order after the launch model, as one token",
+                "cwd": "a shim started in the harness's own directory journals <harness cwd>",
+            }, "oracle_head": _head(), "python_sources": python_sources(),
+                "cases": dict(sorted(self.observed.items()))}
+            candidate_record.write_json(path, golden, newline_at_end=True)
+            print(f"recorded {path.name}: {len(self.observed)} contract observations", flush=True)
+            return len(self.observed)
+        if committed is None:
+            raise AssertionError(f"{path.name} is missing: record it with run.py --suite contract "
+                                 "--record-goldens (both shims) or --record-candidate --write")
+        cases = committed["cases"]
+        if self.mode == "check":
+            differences = [f"{key}: only in the golden" for key in sorted(set(cases) - set(self.observed))]
+            differences += [f"{key}: not in the golden" for key in sorted(set(self.observed) - set(cases))]
+            for key in sorted(set(cases) & set(self.observed)):
+                differences += [f"{key}{d}" for d in snapshot_diff(cases[key], self.observed[key])]
+            assert not differences, ("the native shim departs from " + path.name + ": "
+                                     + "; ".join(differences[:20]))
+            return len(self.observed)
+        # --record-candidate: master's recorder vocabulary.
+        report = {"unchanged": [], "changed": [], "new": [], "removed": []}
+        for key, observation in sorted(self.observed.items()):
+            want = cases.get(key)
+            kind = candidate_record.classify(want is not None,
+                                             snapshot_diff(want, observation) if want is not None else [])
+            report[kind].append(key)
+            if kind != "unchanged":
+                for difference in (snapshot_diff(want, observation) if want is not None else [])[:20]:
+                    print(f"        {key}{difference}")
+            print(candidate_record.summary_line(key, kind, write, None), flush=True)
+        report["removed"] = sorted(set(cases) - set(self.observed))
+        for key in report["removed"]:
+            print(f"  removed {key} (recorded, but no longer observed)", flush=True)
+        changes = report["changed"] + report["new"] + report["removed"]
+        if not changes:
+            print(f"  {path.name}: nothing to change", flush=True)
+            return len(self.observed)
+        if not write:
+            raise SystemExit(f"  dry run: {path.name} would change ({len(report['changed'])} changed, "
+                             f"{len(report['new'])} new, {len(report['removed'])} removed); review the "
+                             "differences above, then add --write")
+        stamp = candidate_record.provenance(binary)
+        record = dict(committed.get(candidate_record.PROVENANCE_KEY) or {})
+        for key in report["removed"]:
+            cases.pop(key, None)
+            record.pop(key, None)
+        for key in report["changed"] + report["new"]:
+            cases[key] = self.observed[key]
+            record[key] = stamp
+        committed["cases"] = dict(sorted(cases.items()))
+        committed[candidate_record.PROVENANCE_KEY] = dict(sorted(record.items()))
+        candidate_record.write_json(path, committed, newline_at_end=True)
+        print(f"  wrote {path} ({len(changes)} change(s) from the native shim at "
+              f"{(stamp['commit'] or 'an unknown commit')[:12]}); on the other OS run: python "
+              f"rust/extractor_harness/run.py ... --suite contract --record-candidate", flush=True)
+        return len(self.observed)
+
+
+def snapshot_diff(want, got, path=""):
+    """Differences between a golden snapshot and an observation, at the path
+    where they differ: dbstate.diff alone compares a list as one value and
+    prints 300 characters of each side, so a change late in the responses
+    would show identical prefixes. The golden is the left side. Standard
+    library only: the Rust jobs that run this install no PostgreSQL client."""
+    if isinstance(want, dict) and isinstance(got, dict):
+        out = []
+        for key in sorted(set(want) | set(got)):
+            if key in want and key in got:
+                out += snapshot_diff(want[key], got[key], f"{path}/{key}")
+            else:
+                out.append(f"{path}/{key}: only in the {'golden' if key in want else 'observation'}")
+        return out
+    if isinstance(want, list) and isinstance(got, list) and len(want) == len(got):
+        return [d for index, (left, right) in enumerate(zip(want, got))
+                for d in snapshot_diff(left, right, f"{path}/{index}")]
+    if type(want) is type(got) and want == got:
+        return []
+    return [f"{path}: golden {json.dumps(want)[:300]} vs observed {json.dumps(got)[:300]}"]
+
+
+def host_paths(value) -> list[str]:
+    """The host paths a snapshot names, raw or JSON-escaped: the checkout, the
+    home and the temporary directory."""
+    text = json.dumps(value)
+    found = []
+    if re.search(r"[A-Za-z]:(?:\\\\|\\|/)Users(?:\\\\|\\|/)|/home/[^/\"]+/|/Users/[^/\"]+/", text):
+        found.append("a user's home directory")
+    for path in {str(ROOT), str(Path.home()), tempfile.gettempdir()}:
+        if len(path) >= 4 and any(spelling in text for spelling in
+                                  {path, path.replace("\\", "/"), json.dumps(path)[1:-1]}):
+            found.append("<home>" if path == str(Path.home()) else path)
+    return sorted(found)
+
+
+def _head():
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+
+
+CONTRACT = Contract("record")
+
+
 def corpus(kind, prompt):
     yield "models", "GET", "/models", None, canned(kind, "OK")
     yield "models-v1", "GET", "/v1/models", None, canned(kind, "OK")
@@ -253,9 +517,9 @@ def differential(binary, root):
     override = root / "override.md"
     override.write_text("header\n---\nReplacement prompt\n", encoding="utf-8")
     for kind in ("claude", "codex"):
-        results, records = [], []
-        for arm, exe in (("python", None), ("rust", binary)):
-            arm_results = []
+        observations = []
+        for arm, exe in CONTRACT.arms(binary):
+            responses = []
             with server(exe, kind, root / f"{kind}-{arm}", canned(kind, "OK"), override=override) as (port, plan, journal, _, _):
                 for label, method, path, body, output in corpus(kind, prompt):
                     plan.write_text(json.dumps(output))
@@ -263,13 +527,10 @@ def differential(binary, root):
                         status, response = call(port, method, path, body)
                     except OSError as error:
                         raise AssertionError(f"{root.name}/{kind}/{arm}/{label}: {error}") from error
-                    arm_results.append((label, status, normalize(response)))
-                records.append(journal_rows(journal))
-            results.append(arm_results)
-        for expected, actual in zip(*results, strict=True):
-            assert actual == expected, (kind, expected, actual)
-            count += 1
-        assert records[0] == records[1], (kind, "CLI journal differs", records)
+                    responses.append([label, status, models_body(body_text(normalize(response)), kind)])
+                observations.append({"responses": responses, "journal": journal_snapshot(journal_rows(journal))})
+        CONTRACT.settle(f"differential/{CONTRACT.launcher()}/{kind}", observations)
+        count += len(observations[-1]["responses"])
     return count
 
 
@@ -291,15 +552,23 @@ def configuration(binary, root):
             assert result.returncode == 0, result.stderr
             assert (pyroot / "ops/.env").read_text() == (native / "ops/.env").read_text(), kind
             count += 1
-        answers, records = [], []
-        for arm, exe in (("python", None), ("rust", binary)):
+        observations = []
+        for arm, exe in CONTRACT.arms(binary):
             with server(exe, kind, root / f"managed-{kind}-{arm}", canned(kind, "OK"), managed=True) as (port, _, journal, _, _):
-                answers.append([call(port, "GET", "/models"), call(port, "POST", "/chat/completions", {"messages": [{"role": "user", "content": "hello"}]})])
-                records.append(journal_rows(journal))
-        assert [(s, normalize(b)) for s, b in answers[0]] == [(s, normalize(b)) for s, b in answers[1]], kind
-        assert records[0] == records[1], (kind, "managed invocation differs", records)
+                answers = [call(port, "GET", "/models"), call(port, "POST", "/chat/completions", {"messages": [{"role": "user", "content": "hello"}]})]
+                observations.append({"responses": [[status, models_body(body_text(normalize(body)), kind)]
+                                                   for status, body in answers],
+                                     "journal": journal_snapshot(journal_rows(journal))})
+        CONTRACT.settle(f"managed/{kind}", observations)
         count += 2
     return count
+
+
+TOOL_REPLIES = ('{"tool_call":{"name":"lookup","arguments":{"x":"é"}}}',
+                'Here is the call: {"tool_call":{"name":"lookup","arguments":"{bad"}}',
+                '[assistant called tool lookup with {"x":1}]',
+                '{"tool_call":{"name":"lookup","arguments":{}}', '{"tool_call": broken}', "plain reply")
+HEALTH_REASONS = ("Not logged in", "rate limit")
 
 
 def tools_differential(binary, root):
@@ -307,109 +576,133 @@ def tools_differential(binary, root):
                             {"role": "assistant", "tool_calls": [{"id": "prior", "function": {"name": "lookup", "arguments": "{}"}}]},
                             {"role": "tool", "tool_call_id": "prior", "content": "result"}],
                "tools": [{"type": "function", "function": {"name": "lookup", "description": "Find é", "parameters": {"type": "object", "properties": {}}}}]}
-    replies = ['{"tool_call":{"name":"lookup","arguments":{"x":"é"}}}',
-               'Here is the call: {"tool_call":{"name":"lookup","arguments":"{bad"}}',
-               '[assistant called tool lookup with {"x":1}]',
-               '{"tool_call":{"name":"lookup","arguments":{}}', '{"tool_call": broken}', "plain reply"]
-    arms, records = [], []
-    for arm, exe in (("python", None), ("rust", binary)):
+    replies = TOOL_REPLIES
+    observations = []
+    for arm, exe in CONTRACT.arms(binary):
         responses = []
         with server(exe, "claude", root / f"tools-{arm}", canned("claude", "OK"), emulate=True) as (port, plan, journal, _, _):
             for reply in replies:
                 plan.write_text(json.dumps(canned("claude", reply)))
                 status, body = call(port, "POST", "/v1/chat/completions", request)
-                responses.append((status, normalize(body)))
-            records.append(journal_rows(journal))
-        arms.append(responses)
-    assert arms[0] == arms[1], ("tool responses", arms)
-    assert records[0] == records[1], ("tool CLI journal", records)
+                responses.append([status, body_text(normalize(body))])
+            observations.append({"responses": responses, "journal": journal_snapshot(journal_rows(journal))})
+    CONTRACT.settle(f"tools/{CONTRACT.launcher()}", observations)
     return len(replies)
 
 
 def health_differential(binary, root):
     count = 0
     for kind in ("claude", "codex"):
-        for reason in ("Not logged in", "rate limit"):
-            arms = []
-            for arm, exe in (("python", None), ("rust", binary)):
+        for reason in HEALTH_REASONS:
+            observations = []
+            for arm, exe in CONTRACT.arms(binary):
                 with server(exe, kind, root / f"health-{kind}-{reason}-{arm}", {"rc": 1, "stderr": reason}) as (port, _, _, _, _):
-                    arms.append(call(port, "GET", "/health"))
-            assert arms[0] == arms[1], ("health", kind, arms)
+                    status, body = call(port, "GET", "/health")
+                    observations.append([status, body_text(body)])
+            CONTRACT.settle(f"health/{kind}/{reason}", observations)
             count += 1
     return count
 
 
+def timeout_body(argv, seconds):
+    """The timeout error both shims return for a printable argv: subprocess.TimeoutExpired's text.
+
+    `argv` is the provider command as the stub journalled it, the fixture CLI
+    shown as '<cli>'. It is derived rather than pasted, so a launch-model
+    change moves both sides. (Python's repr also escapes non-printable
+    characters such as U+00A0, which the native repr leaves as they are.)
+    """
+    return json.dumps({"error": f"Command '{argv!r}' timed out after {float(seconds)} seconds"}).encode()
+
+
 def lifecycle(binary, root):
-    """Both arms must serialize, reap descendants, recover and refresh once."""
+    """The native shim must serialize, reap descendants, recover and refresh once.
+
+    Only the native arm runs. These assertions are per arm, so the Python
+    shim's arm could fail only on Python behaviour, never on a native defect,
+    yet it gated every Rust job (#1314). Its one cross-arm check, equal
+    timeout bytes, is now an expected body built from the journalled argv.
+    """
     count = 0
     for kind in ("claude", "codex"):
-        timeout_answers = []
-        for arm, exe in (("python", None), ("rust", binary)):
-            print(f"START lifecycle {kind}/{arm}", flush=True)
-            # Normal calls need a process-start budget independent of the tiny
-            # timeout formerly used to exercise the timeout error format.
-            with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=5) as (port, plan, journal, _, cli):
-                plan.write_text(json.dumps({**canned(kind, "OK"), "sleep": .1}))
-                with concurrent.futures.ThreadPoolExecutor(2) as pool:
-                    calls = [pool.submit(call, port, "POST", "/chat/completions", {}) for _ in range(2)]
-                    answers = [c.result() for c in calls]
-                    assert all(answer[0] == 200 for answer in answers), (kind, arm, "serialized calls", answers)
-                timeline = Path(str(journal) + ".timeline").read_text().splitlines()
-                assert timeline == ["start", "end"] * 3, (arm, "calls overlapped", timeline)
-                with provider_gate() as gate, concurrent.futures.ThreadPoolExecutor(1) as pool:
-                    plan.write_text(json.dumps({"gate": gate.getsockname()[1]}))
-                    response = pool.submit(call, port, "POST", "/chat/completions", {})
-                    with accept_provider(gate) as witness:
-                        status, body = response.result(timeout=10)
-                        assert status == 500 and b"timed out after 5.0 seconds" in body, (kind, arm, status, body)
-                        # The timeout must kill this blocked provider; it cannot
-                        # succeed because a fixed-duration stub sleep elapsed.
-                        try:
-                            assert witness.recv(1) == b"", (kind, arm, "provider survived timeout")
-                        except ConnectionResetError:
-                            pass
-                encoded_cli = json.dumps(repr(str(cli)))[1:-1].encode()
-                body = body.replace(encoded_cli, b"'<cli>'")
-                timeout_answers.append(body)
-                plan.write_text(json.dumps(canned(kind, "recovered")))
-                recovered = call(port, "POST", "/chat/completions", {})
-                assert recovered[0] == 200, (kind, arm, "recovery", recovered)
-                count += 3
-            print(f"END lifecycle {kind}/{arm}", flush=True)
-        assert timeout_answers[0] == timeout_answers[1], (kind, "timeout bytes", timeout_answers)
-    for arm, exe in (("python", None), ("rust", binary)):
-        print(f"START health refresh {arm}", flush=True)
-        with server(exe, "codex", root / f"refresh-{arm}", canned("codex", "OK"), ttl=0) as (port, plan, journal, _, _):
-            with provider_gate() as failed, provider_gate() as recovered, concurrent.futures.ThreadPoolExecutor(1) as pool:
-                plan.write_text(json.dumps({"rc": 1, "stderr": "Not logged in", "gate": failed.getsockname()[1]}))
-                # TTL zero requests refresh immediately. The provider handshake
-                # holds it in flight until every stale response has returned.
-                first = pool.submit(call, port, "GET", "/health")
-                with accept_provider(failed) as failing:
-                    answer = first.result(timeout=10)
-                    assert answer[0] == 200, (arm, "initial cached health", answer)
-                    for _ in range(2):
-                        answer = call(port, "GET", "/health")
-                        assert answer[0] == 200, (arm, "stale health", answer)
-                    assert len(journal_rows(journal)) == 2, (arm, "duplicate failed refresh")
-                    # Change the next plan only after the in-flight provider
-                    # acknowledged reading the failure plan.
-                    plan.write_text(json.dumps({**canned("codex", "OK"), "gate": recovered.getsockname()[1]}))
-                    failing.sendall(b"release")
-                wait_health(port, 503, arm)
-                # Seeing the new snapshot need not mean the refresh worker has
-                # cleared its in-flight flag yet; keep driving health until the
-                # recovery provider acknowledges its invocation.
-                with accept_provider(recovered, lambda: wait_health(port, 503, arm)) as recovering:
-                    answer = call(port, "GET", "/health")
-                    assert answer[0] == 503, (arm, "cached failure while recovering", answer)
-                    assert len(journal_rows(journal)) == 3, (arm, "duplicate recovery refresh")
-                    plan.write_text(json.dumps(canned("codex", "OK")))
-                    recovering.sendall(b"release")
-                wait_health(port, 200, arm)
-                count += 3
-        print(f"END health refresh {arm}", flush=True)
+        count += lifecycle_arm(binary, kind, root)
+    count += health_refresh(binary, root)
     return count
+
+
+def lifecycle_arm(exe, kind, root):
+    arm = "rust"
+    print(f"START lifecycle {kind}/{arm}", flush=True)
+    # Normal calls need a process-start budget independent of the tiny
+    # timeout formerly used to exercise the timeout error format.
+    seconds = 5
+    with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=seconds) as (port, plan, journal, _, cli):
+        plan.write_text(json.dumps({**canned(kind, "OK"), "sleep": .1}))
+        with concurrent.futures.ThreadPoolExecutor(2) as pool:
+            calls = [pool.submit(call, port, "POST", "/chat/completions", {}) for _ in range(2)]
+            answers = [c.result() for c in calls]
+            assert all(answer[0] == 200 for answer in answers), (kind, arm, "serialized calls", answers)
+        timeline = Path(str(journal) + ".timeline").read_text().splitlines()
+        assert timeline == ["start", "end"] * 3, (kind, arm, "calls overlapped", timeline)
+        with provider_gate() as gate, concurrent.futures.ThreadPoolExecutor(1) as pool:
+            plan.write_text(json.dumps({"gate": gate.getsockname()[1]}))
+            response = pool.submit(call, port, "POST", "/chat/completions", {})
+            with accept_provider(gate) as witness:
+                status, body = response.result(timeout=10)
+                assert status == 500 and b"timed out after 5.0 seconds" in body, (kind, arm, status, body)
+                # The timeout must kill this blocked provider; it cannot
+                # succeed because a fixed-duration stub sleep elapsed.
+                try:
+                    assert witness.recv(1) == b"", (kind, arm, "provider survived timeout")
+                except ConnectionResetError:
+                    pass
+        encoded_cli = json.dumps(repr(str(cli)))[1:-1].encode()
+        body = body.replace(encoded_cli, b"'<cli>'")
+        argv = ["<cli>", *journal_rows(journal)[-1]["argv"]]
+        # The stub journals an instruction file as '<instructions>' while the
+        # shim quotes its real path; this empty request passes none.
+        assert "<instructions>" not in argv and not any(a.startswith("model_instructions_file=") for a in argv), (kind, arm, argv)
+        assert body == timeout_body(argv, seconds), (kind, arm, "timeout bytes", body, argv)
+        plan.write_text(json.dumps(canned(kind, "recovered")))
+        recovered = call(port, "POST", "/chat/completions", {})
+        assert recovered[0] == 200, (kind, arm, "recovery", recovered)
+    print(f"END lifecycle {kind}/{arm}", flush=True)
+    return 3
+
+
+def health_refresh(exe, root):
+    arm = "codex/rust"
+    print(f"START health refresh {arm}", flush=True)
+    with server(exe, "codex", root / "refresh-rust", canned("codex", "OK"), ttl=0) as (port, plan, journal, _, _):
+        with provider_gate() as failed, provider_gate() as recovered, concurrent.futures.ThreadPoolExecutor(1) as pool:
+            plan.write_text(json.dumps({"rc": 1, "stderr": "Not logged in", "gate": failed.getsockname()[1]}))
+            # TTL zero requests refresh immediately. The provider handshake
+            # holds it in flight until every stale response has returned.
+            first = pool.submit(call, port, "GET", "/health")
+            with accept_provider(failed) as failing:
+                answer = first.result(timeout=10)
+                assert answer[0] == 200, (arm, "initial cached health", answer)
+                for _ in range(2):
+                    answer = call(port, "GET", "/health")
+                    assert answer[0] == 200, (arm, "stale health", answer)
+                assert len(journal_rows(journal)) == 2, (arm, "duplicate failed refresh")
+                # Change the next plan only after the in-flight provider
+                # acknowledged reading the failure plan.
+                plan.write_text(json.dumps({**canned("codex", "OK"), "gate": recovered.getsockname()[1]}))
+                failing.sendall(b"release")
+            wait_health(port, 503, arm)
+            # Seeing the new snapshot need not mean the refresh worker has
+            # cleared its in-flight flag yet; keep driving health until the
+            # recovery provider acknowledges its invocation.
+            with accept_provider(recovered, lambda: wait_health(port, 503, arm)) as recovering:
+                answer = call(port, "GET", "/health")
+                assert answer[0] == 503, (arm, "cached failure while recovering", answer)
+                assert len(journal_rows(journal)) == 3, (arm, "duplicate recovery refresh")
+                plan.write_text(json.dumps(canned("codex", "OK")))
+                recovering.sendall(b"release")
+            wait_health(port, 200, arm)
+    print(f"END health refresh {arm}", flush=True)
+    return 3
 
 
 @contextlib.contextmanager
@@ -503,11 +796,29 @@ def main():
     parser.add_argument("--stub-exe", required=True, type=Path)
     parser.add_argument("--suite", choices=("all", "contract", "lifecycle"), default="all")
     parser.add_argument("--output", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--record-goldens", action="store_true",
+                      help="contract: run the Python shim beside the native one and record "
+                           "goldens/contract.<platform>.json where they agree")
+    mode.add_argument("--record-candidate", action="store_true",
+                      help="contract: re-record the golden from the native shim alone; a dry run "
+                           "unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the golden")
     args = parser.parse_args()
+    global CONTRACT
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if (args.record_goldens or args.record_candidate) and args.suite != "contract":
+        parser.error("--record-goldens and --record-candidate record the contract suite: add --suite contract")
+    CONTRACT = Contract("record" if args.record_goldens else "candidate" if args.record_candidate else "check")
     if args.suite != "lifecycle":
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
+        if not (args.record_goldens or args.record_candidate):
+            # A recording writes the golden these tests check.
+            subprocess.run([sys.executable, str(Path(__file__).with_name("test_contract_golden.py"))], check=True)
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_transport.py"))], check=True)
     if args.suite != "contract":
+        subprocess.run([sys.executable, str(Path(__file__).with_name("test_native_lifecycle.py"))], check=True)
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_lifecycle.py"))], check=True)
     with tempfile.TemporaryDirectory(prefix="r6-extractor-") as scratch:
         root = Path(scratch)
@@ -530,6 +841,7 @@ def main():
                 STUB_EXE = None
                 count += differential(args.binary.resolve(), root / "batch")
                 count += tools_differential(args.binary.resolve(), root / "batch")
+            CONTRACT.finish(args.binary.resolve(), write=args.write)
     result = {"cases": count, "status": "passed", "real_cli_calls": 0}
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")

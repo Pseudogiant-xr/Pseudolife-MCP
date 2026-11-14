@@ -332,12 +332,103 @@ fn stop_asks_a_running_watcher() {
         "conductor-watch w1 asked to stop; it exits at its next poll\n"
     );
     assert_eq!(out.stop_file, Some(scratch.0.join("s.stop")));
-    scratch.pid_file(&format!("{{\"pid\": \" {pid} \"}}"));
+}
+
+#[test]
+fn a_record_whose_start_cannot_be_proven_is_decided_by_the_states_lock() {
+    let scratch = Scratch::new();
+    let state = scratch.state();
+    let (pid, _) = me();
+    // No start time recorded: the pid alone proves nothing (it may be a
+    // reused pid), so a free lock means no watcher.
+    scratch.pid_file(&format!(
+        "{{\"pid\": \" {pid} \", \"agent_id\": \"w1\", \"owner\": \"{OWNER}\"}}"
+    ));
     let out = decided(&["--stop", "--state", &state]);
     assert_eq!(
         out.stdout,
-        "conductor-watch None asked to stop; it exits at its next poll\n"
+        format!("conductor-watch: no watcher running for {state}; nothing changed\n")
     );
+    assert_eq!(out.stop_file, None);
+    assert!(
+        decided(&["--owner", OWNER, "--state", &state])
+            .start
+            .is_some()
+    );
+    // A held lock is a watcher, whatever its record lacks.
+    let mut lock = super::super::lease::lock::Lock::new(scratch.0.join("s.lock"));
+    assert!(matches!(lock.acquire(), Ok(true)));
+    let out = decided(&["--stop", "--state", &state]);
+    assert_eq!(
+        out.stdout,
+        "conductor-watch w1 asked to stop; it exits at its next poll\n"
+    );
+    assert!(
+        decided(&["--owner", OWNER, "--state", &state])
+            .start
+            .is_none()
+    );
+    lock.release();
+}
+
+#[test]
+fn a_stat_name_that_is_not_utf8_still_gives_the_start_time() {
+    let mut raw = b"4242 (a\xff) b) S".to_vec();
+    for field in 4..=22 {
+        raw.extend(format!(" {field}").as_bytes());
+    }
+    assert_eq!(stat_start(&raw).as_deref(), Some("22"));
+    assert_eq!(stat_start(b"4242 (short) S 1 2"), None);
+    assert_eq!(stat_start(b"\xff\xfe"), None);
+}
+
+#[test]
+fn one_watcher_per_owner_answers_from_another_state_file() {
+    let scratch = Scratch::new();
+    let home = scratch.0.join("home");
+    let (lock_path, note) = owner_files(&home, OWNER);
+    fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    // The owner's watcher runs on another state file (this test process,
+    // dated as a watcher, holds the owner's lock).
+    let other = scratch.0.join("elsewhere.json");
+    let (pid, start) = me();
+    fs::write(
+        scratch.0.join("elsewhere.pid"),
+        format!("{{\"pid\": {pid}, \"process_start\": \"{start}\", \"agent_id\": \"w9\", \"owner\": \"{OWNER}\"}}"),
+    )
+    .unwrap();
+    fs::write(
+        &note,
+        format!(
+            "{{\"state\": {}}}",
+            serde_json::json!(other.display().to_string())
+        ),
+    )
+    .unwrap();
+    let mut lock = super::super::lease::lock::Lock::new(lock_path);
+    assert!(matches!(lock.acquire(), Ok(true)));
+    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let vars = [(key, home.to_str().unwrap())];
+    let state = scratch.state();
+    // A start for the same owner on this state is answered by that watcher.
+    let out = decide_with(&["--owner", OWNER, "--state", &state], &vars).unwrap();
+    assert!(out.start.is_none());
+    assert_eq!(
+        out.stdout,
+        format!(
+            "conductor-watch w9 already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by=w9\n"
+        )
+    );
+    // --stop for that owner from here stops that watcher.
+    let out = decide_with(&["--stop", "--owner", OWNER, "--state", &state], &vars).unwrap();
+    assert_eq!(out.stop_file, Some(scratch.0.join("elsewhere.stop")));
+    // Near miss: another owner starts.
+    let out = decide_with(&["--owner", OTHER, "--state", &state], &vars).unwrap();
+    assert!(out.start.is_some());
+    lock.release();
+    // With the owner's lock free the note proves nothing.
+    let out = decide_with(&["--owner", OWNER, "--state", &state], &vars).unwrap();
+    assert!(out.start.is_some());
 }
 
 #[test]
@@ -376,15 +467,21 @@ fn a_running_watcher_answers_a_start() {
 }
 
 #[test]
-fn the_watch_itself_defers_before_any_effect() {
+fn a_start_is_decided_before_any_effect_and_edge_spellings_still_defer() {
     let scratch = Scratch::new();
     let state = scratch.state();
-    for argv in [
-        &["--owner", OWNER, "--state", &state][..],
-        &["--owner", OWNER, "--state", &state, "--detach"],
-        &["--sto"],
-        &["--stop", "--state", &format!("{state}.")],
+    for (argv, detach) in [
+        (&["--owner", OWNER, "--state", &state][..], false),
+        (&["--owner", OWNER, "--state", &state, "--detach"], true),
     ] {
+        let out = decided(argv);
+        let start = out.start.expect("a start");
+        assert_eq!(start.owner, OWNER);
+        assert_eq!(start.args.detach, detach);
+        assert_eq!(start.files.state, Path::new(&state));
+        assert!(out.stdout.is_empty() && out.stderr.is_empty());
+    }
+    for argv in [&["--sto"][..], &["--stop", "--state", &format!("{state}.")]] {
         assert!(decide_with(argv, &[]).is_err(), "{argv:?}");
     }
     // Refused or answered before any effect now, no longer deferred.
@@ -415,4 +512,25 @@ fn the_default_state_is_per_owner_in_the_home() {
             state.display()
         )
     );
+}
+
+#[test]
+fn a_python_watchers_macos_start_time_reads_as_ps_wrote_it() {
+    // `ps -o lstart=`: weekday, month, space-padded day, time, year.
+    let rendered = lstart(1_700_000_000).unwrap();
+    let words: Vec<&str> = rendered.split_whitespace().collect();
+    assert_eq!(words.len(), 5, "{rendered}");
+    assert_eq!(rendered.len(), 24, "{rendered}");
+    assert_eq!(words[4], "2023");
+    // Only on macOS does the legacy form name the running process.
+    let legacy = J::Str(rendered.clone());
+    assert_eq!(
+        legacy_start_matches(&legacy, Some("1700000000.123456")),
+        cfg!(target_os = "macos")
+    );
+    assert!(!legacy_start_matches(&legacy, Some("1700000001.000000")));
+    assert!(!legacy_start_matches(
+        &J::Str("1".into()),
+        Some("1700000000.0")
+    ));
 }

@@ -95,6 +95,14 @@ fn assert_refusal(output: &Output) -> String {
     stderr
 }
 
+/// The shared lite-tier refusal as backup prints it.
+fn lite_refusal(bank: &Path) -> String {
+    format!(
+        "backup failed: {} {NOTHING}",
+        pseudolife_stdio::cli::retired::lite_bank_refusal(bank)
+    )
+}
+
 fn assert_refused_before_effects(home: &Home, arguments: &[&str]) -> String {
     let before = home.listing();
     let output = run(home.path(), arguments);
@@ -240,16 +248,9 @@ fn the_embedded_tier_is_refused_before_any_effect() {
     let pgdata = home.path().join("bank").join("embedded_pg");
     fs::create_dir_all(&pgdata).unwrap();
     fs::write(pgdata.join("PG_VERSION"), "18\n").unwrap();
-    let stderr =
-        assert_refused_before_effects(&home, &["--data-dir", &text(&home.path().join("bank"))]);
-    assert!(
-        stderr.contains("holds a lite bank (embedded PostgreSQL)"),
-        "{stderr}"
-    );
-    assert!(
-        stderr.contains("Install the Docker bank (ops/install.sh"),
-        "{stderr}"
-    );
+    let bank = home.path().join("bank");
+    let stderr = assert_refused_before_effects(&home, &["--data-dir", &text(&bank)]);
+    assert_eq!(stderr.trim_end(), lite_refusal(&bank), "{stderr}");
     // No argument and the per-user lite directory: alone (it also holds the
     // installed client) it is no bank, and ./data is backed up.
     let lite = if cfg!(windows) {
@@ -276,7 +277,7 @@ fn the_embedded_tier_is_refused_before_any_effect() {
     fs::create_dir_all(lite.join("embedded_pg")).unwrap();
     fs::write(lite.join("embedded_pg").join("PG_VERSION"), "18\n").unwrap();
     let stderr = assert_refused_before_effects(&home, &[]);
-    assert!(stderr.contains("holds a lite bank"), "{stderr}");
+    assert_eq!(stderr.trim_end(), lite_refusal(&lite), "{stderr}");
 }
 
 #[test]

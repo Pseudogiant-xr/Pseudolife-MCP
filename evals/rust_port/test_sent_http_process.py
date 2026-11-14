@@ -227,6 +227,7 @@ def test_named_yaml_startup_refusals(prefix, tmp_path, configuration):
     config.write_text(configuration, encoding="utf-8")
     env = isolated_env(tmp_path / "home")
     env["PSEUDOLIFE_MCP_CONFIG"] = str(config)
+    env["PSEUDOLIFE_STDIO_SENT_CANDIDATE"] = "1"  # `serve` refuses without it
     with owned_process([*prefix, "serve"], cwd=tmp_path, env=env,
                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE) as process:

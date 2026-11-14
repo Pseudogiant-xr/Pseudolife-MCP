@@ -24,7 +24,7 @@ Added after #592 waited 25 minutes on a CHANGELOG-only conflict. All of
 these must hold:
 
 1. **The previous batch head passed** every lane a batch runs: `test`,
-   `test-lite-linux`, `test-lite-windows`, `test-lite-macos`, `frontend`,
+   `test-lite-windows`, `test-lite-macos`, `frontend`,
    CodeQL and both `Parity` gates. The merge-forward commit is the only
    commit pushed since, since nothing is fixed inside a batch.
 2. **The two sides share no file except docs-only files** (as CLAUDE.md's
@@ -90,6 +90,8 @@ CI runs again on the push to master. That run is the check, and a cancelled
 run is not a pass: a later master push cancels an earlier run
 (`cancel-in-progress`). Watch the first master run that completes on a
 commit containing the merge: `ci.yml` for rule A, both `ci.yml` and
-`rust.yml` for rule B. If it fails, open a revert PR at once (landed as a batch of one), or a fix PR
+`rust.yml` for rule B. A Rust-only change's master push skips `ci.yml`'s
+Python lanes since the Python freeze; for it, the backstop is the next
+nightly's `ci.yml` run (on master's tip, which contains it). If it fails, open a revert PR at once (landed as a batch of one), or a fix PR
 when the fix is obvious, and make no more such merges until master is green
 again.

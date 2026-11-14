@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "92b7929dcce188df",
+  "fingerprint": "3f99c55966fdf66c",
+  "reason": "Adds a PostgreSQL service, test_fake_embedder.py and a step that runs the live tests reading rust/ files on a Rust-only change; the new cost is the estimate recorded in ci_budget.json (9.0 minutes on a Rust-only change, about 2.4 otherwise)."
+}

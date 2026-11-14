@@ -11,7 +11,7 @@ use std::{
 
 fn no_bank() -> i32 {
     say(
-        "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)",
+        "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)",
     );
     1
 }
@@ -89,10 +89,12 @@ fn resolution() -> Result<resolution::Target, pg::Error> {
 pub(super) async fn command(args: &Args, arguments: &[String]) -> i32 {
     let dsn = match resolution() {
         Ok(resolution::Target::Direct(dsn)) => dsn,
-        Ok(resolution::Target::ExistingEmbedded(_)) => {
+        Ok(resolution::Target::ExistingEmbedded(pgdata)) => {
+            let bank = pgdata.parent().unwrap_or(&pgdata);
             say(&format!(
-                "lease: {} refused: phase4-embedded-pg-deferred",
-                args.action
+                "lease: {} refused: {}",
+                args.action,
+                crate::cli::retired::lite_bank_refusal(bank)
             ));
             return 1;
         }

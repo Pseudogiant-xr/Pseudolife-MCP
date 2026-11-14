@@ -141,7 +141,7 @@ def test_a_rust_only_batch_leaves_the_python_lanes_it_skipped_to_run():
     # The batch skipped them (Rust-only scope), so the master push is their
     # backstop: skipped is not passed.
     passed, _ = decide(FakeGitHub(routes()))
-    for lane in ("test", "test-lite-linux", "test-lite-windows", "test-lite-macos"):
+    for lane in ("test", "test-lite-windows", "test-lite-macos"):
         assert lane not in passed, lane
 
 
@@ -435,7 +435,8 @@ def test_both_scope_jobs_ask_on_a_master_push_only(name, scope_id):
 
 
 PASSED = "fromJSON(needs.scope.outputs.batch_passed || '[]')"
-CI_LANES = ("lock-resolve", "test", "test-lite-linux", "test-lite-windows", "test-lite-macos", "frontend")
+# test-lite-linux left with the lite tier (the Python freeze, 14 November 2026).
+CI_LANES = ("lock-resolve", "test", "test-lite-windows", "test-lite-macos", "frontend")
 
 
 @pytest.mark.parametrize("lane", CI_LANES)
@@ -444,7 +445,7 @@ def test_each_ci_lane_skips_only_on_its_own_batch_pass(lane):
     assert job["needs"] == "scope"
     condition = job["if"]
     # Exact element match on the lane's own job name, so test never matches
-    # test-lite-linux; `|| '[]'` keeps a failed or empty scope running it.
+    # test-lite-windows; `|| '[]'` keeps a failed or empty scope running it.
     assert f"!contains({PASSED}, '{lane}')" in condition
     assert condition.startswith("${{ !cancelled() && ")
     assert "github.event_name" not in condition
