@@ -674,6 +674,13 @@ mod tests {
         }
     }
 
+    /// The backup directory as the product resolves it before it prints a
+    /// path (a Windows short name such as the hosted runner's `RUNNER~1`
+    /// reads as its long name there).
+    fn shown(out: &Path) -> PathBuf {
+        PathBuf::from(pathlib::resolve(out).expect("the backup directory resolves"))
+    }
+
     fn names(dir: &Path) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(dir)
             .map(|entries| {
@@ -695,8 +702,8 @@ mod tests {
         let mut host = ready_host();
         let code = backup(&mut docker, &mut host, &request(&out), &dir.0);
         assert_eq!(code, 0, "{:?}", host.errors);
-        let dump = out.join(format!("pseudolife_memory-{STAMP}.sql.gz"));
-        let state = out.join(format!("pseudolife_state-{STAMP}.tgz"));
+        let dump = shown(&out).join(format!("pseudolife_memory-{STAMP}.sql.gz"));
+        let state = shown(&out).join(format!("pseudolife_state-{STAMP}.tgz"));
         assert_eq!(
             names(&out),
             [
@@ -1432,7 +1439,7 @@ mod tests {
             assert!(
                 host.info.contains(&format!(
                     "removed partial file an interrupted backup left: {}",
-                    path.display()
+                    shown(&out).join(path.file_name().unwrap()).display()
                 )),
                 "{:?}",
                 host.info
