@@ -197,6 +197,7 @@ def test_the_workflow_reruns_on_label_changes_and_passes_the_labels():
     assert 'git show HEAD^1:rust/ci/python_freeze.py > "$script"' in guard["run"]
     assert 'python3 "$script" --head-ref' in guard["run"]
     assert '--labels "$labels"' in guard["run"]
+    assert """gh api "repos/$BASE_REPO/pulls/$PR_NUMBER" --jq '[.labels[].name]'""" in guard["run"]
 
 
 def _label_lines():

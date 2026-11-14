@@ -826,8 +826,25 @@ def test_a_rerun_that_timed_out_after_an_earlier_pass_keeps_a_member_out(world, 
 
 def _freeze_runs(*runs: tuple[str, str]) -> list[dict]:
     """Python freeze runs on one head, one per event: (conclusion, start)."""
-    return [_run("Python freeze", conclusion, started=f"2026-11-14T01:{minute}:00Z",
-                 workflow="Python freeze") for conclusion, minute in runs]
+    return [_run("Python freeze", None if conclusion == "IN_PROGRESS" else conclusion,
+                 status="IN_PROGRESS" if conclusion == "IN_PROGRESS" else "COMPLETED",
+                 started=f"2026-11-14T01:{minute}:00Z" if minute else "", workflow="Python freeze")
+            for conclusion, minute in runs]
+
+
+def test_entries_with_no_check_name_never_replace_each_others_failure(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b
+"})
+    sha11 = world.pr(11, {"c.txt": "c
+"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11, statusCheckRollup=[
+        {"status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-11-14T01:00:00Z"},
+        {"status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-11-14T01:05:00Z"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    assert FAILING in capsys.readouterr().out
 
 
 # #1537 at a5629d8fd: the push's run failed before the conductor added
@@ -853,7 +870,17 @@ def test_a_check_is_judged_by_its_latest_run_on_the_head(world, capsys):
     # A rerun of the pre-label run replays an event without the label: when
     # it fails again it is the latest run, and the head stays out.
     (*LABELLED_AFTER_OPENING, ("FAILURE", "10")),
-], ids=["newer-failure", "failed-rerun-of-the-old-run"])
+    # Codex review of 2204f4382: an older run still going hides nothing.
+    (("IN_PROGRESS", "00"), ("FAILURE", "05")),
+    (("FAILURE", "05"), ("IN_PROGRESS", "00")),
+    # A later run with no verdict replaces no failure.
+    (("FAILURE", "00"), ("CANCELLED", "05")),
+    (("FAILURE", "00"), ("SKIPPED", "05")),
+    # Reviewer of 2204f4382: a tie or a missing start time replaces nothing.
+    (("FAILURE", "05"), ("SUCCESS", "05")),
+    (("FAILURE", ""), ("SUCCESS", "05")),
+], ids=["newer-failure", "failed-rerun-of-the-old-run", "older-run-still-going", "listed-in-reverse",
+        "later-cancelled", "later-skipped", "same-start", "failure-without-a-start"])
 def test_a_newer_failure_still_outweighs_an_older_success(world, capsys, runs):
     sha10 = world.pr(10, {"b.txt": "b\n"})
     sha11 = world.pr(11, {"c.txt": "c\n"})
