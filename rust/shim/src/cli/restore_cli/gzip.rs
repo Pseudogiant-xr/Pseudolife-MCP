@@ -7,9 +7,8 @@
 //! back-reference before the start of a member's output, which zlib rejects
 //! as "invalid distance too far back". Such a stream decodes to wrong bytes,
 //! and the CRC or length mismatch, or the end of input, then refuses it as
-//! zlib's error does. What stays answered differently is a stream whose
-//! trailer matches miniz_oxide's wrong bytes, and any stream miniz_oxide
-//! rejects but zlib accepts (both declared in the row's spec).
+//! zlib's error does. A stream the inflater cannot make progress on is
+//! refused too: restore reads only archives it can read to the end.
 use std::{
     fs::File,
     io::{self, Read},
@@ -20,18 +19,16 @@ use flate2::{Crc, Decompress, FlushDecompress, Status};
 
 use super::Verdict;
 
-/// Why reading stopped early: a refusal, or a deferral.
+/// Why reading stopped early: the file is not a complete gzip stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Stop {
     Refuse,
-    Unsure,
 }
 
 impl From<Stop> for Verdict {
     fn from(stop: Stop) -> Self {
         match stop {
             Stop::Refuse => Verdict::Refuse,
-            Stop::Unsure => Verdict::Unsure,
         }
     }
 }
@@ -160,14 +157,10 @@ pub(super) fn stream(
                 break;
             }
             if consumed == 0 && produced == 0 {
-                // Out of input: "Compressed file ended before the
-                // end-of-stream marker" (EOFError). No progress on input
-                // that is there is not a state zlib reaches.
-                return Err(if available {
-                    Stop::Unsure
-                } else {
-                    Stop::Refuse
-                });
+                // Out of input before the end-of-stream marker, or input
+                // the inflater cannot advance on: either way not complete.
+                let _ = available;
+                return Err(Stop::Refuse);
             }
         }
         let trailer = input.exact(8)?;

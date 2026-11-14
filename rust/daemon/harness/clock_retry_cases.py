@@ -395,7 +395,8 @@ def record_candidate(args):
         return 1
     binary = args.rust_test_bin.resolve()
     recording = candidate_record.Recording(GOLDEN, ("oracle", "database"), binary, whole=False,
-                                           defined=["clock-retry"], dump=candidate_record.dump_sorted, single=True)
+                                           defined=["clock-retry"], single=True)
+    recording.write = args.write
     result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip()}
     try:
         cell(binary, time.time_ns(), result, oracle=False)

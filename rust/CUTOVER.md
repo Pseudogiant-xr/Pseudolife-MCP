@@ -69,7 +69,7 @@ the fix.
 | `connect` | Re-pointing existing JSON-file registrations (Claude Code, Claude Desktop, Gemini CLI). | Pairing codes, the Codex configuration, the interactive prompts, a Windows user-scope daemon URL, the unattended-update schedule. |
 | `console` | Every shape except the browser launchers it does not reproduce. | The macOS default launcher and the other launchers Python's `webbrowser` knows. |
 | `serve` | Only a bounded HTTP candidate used in maintainer testing (`sent_serve.rs`), not the daemon. | A refusal that names the Docker install; the daemon is the separate `pseudolife-daemon` binary. |
-| `expose` | Nothing. | The whole command; done on a branch with the program-lookup fix. |
+| `expose` | `expose status`, help and argument errors, and every check `expose tailscale` and `expose off` make before changing anything (the local daemon's `/health`, the `tailscale` lookup in absolute `PATH` directories only, the serve status, the tailnet address), with each refusal, "already exposed" and "not exposed". | The change to the Tailscale serve configuration (`serve --bg`, `serve --tcp=N off`) and the interactive confirmation, which defer by name before any call that makes the change. |
 | `move` | The refusals before any change. | Rebuilt later; until then a plain refusal. |
 | `tunnel` | Status, a pending-only update, and the refusals of `verify` and `setup`. | Rebuilt later; until then a plain refusal. |
 | `embedded` | Nothing. | Retired with file mode; a plain refusal. |

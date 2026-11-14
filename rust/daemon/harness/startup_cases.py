@@ -800,7 +800,8 @@ def record_candidate(args, binary):
         return 1
     golden_path = HERE / "goldens" / "startup-hydration.json"
     recording = candidate_record.Recording(golden_path, ("cases", "database"), binary, whole=not args.only,
-                                           defined=list(CASES), dump=candidate_record.dump_sorted)
+                                           defined=list(CASES))
+    recording.write = args.write
     payload = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
                "normalizers": NORMALIZERS, "cells": []}
     number = time.time_ns()

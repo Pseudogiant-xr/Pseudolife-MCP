@@ -1,34 +1,16 @@
-"""Re-record a startup harness golden from the Rust candidate (--record-candidate).
+"""Re-recording a daemon harness golden from the Rust candidate.
 
-Since the Python freeze the committed goldens are Rust regression snapshots,
-and ``--record-goldens`` records the frozen oracle, which reproduces a golden
-a deliberate Rust change departs from. ``schema_cases.py``,
-``startup_cases.py`` and ``clock_retry_cases.py`` therefore take
-``--record-candidate [--write]``, with the vocabulary of the CLI harness's
-recorder (``rust/cli_harness/README.md``, "Goldens after the freeze"):
-
-- each selected case runs once on the candidate, without the oracle, and is
-  classed against the committed golden: ``unchanged``, ``changed`` (printed
-  with its difference, the golden labelled ``golden``) or ``new``; recording
-  the whole matrix also lists a recorded case it no longer defines as
-  ``removed``;
-- without ``--write`` nothing is written, and the run exits 1 if anything
-  would change; with it only changed and new entries are replaced (and
-  removed ones dropped), every other byte of the file stays;
-- a case whose observation failed the harness's own checks (clock,
-  idempotence, epoch, refusal state, the expected outcome), or is vacuous, is
-  refused, and then nothing is written; so is a case whose entry names a host
-  path (the checkout, the home or temporary directory), which would not
-  replay on another machine and would publish a user name, and a whole run
-  with ``PSEUDOLIFE_DAEMON_MUTANT`` set, which would record a mutant;
-- the golden's top-level ``recorded_from_candidate`` names, for each case
-  written this way, the checkout's commit, whether its Rust sources differed
-  from that commit (``rust_tree``), the platform and the candidate's SHA-256.
-  Checking reads only the cases, so it never compares this.
-
-One golden serves both operating systems, so after ``--write`` check it with
-``--check-goldens --mutants`` on this OS and on the other before committing:
-the recorder compares each entry only with the run it came from.
+A golden is a regression snapshot of the Rust daemon once the Python oracle
+is frozen: when a Rust change alters behaviour on purpose, its golden is
+recorded again from the candidate, through the replay's own path, so that
+what is written is exactly what the replay will compare. The runners that
+support it (``w2e.py golden --record-candidate``, ``run.py golden
+--record-candidate``, and ``schema_cases.py``, ``startup_cases.py`` and
+``clock_retry_cases.py --record-candidate`` through ``Recording`` below)
+share the rules here: a dry run unless ``--write``, every scenario reported
+as unchanged, changed (with the replay's own difference) or new, a refusal
+for a deferral or an entry that would not replay against the run it came
+from, and provenance that replay never reads.
 """
 from __future__ import annotations
 
@@ -36,18 +18,79 @@ import hashlib
 import json
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-CANDIDATE_PROVENANCE = "recorded_from_candidate"
-MUTANT_ENV = "PSEUDOLIFE_DAEMON_MUTANT"
-# The paths whose change makes the binary differ from the commit (the CLI
-# harness's recorder uses the same set).
+# Top-level golden key: where the snapshot came from. Replay reads only the
+# recorded steps or responses, so it never compares this.
+PROVENANCE_KEY = "recorded_from_candidate"
+# What an unported path answers: the daemon's declared 501 body
+# (``http.rs``) and the CLI's deferral line.
+DEFERRAL_MARKS = ('"not_implemented"', "is deferred in this candidate")
+PLATFORM = "windows" if os.name == "nt" else "linux"
+# Paths whose change makes the binary differ from the commit: Rust sources
+# and the build inputs, not the harness, goldens or docs under rust/.
 RUST_SOURCES = (":(glob)rust/**/*.rs", ":(glob)rust/**/Cargo.toml", "rust/Cargo.lock",
                 ":(glob)rust/**/build.rs", "rust/rust-toolchain.toml")
-PLATFORM = "windows" if os.name == "nt" else "linux"
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True)
+
+
+def provenance(binary: Path) -> dict:
+    """This checkout's commit, whether its Rust sources and build inputs
+    differ from it (``RUST_SOURCES``), the platform and the binary's digest."""
+    head = _git("rev-parse", "--verify", "HEAD^{commit}")
+    status = _git("status", "--porcelain", "--", *RUST_SOURCES)
+    if head.returncode != 0 or status.returncode != 0:
+        tree = "unknown"
+    else:
+        tree = "modified" if status.stdout.strip() else "clean"
+    return {"commit": head.stdout.decode().strip() if head.returncode == 0 else None,
+            "rust_tree": tree, "platform": PLATFORM,
+            "candidate_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
+
+
+def deferral(value) -> str | None:
+    """The deferral marker an answer carries, if any."""
+    text = json.dumps(value, sort_keys=True, default=str)
+    return next((mark for mark in DEFERRAL_MARKS if mark in text), None)
+
+
+def classify(committed: bool, diffs: list[str]) -> str:
+    if not committed:
+        return "new"
+    return "changed" if diffs else "unchanged"
+
+
+def summary_line(name: str, kind: str, write: bool, refused: str | None) -> str:
+    if refused:
+        return f"  REFUSED {name}: {refused}; nothing written"
+    if kind == "unchanged":
+        return f"  unchanged {name}"
+    label = "CHANGED" if kind == "changed" else "new"
+    tail = "written" if write else "dry run: add --write after reviewing the difference above"
+    return f"  {label} {name} ({tail})"
+
+
+def write_json(path: Path, data: dict, *, newline_at_end: bool) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(data, indent=1, sort_keys=True) + ("\n" if newline_at_end else "")
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+# ---- the startup harnesses' goldens (schema, startup hydration, clock retry) --
+#
+# Their goldens map a case to a list of stages (or, for clock-retry.json, hold
+# one case as sections), and one file serves both operating systems, so after
+# ``--write`` the golden is checked with ``--check-goldens --mutants`` on this
+# OS and the other. On top of the rules above, a case is refused when its run
+# failed the harness's own checks (clock, idempotence, epoch, refusal state,
+# the expected outcome) or produced no entry, or when its entry names a host
+# path; a whole run is refused with ``PSEUDOLIFE_DAEMON_MUTANT`` set.
+MUTANT_ENV = "PSEUDOLIFE_DAEMON_MUTANT"
 
 
 def refuse_mutant_environment() -> str | None:
@@ -77,19 +120,6 @@ def round_trip(entry) -> list[str]:
     is exactly what --check-goldens compares, so it must survive the file."""
     import dbstate
     return dbstate.diff(entry, json.loads(json.dumps(entry, allow_nan=False)))
-
-
-def provenance(candidate: Path, repo: Path = REPO) -> dict:
-    """Where a candidate recording comes from."""
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
-
-    head = git("rev-parse", "--verify", "HEAD^{commit}")
-    status = git("status", "--porcelain", "--", *RUST_SOURCES)
-    tree = "unknown" if head.returncode or status.returncode else (
-        "modified" if status.stdout.strip() else "clean")
-    return {"commit": head.stdout.strip() if head.returncode == 0 else None, "rust_tree": tree,
-            "platform": PLATFORM, "candidate_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest()}
 
 
 def labelled(differences: list[str]) -> list[str]:
@@ -131,15 +161,16 @@ class Recording:
     """One golden file's candidate recording: classify each case, then write."""
 
     def __init__(self, golden: Path, sections: tuple[str, ...], candidate: Path, *, whole: bool,
-                 defined: list[str], dump, single: bool = False):
+                 defined: list[str], single: bool = False):
         """``sections`` are the golden's top-level maps from case to entry;
         with ``single`` the golden holds one case and each section is that
         case's entry itself (clock-retry.json)."""
         self.golden, self.sections, self.candidate = golden, sections, candidate
-        self.whole, self.defined, self.dump, self.single = whole and not single, defined, dump, single
+        self.whole, self.defined, self.single = whole and not single, defined, single
         self.committed = json.loads(golden.read_text(encoding="utf-8")) if golden.is_file() else {}
         self.report: dict = {"unchanged": [], "changed": [], "new": [], "removed": [], "refused": {},
                              "written": False}
+        self.write = False   # set by the caller before observing, for the per-case lines
         self.updates: dict[str, dict] = {}
 
     def entry(self, case: str) -> dict | None:
@@ -168,37 +199,37 @@ class Recording:
             why = ("its observation is vacuous: the run produced no entry" if observed is None else
                    "its observation failed the harness's own checks: " + "; ".join(failures[:5]))
             self.report["refused"][case] = why
-            print(f"  REFUSED {case}: {why}", flush=True)
+            print(summary_line(case, "", self.write, why), flush=True)
             return
         named = host_paths(observed)
         if named:
             why = ("its entry names a host path (" + ", ".join("<home>" if p == str(Path.home()) else p
                                                          for p in named) + "), which a golden must not hold")
             self.report["refused"][case] = why
-            print(f"  REFUSED {case}: {why}", flush=True)
+            print(summary_line(case, "", self.write, why), flush=True)
             return
         again = recheck(observed)
         if again:
             why = "the entry would not check against the run it came from: " + "; ".join(again[:3])
             self.report["refused"][case] = why
-            print(f"  REFUSED {case}: {why}", flush=True)
+            print(summary_line(case, "", self.write, why), flush=True)
             return
         if want is not None:
             differences = labelled([d for section in self.sections
                                     for d in section_diff(want[section], observed[section], f"/{section}")])
-            if not differences:
+            kind = classify(True, differences)
+            if kind == "unchanged":
                 self.report["unchanged"].append(case)
-                print(f"  unchanged {case}", flush=True)
+                print(summary_line(case, kind, False, None), flush=True)
                 return
-            self.report["changed"].append(case)
-            print(f"  CHANGED {case}", flush=True)
             for difference in differences[:20]:
                 print(f"        {difference}")
         else:
-            self.report["new"].append(case)
-            print(f"  new {case}", flush=True)
+            kind = "new"
             for section in self.sections:
                 print(f"        {section}: {json.dumps(observed[section])[:400]}")
+        self.report[kind].append(case)
+        print(summary_line(case, kind, self.write, None), flush=True)
         self.updates[case] = observed
 
     def finish(self, write: bool, check_command: str) -> int:
@@ -241,24 +272,19 @@ class Recording:
                 table[case] = observed[section]
             golden[section] = table
         stamp = provenance(self.candidate)
-        record = dict(golden.get(CANDIDATE_PROVENANCE) or {})
+        record = dict(golden.get(PROVENANCE_KEY) or {})
         for case in self.updates:
             record[case] = stamp
         for case in self.report["removed"]:
             record.pop(case, None)
-        golden[CANDIDATE_PROVENANCE] = record
-        self.golden.write_text(self.dump(golden), encoding="utf-8", newline="\n")
+        golden[PROVENANCE_KEY] = record
+        write_json(self.golden, golden, newline_at_end=True)
         self.report["written"] = True
         print(f"  wrote {self.golden} ({len(self.updates)} case(s) from the candidate at "
               f"{(stamp['commit'] or 'an unknown commit')[:12]}, Rust tree {stamp['rust_tree']}); one "
               f"golden serves both operating systems, so check it here and on the other OS before "
               f"committing: {check_command}", flush=True)
         return 0
-
-
-def dump_sorted(value: dict) -> str:
-    """The startup goldens' own format."""
-    return json.dumps(value, indent=1, sort_keys=True, allow_nan=False) + "\n"
 
 
 def stage_failures(stage: dict, ignore: tuple[str, ...] = ()) -> list[str]:
@@ -269,6 +295,8 @@ def stage_failures(stage: dict, ignore: tuple[str, ...] = ()) -> list[str]:
                                [d for phase in value.values() for d in phase] if isinstance(value, dict) else [])]
 
 
-if __name__ == "__main__":
-    print(__doc__)
-    sys.exit(0)
+
+
+def dump_sorted(value: dict) -> str:
+    """The text ``write_json(..., newline_at_end=True)`` writes."""
+    return json.dumps(value, indent=1, sort_keys=True) + "\n"

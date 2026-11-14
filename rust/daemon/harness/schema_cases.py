@@ -306,7 +306,8 @@ def record_candidate(args):
     whole = args.all_versions and not args.commit
     recording = candidate_record.Recording(
         GOLDEN_FILE, ("cases",), binary, whole=whole,
-        defined=["fresh", *(source["commit"] for source in history)], dump=candidate_record.dump_sorted)
+        defined=["fresh", *(source["commit"] for source in history)])
+    recording.write = args.write
     number = time.time_ns() // 1000
     results = []
     for i, source in enumerate(sources):

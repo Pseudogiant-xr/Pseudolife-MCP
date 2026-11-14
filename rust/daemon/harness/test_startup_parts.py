@@ -311,8 +311,7 @@ class CandidateRecording(unittest.TestCase):
         return path
 
     def recording(self, path, **kwargs):
-        options = dict(sections=("cases", "database"), whole=True, defined=["a", "b"],
-                       dump=candidate_record.dump_sorted)
+        options = dict(sections=("cases", "database"), whole=True, defined=["a", "b"])
         options.update(kwargs)
         return candidate_record.Recording(path, options.pop("sections"), self.binary, **options)
 
@@ -321,6 +320,7 @@ class CandidateRecording(unittest.TestCase):
         return []
 
     def run_quietly(self, recording, write, observations):
+        recording.write = write
         with patch("sys.stdout"):
             for case, observed, failures in observations:
                 recording.observe(case, observed, failures, self.no_difference)
@@ -357,7 +357,7 @@ class CandidateRecording(unittest.TestCase):
         self.assertEqual(written["cases"], {"a": [1], "b": [2], "c": [3]})
         self.assertEqual(written["database"], {"a": [11], "b": [20], "c": [30]})
         self.assertEqual(written["other"], 1)
-        stamp = written[candidate_record.CANDIDATE_PROVENANCE]
+        stamp = written[candidate_record.PROVENANCE_KEY]
         self.assertEqual(set(stamp), {"a", "c"})
         self.assertEqual(set(stamp["a"]), {"commit", "rust_tree", "platform", "candidate_sha256"})
         self.assertEqual(stamp["a"]["candidate_sha256"], candidate_record.hashlib.sha256(b"candidate").hexdigest())
@@ -403,7 +403,7 @@ class CandidateRecording(unittest.TestCase):
         written = json.loads(path.read_text())
         self.assertEqual(written["oracle"], {"attempts": [2]})
         self.assertEqual(written["declared_noop_callbacks"], [])
-        self.assertEqual(set(written[candidate_record.CANDIDATE_PROVENANCE]), {"clock-retry"})
+        self.assertEqual(set(written[candidate_record.PROVENANCE_KEY]), {"clock-retry"})
 
     def test_rewriting_a_real_golden_changes_only_the_recorded_case(self):
         # The committed startup golden with one entry corrupted: re-recording
@@ -419,7 +419,7 @@ class CandidateRecording(unittest.TestCase):
         self.assertEqual(self.run_quietly(recording, True, [(case, truth, [])]), 0)
         self.assertEqual(recording.report["changed"], [case])
         rewritten = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(set(rewritten.pop(candidate_record.CANDIDATE_PROVENANCE)), {case})
+        self.assertEqual(set(rewritten.pop(candidate_record.PROVENANCE_KEY)), {case})
         self.assertEqual(candidate_record.dump_sorted(rewritten), real.read_text(encoding="utf-8"))
 
     def test_a_mutant_in_the_environment_refuses_every_recording(self):

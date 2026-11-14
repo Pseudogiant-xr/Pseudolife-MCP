@@ -80,11 +80,15 @@ The Rust plan hashes the whole file, so even a comment change needs this.
       `python rust/cli_harness --row <row> --record-candidate --candidate
       <shim>`, then `--write` (`rust/cli_harness/README.md`, "Goldens after
       the freeze");
+    - the daemon `run.py` golden rows and the W2-E scenarios, from the
+      candidate: `python rust/daemon/harness/run.py golden
+      --record-candidate` and `w2e.py golden --record-candidate`, then
+      `--write`;
     - dream cursors (`rust/daemon/harness/dream_cursors.py live --record`),
-      the daemon `run.py` golden rows, the graph store and the principals
-      have no candidate recorder yet: their `--record` records the frozen
-      Python, so a Rust-only change to what they pin stops and asks the
-      maintainer rather than editing those goldens by hand.
+      the graph store and the principals have no candidate recorder yet:
+      their `--record` records the frozen Python, so a Rust-only change to
+      what they pin stops and asks the maintainer rather than editing those
+      goldens by hand.
 
 ## D. Before merge
 
