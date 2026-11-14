@@ -500,6 +500,12 @@ jobs:
       # job does: shared-key "rust" is the key rust-cache derives for the job
       # id rust, and the toolchain set above matches that job's.
       - uses: Swatinem/rust-cache@v2
+        # rust-cache hashes the CARGO*/RUST* environment into the restore key
+        # itself: these are rust.yml's workflow env, or the key never meets
+        # the Rust job's (tests/test_ci_native_client.py compares them).
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
         with:
           prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
@@ -508,7 +514,8 @@ jobs:
       - name: Build the native client the installer tests run
         # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
         # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
-        # 2026-11-13). In rust/, so its rust-toolchain.toml applies.
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
         shell: pwsh
         working-directory: rust
         run: |
@@ -650,6 +657,12 @@ jobs:
       # job does: shared-key "rust" is the key rust-cache derives for the job
       # id rust, and the toolchain set above matches that job's.
       - uses: Swatinem/rust-cache@v2
+        # rust-cache hashes the CARGO*/RUST* environment into the restore key
+        # itself: these are rust.yml's workflow env, or the key never meets
+        # the Rust job's (tests/test_ci_native_client.py compares them).
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
         with:
           prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
@@ -658,7 +671,8 @@ jobs:
       - name: Build the native client the installer tests run
         # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
         # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
-        # 2026-11-13). In rust/, so its rust-toolchain.toml applies.
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
         shell: pwsh
         working-directory: rust
         run: |
@@ -886,16 +900,24 @@ jobs:
           "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Rust cache week: $week"
       # No Rust job runs on macOS, so this lane keeps its own cache (the only
-      # save under this key on macOS); a week's first run builds cold.
+      # save under this key on macOS). It saves on master only (the nightly
+      # and the weekly run), since a pull request's or batch's save is scoped
+      # to that ref, which nothing else reads, and would only churn the
+      # cache quota; other runs restore master's entry or build cold.
       - uses: Swatinem/rust-cache@v2
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
         with:
           prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
           shared-key: native-test-macos
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Build the native client the installer tests run
         # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
         # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
-        # 2026-11-13). In rust/, so its rust-toolchain.toml applies.
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
         shell: pwsh
         working-directory: rust
         run: |
@@ -1021,6 +1043,12 @@ jobs:
       # job does: shared-key "rust" is the key rust-cache derives for the job
       # id rust, and the toolchain set above matches that job's.
       - uses: Swatinem/rust-cache@v2
+        # rust-cache hashes the CARGO*/RUST* environment into the restore key
+        # itself: these are rust.yml's workflow env, or the key never meets
+        # the Rust job's (tests/test_ci_native_client.py compares them).
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
         with:
           prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
           workspaces: rust
@@ -1029,7 +1057,8 @@ jobs:
       - name: Build the native client the installer tests run
         # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
         # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
-        # 2026-11-13). In rust/, so its rust-toolchain.toml applies.
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
         shell: pwsh
         working-directory: rust
         run: |

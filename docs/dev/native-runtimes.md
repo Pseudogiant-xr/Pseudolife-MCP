@@ -269,12 +269,15 @@ exercises two installed native sessions while updating side by side, Unicode
 stdio and exit propagation. Build/execution evidence must be recorded separately;
 formatting success does not prove these tests have run.
 
-The installers' Python tests run the real client where one is given:
+CI prepares a real client for the installers' Python tests:
 `PSEUDOLIFE_NATIVE_TEST_BINARY` names a native `pseudolife-stdio` built from
-the same commit, and `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1` makes a test
-that needs it fail instead of skip. CI's Python lanes that run installer
+the same commit, and `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1` asks a test
+that needs it to fail instead of skip. CI's Python lanes that run installer
 tests (`test`, `test-lite-windows`, `test-lite-macos`, the Windows nightly)
-build one before their tests and set both (`tests/test_ci_native_client.py`
-pins it); on macOS this is the native client's only CI execution. Locally,
-set them to a `cargo build -p pseudolife-stdio` output to run the same
-path.
+build one before their tests, smoke-run its `version` and set both
+(`tests/test_ci_native_client.py` pins it, and runs the binary in the `test`
+lane); on macOS that smoke run is the native client's only CI execution.
+The installer tests that will run it are being added with the native
+installer work; today only `tests/test_ci_native_client.py` reads the
+variable. Locally, set them to a `cargo build -p pseudolife-stdio` output
+to run the same path.
