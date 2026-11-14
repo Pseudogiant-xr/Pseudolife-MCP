@@ -334,7 +334,7 @@ jobs:
           tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_suite_classes.py
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
-          tests/test_claude_md_citations.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py
+          tests/test_claude_md_citations.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py tests/test_installer_legacy_hooks.py
 
   lock-resolve:
     # Replays the daemon image's constrained install (ops/Dockerfile.daemon
