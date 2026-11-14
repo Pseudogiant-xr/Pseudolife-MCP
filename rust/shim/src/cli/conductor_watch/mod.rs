@@ -136,9 +136,9 @@ fn alive(pid: i64) -> bool {
 }
 
 /// `_process_start(pid)`: an opaque token for when `pid` started, `None`
-/// when it cannot be read. The oracle reads Windows's creation FILETIME and
-/// Linux's `/proc/<pid>/stat` field 22; elsewhere it runs `ps`, which this
-/// port does not, so that defers.
+/// when it cannot be read (then `running` lets the state's lock decide):
+/// Windows's creation FILETIME, Linux's `/proc/<pid>/stat` field 22,
+/// macOS's `proc_pidinfo` start time; other systems read none.
 #[cfg_attr(any(windows, target_os = "macos"), allow(unsafe_code))]
 fn process_start(pid: u32) -> Res<Option<String>> {
     #[cfg(windows)]
@@ -173,15 +173,14 @@ fn process_start(pid: u32) -> Res<Option<String>> {
     }
     #[cfg(target_os = "linux")]
     {
-        // A stat that cannot be read, does not decode or has no field 22
-        // falls through to `ps` there, which this port does not run: defer.
-        let raw = fs::read(format!("/proc/{pid}/stat")).map_err(|_| Defer)?;
-        let text = String::from_utf8(raw).map_err(|_| Defer)?;
-        let tail = text.rsplit_once(')').ok_or(Defer)?.1;
-        tail.split_whitespace()
-            .nth(19)
-            .map(|field| Some(field.to_owned()))
-            .ok_or(Defer)
+        // Field 22, counted after the name's last `)`; everything after the
+        // name is ASCII, so a name that is not UTF-8 is read lossily. A stat
+        // that cannot be read, or has no field 22, is not provable (`None`):
+        // the caller's lock rule then decides.
+        let Ok(raw) = fs::read(format!("/proc/{pid}/stat")) else {
+            return Ok(None);
+        };
+        Ok(stat_start(&raw))
     }
     #[cfg(target_os = "macos")]
     {
@@ -213,8 +212,9 @@ fn process_start(pid: u32) -> Res<Option<String>> {
     }
     #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
     {
+        // No start time read here: not provable, so the lock decides.
         let _ = pid;
-        Err(Defer)
+        Ok(None)
     }
 }
 
@@ -289,7 +289,52 @@ fn running(state: &Path) -> Res<Option<pyjson::Dict>> {
     {
         return Ok(None);
     }
+    // Proven only when both start times were read and agree. Otherwise (no
+    // recorded time, or a process this user cannot query) the state's lock
+    // decides: a watcher holds it for its whole life, so a free lock means
+    // the record outlived its watcher, whatever now has that pid.
+    if (recorded.is_none() || started.is_none()) && !lock_held(state)? {
+        return Ok(None);
+    }
     Ok(Some(record))
+}
+
+/// Field 22 of a Linux `/proc/<pid>/stat`, counted after the name's last
+/// `)`. The fields after the name are ASCII, so a name that is not UTF-8
+/// is read lossily; no field 22 is `None` (not provable).
+#[cfg(any(target_os = "linux", test))]
+fn stat_start(raw: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(raw)
+        .rsplit_once(')')
+        .and_then(|(_, tail)| tail.split_whitespace().nth(19).map(str::to_owned))
+}
+
+/// Whether a watcher holds the lock beside `state`.
+fn lock_held(state: &Path) -> Res<bool> {
+    Ok(matches!(
+        super::lease::lock::probe(&with_suffix(state, ".lock")?),
+        Ok(Some(true))
+    ))
+}
+
+/// The per-owner lock and the note naming the state its holder watches:
+/// one watcher per owner, whatever state file each start was given.
+pub(super) fn owner_files(home: &Path, owner: &str) -> (PathBuf, PathBuf) {
+    let folder = home.join(".pseudolife-mcp").join("watch");
+    (
+        folder.join(format!("{owner}.owner.lock")),
+        folder.join(format!("{owner}.owner.json")),
+    )
+}
+
+/// The state file of the watcher that holds `owner`'s lock, if one does.
+pub(super) fn owner_watcher(home: &Path, owner: &str) -> Option<PathBuf> {
+    let (lock, note) = owner_files(home, owner);
+    if !matches!(super::lease::lock::probe(&lock), Ok(Some(true))) {
+        return None;
+    }
+    let note: serde_json::Value = serde_json::from_slice(&fs::read(note).ok()?).ok()?;
+    note["state"].as_str().map(PathBuf::from)
 }
 
 /// Whether `recorded` is the start time a Python watcher wrote for the
@@ -490,6 +535,7 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
         Some(state) => Some(super::wait_mail::pathlib(Path::new(state))),
         None => default_state(owner.as_ref().ok().map(String::as_str), context)?,
     };
+    let home = crate::credentials::python_home_with(|key| (context.var)(key));
     if args.stop {
         let Some(state) = state else {
             return Ok(Out::say(
@@ -497,6 +543,16 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
                 EXIT_SETUP,
             ));
         };
+        // The owner's watcher may run on another state file (one started
+        // from another session or shell): stop that one.
+        if running(&state)?.is_none()
+            && let Ok(owner) = &owner
+            && let Some(other) = owner_watcher(&home, owner)
+            && other != state
+            && running(&other)?.is_some()
+        {
+            return stop(&other);
+        }
         return stop(&state);
     }
     let owner = match owner {
@@ -509,7 +565,16 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
         }
     };
     let state = state.ok_or(Defer)?;
-    let Some(record) = running(&state)? else {
+    // One watcher per owner: one already watching for this owner from
+    // another state file answers the start.
+    let record = match running(&state)? {
+        Some(record) => Some(record),
+        None => match owner_watcher(&home, &owner) {
+            Some(other) if other != state => running(&other)?,
+            _ => None,
+        },
+    };
+    let Some(record) = record else {
         // `--detach` starts a watcher; the foreground run takes the lock.
         let files = watch::Files {
             pid: with_suffix(&state, ".pid")?,
@@ -519,7 +584,6 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
             ledger: with_suffix(&state, ".ledger")?,
             state,
         };
-        let home = crate::credentials::python_home_with(|key| (context.var)(key));
         return Ok(Out {
             start: Some(start::Start {
                 owner,

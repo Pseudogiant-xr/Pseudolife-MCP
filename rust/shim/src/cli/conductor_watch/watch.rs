@@ -144,6 +144,8 @@ enum Halt {
     Transient(String),
     Refused(String),
     Unwritable(String),
+    /// A stop request or an interrupt arrived while gh ran.
+    Stopped,
 }
 
 impl From<Failure> for Halt {
@@ -175,14 +177,45 @@ pub(super) struct Watcher<'a, B: BoardApi, H: Host, G: Gh> {
     last_event: Option<String>,
     last_row: Option<Value>,
     skipped: Vec<String>,
+    /// The first poll finished: the pid record says `ready`, which is what
+    /// `--detach` waits for before it reports the watcher running.
+    ready: bool,
 }
 
 fn uuid() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
+/// `work`, run while the row is kept attached and a stop request or an
+/// interrupt is watched for; `None` when one of those came first. Every gh
+/// call runs through this, so a slow gh never holds them.
+async fn guarded<B: BoardApi, H: Host, T>(
+    board: &B,
+    host: &mut H,
+    attachment: &str,
+    generation: &mut Option<i64>,
+    renewed_at: &mut f64,
+    stop: &Path,
+    work: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    let alive = async {
+        loop {
+            keep_attached(board, &mut *host, attachment, generation, renewed_at).await;
+            if host.interrupted() || stop.exists() {
+                return;
+            }
+            host.sleep(SLICE).await;
+        }
+    };
+    tokio::select! {
+        biased;
+        out = work => Some(out),
+        () = alive => None,
+    }
+}
+
 /// `os.replace` of a sibling `.tmp`: the file is whole or untouched.
-fn save(path: &Path, value: &Value) -> std::io::Result<()> {
+pub(super) fn save(path: &Path, value: &Value) -> std::io::Result<()> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
@@ -355,6 +388,7 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             last_event: None,
             last_row: None,
             skipped: Vec::new(),
+            ready: false,
         }
     }
 
@@ -377,22 +411,33 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         }
     }
 
-    async fn project(&mut self) -> String {
+    async fn project(&mut self) -> Result<String, Cut> {
         if let Some(project) = &self.project {
-            return project.clone();
+            return Ok(project.clone());
         }
         let printable = |text: &str| text.chars().filter(|c| !c.is_control()).take(120).collect::<String>();
         let project = match (&self.settings.project, &self.settings.repo) {
             (Some(project), _) if !project.is_empty() => printable(project),
             (_, Some(repo)) => printable(repo.rsplit('/').next().unwrap_or_default()),
-            _ => GitHub { gh: &mut *self.gh, author: None }
-                .repo_name()
+            _ => {
+                let settings = self.settings;
+                let Self { gh, board, host, attachment, generation, renewed_at, .. } = self;
+                let named = guarded(
+                    *board,
+                    &mut **host,
+                    attachment,
+                    generation,
+                    renewed_at,
+                    &settings.files.stop,
+                    async { GitHub { gh: &mut **gh, author: None }.repo_name().await },
+                )
                 .await
-                .map(|name| printable(&name))
-                .unwrap_or_default(),
+                .ok_or(Cut::Stopped)?;
+                named.map(|name| printable(&name)).unwrap_or_default()
+            }
         };
         self.project = Some(project.clone());
-        project
+        Ok(project)
     }
 
     /// Register (unless this address is still known), attach, and write the
@@ -402,7 +447,7 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
     async fn register(&mut self) -> Result<(), Halt> {
         if self.agent.is_none() {
             let task = format!("decision events for {}", &self.settings.owner[..8]);
-            let project = self.project().await;
+            let project = self.project().await.map_err(|_| Halt::Stopped)?;
             self.agent = Some(self.board.register(&task, &project).await?);
             self.generation = None;
         }
@@ -416,7 +461,7 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         let record = json!({
             "pid": pid, "process_start": start, "agent_id": agent,
             "owner": self.settings.owner, "started": chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
-            "nonce": self.settings.nonce,
+            "nonce": self.settings.nonce, "ready": self.ready,
         });
         let path = &self.settings.files.pid;
         save(path, &record).map_err(|error| {
@@ -553,20 +598,8 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                 let master = github.master(old_master.as_ref()).await;
                 (prs, master)
             };
-            let alive = async {
-                loop {
-                    keep_attached(*board, &mut **host, attachment, generation, renewed_at).await;
-                    if host.interrupted() || settings.files.stop.exists() {
-                        return;
-                    }
-                    host.sleep(SLICE).await;
-                }
-            };
-            tokio::select! {
-                biased;
-                fetched = github => Some(fetched),
-                () = alive => None,
-            }
+            guarded(*board, &mut **host, attachment, generation, renewed_at, &settings.files.stop, github)
+                .await
         };
         let Some((prs, master)) = fetched else {
             return Err(Cut::Stopped);
@@ -602,15 +635,29 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
 
     /// The events from `old` to `new`. A pull request missing from the new
     /// list is looked up; while its end is unknown it stays in `new`.
-    async fn events(&mut self, old: &Value, new: &mut Value) -> Vec<Event> {
+    async fn events(&mut self, old: &Value, new: &mut Value) -> Result<Vec<Event>, Cut> {
         let mut out = Vec::new();
         if let (Some(old_prs), Some(new_prs)) = (old["prs"].as_object(), new["prs"].as_object_mut()) {
             let mut gone: Vec<String> = old_prs.keys().filter(|k| !new_prs.contains_key(*k)).cloned().collect();
             gone.sort_by_key(|n| n.parse::<i64>().unwrap_or(i64::MAX));
+            let settings = self.settings;
+            let ends = {
+                let Self { gh, board, host, attachment, generation, renewed_at, .. } = self;
+                let lookups = async {
+                    let mut github = GitHub { gh: &mut **gh, author: None };
+                    let mut ends = Vec::new();
+                    for number in &gone {
+                        ends.push((number.clone(), github.closed_as(number).await));
+                    }
+                    ends
+                };
+                guarded(*board, &mut **host, attachment, generation, renewed_at, &settings.files.stop, lookups)
+                    .await
+                    .ok_or(Cut::Stopped)?
+            };
             let mut closed = Vec::new();
-            let mut github = GitHub { gh: &mut *self.gh, author: None };
-            for number in gone {
-                match github.closed_as(&number).await {
+            for (number, how) in ends {
+                match how {
                     Some(how) => closed.push((number, how)),
                     None => {
                         new_prs.insert(number.clone(), old_prs[&number].clone());
@@ -624,7 +671,7 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         out.extend(events::master_events(&pick(old, "master"), &pick(new, "master")));
         out.extend(events::suite_events(&pick(old, "suites"), &pick(new, "suites")));
         out.extend(events::lease_events(&pick(old, "leases"), &pick(new, "leases")));
-        out
+        Ok(out)
     }
 
     /// The state an earlier run saved, or `None` for a fresh baseline.
@@ -688,20 +735,34 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
         code
     }
 
+    /// A clean exit. The owner is told first, while the board can still be
+    /// reached (an owner parked on this watcher would otherwise sleep on),
+    /// except when the owner left the board.
     async fn leave(&mut self, why: &str) -> u8 {
         self.ledger("exit", why);
         self.host.say(&format!("exiting: {why}"));
+        if why != "owner gone" && self.agent.is_some() && self.generation.is_some() {
+            let text = format!(
+                "conductor-watch stopped ({why}). Restart it with `pseudolife-mcp conductor-watch --detach` \
+                 when you want it watching again."
+            );
+            if self.board.send(&self.settings.owner, &text, &uuid()).await.is_err() {
+                self.host.say("could not tell the owner");
+            }
+        }
         self.finish(EXIT_OK, why).await
     }
 
     /// Tell the owner the watcher stopped, best effort, then exit 2: it
-    /// never goes silent.
+    /// never goes silent while the board can be reached.
     async fn give_up(&mut self, why: &str) -> u8 {
         self.host.say(why);
         self.ledger("setup", why);
+        // Quoted, since gh's own words can be in it; long enough that the
+        // fix at its end is never cut off.
         let text = format!(
             "conductor-watch stopped: {}. Restart it with `pseudolife-mcp conductor-watch --detach` once that is fixed.",
-            events::quote(why)
+            events::quote_up_to(why, 1000)
         );
         if self.send(&text, &uuid()).await.is_err() {
             self.host.say("could not tell the owner");
@@ -733,6 +794,11 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                 self.host.say(&detail);
                 self.ledger("setup", &detail);
                 return self.finish(EXIT_SETUP, "could not register").await;
+            }
+            Err(Halt::Stopped) => {
+                let why = if self.host.interrupted() { "interrupted" } else { "stopped" };
+                let _ = fs::remove_file(&self.settings.files.stop);
+                return self.leave(why).await;
             }
         }
         let agent = self.agent.clone().unwrap_or_default();
@@ -794,7 +860,10 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
                     }
                 }
                 Some(old) => {
-                    let new = self.events(old, &mut snap).await;
+                    let Ok(new) = self.events(old, &mut snap).await else {
+                        // A stop request or an interrupt: the loop's top says which.
+                        continue;
+                    };
                     state = Some(snap);
                     if !new.is_empty() {
                         found.extend(new);
@@ -804,8 +873,15 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             }
             let now = self.host.now();
             match self.board_turn(&mut found, &mut pending, &mut settle_until, &mut last_sent, state.as_ref(), now, deadline).await {
-                Ok(None) => {}
+                Ok(None) => {
+                    if !self.ready
+                        && let Err(why) = self.mark_ready()
+                    {
+                        return self.give_up(&why).await;
+                    }
+                }
                 Ok(Some(why)) => return self.leave(&why).await,
+                Err(Halt::Stopped) => continue,
                 Err(Halt::Transient(why)) => {
                     self.host.say(&format!("the board failed this poll ({why}); trying again next poll"));
                 }
@@ -843,6 +919,23 @@ impl<'a, B: BoardApi, H: Host, G: Gh> Watcher<'a, B, H, G> {
             }
             self.pause(wait).await;
         }
+    }
+
+    /// After the first poll: the pid record says `ready`, so `--detach`
+    /// reports the watcher running only once it registered, saw its owner
+    /// and finished a poll.
+    fn mark_ready(&mut self) -> Result<(), String> {
+        self.ready = true;
+        let path = &self.settings.files.pid;
+        let mut record: Value = fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_else(|| json!({}));
+        if record["agent_id"] != json!(self.agent) {
+            return Ok(());
+        }
+        record["ready"] = json!(true);
+        save(path, &record).map_err(|error| format!("{} {}; {STATE_FIX}", path.display(), reason(&error, path)))
     }
 
     /// Sleep `seconds` in slices, renewing the attachment and returning

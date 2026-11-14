@@ -27,12 +27,15 @@ use std::{
 
 const OWNER: &str = "0123456789abcdef0123456789abcdef";
 const AGENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
 /// A board on a loopback port this test owns, answering the calls a
 /// watcher makes; the owner is always listed.
 struct Board {
     url: String,
     requests: Arc<Mutex<Vec<(String, Value)>>>,
+    /// The agents the board lists: both owners unless a test says otherwise.
+    listed: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -42,8 +45,9 @@ impl Board {
         let url = format!("http://{}", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let listed = Arc::new(Mutex::new(vec![OWNER.to_owned(), OTHER.to_owned()]));
         let stop = Arc::new(AtomicBool::new(false));
-        let (log, stopping) = (requests.clone(), stop.clone());
+        let (log, stopping, roster) = (requests.clone(), stop.clone(), listed.clone());
         thread::spawn(move || {
             while !stopping.load(Ordering::Acquire) {
                 let Ok((mut stream, _)) = listener.accept() else {
@@ -51,6 +55,7 @@ impl Board {
                     continue;
                 };
                 let log = log.clone();
+                let roster = roster.clone();
                 thread::spawn(move || {
                     stream.set_nonblocking(false).unwrap();
                     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
@@ -83,7 +88,15 @@ impl Board {
                     let reply = match action.as_str() {
                         "register" => json!({"agent_id": AGENT, "credential": "fixture-key"}),
                         "attach" | "heartbeat" => json!({"generation": 1}),
-                        "agents" => json!({"agents": [{"agent_id": OWNER, "park_reason": ""}], "truncated": false}),
+                        "agents" => {
+                            let rows: Vec<Value> = roster
+                                .lock()
+                                .unwrap()
+                                .iter()
+                                .map(|id| json!({"agent_id": id, "park_reason": ""}))
+                                .collect();
+                            json!({"agents": rows, "truncated": false})
+                        }
                         "leases" => json!({"leases": [], "truncated": false}),
                         _ => json!({}),
                     };
@@ -96,7 +109,7 @@ impl Board {
                 });
             }
         });
-        Self { url, requests, stop }
+        Self { url, requests, listed, stop }
     }
     fn count(&self, action: &str) -> usize {
         self.requests.lock().unwrap().iter().filter(|(a, _)| a == action).count()
@@ -139,12 +152,28 @@ impl Sandbox {
         fs::create_dir_all(root.join("home")).unwrap();
         fs::create_dir_all(root.join("bin")).unwrap();
         fs::create_dir_all(root.join("work")).unwrap();
-        // gh answering every call with an empty list.
+        // gh answering `repo view` with a repository and every other call
+        // with an empty list, each call's arguments appended to gh-calls.
+        let calls = root.join("gh-calls.txt");
         if cfg!(windows) {
-            fs::write(root.join("bin").join("gh.cmd"), "@echo []\r\n").unwrap();
+            fs::write(
+                root.join("bin").join("gh.cmd"),
+                format!(
+                    "@echo %*>> \"{}\"\r\n@if \"%1 %2\"==\"repo view\" (echo {{\"nameWithOwner\":\"example/demo\",\"name\":\"demo\"}}) else (echo [])\r\n",
+                    calls.display()
+                ),
+            )
+            .unwrap();
         } else {
             let gh = root.join("bin").join("gh");
-            fs::write(&gh, "#!/bin/sh\necho '[]'\n").unwrap();
+            fs::write(
+                &gh,
+                format!(
+                    "#!/bin/sh\necho \"$*\" >> '{}'\nif [ \"$1 $2\" = \"repo view\" ]; then echo '{{\"nameWithOwner\":\"example/demo\",\"name\":\"demo\"}}'; else echo '[]'; fi\n",
+                    calls.display()
+                ),
+            )
+            .unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -152,6 +181,31 @@ impl Sandbox {
             }
         }
         Self { root, board: Board::new(), started: Mutex::new(Vec::new()) }
+    }
+
+    /// gh made slow: two seconds per call, so a first poll takes several.
+    fn slow_gh(&self) {
+        if cfg!(windows) {
+            let ping = Path::new(&std::env::var_os("SYSTEMROOT").expect("SYSTEMROOT"))
+                .join("System32")
+                .join("PING.EXE");
+            fs::write(
+                self.root.join("bin").join("gh.cmd"),
+                format!("@\"{}\" -n 3 127.0.0.1 >nul
+@echo []
+", ping.display()),
+            )
+            .unwrap();
+        } else {
+            let sleep = ["/bin/sleep", "/usr/bin/sleep"]
+                .into_iter()
+                .find(|path| Path::new(path).exists())
+                .expect("a sleep program");
+            fs::write(self.root.join("bin").join("gh"), format!("#!/bin/sh
+{sleep} 2
+echo '[]'
+")).unwrap();
+        }
     }
 
     fn state(&self, name: &str) -> PathBuf {
@@ -283,8 +337,7 @@ impl Drop for Sandbox {
             while ours() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(100));
             }
-            if ours() {
-                process::kill(*pid);
+            if ours() && process::end(*pid, start.unwrap_or_default()) {
                 left.push(*pid);
             }
         }
@@ -338,27 +391,56 @@ mod process {
         }
     }
 
-    /// End `pid` (one this test started, checked by its start token).
-    pub fn kill(pid: u32) {
+    /// End `pid` only if it is still the process that started at `start`,
+    /// checked and ended through one handle (Windows) or pidfd (Linux), so a
+    /// pid reused in between is never touched. Whether it was ended.
+    pub fn end(pid: u32, token: u64) -> bool {
         #[cfg(windows)]
         {
             use windows_sys::Win32::{
-                Foundation::CloseHandle,
-                System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
+                Foundation::{CloseHandle, FILETIME},
+                System::Threading::{
+                    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+                    TerminateProcess,
+                },
             };
-            // SAFETY: a terminate-only handle, closed after use.
+            let empty = || FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+            // SAFETY: one handle, closed on every path; the creation time is
+            // read from the same handle the process is ended through.
             unsafe {
-                let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-                if !handle.is_null() {
-                    TerminateProcess(handle, 1);
-                    CloseHandle(handle);
+                let handle = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                if handle.is_null() {
+                    return false;
                 }
+                let (mut a, mut b, mut c, mut d) = (empty(), empty(), empty(), empty());
+                let same = GetProcessTimes(handle, &mut a, &mut b, &mut c, &mut d) != 0
+                    && ((u64::from(a.dwHighDateTime) << 32) | u64::from(a.dwLowDateTime)) == token;
+                let ended = same && TerminateProcess(handle, 1) != 0;
+                CloseHandle(handle);
+                ended
             }
         }
-        #[cfg(unix)]
-        // SAFETY: a signal to one pid this test started.
-        unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: a pidfd for `pid`, checked against the start token
+            // after it is open (it then names that process for good), used
+            // for the signal and closed.
+            unsafe {
+                let fd = libc::syscall(libc::SYS_pidfd_open, pid as libc::c_int, 0) as libc::c_int;
+                if fd < 0 {
+                    return false;
+                }
+                let same = start(pid) == Some(token);
+                let ended = same
+                    && libc::syscall(libc::SYS_pidfd_send_signal, fd, libc::SIGKILL, std::ptr::null::<u8>(), 0) == 0;
+                libc::close(fd);
+                ended
+            }
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
+        {
+            let _ = (pid, token);
+            false
         }
     }
 }
@@ -486,20 +568,8 @@ fn a_detached_watcher_outlives_the_command_that_started_it() {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut command = sandbox.command(&args);
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    // The parent leads its own group, as a terminal's foreground job does.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
-    }
     let began = Instant::now();
     let mut parent = command.spawn().unwrap();
-    let parent_pid = parent.id();
     // Its output is a pipe: it must end when the parent exits, not when
     // the watcher does.
     let (sender, outputs) = std::sync::mpsc::channel();
@@ -539,32 +609,17 @@ fn a_detached_watcher_outlives_the_command_that_started_it() {
     sandbox.track(pid, &state);
     let start = process::start(pid);
     assert!(start.is_some(), "the detached watcher is not running");
-    // The session that started it ends: its group gets what a closing
-    // terminal or console sends.
-    end_session(parent_pid);
     thread::sleep(Duration::from_secs(2));
-    assert_eq!(process::start(pid), start, "the detached watcher did not outlive its session");
+    assert_eq!(process::start(pid), start, "the detached watcher did not outlive its parent");
     assert!(fs::read_to_string(state.with_extension("log")).unwrap().contains("watching for"));
+    // Ready before "watching" was printed: registered, first poll done.
+    assert_eq!(held["ready"], true);
 
     let stop = sandbox.run(&["--stop", "--state", &state.display().to_string()]);
     assert_eq!(stop.status.code(), Some(0));
     wait_for("the detached watcher to exit", Duration::from_secs(10), || process::start(pid) != start);
     assert!(record(&state).is_none());
     assert_eq!(sandbox.board.count("detach"), 1);
-}
-
-#[cfg(unix)]
-#[allow(unsafe_code)]
-fn end_session(group: u32) {
-    // SAFETY: SIGHUP to the process group the test's own parent led.
-    unsafe {
-        libc::kill(-(group as i32), libc::SIGHUP);
-    }
-}
-
-#[cfg(windows)]
-fn end_session(group: u32) {
-    interrupt(group);
 }
 
 #[test]
@@ -661,4 +716,267 @@ fn a_gh_in_the_current_directory_is_never_run() {
     assert!(sent[0]["text"].as_str().unwrap().starts_with("conductor-watch stopped: \"gh is not installed or not on PATH\"."));
     assert_eq!(sandbox.board.count("detach"), 1);
     assert!(record(&state).is_none());
+}
+
+/// A shell that runs `--detach` and then waits: the session the watcher
+/// must outlive. It stays alive (and is this test's unreaped child, so its
+/// pid and group cannot be reused) until the test ends its group.
+fn session(sandbox: &Sandbox, args: &[String]) -> Child {
+    let path = std::env::join_paths([sandbox.root.join("bin")]).unwrap();
+    let env = sandbox.env(&path);
+    let work = sandbox.root.join("work");
+    sandbox.require(&env, &work);
+    let binary = env!("CARGO_BIN_EXE_pseudolife-stdio");
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        let quoted: Vec<String> = args.iter().map(|arg| format!("\"{arg}\"")).collect();
+        let system = std::env::var_os("SYSTEMROOT").expect("SYSTEMROOT");
+        let mut command = common::cli::cleared_command(&Path::new(&system).join("System32").join("cmd.exe"));
+        command.raw_arg(format!(
+            "/d /c \"\"{binary}\" conductor-watch {} --detach & \"{}\" -n 61 127.0.0.1 >nul\"",
+            quoted.join(" "),
+            Path::new(&system).join("System32").join("PING.EXE").display()
+        ));
+        // Its own group, sharing this console: the group this test ends.
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
+        command
+    };
+    #[cfg(unix)]
+    let mut command = {
+        use std::os::unix::process::CommandExt;
+        let sleep = ["/bin/sleep", "/usr/bin/sleep"]
+            .into_iter()
+            .find(|path| Path::new(path).exists())
+            .expect("a sleep program");
+        let mut command = common::cli::cleared_command(Path::new("/bin/sh"));
+        command
+            .arg("-c")
+            .arg(format!("\"$0\" conductor-watch \"$@\" --detach; exec {sleep} 60"))
+            .arg(binary)
+            .args(args);
+        // It leads its own group, as a terminal's foreground job does.
+        command.process_group(0);
+        command
+    };
+    command
+        .envs(env)
+        .current_dir(&work)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap()
+}
+
+/// End the session's group: SIGHUP (a closing terminal) or Ctrl-Break (a
+/// closing console). The leader is this test's live, unreaped child.
+#[allow(unsafe_code)]
+fn end_session(leader: &mut Child) {
+    assert!(leader.try_wait().unwrap().is_none(), "the session ended by itself");
+    #[cfg(unix)]
+    // SAFETY: the group of a live child this test holds, so not reused.
+    unsafe {
+        libc::kill(-(leader.id() as i32), libc::SIGHUP);
+    }
+    #[cfg(windows)]
+    interrupt(leader.id());
+    // The wrapper may outlast the signal (its wait is the point); it is
+    // this test's own child, ended through its handle.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while leader.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
+    if leader.try_wait().unwrap().is_none() {
+        leader.kill().unwrap();
+        leader.wait().unwrap();
+    }
+}
+
+#[test]
+fn a_detached_watcher_survives_the_end_of_the_session_that_started_it() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("session");
+    let args = sandbox.watch_args(&state);
+    let mut leader = session(&sandbox, &args);
+    wait_for("the detached watcher to be ready", Duration::from_secs(45), || {
+        record(&state).is_some_and(|held| held["ready"] == true)
+    });
+    let held = record(&state).unwrap();
+    let pid = held["pid"].as_u64().unwrap() as u32;
+    sandbox.track(pid, &state);
+    let start = process::start(pid);
+    assert!(start.is_some());
+    end_session(&mut leader);
+    thread::sleep(Duration::from_secs(2));
+    assert_eq!(process::start(pid), start, "the detached watcher did not outlive its session");
+    let stop = sandbox.run(&["--stop", "--state", &state.display().to_string()]);
+    assert_eq!(stop.status.code(), Some(0));
+    wait_for("the detached watcher to exit", Duration::from_secs(10), || process::start(pid) != start);
+}
+
+#[test]
+fn a_second_watcher_for_the_same_owner_is_refused_with_the_first_ones_record() {
+    let sandbox = Sandbox::new();
+    let first_state = sandbox.state("first");
+    let mut first = sandbox.spawn(&first_state);
+    wait_for("the first watcher's pid record", Duration::from_secs(20), || record(&first_state).is_some());
+    // Another state file for the same owner: the first watcher answers.
+    let second_state = sandbox.root.join("elsewhere").join("second.json");
+    let args = sandbox.watch_args(&second_state);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let second = sandbox.run(&args);
+    assert_eq!(second.status.code(), Some(0), "{}", text(&second.stderr));
+    assert_eq!(
+        text(&second.stdout).trim_end(),
+        format!("conductor-watch {AGENT} already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by={AGENT}")
+    );
+    assert_eq!(sandbox.board.count("register"), 1);
+    // --stop for that owner, given the other state file, stops the first.
+    let stop = sandbox.run(&["--stop", "--owner", OWNER, "--state", &second_state.display().to_string()]);
+    assert_eq!(
+        text(&stop.stdout).trim_end(),
+        format!("conductor-watch {AGENT} asked to stop; it exits at its next poll")
+    );
+    assert_eq!(exit_within(&mut first, Duration::from_secs(10)).code(), Some(0));
+    // Near miss: two different owners on one machine both run.
+    let mine = sandbox.state("mine");
+    let mut one = sandbox.spawn(&mine);
+    wait_for("the owner's watcher", Duration::from_secs(20), || record(&mine).is_some());
+    let theirs = sandbox.state("theirs");
+    let mut other_args = sandbox.watch_args(&theirs);
+    other_args[1] = OTHER.into();
+    let other_args: Vec<&str> = other_args.iter().map(String::as_str).collect();
+    let mut two = sandbox
+        .command(&other_args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    sandbox.track(two.id(), &theirs);
+    wait_for("the other owner's watcher", Duration::from_secs(20), || record(&theirs).is_some());
+    assert_eq!(sandbox.board.count("register"), 3);
+    for (child, state) in [(&mut one, &mine), (&mut two, &theirs)] {
+        fs::write(state.with_extension("stop"), b"").unwrap();
+        assert_eq!(exit_within(child, Duration::from_secs(10)).code(), Some(0));
+    }
+}
+
+/// Whether `folder` is this user's alone: mode 0700 on POSIX; on Windows a
+/// protected DACL (no inherited entries).
+#[allow(unsafe_code)]
+fn private(folder: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(folder).unwrap().permissions().mode() & 0o777 == 0o700
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::{
+                Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
+                DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, SE_DACL_PROTECTED,
+            },
+        };
+        let wide: Vec<u16> = folder.as_os_str().encode_wide().chain([0]).collect();
+        // SAFETY: the descriptor the call allocates is read, then freed.
+        unsafe {
+            let mut descriptor = std::ptr::null_mut();
+            let read = GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut descriptor,
+            );
+            assert_eq!(read, 0, "the folder's DACL could not be read");
+            let (mut control, mut revision) = (0u16, 0u32);
+            GetSecurityDescriptorControl(descriptor, &mut control, &mut revision);
+            LocalFree(descriptor.cast());
+            control & SE_DACL_PROTECTED != 0
+        }
+    }
+}
+
+#[test]
+fn the_watchers_files_live_in_private_folders() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.root.join("fresh").join("watch.json");
+    let mut watcher = sandbox.spawn(&state);
+    wait_for("the watcher's pid record", Duration::from_secs(20), || record(&state).is_some());
+    assert!(private(state.parent().unwrap()), "the state folder is not private");
+    let owners = sandbox.root.join("home").join(".pseudolife-mcp").join("watch");
+    assert!(owners.join(format!("{OWNER}.owner.json")).exists());
+    assert!(private(&owners), "the owner folder is not private");
+    fs::write(state.with_extension("stop"), b"").unwrap();
+    assert_eq!(exit_within(&mut watcher, Duration::from_secs(10)).code(), Some(0));
+}
+
+#[test]
+fn detach_reports_a_watcher_that_stops_before_its_first_poll() {
+    let sandbox = Sandbox::new();
+    // The owner is not on the board: the watcher registers, then leaves at
+    // its first poll's owner check. A slow gh keeps that poll, and so its
+    // not-yet-ready record, around for several seconds.
+    sandbox.board.listed.lock().unwrap().clear();
+    sandbox.slow_gh();
+    let state = sandbox.state("gone");
+    let mut args = sandbox.watch_args(&state);
+    args.push("--detach".into());
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = sandbox.run(&args);
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stdout));
+    assert!(!text(&out.stdout).contains("watching for"), "{}", text(&out.stdout));
+    assert_eq!(
+        text(&out.stderr).trim_end(),
+        format!(
+            "conductor-watch: the watcher did not start (conductor-watch: exiting: owner gone); its log is {}",
+            state.with_extension("log").display()
+        )
+    );
+    assert!(record(&state).is_none());
+    assert_eq!(sandbox.board.count("detach"), 1);
+}
+
+#[test]
+fn a_detached_watcher_runs_from_its_own_folder_with_the_callers_repository() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("folder");
+    let caller = sandbox.root.join("work").join("checkout");
+    fs::create_dir_all(&caller).unwrap();
+    // No --repo: the caller's folder names it (gh repo view), once.
+    let args: Vec<String> = sandbox
+        .watch_args(&state)
+        .into_iter()
+        .filter(|arg| arg != "--repo" && arg != "example/demo")
+        .chain(["--detach".to_owned()])
+        .collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let path = std::env::join_paths([sandbox.root.join("bin")]).unwrap();
+    let out = sandbox.command_in(&args, path, &caller).stdin(Stdio::null()).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let held = record(&state).expect("the detached watcher's pid record");
+    let pid = held["pid"].as_u64().unwrap() as u32;
+    sandbox.track(pid, &state);
+    let calls = fs::read_to_string(sandbox.root.join("gh-calls.txt")).unwrap();
+    assert!(calls.lines().next().unwrap().starts_with("repo view --json nameWithOwner"), "{calls}");
+    assert!(calls.lines().any(|line| line.starts_with("pr list -R example/demo ")), "{calls}");
+    // It does not keep the caller's folder: that can go while it runs.
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        fs::read_link(format!("/proc/{pid}/cwd")).unwrap(),
+        fs::canonicalize(state.parent().unwrap()).unwrap()
+    );
+    fs::remove_dir(&caller).expect("the caller's folder is still in use");
+    let stop = sandbox.run(&["--stop", "--state", &state.display().to_string()]);
+    assert_eq!(stop.status.code(), Some(0));
+    let start = process::start(pid);
+    wait_for("the detached watcher to exit", Duration::from_secs(10), || process::start(pid) != start);
 }

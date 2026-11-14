@@ -384,9 +384,14 @@ fn python_str(value: &Value) -> String {
 /// reorder text. An allowlist: there is no list of invisible characters
 /// to keep current.
 pub(super) fn quote(value: &str) -> String {
+    quote_up_to(value, QUOTED_MAX)
+}
+
+/// `quote` with its own length limit (characters, before quoting).
+pub(super) fn quote_up_to(value: &str, limit: usize) -> String {
     let mut out = String::from("\"");
     let count = value.chars().count();
-    for c in value.chars().take(QUOTED_MAX) {
+    for c in value.chars().take(limit) {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
@@ -394,7 +399,7 @@ pub(super) fn quote(value: &str) -> String {
             c => out.push_str(&format!("\\u{{{:04x}}}", u32::from(c))),
         }
     }
-    if count > QUOTED_MAX {
+    if count > limit {
         out.push_str("...");
     }
     out.push('"');

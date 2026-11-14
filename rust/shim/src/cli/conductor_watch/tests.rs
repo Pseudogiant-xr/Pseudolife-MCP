@@ -332,12 +332,84 @@ fn stop_asks_a_running_watcher() {
         "conductor-watch w1 asked to stop; it exits at its next poll\n"
     );
     assert_eq!(out.stop_file, Some(scratch.0.join("s.stop")));
-    scratch.pid_file(&format!("{{\"pid\": \" {pid} \"}}"));
+}
+
+#[test]
+fn a_record_whose_start_cannot_be_proven_is_decided_by_the_states_lock() {
+    let scratch = Scratch::new();
+    let state = scratch.state();
+    let (pid, _) = me();
+    // No start time recorded: the pid alone proves nothing (it may be a
+    // reused pid), so a free lock means no watcher.
+    scratch.pid_file(&format!("{{\"pid\": \" {pid} \", \"agent_id\": \"w1\", \"owner\": \"{OWNER}\"}}"));
     let out = decided(&["--stop", "--state", &state]);
     assert_eq!(
         out.stdout,
-        "conductor-watch None asked to stop; it exits at its next poll\n"
+        format!("conductor-watch: no watcher running for {state}; nothing changed\n")
     );
+    assert_eq!(out.stop_file, None);
+    assert!(decided(&["--owner", OWNER, "--state", &state]).start.is_some());
+    // A held lock is a watcher, whatever its record lacks.
+    let mut lock = super::super::lease::lock::Lock::new(scratch.0.join("s.lock"));
+    assert!(matches!(lock.acquire(), Ok(true)));
+    let out = decided(&["--stop", "--state", &state]);
+    assert_eq!(
+        out.stdout,
+        "conductor-watch w1 asked to stop; it exits at its next poll\n"
+    );
+    assert!(decided(&["--owner", OWNER, "--state", &state]).start.is_none());
+    lock.release();
+}
+
+#[test]
+fn a_stat_name_that_is_not_utf8_still_gives_the_start_time() {
+    let mut raw = b"4242 (a\xff) b) S".to_vec();
+    for field in 4..=22 {
+        raw.extend(format!(" {field}").as_bytes());
+    }
+    assert_eq!(stat_start(&raw).as_deref(), Some("22"));
+    assert_eq!(stat_start(b"4242 (short) S 1 2"), None);
+    assert_eq!(stat_start(b"\xff\xfe"), None);
+}
+
+#[test]
+fn one_watcher_per_owner_answers_from_another_state_file() {
+    let scratch = Scratch::new();
+    let home = scratch.0.join("home");
+    let (lock_path, note) = owner_files(&home, OWNER);
+    fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    // The owner's watcher runs on another state file (this test process,
+    // dated as a watcher, holds the owner's lock).
+    let other = scratch.0.join("elsewhere.json");
+    let (pid, start) = me();
+    fs::write(
+        scratch.0.join("elsewhere.pid"),
+        format!("{{\"pid\": {pid}, \"process_start\": \"{start}\", \"agent_id\": \"w9\", \"owner\": \"{OWNER}\"}}"),
+    )
+    .unwrap();
+    fs::write(&note, format!("{{\"state\": {}}}", serde_json::json!(other.display().to_string()))).unwrap();
+    let mut lock = super::super::lease::lock::Lock::new(lock_path);
+    assert!(matches!(lock.acquire(), Ok(true)));
+    let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let vars = [(key, home.to_str().unwrap())];
+    let state = scratch.state();
+    // A start for the same owner on this state is answered by that watcher.
+    let out = decide_with(&["--owner", OWNER, "--state", &state], &vars).unwrap();
+    assert!(out.start.is_none());
+    assert_eq!(
+        out.stdout,
+        format!("conductor-watch w9 already running for {OWNER}; park with park_needs=\"decision events\" park_clear_by=w9\n")
+    );
+    // --stop for that owner from here stops that watcher.
+    let out = decide_with(&["--stop", "--owner", OWNER, "--state", &state], &vars).unwrap();
+    assert_eq!(out.stop_file, Some(scratch.0.join("elsewhere.stop")));
+    // Near miss: another owner starts.
+    let out = decide_with(&["--owner", OTHER, "--state", &state], &vars).unwrap();
+    assert!(out.start.is_some());
+    lock.release();
+    // With the owner's lock free the note proves nothing.
+    let out = decide_with(&["--owner", OWNER, "--state", &state], &vars).unwrap();
+    assert!(out.start.is_some());
 }
 
 #[test]

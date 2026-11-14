@@ -23,6 +23,11 @@ fn failure(text: &str, transient: bool, code: Option<&str>) -> Failure {
 struct FakeBoard {
     calls: RefCell<Vec<String>>,
     sent: RefCell<Vec<(String, String, String)>>,
+    /// The goodbye sent on a clean exit, kept apart from the batches.
+    goodbyes: RefCell<Vec<String>>,
+    /// Read on every status update: the pid record as the board sees it.
+    pid_file: RefCell<Option<PathBuf>>,
+    pid_seen: RefCell<Vec<Value>>,
     statuses: RefCell<Vec<(String, Option<u64>)>>,
     owner_listed: Cell<bool>,
     owner_park: RefCell<String>,
@@ -52,6 +57,9 @@ impl FakeBoard {
         Self {
             calls: RefCell::new(Vec::new()),
             sent: RefCell::new(Vec::new()),
+            goodbyes: RefCell::new(Vec::new()),
+            pid_file: RefCell::new(None),
+            pid_seen: RefCell::new(Vec::new()),
             statuses: RefCell::new(Vec::new()),
             owner_listed: Cell::new(true),
             owner_park: RefCell::new(String::new()),
@@ -140,6 +148,11 @@ impl BoardApi for FakeBoard {
     }
     async fn send(&self, to: &str, text: &str, request_id: &str) -> Result<(), Failure> {
         self.call("send");
+        if text.starts_with("conductor-watch stopped (") {
+            assert_eq!(to, OWNER);
+            self.goodbyes.borrow_mut().push(text.into());
+            return Ok(());
+        }
         self.sent.borrow_mut().push((to.into(), text.into(), request_id.into()));
         if self.send_down.get() {
             return Err(failure("HTTP 503", true, None));
@@ -151,6 +164,11 @@ impl BoardApi for FakeBoard {
     }
     async fn update(&self, status: &str, expect: Option<u64>) -> Result<(), Failure> {
         self.call("update");
+        if let Some(path) = self.pid_file.borrow().as_ref()
+            && let Ok(bytes) = fs::read(path)
+        {
+            self.pid_seen.borrow_mut().push(serde_json::from_slice(&bytes).unwrap_or(Value::Null));
+        }
         if self.refuse_updates.get() && !status.starts_with("stopped:") {
             return Err(failure("the daemon refused the bearer token (HTTP 403)", false, None));
         }
@@ -165,21 +183,41 @@ struct FakeGh {
     polls: usize,
     missing: bool,
     failing: bool,
+    /// What a failing gh says.
+    fail_text: String,
     calls: Vec<String>,
     /// Each `pr list` takes this many seconds of the host's clock.
     slow: Option<(Rc<Cell<f64>>, f64)>,
+    /// The calls `slow` applies to (default: `pr list`).
+    slow_on: Vec<&'static str>,
+    /// A slow call ran out of turns: nothing moved the clock while it ran,
+    /// so nothing renewed the row or watched for a stop or an interrupt.
+    starved: bool,
 }
 
 impl FakeGh {
     fn new(pr_lists: Vec<Value>) -> Self {
-        Self { pr_lists, polls: 0, missing: false, failing: false, calls: Vec::new(), slow: None }
+        Self {
+            pr_lists,
+            polls: 0,
+            missing: false,
+            failing: false,
+            fail_text: "HTTP 502: Server Error".into(),
+            calls: Vec::new(),
+            slow: None,
+            slow_on: vec!["pr list"],
+            starved: false,
+        }
     }
 }
 
 impl Gh for FakeGh {
     async fn call(&mut self, argv: &[&str]) -> Result<String, GhError> {
         self.calls.push(argv.join(" "));
-        if let (Some((clock, seconds)), ["pr", "list", ..]) = (&self.slow, argv) {
+        let joined = argv.join(" ");
+        if let Some((clock, seconds)) = &self.slow
+            && self.slow_on.iter().any(|prefix| joined.starts_with(prefix))
+        {
             // Only the watcher's own keep-alive moves the clock while gh
             // runs; without it this gh fails instead of waiting forever.
             let until = clock.get() + seconds;
@@ -187,6 +225,7 @@ impl Gh for FakeGh {
             while clock.get() < until {
                 turns += 1;
                 if turns > 100_000 {
+                    self.starved = true;
                     return Err(GhError::Failed("the clock never moved while gh ran".into()));
                 }
                 tokio::task::yield_now().await;
@@ -196,7 +235,7 @@ impl Gh for FakeGh {
             return Err(GhError::Missing);
         }
         if self.failing {
-            return Err(GhError::Failed("HTTP 502: Server Error".into()));
+            return Err(GhError::Failed(self.fail_text.clone()));
         }
         Ok(match argv {
             ["pr", "list", ..] => {
@@ -630,6 +669,7 @@ fn a_slow_gh_keeps_the_row_attached_and_an_interrupt_ends_it_at_once() {
     // Renewed while gh ran: never 60 s (the board's lease) without one.
     let beats = board.called("heartbeat");
     assert!(beats as f64 >= host.time() / 20.0 - 2.0, "{beats} in {}", host.time());
+    assert!(!gh.starved, "gh ran with nothing renewing the row");
 
     // An interrupt while gh runs (the second poll's gh runs from 130 s)
     // ends the watch at once, not when gh returns.
@@ -700,4 +740,127 @@ fn events_still_unsent_at_the_deadline_are_ledgered_and_the_state_waits_for_them
     // The saved state is still the baseline, so a restart reports them again.
     let saved: Value = serde_json::from_slice(&fs::read(&settings.files.state).unwrap()).unwrap();
     assert_eq!(saved["prs"], json!({}));
+}
+
+#[test]
+fn every_clean_exit_tells_the_owner_unless_the_owner_left() {
+    // Max age.
+    let scratch = Scratch::new();
+    let settings = scratch.settings();
+    let board = FakeBoard::new();
+    let mut gh = FakeGh::new(vec![json!([])]);
+    let mut host = FakeHost::new();
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
+    assert_eq!(
+        board.goodbyes.borrow().as_slice(),
+        ["conductor-watch stopped (max age). Restart it with `pseudolife-mcp conductor-watch --detach` when you want it watching again."]
+    );
+    // An interrupt.
+    let scratch = Scratch::new();
+    let mut settings = scratch.settings();
+    settings.max_age = 86400.0;
+    let board = FakeBoard::new();
+    let mut gh = FakeGh::new(vec![json!([])]);
+    let mut host = FakeHost::new();
+    host.interrupt_at = Some(90.0);
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
+    assert!(board.goodbyes.borrow()[0].starts_with("conductor-watch stopped (interrupted)."));
+    // The lease lost.
+    let scratch = Scratch::new();
+    let mut settings = scratch.settings();
+    settings.until_lease = Some("conductor:demo".into());
+    let board = FakeBoard::new();
+    board.holder_moves_at.set(2);
+    let mut gh = FakeGh::new(vec![json!([])]);
+    let mut host = FakeHost::new();
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
+    assert!(board.goodbyes.borrow()[0]
+        .starts_with("conductor-watch stopped (lease conductor:demo no longer held by the owner)."));
+    // The owner gone: nobody to tell.
+    let scratch = Scratch::new();
+    let settings = scratch.settings();
+    let board = FakeBoard::new();
+    board.owner_listed.set(false);
+    let mut gh = FakeGh::new(vec![json!([])]);
+    let mut host = FakeHost::new();
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
+    assert!(board.goodbyes.borrow().is_empty());
+    assert_eq!(board.called("send"), 0);
+}
+
+#[test]
+fn a_long_reason_to_give_up_reaches_the_owner_with_its_fix() {
+    let scratch = Scratch::new();
+    let settings = scratch.settings();
+    let board = FakeBoard::new();
+    let mut gh = FakeGh::new(vec![json!([])]);
+    gh.failing = true;
+    // Well past the 120 characters an event's quoted values are cut to.
+    gh.fail_text = format!("{}; check the token, then rerun gh auth login", "x".repeat(300));
+    let mut host = FakeHost::new();
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_SETUP);
+    let sent = board.sent.borrow();
+    assert!(
+        sent[0].1.contains("; check the token, then rerun gh auth login\". Restart it with"),
+        "{}",
+        sent[0].1
+    );
+}
+
+#[test]
+fn a_slow_gh_lookup_of_a_vanished_pull_request_keeps_the_row_attached_and_sees_an_interrupt() {
+    // Poll 1 lists PR #4, poll 2 no longer does: `pr view` asks how it ended.
+    let scratch = Scratch::new();
+    let mut settings = scratch.settings();
+    settings.max_age = 86400.0;
+    let board = FakeBoard::new();
+    let mut host = FakeHost::new();
+    host.interrupt_at = Some(100.0);
+    let mut gh = FakeGh::new(vec![green_pr("t"), json!([])]);
+    gh.slow = Some((host.clock.clone(), 500.0));
+    gh.slow_on = vec!["pr view"];
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
+    // The lookup starts at 60 s and would take 500 s: the interrupt at
+    // 100 s ends it there, and the row was renewed meanwhile.
+    assert!(host.time() < 102.0, "{}", host.time());
+    assert!(board.called("heartbeat") >= 2, "{:?}", board.calls.borrow());
+    assert!(!gh.starved, "the lookup ran with nothing renewing the row");
+    assert_released(&board, &settings, "interrupted");
+}
+
+#[test]
+fn a_slow_gh_naming_the_repository_at_registration_sees_an_interrupt() {
+    let scratch = Scratch::new();
+    let mut settings = scratch.settings();
+    settings.repo = None;
+    settings.max_age = 86400.0;
+    let board = FakeBoard::new();
+    let mut host = FakeHost::new();
+    host.interrupt_at = Some(30.0);
+    let mut gh = FakeGh::new(vec![json!([])]);
+    gh.slow = Some((host.clock.clone(), 500.0));
+    gh.slow_on = vec!["repo view"];
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
+    assert!(host.time() < 32.0, "{}", host.time());
+    assert!(!gh.starved, "the lookup ran with nothing watching for the interrupt");
+    // It never registered: no row to release, no record left.
+    assert_eq!(board.called("register"), 0);
+    assert!(!settings.files.pid.exists());
+}
+
+#[test]
+fn the_record_says_ready_only_after_the_first_poll() {
+    let scratch = Scratch::new();
+    let settings = scratch.settings();
+    let board = FakeBoard::new();
+    *board.pid_file.borrow_mut() = Some(settings.files.pid.clone());
+    let mut gh = FakeGh::new(vec![json!([])]);
+    let mut host = FakeHost::new();
+    assert_eq!(run(&settings, &board, &mut gh, &mut host), EXIT_OK);
+    let seen = board.pid_seen.borrow();
+    // The first poll's own status update sees the record not yet ready;
+    // the next ones see it ready.
+    assert_eq!(seen[0]["ready"], false, "{seen:?}");
+    assert_eq!(seen[1]["ready"], true, "{seen:?}");
+    assert_eq!(seen[1]["nonce"], "n1");
 }

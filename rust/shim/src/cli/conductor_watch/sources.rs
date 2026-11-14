@@ -51,10 +51,14 @@ impl Gh for GhProgram {
             return Err(GhError::Missing);
         };
         let mut command = std::process::Command::new(program);
-        command.args(argv);
+        // `-R` right after the subcommand: a `--` later in `argv` makes
+        // everything after it an argument.
+        let split = argv.len().min(2);
+        command.args(&argv[..split]);
         if let Some(repo) = &self.repo {
             command.args(["-R", repo]);
         }
+        command.args(&argv[split..]);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -271,7 +275,8 @@ impl<G: Gh> GitHub<'_, G> {
     /// failed, or the pull request is still open and fell off the list).
     pub(super) async fn closed_as(&mut self, number: &str) -> Option<String> {
         let value = self
-            .json(&["pr", "view", number, "--json", "state"], "gh pr view")
+            // `--`: the number (a state file's key) is never read as a flag.
+            .json(&["pr", "view", "--json", "state", "--", number], "gh pr view")
             .await
             .ok()?;
         match value.get("state").and_then(Value::as_str) {

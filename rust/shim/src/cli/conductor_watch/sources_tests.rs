@@ -102,3 +102,18 @@ fn suite_results_are_read_once_written_and_a_non_object_is_noted_once() {
     assert_eq!(again["b.json"]["exit"], Value::Null);
     assert_eq!(notes.len(), 1);
 }
+
+#[test]
+fn a_pull_request_number_reaches_gh_after_double_dash() {
+    struct Recorded(Vec<String>);
+    impl Gh for Recorded {
+        async fn call(&mut self, argv: &[&str]) -> Result<String, GhError> {
+            self.0.push(argv.join(" "));
+            Ok("{\"state\": \"MERGED\"}".into())
+        }
+    }
+    let mut gh = Recorded(Vec::new());
+    let how = block(GitHub { gh: &mut gh, author: None }.closed_as("-4"));
+    assert_eq!(how.as_deref(), Some("merged"));
+    assert_eq!(gh.0, ["pr view --json state -- -4"]);
+}
