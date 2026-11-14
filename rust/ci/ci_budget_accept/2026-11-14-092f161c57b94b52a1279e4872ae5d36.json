@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "3143d8fe2b5d35c3",
+  "fingerprint": "b41f7d50c69d6fc2",
+  "reason": "On top of the files accepted for #1541 and #1556, the lane adds tests/test_installer_no_python.py, a static scan of the installer scripts (34 tests, 0.7 s on the Windows host on 14 November 2026): within the job's measured minutes."
+}
