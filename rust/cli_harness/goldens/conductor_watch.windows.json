@@ -1047,18 +1047,17 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "Y29uZHVjdG9yLXdhdGNoIGExYjJjM2Q0ZTVmNjA3MTgyOTNhNGI1YzZkN2U4ZjkwIGFza2VkIHRvIHN0b3A7IGl0IGV4aXRzIGF0IGl0cyBuZXh0IHBvbGwNCg==",
+   "stdout": "Y29uZHVjdG9yLXdhdGNoOiBubyB3YXRjaGVyIHJ1bm5pbmcgZm9yIHtIT01FfVx3XHMuanNvbjsgbm90aGluZyBjaGFuZ2VkDQo=",
    "stderr": "",
    "window": [
-    1794552842.580086,
-    1794552842.8902204
+    1794638568.5790687,
+    1794638568.5943472
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "cwd": "dir",
     "nobin": "dir",
-    "w": "dir",
-    "w/s.stop": "file:"
+    "w": "dir"
    },
    "modes": {}
   },
@@ -1066,18 +1065,17 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "Y29uZHVjdG9yLXdhdGNoIE5vbmUgYXNrZWQgdG8gc3RvcDsgaXQgZXhpdHMgYXQgaXRzIG5leHQgcG9sbA0K",
+   "stdout": "Y29uZHVjdG9yLXdhdGNoOiBubyB3YXRjaGVyIHJ1bm5pbmcgZm9yIHtIT01FfVx3XHMuanNvbjsgbm90aGluZyBjaGFuZ2VkDQo=",
    "stderr": "",
    "window": [
-    1794552842.9027514,
-    1794552843.2354383
+    1794638568.6040728,
+    1794638568.619808
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "cwd": "dir",
     "nobin": "dir",
-    "w": "dir",
-    "w/s.stop": "file:"
+    "w": "dir"
    },
    "modes": {}
   },
@@ -1732,15 +1730,19 @@
    "stdout": "",
    "stderr": "Y29uZHVjdG9yLXdhdGNoOiBubyBib2FyZDogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkNCg==",
    "window": [
-    1794631861.9737585,
-    1794631862.004114
+    1794638569.6360624,
+    1794638569.6568837
    ],
    "arm": "rust",
    "files": {
+    ".pseudolife-mcp": "dir",
     "cwd": "dir",
     "nobin": "dir",
     "w": "dir",
-    "w/s.ledger": "file:MjAyNi0xMS0xNCAxNTo1MTowMSBzZXR1cCBubyBib2FyZDogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
+    ".pseudolife-mcp/watch": "dir",
+    ".pseudolife-mcp/watch/0123456789abcdef0123456789abcdef.owner.json": "file:ewogICJzdGF0ZSI6ICJ7SE9NRX1cXHdcXHMuanNvbiIKfQ==",
+    ".pseudolife-mcp/watch/0123456789abcdef0123456789abcdef.owner.lock": "file:",
+    "w/s.ledger": "file:MjAyNi0xMS0xNCAxNzo0Mjo0OSBzZXR1cCBubyBib2FyZDogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
     "w/s.lock": "file:"
    },
    "modes": {}
@@ -1752,15 +1754,19 @@
    "stdout": "",
    "stderr": "Y29uZHVjdG9yLXdhdGNoOiBubyBib2FyZDogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkNCg==",
    "window": [
-    1794631862.0086226,
-    1794631862.026658
+    1794638569.6660247,
+    1794638569.6857429
    ],
    "arm": "rust",
    "files": {
+    ".pseudolife-mcp": "dir",
     "cwd": "dir",
     "nobin": "dir",
     "w": "dir",
-    "w/s.ledger": "file:MjAyNi0xMS0xNCAxNTo1MTowMiBzZXR1cCBubyBib2FyZDogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
+    ".pseudolife-mcp/watch": "dir",
+    ".pseudolife-mcp/watch/0123456789abcdef0123456789abcdef.owner.json": "file:ewogICJzdGF0ZSI6ICJ7SE9NRX1cXHdcXHMuanNvbiIKfQ==",
+    ".pseudolife-mcp/watch/0123456789abcdef0123456789abcdef.owner.lock": "file:",
+    "w/s.ledger": "file:MjAyNi0xMS0xNCAxNzo0Mjo0OSBzZXR1cCBubyBib2FyZDogbm8gYmVhcmVyIHRva2VuIChzZXQgUFNFVURPTElGRV9NQ1BfVE9LRU4gb3IgUFNFVURPTElGRV9NQ1BfVE9LRU5fRklMRSkK",
     "w/s.lock": "file:",
     "w/s.pid": "file:ewogImFnZW50X2lkIjogImExYjJjM2Q0ZTVmNjA3MTgyOTNhNGI1YzZkN2U4ZjkwIiwKICJvd25lciI6ICIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZiIsCiAicGlkIjogMAp9"
    },
@@ -1975,16 +1981,28 @@
    "candidate_sha256": "36c4577cd29c8e407a4c86743b29730b762d5bdc51e70e9853c79f6f0e3f2a82"
   },
   "start-no-board": {
-   "commit": "85a54697b40944b1ff12315388ce92bc01365814",
+   "commit": "d15a26055f79612dbd6bee20cd89416f7c7b6374",
    "rust_tree": "clean",
    "platform": "windows",
-   "candidate_sha256": "36c4577cd29c8e407a4c86743b29730b762d5bdc51e70e9853c79f6f0e3f2a82"
+   "candidate_sha256": "7024d6df89bf04d67cb3de1e8cd54fae1b6fc278f6966ed13f9d303e0dabeae6"
   },
   "start-stale-record-no-board": {
-   "commit": "85a54697b40944b1ff12315388ce92bc01365814",
+   "commit": "d15a26055f79612dbd6bee20cd89416f7c7b6374",
    "rust_tree": "clean",
    "platform": "windows",
-   "candidate_sha256": "36c4577cd29c8e407a4c86743b29730b762d5bdc51e70e9853c79f6f0e3f2a82"
+   "candidate_sha256": "7024d6df89bf04d67cb3de1e8cd54fae1b6fc278f6966ed13f9d303e0dabeae6"
+  },
+  "stop-running-no-agent": {
+   "commit": "d15a26055f79612dbd6bee20cd89416f7c7b6374",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "7024d6df89bf04d67cb3de1e8cd54fae1b6fc278f6966ed13f9d303e0dabeae6"
+  },
+  "stop-running-unrecorded-start": {
+   "commit": "d15a26055f79612dbd6bee20cd89416f7c7b6374",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "7024d6df89bf04d67cb3de1e8cd54fae1b6fc278f6966ed13f9d303e0dabeae6"
   }
  }
 }
