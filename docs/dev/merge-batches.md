@@ -358,12 +358,14 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   below); its plan waits in the worktree's git
   directory for `open`. When the batch changes anything under `rust/`, it
   last runs the Rust compile check (below) and exits 1 if that fails.
-  A labelled pull request that sits the batch out as not ready (a pending
-  replay, a failing head) is also judged as if it were ready, against master
-  alone, and `build` prints what would still refuse it
-  (`#N, once ready: ...`, or "nothing else refuses it"): the freeze, every
-  CI budget job missing an accept record, and a conflict with master. A
-  conflict with another member shows only once it merges.
+  A labelled pull request that sits the batch out as not ready (a draft, a
+  pending replay, a failing or unreadable CI record) is also judged as if it
+  were ready, against master alone, and `build` prints what would still
+  refuse it (`#N, once ready: ...`, or "nothing else refuses it"): the
+  freeze, a refused parent its head carries, every CI budget job missing an
+  accept record, a release cut's unfolded fragments, and a conflict with
+  master (one only in the budget file is normalized, so it is not shown). A conflict with another member
+  shows only once it merges. The report never refuses the build.
 - **`--dry-run`** does the same merges on a detached HEAD, prints the plan,
   the body and the comments `open` would post, then switches back; it
   creates, pushes and comments on nothing, and only says whether `build`

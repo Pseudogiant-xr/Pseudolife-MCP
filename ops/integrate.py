@@ -1075,6 +1075,23 @@ def _is_release_cut(base_sha: str, m: Member) -> bool:
     return common.returncode == 0 and _project_version(m.sha) != _project_version(common.stdout.strip())
 
 
+def _unfolded_reason(base_sha: str, fork: str, m: Member) -> str | None:
+    """Why a release cut forked at ``fork`` may not merge onto ``base_sha``:
+    the merge would leave changelog fragments unfolded."""
+    at_base, at_fork, at_cut = _fragments(base_sha), _fragments(fork), _fragments(m.sha)
+    # What the merge keeps: master's fragments the cut did not fold, and any
+    # the cut adds.
+    unfolded = sorted((at_base - (at_fork - at_cut)) | (at_cut - at_fork))
+    if not unfolded:
+        return None
+    return (f"it is a release cut, but merging it onto {BASE} leaves "
+            f"{len(unfolded)} changelog fragment(s) unfolded "
+            f"({', '.join(unfolded[:3])}{', ...' if len(unfolded) > 3 else ''}), "
+            "so the release would ship changes its notes do not describe; merge "
+            f"{BASE} forward, run `python ops/assemble_changelog.py` again, "
+            "rerun the cut's pinned tests, then re-apply the label")
+
+
 def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None = None) -> list[Member]:
     """The members to merge: all of them, or only the first ready release cut
     (a member whose own diff changes project.version), with the others
@@ -1097,17 +1114,8 @@ def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None =
         base = _out("merge-base", plan.base_sha, m.sha)
         if _project_version(m.sha) == _project_version(base):
             continue
-        at_base, at_fork, at_cut = _fragments(plan.base_sha), _fragments(base), _fragments(m.sha)
-        # What the merge keeps: master's fragments the cut did not fold,
-        # and any the cut adds.
-        unfolded = sorted((at_base - (at_fork - at_cut)) | (at_cut - at_fork))
-        if unfolded:
-            reason = (f"it is a release cut, but merging it onto {BASE} leaves "
-                      f"{len(unfolded)} changelog fragment(s) unfolded "
-                      f"({', '.join(unfolded[:3])}{', ...' if len(unfolded) > 3 else ''}), "
-                      "so the release would ship changes its notes do not describe; merge "
-                      f"{BASE} forward, run `python ops/assemble_changelog.py` again, "
-                      "rerun the cut's pinned tests, then re-apply the label")
+        reason = _unfolded_reason(plan.base_sha, base, m)
+        if reason:
             plan.dropped.append(Dropped(m, reason))
             print(f"  dropped #{m.number}: {reason}")
             # Another cut among the rest is still batched alone.
@@ -1685,34 +1693,54 @@ def _once_ready(base_sha: str, m: Member, freeze, prepass: _Prepass) -> list[str
     ready, once it is: the checks `_merge_members` runs only after
     readiness, judged against master alone. Without this, a pending replay
     hides a budget or freeze refusal until the replay has finished."""
+    if not _has_commit(m.sha):
+        return [f"its listed head {m.sha[:12]} is not in this checkout (it moved after listing), "
+                "so it was not judged further; rebuild to judge it"]
     reasons: list[str] = []
+    # The freeze's own verdict, as `_merge_members` would give it; the merge
+    # check below would only repeat it, and for a child waiting on a
+    # labelled parent would contradict it.
+    judged = False
     if m.sha in prepass.refused:
         reasons.append(prepass.refused[m.sha][1])
-    elif carried := _carried(prepass.refused, m):
+        judged = True
+    if carried := _carried(prepass.refused, m):
         reasons.append(_carried_reason(freeze, carried))
+        judged = True
+    if _is_release_cut(base_sha, m):
+        unfolded = _unfolded_reason(base_sha, _out("merge-base", base_sha, m.sha), m)
+        if unfolded:
+            reasons.append(unfolded)
     try:
         _budget_member_evidence(base_sha, m)
-    except (ValueError, TypeError, KeyError) as error:
+    except (ValueError, TypeError, KeyError, Refusal) as error:
         reasons.append(f"CI budget metadata refused: {error}")
     merged = git("merge-tree", "--write-tree", "--name-only", "--no-messages", base_sha, m.sha, check=False)
     lines = merged.stdout.splitlines()
     if merged.returncode == 1:
         files = [line for line in lines[1:] if line]
-        reasons.append(f"its merge onto {BASE} conflicts in {', '.join(files) or 'files git did not name'}")
+        # `_merge_members` normalizes a conflict in the budget file alone
+        # (`_merge_budget_conflict`), so only that merge can tell.
+        if files != [CI_BUDGET]:
+            reasons.append(f"its merge onto {BASE} conflicts in {', '.join(files) or 'files git did not name'}")
     elif merged.returncode != 0 or not lines:
         reasons.append(f"its merge onto {BASE} could not be computed ({merged.stderr.strip() or 'no tree'})")
-    else:
+    elif not judged:
         frozen = _frozen_between(freeze, base_sha, lines[0])
         if frozen is None:
-            reasons.append("its merge onto master could not be read for the Python freeze check")
+            reasons.append(f"its merge onto {BASE} could not be read for the Python freeze check")
         elif frozen and freeze.EXCEPTION_LABEL not in m.labels:
             reasons.append(freeze.refusal(frozen))
     return list(dict.fromkeys(reasons))
 
 
 def _report_once_ready(base_sha: str, waiting: list[tuple[Member, str]], freeze, prepass: _Prepass) -> None:
+    """Report only: it never refuses, so a build it follows stands as built."""
     for m, _ in waiting:
-        later = _once_ready(base_sha, m, freeze, prepass)
+        try:
+            later = _once_ready(base_sha, m, freeze, prepass)
+        except Refusal as error:
+            later = [f"it could not be judged further ({error})"]
         print(f"  #{m.number}, once ready: " + ("nothing else refuses it" if not later else
                                                 "; and ".join(later)))
 
@@ -2177,10 +2205,17 @@ def build(args: argparse.Namespace) -> int:
         for m, reason in waiting:
             print(f"  #{m.number} {reason}")
         if waiting:
-            _fetch_listed(members)
-            freeze = _freeze_module(base_sha, members)
-            stub = Plan(branch=f"{PREFIX}{args.date}-batch-0", base_sha=base_sha, label=args.label)
-            _report_once_ready(base_sha, waiting, freeze, _freeze_prepass(stub, freeze, members))
+            # Report only: what cannot be judged is said, and this still
+            # returns 0 as it did before the report existed.
+            try:
+                _fetch_listed(members)
+                freeze = _freeze_module(base_sha, members)
+                stub = Plan(branch=f"{PREFIX}{args.date}-batch-0", base_sha=base_sha, label=args.label)
+                prepass = _freeze_prepass(stub, freeze, members)
+            except Refusal as error:
+                print(f"  (what would refuse them once ready could not be judged: {error})")
+            else:
+                _report_once_ready(base_sha, waiting, freeze, prepass)
         return 0
     n = max(_used_numbers(args.date), default=0) + 1
     plan = Plan(branch=f"{PREFIX}{args.date}-batch-{n}", base_sha=base_sha,
