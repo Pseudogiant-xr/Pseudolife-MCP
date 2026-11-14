@@ -318,12 +318,23 @@ def test_preflight_refuses_a_foreign_stack_before_install_can_continue(tmp_path,
         "    out='fixture' if argv[1]=='ps' else json.dumps([inventory])\n"
         "    return subprocess.CompletedProcess(argv,0,out,'')\n"
         "m.subprocess.run=run\nm.port_busy=lambda port: False\n"
+        # Called as the native client: installer preflight-check --repo R --env-file F.
+        "sys.argv=[sys.argv[0], '--env-file', sys.argv[sys.argv.index('--env-file') + 1]]\n"
         "sys.exit(m.main())\n", encoding="utf-8")
+    # The native client the block runs (PSEUDOLIFE_NATIVE_CLI): this fixture
+    # check, which loads the Python reference with Docker's replies faked.
+    if os.name == "nt":
+        client = fixture / "pseudolife-mcp.cmd"
+        client.write_text(f'@"{sys.executable}" "{helper}" %*\r\n', encoding="utf-8")
+    else:
+        client = fixture / "pseudolife-mcp"
+        client.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{helper}" "$@"\n', encoding="utf-8")
+        client.chmod(0o755)
     if script.endswith(".ps1"):
         ps = _PowerShell(tmp_path)
         proc = ps.run(
             f"$PSScriptRoot='{_q(fixture)}'\n"
-            f"function python {{ & '{_q(sys.executable)}' @args }}\n"
+            f"$env:PSEUDOLIFE_NATIVE_CLI = '{_q(client)}'\n"
             "function docker { 'pseudolife-mcp-daemon'; $global:LASTEXITCODE=0 }\n"
             "function Get-NetTCPConnection { }\nfunction Ok {}\nfunction Warn {}\n"
             "function Fail { throw $args[0] }\n" + block + "\n'CONTINUED'\n")
@@ -334,12 +345,12 @@ def test_preflight_refuses_a_foreign_stack_before_install_can_continue(tmp_path,
             pytest.skip("Bash unavailable")
         shell = _Shell(variants[0], tmp_path)
         _stub(shell.bin / "docker", "echo pseudolife-mcp-daemon\n")
-        _stub(shell.bin / "python3", f"exec '{shell.path(sys.executable)}' \"$@\"\n")
+
         block = block.replace('preflight_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
                               f"preflight_dir='{shell.path(fixture)}'")
         proc = shell.run(
             f"preflight_dir='{shell.path(fixture)}'\n"
-            f"resource_python='{shell.path(sys.executable)}'\n"
+            f"export PSEUDOLIFE_NATIVE_CLI='{shell.path(client)}'\n"
             "ok() { :; }; warn() { :; }; fail() { exit 1; }\n"
             + block + "\necho CONTINUED\n")
         output = proc.stdout + proc.stderr

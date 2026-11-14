@@ -25,6 +25,7 @@ import sys
 
 import pytest
 
+from tests import native_client_stub as native_stub
 from tests.test_installer_existing_upgrade import (
     _bash_fixture_path, _bash_variants, _between, _fixture_env,
 )
@@ -170,10 +171,13 @@ def _q(text: str) -> str:
 
 
 def _bash_prelude(bash: str, env: dict[str, str]) -> str:
-    # install-hook.sh edits JSON with python; the fixture PATH carries only
-    # the interpreter running this suite.
-    python_dir = _bash_fixture_path(bash, Path(sys.executable).parent, env)
-    return f"PATH='{_q(python_dir)}:/usr/bin:/bin'\nexport PATH\n"
+    # install-hook.sh edits JSON through the native client's hook-settings
+    # step (the real client, or the stand-in running its former heredocs);
+    # the fixture PATH carries no Python.
+    client = native_stub.native_cli(Path(env["HOME"]).parent / "native-cli")
+    cli = _bash_fixture_path(bash, client, env)
+    return (f"PATH='/usr/bin:/bin'\nexport PATH\nexport PSEUDOLIFE_NATIVE_CLI='{_q(cli)}'\n"
+            f"NATIVE_STAGED='{_q(cli)}'\n")
 
 
 def _run_hook(variant, env: dict[str, str], settings: Path | None, *,
@@ -716,6 +720,7 @@ def test_the_installers_briefing_command_is_in_the_removable_set():
     changing it in one place without the other would strand every install."""
     assert _line(r'^briefing_command="(.*)"$', "ops/install.sh") == DOCKER_BRIEFING
     assert _line(r'^\$briefingCommand = "(.*)"$', "ops/install.ps1") == DOCKER_BRIEFING
-    for rel in ("ops/install-hook.sh", "ops/install-hook.ps1"):
+    # install-hook.sh's removable set is the native client's hook-settings step.
+    for rel in ("rust/shim/src/cli/installer/hook_settings.rs", "ops/install-hook.ps1"):
         text = (ROOT / rel).read_text(encoding="utf-8")
         assert f'"{DOCKER_BRIEFING}"' in text or f"'{DOCKER_BRIEFING}'" in text, rel

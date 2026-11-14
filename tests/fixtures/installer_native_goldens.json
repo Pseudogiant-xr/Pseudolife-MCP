@@ -1009,6 +1009,234 @@
       "files_after": {
         ".pseudolife-mcp/claude-code.token": "tok-good-0123456789abcdef"
       }
+    },
+    {
+      "name": "hook-settings-install-on-a-fresh-claude-home",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "BRIEFING_COMMAND": "pseudolife-mcp briefing --hook-json",
+        "PROMPT_COMMAND": "pseudolife-mcp prompt-hook",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "DISCIPLINE_LINE": "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.",
+        "COORDINATION_COMMAND": "pseudolife-mcp briefing --hook-json --coordination",
+        "LEGACY_COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installed SessionStart briefing hook -> {HOME}/.claude/settings.json\n  command: pseudolife-mcp briefing --hook-json\nInstalled SessionStart coordination hook -> {HOME}/.claude/settings.json\n  command: pseudolife-mcp briefing --hook-json --coordination\nInstalled UserPromptSubmit memory-change hook -> {HOME}/.claude/settings.json\n  command: pseudolife-mcp prompt-hook\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Briefing hook already present in {HOME}/.claude/settings.json - skipping.\nMemory-change hook already present in {HOME}/.claude/settings.json - skipping.\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json --coordination\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp prompt-hook\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      },
+      "files": {
+        ".claude/CLAUDE.md": "# the directory install-hook.sh creates before the edit\n"
+      },
+      "note": "install-hook.sh makes the settings directory (mkdir -p) before the edit runs."
+    },
+    {
+      "name": "hook-settings-install-replaces-the-static-and-obsolete-hooks",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "BRIEFING_COMMAND": "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json",
+        "PROMPT_COMMAND": "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "DISCIPLINE_LINE": "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.",
+        "COORDINATION_COMMAND": "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json --coordination",
+        "LEGACY_COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-start\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'\"\n          }\n        ]\n      },\n      {\n        \"matcher\": \"x\",\n        \"hooks\": []\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-end\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"echo bye\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installed SessionStart briefing hook -> {HOME}/.claude/settings.json\n  command: docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json\nRemoved the unconditional coordination check-in hook.\nInstalled SessionStart coordination hook -> {HOME}/.claude/settings.json\n  command: docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json --coordination\nRemoved the static mid-session discipline hook.\nInstalled UserPromptSubmit memory-change hook -> {HOME}/.claude/settings.json\n  command: docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook\nRemoved obsolete episode-start hook (daemon owns episodes now).\nRemoved obsolete episode-end hook (daemon owns episodes now).\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json --coordination\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo bye\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-install-for-codex-keeps-commandwindows-pairs",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.codex/hooks.json",
+        "BRIEFING_COMMAND": "pseudolife-mcp briefing --hook-json",
+        "PROMPT_COMMAND": "pseudolife-mcp prompt-hook",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "DISCIPLINE_LINE": "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.",
+        "COORDINATION_COMMAND": "pseudolife-mcp briefing --hook-json --coordination",
+        "LEGACY_COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".codex/hooks.json": "{\"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\", \"commandWindows\": \"Write-Output 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"}, {\"type\": \"command\", \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\", \"commandWindows\": \"Write-Output 'mine'\"}]}]}}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installed SessionStart briefing hook -> {HOME}/.codex/hooks.json\n  command: pseudolife-mcp briefing --hook-json\nInstalled SessionStart coordination hook -> {HOME}/.codex/hooks.json\n  command: pseudolife-mcp briefing --hook-json --coordination\nRemoved the static mid-session discipline hook.\nInstalled UserPromptSubmit memory-change hook -> {HOME}/.codex/hooks.json\n  command: pseudolife-mcp prompt-hook\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".codex/hooks.json": "{\n  \"hooks\": {\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\",\n            \"commandWindows\": \"Write-Output 'mine'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp prompt-hook\"\n          }\n        ]\n      }\n    ],\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json --coordination\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": []\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-with-the-plugin-active",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "DRY_RUN": "",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\r\n  \"theme\": \"dark café 😀\",\r\n  \"enabledPlugins\": {\r\n    \"pseudolife-memory@pseudolife-mcp\": true\r\n  },\r\n  \"hooks\": {\r\n    \"SessionStart\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\r\n          }\r\n        ]\r\n      },\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\r\n          }\r\n        ]\r\n      },\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\r\n          }\r\n        ]\r\n      }\r\n    ],\r\n    \"UserPromptSubmit\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\r\n          },\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo mine\"\r\n          }\r\n        ]\r\n      }\r\n    ],\r\n    \"SessionEnd\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"pseudolife-mcp episode-end\"\r\n          }\r\n        ]\r\n      }\r\n    ],\r\n    \"Stop\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo stop\"\r\n          }\r\n        ]\r\n      }\r\n    ]\r\n  }\r\n}\r\n",
+        ".claude/plugins/installed_plugins.json": "{\"plugins\": {\"pseudolife-memory@pseudolife-mcp\": [{\"scope\": \"user\", \"version\": \"1\"}]}}"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installer-written hooks in {HOME}/.claude/settings.json (the pseudolife-memory plugin provides these now):\n  SessionStart: pseudolife-mcp briefing --hook-json\n  SessionStart: echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), t...\n  UserPromptSubmit: echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_...\n  SessionEnd: pseudolife-mcp episode-end\nLeft alone - not an exact installer-written entry; review by hand:\n  SessionStart: my own pseudolife-mcp briefing wrapper\nBacked up -> {HOME}/.claude/settings.json.bak-<stamp>\nRemoved 4 installer-written hook entries from {HOME}/.claude/settings.json.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 3,
+          "stdout": "No installer-written Pseudolife hooks in {HOME}/.claude/settings.json.\nLeft alone - not an exact installer-written entry; review by hand:\n  SessionStart: my own pseudolife-mcp briefing wrapper\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"theme\": \"dark café 😀\",\n  \"enabledPlugins\": {\n    \"pseudolife-memory@pseudolife-mcp\": true\n  },\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [],\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo stop\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-dry-run-and-inactive-plugin",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "DRY_RUN": "1",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\n  \"theme\": \"dark caf\\u00e9 \\ud83d\\ude00\",\n  \"enabledPlugins\": {\n    \"pseudolife-memory@pseudolife-mcp\": true\n  },\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-end\"\n          }\n        ]\n      }\n    ],\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo stop\"\n          }\n        ]\n      }\n    ]\n  }\n}\n",
+        ".claude/plugins/installed_plugins.json": "{\"plugins\": {\"pseudolife-memory@pseudolife-mcp\": {\"scope\": \"project\"}}}"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 4,
+          "stdout": "Installer-written hooks in {HOME}/.claude/settings.json (the pseudolife-memory plugin provides these now):\n  SessionStart: pseudolife-mcp briefing --hook-json\n  SessionStart: echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), t...\n  UserPromptSubmit: echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_...\n  SessionEnd: pseudolife-mcp episode-end\nLeft alone - not an exact installer-written entry; review by hand:\n  SessionStart: my own pseudolife-mcp briefing wrapper\nNot removed: the pseudolife-memory plugin is not installed and enabled for all projects, so these may be the only Pseudolife hooks that run.\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"theme\": \"dark caf/u00e9 /ud83d/ude00\",\n  \"enabledPlugins\": {\n    \"pseudolife-memory@pseudolife-mcp\": true\n  },\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-end\"\n          }\n        ]\n      }\n    ],\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo stop\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-refuses-a-duplicate-key",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "DRY_RUN": "",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\"hooks\": {\"SessionStart\": []}, \"hooks\": {}}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Could not read {HOME}/.claude/settings.json: duplicate key 'hooks'\n"
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\"hooks\": {\"SessionStart\": []}, \"hooks\": {}}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-without-a-file",
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/none.json",
+        "DRY_RUN": "",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 3,
+          "stdout": "No settings file at {HOME}/.claude/none.json - nothing to remove.\n",
+          "stderr": ""
+        }
+      ]
     }
   ]
 }

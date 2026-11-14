@@ -197,6 +197,31 @@ def real_binary() -> Path | None:
     return None
 
 
+_ROOT = Path(__file__).resolve().parents[1].as_posix()
+
+
+def native_cli(directory) -> Path:
+    """A client for scripts that run ``"$PSEUDOLIFE_NATIVE_CLI" installer <step>``
+    (ops/preflight.sh, ops/install-hook.sh): the real one when
+    PSEUDOLIFE_NATIVE_TEST_BINARY names it, else a shell launcher in
+    ``directory`` that answers each installer step with the stand-in. Neither
+    looks Python up on PATH."""
+    real = real_binary()
+    if real is not None:
+        return real
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    launcher = directory / "pseudolife-mcp"
+    launcher.write_text(
+        "#!/bin/sh\n"
+        '[ "$1" = installer ] || { echo "stub client: only installer steps" >&2; exit 2; }\n'
+        "shift\n"
+        f'exec "{_PYTHON}" "{_STANDIN}" "{_ROOT}" "$@"\n',
+        encoding="utf-8", newline="\n")
+    launcher.chmod(0o755)
+    return launcher
+
+
 def host_target() -> str | None:
     """This machine's release target triple, or None for one no release has."""
     import platform

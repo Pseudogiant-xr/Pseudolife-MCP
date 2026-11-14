@@ -1311,11 +1311,12 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
         "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
         "exit 0\n")
     release_env["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] = shell.path(tmp_path / "release")
-    # ops/install-hook.sh (the Claude session hook) still edits settings.json
-    # with python3 until it is moved to the native client.
-    python = shell.path(sys.executable)
-    for name in ("python3", "python"):
-        _stub(shell.bin / name, f"exec '{python}' \"$@\"\n")
+    # No Python anywhere: the installer, its preflight and its hook writer
+    # run every step through the native client, so each of these records the
+    # call and fails it (the guard: any line here fails the test).
+    python_calls = tmp_path / "python-calls"
+    for name in ("python", "python3", "py", "pip", "pip3", "pipx"):
+        _stub(shell.bin / name, f"echo {name} \"$*\" >>'{shell.path(python_calls)}'\nexit 99\n")
     _stub(shell.bin / "claude",
           "printf 'claude|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "if [ \"$1 $2\" = 'mcp get' ]; then exit 1; fi\n"
@@ -1339,10 +1340,10 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
                    **release_env,
                    "PSEUDOLIFE_SHIM_RUNTIMES": shell.path(installed / "runtimes"),
                    "PSEUDOLIFE_SHIM_LAUNCHER": shell.path(installed / "pseudolife-mcp"),
-                   "PYTHONPATH": str(ROOT),
                    # The installer's own environment carries an older credential.
                    "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert not python_calls.exists(), "the installer ran Python tooling: " + python_calls.read_text()
     calls = shell.logged()
     assert not any(call.startswith("docker|") for call in calls)
     assert not (repo / "ops" / ".env").exists()
@@ -1444,29 +1445,41 @@ def test_client_only_messages_match_across_installers():
 
 # -- ops/preflight.sh: the venv the shim runtime is built with -----------------
 
-@pytest.mark.parametrize("venv_exit", [0, 1])
 @BASH
-def test_preflight_checks_the_venv_the_shim_runtime_needs(bash, tmp_path, venv_exit):
-    """The installer builds the stdio shim in a side-by-side runtime with
-    ``python3 -m venv``; Debian and Ubuntu ship venv's ensurepip in the
-    separate python3-venv package, and without it the installer falls back
-    to pipx, then to ``pip --user``, which PEP 668 refuses. Preflight used
-    to call pipx the preferred installer and never looked at venv."""
+def test_preflight_looks_for_no_python_pip_or_pipx(bash, tmp_path):
+    """The client and every installer step are the native client now: the
+    preflight neither checks for Python, venv or pipx nor starts them, and
+    its Docker ownership check is the native client's."""
     shell = _Shell(bash, tmp_path)
-    _stub(shell.bin / "python3",
-          'case "$*" in *ensurepip*) exit "$FAKE_VENV_EXIT" ;; esac\nexit 0\n')
+    calls = tmp_path / "python-calls"
+    for name in ("python", "python3", "py", "pip", "pip3", "pipx"):
+        _stub(shell.bin / name, f"echo {name} >>'{shell.path(calls)}'\nexit 99\n")
+    _stub(shell.bin / "git", "exit 0\n")
+    client = tmp_path / "native" / "pseudolife-mcp"
+    client.parent.mkdir()
+    client.write_text(
+        '#!/bin/sh\n[ "$1 $2" = "installer preflight-check" ] || exit 2\n'
+        "echo '  OK   Docker stack, recorded volumes and ports belong to this install (or are free)'\n",
+        encoding="utf-8", newline="\n")
+    client.chmod(0o755)
     script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
-    proc = shell.run("set -- --client generic\n" + script, extra_env={"FAKE_VENV_EXIT": str(venv_exit)})
-    lines = proc.stdout.splitlines()
-    if venv_exit == 0:
-        assert any(re.search(r"OK\S*\s+python venv", line) for line in lines), proc.stdout
-        assert "python3-venv" not in proc.stdout
-    else:
-        [warned] = [i for i, line in enumerate(lines) if re.search(r"WARN\S*\s+python venv", line)]
-        assert "pip --user" in lines[warned] and "PEP 668" in lines[warned]
-        assert "sudo apt install python3-venv" in lines[warned + 1]
-    [pipx] = [line for line in lines if re.search(r"(OK|WARN)\S*\s+pipx", line)]
-    assert "fallback" in pipx and "preferred" not in proc.stdout
+    proc = shell.run("set -- --client generic\n" + script,
+                     extra_env={"PSEUDOLIFE_NATIVE_CLI": shell.path(client)})
+    assert not calls.exists(), calls.read_text()
+    assert "python" not in proc.stdout.lower().replace("pseudolife", "")
+    assert "pipx" not in proc.stdout
+    assert "Docker stack, recorded volumes and ports belong to this install" in proc.stdout
+
+
+@BASH
+def test_preflight_without_a_native_client_names_how_to_get_one(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
+    proc = shell.run("set -- --client generic\n" + script,
+                     extra_env={"PSEUDOLIFE_NATIVE_CLI": shell.path(tmp_path / "absent" / "pseudolife-mcp")})
+    assert proc.returncode == 1, proc.stdout
+    assert "native pseudolife-mcp client is needed to verify Docker ownership" in proc.stdout
+    assert "run ops/install.sh" in proc.stdout
 
 
 @pytest.mark.parametrize("buildx_exit", [0, 1])
@@ -1483,12 +1496,17 @@ def test_preflight_fails_without_the_buildx_plugin_the_image_build_needs(bash, t
     # The fix line asserted below is the Linux one, whatever this host runs.
     _stub(shell.bin / "uname", "printf 'Linux\\n'\n")
     # The stub PATH keeps only /usr/bin:/bin, which on Git for Windows has
-    # neither git nor python3: stub both so the exit code is buildx's alone.
+    # no git: stub it, and give the ownership check a client that passes, so
+    # the exit code is buildx's alone.
     _stub(shell.bin / "git", "exit 0\n")
-    _stub(shell.bin / "python3", "exit 0\n")
+    client = tmp_path / "native" / "pseudolife-mcp"
+    client.parent.mkdir()
+    client.write_text('#!/bin/sh\necho "  OK   Docker stack"\n', encoding="utf-8", newline="\n")
+    client.chmod(0o755)
     script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
     proc = shell.run("set -- --client generic\n" + script,
-                     extra_env={"FAKE_BUILDX_EXIT": str(buildx_exit)})
+                     extra_env={"FAKE_BUILDX_EXIT": str(buildx_exit),
+                                "PSEUDOLIFE_NATIVE_CLI": shell.path(client)})
     lines = proc.stdout.splitlines()
     if buildx_exit == 0:
         assert any(re.search(r"OK\S*\s+docker buildx", line) for line in lines), proc.stdout

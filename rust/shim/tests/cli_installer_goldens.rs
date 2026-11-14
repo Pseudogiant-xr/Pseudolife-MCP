@@ -47,24 +47,14 @@ fn placeholder(text: &str, home: &str, paths: bool) -> String {
     for form in home_forms(home) {
         text = text.replace(&form, "{HOME}");
     }
-    let marker = ".bak-pseudolife-";
-    let mut out = String::new();
-    let mut rest = text.as_str();
-    while let Some(at) = rest.find(marker) {
-        out.push_str(&rest[..at + marker.len()]);
-        rest = &rest[at + marker.len()..];
-        let stamp = rest.as_bytes();
-        let shape = stamp.len() >= 22
-            && stamp[..22].iter().enumerate().all(|(i, b)| match i {
-                8 | 15 => *b == b'-',
-                _ => b.is_ascii_digit(),
-            });
-        if shape {
-            out.push_str("<stamp>");
-            rest = &rest[22..];
-        }
-    }
-    out.push_str(rest);
+    // client_config._backup's stamp, and install-hook's (local time, with a
+    // counter when that second was taken).
+    let stamped = regex::Regex::new(r"\.bak-pseudolife-\d{8}-\d{6}-\d{6}").unwrap();
+    let mut out = stamped
+        .replace_all(&text, ".bak-pseudolife-<stamp>")
+        .into_owned();
+    let hook_stamp = regex::Regex::new(r"\.bak-\d{8}-\d{6}(-\d+)?").unwrap();
+    out = hook_stamp.replace_all(&out, ".bak-<stamp>").into_owned();
     if paths {
         out = out.replace("\\\\", "/").replace('\\', "/");
     }

@@ -1713,13 +1713,23 @@ DOCKER_BRIEFING = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --h
 
 
 def _install_hooks(shell, client, settings, command):
+    # A disposable home beside the settings, so neither installer reads or
+    # runs anything of the developer's; install-hook.sh edits through the
+    # native client (the real one, or the stand-in running its old heredocs).
+    from tests import installer_sandbox
+    from tests import native_client_stub as native_stub
+    root = Path(settings).parent.parent
+    keep = ("PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "COMSPEC", "PATHEXT")
+    env = installer_sandbox.environment(root / "hook-home", {k: v for k, v in os.environ.items() if k in keep})
+    env["PSEUDOLIFE_NATIVE_CLI"] = native_stub.native_cli(root / "hook-cli").as_posix()
     if shell == "bash":
-        subprocess.run([bash_exe(), str(ROOT / "ops/install-hook.sh"), "--client", client,
-                        settings.as_posix(), command],
-                       capture_output=True, text=True, timeout=HOOK_PROCESS_TIMEOUT, check=True)
+        installer_sandbox.run([bash_exe(), str(ROOT / "ops/install-hook.sh"), "--client", client,
+                               settings.as_posix(), command], env=env, root=root,
+                              capture_output=True, text=True, timeout=HOOK_PROCESS_TIMEOUT, check=True)
     else:
+        installer_sandbox.require(env, root)
         pwsh_run("-File", ROOT / "ops/install-hook.ps1", "-Client", client,
-                 "-SettingsPath", settings, "-Command", command)
+                 "-SettingsPath", settings, "-Command", command, env=env)
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])

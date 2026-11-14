@@ -145,7 +145,10 @@ def test_hook_installers_wire_user_prompt_submit_for_both_clients() -> None:
     for text in (ps, sh):
         assert "UserPromptSubmit" in text
         assert "pseudolife-mcp prompt-hook" in text
-    assert 'add_group(hooks["UserPromptSubmit"], prompt_cmd)' in sh
+    # install-hook.sh's JSON edit is the native client's hook-settings step.
+    assert '"$NATIVE_CLI" installer hook-settings install' in sh
+    rust = _read("rust/shim/src/cli/installer/hook_settings.rs")
+    assert 'add_group(prompt_groups, &prompt)' in rust and "UserPromptSubmit" in rust
     assert 'if ($Client -in "claude", "codex")' in ps
 
 
@@ -331,12 +334,15 @@ def test_preflight_accepts_provider_lists_and_checks_gemini() -> None:
     assert '[ValidateSet("claude", "codex", "both")]' not in ps
 
 
-def test_preflight_checks_pipx_on_both_platforms() -> None:
-    """pipx is the preferred shim installer on every platform; only the .sh
-    preflight used to mention it (the PEP 668 rationale is Linux-specific but
-    the recommendation is not)."""
-    assert "pipx" in _read("ops/preflight.sh")
-    assert "pipx" in _read("ops/preflight.ps1")
+def test_preflight_checks_for_no_python_tooling_on_either_platform() -> None:
+    """The client is the native binary on every platform, so neither
+    preflight checks for Python, venv or pipx any more (they used to, when
+    the shim was a Python package); the Docker ownership check is the native
+    client's ``installer preflight-check``."""
+    for rel in ("ops/preflight.sh", "ops/preflight.ps1"):
+        text = _read(rel)
+        assert "pipx" not in text and "ensurepip" not in text, rel
+        assert "installer preflight-check" in text, rel
 
 
 def test_preflight_checks_buildx_on_both_platforms() -> None:

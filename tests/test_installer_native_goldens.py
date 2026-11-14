@@ -45,12 +45,15 @@ def _home_forms(home: str) -> list[str]:
 
 # client_config._backup's stamp: the time a backup was taken.
 STAMP = re.compile(r"\.bak-pseudolife-\d{8}-\d{6}-\d{6}")
+# install-hook's backup stamp (local time, with a counter for a repeat).
+HOOK_STAMP = re.compile(r"\.bak-\d{8}-\d{6}(-\d+)?")
 
 
 def placeholder(text: str, home: str, paths: bool) -> str:
     for form in _home_forms(home):
         text = text.replace(form, "{HOME}")
     text = STAMP.sub(".bak-pseudolife-<stamp>", text)
+    text = HOOK_STAMP.sub(".bak-<stamp>", text)
     if paths:
         # A path printed after the home uses the host's separator.
         text = text.replace("\\\\", "/").replace("\\", "/")
