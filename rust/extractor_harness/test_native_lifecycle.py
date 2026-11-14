@@ -14,7 +14,7 @@ class Started(Exception):
 
 
 class NativeLifecycle(unittest.TestCase):
-    def test_the_first_shim_the_lifecycle_starts_is_native(self):
+    def test_no_lifecycle_slice_starts_the_python_shim(self):
         started = []
 
         @contextlib.contextmanager
@@ -23,13 +23,21 @@ class NativeLifecycle(unittest.TestCase):
             raise Started
             yield
 
-        with patch.object(run, "server", server), self.assertRaises(Started):
-            run.lifecycle(NATIVE, Path("unused"))
-        self.assertEqual(started, [NATIVE])
+        root = Path("unused")
+        with patch.object(run, "server", server):
+            with self.assertRaises(Started):
+                run.lifecycle(NATIVE, root)
+            # The two-arm lifecycle started the Python shim first.
+            self.assertEqual(started, [NATIVE])
+            for start in (lambda: run.lifecycle_arm(NATIVE, "claude", root),
+                          lambda: run.lifecycle_arm(NATIVE, "codex", root),
+                          lambda: run.health_refresh(NATIVE, root)):
+                with self.assertRaises(Started):
+                    start()
+        self.assertEqual(started, [NATIVE] * 4)
 
-    def test_every_lifecycle_slice_runs_the_native_binary(self):
-        with patch.object(run, "lifecycle_arm", return_value=3) as arm, \
-                patch.object(run, "health_refresh", return_value=3) as refresh:
+    def test_the_lifecycle_runs_every_slice_on_the_native_binary(self):
+        with patch.object(run, "lifecycle_arm", return_value=3) as arm,                 patch.object(run, "health_refresh", return_value=3) as refresh:
             self.assertEqual(run.lifecycle(NATIVE, Path("root")), 9)
         self.assertEqual([c.args for c in arm.call_args_list],
                          [(NATIVE, "claude", Path("root")), (NATIVE, "codex", Path("root"))])
@@ -45,7 +53,7 @@ class NativeLifecycle(unittest.TestCase):
              b'{"error": "Command \'[\'<cli>\', \'exec\', \'--model\', \'gpt-5.6-terra\', \'--json\', \'--sandbox\', \'read-only\', \'--ephemeral\', \'--ignore-user-config\', \'--skip-git-repo-check\', \'-c\', \'features.hooks=false\', \'-c\', \'web_search=disabled\', \'-c\', \'features.shell_tool=false\', \'-\']\' timed out after 5.0 seconds"}'),
         ]
         for argv, body in cases:
-            self.assertEqual(run.timeout_body(argv), body)
+            self.assertEqual(run.timeout_body(argv, 5), body)
 
 
 if __name__ == "__main__":

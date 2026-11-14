@@ -3,8 +3,8 @@
 Invoke through the extractor_shim Cargo integration test, which supplies the
 target-native --stub-exe fixture alongside --binary.
 
-Only generated completion/tool IDs, per-process instruction-file paths and
-the fixture CLI path in timeout diagnostics are normalized. HTTP status and response bodies are then compared as bytes;
+Only generated completion/tool IDs and per-process instruction-file paths
+are normalized. HTTP status and response bodies are then compared as bytes;
 argv, stdin, instruction bytes and selected child environment are compared too.
 """
 from __future__ import annotations
@@ -339,14 +339,15 @@ def health_differential(binary, root):
     return count
 
 
-def timeout_body(argv):
-    """The timeout error both shims return: subprocess.TimeoutExpired's text.
+def timeout_body(argv, seconds):
+    """The timeout error both shims return for a printable argv: subprocess.TimeoutExpired's text.
 
     `argv` is the provider command as the stub journalled it, the fixture CLI
     shown as '<cli>'. It is derived rather than pasted, so a launch-model
-    change moves both sides.
+    change moves both sides. (Python's repr also escapes non-printable
+    characters such as U+00A0, which the native repr leaves as they are.)
     """
-    return json.dumps({"error": f"Command '{argv!r}' timed out after 5.0 seconds"}).encode()
+    return json.dumps({"error": f"Command '{argv!r}' timed out after {float(seconds)} seconds"}).encode()
 
 
 def lifecycle(binary, root):
@@ -369,14 +370,15 @@ def lifecycle_arm(exe, kind, root):
     print(f"START lifecycle {kind}/{arm}", flush=True)
     # Normal calls need a process-start budget independent of the tiny
     # timeout formerly used to exercise the timeout error format.
-    with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=5) as (port, plan, journal, _, cli):
+    seconds = 5
+    with server(exe, kind, root / f"lifecycle-{kind}-{arm}", canned(kind, "OK"), timeout=seconds) as (port, plan, journal, _, cli):
         plan.write_text(json.dumps({**canned(kind, "OK"), "sleep": .1}))
         with concurrent.futures.ThreadPoolExecutor(2) as pool:
             calls = [pool.submit(call, port, "POST", "/chat/completions", {}) for _ in range(2)]
             answers = [c.result() for c in calls]
             assert all(answer[0] == 200 for answer in answers), (kind, arm, "serialized calls", answers)
         timeline = Path(str(journal) + ".timeline").read_text().splitlines()
-        assert timeline == ["start", "end"] * 3, (arm, "calls overlapped", timeline)
+        assert timeline == ["start", "end"] * 3, (kind, arm, "calls overlapped", timeline)
         with provider_gate() as gate, concurrent.futures.ThreadPoolExecutor(1) as pool:
             plan.write_text(json.dumps({"gate": gate.getsockname()[1]}))
             response = pool.submit(call, port, "POST", "/chat/completions", {})
@@ -392,7 +394,10 @@ def lifecycle_arm(exe, kind, root):
         encoded_cli = json.dumps(repr(str(cli)))[1:-1].encode()
         body = body.replace(encoded_cli, b"'<cli>'")
         argv = ["<cli>", *journal_rows(journal)[-1]["argv"]]
-        assert body == timeout_body(argv), (kind, arm, "timeout bytes", body, argv)
+        # The stub journals an instruction file as '<instructions>' while the
+        # shim quotes its real path; this empty request passes none.
+        assert "<instructions>" not in argv and not any(a.startswith("model_instructions_file=") for a in argv), (kind, arm, argv)
+        assert body == timeout_body(argv, seconds), (kind, arm, "timeout bytes", body, argv)
         plan.write_text(json.dumps(canned(kind, "recovered")))
         recovered = call(port, "POST", "/chat/completions", {})
         assert recovered[0] == 200, (kind, arm, "recovery", recovered)
@@ -401,9 +406,9 @@ def lifecycle_arm(exe, kind, root):
 
 
 def health_refresh(exe, root):
-    arm = "rust"
+    arm = "codex/rust"
     print(f"START health refresh {arm}", flush=True)
-    with server(exe, "codex", root / f"refresh-{arm}", canned("codex", "OK"), ttl=0) as (port, plan, journal, _, _):
+    with server(exe, "codex", root / "refresh-rust", canned("codex", "OK"), ttl=0) as (port, plan, journal, _, _):
         with provider_gate() as failed, provider_gate() as recovered, concurrent.futures.ThreadPoolExecutor(1) as pool:
             plan.write_text(json.dumps({"rc": 1, "stderr": "Not logged in", "gate": failed.getsockname()[1]}))
             # TTL zero requests refresh immediately. The provider handshake
