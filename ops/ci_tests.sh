@@ -53,9 +53,19 @@ trap cleanup EXIT
 # timeout cancelled the hung 2026-09-22 run, GitHub kept neither. SIGABRT,
 # not TERM: pytest enables faulthandler in the controller and every xdist
 # worker, so each one prints all its thread stacks as it dies, including a
-# hang outside any single test. 35 min: pytest took 11.8-15.5 min in the
-# four green master runs of 2026-09-23/24, and install plus a cold
-# embedder download (up to ~10 min) must still fit inside the job's 50.
+# hang outside any single test. 50 min (issue #1408): the `test` job's
+# Tests step took 31.9 min (master push 43456549451), 35.0 (batch
+# 43495728956) and 25.5 (batch 43476091008) on 2026-11-13/14, 2 xdist
+# workers on a 4-CPU ubuntu-latest runner with the real embedder, and the
+# old 35-minute bound killed batch 43525635914 at 99%; 50 is about 40% over
+# the slowest. Install plus a cold embedder download (up to ~10 min) and
+# the kill grace must still fit inside the job's 65 (tests/
+# test_hang_diagnostics.py). Those runs collected every test file; the
+# live set alone (tests/suite_classes.txt) has not been measured on CI yet.
+# ops/pytest_failure_lines.py prints `FAILED <node id> - <reason>` the moment
+# a test fails, so a run killed before its summary still names it, and
+# appends each test phase's seconds to ci-results/test-times.tsv, so a
+# killed run still says where its time went (--durations prints at the end).
 # PSEUDOLIFE_SUITE_PROFILE=1 also loads tests/suite_profile_plugin.py (worker
 # timeline, resource and test-server samples, run manifest) into
 # ci-results/profile and folds its summary; the selection, workers and exit
@@ -77,10 +87,12 @@ case "${PSEUDOLIFE_SUITE_PROFILE:-}" in
         profile=(-p tests.suite_profile_plugin)
         ;;
 esac
+export PSEUDOLIFE_CI_TEST_TIMES="$PWD/ci-results/test-times.tsv"
+: > "$PSEUDOLIFE_CI_TEST_TIMES"
 set +e
 /usr/bin/time -v -o ci-results/process.txt \
-    timeout --signal=ABRT --kill-after=60s 35m \
-    python -m pytest ${frozen[@]+"${frozen[@]}"} ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
+    timeout --signal=ABRT --kill-after=60s 50m \
+    python -m pytest -p ops.pytest_failure_lines ${frozen[@]+"${frozen[@]}"} ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
     --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml "$@"
 test_status=$?
 if (( ${#profile[@]} )) && [[ -f ci-results/profile/manifest.json ]]; then

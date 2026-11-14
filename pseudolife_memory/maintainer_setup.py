@@ -68,6 +68,7 @@ from contextvars import ContextVar
 
 from pseudolife_memory import child_python, expose_cli
 from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd, operator_cli
+from pseudolife_memory.program_lookup import find_program
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -114,7 +115,9 @@ def stream(argv, on_line) -> int:
 
 
 def which(name: str) -> str | None:
-    return shutil.which(name)
+    """A program found only in an absolute PATH directory, never the
+    current directory (``program_lookup.find_program``)."""
+    return find_program(name)
 
 
 def interactive() -> bool:

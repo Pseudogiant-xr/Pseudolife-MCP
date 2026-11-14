@@ -43,6 +43,21 @@ def _setup(text=ORIGINAL):
     return setup
 
 
+def _with_cwd_decoy(setup):
+    """``setup``, plus decoy ``docker`` and ``tailscale`` programs (exit 99
+    if run) in the arm's working directory."""
+    def wrapped(arm):
+        setup(arm)
+        for stem in ("docker", "tailscale"):
+            if core.WINDOWS:
+                (arm.cwd / f"{stem}.cmd").write_bytes(b"@exit /b 99\r\n")
+            else:
+                path = arm.cwd / stem
+                path.write_bytes(b"#!/bin/sh\nexit 99\n")
+                path.chmod(0o755)
+    return wrapped
+
+
 def _config_after(changed):
     def after(arm, obs):
         import yaml
@@ -198,6 +213,13 @@ def cases():
                   setup=_setup(), after=_config_after(False), programs=("docker",)),
         core.Case("setup-check-unreadable-keys", ["maintainer", "setup", "--check"], env=dict(env),
                   setup=_setup(CONFIGURED), after=_config_after(False), programs=("docker",)),
+        # docker is looked for only in absolute PATH directories: a decoy in
+        # the working directory (exit 99 if run), reached through an empty or
+        # "." entry, is not found, so both arms take the local tier.
+        core.Case("setup-check-docker-in-cwd-not-found", ["maintainer", "setup", "--check"],
+                  env=dict(env, PATH=os.pathsep.join(["", ".", "{HOME}/empty-bin"])),
+                  setup=_with_cwd_decoy(_setup()), after=_config_after(False),
+                  programs=("docker", "tailscale")),
     ]
     for name, cap in [("negative", "-1"), ("boolean", "true"), ("fraction", "1.5"),
                       ("string", "'7'"), ("null", "null")]:

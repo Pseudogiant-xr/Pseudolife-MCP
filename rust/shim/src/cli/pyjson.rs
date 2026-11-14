@@ -131,6 +131,39 @@ pub(super) fn py_strip(text: &str) -> &str {
 /// values in the answer; the printing of such values never failed first).
 pub(super) const PAIR_DEPTH: usize = 987;
 pub(super) const INVITE_DEPTH: usize = 985;
+/// `expose_cli.JSON_DEPTH_LIMIT`: `expose`'s reads of `tailscale`, and every
+/// `expose_cli.fetch_health` (`invite`'s `/health` too), refuse text with
+/// more brackets open at once than this before parsing it.
+pub(super) const EXPOSE_DEPTH: usize = 100;
+
+/// `expose_cli._too_deep(text)`: more than `limit` brackets open at once,
+/// read lexically (`[` and `{` outside strings open, `]` and `}` close),
+/// whether or not the rest is valid JSON.
+pub(super) fn brackets_past(text: &str, limit: usize) -> bool {
+    let mut depth: i64 = 0;
+    let (mut in_string, mut escaped) = (false, false);
+    for byte in text.bytes() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else if byte == b'"' {
+            in_string = true;
+        } else if byte == b'[' || byte == b'{' {
+            depth += 1;
+            if depth > limit as i64 {
+                return true;
+            }
+        } else if byte == b']' || byte == b'}' {
+            depth -= 1;
+        }
+    }
+    false
+}
 // CPython 3.11's int_max_str_digits default.
 const MAX_INT_DIGITS: usize = 4300;
 

@@ -74,7 +74,8 @@ def test_ci_passes_the_switch_as_an_argument_never_through_the_environment():
     assert jobs["test"]["env"]["PSEUDOLIFE_CI_INCLUDE_FROZEN"] == "${{ needs.scope.outputs.include_frozen }}"
     script = (ROOT / "ops" / "ci_tests.sh").read_text(encoding="utf-8")
     assert 'if [[ "${PSEUDOLIFE_CI_INCLUDE_FROZEN:-}" == true ]]; then\n    frozen=(--include-frozen)' in script
-    assert 'python -m pytest ${frozen[@]+"${frozen[@]}"}' in script
+    # On the suite's own pytest command line (plugin options may come first).
+    assert re.search(r'python -m pytest (?:-p \S+ )*\$\{frozen\[@\]\+"\$\{frozen\[@\]\}"\}', script)
     # conftest reads only its own option, never that variable.
     assert "PSEUDOLIFE_CI_INCLUDE_FROZEN" not in (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
 

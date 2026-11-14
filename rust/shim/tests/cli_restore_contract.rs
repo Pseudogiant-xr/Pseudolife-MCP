@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
-//! `restore`: argparse help and usage, the dump, state-archive and
-//! confirmation refusals, the deferral of shapes the leaf does not read, and,
-//! confirmed, a Docker that cannot run refused under the update lock. The
-//! differential proof against the Python oracle is the CLI harness
-//! (`rust/cli_harness --row restore`).
+//! `restore` through the binary: help and usage, the dump, state-archive
+//! and confirmation refusals, every argv answered (no deferral), and,
+//! confirmed, a missing Docker, a relative Docker program and a lite bank
+//! refused under the update lock. The destructive steps are tested with a
+//! scripted Docker in `src/cli/restore_cli/execute_tests.rs`.
 #[path = "common/cli.rs"]
 mod cli;
 use std::{
@@ -15,7 +15,6 @@ use std::{
 
 use flate2::{Compression, write::GzEncoder};
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'restore' is deferred in this candidate\n";
 const HELP: &str = include_str!("../src/cli/restore_cli/restore_help.txt");
 const INCOMPLETE: &str = "restore failed: the backup is unreadable or incomplete; use a complete .sql.gz dump. Nothing was restored\n";
 const UNSAFE: &str = "restore failed: the state archive is unreadable or contains unsafe paths; use a complete, unmodified state backup. Nothing was restored\n";
@@ -62,6 +61,10 @@ fn tar_header(name: &[u8], kind: u8, linkname: &[u8]) -> Vec<u8> {
 /// A cleared environment whose PATH holds only the empty home, so no
 /// docker can be found, with the home as the per-user directory.
 fn run(home: &Path, columns: &str, args: &[&str]) -> Output {
+    run_with(home, columns, args, &[])
+}
+
+fn run_with(home: &Path, columns: &str, args: &[&str], env: &[(&str, &Path)]) -> Output {
     let mut command: Command =
         cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
     command
@@ -70,10 +73,15 @@ fn run(home: &Path, columns: &str, args: &[&str]) -> Output {
         .current_dir(home)
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("LOCALAPPDATA", home.join("local"))
+        .env("XDG_DATA_HOME", home.join("xdg"))
         .env("PATH", home)
         .env("PSEUDOLIFE_DOCKER", home.join("no-docker"))
         .env("COLUMNS", columns)
         .stdin(Stdio::null());
+    for (key, value) in env {
+        command.env(key, value);
+    }
     command.output().unwrap()
 }
 
@@ -93,24 +101,17 @@ fn listing(home: &Path) -> Vec<String> {
 }
 
 #[test]
-fn help_and_usage_are_argparse_at_80_columns() {
+fn help_and_usage_are_answered_at_any_width() {
     let home = Home::new("help");
-    assert_answer(
-        &run(&home.0, "80", &["--help"]),
-        0,
-        &HELP.replace("\r\n", "\n"),
-        "",
+    let help = HELP.replace("\r\n", "\n");
+    for columns in ["80", "100", "40"] {
+        assert_answer(&run(&home.0, columns, &["--help"]), 0, &help, "");
+    }
+    let usage = &help[..=help.find("\n\n").unwrap()];
+    let required = format!(
+        "{usage}pseudolife-mcp restore: error: the following arguments are required: --backup-file\n"
     );
-    let usage = HELP.replace("\r\n", "\n");
-    let usage = &usage[..=usage.find("\n\n").unwrap()];
-    assert_answer(
-        &run(&home.0, "80", &[]),
-        2,
-        "",
-        &format!(
-            "{usage}pseudolife-mcp restore: error: the following arguments are required: --backup-file\n"
-        ),
-    );
+    assert_answer(&run(&home.0, "80", &[]), 2, "", &required);
     assert_answer(
         &run(&home.0, "80", &["--backup-file", "x", "--db-port", "abc"]),
         2,
@@ -119,8 +120,7 @@ fn help_and_usage_are_argparse_at_80_columns() {
             "{usage}pseudolife-mcp restore: error: argument --db-port: invalid int value: 'abc'\n"
         ),
     );
-    // Another width defers rather than guess argparse's wrapping.
-    assert_answer(&run(&home.0, "100", &["--help"]), 1, "", DEFERRED);
+    assert_answer(&run(&home.0, "120", &["-hx"]), 0, &help, "");
     assert_eq!(listing(&home.0), Vec::<String>::new());
 }
 
@@ -136,6 +136,9 @@ fn the_gates_refuse_in_order_and_write_nothing() {
     let mut plain = tar_header(b"d", b'5', b"");
     plain.extend_from_slice(&[0u8; 1024]);
     fs::write(home.0.join("plain.tgz"), gz(&plain)).unwrap();
+    let mut sparse = tar_header(b"s", b'S', b"");
+    sparse.extend_from_slice(&[0u8; 1024]);
+    fs::write(home.0.join("sparse.tgz"), gz(&sparse)).unwrap();
     let before = listing(&home.0);
     assert_answer(
         &run(&home.0, "80", &["--backup-file", "missing.sql.gz"]),
@@ -173,7 +176,6 @@ fn the_gates_refuse_in_order_and_write_nothing() {
         "",
         UNSAFE,
     );
-    // stdin is the null device and stdout a pipe: nobody can answer a prompt.
     assert_answer(
         &run(
             &home.0,
@@ -182,17 +184,52 @@ fn the_gates_refuse_in_order_and_write_nothing() {
                 "--backup-file",
                 "good.sql.gz",
                 "--state-archive",
-                "plain.tgz",
+                "sparse.tgz",
             ],
         ),
         2,
         "",
-        NEEDS_YES,
+        "restore failed: the state archive contains a sparse member, which restore cannot check safely; re-create it as a plain GNU tar archive (tar --format=gnu -czf <archive> -C <state directory> .) and retry. Nothing was restored\n",
     );
+    // stdin is the null device and stdout a pipe: nobody can answer a
+    // prompt. Abbreviations and `--` are read as argparse reads them.
+    for args in [
+        &[
+            "--backup-file",
+            "good.sql.gz",
+            "--state-archive",
+            "plain.tgz",
+        ][..],
+        &["--back", "good.sql.gz"],
+        &["--backup-file", "good.sql.gz", "--"],
+    ] {
+        assert_answer(&run(&home.0, "80", args), 2, "", NEEDS_YES);
+    }
     assert_eq!(listing(&home.0), before);
 }
 
-const NO_DOCKER: &str = "restore failed: Docker inspect failed for the backup/restore; check the containers with docker logs pg and docker logs daemon, then retry\n";
+const CONFIRMED: [&str; 18] = [
+    "--backup-file",
+    "good.sql.gz",
+    "--yes",
+    "--leave-stopped",
+    "--container",
+    "pg",
+    "--daemon-container",
+    "daemon",
+    "--db",
+    "bank",
+    "--user",
+    "role",
+    "--db-port",
+    "5432",
+    "--daemon-url",
+    "http://127.0.0.1:9",
+    "--safety-dir",
+    "safety",
+];
+
+const NO_DOCKER: &str = "restore failed: Docker was not found: no `docker` program is on PATH (only absolute PATH entries are searched); install Docker, or set PSEUDOLIFE_DOCKER to the docker program's full path, then retry. Nothing was restored\n";
 
 #[test]
 fn a_confirmed_restore_without_docker_refuses_under_the_lock() {
@@ -203,30 +240,8 @@ fn a_confirmed_restore_without_docker_refuses_under_the_lock() {
     )
     .unwrap();
     let before = listing(&home.0);
-    let args = [
-        "--backup-file",
-        "good.sql.gz",
-        "--yes",
-        "--leave-stopped",
-        "--container",
-        "pg",
-        "--daemon-container",
-        "daemon",
-        "--db",
-        "bank",
-        "--user",
-        "role",
-        "--db-port",
-        "5432",
-        "--daemon-url",
-        "http://127.0.0.1:9",
-        "--safety-dir",
-        "safety",
-    ];
-    // The first inspect cannot start: the oracle's UpdateError, exit 1.
-    assert_answer(&run(&home.0, "80", &args), 1, "", NO_DOCKER);
-    // The update lock file stays, as the oracle's does; its pid file and
-    // no safety directory remain.
+    assert_answer(&run(&home.0, "80", &CONFIRMED), 2, "", NO_DOCKER);
+    // The update lock file stays; its pid file and no safety directory do.
     let mut after = before.clone();
     after.push(".pseudolife-mcp".to_owned());
     after.sort();
@@ -238,42 +253,97 @@ fn a_confirmed_restore_without_docker_refuses_under_the_lock() {
 }
 
 #[test]
-fn shapes_the_leaf_does_not_read_defer_before_any_effect() {
-    let home = Home::new("shapes");
+fn a_lite_bank_is_refused_with_the_docker_install() {
+    let home = Home::new("lite");
     fs::write(
         home.0.join("good.sql.gz"),
         gz(b"-- PostgreSQL database dump complete\n"),
     )
     .unwrap();
-    let before = listing(&home.0);
-    for args in [
-        &["--back", "good.sql.gz"][..],
-        &["--backup-file", "good.sql.gz", "--"],
-        &["-hx"],
-    ] {
-        assert_answer(&run(&home.0, "80", args), 1, "", DEFERRED);
-    }
-    // No update lock, safety directory or other file appeared.
-    assert_eq!(listing(&home.0), before);
+    let lite = home.0.join("lite");
+    fs::create_dir_all(lite.join("embedded_pg")).unwrap();
+    fs::write(lite.join("embedded_pg").join("PG_VERSION"), b"18\n").unwrap();
+    let output = run_with(
+        &home.0,
+        "80",
+        &CONFIRMED,
+        &[("PSEUDOLIFE_MCP_DATA_DIR", &lite)],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.starts_with(
+            "restore failed: no Docker bank was found, and this host has a lite bank (embedded PostgreSQL in "
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("Install the Docker bank first (ops/install.sh"),
+        "{stderr}"
+    );
+    assert!(output.stdout.is_empty());
 }
 
 #[test]
-fn the_leaf_source_runs_processes_and_writes_only_where_ported() {
+fn a_relative_docker_program_is_refused() {
+    let home = Home::new("relative");
+    fs::write(
+        home.0.join("good.sql.gz"),
+        gz(b"-- PostgreSQL database dump complete\n"),
+    )
+    .unwrap();
+    // A docker in the current directory is never run.
+    fs::write(home.0.join("docker"), b"").unwrap();
+    let output = run_with(
+        &home.0,
+        "80",
+        &CONFIRMED,
+        &[("PSEUDOLIFE_DOCKER", Path::new("./docker"))],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("restore failed: PSEUDOLIFE_DOCKER names a relative path;"),
+        "{stderr}"
+    );
+    // A bare name is looked up only on absolute PATH entries: with PATH
+    // `.`, the `docker` file in the current directory is not found.
+    let output = run_with(
+        &home.0,
+        "80",
+        &CONFIRMED,
+        &[
+            ("PSEUDOLIFE_DOCKER", Path::new("docker")),
+            ("PATH", Path::new(".")),
+        ],
+    );
+    assert_answer(&output, 2, "", NO_DOCKER);
+}
+
+#[test]
+fn processes_network_and_writes_stay_in_their_modules() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli/restore_cli");
     for entry in fs::read_dir(&root).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_none_or(|extension| extension != "rs") {
             continue;
         }
-        let text = fs::read_to_string(&path).unwrap();
-        // Test modules may write scratch files; the leaf itself writes none.
-        let text = text.split("#[cfg(test)]").next().unwrap();
         let file = path.file_name().unwrap().to_str().unwrap();
-        // docker.rs runs the docker program; mod.rs holds the update lock
-        // and its pid file around a refusal. Nothing else does either.
+        if file == "execute_tests.rs" {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        // Test modules may write scratch files and run servers.
+        let text = text.split("#[cfg(test)]").next().unwrap();
+        // docker.rs runs the docker program and opens its stdout files;
+        // mod.rs holds the update lock and asks the daemon's /health;
+        // safety.rs writes the safety backup; execute.rs the note and the
+        // journal. No module reaches into the updater.
         let allowed: &[&str] = match file {
-            "docker.rs" => &["std::process", "Command"],
-            "mod.rs" => &["fs::write", "remove_file"],
+            "docker.rs" => &["std::process", "Command", "OpenOptions"],
+            "mod.rs" => &["fs::write", "remove_file", "std::net", "TcpStream"],
+            "safety.rs" => &["OpenOptions", "remove_file", "create_dir", "fs::rename"],
+            "execute.rs" => &["fs::write", "remove_file", "fs::rename"],
             _ => &[],
         };
         for name in [
@@ -290,6 +360,7 @@ fn the_leaf_source_runs_processes_and_writes_only_where_ported() {
             "create_dir",
             "OpenOptions",
             "remove_file",
+            "fs::rename",
         ] {
             if allowed.contains(&name) {
                 continue;
