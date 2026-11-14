@@ -1612,6 +1612,7 @@ jobs:
           - doctor-3
           - doctor-4
           - episode-0
+          - expose-0
           - hook-0
           - hook-1
           - invite-0
@@ -1634,8 +1635,6 @@ jobs:
           - restore-4
           - restore-5
           - restore-6
-          - restore-7
-          - restore-8
           - test_login-0
           - test_login-1
           - test_login-2

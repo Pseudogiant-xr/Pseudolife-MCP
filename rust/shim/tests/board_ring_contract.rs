@@ -367,8 +367,10 @@ fn hook_write(home: &Home, name: &str, text: &str) {
     hook_write_mode(home, name, text, 0o644);
 }
 /// A marker as `lifecycle.ps1` writes it on Windows: PowerShell's
-/// `[IO.File]::WriteAllText`, whose file carries an inherited, unprotected
-/// DACL rather than the shim's protected owner-only one (#1326).
+/// `[IO.File]::WriteAllText`. In this fixture's home, which `private_dir`
+/// made and which passes nothing on, the file gets the token's default DACL:
+/// unprotected and not owner-only, unlike the shim's own files (#1326). The
+/// inherited case is covered by `board::state`'s `inheriting_folder` tests.
 #[cfg(windows)]
 fn hook_write(home: &Home, name: &str, text: &str) {
     // `-Command` joins trailing arguments into the script text, so the
