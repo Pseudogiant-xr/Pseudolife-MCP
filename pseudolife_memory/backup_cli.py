@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Mapping
 
 from pseudolife_memory.storage import embedded_pg
+from pseudolife_memory.program_lookup import find_program
 
 # Deliberately disjoint from the Docker tier's artifact names
 # (ops/backup.* writes `pseudolife_memory-*.sql.gz` / `pseudolife_state-*.tgz`
@@ -115,8 +116,8 @@ def _find_pg_dump(home: Path | None = None) -> Path | None:
             cand = vdir / "bin" / exe
             if cand.exists():
                 return cand
-    which = shutil.which("pg_dump")
-    return Path(which) if which else None
+    found = find_program("pg_dump")
+    return Path(found) if found else None
 
 
 def _dump_bank(

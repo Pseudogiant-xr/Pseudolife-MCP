@@ -499,7 +499,9 @@ pub(super) fn apply_role(
     // script is the public role SQL, staged in a directory the
     // container's own user creates, so a non-root PostgreSQL container
     // (uid 999) can read docker cp's root-owned file and remove it.
-    let temporary = std::env::temp_dir().join(format!(
+    // Resolved: the private-state writer refuses a redirected ancestor
+    // (macOS's /var -> /private/var).
+    let temporary = seams::temp_root().join(format!(
         "pseudolife-shadow-{}.sql",
         uuid::Uuid::new_v4().simple()
     ));

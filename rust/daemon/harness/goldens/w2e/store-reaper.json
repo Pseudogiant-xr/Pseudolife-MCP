@@ -1,5 +1,11 @@
 {
  "normalizers": "harness/w2e.py normalize_state, pack",
+ "recorded_from_candidate": {
+  "candidate_sha256": "4e68292a8134ce4a672bf414f548c21f103a763003daa2959e07db47e223dabf",
+  "commit": "2bb35bc195b3978497db9ae8b21ea058e454a14c",
+  "platform": "windows",
+  "rust_tree": "clean"
+ },
  "scenario": "store-reaper",
  "steps": [
   {
@@ -7,7 +13,7 @@
    "op": {
     "op": "init"
    },
-   "python": null,
+   "response": null,
    "state": {
     "catalog": {
      "column_types": [
@@ -220,6 +226,87 @@
       ],
       [
        "public",
+       "cms_counters",
+       1,
+       "id",
+       "integer",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       2,
+       "preset_name",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       3,
+       "interaction_count",
+       "bigint",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       4,
+       "logical_turn_count",
+       "bigint",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       5,
+       "tier_queries",
+       "bigint",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       6,
+       "tier_hits",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       7,
+       "surprise_history",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       8,
+       "consolidation_events",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "cms_counters",
+       9,
+       "updated_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
        "communities",
        1,
        "id",
@@ -259,6 +346,177 @@
        "communities",
        5,
        "computed_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       1,
+       "session_id",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       2,
+       "token_hash",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       3,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       4,
+       "source",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       5,
+       "issuer",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       6,
+       "method",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       7,
+       "label",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       8,
+       "created_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       9,
+       "last_used_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       10,
+       "expires_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_sessions",
+       11,
+       "revoked_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       1,
+       "code_hash",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       2,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       3,
+       "source",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       4,
+       "issuer",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       5,
+       "origin",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       6,
+       "expires_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       7,
+       "used_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       8,
+       "created_at",
        "double precision",
        true,
        ""
@@ -1723,6 +1981,78 @@
       ],
       [
        "public",
+       "edge_proposals",
+       19,
+       "judge_served_model",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "edge_proposals",
+       20,
+       "judge2_verdict",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "edge_proposals",
+       21,
+       "judge2_confidence",
+       "real",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "edge_proposals",
+       22,
+       "judge2_model",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "edge_proposals",
+       23,
+       "judged2_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "edge_proposals",
+       24,
+       "judge2_relation",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "edge_proposals",
+       25,
+       "judge2_served_model",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "edge_proposals",
+       26,
+       "judge2_policy",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
        "edges",
        1,
        "id",
@@ -2159,6 +2489,87 @@
        19,
        "judged2_at",
        "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       20,
+       "judge_served_model",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       21,
+       "judge2_served_model",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       22,
+       "judge2_policy",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       23,
+       "judge3_verdict",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       24,
+       "judge3_confidence",
+       "real",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       25,
+       "judge3_model",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       26,
+       "judged3_at",
+       "double precision",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       27,
+       "judge3_served_model",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
+       "entity_proposals",
+       28,
+       "judge3_policy",
+       "text",
        false,
        ""
       ],
@@ -3370,6 +3781,15 @@
       ],
       [
        "public",
+       "maintainer_passkeys",
+       14,
+       "signs_in_as",
+       "text",
+       false,
+       ""
+      ],
+      [
+       "public",
        "memory_trace_invalidations",
        1,
        "entity_norm",
@@ -3532,6 +3952,15 @@
       ],
       [
        "public",
+       "merge_decisions",
+       10,
+       "votes",
+       "jsonb",
+       false,
+       ""
+      ],
+      [
+       "public",
        "meta",
        1,
        "key",
@@ -3649,6 +4078,24 @@
       ],
       [
        "public",
+       "principal_activity",
+       1,
+       "principal",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "principal_activity",
+       2,
+       "last_seen_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
        "principals",
        1,
        "principal",
@@ -3735,6 +4182,123 @@
        "revoked_at",
        "double precision",
        false,
+       ""
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       1,
+       "id",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       2,
+       "source",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       3,
+       "chunk_index",
+       "integer",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       4,
+       "text",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       5,
+       "embedding",
+       "vector(1024)",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       6,
+       "metadata",
+       "jsonb",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       7,
+       "ingested_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "reference_chunks",
+       8,
+       "created_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       1,
+       "hash_prefix",
+       "text",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       2,
+       "rejections",
+       "bigint",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       3,
+       "first_seen_at",
+       "double precision",
+       true,
+       ""
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       4,
+       "last_seen_at",
+       "double precision",
+       true,
        ""
       ],
       [
@@ -4694,6 +5258,150 @@
       ],
       [
        "public",
+       "cms_counters",
+       1,
+       "id",
+       "integer",
+       "int4",
+       null,
+       32,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       2,
+       "preset_name",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       3,
+       "interaction_count",
+       "bigint",
+       "int8",
+       null,
+       64,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       4,
+       "logical_turn_count",
+       "bigint",
+       "int8",
+       null,
+       64,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       5,
+       "tier_queries",
+       "bigint",
+       "int8",
+       null,
+       64,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       6,
+       "tier_hits",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       7,
+       "surprise_history",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       8,
+       "consolidation_events",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       9,
+       "updated_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
        "communities",
        1,
        "id",
@@ -4761,6 +5469,310 @@
        "communities",
        5,
        "computed_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       1,
+       "session_id",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       2,
+       "token_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       3,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       4,
+       "source",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       5,
+       "issuer",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       6,
+       "method",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       7,
+       "label",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       "''::text",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       8,
+       "created_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       9,
+       "last_used_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       10,
+       "expires_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       11,
+       "revoked_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       1,
+       "code_hash",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       2,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       3,
+       "source",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       4,
+       "issuer",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       5,
+       "origin",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       6,
+       "expires_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       7,
+       "used_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       8,
+       "created_at",
        "double precision",
        "float8",
        null,
@@ -7366,6 +8378,134 @@
       ],
       [
        "public",
+       "edge_proposals",
+       19,
+       "judge_served_model",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "edge_proposals",
+       20,
+       "judge2_verdict",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "edge_proposals",
+       21,
+       "judge2_confidence",
+       "real",
+       "float4",
+       null,
+       24,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "edge_proposals",
+       22,
+       "judge2_model",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "edge_proposals",
+       23,
+       "judged2_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "edge_proposals",
+       24,
+       "judge2_relation",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "edge_proposals",
+       25,
+       "judge2_served_model",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "edge_proposals",
+       26,
+       "judge2_policy",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
        "edges",
        1,
        "id",
@@ -8141,6 +9281,150 @@
        "float8",
        null,
        53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       20,
+       "judge_served_model",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       21,
+       "judge2_served_model",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       22,
+       "judge2_policy",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       23,
+       "judge3_verdict",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       24,
+       "judge3_confidence",
+       "real",
+       "float4",
+       null,
+       24,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       25,
+       "judge3_model",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       26,
+       "judged3_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       27,
+       "judge3_served_model",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "entity_proposals",
+       28,
+       "judge3_policy",
+       "text",
+       "text",
+       null,
+       null,
        "YES",
        null,
        "NO",
@@ -10294,6 +11578,22 @@
       ],
       [
        "public",
+       "maintainer_passkeys",
+       14,
+       "signs_in_as",
+       "text",
+       "text",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
        "memory_trace_invalidations",
        1,
        "entity_norm",
@@ -10582,6 +11882,22 @@
       ],
       [
        "public",
+       "merge_decisions",
+       10,
+       "votes",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
        "meta",
        1,
        "key",
@@ -10790,6 +12106,38 @@
       ],
       [
        "public",
+       "principal_activity",
+       1,
+       "principal",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principal_activity",
+       2,
+       "last_seen_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
        "principals",
        1,
        "principal",
@@ -10942,6 +12290,214 @@
        null,
        53,
        "YES",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "principals",
+       11,
+       "owned",
+       "boolean",
+       "bool",
+       null,
+       null,
+       "NO",
+       "true",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       1,
+       "id",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       2,
+       "source",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       3,
+       "chunk_index",
+       "integer",
+       "int4",
+       null,
+       32,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       4,
+       "text",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       5,
+       "embedding",
+       "USER-DEFINED",
+       "vector",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       6,
+       "metadata",
+       "jsonb",
+       "jsonb",
+       null,
+       null,
+       "NO",
+       "'{}'::jsonb",
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       7,
+       "ingested_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       8,
+       "created_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       1,
+       "hash_prefix",
+       "text",
+       "text",
+       null,
+       null,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       2,
+       "rejections",
+       "bigint",
+       "int8",
+       null,
+       64,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       3,
+       "first_seen_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
+       null,
+       "NO",
+       null,
+       "NEVER",
+       null
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       4,
+       "last_seen_at",
+       "double precision",
+       "float8",
+       null,
+       53,
+       "NO",
        null,
        "NO",
        null,
@@ -12083,6 +13639,83 @@
       ],
       [
        "public",
+       "cms_counters",
+       "cms_counters_consolidation_events_not_null",
+       "n",
+       "NOT NULL consolidation_events"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_id_check",
+       "c",
+       "CHECK (id = 1)"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_id_not_null",
+       "n",
+       "NOT NULL id"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_interaction_count_not_null",
+       "n",
+       "NOT NULL interaction_count"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_logical_turn_count_not_null",
+       "n",
+       "NOT NULL logical_turn_count"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_pkey",
+       "p",
+       "PRIMARY KEY (id)"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_preset_name_not_null",
+       "n",
+       "NOT NULL preset_name"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_surprise_history_not_null",
+       "n",
+       "NOT NULL surprise_history"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_tier_hits_not_null",
+       "n",
+       "NOT NULL tier_hits"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_tier_queries_not_null",
+       "n",
+       "NOT NULL tier_queries"
+      ],
+      [
+       "public",
+       "cms_counters",
+       "cms_counters_updated_at_not_null",
+       "n",
+       "NOT NULL updated_at"
+      ],
+      [
+       "public",
        "communities",
        "communities_cohesion_not_null",
        "n",
@@ -12115,6 +13748,139 @@
        "communities_size_not_null",
        "n",
        "NOT NULL size"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_expires_at_not_null",
+       "n",
+       "NOT NULL expires_at"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_issuer_not_null",
+       "n",
+       "NOT NULL issuer"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_label_not_null",
+       "n",
+       "NOT NULL label"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_method_not_null",
+       "n",
+       "NOT NULL method"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_pkey",
+       "p",
+       "PRIMARY KEY (session_id)"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_session_id_not_null",
+       "n",
+       "NOT NULL session_id"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_source_not_null",
+       "n",
+       "NOT NULL source"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_token_hash_key",
+       "u",
+       "UNIQUE (token_hash)"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_token_hash_not_null",
+       "n",
+       "NOT NULL token_hash"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_code_hash_not_null",
+       "n",
+       "NOT NULL code_hash"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_expires_at_not_null",
+       "n",
+       "NOT NULL expires_at"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_issuer_not_null",
+       "n",
+       "NOT NULL issuer"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_origin_not_null",
+       "n",
+       "NOT NULL origin"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_pkey",
+       "p",
+       "PRIMARY KEY (code_hash)"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_source_not_null",
+       "n",
+       "NOT NULL source"
       ],
       [
        "public",
@@ -14120,6 +15886,27 @@
       ],
       [
        "public",
+       "principal_activity",
+       "principal_activity_last_seen_at_not_null",
+       "n",
+       "NOT NULL last_seen_at"
+      ],
+      [
+       "public",
+       "principal_activity",
+       "principal_activity_pkey",
+       "p",
+       "PRIMARY KEY (principal)"
+      ],
+      [
+       "public",
+       "principal_activity",
+       "principal_activity_principal_not_null",
+       "n",
+       "NOT NULL principal"
+      ],
+      [
+       "public",
        "principals",
        "principals_board_not_null",
        "n",
@@ -14142,6 +15929,13 @@
       [
        "public",
        "principals",
+       "principals_owned_not_null",
+       "n",
+       "NOT NULL owned"
+      ],
+      [
+       "public",
+       "principals",
        "principals_pkey",
        "p",
        "PRIMARY KEY (principal)"
@@ -14159,6 +15953,104 @@
        "principals_token_hash_key",
        "u",
        "UNIQUE (token_hash)"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_chunk_index_not_null",
+       "n",
+       "NOT NULL chunk_index"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_created_at_not_null",
+       "n",
+       "NOT NULL created_at"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_embedding_not_null",
+       "n",
+       "NOT NULL embedding"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_id_not_null",
+       "n",
+       "NOT NULL id"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_ingested_at_not_null",
+       "n",
+       "NOT NULL ingested_at"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_metadata_not_null",
+       "n",
+       "NOT NULL metadata"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_pkey",
+       "p",
+       "PRIMARY KEY (id)"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_source_not_null",
+       "n",
+       "NOT NULL source"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_text_not_null",
+       "n",
+       "NOT NULL text"
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       "rejected_bearers_first_seen_at_not_null",
+       "n",
+       "NOT NULL first_seen_at"
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       "rejected_bearers_hash_prefix_not_null",
+       "n",
+       "NOT NULL hash_prefix"
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       "rejected_bearers_last_seen_at_not_null",
+       "n",
+       "NOT NULL last_seen_at"
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       "rejected_bearers_pkey",
+       "p",
+       "PRIMARY KEY (hash_prefix)"
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       "rejected_bearers_rejections_not_null",
+       "n",
+       "NOT NULL rejections"
       ],
       [
        "public",
@@ -14486,12 +16378,12 @@
      "extensions": [
       [
        "plpgsql",
-       "1.0",
+       "<fixture version>",
        "pg_catalog"
       ],
       [
        "vector",
-       "0.8.7",
+       "<fixture version>",
        "public"
       ]
      ],
@@ -14529,9 +16421,33 @@
       ],
       [
        "public",
+       "cms_counters",
+       "cms_counters_pkey",
+       "CREATE UNIQUE INDEX cms_counters_pkey ON public.cms_counters USING btree (id)"
+      ],
+      [
+       "public",
        "communities",
        "communities_pkey",
        "CREATE UNIQUE INDEX communities_pkey ON public.communities USING btree (id)"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_pkey",
+       "CREATE UNIQUE INDEX console_sessions_pkey ON public.console_sessions USING btree (session_id)"
+      ],
+      [
+       "public",
+       "console_sessions",
+       "console_sessions_token_hash_key",
+       "CREATE UNIQUE INDEX console_sessions_token_hash_key ON public.console_sessions USING btree (token_hash)"
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "console_signin_codes_pkey",
+       "CREATE UNIQUE INDEX console_signin_codes_pkey ON public.console_signin_codes USING btree (code_hash)"
       ],
       [
        "public",
@@ -15009,6 +16925,12 @@
       ],
       [
        "public",
+       "principal_activity",
+       "principal_activity_pkey",
+       "CREATE UNIQUE INDEX principal_activity_pkey ON public.principal_activity USING btree (principal)"
+      ],
+      [
+       "public",
        "principals",
        "principals_code_hash_key",
        "CREATE UNIQUE INDEX principals_code_hash_key ON public.principals USING btree (code_hash)"
@@ -15024,6 +16946,24 @@
        "principals",
        "principals_token_hash_key",
        "CREATE UNIQUE INDEX principals_token_hash_key ON public.principals USING btree (token_hash)"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_pkey",
+       "CREATE UNIQUE INDEX reference_chunks_pkey ON public.reference_chunks USING btree (id)"
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "reference_chunks_source_idx",
+       "CREATE INDEX reference_chunks_source_idx ON public.reference_chunks USING btree (source)"
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       "rejected_bearers_pkey",
+       "CREATE UNIQUE INDEX rejected_bearers_pkey ON public.rejected_bearers USING btree (hash_prefix)"
       ],
       [
        "public",
@@ -15097,1127 +17037,1225 @@
        "public",
        "chronicle_events",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "chronicle_events_actor_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "chronicle_events_episode_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "chronicle_events_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "chronicle_events_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "client_sessions",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "client_sessions_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "client_sessions_started_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "cms_counters",
+       "r",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "cms_counters_pkey",
+       "i",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "communities",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "communities_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "console_sessions",
+       "r",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "console_sessions_pkey",
+       "i",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "console_sessions_token_hash_key",
+       "i",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes",
+       "r",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "console_signin_codes_pkey",
+       "i",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_agents",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_agents_episode_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_agents_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_agents_scope_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_expire_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_message_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_principal_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_send_pair_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_send_principal_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_send_recipient_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_send_sender_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_events_time_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_lease_fence",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_lease_waiters",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_lease_waiters_agent_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_lease_waiters_order_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_lease_waiters_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_lease_waiters_ticket_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_leases",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_leases_holder_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_leases_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_messages",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_messages_expiry_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_messages_pending_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_messages_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_messages_recipient_agent_id_recipient_sequence_key",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_messages_request_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_messages_sender_time_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_wakes",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_wakes_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_wakes_recipient_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_wakes_sender_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_wakes_time_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "coordination_wakes_wake_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "curation_judgments",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "curation_judgments_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dismissed_pairs",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dismissed_pairs_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_run_slots",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_run_slots_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_run_slots_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_run_slots_run_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_runs",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_runs_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_runs_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "dream_runs_started_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edge_evidence",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edge_evidence_entry_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edge_evidence_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edge_proposals",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edge_proposals_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edge_proposals_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edge_proposals_src_id_relation_dst_id_key",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edges",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edges_dst_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edges_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edges_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "edges_src_id_relation_dst_id_key",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entities",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entities_canonical_key",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entities_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entities_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_aliases",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_aliases_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_communities",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_communities_cid_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_communities_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_kinds",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_kinds_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_proposals",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_proposals_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_proposals_junk_uq",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_proposals_merge_uq",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_proposals_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_sources",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_sources_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entity_sources_source_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entries",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entries_band_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entries_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entries_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entries_source_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entries_ts_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entry_reinstatement_decisions",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entry_reinstatement_decisions_entry_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "entry_reinstatement_decisions_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "episodes",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "episodes_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "facts",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "facts_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "facts_member_current_uq",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "facts_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "facts_slot_contested_uq",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "facts_slot_current_scalar_uq",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "facts_slot_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lesson_search_events",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lesson_search_events_created_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lesson_search_events_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lesson_search_events_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lesson_search_events_session_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lessons",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lessons_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lessons_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lessons_slot_current_uq",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "lessons_slot_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "maintainer_bootstrap",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "maintainer_bootstrap_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "maintainer_nonces",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "maintainer_nonces_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "maintainer_passkeys",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "maintainer_passkeys_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "memory_trace_invalidations",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "memory_trace_invalidations_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "memory_traces",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "memory_traces_entry_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "memory_traces_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "merge_decisions",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "merge_decisions_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "merge_decisions_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "meta",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "meta_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "outcome_signals",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "outcome_signals_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "outcome_signals_pending_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "outcome_signals_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "principal_activity",
+       "r",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "principal_activity_pkey",
+       "i",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "principals",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "principals_code_hash_key",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "principals_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "principals_token_hash_key",
        "i",
-       "postgres",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks",
+       "r",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks_pkey",
+       "i",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "reference_chunks_source_idx",
+       "i",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "rejected_bearers",
+       "r",
+       "pseudolife_test",
+       null
+      ],
+      [
+       "public",
+       "rejected_bearers_pkey",
+       "i",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "relations",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "relations_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "retrieval_events",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "retrieval_events_created_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "retrieval_events_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "retrieval_events_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "retrieval_events_session_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "retrieval_uses",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "retrieval_uses_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "slot_reads",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "slot_reads_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "store_decisions",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "store_decisions_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "store_decisions_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "store_decisions_slot_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "world_facts",
        "r",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "world_facts_id_seq",
        "S",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "world_facts_pkey",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "world_facts_slot_current_uq",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ],
       [
        "public",
        "world_facts_slot_idx",
        "i",
-       "postgres",
+       "pseudolife_test",
        null
       ]
      ],
@@ -16571,6 +18609,20 @@
       ],
       "rows": []
      },
+     "public.cms_counters": {
+      "columns": [
+       "id",
+       "preset_name",
+       "interaction_count",
+       "logical_turn_count",
+       "tier_queries",
+       "tier_hits",
+       "surprise_history",
+       "consolidation_events",
+       "updated_at"
+      ],
+      "rows": []
+     },
      "public.communities": {
       "columns": [
        "id",
@@ -16578,6 +18630,35 @@
        "size",
        "cohesion",
        "computed_at"
+      ],
+      "rows": []
+     },
+     "public.console_sessions": {
+      "columns": [
+       "session_id",
+       "token_hash",
+       "principal",
+       "source",
+       "issuer",
+       "method",
+       "label",
+       "created_at",
+       "last_used_at",
+       "expires_at",
+       "revoked_at"
+      ],
+      "rows": []
+     },
+     "public.console_signin_codes": {
+      "columns": [
+       "code_hash",
+       "principal",
+       "source",
+       "issuer",
+       "origin",
+       "expires_at",
+       "used_at",
+       "created_at"
       ],
       "rows": []
      },
@@ -16799,7 +18880,15 @@
        "judged_at",
        "judge_relation",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "judge_served_model",
+       "judge2_verdict",
+       "judge2_confidence",
+       "judge2_model",
+       "judged2_at",
+       "judge2_relation",
+       "judge2_served_model",
+       "judge2_policy"
       ],
       "rows": []
      },
@@ -16878,7 +18967,16 @@
        "judge2_verdict",
        "judge2_confidence",
        "judge2_model",
-       "judged2_at"
+       "judged2_at",
+       "judge_served_model",
+       "judge2_served_model",
+       "judge2_policy",
+       "judge3_verdict",
+       "judge3_confidence",
+       "judge3_model",
+       "judged3_at",
+       "judge3_served_model",
+       "judge3_policy"
       ],
       "rows": []
      },
@@ -17062,7 +19160,8 @@
        "last_used_at",
        "revoked_at",
        "revoked_by",
-       "flagged_at"
+       "flagged_at",
+       "signs_in_as"
       ],
       "rows": []
      },
@@ -17095,7 +19194,8 @@
        "score",
        "reason",
        "decided_by",
-       "decided_at"
+       "decided_at",
+       "votes"
       ],
       "rows": []
      },
@@ -17106,19 +19206,8 @@
       ],
       "rows": [
        [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1791865876.3591616,
-         "copied": 0
-        }
-       ],
-       [
-        "dream_ack_secret_v1",
-        "1ec1c3d1d33bbf4df682aabc65161f78ee9a9e0dbea7e5ee46ffe74ae173a770"
-       ],
-       [
         "schema_version",
-        55
+        59
        ],
        [
         "writer_lease_epoch",
@@ -17142,6 +19231,13 @@
       ],
       "rows": []
      },
+     "public.principal_activity": {
+      "columns": [
+       "principal",
+       "last_seen_at"
+      ],
+      "rows": []
+     },
      "public.principals": {
       "columns": [
        "principal",
@@ -17153,7 +19249,30 @@
        "paired_code_hash",
        "created_at",
        "paired_at",
-       "revoked_at"
+       "revoked_at",
+       "owned"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.rejected_bearers": {
+      "columns": [
+       "hash_prefix",
+       "rejections",
+       "first_seen_at",
+       "last_seen_at"
       ],
       "rows": []
      },
@@ -17177,7 +19296,7 @@
         false,
         null,
         true,
-        1791865874.85339
+        "<clock>"
        ],
        [
         "configures",
@@ -17187,7 +19306,7 @@
         false,
         null,
         true,
-        1791865874.8526583
+        "<clock>"
        ],
        [
         "depends-on",
@@ -17197,7 +19316,7 @@
         true,
         null,
         true,
-        1791865874.8513863
+        "<clock>"
        ],
        [
         "hosts",
@@ -17207,7 +19326,7 @@
         false,
         null,
         true,
-        1791865874.8520715
+        "<clock>"
        ],
        [
         "implements",
@@ -17217,7 +19336,7 @@
         false,
         null,
         true,
-        1791865874.8529906
+        "<clock>"
        ],
        [
         "part-of",
@@ -17227,7 +19346,7 @@
         true,
         null,
         true,
-        1791865874.8518772
+        "<clock>"
        ],
        [
         "prefers",
@@ -17237,7 +19356,7 @@
         false,
         null,
         true,
-        1791865874.8532646
+        "<clock>"
        ],
        [
         "related-to",
@@ -17247,7 +19366,7 @@
         false,
         null,
         true,
-        1791865874.8531137
+        "<clock>"
        ],
        [
         "runs-on",
@@ -17257,7 +19376,7 @@
         false,
         "hosts",
         true,
-        1791865874.8522544
+        "<clock>"
        ],
        [
         "stores-data-in",
@@ -17267,7 +19386,7 @@
         false,
         null,
         true,
-        1791865874.8528697
+        "<clock>"
        ],
        [
         "uses",
@@ -17277,7 +19396,7 @@
         false,
         null,
         true,
-        1791865874.8525074
+        "<clock>"
        ]
       ]
      },
@@ -17381,7 +19500,7 @@
     "name": "memory_store",
     "op": "tool"
    },
-   "python": {
+   "response": {
     "isError": false,
     "value": {
      "cortex_promoted": 0,
@@ -17564,6 +19683,43 @@
       ],
       "rows": []
      },
+     "public.edges": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "origin",
+       "asserted_at",
+       "superseded_at",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.entities": {
+      "columns": [
+       "id",
+       "canonical",
+       "display",
+       "etype",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.entity_aliases": {
+      "columns": [
+       "alias",
+       "entity_id"
+      ],
+      "rows": []
+     },
      "public.entries": {
       "columns": [
        "id",
@@ -17586,6 +19742,24 @@
        "dream_state",
        "reinforcements",
        "explicit_reinforcements"
+      ],
+      "rows": []
+     },
+     "public.entry_reinstatement_decisions": {
+      "columns": [
+       "operation_id",
+       "entry_id",
+       "request_sha256",
+       "entry_text_sha256",
+       "entry_source_sha256",
+       "prior_superseded_at",
+       "prior_superseded_by_text",
+       "prior_superseded_by_text_sha256",
+       "evidence_packet_sha256",
+       "reviewer_ids",
+       "reason",
+       "decided_by",
+       "decided_at"
       ],
       "rows": []
      },
@@ -17613,6 +19787,88 @@
        ]
       ]
      },
+     "public.facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "freshness_class",
+       "kind",
+       "value_norm",
+       "stance",
+       "authority",
+       "distortion_tolerance",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.lessons": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "about",
+       "polarity",
+       "outcome",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.memory_trace_invalidations": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "source_entry_id",
+       "invalidated_at",
+       "cause"
+      ],
+      "rows": []
+     },
      "public.meta": {
       "columns": [
        "key",
@@ -17620,25 +19876,226 @@
       ],
       "rows": [
        [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1791865876.3591616,
-         "copied": 0
-        }
-       ],
-       [
-        "dream_ack_secret_v1",
-        "1ec1c3d1d33bbf4df682aabc65161f78ee9a9e0dbea7e5ee46ffe74ae173a770"
-       ],
-       [
         "schema_version",
-        55
+        59
        ],
        [
         "writer_lease_epoch",
         2
        ]
       ]
+     },
+     "public.outcome_signals": {
+      "columns": [
+       "id",
+       "task",
+       "outcome",
+       "about",
+       "detail",
+       "polarity",
+       "origin",
+       "episode_id",
+       "created_at",
+       "consumed_at",
+       "used_ids"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.relations": {
+      "columns": [
+       "name",
+       "description",
+       "src_type",
+       "dst_type",
+       "transitive",
+       "inverse_of",
+       "builtin",
+       "created_at"
+      ],
+      "rows": [
+       [
+        "avoids",
+        "src (a task-type) should avoid dead-end dst (negative lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "configures",
+        "src sets configuration for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "depends-on",
+        "src requires dst to function",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "hosts",
+        "src is the host/platform for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "implements",
+        "src (a source file) realizes concept/role dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "part-of",
+        "src is a component of dst",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "prefers",
+        "src (a task-type) prefers approach/tool dst (positive lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "related-to",
+        "untyped catch-all association",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "runs-on",
+        "src executes on host/platform dst",
+        null,
+        null,
+        false,
+        "hosts",
+        true,
+        "<clock>"
+       ],
+       [
+        "stores-data-in",
+        "src persists its data in dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "uses",
+        "src makes use of dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ]
+      ]
+     },
+     "public.slot_reads": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "read_count",
+       "last_read_at"
+      ],
+      "rows": []
+     },
+     "public.store_decisions": {
+      "columns": [
+       "id",
+       "store",
+       "entity_norm",
+       "attribute_norm",
+       "action",
+       "decided_by",
+       "reason",
+       "record",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.world_facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "source_url",
+       "source_quote",
+       "retrieved_at",
+       "freshness_class",
+       "content_hash",
+       "source_doc_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
      }
     }
    }
@@ -17649,7 +20106,7 @@
     "op": "sleep",
     "s": 4
    },
-   "python": {
+   "response": {
     "isError": false,
     "value": null
    },
@@ -17825,6 +20282,43 @@
       ],
       "rows": []
      },
+     "public.edges": {
+      "columns": [
+       "id",
+       "src_id",
+       "relation",
+       "dst_id",
+       "confidence",
+       "origin",
+       "asserted_at",
+       "superseded_at",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.entities": {
+      "columns": [
+       "id",
+       "canonical",
+       "display",
+       "etype",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.entity_aliases": {
+      "columns": [
+       "alias",
+       "entity_id"
+      ],
+      "rows": []
+     },
      "public.entries": {
       "columns": [
        "id",
@@ -17847,6 +20341,24 @@
        "dream_state",
        "reinforcements",
        "explicit_reinforcements"
+      ],
+      "rows": []
+     },
+     "public.entry_reinstatement_decisions": {
+      "columns": [
+       "operation_id",
+       "entry_id",
+       "request_sha256",
+       "entry_text_sha256",
+       "entry_source_sha256",
+       "prior_superseded_at",
+       "prior_superseded_by_text",
+       "prior_superseded_by_text_sha256",
+       "evidence_packet_sha256",
+       "reviewer_ids",
+       "reason",
+       "decided_by",
+       "decided_at"
       ],
       "rows": []
      },
@@ -17874,6 +20386,88 @@
        ]
       ]
      },
+     "public.facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "freshness_class",
+       "kind",
+       "value_norm",
+       "stance",
+       "authority",
+       "distortion_tolerance",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.lessons": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "about",
+       "polarity",
+       "outcome",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "entity_id",
+       "object_entity_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
+     },
+     "public.memory_trace_invalidations": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "source_entry_id",
+       "invalidated_at",
+       "cause"
+      ],
+      "rows": []
+     },
      "public.meta": {
       "columns": [
        "key",
@@ -17881,31 +20475,232 @@
       ],
       "rows": [
        [
-        "curation_listing_spelling_v2",
-        {
-         "at": 1791865876.3591616,
-         "copied": 0
-        }
-       ],
-       [
         "deferred_empty_roots",
         {
          "<ep#0>": "<clock>"
         }
        ],
        [
-        "dream_ack_secret_v1",
-        "1ec1c3d1d33bbf4df682aabc65161f78ee9a9e0dbea7e5ee46ffe74ae173a770"
-       ],
-       [
         "schema_version",
-        55
+        59
        ],
        [
         "writer_lease_epoch",
         2
        ]
       ]
+     },
+     "public.outcome_signals": {
+      "columns": [
+       "id",
+       "task",
+       "outcome",
+       "about",
+       "detail",
+       "polarity",
+       "origin",
+       "episode_id",
+       "created_at",
+       "consumed_at",
+       "used_ids"
+      ],
+      "rows": []
+     },
+     "public.reference_chunks": {
+      "columns": [
+       "id",
+       "source",
+       "chunk_index",
+       "text",
+       "embedding",
+       "metadata",
+       "ingested_at",
+       "created_at"
+      ],
+      "rows": []
+     },
+     "public.relations": {
+      "columns": [
+       "name",
+       "description",
+       "src_type",
+       "dst_type",
+       "transitive",
+       "inverse_of",
+       "builtin",
+       "created_at"
+      ],
+      "rows": [
+       [
+        "avoids",
+        "src (a task-type) should avoid dead-end dst (negative lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "configures",
+        "src sets configuration for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "depends-on",
+        "src requires dst to function",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "hosts",
+        "src is the host/platform for dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "implements",
+        "src (a source file) realizes concept/role dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "part-of",
+        "src is a component of dst",
+        null,
+        null,
+        true,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "prefers",
+        "src (a task-type) prefers approach/tool dst (positive lesson)",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "related-to",
+        "untyped catch-all association",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "runs-on",
+        "src executes on host/platform dst",
+        null,
+        null,
+        false,
+        "hosts",
+        true,
+        "<clock>"
+       ],
+       [
+        "stores-data-in",
+        "src persists its data in dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ],
+       [
+        "uses",
+        "src makes use of dst",
+        null,
+        null,
+        false,
+        null,
+        true,
+        "<clock>"
+       ]
+      ]
+     },
+     "public.slot_reads": {
+      "columns": [
+       "entity_norm",
+       "attribute_norm",
+       "read_count",
+       "last_read_at"
+      ],
+      "rows": []
+     },
+     "public.store_decisions": {
+      "columns": [
+       "id",
+       "store",
+       "entity_norm",
+       "attribute_norm",
+       "action",
+       "decided_by",
+       "reason",
+       "record",
+       "decided_at"
+      ],
+      "rows": []
+     },
+     "public.world_facts": {
+      "columns": [
+       "id",
+       "entity",
+       "attribute",
+       "entity_norm",
+       "attribute_norm",
+       "value",
+       "polarity",
+       "status",
+       "confidence",
+       "origin",
+       "support",
+       "provenance",
+       "asserted_at",
+       "last_confirmed",
+       "supersedes_value",
+       "superseded_by_value",
+       "superseded_at",
+       "embedding",
+       "source_url",
+       "source_quote",
+       "retrieved_at",
+       "freshness_class",
+       "content_hash",
+       "source_doc_id",
+       "tx_time",
+       "valid_time",
+       "hlc_phys",
+       "hlc_logical",
+       "writer_id",
+       "session_id",
+       "version"
+      ],
+      "rows": []
      }
     }
    }

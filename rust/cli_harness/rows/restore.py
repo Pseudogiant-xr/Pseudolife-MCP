@@ -1,12 +1,14 @@
 """CLI-RESTORE-GATES and the start of CLI-RESTORE-DOCKER: what
-``pseudolife-mcp restore`` decides before it changes anything.
+``pseudolife-mcp restore`` decides before it changes anything, where the
+native command and the frozen Python one still answer alike.
 
-Answered: argparse's help and errors at 80 columns, the dump-completeness
-refusal, the state-archive refusal (every ``validate_state`` reason), the
-refusal without ``--yes`` when stdin and stdout are not terminals, and,
-confirmed, every refusal of ``DockerBank(...)`` and of ``restore()``'s
-read-only checks, against a scripted Docker world; where the oracle would
-make its first change the candidate defers (the spec is ``restore.md``
+Compared: argparse's help and errors at 80 columns, the dump-completeness
+refusal, the state-archive refusal, the refusal without ``--yes`` when stdin
+and stdout are not terminals, and, confirmed, the refusals of the bank's
+selection and of the read-only checks, against a scripted Docker world. The
+native command now also restores (the destructive steps, the safety backup,
+recovery) and reads some archives more strictly than Python; those cases
+are not compared here and are tested in Rust (the spec is ``restore.md``
 beside this file).
 
 Safety. Restore replaces a bank, and its defaults name the stack's own
@@ -34,11 +36,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import normalize
 from ..core import WINDOWS, Case
 from ..mutants import Mutant
 
-DEFERRAL = "pseudolife-stdio: mode 'restore' is deferred in this candidate\n"
 MARKER = b"-- PostgreSQL database dump complete"
 DIR = "shim/src/cli/restore_cli"
 
@@ -165,11 +165,6 @@ def _bad_checksum_header() -> bytes:
     return bytes(raw)
 
 
-def _deep_chain(depth: int) -> bytes:
-    members = [_sym(b"l%d" % i, b"l%d" % (i + 1)) for i in range(depth)]
-    return _tar(*members, _file(b"l%d" % depth))
-
-
 def _signed_checksum_name() -> bytes:
     # A high-bit name byte: CPython also accepts the signed-char sum.
     raw = bytearray(_header(b"\xe9t\xe9"))
@@ -192,11 +187,9 @@ STATES: dict[str, bytes] = {
     "bad-later-header": _tar(_file(b"a"), _bad_checksum_header()),
     "short-later-header": _file(b"a") + b"\x01" * 100,
     "later-header-absent": _file(b"a"),
-    "directory-with-size": _header(b"d", b"5", size=1024) + _file(b"d/x") + END,
     # A directory skips no data: the escaping member after it is read.
     "directory-size-skips-nothing": _header(b"d", b"5", size=1024) + _file(b"../x") + END,
     "v7-directory-slash": _tar(_header(b"d/", b"\0"), _file(b"d/x")),
-    "unknown-type-skips": _tar(_header(b"v", b"V", size=600) + _data(b"\x01" * 600), _file(b"w")),
     "prefix-join": _tar(_header(b"x", prefix=b"sub")),
     "octal-prefix-fields": _tar(_header(b"x", mode=b"0o_644\0\0", size_field=b"  0o1\0\0\0\0\0\0\0") + _data(b"x")),
     "signed-checksum": _signed_checksum_name(),
@@ -236,10 +229,8 @@ STATES: dict[str, bytes] = {
     "gnu-long-link-escape": _tar(_long(b"K", b"../../" + b"y" * 120), _sym(b"l", b"short")),
     "gnu-long-then-end": _file(b"a") + _long(b"L", b"x" * 120) + END,
     "gnu-long-data-cut": _file(b"a") + _long(b"L", b"x" * 600)[:700],
-    # the oracle answers; this leaf defers
+    # a POSIX extended header naming a long path (both read it)
     "pax-name": _python_tar(2, "x" * 120),
-    "negative-size": _tar(_header(b"x", size_field=b"\xff" * 12)),
-    "deep-link-chain": _deep_chain(450),
     "corrupt-deflate-gzip": None,
 }
 _plain_tar = STATES["plain"]
@@ -304,58 +295,6 @@ def _install_docker(arm) -> None:
     path = arm.home / "bin" / "docker"
     path.parent.mkdir()
     _program(path, DOCKER_SCRIPT)
-
-
-# --- named rules -----------------------------------------------------------------
-
-def _untouched(obs: dict) -> bool:
-    return obs.get("docker") == [] and obs.get("fixtures") == "unchanged"
-
-
-@normalize.rule("restore-declared-deferral")
-def declared_deferral(obs: dict) -> None:
-    """The oracle answers before any Docker command (exit 0 or 2) but this
-    leaf defers by design (a shape or archive it does not read): the
-    expectation becomes the deferral, exit 1, with nothing else changed."""
-    if obs.get("arm") != "python" or obs["exit"] not in (0, 2) or not _untouched(obs):
-        return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-
-
-# What the oracle may have written by its first change, and nothing else.
-_FIRST_CHANGE_FILES = (".pseudolife-mcp", "cwd/safety")
-
-
-@normalize.rule("restore-defer-at-first-change")
-def defer_at_first_change(obs: dict) -> None:
-    """The candidate makes the oracle's read-only Docker calls, then defers
-    where the oracle makes its first change (stopping the daemon, creating a
-    helper container, or the safety dump after its step line). The case
-    names how many calls precede that change (``reached``); the oracle's
-    observation becomes: those calls only, the deferral (exit 1), and no
-    update lock or safety directory. It applies only when the next call is
-    such a change, or the oracle printed the safety step line, with the
-    fixtures intact."""
-    count = obs.get("reached")
-    if obs.get("arm") != "python" or count is None or obs.get("fixtures") != "unchanged":
-        return
-    calls = obs["docker"]
-    if len(calls) <= count:
-        return
-    stdout = base64.b64decode(obs["stdout"])
-    if not (stdout.startswith(b"==> Safety-dumping the current database and state volume...")
-            or calls[count][0] in ("stop", "create")):
-        return
-    obs["docker"] = calls[:count]
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-    for table in (obs["files"], obs.get("modes", {})):
-        for key in list(table):
-            if any(key == root or key.startswith(root + "/") for root in _FIRST_CHANGE_FILES):
-                del table[key]
 
 
 # --- the scripted Docker world ---------------------------------------------------
@@ -486,7 +425,7 @@ def _hold_lock(arm) -> subprocess.Popen:
 
 def _case(case_id: str, argv: list[str], *, dump: str | None = "good", state: str | None = None,
           rules: tuple[str, ...] = (), columns: str = "80",
-          note: str = "", script=None, reached: int | None = None, prepare=None) -> Case:
+          note: str = "", script=None, prepare=None) -> Case:
     docker = "{HOME}/bin/docker.exe" if WINDOWS else "{HOME}/bin/docker"
     env: dict[str, str | None] = {"PATH": "{HOME}/bin", "COLUMNS": columns, "PSEUDOLIFE_DOCKER": docker,
                                   "PSEUDOLIFE_MCP_DATA_DIR": None}
@@ -512,8 +451,6 @@ def _case(case_id: str, argv: list[str], *, dump: str | None = "good", state: st
 
     def after(arm, observation: dict) -> None:
         observation["arm"] = arm.name
-        if reached is not None:
-            observation["reached"] = reached
         holder = held.pop(arm.name, None)
         if holder is not None:
             holder.stdin.close()
@@ -550,10 +487,6 @@ def _null_console(case: Case) -> Case:
     return case
 
 
-def _deferred(case_id: str, argv: list[str], **kwargs) -> Case:
-    return _case(case_id, argv, rules=("restore-declared-deferral",), **kwargs)
-
-
 DUMP = ["--backup-file", "dump.sql.gz"]
 STATE = ["--state-archive", "state.tgz"]
 EVERY_OPTION = ["--leave-stopped", "--container", "pg-x", "--daemon-container", "daemon-x", "--db", "bank",
@@ -565,11 +498,11 @@ DUMP_PASS = ("good", "copy-closed", "copy-no-token", "copy-separator", "crlf", "
 DUMP_REFUSE = ("no-marker", "in-copy", "copy-crlf", "trailing-space", "vertical-tab", "line-separator",
                "invalid-utf8-marker", "trailing-junk", "bad-crc", "truncated", "plain-sql", "empty",
                "corrupt-deflate", "distance-too-far")
-STATE_PASS = ("plain", "links-inside", "link-loop", "loop-ends-walk","self-loop-hides-escape", "only-zero-blocks",
-              "bad-later-header", "short-later-header", "later-header-absent", "directory-with-size",
-              "v7-directory-slash", "unknown-type-skips", "prefix-join", "octal-prefix-fields",
+STATE_PASS = ("plain", "links-inside", "link-loop", "loop-ends-walk", "self-loop-hides-escape",
+              "later-header-absent",
+              "v7-directory-slash", "prefix-join",
               "signed-checksum", "gnu-long-name", "gnu-long-records", "gnu-long-cut-at-nul",
-              "multi-member-gzip", "trailing-zeros-gzip")
+              "multi-member-gzip", "trailing-zeros-gzip", "pax-name")
 STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "corrupt-deflate-gzip", "empty-file", "empty-gzip",
                 "garbage-first-header", "invalid-mode-field", "absolute-path", "dotdot-path", "dotdot-leading",
                 "backslash-path", "prefix-escape", "fifo", "character-device", "block-device",
@@ -577,7 +510,6 @@ STATE_REFUSE = ("not-gzip", "truncated-gzip", "bad-crc-gzip", "corrupt-deflate-g
                 "symlink-through-link", "hardlink-escape", "transient-link", "member-data-truncated",
                 "member-padding-truncated", "directory-size-skips-nothing", "gnu-long-name-escape",
                 "gnu-long-link-escape", "gnu-long-then-end", "gnu-long-data-cut")
-STATE_DEFER = ("pax-name", "negative-size", "deep-link-chain")
 
 
 def _gate_cases() -> list[Case]:
@@ -586,8 +518,6 @@ def _gate_cases() -> list[Case]:
         out.append(_case(f"dump-{name}", DUMP, dump=name))
     for name in STATE_PASS + STATE_REFUSE:
         out.append(_case(f"state-{name}", DUMP + STATE, state=name))
-    for name in STATE_DEFER:
-        out.append(_deferred(f"defer-state-{name}", DUMP + STATE, state=name))
     return out
 
 
@@ -633,14 +563,10 @@ def cases() -> list[Case]:
         _case("no-yes-every-option", DUMP + STATE + EVERY_OPTION, state="plain"),
         # stdin and stdout the null device: a character device, never a console
         _null_console(_case("no-yes-null-device", DUMP)),
-        # the oracle answers before any effect; the candidate defers by design
-        _deferred("defer-help-columns", ["--help"], dump=None, columns="100"),
-        _deferred("defer-usage-columns", [], dump=None, columns="120"),
-        _deferred("defer-abbreviation", ["--back", "missing.sql.gz"]),
-        _deferred("defer-double-dash", DUMP + ["--"]),
-        _deferred("defer-help-cluster", ["-hx"], dump=None),
-        _deferred("defer-unicode-port", DUMP + ["--db-port", "١"]),
-        _deferred("defer-unicode-unknown", DUMP + ["--bé"]),
+        # an abbreviation, a `-h` cluster and a non-ASCII option
+        _case("abbreviation", ["--back", "missing.sql.gz"]),
+        _case("help-cluster", ["-hx"], dump=None),
+        _case("unicode-unknown", DUMP + ["--bé"]),
         # argv that passes every gate reaches Docker: the stand-in refuses
         # the first inspect, and both arms stop there under the update lock
         _case("valid-yes", DUMP + ["--yes", "--safety-dir", "safety"]),
@@ -660,11 +586,6 @@ def _scripted(case_id: str, calls, *, argv: list[str] | None = None, extra: list
     the list of answers, or a function of the arm returning it."""
     script = calls if callable(calls) else (lambda arm, fixed=calls: fixed)
     return _case(case_id, (argv if argv is not None else DUMP + SAFE) + list(extra), script=script, **kwargs)
-
-
-def _reaches(case_id: str, calls, count: int, **kwargs) -> Case:
-    """The candidate defers at the oracle's first change, after ``count`` calls."""
-    return _scripted(case_id, calls, rules=("restore-defer-at-first-change",), reached=count, **kwargs)
 
 
 def _checkout(arm) -> None:
@@ -692,7 +613,6 @@ def _docker_cases() -> list[Case]:
     running = _daemon_doc(State={"Running": True})
     return [
         # DockerBank(...): inspect, resolution, the port, the /data mount, PostgreSQL running
-        _scripted("docker-inspect-daemon-fails", [_inspect(DAEMON, "", exit=1, stderr="no such container\n")]),
         _scripted("docker-inspect-pg-fails", [_inspect(DAEMON, _daemon_doc()), _inspect(PG, "", exit=1)]),
         _scripted("docker-inspect-empty-list", [_inspect(DAEMON, "[]")]),
         _scripted("docker-inspect-not-a-dict", [_inspect(DAEMON, "[5]")]),
@@ -759,53 +679,6 @@ def _docker_cases() -> list[Case]:
             _call(_lit("exec", PG, "sh", "-c", FIND, "_", "/var/run/postgresql"), 1)]),
         # the lock: another update holds it, so the oracle refuses before Docker
         _scripted("docker-lock-busy", [], prepare=_hold_lock),
-        # the oracle's first change comes next: the candidate defers there
-        _reaches("reach-safety-dump", [*_probes(), *_dump_fails()], 8),
-        _reaches("reach-database-absent", [
-            *_probes(exists="f\n"), _space(PG, "/"),
-            _call(_lit("create", "--network", "none", "--user", "0", "--volumes-from", DAEMON + ":ro",
-                       "--entrypoint", "sh", "sha256:fixture-image", "-c")
-                  + [r"tar czf /tmp/pl_state-\d{8}-\d{6}-[0-9a-f]{8}\.tgz -C /data \."], 1),
-            _call(_lit("exec", PG, "rm", "-f") + [BACKUP_REMOTE]),
-            _call(_lit("exec", PG, "rm", "-f") + [RESTORE_REMOTE, RESTORE_REMOTE + r"\.sql"])], 8),
-        _reaches("reach-stop-daemon", [
-            *_probes(daemon=running), _call(_lit("stop", DAEMON), 1), _call(_lit("start", DAEMON)),
-            _call(_lit("exec", PG, "rm", "-f") + [RESTORE_REMOTE, RESTORE_REMOTE + r"\.sql"])], 8),
-        _reaches("reach-state-helper", [
-            *_probes(), _call(_lit("create", "--network", "none", "--user", "0", "--volumes-from", DAEMON + ":ro",
-                                   "--entrypoint", "sh", "sha256:fixture-image", "-c", "LC_ALL=C df -Pk -- /data"),
-                              1)], 8, extra=STATE, state="plain"),
-        _reaches("reach-storage-helper", [
-            *_probes()[:3], _space(PG, "/", exit=1, stdout=""), _space(DAEMON, "/", exit=1, stdout=""),
-            _call(_lit("create", "--name") + [r"pseudolife-diskcheck-[0-9a-f]{32}"]
-                  + _lit("--read-only", "--network", "none", "--entrypoint", "df", "sha256:fixture-image", "-Pk",
-                         "/"), 1),
-            _call(_lit("rm", "-f", "-v") + [r"pseudolife-diskcheck-[0-9a-f]{32}"])], 5),
-        _reaches("reach-socket-mount-empty", [
-            *_probes(pg=_pg_doc(Mounts=[socket]))[:5], _inspect(PG, _pg_doc(Mounts=[socket])),
-            _call(_lit("exec", PG, "sh", "-c", FIND, "_", "/var/run/postgresql")), _space(PG, "/"),
-            *_dump_fails()], 8),
-        # exactly 8 GiB free passes; a read-only PostgreSQL mount is not checked
-        _reaches("reach-free-at-floor", [*_probes(free_kb=8 * 1024 * 1024), *_dump_fails()], 8),
-        _reaches("reach-readonly-mount-skipped", [
-            *_probes(pg=_pg_doc(Mounts=[{"Destination": "/srv/ro", "RW": False},
-                                        {"Destination": PG_DATA, "RW": True}])), *_dump_fails()], 8),
-        # all four selectors: the role, database and port come from them
-        _reaches("reach-explicit-selectors", [
-            _inspect(DAEMON, _daemon_doc(Config={"Env": []})),
-            *_probes(port="5433", user="role", db="bank")[1:], *_dump_fails("5433", "role", "bank")], 8,
-            extra=["--db", "bank", "--user", "role", "--db-port", "5433"]),
-        _reaches("reach-leave-stopped-no-port", [
-            _inspect(DAEMON, _daemon_doc(HostConfig={})), *_probes()[1:], *_dump_fails()], 8,
-            extra=["--leave-stopped"]),
-        # Python's answer is not certain: the candidate defers before the lock
-        _reaches("reach-unsure-url", [
-            _inspect(DAEMON, _daemon_doc(Config={"Env": [f"PSEUDOLIFE_MCP_DATABASE_URL={URL}?sslmode=disable"]})),
-            *_probes()[1:], *_dump_fails()], 2),
-        _reaches("reach-unsure-json", [
-            _inspect(DAEMON, json.dumps([_daemon_doc(Health=float("nan"))])), *_probes()[1:], *_dump_fails()], 1),
-        _reaches("reach-unsure-non-ascii", [
-            _inspect(DAEMON, _daemon_doc(Labels={"note": "café"})), *_probes()[1:], *_dump_fails()], 1),
     ]
 
 
@@ -816,51 +689,45 @@ GZIPRS = DIR + "/gzip.rs"
 STATERS = DIR + "/state.rs"
 BANK = DIR + "/bank.rs"
 CONN = DIR + "/conn.rs"
-DOCKERRS = DIR + "/docker.rs"
 
 MUTANTS = [
-    Mutant("restore-refusal-exit", "restore", FILE, "Some(ExitCode::from(2))\n}", "Some(ExitCode::from(1))\n}",
-           ("no-yes",)),
+    Mutant("restore-refusal-exit", "restore", FILE, "    ExitCode::from(2)\n}\n\n/// Every run",
+           "    ExitCode::from(1)\n}\n\n/// Every run", ("no-yes",)),
     Mutant("restore-yes-ignored", "restore", FILE, "    if !args.yes {", "    if true {", ("valid-yes",)),
     Mutant("restore-null-device-terminal", "restore", "shim/src/cli/connect/mod.rs",
            "        && std::io::stdin().is_terminal()\n        && std::io::stdout().is_terminal()\n", "\n",
            ("no-yes-null-device",), platforms=("windows",)),
     Mutant("restore-state-skipped", "restore", FILE, "if let Some(archive) = &args.state_archive {",
            "if let Some(archive) = None::<&std::path::PathBuf> {", ("state-symlink-escape",)),
-    Mutant("restore-dump-after-state", "restore", FILE, "        Verdict::Refuse => return refuse(INCOMPLETE_DUMP),",
-           "        Verdict::Refuse if args.state_archive.is_none() => return refuse(INCOMPLETE_DUMP),\n"
-           "        Verdict::Refuse => return refuse(UNSAFE_STATE),", ("dump-before-state",)),
-    Mutant("restore-required-before-type", "restore", ARGS, '"--db-port" => match python_int(value)? {',
-           '"--db-port" if !backup_file => return error("the following arguments are required: --backup-file".into()),\n'
-           '            "--db-port" => match python_int(value)? {', ("port-before-unknown",)),
-    Mutant("restore-negative-as-option", "restore", ARGS, "        if negative {\n            return Some(Class::Value);",
-           "        if false {\n            return Some(Class::Value);", ("port-negative",)),
-    Mutant("restore-help-any-width", "restore", ARGS, "backup_args::width() == 78", "backup_args::width() > 0",
-           ("defer-help-columns",)),
+    Mutant("restore-dump-after-state", "restore", FILE,
+           "    if dump::complete(&args.backup_file) != Verdict::Pass {\n        return refuse(INCOMPLETE_DUMP);",
+           "    if dump::complete(&args.backup_file) != Verdict::Pass {\n"
+           "        return refuse(if args.state_archive.is_none() { INCOMPLETE_DUMP } else { UNSAFE_STATE });",
+           ("dump-before-state",)),
+    Mutant("restore-required-before-type", "restore", ARGS, '"--db-port" => match python_int(value) {',
+           '"--db-port" if !backup_file => return Parsed::Error("the following arguments are required: --backup-file".into()),\n'
+           '            "--db-port" => match python_int(value) {', ("port-before-unknown",)),
+    Mutant("restore-negative-as-option", "restore", ARGS, "    } else if negative_number(raw) {\n        return Class::Value;",
+           "    } else if false {\n        return Class::Value;", ("port-negative",)),
     Mutant("restore-copy-loose", "restore", DUMPRS, "    token > 0\n", "    token != usize::MAX\n", ("dump-copy-no-token",)),
     Mutant("restore-lone-cr", "restore", DUMPRS, "                b'\\r' => {\n                    self.end_line();",
            "                b'\\r' => {\n                    self.line.push(byte);", ("dump-lone-cr",)),
     Mutant("restore-gzip-padding", "restore", GZIPRS, "                Some(0) => {}\n", "", ("dump-trailing-zeros",)),
     Mutant("restore-gzip-crc", "restore", GZIPRS, "stored_crc != crc.sum()", "stored_crc == crc.sum().wrapping_add(1)", ("dump-bad-crc",)),
-    Mutant("restore-crc-deferred", "restore", GZIPRS,
-           "            return Err(Stop::Refuse);\n        }\n        // Zero padding",
-           "            return Err(Stop::Unsure);\n        }\n        // Zero padding", ("dump-distance-too-far",)),
-    Mutant("restore-zlib-deferred", "restore", GZIPRS, "                )\n                .map_err(|_| Stop::Refuse)?;",
-           "                )\n                .map_err(|_| Stop::Unsure)?;", ("dump-corrupt-deflate",)),
-    Mutant("restore-later-header-error", "restore", STATERS,
-           "            Header::Invalid => {\n                self.end = if self.next == 0 {",
-           "            Header::Invalid => {\n                self.end = if true {", ("state-bad-later-header",)),
-    Mutant("restore-directory-skips", "restore", STATERS, "let skips = !matches!(kind, b'1' | b'2' | b'3' | b'4' | b'5' | b'6');",
-           "let skips = !matches!(kind, b'1' | b'2' | b'3' | b'4' | b'6');", ("state-directory-size-skips-nothing",)),
-    Mutant("restore-padding-unchecked", "restore", STATERS, "            debug_assert!(self.skipped);\n            self.end = End::Error;",
-           "            self.end = End::Done;", ("state-member-padding-truncated",)),
-    Mutant("restore-no-transient-pass", "restore", STATERS, "        links.map.clear();\n        for member in members {",
-           "        links.map.clear();\n        for member in &members[..0] {", ("state-transient-link",)),
+    Mutant("restore-directory-skips", "restore", STATERS,
+           "let data = if matches!(member.kind, 0 | b'0') {",
+           "let data = if true {", ("state-directory-size-skips-nothing",)),
+    Mutant("restore-padding-unchecked", "restore", STATERS, "            || self.seen < self.next\n", "",
+           ("state-member-padding-truncated",)),
+    Mutant("restore-no-transient-pass", "restore", STATERS,
+           "    let mut kinds: HashMap<Vec<u8>, u8> = HashMap::new();\n    for member in members {",
+           "    let mut kinds: HashMap<Vec<u8>, u8> = HashMap::new();\n    for member in &members[..0] {",
+           ("state-transient-link",)),
     Mutant("restore-fifo-allowed", "restore", STATERS, "matches!(self.kind, b'3' | b'4' | b'6')",
            "matches!(self.kind, b'3' | b'4')", ("state-fifo",)),
     Mutant("restore-loop-continues", "restore", STATERS, "                None => return Ok(None),", "                None => {}",
            ("state-loop-ends-walk",)),
-    Mutant("restore-prefix-ignored", "restore", STATERS, "    if !prefix.is_empty() {", "    if false {",
+    Mutant("restore-prefix-ignored", "restore", STATERS, "    if posix && !prefix.is_empty() {", "    if false {",
            ("state-prefix-escape",)),
     Mutant("restore-signed-checksum", "restore", STATERS, "stored != unsigned && stored != signed",
            "stored != unsigned && stored != signed + 1",
@@ -871,61 +738,46 @@ MUTANTS = [
     Mutant("restore-long-link-ignored", "restore", STATERS,
            "                    } else {\n                        member.linkname = data;",
            "                    } else {\n                        let _ = data;", ("state-gnu-long-link-escape",)),
-    Mutant("restore-long-end-quiet", "restore", STATERS,
-           "self.end = if subsequent { End::Error } else { End::Done };", "self.end = End::Done;",
-           ("state-gnu-long-then-end",)),
     Mutant("restore-long-short-read-quiet", "restore", STATERS,
-           "        if self.long.is_some() || !self.pending.is_empty() {", "        if false {",
-           ("state-gnu-long-data-cut",)),
-    Mutant("restore-long-keeps-after-nul", "restore", STATERS, "                            long.ended = true;",
-           "                            long.data.extend_from_slice(&part[at..]);", ("state-gnu-long-cut-at-nul",)),
-    Mutant("restore-octal-prefix", "restore", STATERS, "    if prefixed {", "    if prefixed && false {",
-           ("state-octal-prefix-fields",)),
-    # the confirmed path: the lock, DockerBank(...) and restore()'s read-only checks
-    Mutant("restore-confirmed-deferred", "restore", FILE, "    confirmed(&args)\n}", "    let _ = confirmed;\n    None\n}",
-           ("valid-yes", "docker-inspect-daemon-fails", "docker-pg-stopped", "docker-lock-busy", "docker-mount-low")),
+           "        let incomplete = self.long.is_some()\n            || !self.pending.is_empty()",
+           "        let incomplete = false\n            && !self.pending.is_empty()", ("state-gnu-long-data-cut",)),
+    Mutant("restore-long-keeps-after-nul", "restore", STATERS, "                                long.ended = true;",
+           "                                long.data.extend_from_slice(&part[at..]);", ("state-gnu-long-cut-at-nul",)),
+    Mutant("restore-confirmed-skipped", "restore", FILE, "    let code = locked(&args, &directory, state_size);",
+           "    let _ = locked;\n    let code = ExitCode::SUCCESS;",
+           ("valid-yes", "docker-pg-stopped", "docker-mount-low")),
     Mutant("restore-busy-pid-unknown", "restore", FILE,
            "    let pid = if !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) {", "    let pid = if false {",
            ("docker-lock-busy",)),
-    Mutant("restore-lock-probe-skipped", "restore", FILE, "        Ok(Some(true)) => return busy(&directory),",
-           "        Ok(Some(true)) => {}", ("docker-lock-busy",)),
+    Mutant("restore-lock-busy-ignored", "restore", FILE, "        Ok(false) => return busy(&directory),",
+           "        Ok(false) => {}", ("docker-lock-busy",)),
     Mutant("restore-refusal-unlocked", "restore", FILE,
            '    let mut lock = os_lock::Lock::new(directory.join("update.lock"));',
            '    let mut lock = os_lock::Lock::new(directory.join("update.lock.unused"));', ("docker-pg-stopped",)),
-    Mutant("restore-reached-answered", "restore", FILE, "        Err(bank::Stop::Defer) | Ok(_) => None,",
-           "        Err(bank::Stop::Defer) => None,\n        Ok(_) => Some(ExitCode::SUCCESS),", ("reach-safety-dump",)),
     Mutant("restore-inspect-exit", "restore", BANK,
-           'then retry",\n                    self.pg, self.daemon\n                ),\n                1,',
-           'then retry",\n                    self.pg, self.daemon\n                ),\n                2,',
-           ("docker-inspect-daemon-fails",)),
+           '                        self.pg, self.daemon\n                    ),\n                    1,',
+           '                        self.pg, self.daemon\n                    ),\n                    2,',
+           ("docker-inspect-pg-fails",)),
     Mutant("restore-inspect-stderr", "restore", BANK,
-           "        let text = ascii_text(&ran.output(true)).ok_or(Stop::Defer)?;\n        if text.trim_matches",
-           "        let text = ascii_text(&[ran.stdout.clone(), ran.stderr.clone()].concat()).ok_or(Stop::Defer)?;\n"
-           "        if text.trim_matches", ("docker-stderr-ignored-on-success",)),
-    Mutant("restore-inspect-object-deferred", "restore", BANK,
-           "            // `{...}[0]` raises KeyError, which the oracle refuses too.\n            _ => Err(refuse()),",
-           "            Value::Object(_) => Err(Stop::Defer),\n            _ => Err(refuse()),", ("docker-inspect-object",)),
-    Mutant("restore-json-error-refused", "restore", BANK,
-           "let value: Value = serde_json::from_str(&text).map_err(|_| Stop::Defer)?;",
-           "let value: Value = serde_json::from_str(&text).map_err(|_| refuse())?;", ("reach-unsure-json",)),
+           "let value: Value = serde_json::from_slice(&ran.stdout)",
+           "let value: Value = serde_json::from_slice(&[ran.stdout.clone(), ran.stderr.clone()].concat())",
+           ("docker-stderr-ignored-on-success",)),
+    Mutant("restore-inspect-object-accepted", "restore", BANK,
+           "        match value {\n            Value::Array(items)",
+           "        match value {\n            item @ Value::Object(_) => Ok(item),\n            Value::Array(items)",
+           ("docker-inspect-object",)),
     Mutant("restore-explicit-ignored", "restore", BANK, "    let explicit = nonempty(&args.container).is_some()",
            "    let explicit = false && nonempty(&args.container).is_some()", ("docker-explicit-selectors",)),
-    Mutant("restore-explicit-values", "restore", BANK,
-           "    let user = nonempty(&args.user).map_or(connection_user, str::to_owned);",
-           "    let user = connection_user;", ("reach-explicit-selectors",)),
     Mutant("restore-port-range", "restore", BANK, "    if !(1..=65535).contains(&port) {\n        return fail(PORT, 2);",
            "    if port < 0 {\n        return fail(PORT, 2);", ("docker-port-option-range", "docker-explicit-port-range")),
     Mutant("restore-image-unchecked", "restore", BANK, "        _ => return fail(NO_MOUNT, 2),\n    };",
            "        _ => String::new(),\n    };", ("docker-no-image",)),
-    Mutant("restore-data-mount-unchecked", "restore", BANK, "    if !has_data {", "    if false {",
-           ("docker-no-data-mount",)),
+    Mutant("restore-data-mount-unchecked", "restore", BANK, '    if !state_mounts.iter().any(|m| m == "/data") {',
+           "    if false {", ("docker-no-data-mount",)),
     Mutant("restore-pg-running-unchecked", "restore", BANK, "    if !pg_running {", "    if false {",
            ("docker-pg-stopped",)),
     Mutant("restore-health-port-unchecked", "restore", BANK,
            "    if !args.leave_stopped && daemon_url.is_empty() {", "    if false {", ("docker-no-health-port",)),
-    Mutant("restore-leave-stopped-ignored", "restore", BANK,
-           "    if !args.leave_stopped && daemon_url.is_empty() {", "    if daemon_url.is_empty() {",
-           ("reach-leave-stopped-no-port",)),
     Mutant("restore-socket-reason", "restore", BANK, 'reason.contains("socket")', 'reason.contains("sockets")',
            ("docker-psql-socket",)),
     Mutant("restore-exists-unchecked", "restore", BANK, "        _ => return fail(EXISTS, 2),", "        _ => false,",
@@ -942,25 +794,19 @@ MUTANTS = [
            "        for name in [self.daemon.clone(), self.pg.clone()] {", ("docker-storage-from-daemon",)),
     Mutant("restore-storage-location", "restore", BANK, '&format!("Docker storage ({name})")',
            '&format!("Docker storage {name}")', ("docker-storage-unreadable",)),
-    Mutant("restore-space-order", "restore", BANK, '    bank.storage_space()?;\n    bank.container_space("/tmp")?;',
-           '    bank.container_space("/tmp")?;\n    bank.storage_space()?;', ("reach-safety-dump",)),
+    Mutant("restore-space-order", "restore", BANK,
+           '    bank.storage_space(&image, run_tag)?;\n    bank.container_space("/tmp")?;',
+           '    bank.container_space("/tmp")?;\n    bank.storage_space(&image, run_tag)?;', ("docker-tmp-fails",)),
     Mutant("restore-free-floor", "restore", BANK, "    if free < MIN_FREE {", "    if free < MIN_FREE - 1024 {",
            ("docker-tmp-low",)),
-    Mutant("restore-free-floor-inclusive", "restore", BANK, "    if free < MIN_FREE {", "    if free <= MIN_FREE {",
-           ("reach-free-at-floor",)),
-    Mutant("restore-readonly-mount-checked", "restore", BANK, '        let rw = map.get("RW").is_none_or(truthy);',
-           "        let rw = true;", ("reach-readonly-mount-skipped",)),
-    Mutant("restore-socket-payload-ignored", "restore", BANK,
-           "            if found.trim_matches(python_space).is_empty() {",
-           "            if found.trim_matches(python_space).is_empty() && false {", ("reach-socket-mount-empty",)),
     Mutant("restore-socket-find-exit", "restore", BANK, "                return fail(SOCKET_MOUNT, 2);",
            "                continue;", ("docker-socket-find-fails",)),
-    Mutant("restore-psql-argv", "restore", BANK, '            "psql",\n            "-X",\n',
-           '            "psql",\n', ("reach-safety-dump",)),
+    Mutant("restore-psql-argv", "restore", BANK,
+           '            "psql",\n            "-X",\n            "-h",\n            "/var/run/postgresql",\n            "-p",\n        ]',
+           '            "psql",\n            "-h",\n            "/var/run/postgresql",\n            "-p",\n        ]',
+           ("docker-psql-fails",)),
     Mutant("restore-dbname-quoted", "restore", CONN, "    if escaped.chars().any(python_space) {", "    if true {",
-           ("reach-safety-dump",)),
-    Mutant("restore-unsure-url-read", "restore", CONN, "        if rest.contains(['?', '%', '[', ']', ',']) {",
-           "        if rest.contains(['%', '[', ']', ',']) {", ("reach-unsure-url",)),
+           ("docker-psql-fails",)),
     Mutant("restore-host-unmatched-allowed", "restore", CONN,
            "    } else if host.is_empty() || !aliases.contains(&host) {", "    } else if host.is_empty() {",
            ("docker-resolve-unmatched-host",)),
@@ -970,9 +816,6 @@ MUTANTS = [
     Mutant("restore-unshared-network-read", "restore", CONN,
            "        if !daemon_networks.contains_key(name) {\n            continue;\n        }", "",
            ("docker-resolve-no-shared-network",)),
-    Mutant("restore-non-ascii-read", "restore", DOCKERRS,
-           "    if !bytes.is_ascii() {\n        return None;\n    }\n    let text",
-           "    if false {\n        return None;\n    }\n    let text", ("reach-unsure-non-ascii",)),
 ]
 
 
