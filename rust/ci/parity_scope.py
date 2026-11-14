@@ -127,11 +127,14 @@ DAEMON = ("cli", "cli-store", "cli-startup", "eval")
 # other commands import them. test_parity_scope.py scans the shim source and
 # fails if another command starts using a mapped entry.
 SHIM_COMMANDS = {
-    # The conservative import scan also sees update's private backup module.
+    # The conservative import scan also sees update's private backup module,
+    # and restore_cli (move's native module among them) imports backup.
     # Doctor shares update's Codex hook checks; its dependencies inherit that row,
     # and console's, which reads doctor's registration search.
-    "backup": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
-    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
+    "backup": ("backup", "migrate_flat", "update", "doctor", "console", "restore",
+               "move"),
+    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "console", "restore",
+                        "move"),
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
     "update": ("update", "doctor", "console"),
@@ -150,8 +153,9 @@ SHIM_COMMANDS = {
     "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
     # backup's Docker tier is restore_cli's docker_backup, so restore_cli
-    # reaches backup and backup's users' rows.
-    "restore_cli": ("restore", "backup", "migrate_flat", "update", "doctor", "console"),
+    # reaches backup and backup's users' rows; its move_native answers the
+    # move row through the cli.rs dispatcher, which the import scan skips.
+    "restore_cli": ("restore", "backup", "migrate_flat", "update", "doctor", "console", "move"),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }

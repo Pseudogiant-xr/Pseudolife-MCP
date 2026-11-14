@@ -659,25 +659,71 @@ ones), 4 verification refused, 5 applied but the post-apply check failed.
 installed Docker bank (its daemon and Postgres containers exist), with no
 lost writes. Run it on the bank's current host.
 
-**With the native client**, `move` plans a move but does not perform one
-yet: `pseudolife-mcp move --to <ssh-target> --target-url <url>
---no-keep-tokens --dry-run` checks both hosts without changing anything on
-either and prints what the move would do, and without `--dry-run` it refuses
-and says so (move with pseudolife-mcp 0.23.x for now). The target needs the
-native client installed (its installer), an installed Docker bank (one
-compose stack, not a source checkout) that is healthy, empty and at least the
-source's schema and PostgreSQL version, and free space for the move's files
-under `~/.pseudolife-mcp/moves` (or `--target-work-dir`). ssh runs with
-`BatchMode=yes` and no option that touches host-key checking: a host key that
-is unknown or has changed fails with ssh's own refusal and the fix (connect
-once with `ssh <target>` and check the fingerprint, or `ssh-keygen -R` after
-confirming a changed key); move never accepts a key itself. `ssh` and
-`docker` are found only in absolute `PATH` directories. Not available in the
-native client yet: `--expose-target` (expose the target yourself and pass
-`--target-url`), carrying the source's tokens (pass `--no-keep-tokens`),
-`--resume`, `--target-env-file`, `--target-compose-file` and checkout targets
-(`--target-checkout`). The rest of this section describes pseudolife-mcp
-0.23.x's move.
+**With the native client**, `pseudolife-mcp move --to <ssh-target>
+--target-url <url> --no-keep-tokens` moves the bank, asking first (or `--yes`).
+Add `--dry-run` to check both hosts without changing anything and print the
+plan. The target needs:
+- the native client installed (its installer);
+- an installed Docker bank (one compose stack, not a source checkout) that is
+  healthy, empty, serving with authentication on, with its data directory at
+  `/data` as the installer sets it, and at least the source's schema and
+  PostgreSQL version;
+- free space for the move's files under `~/.pseudolife-mcp/moves` (or
+  `--target-work-dir`).
+
+The move, in order:
+1. Claims the target, pauses unattended updates and restart policies on both
+   hosts, and stops the source daemon.
+2. Makes the source's database read-only for new sessions, takes a final
+   backup of it, then fences it (`ALLOW_CONNECTIONS false`), so nothing written
+   between the backup and the fence is lost.
+3. Copies the backup to the target and checks its SHA-256.
+4. Gates the target (`/data/move.json`) and restores it there, then checks the
+   restored bank's identity and row counts.
+5. Starts the target once and waits until `--target-url` serves the moved
+   bank.
+6. Writes `/data/moved.json` into the stopped source: the commit point.
+7. Points this machine's clients at the target.
+
+**Before the commit point**, a failure or an interrupt rolls the move back.
+The target is proved stopped and gated before the source's fence lifts and
+its daemon starts, so two daemons never serve one bank. If the target cannot
+be proved stopped (a lost ssh link, say), the source stays stopped and fenced
+and the move exits 6, printing:
+- which daemon runs;
+- whether the bank is served anywhere;
+- where the data is;
+- the next command.
+
+Writes the target took while it served (rows added or removed, and rows
+changed in place, which its write counters show) are named and kept in its
+gated bank, and a later `--resume` never replaces them.
+
+**If the move process itself dies** (a closed console, a power loss), every
+later `move` on this host refuses until you run `pseudolife-mcp move
+--rollback <move id>`, which runs the same rollback from the move's record in
+`~/.pseudolife-mcp/moves/<move id>/`.
+
+**`--resume`** retries a rolled-back move whose restore ran on the target,
+replacing that move's own restored bank there. Both hosts keep the move's files
+(a full copy of the bank) under `~/.pseudolife-mcp/moves/<move id>` until you
+remove them: the report names both folders and their sizes.
+
+**ssh and Docker.** ssh runs with `BatchMode=yes` and no option that touches
+host-key checking. A host key that is unknown or has changed fails with ssh's
+own refusal and the fix: connect once with `ssh <target>` and check the
+fingerprint, or `ssh-keygen -R` after confirming a changed key. Move never
+accepts a key itself. `ssh` and `docker` are found only in absolute `PATH`
+directories.
+
+**Not available in the native client yet:**
+- `--expose-target`: expose the target yourself and pass `--target-url`;
+- carrying the source's tokens: pass `--no-keep-tokens`, and the target keeps
+  its own;
+- `--target-env-file` and `--target-compose-file`;
+- checkout targets (`--target-checkout`).
+
+The rest of this section describes pseudolife-mcp 0.23.x's move.
 
 **Install the destination first**, using the installer or your stack manager,
 then run the move on the source. An owning checkout supplies restore/update;

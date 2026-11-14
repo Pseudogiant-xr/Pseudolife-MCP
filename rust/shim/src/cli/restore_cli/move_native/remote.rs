@@ -37,6 +37,49 @@ impl Ran {
 /// Runs a command on the target.
 pub(in crate::cli) trait Remote {
     fn run(&mut self, target: &str, command: &str, stdin: &[u8], timeout: Duration) -> Ran;
+
+    /// [`Remote::run`] with `head` then the whole of `file` on stdin,
+    /// streamed (a dump can be larger than memory).
+    fn run_stream(
+        &mut self,
+        target: &str,
+        command: &str,
+        head: &[u8],
+        file: Option<&std::path::Path>,
+        timeout: Duration,
+    ) -> Ran {
+        let mut stdin = head.to_vec();
+        if let Some(file) = file {
+            match std::fs::read(file) {
+                Ok(bytes) => stdin.extend(bytes),
+                Err(error) => {
+                    return Ran {
+                        code: 255,
+                        fault: Some(format!("cannot read {}: {error}", file.display())),
+                        ..Ran::default()
+                    };
+                }
+            }
+        }
+        self.run(target, command, &stdin, timeout)
+    }
+}
+
+/// ssh in its own process group, so a terminal's Ctrl-C reaches only move,
+/// which decides at a step boundary (a killed ssh would read as a lost link
+/// mid-operation).
+fn own_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
 }
 
 /// The options every move ssh carries; none of them touches host-key
@@ -80,13 +123,38 @@ pub(super) fn argv(target: &str, command: &str) -> Vec<String> {
 
 impl Remote for Ssh {
     fn run(&mut self, target: &str, command: &str, stdin: &[u8], timeout: Duration) -> Ran {
-        let mut child = match Command::new(&self.program)
+        self.run_stream(target, command, stdin, None, timeout)
+    }
+
+    fn run_stream(
+        &mut self,
+        target: &str,
+        command: &str,
+        head: &[u8],
+        file: Option<&std::path::Path>,
+        timeout: Duration,
+    ) -> Ran {
+        let source = match file.map(std::fs::File::open).transpose() {
+            Ok(source) => source,
+            Err(error) => {
+                return Ran {
+                    code: 255,
+                    fault: Some(format!(
+                        "cannot read {}: {error}",
+                        file.map(|f| f.display().to_string()).unwrap_or_default()
+                    )),
+                    ..Ran::default()
+                };
+            }
+        };
+        let mut command_line = Command::new(&self.program);
+        command_line
             .args(argv(target, command))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
+            .stderr(Stdio::piped());
+        own_group(&mut command_line);
+        let mut child = match command_line.spawn() {
             Ok(child) => child,
             Err(error) => {
                 return Ran {
@@ -99,10 +167,14 @@ impl Remote for Ssh {
                 };
             }
         };
-        let input = stdin.to_vec();
+        let input = head.to_vec();
         if let Some(mut pipe) = child.stdin.take() {
             std::thread::spawn(move || {
-                let _ = pipe.write_all(&input);
+                if pipe.write_all(&input).is_ok()
+                    && let Some(mut source) = source
+                {
+                    let _ = std::io::copy(&mut source, &mut pipe);
+                }
             });
         }
         // The readers report over a channel, never through a join: a

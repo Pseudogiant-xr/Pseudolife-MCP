@@ -709,7 +709,7 @@ MUTANTS = [
            '            "--db-port" => match python_int(value) {', ("port-before-unknown",)),
     Mutant("restore-negative-as-option", "restore", ARGS, "    } else if negative_number(raw) {\n        return Class::Value;",
            "    } else if false {\n        return Class::Value;", ("port-negative",)),
-    Mutant("restore-copy-loose", "restore", DUMPRS, "    token > 0\n", "    token != usize::MAX\n", ("dump-copy-no-token",)),
+    Mutant("restore-copy-loose", "restore", DUMPRS, "    (token > 0\n", "    (token != usize::MAX\n", ("dump-copy-no-token",)),
     Mutant("restore-lone-cr", "restore", DUMPRS, "                b'\\r' => {\n                    self.end_line();",
            "                b'\\r' => {\n                    self.line.push(byte);", ("dump-lone-cr",)),
     Mutant("restore-gzip-padding", "restore", GZIPRS, "                Some(0) => {}\n", "", ("dump-trailing-zeros",)),

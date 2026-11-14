@@ -19,7 +19,7 @@ use super::{
     argv::{self, Request},
     probe::{self, READ_ONLY},
     remote::{self, Remote},
-    target::{self, Ask, FRAME, PROTOCOL, Place},
+    target::{self, FRAME, PROTOCOL, Place},
     *,
 };
 
@@ -54,7 +54,7 @@ fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
         "Image": "sha256:0123456789abcdef",
         "State": {"Running": running},
         "Config": {
-            "Env": [format!("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife:{SECRET}@pseudolife-pg:5432/pseudolife_memory"), "PSEUDOLIFE_MCP_TOKEN=tok-secret", "PATH=/bin"],
+            "Env": [format!("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife:{SECRET}@pseudolife-pg:5432/pseudolife_memory"), "PSEUDOLIFE_MCP_TOKEN=tok-secret", "PSEUDOLIFE_MCP_DATA_DIR=/data", "PATH=/bin"],
             "User": "pseudolife",
             "Image": "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0",
             "Labels": {"com.docker.compose.project": project, "com.docker.compose.project.working_dir": dir, "com.docker.compose.project.config_files": format!("{dir}/docker-compose.yml")}
@@ -257,13 +257,21 @@ impl Remote for Wire {
                 fault: None,
             },
             Link::Helper => {
-                let ask: Ask = serde_json::from_slice(stdin).unwrap();
-                let reply = target::answer(&mut self.far, &ask);
+                let request: protocol::Request = serde_json::from_slice(stdin).unwrap();
+                let protocol::Op::Check { ask } = request.op else {
+                    panic!("the preflight sends only check: {request:?}");
+                };
+                let answer = protocol::Answer {
+                    protocol: protocol::PROTOCOL,
+                    ok: true,
+                    check: Some(target::answer(&mut self.far, &ask)),
+                    ..protocol::Answer::default()
+                };
                 remote::Ran {
                     code: self.helper_exit,
                     stdout: format!(
                         "motd noise from a login script\n{FRAME}{}\n",
-                        serde_json::to_string(&reply).unwrap()
+                        serde_json::to_string(&answer).unwrap()
                     )
                     .into_bytes(),
                     ..remote::Ran::default()
@@ -396,7 +404,7 @@ fn assert_read_only(world: &Both) {
     for (_, command, _) in &world.wire.runs {
         assert_eq!(
             command,
-            &remote::sh(&script()),
+            &remote::sh(&script(protocol::PROTOCOL)),
             "the only remote command is the helper"
         );
     }
@@ -410,7 +418,12 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
     // The source asked the target about itself, by fingerprint and versions.
     let (to, _, body) = &world.wire.runs[0];
     assert_eq!(to, "u@box");
-    let ask: Ask = serde_json::from_slice(body).unwrap();
+    let request: protocol::Request = serde_json::from_slice(body).unwrap();
+    assert_eq!(request.protocol, protocol::PROTOCOL);
+    assert!(body.ends_with(b"\n"), "the request is one line");
+    let protocol::Op::Check { ask } = request.op else {
+        panic!("the preflight sends check: {request:?}");
+    };
     assert_eq!(ask.protocol, PROTOCOL);
     assert_eq!(ask.source_bank, fp(SOURCE_ID));
     assert_eq!((ask.source_schema, ask.source_pg_version), (60, 180001));
@@ -426,7 +439,7 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
     );
     assert_eq!(world.wire.far.health_gets, ["http://127.0.0.1:8765/health"]);
     assert_eq!(plan.target.work_dir, moves());
-    let text = render(&plan);
+    let text = render(&plan, true);
     // Images by name, not id.
     assert!(
         text.contains("(image ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0)"),
@@ -451,9 +464,21 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
     }
     assert!(
         text.ends_with(
-            "The native client does not perform the move yet; this run only checked it.\n"
-        )
+            "This run only checked both hosts: run it without --dry-run to move the bank.\n"
+        ),
+        "{text}"
     );
+    // The move itself shows the same plan, saying it is about to run.
+    let real = render(&plan, false);
+    assert!(
+        real.starts_with("Move plan: both hosts checked; nothing is changed until you confirm.\n"),
+        "{real}"
+    );
+    assert!(
+        real.contains("The move will, in this order:\n  1. claim the target for this move"),
+        "{real}"
+    );
+    assert!(!real.contains("--dry-run"), "{real}");
     // No secret reaches the request, the reply, the plan or its document.
     let document = document(&plan).to_string();
     for shown in [
@@ -839,11 +864,20 @@ fn a_missing_old_or_mismatched_target_client_is_named() {
             "the pseudolife-mcp on u@box has no native move helper (it answered: pseudolife-mcp: error: argument mode: invalid choice: 'move-target'); update it there with pseudolife-mcp update",
         ),
         (
+            // A newer client, speaking a protocol this one does not.
             Link::Prints(
-                "PSEUDOLIFE-MOVE-TARGET {\"protocol\":2,\"version\":\"0.30.0\",\"refusals\":[],\"facts\":null,\"work_dir\":\"\",\"free_bytes\":null,\"update_timer\":\"\"}\n",
-                0,
+                "PSEUDOLIFE-MOVE-TARGET {\"protocol\":3,\"version\":\"0.30.0\",\"ok\":false,\"error\":\"\"}\n",
+                3,
             ),
-            "the client on u@box (0.30.0) speaks move protocol 2, and this one",
+            "the client on u@box (0.30.0) speaks move protocol 3, and this one",
+        ),
+        (
+            // An older client that speaks only protocol 1 refuses 2 itself.
+            Link::Prints(
+                "PSEUDOLIFE-MOVE-TARGET {\"protocol\":1,\"version\":\"0.23.0\",\"refusals\":[\"the target's pseudolife-mcp speaks move protocol 1, and the source asked for \\\"2\\\"; update the older client (pseudolife-mcp update) so both match, then retry\"],\"facts\":null,\"work_dir\":\"\",\"free_bytes\":null,\"update_timer\":\"\"}\n",
+                3,
+            ),
+            "the target's pseudolife-mcp speaks move protocol 1, and the source asked for \"2\"; update the older client",
         ),
         (
             Link::Prints("PSEUDOLIFE-MOVE-TARGET {not json\n", 0),
@@ -871,7 +905,7 @@ fn a_fresh_target_without_a_fingerprint_is_accepted_and_its_url_checked_by_what_
     };
     let mut world = fresh();
     let plan = preflight(&mut world, &request()).expect("a fresh target is accepted");
-    let text = render(&plan);
+    let text = render(&plan, true);
     assert!(
         text.contains("an empty bank (no identity yet: a fresh install)"),
         "{text}"
@@ -910,9 +944,10 @@ fn the_target_url_must_reach_the_targets_own_daemon() {
 
 #[test]
 fn the_helper_answers_a_protocol_it_does_not_speak_with_3_never_255() {
-    assert_eq!(target::run(&words(&["2"])), 3);
+    assert_eq!(target::run(&words(&["3"])), 3);
     assert_eq!(target::run(&words(&[])), 3);
     assert_eq!(target::run(&words(&["1", "extra"])), 3);
+    assert_eq!(target::run(&words(&["2", "extra"])), 3);
 }
 
 #[test]
@@ -948,10 +983,9 @@ fn argv_refusals_come_before_any_effect_in_order() {
         assert!(why.starts_with(words), "{items:?}: {why}");
         assert!(why.ends_with(". Nothing was changed"), "{why}");
     };
-    starts(
-        &without("--dry-run"),
-        "the native client plans a move but does not perform one yet: run it with --dry-run",
-    );
+    // The move itself, and resuming one, pass the argv checks.
+    assert_eq!(refused(&without("--dry-run")), None);
+    assert_eq!(refused(&[&base[..], &["--resume"]].concat()), None);
     starts(
         &[&base[..], &["--target-checkout", "/srv/x"]].concat(),
         "--target-checkout is not supported",
@@ -961,12 +995,8 @@ fn argv_refusals_come_before_any_effect_in_order() {
         "--expose-target is not available in the native client yet: expose the target's daemon yourself",
     );
     starts(
-        &[&base[..], &["--resume"]].concat(),
-        "--resume arrives with the native move itself",
-    );
-    starts(
         &[&base[..], &["--target-env-file", "/x/.env"]].concat(),
-        "--target-env-file and --target-compose-file arrive",
+        "--target-env-file and --target-compose-file are not available in the native client yet",
     );
     starts(&without("--target-url"), "--target-url is required");
     starts(
@@ -1009,10 +1039,10 @@ fn argv_refusals_come_before_any_effect_in_order() {
             "--target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, query or credentials)"
         )
     );
-    // Not dry-run outranks everything else.
+    // Without --dry-run the checks are the same, in the same order.
     starts(
         &["--to", "u@box", "--target-checkout", "/x"],
-        "the native client plans a move",
+        "--target-checkout is not supported",
     );
     // --target-release is the only mode now: accepted.
     assert_eq!(
@@ -1123,12 +1153,12 @@ fn a_host_network_daemon_is_reached_where_it_binds() {
 
 #[test]
 fn remote_commands_are_one_posix_word_after_sh_c() {
-    let command = remote::sh(&script());
+    let command = remote::sh(&script(protocol::PROTOCOL));
     assert!(command.starts_with("sh -c '"), "{command}");
     assert!(command.ends_with('\''), "{command}");
     // The script's own single quotes would end the word: it has none.
-    assert!(!script().contains('\''));
-    assert!(script().contains("exec \"$c\" move-target 1"));
+    assert!(!script(protocol::PROTOCOL).contains('\''));
+    assert!(script(protocol::PROTOCOL).contains("exec \"$c\" move-target 2"));
 }
 
 #[cfg(unix)]
@@ -1158,4 +1188,31 @@ fn an_ssh_timeout_ends_the_run_even_when_a_child_keeps_its_pipes_open() {
         took < Duration::from_secs(10),
         "the run waited {took:?} on the surviving child"
     );
+}
+
+#[test]
+fn a_daemon_the_gate_cannot_stop_and_an_unauthenticated_target_are_refused() {
+    let facts = |dir: &str| Facts {
+        daemon: "pseudolife-mcp-daemon".into(),
+        data_dir: dir.into(),
+        ..Facts::default()
+    };
+    assert_eq!(super::gate_refusal("target", &facts("/data")), None);
+    for dir in ["", "/srv/data", "/data/"] {
+        let why = super::gate_refusal("target", &facts(dir)).unwrap();
+        assert!(why.contains("not /data") && why.contains("gate"), "{why}");
+    }
+    // A target daemon that serves without authentication.
+    let mut world = world();
+    let mut answer = health(TARGET_ID, 60);
+    answer["auth"] = json!(false);
+    world.wire.far.health = Some(answer);
+    let why = preflight(&mut world, &request()).unwrap_err();
+    assert!(why.contains("does not require authentication"), "{why}");
+    // A source database the fence cannot name.
+    let mut source = facts("/data");
+    source.running = true;
+    source.db = "Pseudolife-Memory".into();
+    let why = source_refusal(&source).unwrap();
+    assert!(why.contains("cannot name safely"), "{why}");
 }

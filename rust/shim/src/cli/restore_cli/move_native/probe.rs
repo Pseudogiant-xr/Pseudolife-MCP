@@ -40,6 +40,9 @@ pub(in crate::cli) struct Facts {
     pub image: String,
     pub running: bool,
     pub restart_policy: String,
+    /// The daemon's `PSEUDOLIFE_MCP_DATA_DIR`: the move's gate and commit
+    /// marker stop a start only when it names the `/data` volume.
+    pub data_dir: String,
     /// `com.docker.compose.project` of the daemon and of PostgreSQL.
     pub compose_project: String,
     pub pg_compose_project: String,
@@ -207,12 +210,23 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
     let running = state
         .and_then(|s| bank::get(s, "Running"))
         .is_some_and(truthy);
-    let restart_policy = bank::get(&chosen.running, "HostConfig")
-        .and_then(|h| bank::get(h, "RestartPolicy"))
+    // The policy as `docker update --restart` takes it back, with an
+    // `on-failure` retry limit.
+    let policy =
+        bank::get(&chosen.running, "HostConfig").and_then(|h| bank::get(h, "RestartPolicy"));
+    let name = policy
         .and_then(|r| bank::get(r, "Name"))
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+        .unwrap_or_default();
+    let retries = policy
+        .and_then(|r| bank::get(r, "MaximumRetryCount"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let restart_policy = if name == "on-failure" && retries > 0 {
+        format!("on-failure:{retries}")
+    } else {
+        name.to_owned()
+    };
     let published = bank::daemon_url(&chosen.running, None, &chosen.daemon).map_err(text)?;
     let health_url = if published.is_empty() {
         host_network_url(&chosen.running)
@@ -231,6 +245,7 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
             .map_or_else(|| chosen.image.clone(), str::to_owned),
         running,
         restart_policy,
+        data_dir: env_value(&chosen.running, "PSEUDOLIFE_MCP_DATA_DIR").unwrap_or_default(),
         compose_project: label(&chosen.running, "com.docker.compose.project"),
         pg_compose_project: label(&pg_doc, "com.docker.compose.project"),
         compose_dir: label(&chosen.running, "com.docker.compose.project.working_dir"),
@@ -290,6 +305,19 @@ pub(super) fn gather<D: Docker>(docker: &mut D) -> Result<Facts, String> {
     Ok(facts)
 }
 
+/// The last value of `key` in a container's environment, trimmed.
+fn env_value(running: &Value, key: &str) -> Option<String> {
+    bank::get(running, "Config")
+        .and_then(|c| bank::get(c, "Env"))
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(Value::as_str)
+        .rev()
+        .find_map(|item| item.strip_prefix(key)?.strip_prefix('='))
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+}
+
 /// A daemon on the host network publishes no port: its endpoint is the
 /// address it binds, `PSEUDOLIFE_MCP_HOST` and `PSEUDOLIFE_MCP_PORT` from its
 /// environment (the daemon's defaults 127.0.0.1 and 8765), a wildcard read
@@ -334,6 +362,51 @@ fn literal(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
 
+/// [`user_filter`] for counting what a restored target took while it
+/// served, before and after its first start. A daemon's warm-up search on a
+/// bank with entries serves one of them, so here a "warmup probe" row with
+/// no session and no `episode_id` is the daemon's own whatever it served
+/// (measured 14 November 2026 on the two-host move proof: each start of the
+/// 0.21.0 daemon on a restored 12-entry bank added one such row serving an
+/// entry, which the emptiness rule counted as user data).
+pub(super) fn served_filter(table: &str) -> String {
+    match table {
+        "retrieval_events" => {
+            " WHERE NOT (query_text = 'warmup probe' AND session_id IS NULL AND episode_id IS NULL)"
+                .to_owned()
+        }
+        other => user_filter(other),
+    }
+}
+
+/// The rows of `table` that hold user data, as a SQL `WHERE` clause (or
+/// `""` for every row): Python move's seed-row rule, plus the daemon's own
+/// warm-up search. The preflight's emptiness check counts with it, so a
+/// plain daemon start leaves an empty target empty.
+pub(super) fn user_filter(table: &str) -> String {
+    let meta_filter = format!(
+        " WHERE key NOT IN ({}) AND right(key, 15) <> '_schema_version'",
+        EMPTY_TARGET_META_KEYS
+            .iter()
+            .map(|k| literal(k))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    match table {
+        "meta" => meta_filter,
+        "relations" => " WHERE NOT builtin".to_owned(),
+        "maintainer_bootstrap" => " WHERE used_at IS NOT NULL OR credential_id IS NOT NULL".to_owned(),
+        // Every daemon start runs its own warm-up search,
+        // search("warmup probe", top_k=1), outside any session: one row
+        // per start that no user made (service.py warm-up, Rust
+        // search_route S17). A user's search, even with those words, has
+        // a session or served something.
+        "retrieval_events" => " WHERE NOT (query_text = 'warmup probe' AND session_id IS NULL AND episode_id IS NULL AND served = '[]'::jsonb)".to_owned(),
+        "cms_counters" => " WHERE interaction_count <> 0 OR logical_turn_count <> 0 OR tier_queries <> 0 OR EXISTS (SELECT 1 FROM jsonb_each(tier_hits) WHERE value <> '0'::jsonb) OR EXISTS (SELECT 1 FROM jsonb_each(surprise_history) WHERE value <> '[]'::jsonb) OR consolidation_events <> '[]'::jsonb".to_owned(),
+        _ => String::new(),
+    }
+}
+
 /// The tables of the bank `facts` names that hold user data, with their
 /// counts: Python's move rule (fresh-bank seed rows excluded), plus the
 /// daemon's own warm-up search row, which Python's rule counts; an
@@ -362,29 +435,7 @@ pub(super) fn used_tables<D: Docker>(
     if tables.is_empty() {
         return Ok(Vec::new());
     }
-    let meta_filter = format!(
-        " WHERE key NOT IN ({}) AND right(key, 15) <> '_schema_version'",
-        EMPTY_TARGET_META_KEYS
-            .iter()
-            .map(|k| literal(k))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    let filter = |table: &str| -> String {
-        match table {
-            "meta" => meta_filter.clone(),
-            "relations" => " WHERE NOT builtin".to_owned(),
-            "maintainer_bootstrap" => " WHERE used_at IS NOT NULL OR credential_id IS NOT NULL".to_owned(),
-            // Every daemon start runs its own warm-up search,
-            // search("warmup probe", top_k=1), outside any session: one row
-            // per start that no user made (service.py warm-up, Rust
-            // search_route S17). A user's search, even with those words, has
-            // a session or served something.
-            "retrieval_events" => " WHERE NOT (query_text = 'warmup probe' AND session_id IS NULL AND episode_id IS NULL AND served = '[]'::jsonb)".to_owned(),
-            "cms_counters" => " WHERE interaction_count <> 0 OR logical_turn_count <> 0 OR tier_queries <> 0 OR EXISTS (SELECT 1 FROM jsonb_each(tier_hits) WHERE value <> '0'::jsonb) OR EXISTS (SELECT 1 FROM jsonb_each(surprise_history) WHERE value <> '[]'::jsonb) OR consolidation_events <> '[]'::jsonb".to_owned(),
-            _ => String::new(),
-        }
-    };
+    let filter = |table: &str| user_filter(table);
     let sql = format!(
         "SELECT {}",
         tables

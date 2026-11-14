@@ -233,7 +233,28 @@ fn lite_refusal(dir: &Path) -> ExitCode {
 }
 
 /// The rest of the run, under the update lock.
+/// Set by a move's target helper for the restore it runs: the move's abort
+/// marker, which its source writes (under this same update lock) when it
+/// rolls the move back.
+pub(super) const MOVE_ABORT_ENV: &str = "PSEUDOLIFE_MOVE_ABORT_FILE";
+
+/// The refusal for a move's restore whose move is being rolled back: read
+/// under the update lock, so a restore that waited for the lock never runs
+/// after the rollback's abort.
+fn aborted_move(marker: Option<std::ffi::OsString>) -> Option<String> {
+    let marker = std::path::PathBuf::from(marker.filter(|m| !m.is_empty())?);
+    marker.exists().then(|| {
+        format!(
+            "the move this restore runs for is being rolled back on its source ({} exists); nothing was restored",
+            marker.display()
+        )
+    })
+}
+
 fn locked(args: &args::Args, directory: &Path, state_size: u128) -> ExitCode {
+    if let Some(why) = aborted_move(std::env::var_os(MOVE_ABORT_ENV)) {
+        return refuse(&why);
+    }
     let program = match docker::program() {
         Ok(program) => program,
         Err(message) => {
@@ -385,6 +406,26 @@ fn http_json(url: &str, timeout: Duration) -> Option<serde_json::Value> {
 #[cfg(test)]
 pub(super) mod tests {
     use std::path::PathBuf;
+
+    #[test]
+    fn a_moves_restore_stops_once_the_move_is_aborted() {
+        let marker =
+            std::env::temp_dir().join(format!("move-abort-{}", uuid::Uuid::new_v4().simple()));
+        // No marker named, or none written yet: the restore runs.
+        assert_eq!(super::aborted_move(None), None);
+        assert_eq!(super::aborted_move(Some("".into())), None);
+        assert_eq!(
+            super::aborted_move(Some(marker.clone().into_os_string())),
+            None
+        );
+        std::fs::write(&marker, b"").unwrap();
+        let why = super::aborted_move(Some(marker.clone().into_os_string())).unwrap();
+        assert!(
+            why.contains("being rolled back") && why.ends_with("nothing was restored"),
+            "{why}"
+        );
+        let _ = std::fs::remove_file(&marker);
+    }
 
     /// A file in the temporary directory, removed on drop.
     pub(in crate::cli::restore_cli) struct Scratch(pub PathBuf);
