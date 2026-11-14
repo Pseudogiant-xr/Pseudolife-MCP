@@ -132,7 +132,8 @@ class Tokens(unittest.TestCase):
         self.assertNotEqual(stored, run.tokens(long[:-1] + "e", "P"))
 
     def test_any_users_home_is_a_host_path(self):
-        for text in ("C:\\Users\\someone\\x", "C:/Users/someone/x", "/home/runner/work", "/Users/someone/x"):
+        # The guard's <user> placeholder in each user-home shape (tests/test_release_ux.py).
+        for text in ("C:\\Users\\<user>\\x", "C:/Users/<user>/x", "/home/<user>/work", "/Users/<user>/x"):
             with self.subTest(text=text):
                 self.assertTrue(run.host_paths({"value": text}))
         self.assertEqual(run.host_paths({"value": "fine /usr/bin and Users"}), [])
