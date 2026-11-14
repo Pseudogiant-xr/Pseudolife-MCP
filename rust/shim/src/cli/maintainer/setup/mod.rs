@@ -508,7 +508,7 @@ async fn setup(args: Args, pending: Pending) -> Result<u8> {
     }
     if restart && matches!(tier, Tier::Local) {
         println!(
-            "Restart the daemon so it reads the name (stop the `pseudolife-mcp serve` process; your next session starts it again), then run `{resume}` again to enrol your passkey."
+            "Restart the daemon so it reads the name (stop it and start it again the way it was started), then run `{resume}` again to enrol your passkey."
         );
         return Ok(if write { 0 } else { 4 });
     }

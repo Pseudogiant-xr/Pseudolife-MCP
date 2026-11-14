@@ -134,10 +134,12 @@ fn lite_default() -> Option<PathBuf> {
     Some(base.join("pseudolife-mcp"))
 }
 
-/// `_default_data_dir` with the lite tier retired: `PSEUDOLIFE_MCP_DATA_DIR`,
-/// else the lite default when it holds a lite bank (which is then refused),
-/// else `./data`. The lite default existing is no bank: the native client
-/// installs its runtimes there.
+/// `_default_data_dir`: `PSEUDOLIFE_MCP_DATA_DIR`, else the lite default when
+/// it holds a lite bank (refused below), else `./data` when there is no lite
+/// default. An existing lite default without a bank defers: it is on every
+/// native-client host (the runtimes live there), and Python backs up the
+/// Docker bank from there, which this leaf does not yet; taking `./data`
+/// instead would archive files and skip the bank.
 fn default_data_dir() -> Option<PathBuf> {
     if let Some(raw) = nonempty_env("PSEUDOLIFE_MCP_DATA_DIR")? {
         return Some(args::pathlib(Path::new(&raw)));
@@ -145,6 +147,9 @@ fn default_data_dir() -> Option<PathBuf> {
     let lite = lite_default()?;
     if crate::cli::retired::is_lite_bank(&lite) {
         return Some(lite);
+    }
+    if !matches!(lite.try_exists(), Ok(false)) {
+        return None;
     }
     let cwd = std::env::current_dir().ok()?;
     Some(cwd.join("data"))

@@ -156,10 +156,14 @@ fn an_unreachable_unconfigured_daemon_tells_the_client_how_to_start_one() {
             .unwrap()
             .contains("PSEUDOLIFE_MCP_PYTHON no longer starts")
     );
-    // A configured launch, or a serve command that failed to parse (its own
-    // note), adds nothing here.
+    // A configured launch adds nothing here; a serve command that failed to
+    // parse gets its own remedy.
     assert_eq!(unreachable_remedy(None), None);
-    assert!(unreachable_remedy(Some(INVALID_SERVE_COMMAND_NOTE)).is_some());
+    assert!(
+        unreachable_remedy(Some(INVALID_SERVE_COMMAND_NOTE))
+            .unwrap()
+            .contains("is not a JSON argv array")
+    );
     // The note reaches the instructions the client shows its agent.
     let runtime = Runtime {
         url: "http://127.0.0.1:9".into(),

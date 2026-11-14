@@ -319,3 +319,70 @@ fn the_lite_default_is_a_lite_bank_only_when_it_holds_one() {
         );
     }
 }
+
+/// A `docker` that reports the daemon container running and fails every
+/// other call (exit 3), logging each call's arguments.
+fn running_docker(home: &Home) -> PathBuf {
+    #[cfg(windows)]
+    let (name, script) = (
+        "running-docker.cmd",
+        "@echo off\r\n>>\"%RETIRED_DOCKER_CALLS%\" echo %*\r\nif \"%~1\"==\"inspect\" (echo true& exit /b 0)\r\nexit /b 3\r\n",
+    );
+    #[cfg(unix)]
+    let (name, script) = (
+        "running-docker",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$RETIRED_DOCKER_CALLS\"\nif [ \"$1\" = inspect ]; then printf 'true\\n'; exit 0; fi\nexit 3\n",
+    );
+    let path = home.0.join("bin").join(name);
+    #[cfg(windows)]
+    fs::write(&path, script).unwrap();
+    // A shell writes it, so no descriptor of this process names the file
+    // when it runs (ETXTBSY).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert!(
+            Command::new("/bin/sh")
+                .args(["-c", "printf '%s' \"$2\" > \"$1\"", "sh"])
+                .arg(&path)
+                .arg(script)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    path
+}
+
+#[test]
+fn a_running_daemon_container_wins_over_a_leftover_lite_cluster() {
+    // A completed Docker migration can leave a stopped lite cluster behind:
+    // with the daemon container running, the command goes to the container.
+    let home = Home::new("leftover");
+    let bank = home.lite_bank("bank");
+    let docker = running_docker(&home);
+    for (arguments, mode) in [
+        (&["maintainer", "list"][..], "maintainer"),
+        (&["invite", "laptop"], "invite"),
+    ] {
+        let calls = home.0.join(format!("{mode}-calls"));
+        let output = home
+            .command(arguments)
+            .env("PSEUDOLIFE_MCP_DATA_DIR", &bank)
+            .env("PSEUDOLIFE_DOCKER", &docker)
+            .env("RETIRED_DOCKER_CALLS", &calls)
+            .output()
+            .unwrap();
+        assert!(
+            !stderr(&output).contains("lite-tier"),
+            "{mode}: {}",
+            stderr(&output)
+        );
+        let calls = fs::read_to_string(&calls).unwrap_or_default();
+        assert!(
+            calls.lines().any(|line| line.starts_with("exec")),
+            "{mode} never reached the container: {calls}"
+        );
+    }
+}

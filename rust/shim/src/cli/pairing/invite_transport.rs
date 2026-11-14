@@ -43,6 +43,13 @@ pub(super) fn docker_available() -> bool {
         || program("docker").is_some()
 }
 
+/// Whether the daemon container answers `docker inspect` as running.
+pub(super) async fn daemon_running() -> bool {
+    resolution::inspect(&resolution::container_inspect(&docker()))
+        .await
+        .is_some_and(|o| o.status.success() && text(&o.stdout).trim() == "true")
+}
+
 fn docker() -> OsString {
     std::env::var_os("PSEUDOLIFE_DOCKER")
         .filter(|v| !v.is_empty())

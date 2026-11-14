@@ -78,7 +78,7 @@ pub fn find_lite_bank(explicit: Option<&Path>) -> Option<PathBuf> {
 /// status its other refusals use.
 pub fn lite_bank_refusal(data_dir: &Path) -> String {
     format!(
-        "{} holds a lite-tier bank (embedded PostgreSQL), and the lite tier is retired, so this client does not open it. Move the bank to the Docker tier: {DOCKER_INSTALL}, then follow \"Move a lite bank to Docker\" in docs/guide/configuration.md.",
+        "{} holds a lite-tier bank (embedded PostgreSQL), and the lite tier is retired, so this client does not open it. Move the bank to the Docker tier with the pip release (pseudolife-mcp 0.23.x), which still opens it: follow \"Move a lite bank to Docker\" in docs/guide/configuration.md, which backs the stopped bank up first and then has you {DOCKER_INSTALL}.",
         data_dir.display()
     )
 }
@@ -143,5 +143,14 @@ mod tests {
             assert!(!message.contains("deferred"), "{message}");
         }
         assert!(lite_bank_refusal(dir).starts_with("bank holds a lite-tier bank"));
+        // The move is the guide's order: back up with the release that still
+        // opens the bank, then install the Docker tier.
+        let refusal = lite_bank_refusal(dir);
+        assert!(refusal.contains("pseudolife-mcp 0.23.x"), "{refusal}");
+        assert!(
+            refusal.find("backs the stopped bank up first").unwrap()
+                < refusal.find(DOCKER_INSTALL).unwrap(),
+            "{refusal}"
+        );
     }
 }

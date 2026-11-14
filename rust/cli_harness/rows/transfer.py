@@ -474,9 +474,10 @@ _NO_DATABASE = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL"
 LITE_REFUSAL = (
     "import refused: {HOME}" + _SEP + "lite holds a lite-tier bank (embedded PostgreSQL), "
     "and the lite tier is retired, so this client does not open it. Move the bank to the "
-    "Docker tier: install the Docker tier with ops/install.sh (Linux, macOS) or "
-    "ops\\install.ps1 (Windows), then follow \"Move a lite bank to Docker\" in "
-    "docs/guide/configuration.md.")
+    "Docker tier with the pip release (pseudolife-mcp 0.23.x), which still opens it: "
+    "follow \"Move a lite bank to Docker\" in docs/guide/configuration.md, which backs "
+    "the stopped bank up first and then has you install the Docker tier with "
+    "ops/install.sh (Linux, macOS) or ops\\install.ps1 (Windows).")
 # Host-independent: an oracle with pg0 refuses the unreadable marker with a
 # traceback, one without pg0 never attaches and prints the no-database
 # refusal. The candidate refuses the lite bank plainly either way.

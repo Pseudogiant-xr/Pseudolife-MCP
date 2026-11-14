@@ -104,12 +104,14 @@ pub fn run(arguments: Vec<OsString>) -> Option<i32> {
             // Preserve the shared client's explicit DSN-domain boundary.
             return None;
         }
+        // A running daemon container wins: a completed Docker migration can
+        // leave a stopped lite cluster behind (ops/preflight_lite.py).
+        if let Some(code) = crate::pg::resolution::run_in_daemon("maintainer", &arguments, None, None).await {
+            return Some(code);
+        }
         if let Some(bank) = crate::cli::retired::find_lite_bank(None) {
             crate::stderrln!("error: {}", crate::cli::retired::lite_bank_refusal(&bank));
             return Some(2);
-        }
-        if let Some(code) = crate::pg::resolution::run_in_daemon("maintainer", &arguments, None, None).await {
-            return Some(code);
         }
         crate::stderrln!("error: no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp maintainer ...` on its host)");
         Some(2)

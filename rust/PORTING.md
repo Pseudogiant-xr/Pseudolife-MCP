@@ -1092,8 +1092,8 @@ retain their original runtime identities.
 
 The [break preparation](parity/phase-4-offline-break-source/) adds
 external-DSN transactions and the existing container-host deployment transport.
-The shared client's reviewed TLS policy is unchanged. The embedded lifecycle
-has the named `phase4-embedded-pg-deferred` refusal, and generic failures use
+The shared client's reviewed TLS policy is unchanged. A lite-tier bank gets the
+shared plain refusal (`cli/retired.rs`, since 14 November 2026), and generic failures use
 `native-pg-diagnostics` without driver details or copied interpreter classes.
 Regex 1.13.1 implements the producer's existing secret-shaped-text business
 guard; unsupported look-around is expressed as explicit ASCII boundary and

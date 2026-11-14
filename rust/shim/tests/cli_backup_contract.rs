@@ -260,30 +260,16 @@ fn a_lite_bank_is_refused_plainly_before_any_effect() {
     fs::write(pgdata.join("PG_VERSION"), "18\n").unwrap();
     assert_lite_refused(&home, &["--data-dir", &text(&bank)], &bank);
     // The lite default existing is not a lite bank (the native client keeps
-    // its runtimes there): with no argument the data dir is ./data.
+    // its runtimes there), and the Docker bank Python backs up from there is
+    // not native yet: it still defers, and never archives ./data instead.
     let lite = lite_default(home.path());
     fs::create_dir_all(lite.join("runtimes")).unwrap();
-    assert_refused_default(&home, &text(&home.path().join("data")));
+    fs::create_dir_all(home.path().join("data")).unwrap();
+    assert_deferred(&home, &[]);
     // A lite default that holds a bank is refused by name.
     fs::create_dir_all(lite.join("embedded_pg")).unwrap();
     fs::write(lite.join("embedded_pg").join("PG_VERSION"), "18\n").unwrap();
     assert_lite_refused(&home, &[], &lite);
-}
-
-fn assert_refused_default(home: &Home, data_dir: &str) {
-    let before = home.listing();
-    let output = run(home.path(), &[]);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        cli::native_text(&format!(
-            "data dir {data_dir} does not exist — nothing to back up. \
-             If this is a Docker install, Docker or its bank containers may be unavailable; \
-             start Docker and retry, or pass --container <postgres>.\n"
-        ))
-    );
-    assert_eq!(home.listing(), before);
 }
 
 #[test]
