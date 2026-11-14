@@ -2,7 +2,7 @@
   "schema": 1,
   "workflow": "ci.yml",
   "job": "test-lite-macos",
-  "before": "3143d8fe2b5d35c3",
-  "fingerprint": "90535f6fe3b7847b",
+  "before": "4e8423b74765fec3",
+  "fingerprint": "debe4f1e6a819f5f",
   "reason": "The lane swaps tests/test_installer_shim_upgrade.py (20 tests of the pipx, pip and runtime-Python client install, deleted with it) for tests/test_installer_native_client.py and tests/test_installer_native_client_ps.py (22 tests of the native client install against a fake local release; the two files took 34.8 s together on the Windows host on 14 November 2026, and the real-binary cases skip without PSEUDOLIFE_NATIVE_TEST_BINARY), so the job's cost is unchanged or lower."
 }
