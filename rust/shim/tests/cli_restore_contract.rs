@@ -271,16 +271,13 @@ fn a_lite_bank_is_refused_with_the_docker_install() {
     );
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.starts_with(
-            "restore failed: no Docker bank was found, and this host has a lite bank (embedded PostgreSQL in "
-        ),
-        "{stderr}"
+    // The shared lite-tier refusal, whose move can complete (back up with the
+    // release that opens the bank before installing the Docker tier).
+    let expected = format!(
+        "restore failed: no Docker bank was found, and {} Nothing was restored",
+        pseudolife_stdio::cli::retired::lite_bank_refusal(&lite)
     );
-    assert!(
-        stderr.contains("Install the Docker bank first (ops/install.sh"),
-        "{stderr}"
-    );
+    assert_eq!(stderr.trim_end(), expected, "{stderr}");
     assert!(output.stdout.is_empty());
 }
 

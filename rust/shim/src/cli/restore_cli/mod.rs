@@ -202,13 +202,15 @@ fn lite_bank() -> Option<PathBuf> {
     }
     candidates
         .into_iter()
-        .find(|dir| dir.join("embedded_pg").join("PG_VERSION").is_file())
+        .find(|dir| crate::cli::retired::is_lite_bank(dir))
 }
 
 fn lite_refusal(dir: &Path) -> ExitCode {
+    // The shared lite-tier wording (cli/retired.rs); restore replaces a
+    // Docker bank only, so it says first that none was found.
     refuse(&format!(
-        "no Docker bank was found, and this host has a lite bank (embedded PostgreSQL in {}); restore replaces a Docker bank only. Install the Docker bank first (ops/install.sh, or ops\\install.ps1 on Windows; see \"Move a lite bank to Docker\" in docs/guide/configuration.md), then restore into it. Nothing was restored",
-        dir.display()
+        "no Docker bank was found, and {} Nothing was restored",
+        crate::cli::retired::lite_bank_refusal(dir)
     ))
 }
 
