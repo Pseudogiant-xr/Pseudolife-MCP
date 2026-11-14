@@ -4,9 +4,10 @@ Argparse argv: ``backup [--data-dir P] [--out P] [--keep-days N]`` with
 inline or separate values, repeated and abbreviated options, pathlib path
 spellings and Python floats; help follows COLUMNS. The bank is the explicit
 ``PSEUDOLIFE_MCP_DATABASE_URL``; without one, a data dir holding no embedded
-bank is archived in file mode. Every case that would need the lite tier's
-embedded instance defers (Rust tests cover the deferrals; this row compares
-only answered cases).
+bank is archived in file mode. A lite bank (an embedded instance) is
+refused natively, naming the Docker install, and the Docker tier runs
+natively; this row keeps Docker unreachable and compares only the file and
+DSN cases (Rust tests cover the rest).
 
 Contract per arm: exit code, both streams byte-exact (the timestamp in the
 two new file names is normalized against the arm's own clock window), every
@@ -408,6 +409,17 @@ def _have_pg0() -> bool:
 
 
 def cases() -> list[Case]:
+    """Every case with Docker unreachable: both arms detect a Docker bank
+    by inspecting the stack's containers, and a host running them (a
+    developer's machine) must never be backed up or probed by this row."""
+    sep = "\\" if WINDOWS else "/"
+    out = _cases()
+    for case in out:
+        case.env.setdefault("PSEUDOLIFE_DOCKER", f"{{HOME}}{sep}no-docker")
+    return out
+
+
+def _cases() -> list[Case]:
     # DSN cases need the bundled pg_dump this host's home carries.
     have_pg0 = _have_pg0()
     dsn = _source() if have_pg0 else "postgresql://unused"
@@ -570,8 +582,8 @@ MUTANTS = [
            'format!("pg_dump failed: {}", python_strip(&text))',
            'format!("pg_dump failed: {}", text)', ("dsn-pg-dump-fails",)),
     Mutant("backup-stdout-failure-exit", "backup", B + "mod.rs",
-           "    } else {\n        120\n    })",
-           "    } else {\n        0\n    })",
+           "    } else {\n        120\n    }\n}",
+           "    } else {\n        0\n    }\n}",
            ("file-mode-stdout-closed",)),
     Mutant("backup-argparse-repeat-first-wins", "backup", B + "args.rs",
            '"--data-dir" => args.data_dir = Some(pathlib(Path::new(value))),',
@@ -582,8 +594,8 @@ MUTANTS = [
            'pub(in crate::cli) fn width() -> usize {\n    std::env::var("IGNORED_COLUMNS")',
            ("help-columns-40",)),
     Mutant("backup-help-closed-exit-1", "backup", B + "mod.rs",
-           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                120',
-           'return Some(if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                1',
+           'return if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                120',
+           'return if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                1',
            ("help-stdout-closed-help", "help-stdout-closed-h")),
     Mutant("backup-dot-join-keeps-prefix", "backup", B + "args.rs",
            '    pathlib(&base.join(name))', '    base.join(name)',

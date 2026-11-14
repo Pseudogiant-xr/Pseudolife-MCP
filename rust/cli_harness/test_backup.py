@@ -164,11 +164,12 @@ def test_help_uses_the_terminal_when_columns_is_unusable():
 @pytest.mark.parametrize("option", [
     "--container", "--daemon-container", "--db", "--user", "--db-port",
     "--c", "--daemon", "--u", "--db-p",
-    # These became ambiguous when the Docker selectors were added.
-    "--d", "--da",
 ])
 @pytest.mark.parametrize("inline", [False, True])
-def test_docker_selectors_defer_before_bank_effects(tmp_path, option, inline):
+def test_docker_selectors_choose_the_docker_tier_before_bank_effects(tmp_path, option, inline):
+    """A Docker selector chooses the native Docker tier, as Python's
+    ``run_backup`` does, even beside ``--data-dir``: with no docker program
+    it refuses naming Docker, and the file-mode bank is left alone."""
     import os
     import subprocess
     bank = tmp_path / "bank"
@@ -176,17 +177,51 @@ def test_docker_selectors_defer_before_bank_effects(tmp_path, option, inline):
     config = bank / "config.yaml"
     config.write_bytes(b"storage: files\n")
     out = tmp_path / "backups"
+    home = tmp_path / "home"
+    home.mkdir()
     selector = [f"{option}=5432"] if inline else [option, "5432"]
+    # The update lock lands in the throwaway home; docker is a missing program.
+    env = dict(os.environ, PSEUDOLIFE_MCP_DATA_DIR=str(home),
+               PSEUDOLIFE_DOCKER=str(tmp_path / "no-docker"))
     result = subprocess.run([_native_backup(), "backup", "--data-dir", str(bank),
                              "--out", str(out), *selector],
-                            capture_output=True, timeout=10)
+                            capture_output=True, timeout=10, env=env)
     assert (result.returncode, result.stdout, result.stderr) == (
-        1, b"", ("pseudolife-stdio: mode 'backup' is deferred in this candidate"
-                  + os.linesep).encode(),
+        2, b"", ("backup failed: Docker was not found: no `docker` program is on PATH (only absolute "
+                  "PATH entries are searched); install Docker, or set PSEUDOLIFE_DOCKER to the docker "
+                  "program's full path, then retry. No backup was written" + os.linesep).encode(),
     )
     assert not out.exists()
     assert list(bank.iterdir()) == [config]
     assert config.read_bytes() == b"storage: files\n"
+    # The lock was taken and released there, never in the real home.
+    assert sorted(path.name for path in home.iterdir()) == ["update.lock"]
+
+
+@pytest.mark.parametrize("option", ["--d", "--da"])
+@pytest.mark.parametrize("inline", [False, True])
+def test_prefixes_the_docker_selectors_made_ambiguous_keep_python_errors(tmp_path, option, inline):
+    """``--d`` and ``--da`` became ambiguous when the Docker selectors were
+    added: both refuse them as argparse does, before any tier or effect."""
+    import os
+    import subprocess
+    import sys
+    bank = tmp_path / "bank"
+    bank.mkdir()
+    selector = [f"{option}=5432"] if inline else [option, "5432"]
+    argv = ["backup", "--data-dir", str(bank), *selector]
+    env = dict(os.environ, COLUMNS="80", PSEUDOLIFE_MCP_DATA_DIR=str(tmp_path / "home"),
+               PSEUDOLIFE_DOCKER=str(tmp_path / "no-docker"))
+    expected = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", *argv], env=env,
+                              capture_output=True, timeout=10)
+    actual = subprocess.run([_native_backup(), *argv], env=env, capture_output=True, timeout=10)
+    assert expected.returncode == 2
+    assert b"ambiguous option: " + option.encode() in expected.stderr
+    assert (actual.returncode, actual.stdout, actual.stderr) == (
+        expected.returncode, expected.stdout, expected.stderr,
+    )
+    assert list(bank.iterdir()) == []
+    assert not (tmp_path / "home").exists()
 
 
 @pytest.mark.parametrize("arguments", [
