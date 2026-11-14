@@ -137,7 +137,10 @@ publication job with the same complete artifact after a partial upload.
 Re-running the failed jobs of a release run reruns only what failed and
 what waits for it: a failed target build rebuilds that target, then the
 bundle, the attachment (only missing assets) and PyPI's approval; a
-failure after the attachment leaves the assets in place.
+failure after the attachment leaves the assets in place. Use "Re-run
+failed jobs", never "Re-run all jobs": a rebuild need not be byte-identical,
+so its `SHA256SUMS` would differ from the attached one and the attachment
+would refuse, which blocks PyPI until the attached assets are deleted.
 Packaging fixes
 gzip/tar timestamps at the Unix epoch and ZIP timestamps at 1980-01-01;
 identical input bytes produce identical archives with the same packager.

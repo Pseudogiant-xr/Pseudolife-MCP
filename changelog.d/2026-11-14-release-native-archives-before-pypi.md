@@ -3,7 +3,7 @@
   client archives and `SHA256SUMS` to the GitHub release before it
   publishes to PyPI. `pseudolife-mcp update`, including the 0.23.x update
   bridge, learns that a release exists from PyPI. Before this change, an
-  update run in the minutes between the PyPI upload and the archive upload
-  found no native archive and stayed on the Python client until the next
-  release. A failed native build now stops the release before PyPI, which
+  update run between the PyPI upload and the archive upload (the whole
+  native build, often more than an hour) found no native archive and
+  stayed on the Python client until the next release. A failed native build now stops the release before PyPI, which
   cannot be unpublished. The images and the MCP registry still follow PyPI.

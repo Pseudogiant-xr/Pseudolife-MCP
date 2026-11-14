@@ -165,8 +165,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    "denied". Verify:
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
 
-   **Rust artifacts.** Two repository variables, disabled when unset, gate
-   them, and their publication remains downstream of the human-approved
+   **Rust artifacts.** One repository variable, disabled when unset, gates
+   the Rust image, and its publication remains downstream of the human-approved
    `publish` job (the native archives, which have no variable, come
    before it). `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` publishes the
    separate `pseudolife-daemon-rust:<version>` image. Since 0.23.0 the Rust
@@ -201,6 +201,13 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    exact file set and checksums, downloads and verifies already published
    assets (including `SHA256SUMS`), and uploads only missing ones. It never
    replaces existing bytes; investigate a mismatch before publication.
+   Rerun a failed release with "Re-run failed jobs", never "Re-run all
+   jobs": rebuilt archives need not be byte-identical, so the attachment
+   would refuse the new `SHA256SUMS` and PyPI could not follow until the
+   attached assets are deleted. The archives are attached before the PyPI
+   approval, so to abandon a version after rejecting that approval, delete
+   the GitHub release (or its assets): otherwise a checkout of that tag
+   installs its native client although PyPI never got it.
    Missing opt-in assets are a failed native publication, not permission
    to enable a fallback or change the default engine; keep installation
    and update readiness as release prerequisites.

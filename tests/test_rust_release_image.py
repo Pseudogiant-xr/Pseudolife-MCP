@@ -126,3 +126,8 @@ def test_native_archives_reach_the_release_before_pypi():
     # No status function: publish runs only when every job it needs succeeded.
     gate = jobs["publish"]["if"]
     assert not any(word in gate for word in ("always()", "!cancelled()", "failure()", ".result")), gate
+    # A native job or step that may fail without failing its job would let
+    # PyPI follow an incomplete attachment.
+    for native in ("rust-assets", "rust-assets-bundle", "rust-assets-publish"):
+        assert "continue-on-error" not in jobs[native], native
+        assert not any("continue-on-error" in step for step in jobs[native]["steps"]), native

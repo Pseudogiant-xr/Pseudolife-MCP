@@ -348,7 +348,7 @@ jobs:
       - name: Verify downloaded native assets before publication
         working-directory: release-assets
         run: sha256sum --check SHA256SUMS
-      - name: Attach native assets to the approved release
+      - name: Attach native assets to the published release
         env:
           GH_TOKEN: ${{ github.token }}
         # Verify existing release bytes, then upload only missing assets.
