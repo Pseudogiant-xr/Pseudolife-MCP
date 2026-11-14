@@ -68,6 +68,17 @@ deferred; it is now tested in Rust, and the frozen oracle answers otherwise.
   `--` (the end of options natively, an unrecognized argument in 3.11's
   argparse), a `--db-port` in non-ASCII digits (refused natively).
 
+## Comparison rules
+
+- `restore-busy-holders` (oracle only, case `docker-lock-busy`): the frozen
+  oracle's busy refusal names an update as the only holder of the update
+  lock ("another pseudolife-mcp update is running (pid N)"); the native
+  restore names every command that takes it ("update, restore or backup"),
+  since a native backup holds it too. The rule rewrites only those words,
+  and only in a stderr that starts with the oracle's refusal; the pid, the
+  rest of the line and every other byte still compare, and the native side
+  printing the oracle's words is still a diff.
+
 ## Safety of the harness
 
 Every case runs with `PATH` holding only a recording stand-in `docker` (also

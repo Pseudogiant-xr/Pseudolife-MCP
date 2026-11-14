@@ -600,7 +600,7 @@ fn desktop_source(source: &str) -> String {
 }
 
 /// The free bytes on the filesystem holding `path`.
-fn free_space(path: &str) -> Option<u128> {
+pub(super) fn free_space(path: &str) -> Option<u128> {
     #[cfg(unix)]
     {
         let stats = rustix::fs::statvfs(path).ok()?;
@@ -665,20 +665,55 @@ pub(super) fn host_space(directory: &str) -> Step<()> {
 }
 
 /// The bank's selection and restore's checks, in order.
-pub(super) fn probe<D: Docker>(
-    docker: &mut D,
-    args: &Args,
-    run_tag: &str,
-    staged: u128,
-    host_space: &mut dyn FnMut(&str) -> Step<()>,
-) -> Step<Plan> {
-    let mut bank = Bank {
-        docker,
-        pg: nonempty(&args.container).unwrap_or(PG_CONTAINER).to_owned(),
-        daemon: nonempty(&args.daemon_container)
+/// The options that name a Docker bank (restore's and backup's).
+#[derive(Debug, Clone, Default)]
+pub(super) struct Selectors {
+    pub container: Option<String>,
+    pub daemon_container: Option<String>,
+    pub db: Option<String>,
+    pub user: Option<String>,
+    pub db_port: Option<i128>,
+}
+
+impl Selectors {
+    pub fn of(args: &Args) -> Self {
+        Self {
+            container: args.container.clone(),
+            daemon_container: args.daemon_container.clone(),
+            db: args.db.clone(),
+            user: args.user.clone(),
+            db_port: args.db_port,
+        }
+    }
+}
+
+/// The bank the selectors name, checked: its containers, database, role,
+/// port, the daemon's image and `/data` mounts, PostgreSQL running.
+#[derive(Debug, Clone)]
+pub(super) struct Selected {
+    pub pg: String,
+    pub daemon: String,
+    pub user: String,
+    pub db: String,
+    pub port: u16,
+    pub image: String,
+    /// The daemon's `docker inspect` object.
+    pub running: Value,
+    pub state_mounts: Vec<String>,
+}
+
+/// The containers `args` names, or the stack's own.
+pub(super) fn containers(args: &Selectors) -> (String, String) {
+    (
+        nonempty(&args.container).unwrap_or(PG_CONTAINER).to_owned(),
+        nonempty(&args.daemon_container)
             .unwrap_or(DAEMON_CONTAINER)
             .to_owned(),
-    };
+    )
+}
+
+/// `DockerBank(...)`: inspect both containers and resolve the bank.
+pub(super) fn select<D: Docker>(bank: &mut Bank<'_, D>, args: &Selectors) -> Step<Selected> {
     let daemon_name = bank.daemon.clone();
     let pg_name = bank.pg.clone();
     let running = bank.inspect(&daemon_name)?;
@@ -725,13 +760,6 @@ pub(super) fn probe<D: Docker>(
     }
     state_mounts.sort();
     state_mounts.dedup();
-    if args.state_archive.is_some()
-        && let Some(nested) = state_mounts.iter().find(|mount| *mount != "/data")
-    {
-        // The swap removes /data's contents: it would empty that volume and
-        // could not replace it.
-        return fail(nested_refusal(&daemon_name, nested), 2);
-    }
     let pg_running = match sub_dict(&pg, "State", &pg_name)? {
         Some(state) => get(state, "Running").is_some_and(truthy),
         None => false,
@@ -744,6 +772,86 @@ pub(super) fn probe<D: Docker>(
             2,
         );
     }
+    Ok(Selected {
+        pg: pg_name,
+        daemon: daemon_name,
+        user,
+        db,
+        port,
+        image,
+        running,
+        state_mounts,
+    })
+}
+
+/// Whether the selected database exists.
+pub(super) fn database_exists<D: Docker>(bank: &mut Bank<'_, D>, chosen: &Selected) -> Step<bool> {
+    let (user, port, db) = (&chosen.user, chosen.port, &chosen.db);
+    let literal = format!("'{}'", db.replace('\'', "''"));
+    let query = format!("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = {literal})");
+    let answer = bank.psql(user, port, "postgres", &["-Atc", &query])?;
+    let exists = match answer.trim_matches(python_space) {
+        "t" => true,
+        "f" => false,
+        _ => return fail(EXISTS, 2),
+    };
+    Ok(exists)
+}
+
+/// Whether `path` lies inside one of the daemon's `/data` mount sources (an
+/// archive written there would be inside what it archives).
+pub(super) fn inside_state_mount(chosen: &Selected, path: &str) -> Step<bool> {
+    let daemon_name = &chosen.daemon;
+    for mount in list(&chosen.running, "Mounts", daemon_name)? {
+        let destination = text_field(mount, "Destination", daemon_name)?;
+        if destination != "/data" && !destination.starts_with("/data/") {
+            continue;
+        }
+        let source = match get(mount, "Source") {
+            Some(Value::String(source)) if !source.is_empty() => desktop_source(source),
+            None | Some(Value::Null) | Some(Value::String(_)) => continue,
+            Some(_) => return Err(malformed(daemon_name)),
+        };
+        let source = super::super::backup::args::pathlib(Path::new(&source));
+        if source.is_absolute() {
+            let shown = source.to_string_lossy().into_owned();
+            let resolved = pathlib::resolve(&source).ok_or_else(|| unresolvable(&shown))?;
+            if pathlib::is_relative_to(path, &resolved) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub(super) fn probe<D: Docker>(
+    docker: &mut D,
+    args: &Args,
+    run_tag: &str,
+    staged: u128,
+    host_space: &mut dyn FnMut(&str) -> Step<()>,
+) -> Step<Plan> {
+    let (pg, daemon) = containers(&Selectors::of(args));
+    let mut bank = Bank { docker, pg, daemon };
+    let chosen = select(&mut bank, &Selectors::of(args))?;
+    let Selected {
+        pg: pg_name,
+        daemon: daemon_name,
+        user,
+        db,
+        port,
+        image,
+        running,
+        state_mounts,
+    } = chosen.clone();
+    if args.state_archive.is_some()
+        && let Some(nested) = state_mounts.iter().find(|mount| *mount != "/data")
+    {
+        // The swap removes /data's contents: it would empty that volume and
+        // could not replace it.
+        return fail(nested_refusal(&daemon_name, nested), 2);
+    }
+    let mounts = list(&running, "Mounts", &daemon_name)?;
     let daemon_url = daemon_url(&running, args.daemon_url.as_deref(), &daemon_name)?;
     if !args.leave_stopped && daemon_url.is_empty() {
         return fail(NO_HEALTH, 2);
@@ -756,14 +864,7 @@ pub(super) fn probe<D: Docker>(
             2,
         );
     }
-    let literal = format!("'{}'", db.replace('\'', "''"));
-    let query = format!("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = {literal})");
-    let answer = bank.psql(&user, port, "postgres", &["-Atc", &query])?;
-    let exists = match answer.trim_matches(python_space) {
-        "t" => true,
-        "f" => false,
-        _ => return fail(EXISTS, 2),
-    };
+    let exists = database_exists(&mut bank, &chosen)?;
     let safety = match &args.safety_dir {
         Some(path) => path.clone(),
         None => super::super::backup::args::pathlib(
@@ -783,25 +884,10 @@ pub(super) fn probe<D: Docker>(
             );
         }
     }
-    for mount in mounts {
-        let destination = text_field(mount, "Destination", &daemon_name)?;
-        if destination != "/data" && !destination.starts_with("/data/") {
-            continue;
-        }
-        let source = match get(mount, "Source") {
-            Some(Value::String(source)) if !source.is_empty() => desktop_source(source),
-            None | Some(Value::Null) | Some(Value::String(_)) => continue,
-            Some(_) => return Err(malformed(&daemon_name)),
-        };
-        let source = super::super::backup::args::pathlib(Path::new(&source));
-        if source.is_absolute() {
-            let shown = source.to_string_lossy().into_owned();
-            let resolved = pathlib::resolve(&source).ok_or_else(|| unresolvable(&shown))?;
-            if pathlib::is_relative_to(&safety, &resolved) {
-                return fail(IN_MOUNT, 2);
-            }
-        }
+    if inside_state_mount(&chosen, &safety)? {
+        return fail(IN_MOUNT, 2);
     }
+    let _ = mounts;
     host_space(&safety)?;
     bank.storage_space(&image, run_tag)?;
     bank.container_space("/tmp")?;
@@ -875,7 +961,7 @@ pub(super) fn probe<D: Docker>(
 
 /// The health URL: the option, else the daemon's published 8765/tcp
 /// binding; "" when neither names one (or the binding is unreadable).
-fn daemon_url(running: &Value, option: Option<&str>, container: &str) -> Step<String> {
+pub(super) fn daemon_url(running: &Value, option: Option<&str>, container: &str) -> Step<String> {
     if let Some(option) = option.filter(|o| !o.is_empty()) {
         return Ok(option.to_owned());
     }

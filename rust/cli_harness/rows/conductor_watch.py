@@ -6,12 +6,12 @@ and a start that finds a watcher already running on its state, for the same
 owner (exit 0) or another (exit 2), with or without ``--detach``; the
 deprecated name ``delegate-watch`` prints its notice first.
 
-Nothing here reaches the watcher's lock, board or ``gh``: every compared
-case ends before ``main`` takes the state's lock. The one deferral case
-(a foreground start with no watcher running) gives the oracle no bearer
-token, so it stops at "no board" right after its lock; PATH holds only an
-empty directory, so no ``gh`` or ``pseudolife-mcp`` resolves for either arm
-(checked before each arm), and the daemon URL is the closed loopback port.
+Nothing here reaches the watcher's board or ``gh``: every compared case
+ends before ``main`` takes the state's lock, except the two starts with no
+watcher running, which give both arms no bearer token, so each takes the
+lock and stops at "no board"; PATH holds only an empty directory, so no
+``gh`` or ``pseudolife-mcp`` resolves for either arm (checked before each
+arm), and the daemon URL is the closed loopback port.
 A running watcher is a sleeping child the row starts and stops itself, with
 a pid file the oracle's own ``_process_start`` dates. Scope and deferrals:
 ``rows/conductor_watch.md``.
@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -66,6 +67,19 @@ def conductor_watch_deferral(obs: dict) -> None:
     obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
     obs["files"] = obs.get("setup_files", {})
     obs["modes"] = obs.get("setup_modes", {})
+
+
+@normalize.rule("conductor-watch-start-no-board")
+def conductor_watch_start_no_board(obs: dict) -> None:
+    """A start with no bearer token: both arms take the state's lock and
+    stop at "no board", leaving the empty lock file and one ledger line.
+    The line's timestamp and line ending are the run's own."""
+    files = obs.get("files") or {}
+    for key, value in list(files.items()):
+        if key.endswith(".ledger") and value.startswith("file:"):
+            text = base64.b64decode(value[5:]).decode("utf-8", "replace").replace("\r\n", "\n")
+            text = re.sub(r"(?m)^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ", "<time> ", text)
+            files[key] = "file:" + base64.b64encode(text.encode()).decode()
 
 
 @normalize.rule("conductor-watch-notice-unwritten")
@@ -114,6 +128,38 @@ def _hidden(relative: str):
         path = arm.home / relative
         _write(path, b"earlier")
         assert ctypes.windll.kernel32.SetFileAttributesW(str(path), 0x2)
+    return setup
+
+
+def _private_folder(relative: str):
+    """The folder ``relative`` (under the home) made only this account's,
+    before anything is put in it, so a start that requires a private state
+    folder does not depend on the host's temporary folder: owner-only
+    (``D:P(A;OICI;FA;;;OW)``, through the Windows API) or mode 0700."""
+    def setup(arm):
+        path = arm.home / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not core.WINDOWS:
+            path.mkdir(mode=0o700)
+            os.chmod(path, 0o700)
+            return
+        import ctypes  # noqa: PLC0415
+        from ctypes import wintypes  # noqa: PLC0415
+
+        class SecurityAttributes(ctypes.Structure):
+            _fields_ = [("nLength", wintypes.DWORD), ("lpSecurityDescriptor", ctypes.c_void_p),
+                        ("bInheritHandle", wintypes.BOOL)]
+
+        advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        descriptor = ctypes.c_void_p()
+        assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            "D:P(A;OICI;FA;;;OW)", 1, ctypes.byref(descriptor), None), ctypes.get_last_error()
+        try:
+            attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+            assert kernel.CreateDirectoryW(str(path), ctypes.byref(attributes)), ctypes.get_last_error()
+        finally:
+            kernel.LocalFree(descriptor)
     return setup
 
 
@@ -300,18 +346,18 @@ def cases() -> list[Case]:
     add(case("stop-running-no-agent", ["--stop", "--state", STATE],
              steps=(_record("w/s.json", pid="live", process_start=None),)))
     add(case("stop-running-odd-agent", ["--stop", "--state", STATE],
-             steps=(_record("w/s.json", pid="live", agent_id={"id": [1, 2.5, True, None, "é"]}),)))
+             steps=(_record("w/s.json", pid="live", process_start="live", agent_id={"id": [1, 2.5, True, None, "é"]}),)))
     add(case("stop-running-pid-text", ["--stop", "--state", STATE],
-             steps=(_record("w/s.json", pid="live-text", agent_id=WATCHER),)))
+             steps=(_record("w/s.json", pid="live-text", process_start="live", agent_id=WATCHER),)))
     add(case("stop-running-pid-float", ["--stop", "--state", STATE],
-             steps=(_record("w/s.json", pid="live-float", agent_id=WATCHER),)))
+             steps=(_record("w/s.json", pid="live-float", process_start="live", agent_id=WATCHER),)))
     add(case("stop-running-stop-file-exists", ["--stop", "--state", STATE],
-             steps=(_record("w/s.json", pid="live", agent_id=WATCHER),
+             steps=(_record("w/s.json", pid="live", process_start="live", agent_id=WATCHER),
                     lambda arm: _write(arm.home / "w" / "s.stop", b"earlier"))))
     add(case("stop-running-no-suffix", ["--stop", "--state", "{HOME}/w/state"],
-             steps=(_record("w/state.x", pid="live", agent_id=WATCHER),)))
+             steps=(_record("w/state.x", pid="live", process_start="live", agent_id=WATCHER),)))
     add(case("stop-running-dotted", ["--stop", "--state", "{HOME}/w/a.b.json"],
-             steps=(_record("w/a.b.json", pid="live", agent_id=WATCHER),)))
+             steps=(_record("w/a.b.json", pid="live", process_start="live", agent_id=WATCHER),)))
     add(case("stop-start-mismatch", ["--stop", "--state", STATE],
              steps=(_record("w/s.json", pid="live", process_start="0", agent_id=WATCHER),)))
     add(case("stop-start-not-text", ["--stop", "--state", STATE],
@@ -346,21 +392,21 @@ def cases() -> list[Case]:
     # A stop request that cannot be written: exit 2 with the reason, the
     # .stop path left as it was.
     add(case("stop-request-unwritable", ["--stop", "--state", STATE],
-             steps=(_record("w/s.json", pid="live", agent_id=WATCHER),
+             steps=(_record("w/s.json", pid="live", process_start="live", agent_id=WATCHER),
                     lambda arm: (arm.home / "w" / "s.stop").mkdir())))
     add(case("stop-request-unwritable-deprecated-name", ["--stop", "--state", STATE],
              mode="delegate-watch",
-             steps=(_record("w/s.json", pid="live", agent_id=WATCHER),
+             steps=(_record("w/s.json", pid="live", process_start="live", agent_id=WATCHER),
                     lambda arm: (arm.home / "w" / "s.stop").mkdir())))
     # Windows: the C runtime's CREATE_ALWAYS refuses a hidden or system file.
     add(case("stop-request-hidden", ["--stop", "--state", STATE], platforms=("windows",),
-             steps=(_record("w/s.json", pid="live", agent_id=WATCHER), _hidden("w/s.stop"))))
+             steps=(_record("w/s.json", pid="live", process_start="live", agent_id=WATCHER), _hidden("w/s.stop"))))
     add(case("stop-deprecated-name", ["--stop", "--state", STATE], mode="delegate-watch",
-             steps=(_record("w/s.json", pid="live", agent_id=WATCHER),)))
+             steps=(_record("w/s.json", pid="live", process_start="live", agent_id=WATCHER),)))
     # The notice comes before the stop request: when it cannot be written,
     # the watcher is not asked to stop.
     add(case("stop-deprecated-name-stderr-closed", ["--stop", "--state", STATE],
-             mode="delegate-watch", steps=(_record("w/s.json", pid="live", agent_id=WATCHER),),
+             mode="delegate-watch", steps=(_record("w/s.json", pid="live", process_start="live", agent_id=WATCHER),),
              rules=("conductor-watch-notice-unwritten",), stderr_closed=True))
 
     # A start that finds a watcher on its state.
@@ -378,16 +424,18 @@ def cases() -> list[Case]:
     add(case("start-foreign-owner-detach", ["--detach", "--owner", OTHER, "--state", STATE],
              steps=(running,)))
     add(case("start-foreign-unnamed-owner", ["--owner", OTHER, "--state", STATE],
-             steps=(_record("w/s.json", pid="live", agent_id=WATCHER),)))
+             steps=(_record("w/s.json", pid="live", process_start="live", agent_id=WATCHER),)))
     add(case("start-already-deprecated-name", ["--owner", OWNER, "--state", STATE],
              mode="delegate-watch", steps=(running,)))
 
-    # Declared deferrals: the candidate answers before any effect.
-    add(case("defer-foreground-start", ["--owner", OWNER, "--state", STATE],
-             rules=("conductor-watch-deferral",)))
-    add(case("defer-stale-record-start", ["--owner", OWNER, "--state", STATE],
-             steps=(_record("w/s.json", pid=0, agent_id=WATCHER, owner=OWNER),),
-             rules=("conductor-watch-deferral",)))
+    # A start with no watcher running takes the lock and stops at the
+    # board: the cases give no bearer token and a closed daemon address.
+    add(case("start-no-board", ["--owner", OWNER, "--state", STATE],
+             rules=("conductor-watch-start-no-board",)))
+    add(case("start-stale-record-no-board", ["--owner", OWNER, "--state", STATE],
+             steps=(_private_folder("w"), _record("w/s.json", pid=0, agent_id=WATCHER, owner=OWNER)),
+             rules=("conductor-watch-start-no-board",)))
+    # Declared deferrals: argument spellings answered before any effect.
     add(case("defer-abbreviation", ["--sto", "--state", STATE], rules=("conductor-watch-deferral",)))
     add(case("defer-dash-value", ["--state", "-x", "--stop"], rules=("conductor-watch-deferral",)))
     add(case("defer-underscore-interval", ["--interval", "1_0", "--stop", "--state", STATE],

@@ -625,6 +625,14 @@ def host(tmp_path, failure="", mode="release"):
         thread.join(timeout=5)
 
 
+# Since the Python freeze (14 November 2026) the transaction cases run the
+# native CLI only: their python-oracle cases ran the frozen Python updater
+# under the same assertions, so they could fail only on frozen code. The
+# ``native`` parameter is kept so each case still reads as it did. The two
+# interop tests (test_release_rust_selection_is_shared_by_both_updaters,
+# test_release_updaters_can_follow_each_other) still run the Python updater
+# on purpose: what they test is the two updaters acting on one host, which
+# an install with the Python updater still meets.
 def run_arm(repo, env, native, args):
     if native:
         command = [native, "update", *args]
@@ -829,7 +837,7 @@ def test_rollback_retention_leaves_other_projects_and_current_tag(tmp_path):
         assert manual not in removed
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["", "backup", "up", "health"])
 def test_ordinary_checkout_transaction_phase_parity(tmp_path, native, failure):
     binary = _native_binary() if native else None
@@ -895,7 +903,7 @@ def test_checkout_discovery_never_falls_back_to_another_projects_global_daemon(t
         assert "restore its Compose project" in result.stdout
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["", "build", "provision", "backup", "incomplete", "up", "health", "version", "schema", "read"])
 def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, native, failure):
     binary = _native_binary() if native else None
@@ -961,7 +969,7 @@ def test_engine_activation_faults_preserve_rollback_and_retry_guard(tmp_path, na
             assert "rollback" in retry.stdout.lower()
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_same_engine_checkout_rerun_tags_the_running_image_before_rebuilding_it(tmp_path, native):
     """Docker's containerd image store no longer resolves an image's ID once
     a build moved the only tag naming it: a Rust-to-Rust rerun must tag the
@@ -990,7 +998,7 @@ def test_same_engine_checkout_rerun_tags_the_running_image_before_rebuilding_it(
         assert state["running"]["Image"] != running
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_checkout_switch_back_to_python_leaves_the_rust_model_volume(tmp_path, native):
     """The Rust daemon's /models volume comes from the checkout overlay;
     switching back to Python may leave that cache, and is not refused as a
@@ -1011,7 +1019,7 @@ def test_checkout_switch_back_to_python_leaves_the_rust_model_volume(tmp_path, n
         assert state["running"]["Config"]["Labels"]["org.pseudolife.engine"] == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("target", ["rust", "python"])
 def test_missing_checkout_rust_overlay_is_refused_before_any_tag(tmp_path, native, target):
     """A Rust checkout without ops/docker-compose.rust-daemon.yml cannot be
@@ -1074,15 +1082,17 @@ def test_native_checkout_still_refuses_an_undeclared_mount_beside_the_rust_model
 
 @pytest.mark.parametrize("models", ["volume", "legacy"])
 def test_rust_to_rust_rollback_keeps_the_model_directory_the_daemon_ran_with(tmp_path, models):
-    """Both updaters print the same restore command for a failed Rust-to-Rust
+    """The native updater prints the restore command for a failed Rust-to-Rust
     rerun: with the checkout overlay's /models volume when the running daemon
-    uses it, without it for one that read /data/models."""
+    uses it, without it for one that read /data/models. The file lists are the
+    frozen Python updater's, recorded on 14 November 2026, when both agreed."""
     import re
     binary = _native_binary()
     if not binary:
         pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
-    files = {}
-    for arm, native in (("python", None), ("native", binary)):
+    expected = {"volume": ["docker-compose.yml", "docker-compose.rust-daemon.yml", "docker-compose.rollback.json"],
+                "legacy": ["docker-compose.yml", "docker-compose.rollback.json"]}
+    for arm, native in (("native", binary),):
         with host(tmp_path / arm, "", "engine") as (repo, env, state_path):
             args = ["--checkout", str(repo), "--engine", "rust", "--no-test-login", "--no-cache-prune", "--json",
                     "--health-retries", "1", "--health-delay-ms", "0"]
@@ -1106,13 +1116,10 @@ def test_rust_to_rust_rollback_keeps_the_model_directory_the_daemon_ran_with(tmp
             command = restore[restore.index("docker compose"):restore.index(" up ")]
             found = [re.sub(r"rollback-.*\.json$", "rollback.json", name)
                      for name in re.findall(r"[\w.\-]+\.(?:yml|json)", command)]
-            files[arm] = found
-            assert ("docker-compose.rust-daemon.yml" in found) is (models == "volume"), restore
-            assert found[-1] == "docker-compose.rollback.json", restore
-    assert files["python"] == files["native"]
+            assert found == expected[models], restore
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["", "pull", "backup", "up", "health", "version"])
 def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failure):
     binary = _native_binary() if native else None
@@ -1132,7 +1139,7 @@ def test_release_fault_chronology_and_no_client_movement(tmp_path, native, failu
             assert report["rollback"]["state"] == "tagged"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["old_schema", "pending_import", "unreadable_schema", "imported_weights"])
 def test_checkout_d2_guard_is_reached_before_backup_and_accepts_imported_row(tmp_path, native, failure):
     binary = _native_binary() if native else None
@@ -1162,7 +1169,7 @@ def _accepted(env):
     return Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/docker-compose.release-accepted.json"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1222,7 +1229,7 @@ def test_release_rust_activation_keeps_and_switches_back_on_the_same_bank(tmp_pa
         assert "docker-compose.rust-ghcr.yml" in restore
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["pull", "provision", "backup", "up", "health", "version", "read"])
 def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, native, failure):
     binary = _native_binary()
@@ -1253,7 +1260,7 @@ def test_release_rust_activation_faults_never_commit_the_selection(tmp_path, nat
             assert stages(json.loads(state_path.read_text())) == ["pull", "backup", "tag", "up"]
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("engine", ["", "rust"])
 def test_release_refuses_to_recreate_without_project_files_or_an_env_file(tmp_path, native, engine):
     # The daemon's labels name no Compose file on this host and no env file:
@@ -1278,7 +1285,7 @@ def test_release_refuses_to_recreate_without_project_files_or_an_env_file(tmp_pa
         assert stages(json.loads(state_path.read_text())) == []
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1307,7 +1314,7 @@ def test_release_rust_models_go_to_their_own_volume_outside_the_backed_up_state(
         assert not any(v.endswith("dst=/data") for v in provision)
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("labelled", [False, True], ids=["bundled-overlay", "labelled-overlay"])
 def test_release_rust_models_mount_does_not_block_a_rerun_or_a_switch_back(tmp_path, native, labelled):
     # Once the Rust daemon runs with the overlay's /models volume, a plain
@@ -1372,7 +1379,7 @@ def test_release_native_switch_back_still_refuses_dropping_another_mount(tmp_pat
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_engine_change_requires_a_backup(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1385,7 +1392,7 @@ def test_release_engine_change_requires_a_backup(tmp_path, native):
         assert json.loads(state_path.read_text())["calls"] == []
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["misplaced_models", "newer_bank"])
 def test_release_rust_refuses_before_pulling_or_backing_up(tmp_path, native, case):
     binary = _native_binary()
@@ -1407,7 +1414,7 @@ def test_release_rust_refuses_before_pulling_or_backing_up(tmp_path, native, cas
         assert ("no persistent volume" if case == "misplaced_models" else "newer than") in result.stdout
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_rust_host_keeps_its_daemon_when_a_release_has_no_rust_image(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1428,7 +1435,7 @@ def test_rust_host_keeps_its_daemon_when_a_release_has_no_rust_image(tmp_path, n
         assert _labels(state_path)["org.pseudolife.engine"] == "rust"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["unchosen", "unpublished", "chose-python", "chose-python-then-rust",
                                   "corrupt-choice", "binary-choice", "working-dir"])
 def test_release_default_moves_only_an_unchosen_attended_host_to_rust(tmp_path, native, case):
@@ -1495,7 +1502,7 @@ def test_release_default_moves_only_an_unchosen_attended_host_to_rust(tmp_path, 
                 assert "default since G2" not in result.stdout
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_a_fallback_never_removes_an_image_a_docker_error_hid(tmp_path, native):
     # `docker image inspect` failed for another reason than "No such image":
     # the image may have been there before this run, so it stays.
@@ -1517,7 +1524,7 @@ def test_a_fallback_never_removes_an_image_a_docker_error_hid(tmp_path, native):
         assert not any(a[:2] == ["image", "rm"] for a in calls), calls
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_a_fallback_after_provisioning_removes_the_model_volume_it_created(tmp_path, native):
     # The move provisioned the overlay's models volume, then the state backup
     # refused: falling back removes the volume and the image it added.
@@ -1545,7 +1552,7 @@ def test_a_fallback_after_provisioning_removes_the_model_volume_it_created(tmp_p
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("flag", ["--unattended", "--allow-auth-change"])
 def test_release_default_never_applies_to_unattended_or_auth_change_runs(tmp_path, native, flag):
     # Maintainer, 2026-11-07: only the scheduled --unattended run keeps the
@@ -1577,7 +1584,7 @@ def test_release_default_never_applies_to_unattended_or_auth_change_runs(tmp_pat
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["unsupported", "uncheckable"])
 def test_release_default_keeps_python_for_a_configuration_rust_refuses(tmp_path, native, case):
     # Codex P1 (round 3): the Rust daemon refuses a non-default reranker or an
@@ -1612,7 +1619,7 @@ def test_release_default_keeps_python_for_a_configuration_rust_refuses(tmp_path,
             assert "could not check this bank's configuration" in warning
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["unsupported", "uncheckable"])
 def test_explicit_rust_refuses_an_unsupported_configuration_before_the_backup(tmp_path, native, case):
     binary = _native_binary()
@@ -1639,7 +1646,7 @@ def test_explicit_rust_refuses_an_unsupported_configuration_before_the_backup(tm
             assert _labels(state_path)["org.pseudolife.engine"] == "rust"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["after-switch", "nothing-to-do"])
 def test_a_failed_python_choice_write_only_warns(tmp_path, native, case):
     binary = _native_binary()
@@ -1665,7 +1672,7 @@ def test_a_failed_python_choice_write_only_warns(tmp_path, native, case):
         assert "choice could not be recorded" in back.stdout
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["tokenless", "no-backup", "rust-pull-fails", "state-backup-refused"])
 def test_release_default_never_blocks_an_ordinary_update(tmp_path, native, case):
     binary = _native_binary()
@@ -1705,7 +1712,7 @@ def test_release_default_never_blocks_an_ordinary_update(tmp_path, native, case)
             assert removed == (case == "state-backup-refused")
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["supported", "unsupported"])
 def test_release_default_imports_legacy_counters_unless_rust_refuses_the_configuration(tmp_path, native, case):
     # With G2-K, a defaulted move on a bank whose counters still need the
@@ -1740,7 +1747,7 @@ def test_release_default_imports_legacy_counters_unless_rust_refuses_the_configu
             assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("outcome", ["moved", "rust-leg-fails"])
 def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_path, native, outcome):
     # Codex (review of the merge): an ordinary update that defaults to Rust
@@ -1769,7 +1776,7 @@ def test_an_import_leg_update_moves_the_clients_once_after_the_rust_gate(tmp_pat
             assert client_steps == [], report["steps"]
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["python-leg", "rust-leg"])
 def test_a_failed_import_leg_of_a_defaulted_move_is_the_updates_error(tmp_path, native, failure):
     # Once the import leg starts, the host is changing: a failure in either
@@ -1799,7 +1806,7 @@ def test_a_failed_import_leg_of_a_defaulted_move_is_the_updates_error(tmp_path, 
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_an_unreadable_choice_record_still_keeps_the_host_engine(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1818,7 +1825,7 @@ def test_an_unreadable_choice_record_still_keeps_the_host_engine(tmp_path, nativ
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_an_explicit_python_choice_with_nothing_to_deploy_is_kept(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1843,7 +1850,7 @@ def test_an_explicit_python_choice_with_nothing_to_deploy_is_kept(tmp_path, nati
         assert (_labels(state_path) or {}).get("org.pseudolife.engine", "python") == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("failure", ["pending_import", "old_schema"])
 def test_release_rust_imports_legacy_counters_on_python_first(tmp_path, native, failure):
     # G2-K: the Rust daemon never reads memory_state/weights.pt. Update first
@@ -1873,7 +1880,7 @@ def test_release_rust_imports_legacy_counters_on_python_first(tmp_path, native, 
         assert rollback["tag"] != rollback["before_import"]["tag"]
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("case", ["rust_host", "unreadable_schema"])
 def test_release_rust_refuses_an_unimportable_bank_without_an_import_leg(tmp_path, native, case):
     # A Rust daemon never imports weights.pt, and an unreadable schema would
@@ -1895,7 +1902,7 @@ def test_release_rust_refuses_an_unimportable_bank_without_an_import_leg(tmp_pat
         assert "backup" not in stages(state) and "up" not in stages(state)
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1916,7 +1923,7 @@ def test_release_rust_stops_on_python_when_the_import_does_not_happen(tmp_path, 
         assert _labels(state_path)["org.pseudolife.engine"] == "python"
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_rust_import_leg_checks_the_disk_before_pulling(tmp_path, native):
     # The Rust image is pulled before the Python leg; the 8 GiB floor must
     # hold first, as it does before every other pull.
@@ -1936,7 +1943,7 @@ def test_release_rust_import_leg_checks_the_disk_before_pulling(tmp_path, native
         assert stages(json.loads(state_path.read_text())) == []
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_rust_without_an_image_refuses_before_the_import_leg(tmp_path, native):
     binary = _native_binary()
     if native and not binary:
@@ -1952,7 +1959,7 @@ def test_release_rust_without_an_image_refuses_before_the_import_leg(tmp_path, n
         assert stages(json.loads(state_path.read_text())) == ["pull"]
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_rust_import_leg_runs_at_the_same_version_with_a_fixed_rollback_tag(tmp_path, native):
     # The Python daemon already runs the target: it still restarts to import,
     # and the two legs' rollback tags (same version, same suffix) stay apart.
@@ -2084,7 +2091,7 @@ def test_maintainer_setup_check_uses_recreated_checkout_container(tmp_path, setu
         assert not any("pseudolife-mcp-daemon" in args for args in calls)
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("container", [None, "second-project-daemon", "missing-daemon"])
 def test_maintainer_setup_explicit_container_scope(tmp_path, native, container):
     binary = _native_binary() if native else None
@@ -2143,7 +2150,7 @@ def test_release_retains_original_project_directory_for_relative_mounts(tmp_path
                 assert args[args.index("--project-directory") + 1] == str(repo / "ops")
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("layout", ["stack", "packaged", "old-archive"])
 def test_release_keeps_a_stack_file_that_only_shares_a_shipped_name(tmp_path, native, layout):
     # A stack manager (Portainer: /data/compose/<id>/docker-compose.yml)
@@ -2193,7 +2200,7 @@ def test_release_keeps_a_stack_file_that_only_shares_a_shipped_name(tmp_path, na
             assert files[0] == bases[0] and files.index(ghcr[0]) > files.index(bases[0]), files
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_refuses_when_a_labelled_override_beside_ops_is_missing(tmp_path, native):
     # Review (Opus): a missing override in a checkout's ops/ was exempt
     # because its directory looked packaged; only a shipped file's packaged
@@ -2213,7 +2220,7 @@ def test_release_refuses_when_a_labelled_override_beside_ops_is_missing(tmp_path
         assert stages(json.loads(state_path.read_text())) == []
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 def test_release_refuses_when_a_stack_file_is_missing_on_this_host(tmp_path, native):
     # Portainer records /data/compose/<id>/docker-compose.yml, a path inside
     # its own container. The release's files would replace the stack's
@@ -2235,7 +2242,7 @@ def test_release_refuses_when_a_stack_file_is_missing_on_this_host(tmp_path, nat
         assert stages(json.loads(state_path.read_text())) == []
 
 
-@pytest.mark.parametrize("native", [False, True], ids=["python-oracle", "native"])
+@pytest.mark.parametrize("native", [True], ids=["native"])
 @pytest.mark.parametrize("engine", ["", "rust"])
 def test_release_keeps_a_user_override_whose_name_looks_like_an_engine_overlay(tmp_path, native, engine):
     # A user's own Compose override named docker-compose.engine-*.yml beside

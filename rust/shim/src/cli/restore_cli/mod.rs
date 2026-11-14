@@ -23,10 +23,12 @@ mod args;
 mod bank;
 mod conn;
 mod docker;
+pub(super) mod docker_backup;
 mod dump;
 mod execute;
 mod gzip;
 mod interrupt;
+pub(super) mod move_native;
 mod pathlib;
 mod safety;
 mod state;
@@ -130,24 +132,54 @@ fn main(arguments: Vec<OsString>) -> ExitCode {
             "cannot find your home directory for the update lock; set HOME (USERPROFILE on Windows) or PSEUDOLIFE_MCP_DATA_DIR, then retry. Nothing was restored",
         );
     };
+    match with_update_lock(&directory, || locked(&args, &directory, state_size)) {
+        Ok(code) => code,
+        Err(LockRefusal::Busy(pid)) => refuse(&format!(
+            "another pseudolife-mcp update, restore or backup is running (pid {pid}); nothing was changed. Run this again when it has finished"
+        )),
+        Err(LockRefusal::Unavailable(error)) => refuse(&format!(
+            "cannot take the update lock in {} ({error}); make that directory writable, then retry. Nothing was restored",
+            directory.display()
+        )),
+    }
+}
+
+/// Why the update lock was not taken.
+pub(super) enum LockRefusal {
+    /// Another process holds it: its pid, or `unknown`.
+    Busy(String),
+    /// The lock file could not be opened or locked.
+    Unavailable(os_lock::AcquisitionError),
+}
+
+/// Runs `work` holding the update lock in `directory`, with this process's
+/// pid beside it for a refused peer to name. Restore and backup share it.
+pub(super) fn with_update_lock<T>(
+    directory: &Path,
+    work: impl FnOnce() -> T,
+) -> Result<T, LockRefusal> {
     let mut lock = os_lock::Lock::new(directory.join("update.lock"));
+    let holder = directory.join("update.lock.pid");
     match lock.acquire() {
         Ok(true) => {}
-        Ok(false) => return busy(&directory),
-        Err(error) => {
-            return refuse(&format!(
-                "cannot take the update lock in {} ({error}); make that directory writable, then retry. Nothing was restored",
-                directory.display()
-            ));
+        Ok(false) => {
+            let text = std::fs::read_to_string(&holder).unwrap_or_default();
+            let pid = text.trim();
+            let pid = if !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) {
+                pid
+            } else {
+                "unknown"
+            };
+            return Err(LockRefusal::Busy(pid.to_owned()));
         }
+        Err(error) => return Err(LockRefusal::Unavailable(error)),
     }
-    let holder = directory.join("update.lock.pid");
     let newline = if cfg!(windows) { "\r\n" } else { "\n" };
     let _ = std::fs::write(&holder, format!("{}{newline}", process::id()));
-    let code = locked(&args, &directory, state_size);
+    let result = work();
     let _ = std::fs::remove_file(&holder);
     lock.release();
-    code
+    Ok(result)
 }
 
 /// The data directory: `PSEUDOLIFE_MCP_DATA_DIR`, else
@@ -159,20 +191,6 @@ fn data_dir() -> Option<PathBuf> {
     }
     let home = set("USERPROFILE").or_else(|| set("HOME"))?;
     Some(PathBuf::from(home).join(".pseudolife-mcp"))
-}
-
-/// Another update or restore holds the lock.
-fn busy(directory: &Path) -> ExitCode {
-    let text = std::fs::read_to_string(directory.join("update.lock.pid")).unwrap_or_default();
-    let pid = text.trim();
-    let pid = if !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()) {
-        pid
-    } else {
-        "unknown"
-    };
-    refuse(&format!(
-        "another pseudolife-mcp update is running (pid {pid}); nothing was changed. Run this again when it has finished"
-    ))
 }
 
 /// The embedded PostgreSQL of a lite bank on this host, if there is one.
@@ -202,13 +220,15 @@ fn lite_bank() -> Option<PathBuf> {
     }
     candidates
         .into_iter()
-        .find(|dir| dir.join("embedded_pg").join("PG_VERSION").is_file())
+        .find(|dir| crate::cli::retired::is_lite_bank(dir))
 }
 
 fn lite_refusal(dir: &Path) -> ExitCode {
+    // The shared lite-tier wording (cli/retired.rs); restore replaces a
+    // Docker bank only, so it says first that none was found.
     refuse(&format!(
-        "no Docker bank was found, and this host has a lite bank (embedded PostgreSQL in {}); restore replaces a Docker bank only. Install the Docker bank first (ops/install.sh, or ops\\install.ps1 on Windows; see \"Move a lite bank to Docker\" in docs/guide/configuration.md), then restore into it. Nothing was restored",
-        dir.display()
+        "no Docker bank was found, and {} Nothing was restored",
+        crate::cli::retired::lite_bank_refusal(dir)
     ))
 }
 

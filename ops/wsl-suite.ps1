@@ -5,7 +5,7 @@
 #                                               # PSEUDOLIFE_SUITE_WORKERS=1: one process)
 #   pwsh ops/wsl-suite.ps1 -q -n 2              # still the full suite: display
 #                                               # options and a worker choice
-#   pwsh ops/wsl-suite.ps1 tests/test_bm25.py   # anything else goes to pytest
+#   pwsh ops/wsl-suite.ps1 tests/test_suite_lock.py   # anything else goes to pytest
 #                                               # unchanged (ops/wsl-suite.sh,
 #                                               # plan_run, has the contract)
 #   $env:PSEUDOLIFE_SUITE_PROFILE='1'           # also profile the run (the

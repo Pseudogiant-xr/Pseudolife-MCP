@@ -135,7 +135,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
     parser.add_argument("--record-goldens", action="store_true", help="record oracle fixtures, then check replay")
     parser.add_argument("--part", type=int, choices=(1, 2), help="run one CI part of the startup cells")
+    parser.add_argument("--record-candidate", action="store_true",
+                        help="re-record startup-hydration.json and clock-retry.json from the Rust candidate "
+                             "(candidate_record.py): a dry run that exits 1 if anything would change, unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     args = parser.parse_args(argv)
+    if args.record_goldens and args.record_candidate:
+        parser.error("--record-goldens records the oracle and --record-candidate the candidate; give one")
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if args.record_candidate:
+        import candidate_record
+        why = candidate_record.refuse_mutant_environment()
+        if why:
+            # Before the checks and the build, not only in the child.
+            parser.error(why)
+    if args.part and args.record_candidate:
+        parser.error("--record-candidate records the complete startup matrix, not --part")
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
     if args.part and args.record_goldens:
@@ -179,6 +195,17 @@ def main(argv: list[str] | None = None) -> int:
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
         command = [sys.executable, str(HERE / "startup_cases.py"), "--rust-test-bin", str(binary)]
+        if args.record_candidate:
+            # Both goldens, whatever the first one's dry run says, so one run
+            # shows every change; then check them (the recorder prints how).
+            write = ["--write"] if args.write else []
+            startup = subprocess.run([*command, "--record-candidate", *write, "--out", str(output)],
+                                     cwd=REPO, env=env).returncode
+            retry_output = args.out.resolve().with_name(args.out.stem + "-clock-retry" + args.out.suffix)
+            retry = subprocess.run([sys.executable, str(HERE / "clock_retry_cases.py"), "--rust-test-bin",
+                                    str(binary), "--record-candidate", *write, "--out", str(retry_output)],
+                                   cwd=REPO, env=env).returncode
+            return startup or retry
         if args.part:
             command += ["--part", str(args.part)]
         if args.record_goldens:

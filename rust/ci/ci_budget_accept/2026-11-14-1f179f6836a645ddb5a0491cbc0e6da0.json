@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "bb217dd816ccb0b8",
+  "fingerprint": "7639fe88276933a4",
+  "reason": "The frozen switch now reaches pytest as an argument ops/ci_tests.sh adds (PSEUDOLIFE_CI_INCLUDE_FROZEN), not PYTEST_ADDOPTS; the same tests run, so its cost holds."
+}

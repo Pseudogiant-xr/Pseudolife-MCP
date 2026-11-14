@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "3143d8fe2b5d35c3",
+  "fingerprint": "4e8423b74765fec3",
+  "reason": "Merge of master c768b67bf (batch 6) into #1550: the lane is master's (with #1537's tests/test_update_bridge.py) minus its frozen files, so its cost can only fall from master's; re-measure with test from the first two live-set batches."
+}

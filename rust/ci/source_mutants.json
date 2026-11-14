@@ -232,14 +232,11 @@
     "move-dash-value-admitted",
     "move-direct-socket",
     "move-help-any-width",
-    "move-isspace-separators",
-    "move-json-control",
     "move-refusal-exit",
     "move-scheme-case-sensitive",
     "move-unsure-as-valid",
     "move-url-checked-after-to",
-    "move-url-message",
-    "move-valid-refused"
+    "move-url-message"
   ],
   "pair": [
     "pair-cleanup-error-swallowed",

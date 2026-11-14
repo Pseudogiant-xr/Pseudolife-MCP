@@ -26,8 +26,9 @@ picked up by that command; new control flow requires an explicit compiler
 extension and review. Check current master again before opening the PR.
 The `--record-goldens <result.json>` option also builds and records oracle
 post-states for every historical cell, after the live control and five source
-mutants pass. CI compares the candidate to these committed snapshots as well
-as to the live Python constructor.
+mutants pass. Since the Python freeze CI compares the candidate with these
+committed snapshots only, and a deliberate Rust change re-records them from
+the candidate (`schema_ci.py --record-candidate`, `harness/candidate_record.py`).
 
 ## Seam with W2-D/E
 

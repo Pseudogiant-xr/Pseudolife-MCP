@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "f3e61581c78da942",
+  "fingerprint": "042ddf07d4979fd8",
+  "reason": "Restores tests/test_lease_cli.py, which the lane already ran before the freeze split; the lane is back to its measured file set less the frozen files."
+}
