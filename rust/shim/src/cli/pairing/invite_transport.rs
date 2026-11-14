@@ -283,7 +283,7 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
         .flatten();
     let Some(version) = version else {
         let message = if checked.code == 127 || checked.stderr.contains("No such container") {
-            "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and no pseudolife-mcp-daemon container: run this on the daemon's host"
+            "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset) and no pseudolife-mcp-daemon container: run this on the daemon's host"
         } else {
             "the daemon's image predates `invite`: update the daemon first (pseudolife-mcp update), then re-run"
         };

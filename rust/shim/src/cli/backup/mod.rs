@@ -134,13 +134,17 @@ fn lite_default() -> Option<PathBuf> {
     Some(base.join("pseudolife-mcp"))
 }
 
-/// `_default_data_dir`, deferring wherever Python could pick the lite tier.
+/// `_default_data_dir` with the lite tier retired: `PSEUDOLIFE_MCP_DATA_DIR`,
+/// else the lite default when it holds a lite bank (which is then refused),
+/// else `./data`. The lite default existing is no bank: the native client
+/// installs its runtimes there.
 fn default_data_dir() -> Option<PathBuf> {
     if let Some(raw) = nonempty_env("PSEUDOLIFE_MCP_DATA_DIR")? {
         return Some(args::pathlib(Path::new(&raw)));
     }
-    if !matches!(lite_default()?.try_exists(), Ok(false)) {
-        return None;
+    let lite = lite_default()?;
+    if crate::cli::retired::is_lite_bank(&lite) {
+        return Some(lite);
     }
     let cwd = std::env::current_dir().ok()?;
     Some(cwd.join("data"))
@@ -225,12 +229,23 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         Err(_) => return None,
     }
     let dsn = nonempty_env("PSEUDOLIFE_MCP_DATABASE_URL")?;
+    if dsn.is_none() && crate::cli::retired::is_lite_bank(&data_dir) {
+        let _ = write_stream(
+            false,
+            &format!(
+                "pseudolife-mcp backup: {}\n",
+                crate::cli::retired::lite_bank_refusal(&data_dir)
+            ),
+        );
+        return Some(1);
+    }
     if dsn.is_none()
         && !matches!(
             data_dir.join("embedded_pg").join("PG_VERSION").try_exists(),
             Ok(false)
         )
     {
+        // An unreadable marker (not a lite bank this client can name).
         return None;
     }
     let bdir = match &args.out {
@@ -280,8 +295,7 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         },
         (Some(_), _) => {
             return Some(failed(
-                "pg_dump not found — install PostgreSQL client tools or the \
-                 pseudolife-mcp[lite] extra (whose embedded runtime bundles it).",
+                "pg_dump not found — install the PostgreSQL client tools.",
             ));
         }
         (None, _) => None,

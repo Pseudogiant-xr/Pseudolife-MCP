@@ -222,32 +222,68 @@ fn invalid_argv_reports_argparse_usage_without_effects() {
     }
 }
 
-#[test]
-fn the_embedded_tier_defers_before_any_effect() {
-    let home = Home::new("embedded");
-    let pgdata = home.path().join("bank").join("embedded_pg");
-    fs::create_dir_all(&pgdata).unwrap();
-    fs::write(pgdata.join("PG_VERSION"), "18\n").unwrap();
-    assert_deferred(&home, &["--data-dir", &text(&home.path().join("bank"))]);
-    // No argument and an existing lite default dir: Python may attach pg0.
-    let lite = if cfg!(windows) {
-        home.path()
-            .join("AppData")
-            .join("Local")
-            .join("pseudolife-mcp")
+fn lite_default(home: &Path) -> PathBuf {
+    if cfg!(windows) {
+        home.join("AppData").join("Local").join("pseudolife-mcp")
     } else if cfg!(target_os = "macos") {
-        home.path()
-            .join("Library")
+        home.join("Library")
             .join("Application Support")
             .join("pseudolife-mcp")
     } else {
-        home.path()
-            .join(".local")
-            .join("share")
-            .join("pseudolife-mcp")
-    };
-    fs::create_dir_all(&lite).unwrap();
-    assert_deferred(&home, &[]);
+        home.join(".local").join("share").join("pseudolife-mcp")
+    }
+}
+
+fn assert_lite_refused(home: &Home, arguments: &[&str], bank: &Path) {
+    let before = home.listing();
+    let output = run(home.path(), arguments);
+    assert_eq!(output.status.code(), Some(1), "{arguments:?}");
+    assert!(output.stdout.is_empty(), "{arguments:?}");
+    let expected = format!(
+        "pseudolife-mcp backup: {}",
+        pseudolife_stdio::cli::retired::lite_bank_refusal(bank)
+    );
+    assert_eq!(
+        output.stderr,
+        cli::native_text(&format!("{expected}\n")),
+        "{arguments:?}"
+    );
+    assert_eq!(home.listing(), before, "{arguments:?} changed the home");
+}
+
+#[test]
+fn a_lite_bank_is_refused_plainly_before_any_effect() {
+    let home = Home::new("embedded");
+    let bank = home.path().join("bank");
+    let pgdata = bank.join("embedded_pg");
+    fs::create_dir_all(&pgdata).unwrap();
+    fs::write(pgdata.join("PG_VERSION"), "18\n").unwrap();
+    assert_lite_refused(&home, &["--data-dir", &text(&bank)], &bank);
+    // The lite default existing is not a lite bank (the native client keeps
+    // its runtimes there): with no argument the data dir is ./data.
+    let lite = lite_default(home.path());
+    fs::create_dir_all(lite.join("runtimes")).unwrap();
+    assert_refused_default(&home, &text(&home.path().join("data")));
+    // A lite default that holds a bank is refused by name.
+    fs::create_dir_all(lite.join("embedded_pg")).unwrap();
+    fs::write(lite.join("embedded_pg").join("PG_VERSION"), "18\n").unwrap();
+    assert_lite_refused(&home, &[], &lite);
+}
+
+fn assert_refused_default(home: &Home, data_dir: &str) {
+    let before = home.listing();
+    let output = run(home.path(), &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        cli::native_text(&format!(
+            "data dir {data_dir} does not exist — nothing to back up. \
+             If this is a Docker install, Docker or its bank containers may be unavailable; \
+             start Docker and retry, or pass --container <postgres>.\n"
+        ))
+    );
+    assert_eq!(home.listing(), before);
 }
 
 #[test]

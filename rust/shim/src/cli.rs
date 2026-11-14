@@ -24,6 +24,7 @@ mod move_cli;
 mod pairing;
 mod pyjson;
 mod restore_cli;
+pub mod retired;
 mod test_login;
 mod transfer;
 mod tunnel;
@@ -36,10 +37,10 @@ pub(crate) fn process_table() -> Result<Option<connect::ProcessTable>, ()> {
 }
 
 const HELP: &str = include_str!("cli_help.txt");
+// Modes whose own arm returns `None` for shapes it does not handle yet; the
+// generic line names them. `serve`, `embedded` and `board-audit` answer every
+// shape themselves (main.rs, the arm below, main.rs), so none is listed.
 const DEFERRED_MODES: &[&str] = &[
-    "serve",
-    "embedded",
-    "board-audit",
     "doctor",
     "connect",
     "invite",
@@ -222,6 +223,10 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
         && let Some(code) = console::run(std::env::args_os().skip(2).collect())
     {
         return Some(code);
+    }
+    if mode == "embedded" {
+        crate::stderrln!("{}", retired::embedded_message());
+        return Some(ExitCode::from(1));
     }
     if matches!(mode, "conductor-watch" | "delegate-watch")
         && let Some(code) = conductor_watch::run(mode, std::env::args_os().skip(2).collect())

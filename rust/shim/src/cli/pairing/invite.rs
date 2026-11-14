@@ -491,6 +491,9 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         .ok()
         .filter(|value| !value.is_empty());
     let Some(dsn) = dsn else {
+        if let Some(bank) = crate::cli::retired::find_lite_bank(None) {
+            return Ok(report.fail(EXIT_REFUSED, &crate::cli::retired::lite_bank_refusal(&bank)));
+        }
         if transport::docker_available() {
             return transport::run(&args, &mut report, port).await;
         }

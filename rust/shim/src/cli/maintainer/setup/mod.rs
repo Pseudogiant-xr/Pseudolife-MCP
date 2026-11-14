@@ -310,8 +310,8 @@ async fn keys() -> Result<Value> {
         .filter(|v| !v.is_empty())
     {
         value
-    } else if data.join("embedded_pg/PG_VERSION").is_file() {
-        return Err(lite_refusal());
+    } else if crate::cli::retired::is_lite_bank(&data) {
+        return Err(lite_refusal(&data));
     } else {
         return Err(Error::refused("NoBank"));
     };
@@ -341,22 +341,17 @@ async fn keys() -> Result<Value> {
     }.await
 }
 
-fn lite_refusal() -> Error {
-    Error::refused(
-        "phase4-embedded-pg-deferred: native maintainer setup does not support the lite tier; run `python -m pseudolife_memory.cli maintainer setup` for this bank",
-    )
+fn lite_refusal(data: &std::path::Path) -> Error {
+    Error::refused(crate::cli::retired::lite_bank_refusal(data))
 }
 
 fn refuse_lite() -> Result<()> {
     if std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").is_some_and(|v| !v.is_empty()) {
         return Ok(());
     }
-    if config::data_dir()?
-        .0
-        .join("embedded_pg/PG_VERSION")
-        .is_file()
-    {
-        return Err(lite_refusal());
+    let data = config::data_dir()?.0;
+    if crate::cli::retired::is_lite_bank(&data) {
+        return Err(lite_refusal(&data));
     }
     Ok(())
 }

@@ -73,6 +73,8 @@ def test_scanner_refusals(candidate, tmp_path, text):
     config.write_text(text, encoding="utf-8")
     env = isolated_env(tmp_path / "home")
     env["PSEUDOLIFE_MCP_CONFIG"] = str(config)
+    # `serve` refuses unless asked for the maintainer-testing candidate.
+    env["PSEUDOLIFE_STDIO_SENT_CANDIDATE"] = "1"
     def files():
         return {p.relative_to(tmp_path / "home"): p.read_bytes()
                 for p in (tmp_path / "home").rglob("*") if p.is_file()}

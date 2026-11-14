@@ -4,7 +4,7 @@ use super::{
     bank, stats,
 };
 use crate::pg::resolution;
-use std::{ffi::OsString, fs::File, path::PathBuf, process::Stdio};
+use std::{ffi::OsString, fs::File, process::Stdio};
 
 fn runtime() -> Option<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()
@@ -19,31 +19,21 @@ fn add(args: &mut Vec<OsString>, flag: &str, value: Option<impl ToString>) {
 }
 fn no_bank() -> u8 {
     stats::error(
-        "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)",
+        "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp board-audit ...` on its host)",
     )
 }
-fn local_deferred() -> bool {
+/// Before any forwarding: a database URL this transport does not serve yet
+/// (the generic deferral), or a lite-tier bank (its plain refusal).
+fn local_answer() -> Option<u8> {
     if std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").is_some_and(|v| !v.is_empty()) {
-        return true;
+        return Some(super::deferred());
     }
-    let directory = std::env::var_os("PSEUDOLIFE_MCP_DATA_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let default = dirs::data_local_dir()
-                .unwrap_or_default()
-                .join("pseudolife-mcp");
-            if default.exists() {
-                default
-            } else {
-                std::env::current_dir().unwrap_or_default().join("data")
-            }
-        });
-    directory.join("embedded_pg").join("PG_VERSION").exists()
+    let bank = crate::cli::retired::find_lite_bank(None)?;
+    Some(stats::error(crate::cli::retired::lite_bank_refusal(&bank)))
 }
 fn forward(arguments: Vec<OsString>, stdout: Option<Stdio>) -> u8 {
-    if local_deferred() {
-        return super::deferred();
+    if let Some(code) = local_answer() {
+        return code;
     }
     let Some(runtime) = runtime() else {
         return super::failed();
@@ -73,8 +63,8 @@ pub(super) fn redact(message_id: &str, reason: &str) -> u8 {
     forward(args, None)
 }
 pub(super) fn export(export: &Export) -> u8 {
-    if local_deferred() {
-        return super::deferred();
+    if let Some(code) = local_answer() {
+        return code;
     }
     let mut args = vec!["export".into()];
     add(&mut args, "--project", export.project.as_deref());
@@ -116,8 +106,8 @@ pub(super) fn export(export: &Export) -> u8 {
     code
 }
 pub(super) fn stats(stats: &Stats) -> u8 {
-    if local_deferred() {
-        return super::deferred();
+    if let Some(code) = local_answer() {
+        return code;
     }
     let Some(runtime) = runtime() else {
         return super::failed();
