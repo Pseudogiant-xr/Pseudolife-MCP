@@ -77,12 +77,6 @@ cannot print. List and revoke make no request.
 
 ## Declared divergences
 
-- A `/health` nested past CPython's recursion limit (more than 985
-  containers): the oracle dies with an uncaught `RecursionError` traceback
-  (exit 1, naming its own source files); the candidate prints its deferral
-  line, exit 1, after the same request. Rule `invite-recursion-traceback`
-  maps only that traceback with exit 1. The limit is measured on CPython
-  3.11.9; another oracle interpreter can move it.
 - The native session runs `RESET lock_timeout` after the shared client's
   5 s setting, so a lock wait ends at the 10 s statement timeout as in Python
   (`QueryCanceled`, exit 1).
@@ -109,13 +103,14 @@ it, and core's program preflight proves both before every arm. Rule
 loads; each arm records it, and only `port <p>`, `127.0.0.1:<p>` and
 `localhost:<p>` with that exact value become `<port>` in the streams.
 
-The 40 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
+The 39 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
 their output or bank dump. The oracle's writers stamp those rows with the
 wall clock and draw their codes and tokens at random in every harness
 process, so the cases run live only (`Case.golden` False).
-`health-nested-at-limit-json` is live-only too: its report pretty-prints
-the daemon's auth value nested to the limit, 2.6 MB of indentation. The
-goldens hold the other 84.
+The goldens hold the other 86. A `/health` with more than 100 brackets
+open at once is "not the daemon" in both arms (`expose_cli._json`'s bound,
+2026-11-13); before it, one nested past CPython's recursion limit killed
+the oracle with a traceback.
 
 ## Operator transport extension (2026-11-02 candidate)
 

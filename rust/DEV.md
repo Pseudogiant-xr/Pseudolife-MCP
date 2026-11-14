@@ -49,6 +49,41 @@ git diff -- rust/cli_harness/goldens/mail.*.json
 Recording writes `goldens/<row>.<platform>.json` and replaces that row's record;
 omit `--case` to avoid replacing it with a partial row.
 
+Python is frozen, so a deliberate Rust behaviour change re-records its
+golden from the candidate instead. The first command is a dry run that
+prints each case as unchanged, changed (with the replay's difference) or new
+and exits 1 if anything would change; `--write` then replaces only the
+changed and new cases of this platform's golden:
+
+```powershell
+python rust/cli_harness --row mail --case ring-past-seen --record-candidate --candidate $candidate
+python rust/cli_harness --row mail --case ring-past-seen --record-candidate --candidate $candidate --write
+```
+
+Repeat it on the other OS when that golden pins the case too, and replay the
+written golden once more with `--golden` before committing: the recorder
+checks each entry only against the single run it came from, so a value that
+varies between runs shows up only on a second run. It refuses a vacuous
+case, a deferral (unless `--allow-deferral`) and an entry that would not
+replay against its own run. Re-record only a difference you can name as the
+intended change; a red replay you cannot explain is a finding, not a golden
+to rewrite ([Goldens after the freeze](cli_harness/README.md#goldens-after-the-freeze)).
+
+The daemon harness records whole scenarios the same way, through the golden
+replay's own Rust-only path: `run.py golden --record-candidate` and
+`w2e.py golden --record-candidate`, each a dry run unless `--write`, select
+scenarios with `--only`. They report each scenario as unchanged, changed or
+new, and refuse a deferral (the declared 501 body, no override), a run that
+fails a check the replay makes whatever the golden says (a boot's warmup
+probe, the extractor stub table, a read-only bank), and a golden that would
+not replay against its own run. w2e goldens and all `run.py` goldens except
+the `static-*-windows`/`-linux` pairs are shared by both OSes, so replay a
+written one on the other OS before landing it. `w2e.py golden --mutant
+<name>` replays against a deliberate break in a `--features mutants` build,
+to show a golden catches it. Seeded and live-only scenarios are skipped, and
+the `console-dream-*` scenarios are refused, because their replay seeds the
+bank from the recording itself.
+
 Run the existing source mutants; every selected mutant must be caught:
 
 ```powershell

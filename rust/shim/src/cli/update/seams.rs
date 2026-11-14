@@ -402,6 +402,47 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         UpdateError::new("cannot save update state; restore free disk space and retry")
     })
 }
+/// The system temporary folder with its symlinks resolved. Private state
+/// refuses any redirected ancestor, and on macOS the temporary folder sits
+/// below one (`/var` -> `/private/var`, `$TMPDIR` under it); a Linux host may
+/// link `/tmp` too. Windows keeps its path (canonical paths there carry the
+/// `\\?\` prefix other tools refuse, and its redirect check is its own).
+pub(crate) fn temp_root() -> PathBuf {
+    resolved(std::env::temp_dir())
+}
+fn resolved(base: PathBuf) -> PathBuf {
+    if cfg!(unix) {
+        std::fs::canonicalize(&base).unwrap_or(base)
+    } else {
+        base
+    }
+}
+/// A new private folder `<prefix>-<uuid>` under the temporary folder.
+pub(crate) fn private_scratch(prefix: &str) -> std::result::Result<PathBuf, String> {
+    private_scratch_in(std::env::temp_dir(), prefix)
+}
+pub(crate) fn private_scratch_in(
+    base: PathBuf,
+    prefix: &str,
+) -> std::result::Result<PathBuf, String> {
+    let scratch = resolved(base).join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
+    crate::board::state::private_dir(&scratch).map_err(|cause| {
+        if cause == "invalid_state" {
+            format!(
+                "could not create the private folder {}: one of its parent folders is a link that could not be resolved, or the folder could not be made private; set {} to a real folder you own, then retry",
+                scratch.display(),
+                if cfg!(windows) { "TEMP" } else { "TMPDIR" }
+            )
+        } else {
+            format!(
+                "could not create the private folder {}; check that the temporary folder exists, is writable by this account and has free space, then retry",
+                scratch.display()
+            )
+        }
+    })?;
+    Ok(scratch)
+}
+
 pub(crate) fn stamp() -> String {
     chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
 }
