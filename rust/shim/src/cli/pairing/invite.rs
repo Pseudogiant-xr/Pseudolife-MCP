@@ -491,17 +491,15 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         .ok()
         .filter(|value| !value.is_empty());
     let Some(dsn) = dsn else {
-        // A running daemon container wins: a completed Docker migration can
-        // leave a stopped lite cluster behind (ops/preflight_lite.py).
-        let docker = transport::docker_available();
-        if docker && transport::daemon_running().await {
+        // With docker, the transport tries the daemon container first and
+        // refuses a lite bank only when that container is not running: a
+        // completed Docker migration can leave a stopped lite cluster behind
+        // (ops/preflight_lite.py).
+        if transport::docker_available() {
             return transport::run(&args, &mut report, port).await;
         }
         if let Some(bank) = crate::cli::retired::find_lite_bank(None) {
             return Ok(report.fail(EXIT_REFUSED, &crate::cli::retired::lite_bank_refusal(&bank)));
-        }
-        if docker {
-            return transport::run(&args, &mut report, port).await;
         }
         return Ok(report.fail(EXIT_REFUSED, "no database found: set PSEUDOLIFE_MCP_DATABASE_URL, or run this on the daemon's host (a Docker install runs it in the daemon container)"));
     };

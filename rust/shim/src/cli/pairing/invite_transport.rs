@@ -43,23 +43,6 @@ pub(super) fn docker_available() -> bool {
         || program("docker").is_some()
 }
 
-/// Whether the daemon container answers `docker inspect` as running: the
-/// program is `PSEUDOLIFE_DOCKER`, else `docker` as `find_program_path`
-/// finds it (absolute `PATH` directories only); with neither, no container
-/// can answer and nothing is started.
-pub(super) async fn daemon_running() -> bool {
-    let docker = match std::env::var_os("PSEUDOLIFE_DOCKER").filter(|v| !v.is_empty()) {
-        Some(program) => program,
-        None => match crate::cli::program_lookup::find_program_path("docker") {
-            Some(program) => program.into_os_string(),
-            None => return false,
-        },
-    };
-    resolution::inspect(&resolution::container_inspect(&docker))
-        .await
-        .is_some_and(|o| o.status.success() && text(&o.stdout).trim() == "true")
-}
-
 fn docker() -> OsString {
     std::env::var_os("PSEUDOLIFE_DOCKER")
         .filter(|v| !v.is_empty())
@@ -297,6 +280,10 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
     if !running.is_some_and(|o| o.status.success() && text(&o.stdout).trim() == "true") {
         if args.list || args.revoke.is_some() {
             return through_postgres(args, report).await;
+        }
+        // No daemon container answers: a lite bank here is refused plainly.
+        if let Some(bank) = crate::cli::retired::find_lite_bank(None) {
+            return Ok(report.fail(EXIT_REFUSED, &crate::cli::retired::lite_bank_refusal(&bank)));
         }
         return Ok(report.fail(EXIT_REFUSED, "the pseudolife-mcp-daemon container is not running: start the daemon (an invite needs it to report its bank), then re-run"));
     }
