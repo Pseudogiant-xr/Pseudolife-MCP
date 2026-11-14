@@ -833,10 +833,8 @@ def _freeze_runs(*runs: tuple[str, str]) -> list[dict]:
 
 
 def test_entries_with_no_check_name_never_replace_each_others_failure(world, capsys):
-    sha10 = world.pr(10, {"b.txt": "b
-"})
-    sha11 = world.pr(11, {"c.txt": "c
-"})
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
     world.gh.add(10, sha10)
     world.gh.add(11, sha11, statusCheckRollup=[
         {"status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-11-14T01:00:00Z"},
