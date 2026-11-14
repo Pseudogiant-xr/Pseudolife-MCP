@@ -26,9 +26,12 @@ setup` before they would change anything. Every other step (setup itself,
 `start`, `run`, `stop`, `doctor`, `service`, the cloud verification and
 `update` of a ready profile) stops with `pseudolife-stdio: mode 'tunnel' is
 deferred in this candidate` and exit 1, having changed nothing. On a host
-that runs a tunnel, keep the Python client: start the update from the
-Python client with `PSEUDOLIFE_SHIM_ENGINE=python` set, before the machine
-moves (see [The native client](configuration.md#the-native-client)).
+that runs a tunnel, keep the Python client, which an update does unless
+you opt in with `PSEUDOLIFE_SHIM_ENGINE=native`. With a running tunnel and
+a ready profile, every native `update` that runs the client steps also ends
+with exit 5, the opting-in run included, because its tunnel step defers (see
+[The native client](configuration.md#the-native-client), which also says how
+to go back).
 
 ## Start or resume
 

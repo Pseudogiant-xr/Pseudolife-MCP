@@ -693,8 +693,10 @@ yet: `pseudolife-mcp move --to <ssh-target> --target-url <url>
 --no-keep-tokens --dry-run` checks both hosts without changing anything on
 either and prints what the move would do, and without `--dry-run` it refuses
 and says so (move with pseudolife-mcp 0.23.x for now). The target needs the
-native client installed (an update from a 0.23.x Python client moves a
-host to it, or `pseudolife-mcp runtime install --archive`), an installed
+native client installed (an update from 0.23.x, or `update
+--clients-only`, with `PSEUDOLIFE_SHIM_ENGINE=native` set moves a host to
+it, see [The native client](configuration.md#the-native-client); or
+`pseudolife-mcp runtime install --archive`), an installed
 Docker bank (one
 compose stack, not a source checkout) that is healthy, empty and at least the
 source's schema and PostgreSQL version, and free space for the move's files

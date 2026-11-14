@@ -2,8 +2,8 @@
 
 A Docker install of Pseudolife-MCP runs the Rust daemon. Everything on the
 user's own machine (the stdio shim, the `pseudolife-mcp` command, the
-installers and the updater) still runs Python, until an update moves the
-machine to the native client (below). This page records what is true
+installers and the updater) still runs Python, until the user opts in to
+the native client with `PSEUDOLIFE_SHIM_ENGINE=native` on an update (below). This page records what is true
 on master and what is left before Python can be deleted. It replaces the
 October 2026 plan that lived here; that plan's decisions are kept, shortened,
 under "Decision record".
@@ -31,10 +31,10 @@ deploy or a live-bank change.
 |---|---|---|
 | Daemon, Docker tier | `ghcr.io/…/pseudolife-daemon-rust:<version>`, the default engine for a new install and for an attended update. Its final image stage is `debian:bookworm-slim` with `pseudolife-daemon` and a native `pseudolife-mcp`; it holds no Python. | No |
 | Daemon on a host that chose Python, or whose bank the Rust daemon cannot open yet | `ghcr.io/…/pseudolife-daemon` (`ops/Dockerfile.daemon`). | Yes |
-| Stdio shim and `pseudolife-mcp` on the user's machine | A Python virtual environment the installers build with `ops/shim_runtime.py`; every client registration points at its launcher. An update from a 0.23.x Python client replaces it with the native client behind the same launcher (next rows). | Yes, until moved |
+| Stdio shim and `pseudolife-mcp` on the user's machine | A Python virtual environment the installers build with `ops/shim_runtime.py`; every client registration points at its launcher. An update with `PSEUDOLIFE_SHIM_ENGINE=native` set replaces it with the native client behind the same launcher (next rows); without it the update keeps Python. | Yes, unless moved |
 | Installers (`ops/install.sh`, `ops/install.ps1`) | Shell and PowerShell that call Python helpers: `client_credentials.py` (the bearer token), `installer_state.py`, `installer_engine.py`, `preflight.py`, the Codex setup scripts and the Claude Desktop registrar. | Yes |
-| `pseudolife-mcp update` | The installed updater. The Python one's client step installs a shim runtime from PyPI and hands the steps after it to that runtime (`client-handoff-v1`); a 0.23.x updater's hand-off reaches this release's `pseudolife_memory/update_bridge.py`, which downloads and verifies the native archive for the platform and runs the native updater's client steps in its place, or keeps Python and says why. On a native client, the native updater. From a checkout, the wrappers (`ops/update.sh`, `update.ps1`, `update.py`) use the native updater only with `--native` or `PSEUDOLIFE_NATIVE_UPDATE=1`, or when no Python 3.10 or newer is found. | Yes, until moved |
-| Native client (`rust/shim`, binary `pseudolife-stdio`, installed as `pseudolife-mcp`) | Installed by the update bridge (above), or by hand with `pseudolife-mcp runtime install --archive`; the installers do not install it yet. Every release builds the five native archives, the compose bundle and `SHA256SUMS` and attaches them to the GitHub release before PyPI publishes (`release.yml`: `rust-assets`, `rust-assets-bundle`, `rust-assets-publish`); release 0.23.1 carries none. A manual dispatch builds them without publishing. | No |
+| `pseudolife-mcp update` | The installed updater. The Python one's client step installs a shim runtime from PyPI and hands the steps after it to that runtime (`client-handoff-v1`); a 0.23.x updater's hand-off reaches this release's `pseudolife_memory/update_bridge.py`. The move is opt-in in 0.24.0: without `PSEUDOLIFE_SHIM_ENGINE=native` the bridge keeps Python and, on a hand-off where a native build exists for the platform, prints the opt-in command; with it, it downloads and verifies the native archive for the platform and runs the native updater's client steps in its place, or keeps Python and says why (a machine already on this release's Python client moves with that setting and `update --clients-only`). On a native client, the native updater. From a checkout, the wrappers (`ops/update.sh`, `update.ps1`, `update.py`) use the native updater only with `--native` or `PSEUDOLIFE_NATIVE_UPDATE=1`, or when no Python 3.10 or newer is found. | Yes, unless moved |
+| Native client (`rust/shim`, binary `pseudolife-stdio`, installed as `pseudolife-mcp`) | Installed by the update bridge when the user opts in (above), or by hand with `pseudolife-mcp runtime install --archive`; the installers do not install it yet. Every release builds the five native archives, the compose bundle and `SHA256SUMS` and attaches them to the GitHub release before PyPI publishes (`release.yml`: `rust-assets`, `rust-assets-bundle`, `rust-assets-publish`); release 0.23.1 carries none. A manual dispatch builds them without publishing. | No |
 | Plugin hooks | bash and PowerShell scripts (`plugin/hooks/`). | No |
 | Published packages | The PyPI wheel, the Python daemon image, the PostgreSQL image, the Rust daemon image, the native archives on the GitHub release, and an MCP registry entry (`server.json`) that points at PyPI. | PyPI, the Python image and the registry entry |
 
@@ -58,9 +58,10 @@ the fix.
    binary (#1308). Fixed: it hands them to the new runtime.
 3. The native archives publish with every release. Done.
 4. The installers and `update` install the native client, re-point existing
-   registrations at it, and stop calling Python helpers. `update` does from
-   a 0.23.x Python client (the update bridge); the installers still build
-   the Python client and call the Python helpers.
+   registrations at it, and stop calling Python helpers. `update` does on
+   request (`PSEUDOLIFE_SHIM_ENGINE=native`, opt-in in 0.24.0 because of the
+   deferrals below); the installers still build the Python client and call
+   the Python helpers.
 5. The registered shim can start a local daemon without Python. Done:
    `rust/shim/src/lifecycle.rs` starts one only from
    `PSEUDOLIFE_MCP_SERVE_COMMAND`, and otherwise its note names the Docker
@@ -71,7 +72,7 @@ the fix.
 |---|---|---|
 | `backup` | A Docker bank (the verified dump and state archive, rotation) and an explicit DSN through `pg_dump`. | Nothing; a lite bank is refused. |
 | `restore` | All of it for a Docker bank: the checks, the confirmation prompt, the safety backup, drop, replay, state archive and restart. | Nothing; a lite bank is refused. |
-| `update` | Release and checkout mode, with the client-step hand-off (`client-handoff-v1`); a 0.23.x Python client's update moves to it through the update bridge. | The installers (item 4). |
+| `update` | Release and checkout mode, with the client-step hand-off (`client-handoff-v1`); a Python client's update moves to it through the update bridge when `PSEUDOLIFE_SHIM_ENGINE=native` is set. | The installers (item 4); on a machine with a running tunnel and a ready profile with its key, every native `update` that runs the client steps exits 5 (the opting-in run included), because its tunnel step runs `tunnel update`, which defers. |
 | `conductor-watch` (`delegate-watch`) | Everything, the watch loop and `--detach` included, on Windows and Linux (macOS runs the same code; only the release build compiles it there, and no CI job tests it). | The argument spellings `rust/cli_harness/rows/conductor_watch.md` lists still defer; `--lease-cli` is accepted and ignored. |
 | `connect` | Re-pointing every registration (Claude Code, Codex through its app-server, Claude Desktop, Gemini CLI), pairing codes, and a Windows User-scope daemon URL. | The interactive prompts (a run at a terminal without `--yes`, `--read-token` or `--read-code` at a terminal) and a run for all clients on a machine with an unattended-update schedule defer. |
 | `console` | Every shape except the browser launchers it does not reproduce. | The macOS default launcher and the other launchers Python's `webbrowser` knows. |
