@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "0f464b588183eae9",
+  "fingerprint": "9045b09e5ae957d5",
+  "reason": "Python freeze (2026-11-14): the two oracle steps (event oracle selection and its metadata export, about 10-20 s together) become one environment line pointing the version contract at the checkout's pyproject.toml, and the in-process Codex planning comparison with Python (setup_codex_parity.py, a 3-minute step limit; it rebuilds test binaries Nextest already built) leaves; every build and test step is unchanged, so its cost holds or falls."
+}

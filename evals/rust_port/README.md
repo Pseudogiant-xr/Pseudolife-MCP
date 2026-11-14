@@ -1,5 +1,13 @@
 # Rust port differential instrument
 
+**Not run by CI since 14 November 2026.** Python is frozen and exact parity
+with it is no longer the acceptance bar, so no pull request, batch, push or
+scheduled job runs this instrument, its judges or its tests (the `judges`
+suite, the `eval` shard's differential tests and the frozen judge probes
+left `rust.yml`). The code stays until the deletion stream removes it; the
+plan is `rust/CUTOVER.md` "Stop comparing with Python". What follows
+describes the instrument as it was.
+
 The instrument records whole CLI processes and HTTP/MCP responses and compares
 an independently observed candidate. Phase 0b pins Python production source to
 `3691f5cb75487d3fda54a6bde6fab35dcf32c681`, schema 53; evaluation code may

@@ -1,6 +1,14 @@
-"""Check executable CI selections against the accepted row/control registries."""
+"""Check executable CI selections against the accepted row/control registries.
+
+Since the Python freeze (14 November 2026) the contract is: every accepted CLI row
+and daemon scenario replays its committed goldens in a parity shard or is named
+as unreplayed here or in parity_scope.UNREPLAYED_ROWS; no job a pull request,
+batch, master push or schedule starts compares against a live Python oracle,
+except the weekly CLI source mutants.
+"""
 
 import ast
+import itertools
 from collections import Counter
 import json
 import re
@@ -11,7 +19,12 @@ from test_workflow import commands
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
-SOURCE_EVENTS = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')"
+# Weekly since the Python freeze (14 November 2026): the Sunday schedule
+# and manual CI. The weekday nightly is the other schedule.
+NIGHTLY_CRON = '23 3 * * 1-6'
+WEEKLY_CRON = '23 3 * * 0'
+SOURCE_EVENTS = (f"(github.event_name == 'schedule' && github.event.schedule == '{WEEKLY_CRON}') "
+                 "|| (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
 PARITY_CANCELLED_STEP = {"name": "A needed job was cancelled",
                          "if": "${{ contains(needs.*.result, 'cancelled') }}", "run": "exit 1"}
 PARITY_VERDICT_IF = "${{ !contains(needs.*.result, 'cancelled') }}"
@@ -20,19 +33,133 @@ $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
 $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
 $fastPr = $env:GATE_EVENT -ceq 'pull_request' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.full -ceq 'false'
 $pushPassed = $env:GATE_EVENT -ceq 'schedule' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.push_passed -ceq 'true'
+$noPairs = $env:GATE_EVENT -ceq 'push' -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.parity_any -ceq 'false'
 foreach ($job in @('rust', 'candidate', 'parity-checks')) {
-  $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust') -or ($pushPassed -and $job -cne 'candidate')
+  $skipChosen = $docsOnly -or ($fastPr -and $job -cne 'rust') -or ($pushPassed -and $job -cne 'candidate') -or ($noPairs -and $job -ceq 'parity-checks')
   if ($results[$job].result -cne 'success' -and -not ($skipChosen -and $results[$job].result -ceq 'skipped')) {
     Write-Error "$job did not succeed"
     exit 1
   }
 }
 $sourceResult = $results['source-mutants'].result
-if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push') -and $sourceResult -ceq 'skipped')) {
-  Write-Error "source-mutants did not succeed outside the PR, merge-group and push skip exception"
+$weekday = $env:GATE_EVENT -ceq 'schedule' -and $env:GATE_SCHEDULE -cne 'WEEKLY_CRON'
+if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push' -or $weekday) -and $sourceResult -ceq 'skipped')) {
+  Write-Error "source-mutants did not succeed outside the PR, merge-group, push and weekday-nightly skip exception"
   exit 1
 }
-"""
+""".replace("WEEKLY_CRON", WEEKLY_CRON)
+# The parity suites that held only live comparisons against the Python
+# oracle and left CI with the freeze. None may come back into the matrix.
+RETIRED_SUITES = frozenset({"cli-live", "judges", "h5-audit", "h5-backup", "h5-w1a", "h5-background",
+                            "h5-daemon-mutants", "h5-graph-mutants", "h5-light"})
+# Daemon harness scenarios (rust/daemon/harness/run.py SCENARIOS) no hosted
+# job replays since the freeze. Each ran only live against the Python
+# oracle, or replayed a recording the same run made from it (the H5 suites).
+# A new scenario gets a golden replay in a parity shard or is named here.
+UNREPLAYED_SCENARIOS = frozenset({
+    # h5-w1a: live with a same-run recording, then its replay.
+    "tokens", "tokenless", "pair-budget", "config", "extractor", "db-down", "lease-held", "reaper",
+    "dim-mismatch", "stamped", "seeded", "json-float-shortest-ties", "trust-bind", "null-embedding",
+    "unconstrained-dims", "db-lost", "encodings", "map-order", "map-order-reversed", "mcp-modern",
+    "mcp-modern-subscriptions", "mcp-cancellation", "mcp-modern-cancellation", "mcp-dream-rollback",
+    "mcp-search-explain",
+    # h5-background: live only.
+    "session-reap", "session-restart", "session-resume-refusal", "session-sweep",
+    "session-tombstone-restart", "sweep-recovery",
+    # Live only before the freeze too (coverage_plan EXCEPTIONS['daemon_scenarios']).
+    "pairing", "console-signin", "console-passkey-signin",
+    # The security remote-bind cases: no golden; they run live under
+    # LIVE_SECURITY_EXCEPTIONS below.
+    "security-remote-open", "security-remote-auth",
+})
+# The live comparisons kept after the freeze because each checks a security
+# property no Rust test asserts yet (conductor rule, 14 November 2026): the
+# exact run lines, by step of the parity steps (parity-checks, and
+# parity-selfhosted through the YAML anchor). Each goes once a Rust test
+# covers it; nothing else may start a live comparison.
+LIVE_SECURITY_JOBS = ("parity-checks", "parity-selfhosted")
+LIVE_SECURITY_EXCEPTIONS = {
+    "Daemon security live checks without a Rust test": (
+        # The startup bind guard and token-map refusals (rust/daemon/src/main.rs
+        # `fail(2, ...)` before listening): no Rust test starts the daemon there.
+        "python rust/daemon/harness/run.py live --rust-bin $candidate --only security-refusals "
+        "--out (Join-Path $env:RUNNER_TEMP 'daemon-security-refusals.json')",
+        # Bound on 0.0.0.0: the Host/Origin gate and the bearer still hold.
+        "python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open "
+        "security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')",
+    ),
+}
+# Run text that starts a Python oracle to compare the candidate against, or
+# replays a recording the same run made from one. No job a pull request, a
+# batch, a master push or a schedule starts may hold one, except the weekly
+# CLI source mutants (each control compares against the checkout's frozen
+# Python, rust/cli_harness/mutants.py). Stress loops are manual dispatches.
+LIVE_INVOCATIONS = (
+    re.compile(r"\bevals[./]rust_port\b"),
+    re.compile(r"\bevals[./]rust_baseline\b"),
+    # rust/ optional: a step with `working-directory: rust` names the path
+    # relative to it.
+    re.compile(r"(?:rust/)?daemon/harness/(?:run|graph_store|principals|dream_cursors)\.py\s+(?:live|mutants|oracle)\b"),
+    re.compile(r"(?:rust/)?daemon/harness/(?:mcp_ci|mcp_binding_sweep|mcp_run)\.py\b"),
+    re.compile(r"rust/ci/body_evidence\.py\s+run\b"),
+    re.compile(r"rust/ci/body_oracle\.py\b"),
+    re.compile(r"rust/ci/run_coverage\.py\s+--suite\b"),
+    # The CLI harness without an exact --golden (--golden-dir is not one),
+    # by path or as a module; a recording from the oracle; the in-process
+    # Codex planning comparison.
+    re.compile(r"(?:(?:rust/)?cli_harness(?:/__main__\.py)?|-m\s+rust\.cli_harness)(?=\s|$)(?!.*\s--golden(?=\s|$))"),
+    re.compile(r"\s--record(?:-goldens)?(?=\s|$)"),
+    re.compile(r"setup_codex_parity\.py\b"),
+)
+LIVE_EXEMPT_JOBS = ("source-mutants", "stress-plan", "stress-build", "stress", "stress-report")
+
+
+# A trailing shell or PowerShell comment, which must not supply a --golden.
+TRAILING_COMMENT = re.compile(r"\s#.*$")
+# Commands sharing one line; each is judged on its own.
+COMMAND_SEPARATORS = re.compile(r";|&&|\|\|")
+
+
+def live_invocations(workflow, exempt=True):
+    """Every (job, step, line) whose run text starts a live comparison;
+    ``exempt`` applies the exempt jobs and security exceptions, which name
+    rust.yml's jobs and are off for every other workflow.
+
+    Lexical: it catches a live comparison coming back by accident, not a
+    deliberate evasion (a mode or script from a variable, a module form, a
+    harness change behind an allowed line; the PR's "Known limits")."""
+    found = []
+    for name, job in workflow["jobs"].items():
+        if exempt and name in LIVE_EXEMPT_JOBS:
+            continue
+        for step in job.get("steps", []):
+            for line in step.get("run", "").splitlines():
+                text = line.strip()
+                if exempt and name in LIVE_SECURITY_JOBS and \
+                        text in LIVE_SECURITY_EXCEPTIONS.get(step.get("name", ""), ()):
+                    continue
+                if not text or text.startswith("#"):
+                    continue
+                command_text = TRAILING_COMMENT.sub("", text).replace("\\", "/")
+                for command in COMMAND_SEPARATORS.split(command_text):
+                    if any(p.search(command.strip()) for p in LIVE_INVOCATIONS):
+                        found.append((name, step.get("name", ""), text))
+                        break
+    return found
+
+
+def all_workflow_live_invocations(root=ROOT):
+    """live_invocations over every workflow file (*.yml and *.yaml), not
+    only rust.yml; the exempt job names hold in rust.yml only. Run from
+    __main__ and the tests, not from check(), which takes one workflow."""
+    import yaml
+    found = []
+    workflows = root / ".github" / "workflows"
+    for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        found += [(path.name, *row) for row in live_invocations(
+            {"jobs": workflow.get("jobs", {})}, exempt=path.name == "rust.yml")]
+    return found
 
 
 def cli_controls():
@@ -71,8 +198,8 @@ def exit_propagation(step, invocation):
     lines = [line.strip() for line in step['run'].splitlines()
              if line.strip() and not line.lstrip().startswith('#')]
     assert step.get('shell') == 'pwsh' and len(lines) == 2 \
-        and lines[1] == 'exit $LASTEXITCODE', 'H5 exit propagation changed'
-    assert lines[0] == invocation, 'H5 driver command or failure propagation changed'
+        and lines[1] == 'exit $LASTEXITCODE', 'source-control exit propagation changed'
+    assert lines[0] == invocation, 'source-control driver command or failure propagation changed'
 
 
 def backup_zero_retention_scope(exceptions):
@@ -105,8 +232,7 @@ def backup_zero_retention_scope(exceptions):
 
 
 def check(workflow):
-    from coverage_plan import (SUITES, DAEMON_CONTROLS, GRAPH_CONTROLS, W1A, EXCEPTIONS,
-                               SOURCE_SHARDS, PLATFORM_EXCLUSIONS, UNOBSERVED_CONTROLS, BACKGROUND)
+    from coverage_plan import EXCEPTIONS, SOURCE_SHARDS, PLATFORM_EXCLUSIONS, UNOBSERVED_CONTROLS
     from control_selection import runtime_controls
     from rust.cli_harness import core
 
@@ -142,55 +268,52 @@ def check(workflow):
     jobs = workflow["jobs"]
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode == 'ci'"
-    assert parity['if'] == (f"${{{{ !cancelled() && needs.scope.outputs.push_passed != 'true' && ({ordinary_ci}) && needs.candidate.result == 'success' "
+    assert parity['if'] == (f"${{{{ !cancelled() && needs.scope.outputs.push_passed != 'true' "
+                            f"&& needs.scope.outputs.parity_any != 'false' && ({ordinary_ci}) "
+                            "&& needs.candidate.result == 'success' "
                             "&& needs.candidate-harness.result == 'success' "
-                            "&& needs.fixtures.result == 'success' }}"), 'H5 PR event selection changed'
+                            "&& needs.fixtures.result == 'success' }}"), 'parity event selection changed'
     matrix = parity["strategy"]["matrix"]
     assert matrix["os"] == SYSTEMS
-    # Hosted Windows' live comparisons leave the required matrix (they run
-    # in the non-gating parity-live job; test_workflow.py pins it), and so
-    # does each H5 suite whose OS runs it inside a composite shard instead.
-    from coverage_plan import COMPOSITES
-    excluded = matrix.get("exclude")
-    composite_excludes = [pair for pair in excluded
-                          if pair != {"os": "windows-latest", "suite": "cli-live"}]
-    assert {"os": "windows-latest", "suite": "cli-live"} in excluded and len(composite_excludes) == len(excluded) - 1, \
-        'required parity matrix no longer leaves out the Windows live comparisons'
-    for pair in composite_excludes:
-        if pair["suite"] in COMPOSITES:
-            continue
-        hosts = [name for name, parts in COMPOSITES.items() if pair["suite"] in parts
-                 and name in matrix["suite"] and {"os": pair["os"], "suite": name} not in excluded]
-        assert pair["suite"] in SUITES and hosts, \
-            f'required parity matrix leaves out {pair["os"]}/{pair["suite"]} with no composite running it'
-    for name, parts in COMPOSITES.items():
-        assert name in matrix["suite"] and set(parts) <= set(SUITES), f"composite {name} lost a suite"
-    assert set(SUITES) <= set(matrix["suite"]), "missing H5 suite"
-    step = next(s for s in parity["steps"] if s.get("name") == "Ported rows and daemon controls")
-    assert step["if"] == "startsWith(matrix.suite, 'h5-')"
-    assert not step.get("continue-on-error")
-    assert ["python", "rust/ci/run_coverage.py", "--suite", "${{", "matrix.suite", "}}"] \
-        == commands(step["run"])[0][:6]
-    assert "--out-dir" in commands(step["run"])[0]
-    exit_propagation(step, "python rust/ci/run_coverage.py --suite ${{ matrix.suite }} "
-                     "--out-dir (Join-Path $env:RUNNER_TEMP 'h5') --keep-going")
-    setup = next(s for s in parity["steps"] if s.get("name") == "Prepare disposable PostgreSQL for H5")
-    assert setup["if"] == step["if"] and parity["steps"].index(setup) < parity["steps"].index(step)
+    assert not matrix.get("exclude"), 'required parity matrix leaves out a pair'
+    assert not RETIRED_SUITES & set(matrix["suite"]), 'a retired live-comparison suite is back in the matrix'
+    live = live_invocations(workflow)
+    assert not live, f'a job starts a live comparison against the Python oracle: {live[0]}'
+    # The name-exempt stress jobs hang off the stress plan, a manual dispatch.
+    assert jobs["stress-plan"]["if"] == "github.event_name == 'workflow_dispatch' && inputs.mode == 'stress'", \
+        'the stress plan no longer runs only on a manual stress dispatch'
+    for name in ("stress-build", "stress", "stress-report"):
+        assert "stress-plan" in (jobs[name].get("needs") or []), f'{name} no longer depends on the stress plan'
 
-    covered = {"audit", "backup", "migrate_flat"}
+    # Every accepted row replays its committed goldens in some shard, or is
+    # named as unreplayed (parity_scope.UNREPLAYED_ROWS).
+    from parity_scope import ROW_SUITES, UNREPLAYED_ROWS
+    golden_rows = set()
     for current in parity["steps"]:
         for words in commands(current.get("run", "")):
-            if words[:2] == ["python", "rust/cli_harness"] and "--mutants" not in words:
-                covered.update(words[i + 1] for i, word in enumerate(words[:-1]) if word == "--row")
+            if words[:2] == ["python", "rust/cli_harness"] and "--golden" in words:
+                golden_rows.update(words[i + 1] for i, word in enumerate(words[:-1]) if word == "--row")
+    w1c = next(s for s in parity["steps"] if s.get("name") == "CLI W1-C golden harness")
+    harness = [w for w in commands(w1c["run"]) if w[:2] == ["python", "rust/cli_harness"]]
+    assert len(harness) == 1 and harness[0][2:4] == ["@golden", "--golden"], 'W1-C rows no longer replay their goldens'
     for shard in matrix["include"]:
-        covered.update(re.findall(r"'([a-z_]+)'", shard.get("w1c_rows", "")))
-    assert set(rows) <= covered, "accepted live row dropped"
-    # Existing live/golden routing remains checked by test_workflow.py;
-    # the executable H5 plan names its additional row modes explicitly.
-    for suite, expected_rows in (("h5-audit", {"audit"}), ("h5-backup", {"backup", "migrate_flat"})):
-        assert {action["row"] for action in SUITES[suite]} == expected_rows
-        for row in expected_rows:
-            assert {action["mode"] for action in SUITES[suite] if action["row"] == row} == {"live", "record", "golden"}
+        golden_rows.update(re.findall(r"'([a-z_]+)'", shard.get("w1c_rows", "")))
+    assert golden_rows.isdisjoint(UNREPLAYED_ROWS), 'a replayed row is still named unreplayed'
+    assert set(rows) == golden_rows | set(UNREPLAYED_ROWS), 'accepted row neither replayed nor named unreplayed'
+    assert set(ROW_SUITES) == golden_rows, 'parity scope routes a row no shard replays'
+
+    # Every daemon scenario replays its committed golden, or is named.
+    golden_scenarios = set()
+    for step in parity['steps']:
+        for words in commands(step.get('run', '')):
+            if words[:3] == ['python', 'rust/daemon/harness/run.py', 'golden'] and '--only' in words:
+                golden_scenarios.update(itertools.takewhile(lambda w: not w.startswith('--'),
+                                                            words[words.index('--only') + 1:]))
+    unknown = (golden_scenarios | UNREPLAYED_SCENARIOS) - daemon_scenarios()
+    assert not unknown, f'unknown daemon scenario named: {sorted(unknown)}'
+    assert golden_scenarios.isdisjoint(UNREPLAYED_SCENARIOS), 'a replayed daemon scenario is still named unreplayed'
+    missing = daemon_scenarios() - golden_scenarios - UNREPLAYED_SCENARIOS
+    assert not missing, f'accepted daemon scenario neither replayed nor named unreplayed: {sorted(missing)}'
 
     source = jobs["source-mutants"]
     assert source["strategy"]["matrix"]["os"] == SYSTEMS
@@ -199,7 +322,7 @@ def check(workflow):
     assert not source.get("continue-on-error")
     events = workflow.get('on', workflow.get(True))
     assert events.get('push') == {'branches': ['master']} \
-        and events.get('schedule') == [{'cron': '23 3 * * *'}], 'source events dropped or changed'
+        and events.get('schedule') == [{'cron': NIGHTLY_CRON}, {'cron': WEEKLY_CRON}], 'source events dropped or changed'
     assert {'pull_request', 'merge_group', 'workflow_dispatch'} <= set(events), 'source events dropped or changed'
     assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
                             "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
@@ -214,7 +337,8 @@ def check(workflow):
     assert required.get('shell') == 'pwsh' and required.get('if') == PARITY_VERDICT_IF \
         and not required.get('continue-on-error'), 'Parity event gate can skip failures'
     assert required['env'] == {'GATE_RESULTS': '${{ toJSON(needs) }}',
-                              'GATE_EVENT': '${{ github.event_name }}'}, 'Parity event gate inputs changed'
+                              'GATE_EVENT': '${{ github.event_name }}',
+                              'GATE_SCHEDULE': '${{ github.event.schedule }}'}, 'Parity event gate inputs changed'
     actual = [line.strip() for line in required['run'].splitlines() if line.strip()]
     expected = [line.strip() for line in PARITY_EVENT_GATE.splitlines() if line.strip()]
     assert actual == expected, 'Parity event gate accepts an unsupported result'
@@ -223,63 +347,13 @@ def check(workflow):
     assert commands(invocation["run"])[0][:6] == ["python", "rust/ci/run_coverage.py", "--source-shard", "${{", "matrix.shard", "}}"]
     exit_propagation(invocation, "python rust/ci/run_coverage.py --source-shard ${{ matrix.shard }} "
                      "--out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')")
-    oracle = next(s for s in source['steps'] if s.get('name') == 'Bind the source-control Python oracle')
-    assert source['steps'].index(oracle) < source['steps'].index(invocation)
-    assert oracle['env'] == {'GITHUB_REF': '${{ github.ref }}',
-                             'PSEUDOLIFE_PORT_DISPATCH_BASE': '${{ needs.scope.outputs.oracle_base }}'}
-    assert commands(oracle['run'])[0][:3] == ['python', '-m', 'evals.rust_port.oracle_selection']
-    assert '--github-env' in commands(oracle['run'])[0]
-
-    generic = set(assigned_list("rust/daemon/harness/run.py", "MUTANTS"))
-    assert generic == set(DAEMON_CONTROLS) | set(EXCEPTIONS["daemon_mutants"]), "daemon control dropped"
-    executed = {action["mutant"] for action in SUITES["h5-daemon-mutants"]}
-    assert set(DAEMON_CONTROLS) == executed, ("daemon source mutant dropped", set(DAEMON_CONTROLS) - executed)
-    assert len(SUITES['h5-daemon-mutants']) == len(DAEMON_CONTROLS), 'executable daemon control duplicated'
-    assert all(action == dict(kind='daemon', mode='mutants', mutant=action['mutant'],
-                              scenarios=DAEMON_CONTROLS[action['mutant']])
-               for action in SUITES['h5-daemon-mutants']), 'executable daemon control lost mode or witnesses'
-    for row, path in (("store", "graph_store.py"), ("read", "graph_read_profile.py")):
-        assert any(action == {"kind": "graph", "mode": "mutants", "row": row}
-                   for action in SUITES["h5-graph-mutants"])
-        assert assigned_list("rust/daemon/harness/" + path, "MUTANTS") == GRAPH_CONTROLS[row]
-    assert set(W1A) == {action["scenario"] for action in SUITES["h5-w1a"] if action["mode"] == "live"} \
-        | set(EXCEPTIONS["w1a"]), "W1-A scenario dropped"
-    supported = set(W1A) - set(EXCEPTIONS['w1a'])
-    assert set(EXCEPTIONS['w1a_platform']) == {'linux', 'windows'}, 'W1-A platform exception roster changed'
-    assert all(set(names) <= supported for names in EXCEPTIONS['w1a_platform'].values()), 'unknown W1-A platform exception'
-    assert set(EXCEPTIONS['w1a_golden']) <= supported, 'unknown W1-A golden exception'
-    expected_w1a = [dict(kind='daemon', scenario=name, mode=mode, record=mode == 'live')
-                    for name in W1A if name in supported for mode in ('live', 'golden')]
-    assert SUITES['h5-w1a'] == expected_w1a, 'W1-A recording/replay selection dropped or changed'
-    scoped = EXCEPTIONS['w1a_selections']
-    assert not scoped, 'retired unsettled-bank exception restored'
-    from run_coverage import suite_actions
-    for platform in ('linux', 'windows'):
-        actions, omitted_scenarios, omitted_selections = suite_actions('h5-w1a', platform)
-        protected_names = ('encodings', 'map-order', 'map-order-reversed')
-        protected = [(mode, name) for name in protected_names for mode in ('live', 'golden')]
-        actual_protected = Counter((a['mode'], a['scenario']) for a in actions
-                                   if a['scenario'] in protected_names)
-        assert actual_protected == Counter(protected), 'protected settled-auth selections dropped or changed'
-        expected = [a for a in expected_w1a if a['scenario'] not in EXCEPTIONS['w1a_platform'][platform]]
-        assert actions == expected, 'W1-A executable selection changed'
-        assert not omitted_selections, 'retired unsettled-bank exception in receipt'
-        assert omitted_scenarios == EXCEPTIONS['w1a_platform'][platform]
-    assert SUITES['h5-background'] == [dict(kind='daemon', scenario=name, mode='live')
-                                     for name in BACKGROUND], 'accepted daemon scenario lost live background execution'
-    existing = set()
-    for step in parity['steps']:
-        for words in commands(step.get('run', '')):
-            if words[:2] == ['python', 'rust/daemon/harness/run.py'] and words[2] in ('live', 'golden') and '--only' in words:
-                existing.update(w for w in words[words.index('--only') + 1:] if not w.startswith('--'))
-    added = {a['scenario'] for actions in SUITES.values() for a in actions if 'scenario' in a}
-    exceptions = set(EXCEPTIONS.get('daemon_scenarios', {}))
-    assert exceptions <= daemon_scenarios(), 'unknown daemon scenario exception'
-    assert daemon_scenarios() <= existing | added | set(EXCEPTIONS['w1a']) | exceptions, 'accepted daemon scenario missing from CI inventory'
+    assert not any('oracle_selection' in step.get('run', '') for step in source['steps']), \
+        'source mutants select an event oracle again'
     assert any(s.get("name") == "ported-row-and-mutant-ci-inventory" for s in jobs["rust"]["steps"])
-
 
 if __name__ == "__main__":
     import yaml
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
+    everywhere = all_workflow_live_invocations()
+    assert not everywhere, f"a workflow starts a live comparison against the Python oracle: {everywhere[0]}"
     print("ported-row-and-mutant-ci-inventory: all named selections accounted for")

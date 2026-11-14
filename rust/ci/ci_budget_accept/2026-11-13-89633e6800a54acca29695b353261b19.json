@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity",
+  "before": "4b13f8c55b6e3de3",
+  "fingerprint": "f8acb83e13126842",
+  "reason": "Python freeze (2026-11-14): the gate's verdict script reads two more inputs (the schedule and scope's parity_any); a 5-second pwsh step either way."
+}
