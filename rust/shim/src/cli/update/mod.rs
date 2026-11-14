@@ -1,12 +1,11 @@
 //! Native, opt-in host update transactions. Python remains the differential oracle.
 mod backup;
 pub(super) mod clients;
-mod disk;
-mod engine;
-pub(crate) mod installer_engine;
+pub(crate) mod disk;
+pub(crate) mod engine;
 mod options;
-mod release;
-mod seams;
+pub(crate) mod release;
+pub(crate) mod seams;
 mod shadow;
 #[cfg(unix)]
 mod signals;

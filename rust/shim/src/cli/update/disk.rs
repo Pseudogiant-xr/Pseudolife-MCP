@@ -11,7 +11,7 @@ fn require(free: u64, location: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn host(path: &Path) -> Result<()> {
+pub(crate) fn host(path: &Path) -> Result<()> {
     host_with(path, crate::runtime::available_space)
 }
 
