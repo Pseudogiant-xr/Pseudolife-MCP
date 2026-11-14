@@ -2,7 +2,7 @@
   "schema": 1,
   "workflow": "ci.yml",
   "job": "test-lite-macos",
-  "before": "3143d8fe2b5d35c3",
-  "fingerprint": "38e71f85d9c1a067",
+  "before": "4e8423b74765fec3",
+  "fingerprint": "8c31a5f482024172",
   "reason": "On top of the native-client swap accepted for #1541, the lane adds tests/test_installer_native_goldens.py (28 tests, 7.2 s on the Windows host on 14 November 2026) and tests/test_installer_sandbox.py (24 tests, 0.3 s): under ten seconds more, within the job's measured minutes."
 }
