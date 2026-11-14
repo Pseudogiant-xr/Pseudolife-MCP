@@ -247,8 +247,9 @@ jobs:
     name: Native release / ${{ matrix.target }}
     needs: publish
     # The status function admits the build-only dispatch after publish is skipped;
-    # a release requires both human approval and the explicit opt-in.
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.publish.result == 'success' && vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true')) }}
+    # a release builds them once the human-approved publish job succeeded. The
+    # installers download these archives, so every release carries them.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && needs.publish.result == 'success')) }}
     permissions:
       contents: read
     strategy:
@@ -321,7 +322,7 @@ jobs:
 
   rust-assets-publish:
     needs: [publish, rust-assets-bundle]
-    if: ${{ !cancelled() && github.event_name == 'release' && needs.publish.result == 'success' && needs.rust-assets-bundle.result == 'success' && vars.PSEUDOLIFE_PUBLISH_RUST_ASSETS == 'true' }}
+    if: ${{ !cancelled() && github.event_name == 'release' && needs.publish.result == 'success' && needs.rust-assets-bundle.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -166,19 +166,11 @@ def test_intentional_platform_skips_keep_the_existing_pytest_exit_semantics(tmp_
     assert result["exit_code"] == 0 and result["phases"][2]["failed_cases"] == []
 
 
-def test_workflow_runs_all_judges_and_always_retains_the_summary():
+def test_no_workflow_runs_the_judges_since_the_python_freeze():
+    # The differential judges compared the candidate with a live Python
+    # oracle and left CI on 14 November 2026; this summariser stays as
+    # source until the deletion stream removes the harness.
     workflow = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/rust.yml").read_text())
-    steps = workflow["jobs"]["parity-checks"]["steps"]
-    judge = next(s for s in steps if s.get("name") == "Run unchanged candidates and differential judges")
-    script = judge["run"]
-    assert "$PSNativeCommandUseErrorActionPreference = $false" in script
-    assert [line.strip().split("'")[1] for line in script.splitlines()
-            if line.strip().startswith("Start-JudgePhase '")] == list(PHASES)
-    assert script.count("Complete-JudgePhase $LASTEXITCODE") == len(PHASES)
-    # Setup and the resource gate remain fatal; comparison phases aggregate.
-    assert "exit $LASTEXITCODE" not in script[script.index("Start-JudgePhase 'wait-mail-tests'"):]
-    observer = next(s for s in steps if s.get("name") == "Summarize every judge phase")
-    assert observer["if"] == "always() && matrix.suite == 'judges'"
-    assert not observer.get("continue-on-error")
-    upload = next(s for s in steps if s.get("name") == "Retain comparison summary")
-    assert "${{ runner.temp }}/judge-summary/*.json" in upload["with"]["path"]
+    text = json.dumps(workflow)
+    assert "judge_summary.py" not in text
+    assert "Run unchanged candidates and differential judges" not in text

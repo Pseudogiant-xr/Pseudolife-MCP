@@ -29,13 +29,30 @@ pub(super) fn write_config_with(
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => return Err(io_error(error)),
     };
+    // Refuse only what makes this write unsafe: another account's file (its
+    // replacement would cross accounts), a redirect (above) or a hard link
+    // (the other name would keep the old content, and the backup's privacy
+    // would reach it). Who else may write the file is not a reason: the
+    // client already reads and trusts it, an account that can write it can
+    // already redirect the client, and the edit keeps its owner, group and
+    // mode (or ACL) or narrows them, so refusing protected nothing and
+    // blocked umask-002 hosts (issue #1545). The displaced copy kept as the
+    // backup is made private below.
     #[cfg(unix)]
     if let Some(meta) = &meta {
         use std::os::unix::fs::MetadataExt;
-        if meta.uid() != rustix::process::getuid().as_raw() || meta.mode() & 0o022 != 0 {
-            return Err(
-                "client configuration is not owned by this user or is writable by others".into(),
-            );
+        let shown = target.display().to_string().replace('\'', "'\\''");
+        if meta.uid() != rustix::process::getuid().as_raw() {
+            return Err(format!(
+                "{} is owned by another account, so it was not replaced; run this as its owner, or make this user its owner: sudo chown \"$USER\" '{shown}'",
+                target.display()
+            ));
+        }
+        if meta.nlink() != 1 {
+            return Err(format!(
+                "{} has another hard link, which would keep the old content, so it was not replaced; replace the links with one file (cp '{shown}' '{shown}.copy' && mv '{shown}.copy' '{shown}'), then retry",
+                target.display()
+            ));
         }
     }
     #[cfg(windows)]
@@ -46,7 +63,10 @@ pub(super) fn write_config_with(
             .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
             .open(&target)
             .map_err(io_error)?;
-        windows_config_security::validate(&opened)?;
+        windows_config_security::validate(&opened, true).map_err(|error| {
+            let shown = display_path(&target);
+            format!("{shown}: {}", error.replace("<path>", &shown))
+        })?;
     }
     let recovery = parent.join(format!(".client-native-backup-{}", uuid::Uuid::new_v4()));
     crate::board::state::private_dir(&recovery).map_err(str::to_owned)?;
@@ -62,10 +82,7 @@ pub(super) fn write_config_with(
         .map_err(io_error)?;
     #[cfg(unix)]
     if let Some(meta) = &meta {
-        opened
-            .file
-            .set_permissions(meta.permissions())
-            .map_err(io_error)?;
+        keep_group_and_mode(&opened.file, &target, meta).map_err(io_error)?;
     }
     drop(opened);
     let result = (|| {
@@ -80,6 +97,10 @@ pub(super) fn write_config_with(
             if read_optional(&previous)?.as_deref() != Some(before) {
                 return Err("client configuration changed during replacement; the actual displaced file was preserved; review the recovery copy before retrying".into());
             }
+            // The displaced file kept the original's mode or ACL, which may
+            // let other accounts write it; the backup is this user's alone.
+            // Best effort: a backup left as it was is kept, never pruned.
+            make_backup_private(&previous);
             previous
         } else {
             // Atomic create-if-absent: a concurrent new file is never replaced.
@@ -104,6 +125,75 @@ pub(super) fn write_config_with(
         complete_backup(&target, backup);
     }
     result.map_err(|error: String| format!("{error}; recovery files: {}", recovery.display()))
+}
+
+/// The replacement keeps the original's group as well as its mode: a mode
+/// copied onto another group (the new file's default) would widen who may
+/// write it. When the group cannot be kept, or a POSIX ACL widened the group
+/// bits, group write is dropped, so the edit only ever narrows access.
+#[cfg(unix)]
+fn keep_group_and_mode(file: &fs::File, target: &Path, meta: &fs::Metadata) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let mut mode = meta.mode() & 0o7777;
+    let kept = rustix::fs::fchown(file, None, Some(rustix::fs::Gid::from_raw(meta.gid()))).is_ok();
+    if !kept || has_access_acl(target) {
+        mode &= !0o020;
+    }
+    file.set_permissions(fs::Permissions::from_mode(mode))
+}
+/// Whether the file carries a POSIX access ACL (Linux), whose mask the
+/// group bits show; macOS ACLs are not copied either, and are not detected.
+#[cfg(unix)]
+fn has_access_acl(path: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // A zero-length read returns the attribute's size without its value.
+        let mut empty: [u8; 0] = [];
+        rustix::fs::getxattr(path, "system.posix_acl_access", &mut empty[..]).is_ok_and(|n| n > 0)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+#[cfg(windows)]
+/// A path as a user types it: Windows canonical paths drop the verbatim
+/// prefix (`\\?\`), which `takeown` and most tools do not accept.
+fn display_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+}
+
+fn make_backup_private(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        // A link made after the target's check must not lose access through
+        // the backup: only a sole name is narrowed (Codex review).
+        if fs::symlink_metadata(path).is_ok_and(|m| m.is_file() && m.nlink() == 1) {
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, WRITE_DAC, WRITE_OWNER,
+        };
+        // make_private sets the owner as well as the DACL.
+        if let Ok(file) = fs::OpenOptions::new()
+            .access_mode(FILE_GENERIC_READ | WRITE_DAC | WRITE_OWNER)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+        {
+            let _ = crate::credentials::windows_security::make_private(&file);
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -175,7 +265,7 @@ fn backup_digest(path: &Path) -> Option<String> {
         }
     }
     #[cfg(windows)]
-    windows_config_security::validate(&file).ok()?;
+    windows_config_security::validate(&file, false).ok()?;
     let mut bytes = Vec::new();
     file.take(16 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
@@ -371,9 +461,18 @@ mod windows_config_security {
         }
     }
 
-    pub(super) fn validate(file: &fs::File) -> Result<()> {
-        let invalid =
-            "client configuration must be owned by this user and not writable by other users";
+    /// A regular file without links or redirects, owned by this user (or by
+    /// the token's default owner). `others_may_write` accepts an ACL that
+    /// lets other accounts write it: true for a client's own configuration,
+    /// which the client already trusts as it is; false for this tool's own
+    /// backups, which must be private.
+    pub(super) fn validate(file: &fs::File, others_may_write: bool) -> Result<()> {
+        let invalid = if others_may_write {
+            "its owner and permissions could not be read, so it was not replaced; check that this account can read its security settings (icacls \"<path>\"), then retry"
+        } else {
+            "client configuration must be owned by this user and not writable by other users"
+        };
+        let not_owner = "it is owned by another account, so it was not replaced; run this as its owner, or take ownership of it as this user (takeown /f \"<path>\")";
         // SAFETY: the borrowed file handle and aligned token buffer remain live
         // throughout inspection. Descriptor owns every ACL/ACE/SID pointer.
         // ACE and SID bounds are checked before their contents are inspected.
@@ -407,9 +506,9 @@ mod windows_config_security {
             if status != 0
                 || descriptor.is_null()
                 || owner.is_null()
-                || dacl.is_null()
+                || (dacl.is_null() && !others_may_write)
                 || Security::IsValidSid(owner) == 0
-                || Security::IsValidAcl(dacl) == 0
+                || (!dacl.is_null() && Security::IsValidAcl(dacl) == 0)
             {
                 return Err(invalid.into());
             }
@@ -441,7 +540,12 @@ mod windows_config_security {
                 || (Security::EqualSid(owner, current) == 0
                     && Security::EqualSid(owner, default_owner) == 0)
             {
-                return Err(invalid.into());
+                return Err(if others_may_write { not_owner } else { invalid }.into());
+            }
+            if others_may_write {
+                // Who else may write it is not a reason to refuse (see
+                // write_config_with); nothing below applies.
+                return Ok(());
             }
             let acl_start = dacl as usize;
             let acl_end = acl_start + (*dacl).AclSize as usize;
@@ -487,7 +591,8 @@ mod windows_config_security {
                 if 8 + sid_size > header.AceSize as usize || Security::IsValidSid(sid) == 0 {
                     return Err(invalid.into());
                 }
-                if allowed.Mask & mutable != 0
+                if !others_may_write
+                    && allowed.Mask & mutable != 0
                     && Security::EqualSid(owner, sid) == 0
                     && Security::EqualSid(current, sid) == 0
                     && Security::IsWellKnownSid(sid, Security::WinCreatorOwnerRightsSid) == 0

@@ -123,6 +123,7 @@ RUST_HARNESS = (
     "rust/daemon/harness/test_startup_ci.py", "rust/daemon/harness/test_startup_parts.py",
     "rust/daemon/harness/test_w2d_rerank_check.py",
     "rust/daemon/harness/test_w2d_trace_compare.py", "rust/cli_harness/test_update_row.py",
+    "rust/cli_harness/test_cli_harness.py",
     "rust/ci",
 )
 RUST_HARNESS_COMMAND = ("python -m pytest -q -p no:cacheprovider --require-databases "
@@ -190,10 +191,12 @@ class Member:
     checks: str
     labeled_at: str | None = None
     draft: bool = False
-    checks_why: str = ""   # for `unverified`: the read that failed
+    checks_why: str = ""   # for `unverified`: the read that failed; for `failing`: the red checks
+    report_only_red: tuple[str, ...] = ()   # red REPORT_ONLY_CHECK runs, shown, not counted
     snapshot_required: bool | None = None
     snapshot: str = "not required"
     snapshot_why: str = ""
+    labels: tuple[str, ...] = ()   # label names, for the Python freeze exception
 
 
 @dataclass
@@ -217,6 +220,10 @@ class Plan:
     markers: list[str] = field(default_factory=list)
     census_commit: str = ""   # the generated census commit, when there is one
     census_drift: list[str] = field(default_factory=list)   # manual shapes it withdrew
+    # Members whose head the batch already contained when `build` reached
+    # them (a stacked child merged first, or a head already on master): no
+    # merge commit of their own, so `open` and `merge` do not demand one.
+    contained: list[int] = field(default_factory=list)
     # `passed` or `not needed`, which `open` accepts, or `failed: ...` or
     # `not run: ...`; empty for a plan built before the check existed.
     rust_check: str = ""
@@ -273,6 +280,13 @@ _clock = time.monotonic
 # (PASSING, above).
 FAILED = {"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
 CANCELLED = "CANCELLED"
+# (workflow name, check-name prefix) of the one report-only check on a
+# member's head: rust.yml's frozen-probes job, "Frozen judge probes (report
+# only) / <os>", which runs only on ordinary pull requests, gates nothing
+# and is shown but never counted, because a lost probe runner (issue #1519)
+# says nothing about the change. A test pins that only that job produces
+# the prefix. `merge` does not use it: the probe never runs in a batch.
+REPORT_ONLY_CHECK = ("Rust shim", "Frozen judge probes (report only) / ")
 # GitHub reports a job that ran past its timeout-minutes as CANCELLED, not
 # TIMED_OUT, and the runner annotates it with this message (jobs
 # 116301727515 and 116323387861, 2026-10-15: "The job has exceeded the
@@ -445,7 +459,35 @@ def _checks(rollup: list[dict] | None) -> str:
     return _checks_why(rollup)[0]
 
 
+def _report_only(check: dict) -> bool:
+    """Whether a rollup entry is the report-only check: an Actions check run
+    of exactly REPORT_ONLY_CHECK's workflow whose name starts with its prefix."""
+    workflow, prefix = REPORT_ONLY_CHECK
+    return (check.get("__typename") != "StatusContext" and "context" not in check
+            and check.get("workflowName") == workflow
+            and str(check.get("name") or "").startswith(prefix))
+
+
+def _report_only_red(rollup: list[dict] | None) -> tuple[str, ...]:
+    """The report-only checks whose latest run did not pass, by name."""
+    return tuple(sorted({_check_name(check) for check in _latest_checks(rollup)
+                         if _report_only(check) and not _unfinished(check)
+                         and _check_state(check) not in PASSING}))
+
+
 def _checks_why(rollup: list[dict] | None) -> tuple[str, str]:
+    """(one word for a head's CI, why) over every check but the report-only
+    one (REPORT_ONLY_CHECK, which `_report_only_red` lists separately); for
+    `failing` the why names the red checks."""
+    counted = [check for check in rollup or [] if not _report_only(check)]
+    word, why = _counted_checks_why(counted if rollup else rollup)
+    if word == "failing" and not why:
+        red = sorted({_check_name(check) for check in counted if _check_state(check) in FAILED})
+        why = ", ".join(red)
+    return word, why
+
+
+def _counted_checks_why(rollup: list[dict] | None) -> tuple[str, str]:
     """(one word for a head's CI, why): green, pending, cancelled,
     unverified, failing or none; `failing` and `unverified` keep a member
     out of a batch, and for `unverified` the why names the read that failed.
@@ -711,8 +753,9 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
       whether the rollup lists that leg or not (`_failed_at_cancel_step`),
       or the leg ran no step at all in an attempt that itself concluded
       `cancelled` (cancelled while starting, so it gave no verdict);
-    - no other job in the run attempt failed, timed out or needs action,
-      and none the gate needs is unfinished;
+    - no other job in the run attempt failed, timed out or needs action
+      (the report-only check aside, REPORT_ONLY_CHECK), and none the gate
+      needs is unfinished;
     - a job it needs, and nothing outside its needs, was cancelled, and no
       such job ran past its timeout.
 
@@ -797,6 +840,9 @@ def _gate_cancelled(check: dict, runs: dict, probes: dict,
             named = owners(str(other["name"]))
             if other.get("id") == meta.get("id") or named == {gate_id}:
                 continue                    # a leg of this gate, read above
+            if _report_only({"workflowName": check.get("workflowName"),
+                             "name": other.get("name")}):
+                continue                    # shown, never counted (REPORT_ONLY_CHECK)
             conclusion = other.get("conclusion")
             if conclusion is not None and conclusion not in _NO_VERDICT:
                 return False, ""            # a job of the run failed
@@ -849,7 +895,7 @@ def _labeled_at(number: int, label: str) -> str | None:
 
 def ready(label: str, base_sha: str | None = None) -> list[Member]:
     """Open labelled pull requests on master, in label-applied order."""
-    fields = "number,title,headRefOid,url,isDraft,reviewDecision,statusCheckRollup"
+    fields = "number,title,headRefOid,url,isDraft,reviewDecision,statusCheckRollup,labels"
     rows = json.loads(gh("pr", "list", "--state", "open", "--label", label,
                          "--base", BASE, "--limit", "100", "--json", fields) or "[]")
     members = []
@@ -857,7 +903,10 @@ def ready(label: str, base_sha: str | None = None) -> list[Member]:
         checks, why = _checks_why(r.get("statusCheckRollup"))
         members.append(Member(number=r["number"], title=r["title"], sha=r["headRefOid"],
                               url=r["url"], review=r.get("reviewDecision") or "NONE",
-                              checks=checks, draft=bool(r.get("isDraft")), checks_why=why))
+                              checks=checks, draft=bool(r.get("isDraft")), checks_why=why,
+                              report_only_red=_report_only_red(r.get("statusCheckRollup")),
+                              labels=tuple(label.get("name", "") for label in r.get("labels") or []
+                                           if isinstance(label, dict))))
     base_sha = base_sha or _out("rev-parse", f"{REMOTE}/{BASE}")
     for m, row in zip(members, rows):
         if not m.draft and m.checks not in ("failing", "unverified"):
@@ -965,7 +1014,8 @@ def _not_ready(m: Member) -> str | None:
     if m.draft:
         return "is a draft"
     if m.checks == "failing":
-        return ("CI on its head is failing; it joins a batch once a rerun of "
+        red = f" ({m.checks_why})" if m.checks_why else ""
+        return (f"CI on its head is failing{red}; it joins a batch once a rerun of "
                 "the failed job passes or a push replaces that head")
     if m.checks == "unverified":
         why = m.checks_why or "GitHub's record of its CI could not be read"
@@ -1222,7 +1272,156 @@ def _regenerate_budget(plan: Plan, root: Path) -> set[str]:
     return set(serialized)
 
 
+FREEZE_GUARD = "rust/ci/python_freeze.py"
+
+
+def _guard_text(rev: str) -> str | None:
+    shown = git("show", f"{rev}:{FREEZE_GUARD}", check=False)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def _freeze_module(base_sha: str, members: list[Member] = (), head: str = ""):
+    """Master's copy of the Python freeze guard, loaded in this process
+    (master's code, never a member's: an earlier member merged into this
+    checkout must not decide a later one's admission).
+
+    Master without it refuses, with one exception told apart by history,
+    not presence: when no commit on master's history ever touched the
+    guard, this is the batch that introduces it (the guard and this check
+    land together, so `open` and `merge` run this code against a master
+    that has never had it). Its members are then judged with the one copy
+    the members carry, which the batch head (``head``, when given) must
+    still hold. Anything else, a master that had the guard and lost it
+    above all, refuses: admitting Python changes silently is the one
+    outcome this must not have."""
+    text = _guard_text(base_sha)
+    if text is None:
+        if _out("rev-list", "-1", base_sha, "--", FREEZE_GUARD):
+            raise Refusal(f"{BASE} has no {FREEZE_GUARD} although it had one, so the Python "
+                          "freeze cannot be applied to this batch; restore it on master. The "
+                          "pull request that deletes pseudolife_memory/ removes this check "
+                          "in the same change")
+        copies: dict[str, list[Member]] = {}
+        for m in members:
+            carried = _guard_text(m.sha)
+            if carried is not None:
+                copies.setdefault(carried, []).append(m)
+        if not copies:
+            raise Refusal(f"{BASE} has never had {FREEZE_GUARD} and no member adds it, so "
+                          "the Python freeze cannot be applied; build with master's own "
+                          "ops/integrate.py, or include the pull request that adds the guard")
+        if len(copies) > 1:
+            numbers = ", ".join(f"#{m.number}" for carriers in copies.values() for m in carriers)
+            raise Refusal(f"the members introducing {FREEZE_GUARD} ({numbers}) carry different "
+                          "copies of it; batch one copy at a time")
+        (text, carriers), = copies.items()
+        if head and _guard_text(head) != text:
+            raise Refusal(f"this batch introduces {FREEZE_GUARD} with #{carriers[0].number}'s "
+                          "copy, but its head holds another; rebuild it")
+        print(f"  {BASE} has never had {FREEZE_GUARD}: this batch introduces it, so its "
+              f"members are judged with the copy #{carriers[0].number} adds")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "python_freeze.py"
+        path.write_text(text, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("_batch_python_freeze", path)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except (Exception, SystemExit) as exc:
+            raise Refusal(f"{BASE}'s own {FREEZE_GUARD} fails to load ({exc!r}); fix it on "
+                          f"{BASE} before building") from None
+    return module
+
+
+def _frozen_refusal(freeze, commit: str, labels) -> str | None:
+    """Why a merge commit on the batch branch may not stay: what it changes
+    against its first parent touches the frozen Python package and the
+    member does not carry the exception label. Judged on the merge itself,
+    not on a merge-base diff: with two merge bases, `git merge-base` reports
+    one, and a member can set a frozen file back with an empty diff from it.
+    The `Python freeze` check is early feedback on the pull request; this is
+    the gate, since the batch is exempt from that check and a member's own
+    run can be absent, queued or cancelled."""
+    paths = freeze.changed_paths(Path.cwd(), f"{commit}^1", commit)   # the checkout `build` runs in
+    if paths is None:
+        return "its change could not be read for the Python freeze check; rebuild once git can read it"
+    refused = freeze.frozen_paths(paths)
+    if refused and freeze.EXCEPTION_LABEL not in labels:
+        return freeze.refusal(refused)
+    return None
+
+
+def _undo_merge_if_frozen(plan: Plan, m: Member, freeze) -> bool:
+    """Drop the merge just made for ``m`` when it changes frozen paths
+    without the label; True when it was undone."""
+    frozen = _frozen_refusal(freeze, "HEAD", m.labels)
+    if not frozen:
+        return False
+    git("reset", "-q", "--hard", "HEAD^1")
+    plan.dropped.append(Dropped(m, frozen))
+    print(f"  dropped #{m.number}: {frozen}")
+    return True
+
+
+def _labels_now(number: int) -> tuple[str, ...]:
+    view = json.loads(gh("pr", "view", str(number), "--json", "labels") or "{}")
+    return tuple(label.get("name", "") for label in view.get("labels") or [] if isinstance(label, dict))
+
+
+def _batch_freeze_refusal(plan: Plan) -> str | None:
+    """Why the built batch may not be published or merged, judged on the
+    batch as a whole with master's guard: every commit since its base must
+    be a member's merge or the one generated commit, the generated commit
+    touches nothing frozen, and a member merge that changes frozen paths
+    still carries the exception label (read again now: it may have been
+    removed since `build`). A member whose head the batch already
+    contained has no merge of its own: its changes entered under the
+    containing member's merge, judged with that member's labels."""
+    if not _is_ancestor(plan.base_sha, plan.head):
+        return (f"{plan.branch}'s head {plan.head[:12]} does not descend from its base "
+                f"{plan.base_sha[:12]}; rebuild it")
+    freeze = _freeze_module(plan.base_sha, plan.merged, plan.head)
+    members = {m.sha: m for m in plan.merged if m.number not in plan.contained}
+    seen: set[str] = set()
+    generated = 0
+    for commit in _out("rev-list", "--first-parent", "--reverse",
+                       f"{plan.base_sha}..{plan.head}").split():
+        parents = _out("rev-list", "--parents", "-n", "1", commit).split()[1:]
+        if len(parents) == 2 and parents[1] in members:
+            m = members[parents[1]]
+            seen.add(m.sha)
+            first = _frozen_refusal(freeze, commit, (freeze.EXCEPTION_LABEL,))
+            if first:   # unreadable
+                return f"#{m.number}'s merge {commit[:12]}: {first}"
+            if _frozen_refusal(freeze, commit, ()):
+                frozen = _frozen_refusal(freeze, commit, _labels_now(m.number))
+                if frozen:
+                    return (f"#{m.number} no longer carries the {freeze.EXCEPTION_LABEL} label its "
+                            f"Python change was admitted with: {frozen}; rebuild without it, or "
+                            "restore the label if the maintainer's exception stands")
+            continue
+        subject = _out("log", "-1", "--format=%s", commit)
+        if len(parents) == 1 and subject == CENSUS_SUBJECT and generated == 0:
+            generated += 1
+            frozen = _frozen_refusal(freeze, commit, ())
+            if frozen:
+                return f"the generated commit {commit[:12]} changes the frozen package: {frozen}"
+            continue
+        return (f"commit {commit[:12]} ({subject!r}) on {plan.branch} is neither a member merge "
+                "nor the one generated commit; nothing is fixed inside a batch, so rebuild it")
+    missing = [f"#{m.number}" for m in plan.merged if m.sha not in seen
+               and not (m.number in plan.contained and _is_ancestor(m.sha, plan.head))]
+    if missing:
+        return f"the batch lacks the merges of {', '.join(missing)}; rebuild it"
+    return None
+
+
+def _is_ancestor(ancestor: str, descendant: str) -> bool:
+    return git("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
+
+
 def _merge_members(plan: Plan, members: list[Member]) -> None:
+    freeze = _freeze_module(plan.base_sha, members)
     for m in members:
         reason = _not_ready(m)
         if reason:
@@ -1243,15 +1442,32 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
             continue
         # rerere off: a replayed resolution would be a conflict resolved
         # inside the batch, and would hide the conflict from --diff-filter=U.
+        before = _out("rev-parse", "HEAD")
         proc = git("-c", "rerere.enabled=false", "merge", "--no-ff", "--no-edit", "-m",
                    f"Merge #{m.number} into {plan.branch}: {m.title}", m.sha,
                    check=False)
+        if proc.returncode == 0 and _out("rev-parse", "HEAD") == before:
+            # "Already up to date": the batch holds this head already (a
+            # stacked child merged first, or a head on master GitHub has not
+            # marked merged). No merge commit to judge; HEAD^1 would be the
+            # previous member's merge, or below the base.
+            if not _is_ancestor(m.sha, before):
+                raise Refusal(f"merging #{m.number} made no commit, yet its head "
+                              f"{m.sha[:12]} is not in the batch")
+            plan.merged.append(m)
+            plan.contained.append(m.number)
+            print(f"  merged #{m.number} {m.sha[:12]} {m.title} (already contained)")
+            continue
         if proc.returncode == 0:
+            if _undo_merge_if_frozen(plan, m, freeze):
+                continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} {m.title}")
             continue
         conflicted = _out("diff", "--name-only", "--diff-filter=U").splitlines()
         if _merge_budget_conflict(plan.base_sha, conflicted):
+            if _undo_merge_if_frozen(plan, m, freeze):
+                continue
             plan.merged.append(m)
             print(f"  merged #{m.number} {m.sha[:12]} after normalizing derived CI budget metadata")
             continue
@@ -1429,7 +1645,7 @@ def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
              out: set[int]) -> None:
     """Merge `members` but `out` again from the base, in their order."""
     git("reset", "-q", "--hard", plan.base_sha)
-    plan.merged, plan.dropped = [], list(dropped)
+    plan.merged, plan.dropped, plan.contained = [], list(dropped), []
     _merge_members(plan, [m for m in members if m.number not in out])
 
 
@@ -1810,6 +2026,9 @@ def open_(args: argparse.Namespace) -> int:
     if head != plan.head:
         raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
                       "build; nothing is fixed inside a batch, so rebuild it")
+    frozen = _batch_freeze_refusal(plan)
+    if frozen:
+        raise Refusal(frozen)
     open_prs = _open_batches()
     others = [(n, name) for n, name, _, _ in open_prs if name != plan.branch]
     if others:
@@ -2116,6 +2335,9 @@ def merge(args: argparse.Namespace) -> int:
         print(f"#{n} is already merged; confirming its members")
     else:
         _refuse_unmergeable(plan, view)
+        frozen = _batch_freeze_refusal(plan)
+        if frozen:
+            raise Refusal(frozen)
         try:
             gh("pr", "merge", str(n), "--merge", "--admin",
                "--match-head-commit", plan.head)
@@ -2164,7 +2386,9 @@ def status(args: argparse.Namespace) -> int:
         clean, files = _merge_tree(base_sha, head)
         merge = "merges cleanly" if clean else f"conflicts with master in {', '.join(files)}"
         draft = " draft," if m.draft else ""
-        print(f"#{m.number} {m.sha[:12]}{moved}:{draft} {merge}; CI {m.checks}; "
+        shown = (f" (report-only red, not counted: {', '.join(m.report_only_red)})"
+                 if m.report_only_red else "")
+        print(f"#{m.number} {m.sha[:12]}{moved}:{draft} {merge}; CI {m.checks}{shown}; "
               f"review {m.review}; labelled {m.labeled_at or 'at an unknown time'} "
               f"- {m.title}")
     return 0

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "python-freeze.yml",
+  "job": "python-freeze",
+  "before": null,
+  "fingerprint": "11925709ebd29f33",
+  "reason": "New workflow (2026-11-14): the Python freeze guard, one checkout, one git show of the base commit's script and one standard-library run; its cost is entered as an estimate until a hosted run measures it."
+}

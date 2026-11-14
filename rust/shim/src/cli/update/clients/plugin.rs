@@ -277,6 +277,30 @@ pub(super) fn migrate_with(
     outcome.unwrap_or_else(|detail| result("failed", detail))
 }
 
+/// The Claude Code marketplace source migration on its own, for the
+/// installers (which used to run `ops/plugin_marketplace.py`), with the same
+/// defaults as [`update_plugin`]. The report is `{"state", "detail"}`; the
+/// states are stable because callers map them: "absent", "current",
+/// "migrated", "kept", "failed", and "no-cli" when `claude` is not on PATH.
+#[allow(
+    dead_code,
+    reason = "the native installer (W3's installer pull request) calls it"
+)]
+pub fn migrate_marketplace() -> Value {
+    marketplace_with_cli(registrations::absolute_command("claude"))
+}
+#[allow(dead_code, reason = "used by migrate_marketplace and its test")]
+pub(super) fn marketplace_with_cli(claude: Option<PathBuf>) -> Value {
+    let Some(claude) = claude else {
+        return result("no-cli", "the claude CLI is not on PATH");
+    };
+    migrate_with(
+        &plugins_root(),
+        &registrations::claude_config_dir().join("settings.json"),
+        &claude,
+        &NativeRunner,
+    )
+}
 pub fn update_plugin(repo: Option<&Path>) -> Value {
     let Some(claude) = registrations::absolute_command("claude") else {
         return result("no-cli", "the claude CLI is not on PATH");

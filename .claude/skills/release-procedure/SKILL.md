@@ -70,7 +70,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the daemon image tag in **both** compose files (`ops/docker-compose.yml`
-   and the packaged copy `pseudolife_memory/compose/docker-compose.yml`),
+   and the packaged copy `pseudolife_memory/compose/docker-compose.yml`,
+   so, as nothing under the package may change, the cut PR is an exception that carries the `freeze-exception` label, applied by the maintainer or the conductor on a maintainer ruling),
    **both** version fields in `server.json`,
    `plugin/release.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the release the hooks report for the
@@ -171,10 +172,11 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    engine stays on Python and `--engine rust` stops at its `docker pull`
    with nothing changed. The Rust image gets only the explicit version
    tag; the workflow pushes no `latest` for it.
-   `PSEUDOLIFE_PUBLISH_RUST_ASSETS=true` (the five native CLI archives,
-   `SHA256SUMS`, and `pseudolife-compose-<version>.tar.gz`) remains the
-   maintainer's choice before each release and switches nothing on a
-   host. Verify a published image with
+   The five native CLI archives, `SHA256SUMS` and
+   `pseudolife-compose-<version>.tar.gz` publish with every release once
+   `publish` succeeds (no variable); the installers download the archive
+   for their host, so check after the run that all seven assets are on
+   the release (`gh release view v<version> --json assets`). Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
    and flip its GHCR package to public after the first release that runs
    the job, as for the Python image.
