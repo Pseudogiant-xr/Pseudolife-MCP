@@ -199,19 +199,17 @@
   "ci.yml": {
     "limits": {
       "jobs": 8,
-      "runner_minutes": 67,
-      "longest_job_minutes": 25,
-      "critical_path_minutes": 27,
-      "why": "2026-10-24: measured on the runs below, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above"
+      "runner_minutes": 96,
+      "longest_job_minutes": 41,
+      "critical_path_minutes": 41,
+      "why": "2026-11-14 (issue #1408): re-measured on master push 43456549451 and batches 43495728956 and 43476091008, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run). The test job grew from 22.4 to 34.0 minutes (27.1-37.3 across those runs and batch 43525635914, whose first attempt the 35-minute pytest bound killed), so the runner-minute, longest-job and critical-path limits are about 10% above the slowest: 87.1 -> 96, 37.3 -> 41, scope -> test 37.5 -> 41. What they buy: a suite as slow as today's finishes instead of costing a batch cycle."
     },
     "pip_no_compile": false,
     "needs_without_data": {},
     "measured_on": [
-      40074592538,
-      40071746672,
-      40068731867,
-      39989124855,
-      39988057818
+      43456549451,
+      43495728956,
+      43476091008
     ],
     "jobs": {
       "scope": {
@@ -221,22 +219,22 @@
         "minutes": 1.9
       },
       "lock-resolve": {
-        "minutes": 0.6
+        "minutes": 0.5
       },
       "test": {
-        "minutes": 22.4
+        "minutes": 34.0
       },
       "test-lite-linux": {
-        "minutes": 21.7
+        "minutes": 25.3
       },
       "test-lite-windows": {
-        "minutes": 5.0
+        "minutes": 12.1
       },
       "test-lite-macos": {
-        "minutes": 8.8
+        "minutes": 12.6
       },
       "frontend": {
-        "minutes": 0.3
+        "minutes": 0.5
       }
     }
   }
