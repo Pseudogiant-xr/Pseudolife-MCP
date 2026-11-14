@@ -10,6 +10,7 @@ promises.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -134,3 +135,28 @@ def test_a_git_bash_path_is_read_as_the_windows_path(tmp_path):
     env["HOME"] = "/" + real[0].lower() + real[2:]
     with pytest.raises(installer_sandbox.RealHomeRefused, match="HOME"):
         installer_sandbox.require(env, tmp_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Git Bash path spelling")
+def test_a_git_bash_tmp_path_is_read_where_git_bash_mounts_tmp(tmp_path):
+    # Git Bash mounts the user's own temporary folder at /tmp whatever TEMP
+    # says; with TEMP at an 8.3 short-name folder inside it (as the hosted
+    # runner reaches its own), /tmp is not tempfile.gettempdir().
+    from tests.ops_harness import find_bash
+
+    bash = find_bash()
+    if not bash:
+        pytest.skip("no Git Bash")
+    tmp = subprocess.run([bash, "-c", "cygpath -w /tmp"], capture_output=True, text=True,
+                         timeout=60, check=True).stdout.strip()
+    try:
+        inside = Path(os.path.realpath(tmp_path)).relative_to(os.path.realpath(tmp))
+    except ValueError:
+        pytest.skip("the test directory is not under Git Bash's /tmp")
+    env = installer_sandbox.environment(tmp_path)
+    env["HOME"] = "/tmp/" + inside.as_posix() + "/home"
+    installer_sandbox.require(env, tmp_path)
+    env["HOME"] = "/tmp/" + inside.as_posix() + "-elsewhere/home"
+    with pytest.raises(installer_sandbox.RealHomeRefused, match="HOME"):
+        installer_sandbox.require(env, tmp_path)
+

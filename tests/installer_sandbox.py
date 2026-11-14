@@ -17,6 +17,7 @@ unset asks the system for the real folder instead.
 """
 from __future__ import annotations
 
+import functools
 import os
 import subprocess
 import tempfile
@@ -33,14 +34,40 @@ class RealHomeRefused(RuntimeError):
     """An installer was about to start outside a disposable home."""
 
 
+@functools.lru_cache(maxsize=None)
+def _git_bash_tmp() -> str | None:
+    """The Windows folder Git Bash mounts at ``/tmp``, as Git Bash answers it.
+
+    Git mounts the user's own temporary folder there whatever ``TEMP`` says,
+    so with ``TEMP`` pointed elsewhere (an 8.3 short-name folder, as the
+    hosted runner reaches its own) ``tempfile.gettempdir()`` is a different
+    folder. ``None`` when Git Bash cannot be asked: a ``/tmp`` path is then
+    not resolved, and so refused.
+    """
+    from tests.ops_harness import find_bash
+
+    bash = find_bash()
+    if not bash:
+        return None
+    try:
+        answer = subprocess.run([bash, "-c", "cygpath -w /tmp"], capture_output=True, text=True,
+                                timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    folder = answer.stdout.strip()
+    return folder if answer.returncode == 0 and folder else None
+
+
 def _resolved(value: str | os.PathLike[str]) -> Path:
     text = os.fspath(value)
     # Git Bash spells C:\x as /c/x; read it as the Windows path it names.
     if os.name == "nt" and len(text) > 2 and text[0] == "/" and text[1].isalpha() and text[2] == "/":
         text = f"{text[1]}:{text[2:]}"
     elif os.name == "nt" and (text == "/tmp" or text.startswith("/tmp/")):
-        # Git Bash's /tmp is the Windows temporary directory.
-        text = tempfile.gettempdir() + text[4:]
+        tmp = _git_bash_tmp()
+        if tmp is None:
+            return Path(text)
+        text = tmp + text[4:]
     return Path(os.path.realpath(text))
 
 
