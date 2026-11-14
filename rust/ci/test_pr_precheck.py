@@ -75,24 +75,27 @@ def test_budget_metadata_changes_do_not_replay_runtime_cases(path):
 
 @pytest.mark.parametrize("path", ["rust/Cargo.toml", "rust/Cargo.lock", "rust/rust-toolchain.toml",
                                   ".cargo/config.toml", "rust/.cargo/config.toml", "tests/__init__.py"])
-def test_shared_build_inputs_and_test_package_initializer_keep_all_judges(path):
+def test_shared_build_inputs_and_test_package_initializer_replay_every_golden_row(path):
+    from parity_scope import UNREPLAYED_ROWS
     selected = precheck.select([path])
-    assert selected["linux"] == list(precheck.ROWS)
-    assert selected["judges"] == list(precheck.JUDGES)
+    assert selected["linux"] == [row for row in precheck.ROWS if row not in UNREPLAYED_ROWS]
+    # The frozen judge probes left CI with the Python freeze (14 November 2026).
+    assert selected["judges"] == []
 
 
 @pytest.mark.parametrize("path", [*[f"rust/shim/src/cli/{entry}" for entry in SHIM_COMMANDS],
     "rust/shim/src/cli/doctor/mod.rs", "rust/shim/src/cli/lease/mod.rs", "rust/shim/src/cli/wait_mail.rs",
     "rust/shim/src/shared.rs", "rust/shim/README.md"])
-def test_shim_precheck_judges_match_batch_ownership(path):
-    expected = list(precheck.JUDGES) if "judges" in reached(path) else []
-    assert precheck.select([path])["judges"] == expected
+def test_no_shim_change_selects_a_frozen_judge(path):
+    # The judges left CI with the Python freeze: no path reaches them.
+    assert "judges" not in reached(path)
+    assert precheck.select([path])["judges"] == []
 
 
 def test_report_artifact_upload_is_not_a_pr_gate():
     import yaml
-    job = yaml.safe_load((precheck.ROOT / ".github/workflows/rust.yml").read_text())["jobs"]["rust"]
-    upload = next(step for step in job["steps"] if step.get("name") == "Retain ordinary PR parity precheck case IDs")
+    jobs = yaml.safe_load((precheck.ROOT / ".github/workflows/rust.yml").read_text())["jobs"]
+    upload = next(step for step in jobs["rust"]["steps"] if step.get("name") == "Retain ordinary PR parity precheck case IDs")
     assert upload["continue-on-error"] is True
 
 
@@ -127,21 +130,21 @@ def test_missing_or_malformed_goldens_cannot_establish_equivalence(tmp_path):
 def test_missing_diff_selects_all_linux_rows_and_different_windows_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(precheck, "python_owners", lambda root: {})
     monkeypatch.setattr(precheck, "windows_differs", lambda root, row: row == "doctor")
+    from parity_scope import UNREPLAYED_ROWS
     plan = precheck.select(None, tmp_path)
-    assert plan["linux"] == list(precheck.ROWS) and plan["windows"] == ["doctor"]
-    assert plan["judges"] == list(precheck.JUDGES)
+    assert plan["linux"] == [row for row in precheck.ROWS if row not in UNREPLAYED_ROWS]
+    assert plan["windows"] == ["doctor"] and plan["judges"] == []
 
 
-def test_lease_and_shared_cli_changes_select_their_frozen_judges():
-    graph = precheck.import_graph({"pseudolife_memory/lease_cli.py": "from . import os_lock\n",
-                                  "pseudolife_memory/os_lock.py": "",
-                                  "pseudolife_memory/doctor_cli.py": ""})
-    owners = {"pseudolife_memory/doctor_cli.py": ("doctor",)}
-    assert precheck.judges_for("pseudolife_memory/cli.py", graph, owners) == precheck.JUDGES
-    assert precheck.judges_for("pseudolife_memory/os_lock.py", graph, owners) == ("lease-headers", "cli-process")
-    assert precheck.judges_for("pseudolife_memory/doctor_cli.py", graph, owners) == ()
-    assert precheck.judges_for("rust/shim/src/cli/lease.rs", graph, owners) == precheck.JUDGES
-    assert precheck.judges_for("rust/shim/src/main.rs", graph, owners) == precheck.JUDGES
+@pytest.mark.parametrize("path", ["rust/cli_harness/goldens/audit.linux.json", "rust/cli_harness/rows/backup.py",
+                                  "rust/shim/src/cli/migrate_flat.rs", "pyproject.toml"])
+def test_rows_without_a_committed_golden_replay_are_never_recorded(path):
+    # Their only CI replay recorded the Python oracle first (coverage_plan's
+    # record/golden pairs); since the freeze the precheck never records.
+    from parity_scope import UNREPLAYED_ROWS
+    selected = precheck.select([path])
+    assert not set(UNREPLAYED_ROWS) & set(selected["linux"])
+    assert not set(UNREPLAYED_ROWS) & set(selected["windows"])
 
 
 @pytest.mark.parametrize("row,full", [("doctor", False), ("transfer", True), ("test_login", True),
@@ -162,7 +165,7 @@ def test_prechecks_are_ordinary_pr_only_and_keep_python_dependencies_isolated():
     steps = {step.get("name"): step for step in jobs["rust"]["steps"]}
     selected = steps["Select ordinary PR parity prechecks"]
     assert selected["if"] == "github.event_name == 'pull_request' && needs.scope.outputs.full == 'false'"
-    assert jobs["rust"]["timeout-minutes"] == "${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 90 || 60 }}"
+    assert jobs["rust"]["timeout-minutes"] == "${{ github.event_name == 'pull_request' && needs.scope.outputs.full == 'false' && 100 || 75 }}"
     runtime = steps["Install the selected PR precheck dependencies"]
     assert "venv --system-site-packages" in runtime["run"] and "GITHUB_ENV" not in runtime["run"]
     replay = steps["Replay touched PR goldens"]
@@ -170,13 +173,14 @@ def test_prechecks_are_ordinary_pr_only_and_keep_python_dependencies_isolated():
     assert runtime["if"] == "steps.precheck.outputs.enabled == 'true'"
     assert replay["if"] == "steps.precheck.outputs.golden == 'true'"
     assert not replay.get("continue-on-error", False)
-    probes = steps["Probe PR frozen judges for item-11 diagnostics"]
-    assert probes["continue-on-error"] is True
-    assert "!cancelled()" in probes["if"] and "precheck_runtime.outcome == 'success'" in probes["if"]
-    assert "--only goldens" in replay["run"] and "--only judges" in probes["run"]
-    assert "--publish" in steps["Summarize PR goldens and report-only frozen probes"]["run"]
+    assert "--only goldens" in replay["run"]
+    assert "--publish --only goldens" in steps["Summarize PR golden replay"]["run"]
     ordered = [step.get("name") for step in jobs["rust"]["steps"]]
     assert ordered.index(replay["name"]) < ordered.index("Nextest")
+    # The report-only frozen judge probes left CI with the Python freeze
+    # (14 November 2026): no job runs them.
+    assert not any("--only judges" in step.get("run", "") for job in jobs.values() for step in job.get("steps", []))
+    assert "frozen-probes" not in jobs
     assert not any("precheck" in name for name in jobs)
 
 

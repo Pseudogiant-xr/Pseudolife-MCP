@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "ae533ea0bf5ced90",
+  "fingerprint": "0f464b588183eae9",
+  "reason": "The binary-less harness step also runs rust/cli_harness/test_cli_harness.py (offline self-test, 182 cases in 25 s on a Windows desktop, 0.5 min in the hosted cli shard on 2026-11-13) and installs httpx for it: about half a minute per Rust job, within noise of its 31.4 / 16.2 min price."
+}

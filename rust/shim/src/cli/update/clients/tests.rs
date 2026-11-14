@@ -782,3 +782,11 @@ fn native_client_suspend_driver() {
     );
     assert_eq!(result.code, 0, "resumed client command timed out");
 }
+
+#[test]
+fn marketplace_migration_without_claude_says_no_cli() {
+    // The installers map this state (they run the step only for a Claude client).
+    let report = plugin::marketplace_with_cli(None);
+    assert_eq!(report["state"], "no-cli");
+    assert_eq!(report["detail"], "the claude CLI is not on PATH");
+}
