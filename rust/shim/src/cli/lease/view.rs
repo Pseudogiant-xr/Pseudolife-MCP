@@ -246,17 +246,23 @@ pub(in crate::cli) fn held_with(name: &str, leases: &[Value]) -> bool {
     let holder = leases
         .iter()
         .find(|lease| lease["name"] == name && lease["holder"].is_object())
-        .map(|lease| &lease["holder"]);
+        .map_or(&Value::Null, |lease| &lease["holder"]);
+    local["state"] == "held" || (!holder.is_null() && !stale_hold(name, &local, holder))
+}
+/// Whether the board's `holder` of `name` is this machine's own `lease
+/// hold` whose local lock is already free: a record that outlived its
+/// holder and lapses at its ttl, so it does not count as held.
+#[allow(clippy::let_and_return)] // the binding is a source mutant's anchor
+fn stale_hold(name: &str, local: &Value, holder: &Value) -> bool {
     let here = if is_suite(name) {
         suite_directory()
     } else {
         lock::directory()
     };
+    let ours = lock::instance_id(&here);
     let stale = local["state"] == "free"
-        && lock::instance_id(&here).is_some_and(|id| {
-            holder.is_some_and(|holder| holder["label"] == format!("lease-hold@{id}"))
-        });
-    local["state"] == "held" || (holder.is_some() && !stale)
+        && ours.is_some_and(|id| holder["label"] == format!("lease-hold@{id}"));
+    stale
 }
 fn local_state(name: &str) -> Value {
     if is_suite(name) && name != local_suite() {
@@ -425,14 +431,7 @@ pub(super) async fn verdict(args: &Args, gated: bool) -> Verdict {
         },
     }
     report["reason"] = json!(reason.as_ref());
-    let here = if is_suite(name) {
-        suite_directory()
-    } else {
-        lock::directory()
-    };
-    let ours = lock::instance_id(&here);
-    let stale = local["state"] == "free"
-        && ours.is_some_and(|id| report["holder"]["label"] == format!("lease-hold@{id}"));
+    let stale = stale_hold(name, &local, &report["holder"]);
     let held = local["state"] == "held" || (!report["holder"].is_null() && !stale);
     let text = if args.json {
         json_text(&json!({"name":name,"held":held,"local":local,"board":report}))
