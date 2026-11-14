@@ -1076,7 +1076,7 @@ mod tests {
                 d.join("pseudolife_memory-20261101-000000-00000001.sql.gz"),
             ]
         );
-        assert_eq!(rotation.unpaired, [state.clone()]);
+        assert_eq!(rotation.unpaired, std::slice::from_ref(&state));
         assert!(fs::symlink_metadata(&link).is_ok());
         assert!(target.exists() && state.exists());
     }
