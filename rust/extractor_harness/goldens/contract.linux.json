@@ -1,0 +1,2502 @@
+{
+ "cases": {
+  "differential/script/claude": {
+   "journal": [
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "UmVwbHkgd2l0aCBleGFjdGx5OiBPSw=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "claude-future",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--effort",
+      "high",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system \u00e9 \ud83d\ude00"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "<64008 chars sha256:dab26cf9dbe37a84e82038ca2c85284a8e7c842bdf384101d703b1bf687e83c4>"
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "Replacement prompt\nVocabulary"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    }
+   ],
+   "responses": [
+    [
+     "models",
+     200,
+     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+    ],
+    [
+     "models-v1",
+     200,
+     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+    ],
+    [
+     "health",
+     200,
+     "{\"status\": \"ok\"}"
+    ],
+    [
+     "missing",
+     404,
+     "{\"error\": \"not found\"}"
+    ],
+    [
+     "query-is-not-route",
+     404,
+     "{\"error\": \"not found\"}"
+    ],
+    [
+     "missing-post",
+     404,
+     "{\"error\": \"not found\"}"
+    ],
+    [
+     "unsupported-method",
+     501,
+     "<!DOCTYPE HTML>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\">\n        <title>Error response</title>\n    </head>\n    <body>\n        <h1>Error response</h1>\n        <p>Error code: 501</p>\n        <p>Message: Unsupported method ('PUT').</p>\n        <p>Error code explanation: 501 - Server does not support this operation.</p>\n    </body>\n</html>\n"
+    ],
+    [
+     "model-None",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-extractor",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-bench",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-Qwen/Qwen3",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-claude-future",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-future\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-  high ",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-17",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-None",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "stream-is-ignored",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"text\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "empty",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "ascii-del",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\\u007f\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "long-system",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "production-prompt",
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "bad-b''",
+     500,
+     "{\"error\": \"Expecting value: line 1 column 1 (char 0)\"}"
+    ],
+    [
+     "bad-b'bad'",
+     500,
+     "{\"error\": \"Expecting value: line 1 column 1 (char 0)\"}"
+    ],
+    [
+     "bad-b'{'",
+     500,
+     "{\"error\": \"Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\"}"
+    ],
+    [
+     "bad-b'[]'",
+     500,
+     "{\"error\": \"'list' object has no attribute 'get'\"}"
+    ],
+    [
+     "bad-b'{\"messages\": null}'",
+     500,
+     "{\"error\": \"'NoneType' object is not iterable\"}"
+    ],
+    [
+     "bad-b'{\"messages\":[{\"content\": [\"x\"]}]}'",
+     500,
+     "{\"error\": \"sequence item 0: expected str instance, list found\"}"
+    ],
+    [
+     "exit-failure",
+     500,
+     "{\"error\": \"claude -p rc=7: stdout: warning; stderr: failed call\"}"
+    ],
+    [
+     "bounded-failure",
+     500,
+     "{\"error\": \"claude -p rc=1: stdout: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ... AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; stderr: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB ... BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\"}"
+    ],
+    [
+     "error-result",
+     500,
+     "{\"error\": \"claude -p error result: Not logged in\"}"
+    ],
+    [
+     "invalid-cli-json",
+     500,
+     "{\"error\": \"Expecting value: line 1 column 1 (char 0)\"}"
+    ],
+    [
+     "wrong-cli-type",
+     500,
+     "{\"error\": \"'list' object has no attribute 'get'\"}"
+    ],
+    [
+     "wrong-result-type",
+     500,
+     "{\"error\": \"'int' object has no attribute 'strip'\"}"
+    ],
+    [
+     "object-error-result",
+     500,
+     "{\"error\": \"claude -p error result: {'error': 'bad'}\"}"
+    ]
+   ]
+  },
+  "differential/script/codex": {
+   "journal": [
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "Reply with exactly: OK"
+     },
+     "stdin": "cGluZw=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "gpt-future",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_reasoning_effort=high",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "system \u00e9 \ud83d\ude00"
+     },
+     "stdin": "aGVsbG8KCnByaW9yCgphZ2Fpbg=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "<24001 chars sha256:434c3762252463038ab4039ccf46d0babf1ab1e7c83298a44123b3a3a186c884>"
+     },
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": {
+      "text": "Replacement prompt\nVocabulary"
+     },
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "<listed model>",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": ""
+    }
+   ],
+   "responses": [
+    [
+     "models",
+     200,
+     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+    ],
+    [
+     "models-v1",
+     200,
+     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+    ],
+    [
+     "health",
+     200,
+     "{\"status\": \"ok\"}"
+    ],
+    [
+     "missing",
+     404,
+     "{\"error\": \"not found\"}"
+    ],
+    [
+     "query-is-not-route",
+     404,
+     "{\"error\": \"not found\"}"
+    ],
+    [
+     "missing-post",
+     404,
+     "{\"error\": \"not found\"}"
+    ],
+    [
+     "unsupported-method",
+     501,
+     "<!DOCTYPE HTML>\n<html lang=\"en\">\n    <head>\n        <meta charset=\"utf-8\">\n        <title>Error response</title>\n    </head>\n    <body>\n        <h1>Error response</h1>\n        <p>Error code: 501</p>\n        <p>Message: Unsupported method ('PUT').</p>\n        <p>Error code explanation: 501 - Server does not support this operation.</p>\n    </body>\n</html>\n"
+    ],
+    [
+     "model-None",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-extractor",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-bench",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-Qwen/Qwen3",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "model-gpt-future",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-future\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-  high ",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-17",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "effort-None",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "stream-is-ignored",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"text\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "empty",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "ascii-del",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\\u007f\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "long-system",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "production-prompt",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "bad-b''",
+     500,
+     "{\"error\": \"Expecting value: line 1 column 1 (char 0)\"}"
+    ],
+    [
+     "bad-b'bad'",
+     500,
+     "{\"error\": \"Expecting value: line 1 column 1 (char 0)\"}"
+    ],
+    [
+     "bad-b'{'",
+     500,
+     "{\"error\": \"Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\"}"
+    ],
+    [
+     "bad-b'[]'",
+     500,
+     "{\"error\": \"'list' object has no attribute 'get'\"}"
+    ],
+    [
+     "bad-b'{\"messages\": null}'",
+     500,
+     "{\"error\": \"'NoneType' object is not iterable\"}"
+    ],
+    [
+     "bad-b'{\"messages\":[{\"content\": [\"x\"]}]}'",
+     500,
+     "{\"error\": \"sequence item 0: expected str instance, list found\"}"
+    ],
+    [
+     "exit-failure",
+     500,
+     "{\"error\": \"codex exec rc=7: stdout: warning; stderr: failed call\"}"
+    ],
+    [
+     "bounded-failure",
+     500,
+     "{\"error\": \"codex exec rc=1: stdout: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ... AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; stderr: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB ... BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\"}"
+    ],
+    [
+     "reply-type-17-0",
+     500,
+     "{\"error\": \"'int' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-17-1",
+     500,
+     "{\"error\": \"'int' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-True-0",
+     500,
+     "{\"error\": \"'bool' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-True-1",
+     500,
+     "{\"error\": \"'bool' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-['text']-0",
+     500,
+     "{\"error\": \"'list' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-['text']-1",
+     500,
+     "{\"error\": \"'list' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-{'text': 'value'}-0",
+     500,
+     "{\"error\": \"'dict' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-{'text': 'value'}-1",
+     500,
+     "{\"error\": \"'dict' object has no attribute 'strip'\"}"
+    ],
+    [
+     "reply-type-None-0",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "reply-type-None-1",
+     500,
+     "{\"error\": \"codex exec rc=1: (no message: stdout had 1 JSON events and none an error; stderr was empty)\"}"
+    ],
+    [
+     "reply-type-0-0",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "reply-type-0-1",
+     500,
+     "{\"error\": \"codex exec rc=1: (no message: stdout had 1 JSON events and none an error; stderr was empty)\"}"
+    ],
+    [
+     "reply-type-False-0",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "reply-type-False-1",
+     500,
+     "{\"error\": \"codex exec rc=1: (no message: stdout had 1 JSON events and none an error; stderr was empty)\"}"
+    ],
+    [
+     "reply-type-[]-0",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "reply-type-[]-1",
+     500,
+     "{\"error\": \"codex exec rc=1: (no message: stdout had 1 JSON events and none an error; stderr was empty)\"}"
+    ],
+    [
+     "reply-type-{}-0",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "reply-type-{}-1",
+     500,
+     "{\"error\": \"codex exec rc=1: (no message: stdout had 1 JSON events and none an error; stderr was empty)\"}"
+    ],
+    [
+     "invalid-earlier-reply",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"last\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     "turn-failed-0",
+     500,
+     "{\"error\": \"codex exec failed: Unauthorized\"}"
+    ],
+    [
+     "turn-failed-1",
+     500,
+     "{\"error\": \"codex exec rc=1: codex exec failed: Unauthorized\"}"
+    ],
+    [
+     "no-reply",
+     500,
+     "{\"error\": \"codex exec produced no agent_message (stream: 'banner\\\\n{}\\\\n')\"}"
+    ],
+    [
+     "last-reply",
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"last\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ]
+   ]
+  },
+  "health/claude/Not logged in": [
+   503,
+   "{\"status\": \"login_required\", \"detail\": \"claude -p rc=1: stderr: Not logged in\", \"fix\": \"sign in to the Claude CLI on the shim host as fixture: run `claude`, then `/login`; /health recovers within 30 seconds, no restart needed\", \"provider\": \"claude\", \"user\": \"fixture\"}"
+  ],
+  "health/claude/rate limit": [
+   503,
+   "{\"status\": \"cli_error\", \"detail\": \"claude -p rc=1: stderr: rate limit\"}"
+  ],
+  "health/codex/Not logged in": [
+   503,
+   "{\"status\": \"login_required\", \"detail\": \"codex exec rc=1: stderr: Not logged in\", \"fix\": \"sign in to the Codex CLI on the shim host as fixture: run `codex login` (or `codex login --with-api-key` for an API key); /health recovers within 30 seconds, no restart needed\", \"provider\": \"codex\", \"user\": \"fixture\"}"
+  ],
+  "health/codex/rate limit": [
+   503,
+   "{\"status\": \"cli_error\", \"detail\": \"codex exec rc=1: stderr: rate limit\"}"
+  ],
+  "managed/claude": {
+   "journal": [
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "claude-fixture",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<root>",
+     "environment": {
+      "CLAUDECODE": null,
+      "CLAUDE_CODE_SESSION_ID": null,
+      "CLAUDE_EFFORT": null
+     },
+     "instructions": null,
+     "stdin": "UmVwbHkgd2l0aCBleGFjdGx5OiBPSw=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "claude-fixture",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<root>",
+     "environment": {
+      "CLAUDECODE": null,
+      "CLAUDE_CODE_SESSION_ID": null,
+      "CLAUDE_EFFORT": null
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8="
+    }
+   ],
+   "responses": [
+    [
+     200,
+     "{\"object\": \"list\", \"data\": [{\"id\": \"claude-fixture\", \"object\": \"model\"}, {\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+    ],
+    [
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-fixture\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ]
+   ]
+  },
+  "managed/codex": {
+   "journal": [
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "gpt-fixture",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-c",
+      "model_instructions_file=<instructions>",
+      "-"
+     ],
+     "cwd": "<root>",
+     "environment": {
+      "CLAUDECODE": null,
+      "CLAUDE_CODE_SESSION_ID": null,
+      "CLAUDE_EFFORT": null
+     },
+     "instructions": {
+      "text": "Reply with exactly: OK"
+     },
+     "stdin": "cGluZw=="
+    },
+    {
+     "argv": [
+      "exec",
+      "--model",
+      "gpt-fixture",
+      "--json",
+      "--sandbox",
+      "read-only",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "web_search=disabled",
+      "-c",
+      "features.shell_tool=false",
+      "-"
+     ],
+     "cwd": "<root>",
+     "environment": {
+      "CLAUDECODE": null,
+      "CLAUDE_CODE_SESSION_ID": null,
+      "CLAUDE_EFFORT": null
+     },
+     "instructions": null,
+     "stdin": "aGVsbG8="
+    }
+   ],
+   "responses": [
+    [
+     200,
+     "{\"object\": \"list\", \"data\": [{\"id\": \"gpt-fixture\", \"object\": \"model\"}, {\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+    ],
+    [
+     200,
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-fixture\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ]
+   ]
+  },
+  "tools/script": {
+   "journal": [
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      ""
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "UmVwbHkgd2l0aCBleGFjdGx5OiBPSw=="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system\n\nYou can call tools. Call AT MOST ONE tool per reply.\n\nTo call a tool, reply with ONLY this JSON object and nothing else \u2014 no prose\nbefore or after it, no markdown fences, no explanation:\n\n{\"tool_call\": {\"name\": \"<tool name>\", \"arguments\": {<arguments object>}}}\n\nThe arguments object must match that tool's parameter schema. The tool's\nresult is given back to you on the next turn, after which you can call\nanother tool or answer. If you do not need a tool, reply to the user in\nplain text and do not mention this format.\n\nEarlier turns of this conversation are shown to you with markers such as\n[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].\nThose markers are history rendered for you \u2014 never write them yourself. A\ncall is only ever the JSON object above.\n\nAvailable tools:\n- name: lookup\n  description: Find \u00e9\n  parameters (JSON Schema): {\"type\": \"object\", \"properties\": {}}"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "VXNlcjogcXVlc3Rpb24KClthc3Npc3RhbnQgY2FsbGVkIHRvb2wgbG9va3VwIHdpdGgge31dCgpbdG9vbCBsb29rdXAgcmV0dXJuZWQ6IHJlc3VsdF0="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system\n\nYou can call tools. Call AT MOST ONE tool per reply.\n\nTo call a tool, reply with ONLY this JSON object and nothing else \u2014 no prose\nbefore or after it, no markdown fences, no explanation:\n\n{\"tool_call\": {\"name\": \"<tool name>\", \"arguments\": {<arguments object>}}}\n\nThe arguments object must match that tool's parameter schema. The tool's\nresult is given back to you on the next turn, after which you can call\nanother tool or answer. If you do not need a tool, reply to the user in\nplain text and do not mention this format.\n\nEarlier turns of this conversation are shown to you with markers such as\n[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].\nThose markers are history rendered for you \u2014 never write them yourself. A\ncall is only ever the JSON object above.\n\nAvailable tools:\n- name: lookup\n  description: Find \u00e9\n  parameters (JSON Schema): {\"type\": \"object\", \"properties\": {}}"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "VXNlcjogcXVlc3Rpb24KClthc3Npc3RhbnQgY2FsbGVkIHRvb2wgbG9va3VwIHdpdGgge31dCgpbdG9vbCBsb29rdXAgcmV0dXJuZWQ6IHJlc3VsdF0="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system\n\nYou can call tools. Call AT MOST ONE tool per reply.\n\nTo call a tool, reply with ONLY this JSON object and nothing else \u2014 no prose\nbefore or after it, no markdown fences, no explanation:\n\n{\"tool_call\": {\"name\": \"<tool name>\", \"arguments\": {<arguments object>}}}\n\nThe arguments object must match that tool's parameter schema. The tool's\nresult is given back to you on the next turn, after which you can call\nanother tool or answer. If you do not need a tool, reply to the user in\nplain text and do not mention this format.\n\nEarlier turns of this conversation are shown to you with markers such as\n[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].\nThose markers are history rendered for you \u2014 never write them yourself. A\ncall is only ever the JSON object above.\n\nAvailable tools:\n- name: lookup\n  description: Find \u00e9\n  parameters (JSON Schema): {\"type\": \"object\", \"properties\": {}}"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "VXNlcjogcXVlc3Rpb24KClthc3Npc3RhbnQgY2FsbGVkIHRvb2wgbG9va3VwIHdpdGgge31dCgpbdG9vbCBsb29rdXAgcmV0dXJuZWQ6IHJlc3VsdF0="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system\n\nYou can call tools. Call AT MOST ONE tool per reply.\n\nTo call a tool, reply with ONLY this JSON object and nothing else \u2014 no prose\nbefore or after it, no markdown fences, no explanation:\n\n{\"tool_call\": {\"name\": \"<tool name>\", \"arguments\": {<arguments object>}}}\n\nThe arguments object must match that tool's parameter schema. The tool's\nresult is given back to you on the next turn, after which you can call\nanother tool or answer. If you do not need a tool, reply to the user in\nplain text and do not mention this format.\n\nEarlier turns of this conversation are shown to you with markers such as\n[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].\nThose markers are history rendered for you \u2014 never write them yourself. A\ncall is only ever the JSON object above.\n\nAvailable tools:\n- name: lookup\n  description: Find \u00e9\n  parameters (JSON Schema): {\"type\": \"object\", \"properties\": {}}"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "VXNlcjogcXVlc3Rpb24KClthc3Npc3RhbnQgY2FsbGVkIHRvb2wgbG9va3VwIHdpdGgge31dCgpbdG9vbCBsb29rdXAgcmV0dXJuZWQ6IHJlc3VsdF0="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system\n\nYou can call tools. Call AT MOST ONE tool per reply.\n\nTo call a tool, reply with ONLY this JSON object and nothing else \u2014 no prose\nbefore or after it, no markdown fences, no explanation:\n\n{\"tool_call\": {\"name\": \"<tool name>\", \"arguments\": {<arguments object>}}}\n\nThe arguments object must match that tool's parameter schema. The tool's\nresult is given back to you on the next turn, after which you can call\nanother tool or answer. If you do not need a tool, reply to the user in\nplain text and do not mention this format.\n\nEarlier turns of this conversation are shown to you with markers such as\n[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].\nThose markers are history rendered for you \u2014 never write them yourself. A\ncall is only ever the JSON object above.\n\nAvailable tools:\n- name: lookup\n  description: Find \u00e9\n  parameters (JSON Schema): {\"type\": \"object\", \"properties\": {}}"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "VXNlcjogcXVlc3Rpb24KClthc3Npc3RhbnQgY2FsbGVkIHRvb2wgbG9va3VwIHdpdGgge31dCgpbdG9vbCBsb29rdXAgcmV0dXJuZWQ6IHJlc3VsdF0="
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system\n\nYou can call tools. Call AT MOST ONE tool per reply.\n\nTo call a tool, reply with ONLY this JSON object and nothing else \u2014 no prose\nbefore or after it, no markdown fences, no explanation:\n\n{\"tool_call\": {\"name\": \"<tool name>\", \"arguments\": {<arguments object>}}}\n\nThe arguments object must match that tool's parameter schema. The tool's\nresult is given back to you on the next turn, after which you can call\nanother tool or answer. If you do not need a tool, reply to the user in\nplain text and do not mention this format.\n\nEarlier turns of this conversation are shown to you with markers such as\n[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].\nThose markers are history rendered for you \u2014 never write them yourself. A\ncall is only ever the JSON object above.\n\nAvailable tools:\n- name: lookup\n  description: Find \u00e9\n  parameters (JSON Schema): {\"type\": \"object\", \"properties\": {}}"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "VXNlcjogcXVlc3Rpb24KClthc3Npc3RhbnQgY2FsbGVkIHRvb2wgbG9va3VwIHdpdGgge31dCgpbdG9vbCBsb29rdXAgcmV0dXJuZWQ6IHJlc3VsdF0KCllvdXIgcHJldmlvdXMgcmVwbHkgbG9va2VkIGxpa2UgYSB0b29sIGNhbGwgYnV0IHdhcyBub3QgdmFsaWQgSlNPTi4gUmVwbHkgd2l0aCBPTkxZIHRoZSBKU09OIG9iamVjdCB7InRvb2xfY2FsbCI6IHsibmFtZSI6IC4uLiwgImFyZ3VtZW50cyI6IHsuLi59fX0gYW5kIG5vdGhpbmcgZWxzZSwgb3Igd2l0aCBhIHBsYWluLXRleHQgYW5zd2VyIGNvbnRhaW5pbmcgbm8gSlNPTiBhdCBhbGwu"
+    },
+    {
+     "argv": [
+      "-p",
+      "--model",
+      "<listed model>",
+      "--output-format",
+      "json",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--tools",
+      "",
+      "--system-prompt",
+      "system\n\nYou can call tools. Call AT MOST ONE tool per reply.\n\nTo call a tool, reply with ONLY this JSON object and nothing else \u2014 no prose\nbefore or after it, no markdown fences, no explanation:\n\n{\"tool_call\": {\"name\": \"<tool name>\", \"arguments\": {<arguments object>}}}\n\nThe arguments object must match that tool's parameter schema. The tool's\nresult is given back to you on the next turn, after which you can call\nanother tool or answer. If you do not need a tool, reply to the user in\nplain text and do not mention this format.\n\nEarlier turns of this conversation are shown to you with markers such as\n[assistant called tool NAME with ARGS] and [tool NAME returned: RESULT].\nThose markers are history rendered for you \u2014 never write them yourself. A\ncall is only ever the JSON object above.\n\nAvailable tools:\n- name: lookup\n  description: Find \u00e9\n  parameters (JSON Schema): {\"type\": \"object\", \"properties\": {}}"
+     ],
+     "cwd": "<harness cwd>",
+     "environment": {
+      "CLAUDECODE": "fixture-session",
+      "CLAUDE_CODE_SESSION_ID": "fixture-id",
+      "CLAUDE_EFFORT": "low"
+     },
+     "instructions": null,
+     "stdin": "VXNlcjogcXVlc3Rpb24KClthc3Npc3RhbnQgY2FsbGVkIHRvb2wgbG9va3VwIHdpdGgge31dCgpbdG9vbCBsb29rdXAgcmV0dXJuZWQ6IHJlc3VsdF0="
+    }
+   ],
+   "responses": [
+    [
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"x\\\": \\\"\\u00e9\\\"}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"x\\\": 1}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"tool_call\\\": broken}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ],
+    [
+     200,
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"plain reply\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+    ]
+   ]
+  }
+ },
+ "normalizers": {
+  "ids": "generated completion and tool-call IDs (normalize)",
+  "models": "each listed model ID as <listed model>, /models entries collapsed",
+  "prompt": "the production prompt's text as <production prompt>"
+ },
+ "oracle_head": "67e0402cc157733d4fee3d072881e8c8ed5de1dc"
+}

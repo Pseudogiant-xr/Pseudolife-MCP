@@ -10,8 +10,10 @@ argv, stdin, instruction bytes and selected child environment are compared too.
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import concurrent.futures
+import hashlib
 import http.client
 import importlib.util
 import json
@@ -26,6 +28,8 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "rust/daemon/harness"))
+import candidate_record  # noqa: E402  (the recorders' shared vocabulary)
 spec = importlib.util.spec_from_file_location("autostart_oracle", ROOT / "ops/shim_autostart.py")
 autostart_oracle = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(autostart_oracle)
@@ -205,6 +209,224 @@ def journal_rows(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+# The contract suite: CI checks the native shim against committed snapshots
+# (goldens/contract.<platform>.json); --record-goldens runs the Python shim
+# beside it and records where the two agree; --record-candidate re-records
+# from the native shim alone (rust/daemon/harness/candidate_record.py).
+GOLDENS = Path(__file__).with_name("goldens")
+PLATFORM = "windows" if os.name == "nt" else "linux"
+PROMPT_FILE = ROOT / "evals/prompts/assistant_facts_provenance.txt"
+PROMPT_TOKEN = "<production prompt>"
+MODEL_TOKEN = "<listed model>"
+# A longer string is stored as its length and digest (run.py's golden_scrub does the same).
+LONG = 4096
+
+
+def contract_golden():
+    return GOLDENS / f"contract.{PLATFORM}.json"
+
+
+def listed_models():
+    """The native shims' listed model IDs (test_prompt.py pins them to both
+    shims), longest first, so a snapshot never pins the list itself: a model
+    release changes the lists, not this golden."""
+    native = (ROOT / "rust/shim/src/extractor_shim/config.rs").read_text(encoding="utf-8")
+    return sorted(set(re.findall(r'"((?:claude|gpt)-[a-z0-9.-]+)"', native)), key=len, reverse=True)
+
+
+def tokens(value, prompt, models):
+    """A snapshot with the production prompt's text and each listed model ID
+    replaced by a token, and /models' entries collapsed once their IDs are
+    tokens. Unlisted IDs (``claude-future``) stay, since they test pass-through."""
+    if isinstance(value, dict):
+        return {key: tokens(item, prompt, models) for key, item in value.items()}
+    if isinstance(value, list):
+        return [tokens(item, prompt, models) for item in value]
+    if isinstance(value, str):
+        value = value.replace(prompt, PROMPT_TOKEN)
+        for model in models:
+            value = re.sub(rf"(?<![a-z0-9.-]){re.escape(model)}(?![a-z0-9.-])", MODEL_TOKEN, value)
+        entry = re.escape(f'{{"id": "{MODEL_TOKEN}", "object": "model"}}')
+        value = re.sub(rf"({entry})(?:, {entry})+", r"\1", value)
+        if len(value) > LONG:
+            # Still exact, without storing the long request bodies themselves.
+            value = f"<{len(value)} chars sha256:{hashlib.sha256(value.encode('utf-8', 'surrogatepass')).hexdigest()}>"
+        return value
+    return value
+
+
+def body_text(body: bytes):
+    """A response body as the snapshot stores it: text when it is UTF-8, its
+    base64 otherwise, so the bytes are compared exactly either way."""
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"base64": base64.b64encode(body).decode()}
+
+
+def journal_snapshot(rows):
+    """Journal rows with the instruction file's bytes as text, so the prompt
+    inside them can be a token; anything else in base64 stays as recorded."""
+    out = []
+    for row in rows:
+        row = dict(row)
+        # A shim the harness starts without its own cwd runs in the
+        # harness's, wherever that was launched (the checkout by hand,
+        # rust/shim under cargo test): a host path no golden may hold.
+        # The stub already names the fixture's own root <root>.
+        if isinstance(row.get("cwd"), str) and not row["cwd"].startswith("<root>"):
+            row["cwd"] = "<harness cwd>"
+        if row.get("instructions"):
+            raw = base64.b64decode(row["instructions"])
+            try:
+                row["instructions"] = {"text": raw.decode("utf-8")}
+            except UnicodeDecodeError:
+                pass
+        out.append(row)
+    return out
+
+
+class Contract:
+    """Where the contract slices' observations go. Recording (``record``)
+    starts both shims and keeps an observation only where they agree;
+    checking (``check``, what CI runs) and ``candidate`` start the native shim
+    alone. Each observation is keyed by slice, launcher and provider."""
+
+    def __init__(self, mode):
+        self.mode = mode
+        self.prompt = PROMPT_FILE.read_text(encoding="utf-8")
+        self.models = listed_models()
+        self.observed: dict[str, object] = {}
+
+    def arms(self, binary):
+        return (("python", None), ("rust", binary)) if self.mode == "record" else (("rust", binary),)
+
+    @staticmethod
+    def launcher():
+        if os.name != "nt":
+            return "script"
+        return "exe" if STUB_EXE else "batch"
+
+    def settle(self, key, per_arm):
+        """Keep one observation per key: in recording, the two shims' agreed
+        one (a difference fails, as the live comparison always did)."""
+        snapshots = [tokens(observation, self.prompt, self.models) for observation in per_arm]
+        if self.mode == "record":
+            assert snapshots[0] == snapshots[1], (key, "the Python and native shims differ", snapshots)
+        if key in self.observed:
+            raise AssertionError(f"contract key {key} observed twice")
+        self.observed[key] = snapshots[-1]
+
+    def finish(self, binary, write=False):
+        """Check, record or re-record the golden; the number of cases."""
+        import dbstate
+        path = contract_golden()
+        committed = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+        named = host_paths(self.observed)
+        if named:
+            where = sorted(key for key, value in self.observed.items() if host_paths(value))
+            raise AssertionError("a contract snapshot names a host path (" + ", ".join(named) + ") in "
+                                 + ", ".join(where) + "; a golden must not hold one")
+        if self.mode == "record":
+            golden = {"normalizers": {
+                "ids": "generated completion and tool-call IDs (normalize)",
+                "prompt": f"the production prompt's text as {PROMPT_TOKEN}",
+                "models": f"each listed model ID as {MODEL_TOKEN}, /models entries collapsed",
+            }, "oracle_head": _head(), "cases": dict(sorted(self.observed.items()))}
+            candidate_record.write_json(path, golden, newline_at_end=True)
+            print(f"recorded {path.name}: {len(self.observed)} contract observations", flush=True)
+            return len(self.observed)
+        if committed is None:
+            raise AssertionError(f"{path.name} is missing: record it with run.py --suite contract "
+                                 "--record-goldens (both shims) or --record-candidate --write")
+        cases = committed["cases"]
+        if self.mode == "check":
+            differences = [f"{key}: only in the golden" for key in sorted(set(cases) - set(self.observed))]
+            differences += [f"{key}: not in the golden" for key in sorted(set(self.observed) - set(cases))]
+            for key in sorted(set(cases) & set(self.observed)):
+                differences += [f"{key}{d}" for d in snapshot_diff(cases[key], self.observed[key])]
+            assert not differences, ("the native shim departs from " + path.name + ": "
+                                     + "; ".join(differences[:20]))
+            return len(self.observed)
+        # --record-candidate: master's recorder vocabulary.
+        report = {"unchanged": [], "changed": [], "new": [], "removed": []}
+        for key, observation in sorted(self.observed.items()):
+            want = cases.get(key)
+            kind = candidate_record.classify(want is not None,
+                                             snapshot_diff(want, observation) if want is not None else [])
+            report[kind].append(key)
+            if kind != "unchanged":
+                for difference in (snapshot_diff(want, observation) if want is not None else [])[:20]:
+                    print(f"        {key}{difference}")
+            print(candidate_record.summary_line(key, kind, write, None), flush=True)
+        report["removed"] = sorted(set(cases) - set(self.observed))
+        for key in report["removed"]:
+            print(f"  removed {key} (recorded, but no longer observed)", flush=True)
+        changes = report["changed"] + report["new"] + report["removed"]
+        if not changes:
+            print(f"  {path.name}: nothing to change", flush=True)
+            return len(self.observed)
+        if not write:
+            raise SystemExit(f"  dry run: {path.name} would change ({len(report['changed'])} changed, "
+                             f"{len(report['new'])} new, {len(report['removed'])} removed); review the "
+                             "differences above, then add --write")
+        stamp = candidate_record.provenance(binary)
+        record = dict(committed.get(candidate_record.PROVENANCE_KEY) or {})
+        for key in report["removed"]:
+            cases.pop(key, None)
+            record.pop(key, None)
+        for key in report["changed"] + report["new"]:
+            cases[key] = self.observed[key]
+            record[key] = stamp
+        committed["cases"] = dict(sorted(cases.items()))
+        committed[candidate_record.PROVENANCE_KEY] = dict(sorted(record.items()))
+        candidate_record.write_json(path, committed, newline_at_end=True)
+        print(f"  wrote {path} ({len(changes)} change(s) from the native shim at "
+              f"{(stamp['commit'] or 'an unknown commit')[:12]}); on the other OS run: python "
+              f"rust/extractor_harness/run.py ... --suite contract --record-candidate", flush=True)
+        return len(self.observed)
+
+
+def snapshot_diff(want, got, path=""):
+    """Differences between a golden snapshot and an observation, at the path
+    where they differ: dbstate.diff alone compares a list as one value and
+    prints 300 characters of each side, so a change late in the responses
+    would show identical prefixes. The golden is the left side."""
+    import dbstate
+    if isinstance(want, dict) and isinstance(got, dict):
+        out = []
+        for key in sorted(set(want) | set(got)):
+            if key in want and key in got:
+                out += snapshot_diff(want[key], got[key], f"{path}/{key}")
+            else:
+                out.append(f"{path}/{key}: only in the {'golden' if key in want else 'observation'}")
+        return out
+    if isinstance(want, list) and isinstance(got, list) and len(want) == len(got):
+        return [d for index, (left, right) in enumerate(zip(want, got))
+                for d in snapshot_diff(left, right, f"{path}/{index}")]
+    return [d.replace(": python ", ": golden ").replace(" vs rust ", " vs observed ")
+            for d in dbstate.diff(want, got, path)]
+
+
+def host_paths(value) -> list[str]:
+    """The host paths a snapshot names, raw or JSON-escaped: the checkout, the
+    home and the temporary directory."""
+    text = json.dumps(value)
+    found = []
+    for path in {str(ROOT), str(Path.home()), tempfile.gettempdir()}:
+        if len(path) >= 4 and any(spelling in text for spelling in
+                                  {path, path.replace("\\", "/"), json.dumps(path)[1:-1]}):
+            found.append("<home>" if path == str(Path.home()) else path)
+    return sorted(found)
+
+
+def _head():
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+
+
+CONTRACT = Contract("record")
+
+
 def corpus(kind, prompt):
     yield "models", "GET", "/models", None, canned(kind, "OK")
     yield "models-v1", "GET", "/v1/models", None, canned(kind, "OK")
@@ -253,9 +475,9 @@ def differential(binary, root):
     override = root / "override.md"
     override.write_text("header\n---\nReplacement prompt\n", encoding="utf-8")
     for kind in ("claude", "codex"):
-        results, records = [], []
-        for arm, exe in (("python", None), ("rust", binary)):
-            arm_results = []
+        observations = []
+        for arm, exe in CONTRACT.arms(binary):
+            responses = []
             with server(exe, kind, root / f"{kind}-{arm}", canned(kind, "OK"), override=override) as (port, plan, journal, _, _):
                 for label, method, path, body, output in corpus(kind, prompt):
                     plan.write_text(json.dumps(output))
@@ -263,13 +485,10 @@ def differential(binary, root):
                         status, response = call(port, method, path, body)
                     except OSError as error:
                         raise AssertionError(f"{root.name}/{kind}/{arm}/{label}: {error}") from error
-                    arm_results.append((label, status, normalize(response)))
-                records.append(journal_rows(journal))
-            results.append(arm_results)
-        for expected, actual in zip(*results, strict=True):
-            assert actual == expected, (kind, expected, actual)
-            count += 1
-        assert records[0] == records[1], (kind, "CLI journal differs", records)
+                    responses.append([label, status, body_text(normalize(response))])
+                observations.append({"responses": responses, "journal": journal_snapshot(journal_rows(journal))})
+        CONTRACT.settle(f"differential/{CONTRACT.launcher()}/{kind}", observations)
+        count += len(observations[-1]["responses"])
     return count
 
 
@@ -291,15 +510,22 @@ def configuration(binary, root):
             assert result.returncode == 0, result.stderr
             assert (pyroot / "ops/.env").read_text() == (native / "ops/.env").read_text(), kind
             count += 1
-        answers, records = [], []
-        for arm, exe in (("python", None), ("rust", binary)):
+        observations = []
+        for arm, exe in CONTRACT.arms(binary):
             with server(exe, kind, root / f"managed-{kind}-{arm}", canned(kind, "OK"), managed=True) as (port, _, journal, _, _):
-                answers.append([call(port, "GET", "/models"), call(port, "POST", "/chat/completions", {"messages": [{"role": "user", "content": "hello"}]})])
-                records.append(journal_rows(journal))
-        assert [(s, normalize(b)) for s, b in answers[0]] == [(s, normalize(b)) for s, b in answers[1]], kind
-        assert records[0] == records[1], (kind, "managed invocation differs", records)
+                answers = [call(port, "GET", "/models"), call(port, "POST", "/chat/completions", {"messages": [{"role": "user", "content": "hello"}]})]
+                observations.append({"responses": [[status, body_text(normalize(body))] for status, body in answers],
+                                     "journal": journal_snapshot(journal_rows(journal))})
+        CONTRACT.settle(f"managed/{kind}", observations)
         count += 2
     return count
+
+
+TOOL_REPLIES = ('{"tool_call":{"name":"lookup","arguments":{"x":"é"}}}',
+                'Here is the call: {"tool_call":{"name":"lookup","arguments":"{bad"}}',
+                '[assistant called tool lookup with {"x":1}]',
+                '{"tool_call":{"name":"lookup","arguments":{}}', '{"tool_call": broken}', "plain reply")
+HEALTH_REASONS = ("Not logged in", "rate limit")
 
 
 def tools_differential(binary, root):
@@ -307,34 +533,30 @@ def tools_differential(binary, root):
                             {"role": "assistant", "tool_calls": [{"id": "prior", "function": {"name": "lookup", "arguments": "{}"}}]},
                             {"role": "tool", "tool_call_id": "prior", "content": "result"}],
                "tools": [{"type": "function", "function": {"name": "lookup", "description": "Find é", "parameters": {"type": "object", "properties": {}}}}]}
-    replies = ['{"tool_call":{"name":"lookup","arguments":{"x":"é"}}}',
-               'Here is the call: {"tool_call":{"name":"lookup","arguments":"{bad"}}',
-               '[assistant called tool lookup with {"x":1}]',
-               '{"tool_call":{"name":"lookup","arguments":{}}', '{"tool_call": broken}', "plain reply"]
-    arms, records = [], []
-    for arm, exe in (("python", None), ("rust", binary)):
+    replies = TOOL_REPLIES
+    observations = []
+    for arm, exe in CONTRACT.arms(binary):
         responses = []
         with server(exe, "claude", root / f"tools-{arm}", canned("claude", "OK"), emulate=True) as (port, plan, journal, _, _):
             for reply in replies:
                 plan.write_text(json.dumps(canned("claude", reply)))
                 status, body = call(port, "POST", "/v1/chat/completions", request)
-                responses.append((status, normalize(body)))
-            records.append(journal_rows(journal))
-        arms.append(responses)
-    assert arms[0] == arms[1], ("tool responses", arms)
-    assert records[0] == records[1], ("tool CLI journal", records)
+                responses.append([status, body_text(normalize(body))])
+            observations.append({"responses": responses, "journal": journal_snapshot(journal_rows(journal))})
+    CONTRACT.settle(f"tools/{CONTRACT.launcher()}", observations)
     return len(replies)
 
 
 def health_differential(binary, root):
     count = 0
     for kind in ("claude", "codex"):
-        for reason in ("Not logged in", "rate limit"):
-            arms = []
-            for arm, exe in (("python", None), ("rust", binary)):
+        for reason in HEALTH_REASONS:
+            observations = []
+            for arm, exe in CONTRACT.arms(binary):
                 with server(exe, kind, root / f"health-{kind}-{reason}-{arm}", {"rc": 1, "stderr": reason}) as (port, _, _, _, _):
-                    arms.append(call(port, "GET", "/health"))
-            assert arms[0] == arms[1], ("health", kind, arms)
+                    status, body = call(port, "GET", "/health")
+                    observations.append([status, body_text(body)])
+            CONTRACT.settle(f"health/{kind}/{reason}", observations)
             count += 1
     return count
 
@@ -531,9 +753,26 @@ def main():
     parser.add_argument("--stub-exe", required=True, type=Path)
     parser.add_argument("--suite", choices=("all", "contract", "lifecycle"), default="all")
     parser.add_argument("--output", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--record-goldens", action="store_true",
+                      help="contract: run the Python shim beside the native one and record "
+                           "goldens/contract.<platform>.json where they agree")
+    mode.add_argument("--record-candidate", action="store_true",
+                      help="contract: re-record the golden from the native shim alone; a dry run "
+                           "unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the golden")
     args = parser.parse_args()
+    global CONTRACT
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if (args.record_goldens or args.record_candidate) and args.suite != "contract":
+        parser.error("--record-goldens and --record-candidate record the contract suite: add --suite contract")
+    CONTRACT = Contract("record" if args.record_goldens else "candidate" if args.record_candidate else "check")
     if args.suite != "lifecycle":
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_prompt.py"))], check=True)
+        if not (args.record_goldens or args.record_candidate):
+            # A recording writes the golden these tests check.
+            subprocess.run([sys.executable, str(Path(__file__).with_name("test_contract_golden.py"))], check=True)
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_transport.py"))], check=True)
     if args.suite != "contract":
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_native_lifecycle.py"))], check=True)
@@ -559,6 +798,7 @@ def main():
                 STUB_EXE = None
                 count += differential(args.binary.resolve(), root / "batch")
                 count += tools_differential(args.binary.resolve(), root / "batch")
+            CONTRACT.finish(args.binary.resolve(), write=args.write)
     result = {"cases": count, "status": "passed", "real_cli_calls": 0}
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")
