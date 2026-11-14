@@ -1,3 +1,3 @@
 | Mode | Phase | Status | Native | Evidence |
 |---|---|---|---|---|
-| backup | 2 | deferred | partly | Explicit-DSN and file mode ported as CLI-BACKUP-DSN (harness row `backup`); the lite tier (CLI-BACKUP-LITE) defers by name until native embedded_pg; `test_backup_cli.py::test_backup_roundtrip_embedded` remains its oracle node |
+| backup | 2 | deferred | partly | Explicit-DSN and file mode ported as CLI-BACKUP-DSN (harness row `backup`); the Docker tier runs natively (`rust/shim/src/cli/restore_cli/docker_backup.rs`: restore's verified backup under the backup names, the daemon kept serving, exact-name rotation; tested in its unit tests and `rust/shim/tests/cli_backup_contract.rs`, the harness row keeps Docker unreachable); a lite directory is refused, naming the Docker install; the lite tier (CLI-BACKUP-LITE) defers by name until native embedded_pg; `test_backup_cli.py::test_backup_roundtrip_embedded` remains its oracle node |

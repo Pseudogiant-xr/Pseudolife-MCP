@@ -1,10 +1,14 @@
-//! `backup`: pg_dump of an explicit DSN plus the state archive, with rotation.
+//! `backup`: a Docker bank (restore's verified backup under the backup
+//! names, `restore_cli::docker_backup`), or pg_dump of an explicit DSN plus
+//! the state archive, with rotation.
 //!
-//! Oracle: `pseudolife_memory/backup_cli.py`. Cases requiring the lite
-//! tier's embedded instance defer before any effect.
+//! Oracle: `pseudolife_memory/backup_cli.py`. A lite bank (an embedded
+//! instance) is refused before any effect, naming the Docker install.
 mod archive;
 pub(super) mod args;
 mod dump;
+
+use super::restore_cli::docker_backup;
 
 use std::{
     ffi::OsString,
@@ -29,7 +33,7 @@ pub(super) fn migration_backup(data_dir: &Path, dsn: &str) -> Result<serde_json:
     };
     let home = home().ok_or_else(fail)?;
     let pg_dump = dump::find(&home).map_err(|_| fail())?.ok_or_else(fail)?;
-    archive::admit(data_dir, &bdir).ok_or_else(fail)?;
+    archive::admit(data_dir, &bdir).map_err(|_| fail())?;
     let stamp = timestamp().ok_or_else(fail)?;
     fs::create_dir_all(&bdir).map_err(|_| fail())?;
     let dump = dump::write(dsn, &pg_dump, &bdir, &stamp).map_err(|_| fail())?;
@@ -134,16 +138,42 @@ fn lite_default() -> Option<PathBuf> {
     Some(base.join("pseudolife-mcp"))
 }
 
-/// `_default_data_dir`, deferring wherever Python could pick the lite tier.
-fn default_data_dir() -> Option<PathBuf> {
-    if let Some(raw) = nonempty_env("PSEUDOLIFE_MCP_DATA_DIR")? {
-        return Some(args::pathlib(Path::new(&raw)));
+/// The data directory when `--data-dir` is not given:
+/// `PSEUDOLIFE_MCP_DATA_DIR`, else `./data`. A lite bank in the per-user
+/// lite directory is refused (the native client backs up a Docker bank, or
+/// a bank its `PSEUDOLIFE_MCP_DATABASE_URL` names); that directory alone
+/// (it also holds the installed client) is no bank.
+fn default_data_dir() -> Result<PathBuf, u8> {
+    if let Some(raw) = std::env::var_os("PSEUDOLIFE_MCP_DATA_DIR").filter(|raw| !raw.is_empty()) {
+        return Ok(args::pathlib(Path::new(&raw)));
     }
-    if !matches!(lite_default()?.try_exists(), Ok(false)) {
-        return None;
+    if let Some(lite) = lite_default()
+        && lite.join("embedded_pg").join("PG_VERSION").is_file()
+        && nonempty_env("PSEUDOLIFE_MCP_DATABASE_URL")
+            .flatten()
+            .is_none()
+    {
+        return Err(lite_refusal(&lite));
     }
-    let cwd = std::env::current_dir().ok()?;
-    Some(cwd.join("data"))
+    match std::env::current_dir() {
+        Ok(cwd) => Ok(cwd.join("data")),
+        Err(error) => Err(refused(&format!(
+            "cannot read the current directory ({error}); pass --data-dir <directory>, then retry. No backup was written"
+        ))),
+    }
+}
+
+/// `backup failed: <message>`, exit 2: a refusal before anything is written.
+fn refused(message: &str) -> u8 {
+    let _ = write_stream(false, &format!("backup failed: {message}\n"));
+    2
+}
+
+fn lite_refusal(dir: &Path) -> u8 {
+    refused(&format!(
+        "{} holds a lite bank (embedded PostgreSQL), and the native client backs up a Docker bank (or the bank PSEUDOLIFE_MCP_DATABASE_URL names) only. Install the Docker bank (ops/install.sh, or ops\\install.ps1 on Windows; see \"Move a lite bank to Docker\" in docs/guide/configuration.md), or back this bank up with pseudolife-mcp 0.23.x. No backup was written",
+        dir.display()
+    ))
 }
 
 fn write_stream(stdout: bool, text: &str) -> io::Result<()> {
@@ -157,28 +187,6 @@ fn write_stream(stdout: bool, text: &str) -> io::Result<()> {
     }
 }
 
-/// Raw unrelated names are harmless; a rotated raw name cannot be printed
-/// through this leaf's UTF-8 stdout contract.
-fn rotation_names_supported(bdir: &Path, include_dumps: bool) -> Option<()> {
-    let entries = match fs::read_dir(bdir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Some(()),
-        Err(_) => return None,
-    };
-    for entry in entries {
-        let name = entry.ok()?.file_name();
-        if name.to_str().is_none() {
-            let text = name.to_string_lossy();
-            if glob_matches(&text, STATE_PREFIX, ".tar.gz")
-                || include_dumps && glob_matches(&text, DUMP_PREFIX, ".sql.gz")
-            {
-                return None;
-            }
-        }
-    }
-    Some(())
-}
-
 fn missing_data_dir_message(data_dir: &str) -> String {
     format!(
         "data dir {data_dir} does not exist — nothing to back up. \
@@ -187,19 +195,21 @@ fn missing_data_dir_message(data_dir: &str) -> String {
     )
 }
 
-/// `None` defers to the dispatcher before any effect.
+/// Every argv is answered here: the dispatcher never defers `backup`.
 pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
-    if !args::columns_supported() {
-        return None;
-    }
-    let args = match args::parse(&arguments)? {
+    Some(main(arguments))
+}
+
+fn main(arguments: Vec<OsString>) -> u8 {
+    let parsed = args::parse(&arguments).expect("backup's parser answers every argv");
+    let args = match parsed {
         args::Parsed::Args(args) => args,
         args::Parsed::Help => {
-            return Some(if write_stream(true, &args::help(args::width())).is_ok() {
+            return if write_stream(true, &args::help(args::width())).is_ok() {
                 0
             } else {
                 120
-            });
+            };
         }
         args::Parsed::Error(message) => {
             let _ = write_stream(
@@ -209,90 +219,174 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
                     args::usage(args::width())
                 ),
             );
-            return Some(2);
+            return 2;
         }
     };
+    // The Docker tier: a Docker selector, or no --data-dir and a bank
+    // container that answers `docker inspect`.
+    if args.docker() || (args.data_dir.is_none() && docker_backup::configured()) {
+        return docker_backup::run(&docker_backup::Request {
+            container: args.container.clone(),
+            daemon_container: args.daemon_container.clone(),
+            db: args.db.clone(),
+            user: args.user.clone(),
+            db_port: args.db_port,
+            out: args.out.clone(),
+            keep_days: args.keep_days,
+        });
+    }
     let data_dir = match &args.data_dir {
         Some(value) => value.clone(),
-        None => default_data_dir()?,
+        None => match default_data_dir() {
+            Ok(dir) => dir,
+            Err(code) => return code,
+        },
     };
     match data_dir.try_exists() {
         Ok(true) => {}
         Ok(false) => {
-            let _ = write_stream(false, &missing_data_dir_message(data_dir.to_str()?));
-            return Some(1);
+            let _ = write_stream(
+                false,
+                &missing_data_dir_message(&data_dir.to_string_lossy()),
+            );
+            return 1;
         }
-        Err(_) => return None,
+        Err(error) => {
+            return refused(&format!(
+                "cannot read the data directory {} ({error}); restore access to it or pass another --data-dir, then retry. No backup was written",
+                data_dir.display()
+            ));
+        }
     }
-    let dsn = nonempty_env("PSEUDOLIFE_MCP_DATABASE_URL")?;
+    let Some(dsn) = nonempty_env("PSEUDOLIFE_MCP_DATABASE_URL") else {
+        return refused(
+            "PSEUDOLIFE_MCP_DATABASE_URL is not valid Unicode text; set it to the bank's PostgreSQL URL, then retry. No backup was written",
+        );
+    };
     if dsn.is_none()
         && !matches!(
             data_dir.join("embedded_pg").join("PG_VERSION").try_exists(),
             Ok(false)
         )
     {
-        return None;
+        return lite_refusal(&data_dir);
     }
     let bdir = match &args.out {
         Some(out) => out.clone(),
         None => args::join(&data_dir, "backups"),
     };
     match fs::metadata(&bdir) {
-        Ok(meta) if !meta.is_dir() => return None,
-        Err(error) if error.kind() != io::ErrorKind::NotFound => return None,
+        Ok(meta) if !meta.is_dir() => {
+            return refused(&format!(
+                "{} is not a directory; name a directory with --out <directory>, then retry. No backup was written",
+                bdir.display()
+            ));
+        }
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            return refused(&format!(
+                "cannot read the backup directory {} ({error}); restore access to it or choose another --out, then retry. No backup was written",
+                bdir.display()
+            ));
+        }
         _ => {}
     }
-    archive::admit(&data_dir, &bdir)?;
-    rotation_names_supported(&bdir, dsn.is_some())?;
+    match archive::admit(&data_dir, &bdir) {
+        Ok(()) => {}
+        Err(archive::Unadmitted::Inside) => {
+            return refused(&format!(
+                "the backup directory {} is inside the data directory {} (outside its own backups directory), which the archive includes; choose --out <a directory outside the data directory>, then retry. No backup was written",
+                bdir.display(),
+                data_dir.display()
+            ));
+        }
+        Err(archive::Unadmitted::Unresolved(path)) => {
+            return refused(&format!(
+                "cannot resolve {} the way the archive would (a symlink loop, a link that cannot be followed, or an entry that cannot be read); repair or remove it, then retry. No backup was written",
+                path.display()
+            ));
+        }
+        Err(archive::Unadmitted::Unsupported(path)) => {
+            return refused(&format!(
+                "{} in the data directory is a kind of entry this backup cannot archive the way restore reads it back (a link it cannot follow or a special file); remove it or move it outside the data directory, then retry. No backup was written",
+                path.display()
+            ));
+        }
+    }
     let pg_dump = match &dsn {
         Some(_) => {
-            let home = home()?;
-            dump::discovery_paths_supported(&home)?;
+            let Some(home) = home() else {
+                return refused(
+                    "cannot find your home directory to look for pg_dump; set HOME (USERPROFILE on Windows), then retry. No backup was written",
+                );
+            };
+            if dump::discovery_paths_supported(&home).is_none() {
+                return refused(
+                    "PATH or the home directory is not valid Unicode text, so pg_dump cannot be looked up; fix PATH, then retry. No backup was written",
+                );
+            }
             Some(dump::find(&home))
         }
         None => None,
     };
-    let ts = timestamp()?;
-    // Python's Windows rename refuses an existing target after writing the partial.
-    if cfg!(windows)
-        && [
+    let Some(ts) = timestamp() else {
+        return refused(
+            "cannot read the local time for the backup's name; check the system clock and TZ, then retry. No backup was written",
+        );
+    };
+    // Python's Windows rename refuses an existing target after writing the
+    // partial; elsewhere it replaces it, as this backup does.
+    if cfg!(windows) {
+        for name in [
             format!("{STATE_PREFIX}{ts}.tar.gz"),
             format!("{DUMP_PREFIX}{ts}.sql.gz"),
-        ]
-        .iter()
-        .any(|name| !matches!(bdir.join(name).try_exists(), Ok(false)))
-    {
-        return None;
+        ] {
+            let path = bdir.join(&name);
+            match path.try_exists() {
+                Ok(false) => {}
+                Ok(true) => {
+                    return refused(&format!(
+                        "a backup named for {ts} already exists in {} (two backups in one second); wait a second, then retry. No backup was written",
+                        bdir.display()
+                    ));
+                }
+                Err(error) => {
+                    return refused(&format!(
+                        "cannot check whether {} exists ({error}); restore access to the backup directory or choose another --out, then retry. No backup was written",
+                        path.display()
+                    ));
+                }
+            }
+        }
     }
 
     // Effects start here, in Python's order.
     if let Err(error) = fs::create_dir_all(&bdir) {
-        return Some(failed(&error.to_string()));
+        return failed(&error.to_string());
     }
     if let Some(Err(error)) = &pg_dump {
         let _ = write_stream(false, &error.diagnostic());
-        return Some(1);
+        return 1;
     }
     let dump = match (&dsn, pg_dump) {
         (Some(dsn), Some(Ok(Some(pg_dump)))) => match dump::write(dsn, &pg_dump, &bdir, &ts) {
             Ok(path) => Some(path),
-            Err(message) => return Some(failed(&message)),
+            Err(message) => return failed(&message),
         },
         (Some(_), _) => {
-            return Some(failed(
+            return failed(
                 "pg_dump not found — install PostgreSQL client tools or the \
                  pseudolife-mcp[lite] extra (whose embedded runtime bundles it).",
-            ));
+            );
         }
         (None, _) => None,
     };
     let state = match archive::write(&data_dir, &bdir, &ts) {
         Ok(path) => path,
-        Err(error) => return Some(failed(&error.to_string())),
+        Err(error) => return failed(&error.to_string()),
     };
     let pruned = match rotate(&bdir, args.keep_days, dump.is_some()) {
         Ok(pruned) => pruned,
-        Err(error) => return Some(failed(&error.to_string())),
+        Err(error) => return failed(&error.to_string()),
     };
     let mut text = match &dump {
         Some(path) => format!("bank dump:     {}\n", path.display()),
@@ -305,11 +399,11 @@ pub(super) fn run(arguments: Vec<OsString>) -> Option<u8> {
         text.push_str(&format!("rotated out:   {}\n", path.display()));
     }
     // Python flushes stdout at interpreter shutdown; a closed stdout makes that exit 120.
-    Some(if write_stream(true, &text).is_ok() {
+    if write_stream(true, &text).is_ok() {
         0
     } else {
         120
-    })
+    }
 }
 
 fn failed(message: &str) -> u8 {
