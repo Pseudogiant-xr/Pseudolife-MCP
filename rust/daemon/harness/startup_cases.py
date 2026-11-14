@@ -698,6 +698,10 @@ def main(argv=None):
     golden_mode = parser.add_mutually_exclusive_group()
     golden_mode.add_argument("--record-goldens", action="store_true")
     golden_mode.add_argument("--check-goldens", action="store_true")
+    golden_mode.add_argument("--record-candidate", action="store_true",
+                             help="re-record the golden from the Rust candidate (candidate_record.py); a dry "
+                                  "run unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--seed-cell", choices=CASES, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -712,10 +716,17 @@ def main(argv=None):
         parser.error("--record-goldens requires the complete startup matrix")
     if args.only and args.part:
         parser.error("--only and --part select cases differently; give one")
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if args.record_candidate and (args.part or args.mutants):
+        parser.error("--record-candidate takes the whole matrix or --only; check the result with "
+                     "--check-goldens --mutants")
     binary = args.rust_test_bin.resolve()
     if not binary.is_file():
         parser.error("--rust-test-bin must name the built daemon Cargo test executable")
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    if args.record_candidate:
+        return record_candidate(args, binary)
     payload = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
                "normalizers": NORMALIZERS, "cells": []}
     number = time.time_ns()
@@ -777,6 +788,42 @@ def main(argv=None):
             "database": {result["case"]: [s["database"]["python"] for s in result["stages"]]
                          for result in payload["cells"]}}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return int(bad)
+
+
+def record_candidate(args, binary):
+    """--record-candidate: each selected case starts on the candidate alone
+    and is classed against startup-hydration.json (candidate_record.py)."""
+    import candidate_record
+    why = candidate_record.refuse_mutant_environment()
+    if why:
+        print(f"startup record-candidate refused: {why}", flush=True)
+        return 1
+    golden_path = HERE / "goldens" / "startup-hydration.json"
+    recording = candidate_record.Recording(golden_path, ("cases", "database"), binary, whole=not args.only,
+                                           defined=list(CASES))
+    recording.write = args.write
+    payload = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
+               "normalizers": NORMALIZERS, "cells": []}
+    number = time.time_ns()
+    for index, case in enumerate(args.only or CASES):
+        result = {"case": case}
+        payload["cells"].append(result)
+        try:
+            cell(binary, number + index * 3, case, result, oracle=False)
+        except Exception as error:
+            result["error"] = str(error)
+        stages = result.get("stages", [])
+        failures = ([f"error: {result['error']}"] if result.get("error") else []) + [
+            f"cleanup: {e}" for e in result.get("cleanup_errors", [])] + [
+            d for stage in stages for d in candidate_record.stage_failures(stage)]
+        observed = ({"cases": [normalized_result(stage["snapshots"]["rust"]) for stage in stages],
+                     "database": [stage["database"]["rust"] for stage in stages]}
+                    if len(stages) == 2 else None)
+        recording.observe(case, observed, failures, candidate_record.round_trip)
+    code = recording.finish(args.write, "python rust/daemon/harness/startup_ci.py --out <scratch>/startup.json")
+    payload["record_candidate"] = recording.report
+    args.out.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    return code
 
 
 if __name__ == "__main__":
