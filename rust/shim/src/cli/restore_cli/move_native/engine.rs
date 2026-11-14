@@ -448,8 +448,9 @@ impl<H: Hosts> Run<'_, H> {
         match self.ask(&request, None)? {
             Ok(answer) if answer.ok => {}
             Ok(answer) => {
-                if !answer.restore_dropped {
-                    // Refused before its destructive step: nothing changed.
+                // Refused before its destructive step: nothing changed. A
+                // resumed target still holds its earlier restored bank.
+                if !answer.restore_dropped && !plan.resume {
                     self.record.flags.target_restored = false;
                     self.save()?;
                 }
@@ -1014,7 +1015,10 @@ impl<H: Hosts> Back<'_, H> {
     /// target may have served.
     fn read(&mut self) -> Result<State, String> {
         let flags = &self.record.flags;
-        let counted = flags.gate_lifting || flags.target_started || flags.target_restored;
+        let counted = flags.gate_lifting
+            || flags.target_started
+            || flags.target_restored
+            || flags.gate_written;
         let tables = if counted {
             self.record.dump_counts.keys().cloned().collect()
         } else {
@@ -1071,7 +1075,14 @@ impl<H: Hosts> Back<'_, H> {
         let mut can_start = true;
         // The target may hold, or may soon hold, the moved bank: it must be
         // proved stopped and gated before the source comes back (I2).
-        let needs_proof = flags.target_restored || flags.gate_lifting || flags.target_started;
+        let needs_proof = flags.target_restored
+            || flags.gate_lifting
+            || flags.target_started
+            || flags.gate_written;
+        // Whether the target holds the moved bank: the record's word, or a
+        // reading that finds it there although the record says it never got
+        // that far.
+        let mut restored = flags.target_restored;
         // First, no forward step of this move may run on the target any
         // more: one still running there (its ssh gone) finishes under the
         // target's update lock before the abort is written.
@@ -1093,7 +1104,7 @@ impl<H: Hosts> Back<'_, H> {
             for _ in 0..3 {
                 match self.read() {
                     Ok(state) if state.running == Some(true) => {
-                        if flags.target_restored && !served {
+                        if restored && !served {
                             found.push(
                                 "the gated bank was found running, so it may have served writes"
                                     .to_owned(),
@@ -1104,7 +1115,7 @@ impl<H: Hosts> Back<'_, H> {
                     }
                     Ok(state) if state.running == Some(false) => {
                         if state.gated != Some(true) {
-                            if flags.target_restored && !served {
+                            if restored && !served {
                                 found.push(
                                     "the bank was found without /data/move.json, so it may have been started"
                                         .to_owned(),
@@ -1115,7 +1126,13 @@ impl<H: Hosts> Back<'_, H> {
                             continue;
                         }
                         proved = true;
-                        if flags.target_restored && !served {
+                        if !restored
+                            && state.bank.as_deref() == Some(self.record.source_bank.as_str())
+                        {
+                            restored = true;
+                            self.record.flags.target_restored = true;
+                        }
+                        if restored && !served {
                             // This run's own restore, if it got that far, or
                             // the reading the last rollback kept.
                             let reference = if flags.gate_written {
@@ -1126,6 +1143,7 @@ impl<H: Hosts> Back<'_, H> {
                                         user_counts: self.record.restored_counts.clone(),
                                         mutations,
                                     })
+                                    .or_else(|| self.record.gated_baseline.clone())
                             } else {
                                 self.record.gated_baseline.clone()
                             };
@@ -1157,7 +1175,7 @@ impl<H: Hosts> Back<'_, H> {
                         }
                         // The gated bank as this rollback leaves it: what a
                         // resume must still find before it replaces it.
-                        if flags.target_restored && parked.is_none() {
+                        if restored && parked.is_none() {
                             self.record.gated_baseline =
                                 state.mutations.clone().map(|mutations| Baseline {
                                     user_counts: state.user_counts.clone(),
@@ -1266,15 +1284,18 @@ impl<H: Hosts> Back<'_, H> {
         }
         // A gate on the target's own bank (the restore never ran, or was
         // refused before its destructive step) would keep it from starting.
-        if flags.gate_written && !flags.target_restored && !flags.gate_lifting {
+        // Never the moved bank's gate, nor the claim while it is there.
+        let reads_moved = self.state.as_ref().and_then(|s| s.bank.as_deref())
+            == Some(self.record.source_bank.as_str());
+        if flags.gate_written && !restored && !flags.gate_lifting && !reads_moved {
             let result = self.op(Op::Ungate).map(|_| ());
             complete &= self.attempt("remove the gate from the target's own bank", result);
         }
-        if flags.target_quiesced && !flags.target_restored {
+        if flags.target_quiesced && !restored && !reads_moved {
             let result = self.op(Op::Start).map(|_| ());
             complete &= self.attempt("start the target's own daemon again", result);
         }
-        if flags.claimed && !flags.target_restored {
+        if flags.claimed && !restored && !reads_moved {
             let result = self.op(Op::Release).map(|_| ());
             complete &= self.attempt("release the target's claim", result);
         }
@@ -1284,7 +1305,7 @@ impl<H: Hosts> Back<'_, H> {
         if complete && parked.is_none() {
             self.record.phase = Phase::RolledBack;
             self.save();
-            let note = if flags.target_restored {
+            let note = if restored {
                 format!(
                     "; the target keeps the restored bank stopped behind /data/move.json, and its claim ({} on {}). Rerun the move with --resume to finish it, or give {} back its own bank with pseudolife-mcp move --release-target {}",
                     claim_path(),
@@ -1374,7 +1395,7 @@ impl<H: Hosts> Back<'_, H> {
         if state.claim.as_deref() != Some(id.as_str())
             && state.bank.as_deref() != Some(bank.as_str())
         {
-            if self.record.kept.is_empty() {
+            if self.record.kept.is_empty() && !self.record.given_back {
                 self.record.phase = Phase::RolledBack;
                 self.save();
                 return Outcome {
@@ -1393,6 +1414,17 @@ impl<H: Hosts> Back<'_, H> {
                     kept_line(&self.record)
                 ),
             };
+        }
+        // The claim is gone (removed by hand) while the target still holds
+        // this move's bank: taken again, which only an unclaimed target allows.
+        if state.claim.is_none() && state.bank.as_deref() == Some(bank.as_str()) {
+            let claim = Op::Claim {
+                source_bank: bank.clone(),
+                resume: false,
+            };
+            if let Err(why) = self.op(claim) {
+                return unfinished(self, "claim the target for this release again", why);
+            }
         }
         if state.bank.as_deref() == Some(bank.as_str()) {
             if state.running != Some(false)
@@ -1455,6 +1487,7 @@ impl<H: Hosts> Back<'_, H> {
             }
         };
         self.record.kept = kept;
+        self.record.given_back = true;
         self.save();
         self.hosts
             .say("release: lift the gate from the target's own bank");

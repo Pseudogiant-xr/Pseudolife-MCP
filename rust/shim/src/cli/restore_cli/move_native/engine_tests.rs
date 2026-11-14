@@ -2100,3 +2100,286 @@ fn the_restore_and_the_give_back_wait_for_a_busy_target_lock() {
     let outcome = engine::release_target(&mut model, record);
     assert_eq!(outcome.code, 0, "{outcome:?}\n{:#?}", model.log);
 }
+
+/// A move rolled back after its restore, and the plan that resumes it.
+fn resumable_move() -> (Model, Plan) {
+    let mut first = Model::new();
+    first.fault = Some((call_of("target health"), Fault::Interrupt));
+    assert_eq!(run(&mut first).code, 1);
+    let mut plan = plan();
+    plan.resume = true;
+    plan.target_running = false;
+    plan.resume_baseline = first.record.as_ref().unwrap().gated_baseline.clone();
+    (first, plan)
+}
+
+/// The number of the first call named `what` in a resume of `first` with
+/// no fault.
+fn resume_call_of(first: &Model, plan: &Plan, what: &str) -> usize {
+    let mut probe = later(first);
+    engine::execute(&mut probe, plan, ID);
+    probe
+        .log
+        .iter()
+        .filter_map(|l| {
+            let (n, name) = l.split_once(": ")?;
+            Some((n.parse::<usize>().ok()?, name))
+        })
+        .find(|(_, name)| *name == what)
+        .map(|(n, _)| n)
+        .unwrap_or_else(|| panic!("no {what} in a resume"))
+}
+
+#[test]
+fn a_resume_whose_restore_is_refused_before_its_drop_keeps_the_clone_gated_and_claimed() {
+    let (first, plan) = resumable_move();
+    for (label, setup) in [
+        (
+            "refused",
+            (|m: &mut Model| m.always = vec![("target restore", Fault::Refused)]) as fn(&mut Model),
+        ),
+        ("the lock held past the wait", |m: &mut Model| {
+            m.busy = vec![("target restore", usize::MAX)]
+        }),
+    ] {
+        let mut model = later(&first);
+        setup(&mut model);
+        let outcome = engine::execute(&mut model, &plan, ID);
+        assert_eq!(outcome.code, 1, "{label}: {outcome:?}\n{:#?}", model.log);
+        let record = model.record.clone().unwrap();
+        assert_eq!(record.phase, Phase::RolledBack, "{label}");
+        assert!(record.flags.target_restored, "{label}");
+        let h = &model.hosts;
+        assert!(
+            matches!(h.bank, Bank::Clone { .. }) && h.gated,
+            "{label}: {h:?}"
+        );
+        assert_eq!(
+            h.claim.as_deref(),
+            Some(ID),
+            "{label}: the clone's claim was released"
+        );
+        assert!(h.source_running && !h.fenced, "{label}");
+        assert!(
+            model.violations.is_empty(),
+            "{label}: {:?}",
+            model.violations
+        );
+        // And it can still be resumed or released.
+        assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_some());
+        let mut release = later(&model);
+        assert_eq!(
+            engine::release_target(&mut release, record).code,
+            0,
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn every_way_a_resume_can_fail_leaves_a_command_that_works() {
+    let (first, plan) = resumable_move();
+    let mut probe = later(&first);
+    engine::execute(&mut probe, &plan, ID);
+    let calls = probe.calls;
+    for at in 1..=calls {
+        for fault in FAULTS {
+            let mut model = later(&first);
+            model.fault = Some((at, fault));
+            engine::execute(&mut model, &plan, ID);
+            let label = format!("{fault:?} at call {at} of a resume");
+            assert!(
+                model.violations.is_empty(),
+                "{label}: {:?}",
+                model.violations
+            );
+            let Some(mut record) = model.record.clone() else {
+                continue;
+            };
+            if record.committed {
+                continue;
+            }
+            let mut hosts = later(&model);
+            // A rollback still to run (the process died, or an undo failed)
+            // finishes with no fault.
+            if super::command::unfinished(&record) {
+                let outcome = engine::roll_back(&mut hosts, record.clone());
+                record = hosts.record.clone().unwrap_or(record);
+                if record.committed {
+                    continue;
+                }
+                assert_eq!(
+                    record.phase,
+                    Phase::RolledBack,
+                    "{label}, then --rollback: {outcome:?}\n{:#?}",
+                    hosts.log
+                );
+                hosts = later(&hosts);
+            }
+            // The target is then freed.
+            if record.flags.target_restored {
+                let outcome = engine::release_target(&mut hosts, record.clone());
+                assert_eq!(
+                    outcome.code, 0,
+                    "{label}, then --release-target: {outcome:?}\n{:#?}",
+                    hosts.log
+                );
+                assert!(
+                    hosts.hosts.claim.is_none() && !hosts.hosts.gated,
+                    "{label}: {:?}",
+                    hosts.hosts
+                );
+            }
+            assert!(
+                hosts.violations.is_empty(),
+                "{label}: {:?}",
+                hosts.violations
+            );
+        }
+    }
+}
+
+#[test]
+fn a_quiet_write_while_a_resumes_restore_was_lost_is_found_against_the_kept_reading() {
+    let (first, plan) = resumable_move();
+    let baseline = plan.resume_baseline.clone();
+    let mut model = later(&first);
+    let restore = resume_call_of(&first, &plan, "target restore");
+    model.hand_write_at = Some(restore);
+    model.hand_write_quiet = true;
+    model.always = vec![("target restore", Fault::LostBefore)];
+    let outcome = engine::execute(&mut model, &plan, ID);
+    assert_eq!(outcome.code, 6, "{outcome:?}\n{:#?}", model.log);
+    let record = model.record.clone().unwrap();
+    assert!(record.parked_writes.is_some(), "{record:?}");
+    assert_eq!(record.gated_baseline, baseline);
+    assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_none());
+}
+
+#[test]
+fn a_release_that_needed_no_restore_finishes_on_a_rerun_after_its_claim_was_released() {
+    // The restore's answer was lost before it ran: the target keeps its
+    // own bank, gated and claimed.
+    let mut first = Model::new();
+    first.always = vec![("target restore", Fault::LostBefore)];
+    assert_eq!(run(&mut first).code, 1);
+    let record = first.record.clone().unwrap();
+    let mut probe = later(&first);
+    engine::release_target(&mut probe, record.clone());
+    let released = probe
+        .log
+        .iter()
+        .filter_map(|l| {
+            l.split_once(": ")
+                .and_then(|(n, name)| Some((n.parse::<usize>().ok()?, name)))
+        })
+        .find(|(_, name)| *name == "target release")
+        .map(|(n, _)| n)
+        .unwrap();
+    // Killed right after the claim was released.
+    let mut model = later(&first);
+    model.fault = Some((released + 1, Fault::Killed));
+    engine::release_target(&mut model, record);
+    assert!(model.hosts.claim.is_none());
+    let saved = model.record.clone().unwrap();
+    assert_eq!(saved.phase, Phase::Releasing);
+    let mut rerun = later(&model);
+    let outcome = engine::release_target(&mut rerun, saved);
+    assert_eq!(outcome.code, 0, "{outcome:?}");
+    assert_eq!(rerun.record.unwrap().phase, Phase::Released);
+}
+
+#[test]
+fn a_release_takes_back_a_claim_removed_by_hand() {
+    let parked = parked_move();
+    let record = parked.record.clone().unwrap();
+    let mut model = later(&parked);
+    model.hosts.claim = None;
+    let outcome = engine::release_target(&mut model, record);
+    assert_eq!(outcome.code, 0, "{outcome:?}\n{:#?}", model.log);
+    let h = &model.hosts;
+    assert_eq!(h.bank, Bank::Empty);
+    assert!(h.claim.is_none() && !h.gated, "{h:?}");
+    // Never a claim another move holds.
+    let mut model = later(&parked);
+    model.hosts.claim = Some("20261114-100000-00000002".into());
+    let outcome = engine::release_target(&mut model, parked.record.clone().unwrap());
+    assert_ne!(outcome.code, 0, "{outcome:?}");
+    assert!(matches!(model.hosts.bank, Bank::Clone { .. }));
+    assert_eq!(
+        model.hosts.claim.as_deref(),
+        Some("20261114-100000-00000002")
+    );
+}
+
+#[test]
+fn no_second_move_starts_while_an_earlier_moves_target_holds_this_hosts_bank() {
+    let (first, _) = resumable_move();
+    let record = first.record.clone().unwrap();
+    let records = std::slice::from_ref(&record);
+    // Another target, or this one without --resume: refused, naming both
+    // ways out.
+    for (to, resume) in [
+        ("dev@other", false),
+        ("dev@other", true),
+        ("dev@target", false),
+    ] {
+        let why = super::command::held_refusal(records, to, resume)
+            .unwrap_or_else(|| panic!("{to} {resume}: not refused"));
+        assert!(
+            why.contains(&format!("move --release-target {ID}")),
+            "{why}"
+        );
+        assert!(why.contains("--resume"), "{why}");
+    }
+    // Resuming that move is the one way forward it allows.
+    assert_eq!(
+        super::command::held_refusal(records, "dev@target", true),
+        None
+    );
+    // Released, it no longer holds anything.
+    let mut released = record.clone();
+    released.phase = Phase::Released;
+    assert_eq!(
+        super::command::held_refusal(std::slice::from_ref(&released), "dev@other", false),
+        None
+    );
+}
+
+#[test]
+fn a_resume_killed_right_after_its_restore_was_refused_still_records_the_clone() {
+    let (first, plan) = resumable_move();
+    let restore = resume_call_of(&first, &plan, "target restore");
+    let mut model = later(&first);
+    model.always = vec![("target restore", Fault::Refused)];
+    // Killed after the record the refusal might write.
+    model.fault = Some((restore + 2, Fault::Killed));
+    engine::execute(&mut model, &plan, ID);
+    let record = model.record.clone().unwrap();
+    assert!(record.flags.target_restored, "{record:?}\n{:#?}", model.log);
+}
+
+#[test]
+fn a_rollback_that_finds_the_moved_bank_keeps_it_whatever_the_record_said() {
+    // A record that says the target was never restored, over a target that
+    // holds the moved bank behind its gate.
+    let (first, _) = resumable_move();
+    let mut record = first.record.clone().unwrap();
+    // Gated, and nothing more: the record never got as far as starting it.
+    record.flags.target_restored = false;
+    record.flags.gate_lifting = false;
+    record.flags.target_started = false;
+    record.phase = Phase::Moving;
+    let mut model = later(&first);
+    let outcome = engine::roll_back(&mut model, record);
+    assert_eq!(outcome.code, 1, "{outcome:?}\n{:#?}", model.log);
+    let after = model.record.clone().unwrap();
+    assert!(after.flags.target_restored, "{after:?}");
+    let h = &model.hosts;
+    assert!(
+        matches!(h.bank, Bank::Clone { .. }) && h.gated && h.claim.as_deref() == Some(ID),
+        "{h:?}"
+    );
+    let mut release = later(&model);
+    assert_eq!(engine::release_target(&mut release, after).code, 0);
+}

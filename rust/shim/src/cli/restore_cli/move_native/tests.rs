@@ -1651,3 +1651,20 @@ fn only_the_first_restore_records_the_targets_own_bank() {
     assert!(site.act(protocol::Op::Restore).ok);
     assert!(!folder.join("own-bank.json").exists());
 }
+
+#[test]
+fn a_named_own_backup_that_is_gone_is_refused_as_missing() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    let own = site.folder().join("own-bank.json");
+    let named: Value = serde_json::from_slice(&std::fs::read(&own).unwrap()).unwrap();
+    std::fs::remove_file(named["dump"].as_str().unwrap()).unwrap();
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(!answer.ok && !answer.restore_dropped, "{answer:?}");
+    assert!(
+        answer.error.contains("own database") && answer.error.contains("is missing"),
+        "{}",
+        answer.error
+    );
+    assert!(site.restores.is_empty());
+}

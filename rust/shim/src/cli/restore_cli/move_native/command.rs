@@ -120,6 +120,24 @@ pub(super) fn unfinished_refusal(record: &Record) -> String {
     )
 }
 
+/// The refusal while an earlier move's target still holds a copy of this
+/// host's bank (rolled back after its restore ran there): only resuming that
+/// move, or releasing its target, comes first, so no target is left holding
+/// a copy no command can clear.
+pub(super) fn held_refusal(records: &[Record], to: &str, resume: bool) -> Option<String> {
+    let held = records
+        .iter()
+        .find(|r| !r.committed && r.phase == Phase::RolledBack && r.flags.target_restored)?;
+    if resume && held.target == to {
+        return None;
+    }
+    Some(format!(
+        "move {id} left {target} holding a copy of this host's bank behind its gate (it was rolled back after its restore ran there). First finish it with pseudolife-mcp move --to {target} --resume, or give {target} back its own bank with pseudolife-mcp move --release-target {id}",
+        id = held.move_id,
+        target = held.target
+    ))
+}
+
 /// The move `--resume` takes up: the newest rolled-back move to the same
 /// target whose restore ran there (the target keeps its claim and that bank).
 pub(super) fn resumable<'a>(records: &'a [Record], to: &str) -> Option<&'a Record> {

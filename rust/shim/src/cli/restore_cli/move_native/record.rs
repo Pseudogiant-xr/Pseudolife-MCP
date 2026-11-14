@@ -157,6 +157,11 @@ pub(super) struct Record {
     /// bank as it stood there, with any writes it took.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub kept: Vec<String>,
+    /// `--release-target`'s give-back finished on the target (with or
+    /// without a restore: a target this move never restored over keeps no
+    /// copy).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub given_back: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

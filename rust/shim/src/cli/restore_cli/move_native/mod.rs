@@ -644,6 +644,9 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
         if let Some(open) = records.iter().find(|r| command::unfinished(r)) {
             return Some(finish(&request, Err(command::unfinished_refusal(open))));
         }
+        if let Some(why) = command::held_refusal(&records, &request.to, request.resume) {
+            return Some(finish(&request, Err(why)));
+        }
         if request.resume {
             match command::resumable(&records, &request.to) {
                 Some(earlier) => {

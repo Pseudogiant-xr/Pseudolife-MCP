@@ -657,3 +657,29 @@ fn a_release_that_did_not_finish_and_a_commit_killed_before_its_follow_ups_are_n
     );
     assert_quiet(&socket);
 }
+
+#[test]
+fn no_other_move_starts_while_an_earlier_moves_target_holds_this_hosts_bank() {
+    let home = Home::new("held");
+    let (socket, url) = listener();
+    plant(&home.0, &rolled_back_to_box(""));
+    let want = format!(
+        "move: move {MOVE_ID} left root@box holding a copy of this host's bank behind its gate (it was rolled back after its restore ran there). First finish it with pseudolife-mcp move --to root@box --resume, or give root@box back its own bank with pseudolife-mcp move --release-target {MOVE_ID}. Nothing was changed
+"
+    );
+    // Another target, and this one without --resume, meet it before
+    // anything else is asked.
+    let other: Vec<&str> = DRY
+        .iter()
+        .map(|w| if *w == "root@box" { "u@elsewhere" } else { w })
+        .collect();
+    assert_answer(&run(&home.0, &url, "80", &other), 4, "", &want);
+    assert_answer(&run(&home.0, &url, "80", DRY), 4, "", &want);
+    // Resuming it goes on (to the ssh lookup, which PATH lacks here).
+    let output = run(&home.0, &url, "80", &[DRY, &["--resume"]].concat());
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("holding a copy"),
+        "{output:?}"
+    );
+    assert_quiet(&socket);
+}

@@ -36,6 +36,8 @@
   is kept in that restore's own safety backup, which the output and `--json`
   name. It refuses while this host's daemon is not serving, and each of its
   steps is safe to repeat.
+  While such a target holds a copy of this host's bank, no other move starts
+  from this host; the refusal names `--resume` and `--release-target`.
 - The target's half runs in its native client (move protocol 2): each
   operation is safe to repeat and is journalled on the target. Each change is
   refused unless the target's claim names the move, so a second move into the
