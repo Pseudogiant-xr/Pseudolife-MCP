@@ -63,15 +63,17 @@ install refuses it.
 
 ## Native client
 
-The installers install the Python client, which moves on its update to
-a later release. A release-mode
-`pseudolife-mcp update` started from a 0.23.x Python client moves the
-machine to the native client (one program, no Python) when the release's
-archive for its platform downloads, matches `SHA256SUMS` and runs;
-otherwise it keeps the Python client and prints one line saying why.
-Start the update with `PSEUDOLIFE_SHIM_ENGINE=python` set to keep the
-Python client. A pip or lite install is upgraded in place and is not
-moved. The native client refuses a lite-tier bank, `serve` and
+The installers install the Python client, and `pseudolife-mcp update`
+keeps it: in 0.24.0 the native client (one program, no Python) is opt-in,
+because it does not run everything the Python client does yet. An update
+from 0.23.x, where a native client is built for the platform, says so in
+one line with the command that moves the machine. To move, set
+`PSEUDOLIFE_SHIM_ENGINE=native` for the update (from a machine already on
+this release's Python client: `PSEUDOLIFE_SHIM_ENGINE=native
+pseudolife-mcp update --clients-only`); it moves when the release's archive
+for its platform downloads, matches `SHA256SUMS` and runs, and otherwise
+keeps the Python client and says why. A pip or lite install is upgraded in
+place and is not moved. The native client refuses a lite-tier bank, `serve` and
 `embedded`, each naming the way forward, and some commands are not in it
 yet; see [The native client](configuration.md#the-native-client).
 
