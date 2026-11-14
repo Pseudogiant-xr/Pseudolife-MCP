@@ -94,6 +94,13 @@ fn absolute(path: &Path) -> Result<PathBuf, SetupError> {
     std::path::absolute(path).map_err(|_| SetupError("The Codex configuration path is invalid."))
 }
 
+/// `path` resolved through links, its missing tail kept, in Windows'
+/// ordinary spelling where that names the same file: how Codex (and the
+/// frozen Python setup's `Path.resolve()`) spell the Codex home.
+pub fn resolved_path(path: &Path) -> Result<PathBuf, SetupError> {
+    config_path(path)
+}
+
 fn config_path(path: &Path) -> Result<PathBuf, SetupError> {
     let mut base = absolute(path)?;
     let mut suffix = Vec::new();

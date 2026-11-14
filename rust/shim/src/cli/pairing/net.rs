@@ -97,7 +97,8 @@ pub(super) async fn pair_health(url: &str) -> Result<Option<pyjson::Dict>, TooDe
 }
 
 /// `expose_cli.probe_health(url, 3.0)`: a JSON object from any non-redirect
-/// answer, else `None`.
+/// answer, else `None`; a body with more than `EXPOSE_DEPTH` brackets open
+/// at once is `None` (`expose_cli._json` refuses it before parsing).
 pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, TooDeep> {
     let Some(client) = client(url, Duration::from_secs(3), false) else {
         return Ok(None);
@@ -111,6 +112,11 @@ pub(super) async fn invite_health(url: &str) -> Result<Option<pyjson::Dict>, Too
     let Ok(body) = read(&mut response, None).await else {
         return Ok(None);
     };
+    if std::str::from_utf8(&body)
+        .is_ok_and(|text| pyjson::brackets_past(text, pyjson::EXPOSE_DEPTH))
+    {
+        return Ok(None);
+    }
     dict(&body, pyjson::INVITE_DEPTH)
 }
 

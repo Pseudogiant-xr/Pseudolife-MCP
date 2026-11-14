@@ -2,9 +2,9 @@
 //! directory and the state mounts, as CPython 3.11 performs them:
 //! `Path.resolve()` (non-strict `os.path.realpath`, then a `stat` that turns a
 //! symlink loop into `RuntimeError`), `exists()`, `parents` and
-//! `is_relative_to`. `None` means this leaf cannot be sure of Python's
-//! answer (an `OSError` or `RuntimeError` would escape, or a shape it does not
-//! read), so the caller defers; every use is before the first write.
+//! `is_relative_to`. `None` means the path cannot be resolved or tested (an
+//! I/O error, a symlink loop, a path that is not Unicode text), and the
+//! caller refuses before the first write.
 use std::path::{Path, PathBuf};
 
 /// `Path(text).resolve()` as a string; `text` is already pathlib's spelling.

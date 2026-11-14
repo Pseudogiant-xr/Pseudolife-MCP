@@ -1,0 +1,4 @@
+### Fixed (2026-11-14 — a pull request labelled `freeze-exception` after it was opened can join a batch)
+
+- `ops/integrate.py build` and `open` judged a member's CI by every run on its head, so the `Python freeze` run made at the push, before the label, kept the pull request out after the label's own run had passed. The batch tool now counts a failed run unless a later run of the same check finished passing or failing after it, so the labelled event's passing run replaces the stale failure; a newer failure still keeps a head out, and a run still going, cancelled or skipped replaces no failure.
+- The `Python freeze` check reads the pull request's labels when it runs instead of from its event, so a rerun of a run made before the label was added passes, and one made before it was removed fails. If the labels cannot be read it judges without them, which refuses only a change that needs the exception; rerun it once the API answers.

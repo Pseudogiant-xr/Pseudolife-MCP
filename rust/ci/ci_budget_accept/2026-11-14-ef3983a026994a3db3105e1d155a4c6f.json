@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "bb217dd816ccb0b8",
+  "fingerprint": "953b718efb3dafdf",
+  "reason": "Raises timeout-minutes from 50 to 65 to fit ops/ci_tests.sh's new 50-minute pytest bound (issue #1408); the steps run the same tests, and the failure-line plugin adds one line per failure and one file append per test phase, so the measured cost holds."
+}
