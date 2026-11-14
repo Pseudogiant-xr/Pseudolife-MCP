@@ -128,7 +128,7 @@ def test_inventory_rejects_source_filter_dropping_event(event):
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
     source = workflow['jobs']['source-mutants']
-    dropped = (f"github.event_name == '{event}' || " if event == 'schedule'
+    dropped = ("(github.event_name == 'schedule' && github.event.schedule == '23 3 * * 0') || " if event == 'schedule'
                else " || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
     assert dropped in source['if']
     source['if'] = source['if'].replace(dropped, '')
@@ -170,17 +170,6 @@ def test_cli_mutant_summary_names_witnesses_and_durations(tmp_path, monkeypatch)
     assert result["survivors"] == []
 
 
-@pytest.mark.parametrize("suite", ["h5-audit", "h5-backup", "h5-w1a",
-                                  "h5-background", "h5-daemon-mutants", "h5-graph-mutants"])
-def test_inventory_rejects_a_dropped_suite(suite):
-    from inventory import check
-    from parity_scope import resolve
-    workflow = resolve(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
-    workflow["jobs"]["parity-checks"]["strategy"]["matrix"]["suite"].remove(suite)
-    with pytest.raises(AssertionError, match="missing H5 suite"):
-        check(workflow)
-
-
 def test_inventory_rejects_each_dropped_source_shard():
     from inventory import check
     from coverage_plan import SOURCE_SHARDS
@@ -201,40 +190,6 @@ def test_inventory_rejects_a_control_dropped_from_an_executable_shard(monkeypatc
         check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8")))
 
 
-@pytest.mark.parametrize('field, value', [('mode', 'live'), ('kind', 'cli'),
-                                        ('scenarios', ['extractor'])])
-def test_inventory_rejects_a_daemon_control_without_its_mutant_witness(monkeypatch, field, value):
-    from inventory import check
-    from coverage_plan import SUITES
-    actions = copy.deepcopy(SUITES['h5-daemon-mutants'])
-    next(a for a in actions if a['mutant'] == 'static-no-csp')[field] = value
-    monkeypatch.setitem(SUITES, 'h5-daemon-mutants', actions)
-    with pytest.raises(AssertionError, match='executable daemon control'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8")))
-
-
-def test_inventory_rejects_each_dropped_named_mutant(monkeypatch):
-    import inventory
-    from coverage_plan import DAEMON_CONTROLS, SOURCE_MUTANTS, SUITES
-    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8"))
-    original_loads = json.loads
-    for row, mutants in SOURCE_MUTANTS.items():
-        for mutant in mutants:
-            reduced = copy.deepcopy(SOURCE_MUTANTS)
-            reduced[row].remove(mutant)
-            with monkeypatch.context() as patch:
-                patch.setattr(inventory.json, "loads", lambda text: reduced)
-                with pytest.raises(AssertionError, match="source mutant inventory drift"):
-                    inventory.check(workflow)
-    assert json.loads is original_loads
-    for mutant in DAEMON_CONTROLS:
-        reduced = [action for action in SUITES['h5-daemon-mutants'] if action['mutant'] != mutant]
-        with monkeypatch.context() as patch:
-            patch.setitem(SUITES, 'h5-daemon-mutants', reduced)
-            with pytest.raises(AssertionError):
-                inventory.check(workflow)
-
-
 @pytest.mark.parametrize('host_separator', [':', ';'])
 def test_linux_test_login_selects_its_bundled_icu(tmp_path, monkeypatch, host_separator):
     import run_coverage
@@ -246,21 +201,6 @@ def test_linux_test_login_selects_its_bundled_icu(tmp_path, monkeypatch, host_se
     environment = source_environment('test_login', 'linux', tmp_path, {'LD_LIBRARY_PATH': 'existing'})
     assert environment['LD_LIBRARY_PATH'] == str(installation / 'lib') + ':existing'
     assert source_environment('test_login', 'windows', tmp_path, {}) == {}
-
-
-@pytest.mark.parametrize('mutation', ['drop_golden', 'drop_record', 'wrong_kind'])
-def test_inventory_rejects_lost_w1a_recording_or_replay(monkeypatch, mutation):
-    from inventory import check
-    from coverage_plan import SUITES
-    actions = copy.deepcopy(SUITES['h5-w1a'])
-    if mutation == 'drop_golden':
-        actions = [a for a in actions if not (a['scenario'] == 'extractor' and a['mode'] == 'golden')]
-    else:
-        action = next(a for a in actions if a['scenario'] == 'extractor' and a['mode'] == 'live')
-        action['record' if mutation == 'drop_record' else 'kind'] = False if mutation == 'drop_record' else 'cli'
-    monkeypatch.setitem(SUITES, 'h5-w1a', actions)
-    with pytest.raises(AssertionError, match='W1-A recording/replay'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8")))
 
 
 def test_w1a_named_golden_exceptions_match_scenario_support():
@@ -316,9 +256,8 @@ def test_daemon_replays_the_selected_temporary_golden_directory(tmp_path, monkey
     assert observed == [tmp_path / 'goldens']
 
 
-@pytest.mark.parametrize('job,step', [('parity-checks', 'Ported rows and daemon controls'),
-                                     ('source-mutants', 'CLI source mutants')])
-def test_inventory_rejects_masked_h5_exit(job, step):
+@pytest.mark.parametrize('job,step', [('source-mutants', 'CLI source mutants')])
+def test_inventory_rejects_masked_source_control_exit(job, step):
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
     selected = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == step)
@@ -393,25 +332,6 @@ def test_inventory_rejects_control_excepted_on_every_os_without_global_reason(mo
         monkeypatch.setitem(EXCEPTIONS['cli_mutants'][platform], 'audit-body-reason-swap', 'fixture exclusion')
     with pytest.raises(AssertionError, match='without any OS execution'):
         check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
-
-
-@pytest.mark.parametrize('scenario', ['session-reap', 'session-restart', 'session-resume-refusal',
-                                     'session-sweep', 'session-tombstone-restart', 'sweep-recovery'])
-def test_inventory_rejects_dropped_runtime_background_scenario(monkeypatch, scenario):
-    from inventory import check
-    from coverage_plan import SUITES
-    monkeypatch.setitem(SUITES, 'h5-background', [a for a in SUITES['h5-background']
-                                               if a['scenario'] != scenario])
-    with pytest.raises(AssertionError, match='accepted daemon scenario'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
-
-
-def test_h5_artifacts_do_not_walk_deliberate_scratch_symlink_loops():
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    upload = next(s for s in workflow['jobs']['parity-checks']['steps']
-                  if s.get('name') == 'Retain H5 row and control outcomes')
-    assert upload['with']['path'].splitlines() == ['${{ runner.temp }}/h5/*.json',
-                                                 '${{ runner.temp }}/h5/goldens/*.json']
 
 
 @pytest.mark.parametrize('name', ['session-reap', 'session-restart', 'session-resume-refusal',
@@ -506,19 +426,6 @@ def test_settled_encodings_records_and_replays_on_both_platforms(monkeypatch, tm
     assert len(auth) == 1 and auth[0][auth[0].index('--only') + 1] == 'encodings'
 
 
-@pytest.mark.parametrize('field, value', [('platform', 'linux'), ('mode', 'live'),
-                                         ('scenario', 'map-order-reversed')])
-def test_inventory_rejects_broadened_map_order_exception(monkeypatch, field, value):
-    from coverage_plan import EXCEPTIONS
-    from inventory import check
-    entry = dict(platform='windows', mode='both', scenario='map-order', reason='observed bank initialization gap')
-    entry[field] = value
-    monkeypatch.setitem(EXCEPTIONS, 'w1a_selections', {'windows-map-order-unsettled-bank-init': entry})
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    with pytest.raises(AssertionError, match='retired unsettled-bank exception'):
-        check(workflow)
-
-
 @pytest.mark.parametrize('platform', ['linux', 'windows'])
 def test_settled_map_order_records_and_replays_on_both_platforms(monkeypatch, tmp_path, platform):
     import run_coverage
@@ -534,23 +441,7 @@ def test_settled_map_order_records_and_replays_on_both_platforms(monkeypatch, tm
     assert ('live', 'map-order-reversed') in selected and ('golden', 'map-order-reversed') in selected
 
 
-@pytest.mark.parametrize('platform', [None, 'linux', 'windows'])
-@pytest.mark.parametrize('scenario', ['encodings', 'map-order', 'map-order-reversed'])
-def test_inventory_rejects_settled_auth_omissions(monkeypatch, platform, scenario):
-    from coverage_plan import EXCEPTIONS, SUITES
-    from inventory import check
-    if platform is None:
-        monkeypatch.setitem(EXCEPTIONS['w1a'], scenario, 'broad initialization exception')
-        monkeypatch.setitem(SUITES, 'h5-w1a', [a for a in SUITES['h5-w1a'] if a['scenario'] != scenario])
-    else:
-        monkeypatch.setitem(EXCEPTIONS['w1a_platform'][platform], scenario, 'broad platform initialization exception')
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    with pytest.raises(AssertionError, match='protected settled-auth selections'):
-        check(workflow)
-
-
-@pytest.mark.parametrize('job, name', [('parity-checks', 'Ported rows and daemon controls'),
-                                      ('source-mutants', 'CLI source mutants')])
+@pytest.mark.parametrize('job, name', [('source-mutants', 'CLI source mutants')])
 @pytest.mark.parametrize('suffix', ['; exit 0', '; python -c "raise SystemExit(0)"'])
 def test_inventory_rejects_failure_mask_on_invocation_line(job, name, suffix):
     from inventory import check
@@ -610,3 +501,209 @@ def test_a_composite_runs_each_suite_with_its_own_receipts(monkeypatch, tmp_path
         receipts = json.loads((tmp_path / f'{part}-timings.json').read_text(encoding='utf-8'))['receipts']
         assert [receipt['selection'] for receipt in receipts] == (
             SUITES[part] if keep_going or part != 'h5-backup' else SUITES[part][:1])
+
+
+def workflow_copy():
+    return yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+
+
+@pytest.mark.parametrize('suite', ['cli-live', 'judges', 'h5-w1a', 'h5-light'])
+def test_inventory_rejects_a_retired_live_suite_coming_back(suite):
+    from inventory import check
+    from parity_scope import resolve
+    workflow = resolve(workflow_copy())
+    workflow['jobs']['parity-checks']['strategy']['matrix']['suite'].append(suite)
+    with pytest.raises(AssertionError, match='retired live-comparison suite'):
+        check(workflow)
+
+
+# Each line starts a comparison against a live Python oracle, or replays a
+# recording the same run made from one (the Python freeze, 14 November 2026).
+LIVE_LINES = [
+    "python -m evals.rust_port.oracle_selection --out x --github-env $env:GITHUB_ENV",
+    "python -m evals.rust_port.phase1_oracle --metadata-only --destination x",
+    "python -m pytest evals/rust_port evals/rust_baseline -ra",
+    "python rust/daemon/harness/run.py live --rust-bin $candidate --only body-limits",
+    "python rust/daemon/harness/run.py mutants --rust-bin $mutants --only security-open",
+    "python rust/daemon/harness/graph_store.py live --candidate $candidate",
+    "python rust/daemon/harness/principals.py live --rust-bin $candidate",
+    "python rust/daemon/harness/dream_cursors.py mutants --ci-fixture --rust-bin $candidate",
+    "python rust/daemon/harness/mcp_ci.py --default-bin $candidate --mutant-bin $mutants --out x",
+    "python rust/daemon/harness/mcp_binding_sweep.py --rust-bin $mutants --mutants",
+    "python rust/ci/run_coverage.py --suite ${{ matrix.suite }} --out-dir x --keep-going",
+    "python rust/cli_harness --row lease --candidate $candidate -v --out x",
+    "python rust/cli_harness @live --candidate $candidate -v",
+    "python3 rust/ci/body_evidence.py run --rust-bin x --out y",
+    # Near misses the first pattern let through (reviewer of 462ada24).
+    "python rust/cli_harness --row mail --golden-dir x --candidate $candidate",
+    "python -m rust.cli_harness --row mail --candidate $candidate",
+    "python rust/cli_harness/__main__.py --row mail --candidate $candidate",
+    "python rust/daemon/harness/startup_ci.py --no-build --record-goldens --out x",
+    "python rust/daemon/harness/schema_ci.py --record-goldens --out x",
+    "python rust/cli_harness --row test_login --record -v --out x",
+    "python shim/tests/setup_codex_parity.py --cargo",
+    # Shapes the fix-round reviewer of bf3de877 got past the first patterns.
+    "python rust/cli_harness --row mail --candidate $candidate  # --golden",
+    "python rust/cli_harness --row mail --candidate x; python rust/cli_harness --row hook --golden --candidate x",
+    "python rust\\daemon\\harness\\run.py live --rust-bin $candidate --only body-limits",
+    "python daemon/harness/run.py live --rust-bin $candidate --only body-limits",
+    "python cli_harness --row mail --candidate $candidate",
+]
+
+
+@pytest.mark.parametrize('job', ['rust', 'parity-checks', 'daemon-image', 'scope'])
+@pytest.mark.parametrize('line', LIVE_LINES)
+def test_inventory_rejects_a_live_comparison_in_any_gating_job(job, line):
+    from inventory import check
+    workflow = workflow_copy()
+    workflow['jobs'][job]['steps'].append({'name': 'Live comparison', 'shell': 'pwsh', 'run': line})
+    with pytest.raises(AssertionError, match='live comparison against the Python oracle'):
+        check(workflow)
+
+
+@pytest.mark.parametrize('line', [
+    # Golden replays and harness self-tests: the near misses.
+    "python rust/cli_harness --row lease --golden --candidate $candidate -v --out x",
+    "python rust/cli_harness @golden --golden --candidate $candidate -v",
+    "python rust/daemon/harness/run.py golden --rust-bin $candidate --only static-build",
+    "python rust/daemon/harness/graph_store.py golden --row read --candidate $candidate",
+    "python -m pytest -q rust/cli_harness/test_cli_harness.py",
+    "python rust/ci/run_coverage.py --source-shard audit-0 --out-dir x",
+    "# python rust/daemon/harness/run.py live --rust-bin x (a comment)",
+])
+def test_golden_replays_and_self_tests_are_not_live_comparisons(line):
+    from inventory import live_invocations
+    workflow = workflow_copy()
+    workflow['jobs']['parity-checks']['steps'].append({'name': 'Replay', 'run': line})
+    assert live_invocations(workflow) == []
+
+
+def test_no_workflow_starts_a_live_comparison():
+    from inventory import all_workflow_live_invocations
+    assert all_workflow_live_invocations() == []
+
+
+def test_a_live_comparison_in_another_workflow_is_found(tmp_path):
+    from inventory import all_workflow_live_invocations
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "other.yml").write_text(
+        "jobs:\n  x:\n    steps:\n      - run: python rust/daemon/harness/run.py live --rust-bin b\n",
+        encoding="utf-8")
+    assert [row[0] for row in all_workflow_live_invocations(tmp_path)] == ["other.yml"]
+
+
+def test_a_yaml_workflow_is_scanned_and_exempt_names_hold_only_in_rust_yml(tmp_path):
+    from inventory import all_workflow_live_invocations
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    live = "      - run: python rust/daemon/harness/run.py live --rust-bin b\n"
+    (workflows / "other.yaml").write_text("jobs:\n  x:\n    steps:\n" + live, encoding="utf-8")
+    # A job named like rust.yml's exempt stress job, in another workflow.
+    (workflows / "elsewhere.yml").write_text("jobs:\n  stress:\n    steps:\n" + live, encoding="utf-8")
+    (workflows / "rust.yml").write_text("jobs:\n  stress:\n    steps:\n" + live, encoding="utf-8")
+    assert sorted(row[0] for row in all_workflow_live_invocations(tmp_path)) == ["elsewhere.yml", "other.yaml"]
+
+
+def test_inventory_rejects_a_stress_plan_that_runs_outside_a_stress_dispatch():
+    from inventory import check
+    workflow = workflow_copy()
+    workflow['jobs']['stress-plan']['if'] = "github.event_name == 'workflow_dispatch'"
+    with pytest.raises(AssertionError, match='stress plan'):
+        check(workflow)
+
+
+def test_the_weekly_source_mutants_may_compare_live():
+    from inventory import check, live_invocations
+    workflow = workflow_copy()
+    workflow['jobs']['source-mutants']['steps'].append(
+        {'name': 'Extra', 'run': 'python rust/cli_harness --row mail --mutants'})
+    assert live_invocations(workflow) == []
+    check(workflow)
+
+
+def test_inventory_rejects_a_scenario_whose_golden_replay_is_dropped():
+    from inventory import check
+    workflow = workflow_copy()
+    step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == 'Daemon static HTTP golden')
+    assert ' static-missing' in step['run']
+    step['run'] = step['run'].replace(' static-missing', '')
+    with pytest.raises(AssertionError, match='neither replayed nor named unreplayed'):
+        check(workflow)
+
+
+def test_inventory_rejects_an_unreplayed_scenario_that_is_not_named(monkeypatch):
+    import inventory
+    monkeypatch.setattr(inventory, 'UNREPLAYED_SCENARIOS', inventory.UNREPLAYED_SCENARIOS - {'session-reap'})
+    with pytest.raises(AssertionError, match='neither replayed nor named unreplayed'):
+        inventory.check(workflow_copy())
+
+
+def test_inventory_rejects_a_row_whose_golden_replay_is_dropped():
+    from inventory import check
+    workflow = workflow_copy()
+    step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == 'CLI lease golden harness')
+    step['run'] = step['run'].replace('--row lease ', '')
+    with pytest.raises(AssertionError, match='row'):
+        check(workflow)
+
+
+def test_inventory_rejects_w1c_rows_that_stop_replaying_goldens():
+    from inventory import check
+    workflow = workflow_copy()
+    step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == 'CLI W1-C golden harness')
+    step['run'] = step['run'].replace('@golden --golden', '@golden')
+    with pytest.raises(AssertionError):
+        check(workflow)
+
+
+def test_inventory_rejects_an_oracle_binding_in_the_source_mutants():
+    from inventory import check
+    workflow = workflow_copy()
+    workflow['jobs']['source-mutants']['steps'].insert(0, {
+        'name': 'Bind the source-control Python oracle',
+        'run': "python -m evals.rust_port.oracle_selection --out x --github-env $env:GITHUB_ENV"})
+    with pytest.raises(AssertionError, match='event oracle'):
+        check(workflow)
+
+
+KEPT = "Daemon security live checks without a Rust test"
+
+
+def test_the_kept_security_checks_are_the_only_live_comparison_allowed():
+    from inventory import LIVE_SECURITY_EXCEPTIONS, live_invocations
+    workflow = workflow_copy()
+    step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == KEPT)
+    lines = [line.strip() for line in step['run'].splitlines() if 'run.py live' in line]
+    assert lines == list(LIVE_SECURITY_EXCEPTIONS[KEPT])
+    assert live_invocations(workflow) == []
+
+
+def test_an_exception_line_in_another_step_is_refused():
+    from inventory import LIVE_SECURITY_EXCEPTIONS, check
+    workflow = workflow_copy()
+    workflow['jobs']['parity-checks']['steps'].append(
+        {'name': 'Elsewhere', 'run': LIVE_SECURITY_EXCEPTIONS[KEPT][0]})
+    with pytest.raises(AssertionError, match='live comparison against the Python oracle'):
+        check(workflow)
+
+
+@pytest.mark.parametrize('line', [
+    "python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open --out x",
+    "python rust/daemon/harness/run.py mutants --rust-bin $candidate --only security-open --out x",
+])
+def test_another_live_line_in_the_kept_step_is_refused(line):
+    from inventory import check
+    workflow = workflow_copy()
+    step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == KEPT)
+    step['run'] = line + "\n" + step['run']
+    with pytest.raises(AssertionError, match='live comparison against the Python oracle'):
+        check(workflow)
+
+
+def test_the_exception_holds_only_in_the_parity_lanes():
+    from inventory import LIVE_SECURITY_EXCEPTIONS, check
+    workflow = workflow_copy()
+    workflow['jobs']['rust']['steps'].append({'name': KEPT, 'run': LIVE_SECURITY_EXCEPTIONS[KEPT][0]})
+    with pytest.raises(AssertionError, match='live comparison against the Python oracle'):
+        check(workflow)

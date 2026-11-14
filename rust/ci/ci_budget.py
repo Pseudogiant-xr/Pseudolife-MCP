@@ -669,10 +669,10 @@ def recorded_definitions(name: str, entry: dict) -> tuple[dict, bool]:
         if not isinstance(entry["fingerprints"], dict):
             raise ValueError("malformed legacy fingerprints")
         return entry["fingerprints"], True
-    baseline = read_fingerprint_baseline()
-    if name not in baseline:
-        raise ValueError(f"{name} has no generated fingerprint baseline")
-    return baseline[name], False
+    # A workflow the generated baseline does not name yet is new: every job's
+    # earlier definition is None, so each needs an accepted reason, as
+    # ops/integrate.py's member check treats it (baselines.get(name, {})).
+    return read_fingerprint_baseline().get(name, {}), False
 
 
 def approved_definitions(name: str, workflow: dict, entry: dict, raw: dict,

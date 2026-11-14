@@ -308,7 +308,7 @@ fn rename_retry(source: &Path, target: &Path) -> Result<()> {
             Err(e) if e.kind() == io::ErrorKind::PermissionDenied && attempt < 4 => {
                 std::thread::sleep(Duration::from_millis(100 * (attempt + 1)))
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(crate::board::state::denied_cause(source, &e)),
         }
     }
     unreachable!()
