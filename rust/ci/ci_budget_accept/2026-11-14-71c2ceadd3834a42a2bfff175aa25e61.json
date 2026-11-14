@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "953b718efb3dafdf",
+  "fingerprint": "5d0f63c18413566d",
+  "reason": "Python freeze (#1550): the job now collects only the live test files (tests/suite_classes.txt) unless scope sets PSEUDOLIFE_CI_INCLUDE_FROZEN, so its cost can only fall from the 34.0 measured on every file; re-measure from the first two batches that run the live set."
+}

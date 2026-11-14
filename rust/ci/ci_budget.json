@@ -154,19 +154,17 @@
   "ci.yml": {
     "limits": {
       "jobs": 7,
-      "runner_minutes": 67,
-      "longest_job_minutes": 25,
-      "critical_path_minutes": 27,
-      "why": "2026-10-24: measured on the runs below, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run); limits about 10% above 2026-11-14 (the Python freeze): test-lite-linux, the whole suite on embedded PostgreSQL, left with the lite tier, so the job limit falls to 7; the other limits are unchanged."
+      "runner_minutes": 96,
+      "longest_job_minutes": 41,
+      "critical_path_minutes": 41,
+      "why": "2026-11-14 (issue #1408): re-measured on master push 43456549451 and batches 43495728956 and 43476091008, each job only on runs of its current definition (guards runs instead of the four test lanes when scope skips them, so the sum overstates a run). The test job grew from 22.4 to 34.0 minutes (27.1-37.3 across those runs and batch 43525635914, whose first attempt the 35-minute pytest bound killed), so the runner-minute, longest-job and critical-path limits are about 10% above the slowest: 87.1 -> 96, 37.3 -> 41, scope -> test 37.5 -> 41. What they buy: a suite as slow as today's finishes instead of costing a batch cycle. 2026-11-14 (the Python freeze): test-lite-linux, the whole suite on embedded PostgreSQL, left with the lite tier, so the job limit falls to 7; the minute limits stay until the first two batches that collect only the live test files are measured."
     },
     "pip_no_compile": false,
     "needs_without_data": {},
     "measured_on": [
-      40074592538,
-      40071746672,
-      40068731867,
-      39989124855,
-      39988057818
+      43456549451,
+      43495728956,
+      43476091008
     ],
     "jobs": {
       "scope": {
@@ -177,19 +175,19 @@
         "estimate": "2026-11-14: a Rust-only batch or push now also runs the 20 live tests that read rust/ files, with a PostgreSQL service. That step took 12.3 min on two workers on a Windows desktop (1,532 passed, 7 platform skips); about 6 is expected on hosted ubuntu-latest, plus the 1.9 measured for the tree-wide guards and about 0.5 for the service. An ordinary pull request skips the step (about 2.4). Re-measure from the first Rust-only batch's run."
       },
       "lock-resolve": {
-        "minutes": 0.6
+        "minutes": 0.5
       },
       "test": {
-        "minutes": 22.4
+        "minutes": 34.0
       },
       "test-lite-windows": {
-        "minutes": 5.0
+        "minutes": 12.1
       },
       "test-lite-macos": {
-        "minutes": 8.8
+        "minutes": 12.6
       },
       "frontend": {
-        "minutes": 0.3
+        "minutes": 0.5
       }
     }
   },

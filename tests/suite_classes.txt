@@ -92,6 +92,7 @@ live test_child_python.py
 frozen test_chronicle_store.py
 live test_ci_batch_passed.py
 live test_ci_budget_integration.py
+live test_ci_failure_lines.py
 live test_ci_merge_queue.py
 live test_ci_push_passed.py
 live test_ci_windows_lanes.py
@@ -413,6 +414,7 @@ live test_postgres_container_nonroot.py
 frozen test_principal_activity.py
 frozen test_principal_store_pg.py
 frozen test_principals.py
+live test_program_lookup.py
 live test_prompt_example_lifts.py
 live test_prune_worktrees.py
 live test_pytest_retry_once.py

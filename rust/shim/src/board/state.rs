@@ -215,6 +215,16 @@ pub fn open_marker(path: &Path, write: bool) -> Result<PrivateFile> {
     #[cfg(windows)]
     {
         crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+        // An account that may delete entries in the marker's folder can
+        // suppress a wake whatever the marker's own access list says, so the
+        // folder is held to the folder rule too.
+        // The checked folder stays open, without delete sharing, until the
+        // marker is: it cannot be renamed or replaced in between, so the
+        // marker is opened in the folder that was checked.
+        let _folder = match path.parent() {
+            Some(folder) => Some(marker_folder_trusted(folder)?),
+            None => None,
+        };
         let file = options(false, write)
             .open(path)
             .map_err(|_| "state_unavailable")?;
@@ -285,18 +295,89 @@ fn marker_refusal_windows(
         MarkerDistrust::Owner(owner) => format!(
             "pseudolife-mcp: ignoring {shown}: it is owned by {owner}, not this user, so it could forge or suppress board wakes for this session. Fix: delete that file; the plugin hooks write it again."
         ),
-        MarkerDistrust::Writer(writer) => {
-            // Named, not %USERNAME%: Git Bash and PowerShell do not expand it.
-            let me = crate::credentials::windows_security::current_user_name()
-                .unwrap_or_else(|| "<this account>".into());
-            format!(
-                "pseudolife-mcp: ignoring {shown}: {writer} can change or delete it, so it could forge or suppress board wakes for this session. Fix: make {folder} private to this account ({}), then delete the file; the plugin hooks write it again.",
-                private_folder_command(&folder, &me, Some(writer))
-            )
-        }
+        MarkerDistrust::Writer { name, sid } => format!(
+            "pseudolife-mcp: ignoring {shown}: {name} can change or delete it, so it could forge or suppress board wakes for this session. Fix: make {folder} private to this account ({}), then delete the file; the plugin hooks write it again.",
+            private_folder_command(&folder, Some(sid.as_str()))
+        ),
+        MarkerDistrust::Unreadable => format!(
+            "pseudolife-mcp: ignoring {shown}: its access list holds an entry this client cannot read (a callback or object entry), which could let another account change it. Fix: delete that file; the plugin hooks write it again."
+        ),
         MarkerDistrust::NoDacl => format!(
             "pseudolife-mcp: ignoring {shown}: it has no access list, so every user can write it and it could forge or suppress board wakes for this session. Fix: delete that file; the plugin hooks write it again."
         ),
+    }
+}
+/// Marker folders that passed the folder rule, and when.
+#[cfg(windows)]
+static MARKER_FOLDERS: LazyLock<StdMutex<HashMap<PathBuf, FolderPass>>> =
+    LazyLock::new(Default::default);
+/// A marker folder's (volume, file index) and when it passed the rule.
+#[cfg(windows)]
+type FolderPass = ((u64, u64), std::time::Instant);
+/// Check the folder a marker is read from with the folder rule
+/// (`windows_security::validate_folder`), as `private_dir` does before
+/// anything is written into one: no other account may add, delete or
+/// replace entries in it. A folder that passes is not checked again for 30
+/// seconds, because the Stop hook and the ring read markers often.
+#[cfg(windows)]
+fn marker_folder_trusted(folder: &Path) -> Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FRESH: Duration = Duration::from_secs(30);
+    // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse point,
+    // sharing read and write but not delete: while the caller holds this
+    // handle the folder cannot be renamed or removed.
+    let directory = OpenOptions::new()
+        .access_mode(0x0002_0000 | 0x80)
+        .share_mode(0x1 | 0x2)
+        .custom_flags(0x02000000 | 0x00200000)
+        .open(folder)
+        .map_err(|_| "state_unavailable")?;
+    // The pass is cached for the folder object it was made on (volume and
+    // file index, read through this same handle), not its name: a folder
+    // swapped in under the same name is checked afresh.
+    let Ok(identity) = crate::credentials::windows_security::folder_identity(&directory) else {
+        report_folder_once(
+            folder,
+            &format!(
+                "pseudolife-mcp: not reading board markers in {}: it is not a plain folder (a symlink or junction, which private state never follows). Fix: point the digest folder at a plain folder, then retry.",
+                folder.display()
+            ),
+        );
+        return Err("invalid_state");
+    };
+    let fresh = MARKER_FOLDERS
+        .lock()
+        .map(|trusted| {
+            trusted
+                .get(folder)
+                .is_some_and(|(seen, at)| *seen == identity && at.elapsed() < FRESH)
+        })
+        .unwrap_or(false);
+    if fresh {
+        return Ok(directory);
+    }
+    match crate::credentials::windows_security::validate_folder(&directory) {
+        Ok(None) => {
+            if let Ok(mut trusted) = MARKER_FOLDERS.lock() {
+                trusted.insert(folder.to_path_buf(), (identity, std::time::Instant::now()));
+            }
+            Ok(directory)
+        }
+        Ok(Some(distrust)) => {
+            report_folder_once(folder, &folder_refusal_windows(folder, &distrust));
+            Err("invalid_state")
+        }
+        Err(error) => {
+            report_folder_once(
+                folder,
+                &format!(
+                    "pseudolife-mcp: not reading board markers in {}: its permissions could not be checked ({}). Fix: check that this account can read that folder's permissions, then retry.",
+                    folder.display(),
+                    error.0
+                ),
+            );
+            Err("invalid_state")
+        }
     }
 }
 /// One line per directory and marker kind per process: each Stop-hook run
@@ -439,8 +520,15 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
             use std::os::unix::fs::DirBuilderExt;
             fs::DirBuilder::new().mode(0o700).create(path)
         };
+        // Owner-only from the moment it exists: a child another task creates
+        // before make_private would otherwise inherit entries the
+        // protection then strips, leaving it with none (#1538 review).
         #[cfg(windows)]
-        let made = fs::create_dir(path);
+        let made = crate::credentials::windows_security::create_dir_owner_only(path);
+        #[cfg(test)]
+        if made.is_ok() {
+            tests::create_child_meanwhile(path);
+        }
         match made {
             Ok(()) => created = true,
             // Never a symlink: the protection below must not follow one.
@@ -536,24 +624,127 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
     }
     Ok(())
 }
-/// The icacls command that makes `folder` private to `me` while keeping
-/// access for what is in it, and removes `writer`'s own grants, which
-/// `/inheritance:r` (inherited entries only) and `/grant:r` (only the named
-/// account) leave in place. A writer that is not a readable account name
-/// gets no `/remove`, and the caller says to remove that rule by hand.
+/// The icacls command that makes `folder` private to this account while
+/// keeping access for what is in it, and removes `writer`'s own grants
+/// (`writer` as `S-1-...` text), which `/inheritance:r` (inherited entries
+/// only) and `/grant:r` (only the named account) leave in place.
+///
+/// Accounts are named by SID (`*S-1-...`): no localisation, and no
+/// characters a shell expands. The path is the one part a shell could
+/// change: double quotes keep it safe to paste in cmd, PowerShell 5.1 and
+/// PowerShell 7 unless it holds a character one of them expands (`$` or a
+/// backtick in PowerShell, `%` or `!` in cmd, or a quote); then the command
+/// is given for PowerShell, in single quotes, and says so.
 #[cfg(windows)]
-fn private_folder_command(folder: &str, me: &str, writer: Option<&str>) -> String {
+fn private_folder_command(folder: &str, writer: Option<&str>) -> String {
+    let me = this_account_sid();
+    let grant = format!("*{me}:(OI)(CI)F");
     let remove = writer
-        .filter(|writer| *writer != "an access rule that cannot be read")
-        .map(|writer| {
-            if writer.starts_with("S-1-") {
-                format!(" /remove:g \"*{writer}\"")
-            } else {
-                format!(" /remove:g \"{writer}\"")
-            }
+        .filter(|writer| writer.starts_with("S-1-"))
+        .map(|writer| format!("*{writer}"));
+    let mut parts = vec![
+        ("/inheritance:r", false),
+        ("/grant:r", false),
+        (grant.as_str(), true),
+    ];
+    if let Some(remove) = &remove {
+        parts.extend([("/remove:g", false), (remove.as_str(), true)]);
+    }
+    icacls_line(folder, &[parts])
+}
+#[cfg(windows)]
+fn this_account_sid() -> String {
+    crate::credentials::windows_security::current_user_sid()
+        .unwrap_or_else(|| "<this account's SID>".into())
+}
+/// One or more icacls calls on `folder` as a line safe to paste: the path is
+/// the one part a shell could change. Double quotes keep it safe in cmd,
+/// PowerShell 5.1 and PowerShell 7 unless it holds a character one of them
+/// expands or treats as a quote (`$` or a backtick in PowerShell, `%` or `!`
+/// in cmd, straight or curly quotes, `^`); then, and for more than one call
+/// (cmd and PowerShell join commands differently), the line is given for
+/// PowerShell, single-quoted, and says so. Each call is a list of arguments,
+/// `true` for a value to quote. A path ending in a backslash gets a `.`, so
+/// the backslash cannot escape the closing quote (`"D:\"`).
+#[cfg(windows)]
+fn icacls_line(folder: &str, calls: &[Vec<(&str, bool)>]) -> String {
+    let folder = if folder.ends_with('\\') {
+        format!("{folder}.")
+    } else {
+        folder.to_owned()
+    };
+    let special = [
+        '$', '`', '%', '!', '^', '\'', '"', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}',
+    ];
+    let plain = calls.len() == 1 && !folder.contains(special);
+    let quote = |text: &str| {
+        if plain {
+            format!("\"{text}\"")
+        } else {
+            format!("'{}'", text.replace('\'', "''"))
+        }
+    };
+    let line = calls
+        .iter()
+        .map(|parts| {
+            let rest: Vec<String> = parts
+                .iter()
+                .map(|(text, quoted)| {
+                    if *quoted {
+                        quote(text)
+                    } else {
+                        (*text).to_owned()
+                    }
+                })
+                .collect();
+            format!("icacls {} {}", quote(&folder), rest.join(" "))
         })
-        .unwrap_or_default();
-    format!("icacls \"{folder}\" /inheritance:r /grant:r \"{me}:(OI)(CI)F\"{remove}")
+        .collect::<Vec<_>>()
+        .join("; ");
+    if plain {
+        line
+    } else {
+        format!("in PowerShell: {line}")
+    }
+}
+/// The fix for a folder whose access list holds an entry the rule cannot
+/// read. icacls cannot name such an entry to remove it, so `/reset` drops
+/// the folder's own entries; then the folder stops inheriting and grants this
+/// account (by SID, inheritable) full control, because an entry like that can
+/// also come from a parent, and a folder under one that passes nothing on is
+/// left with no entries by `/reset` alone. The owner keeps WRITE_DAC however
+/// empty the list is, so the second call always runs (from an elevated
+/// prompt when Administrators owns the folder).
+#[cfg(windows)]
+fn unreadable_folder_command(folder: &str) -> String {
+    let grant = format!("*{}:(OI)(CI)F", this_account_sid());
+    icacls_line(
+        folder,
+        &[
+            vec![("/reset", false)],
+            vec![
+                ("/inheritance:r", false),
+                ("/grant:r", false),
+                (grant.as_str(), true),
+            ],
+        ],
+    )
+}
+/// The fix for a handshake cache folder this account cannot use: give this
+/// account full control of that folder and what is in it, and nothing else.
+/// Resetting an ancestor instead could unprotect the private state files
+/// beside it, which are refused once not protected.
+#[cfg(windows)]
+pub(crate) fn cache_folder_fix(folder: &Path) -> String {
+    let grant = format!("*{}:(OI)(CI)F", this_account_sid());
+    icacls_line(
+        &folder.display().to_string(),
+        &[vec![
+            ("/grant:r", false),
+            (grant.as_str(), true),
+            ("/T", false),
+        ]],
+    )
 }
 /// Why an existing Windows folder is not used for private state, as the
 /// line [`private_dir`] prints: the path, the cause and the fix.
@@ -564,21 +755,25 @@ fn folder_refusal_windows(
 ) -> String {
     use crate::credentials::windows_security::MarkerDistrust;
     let shown = path.display();
-    let me = crate::credentials::windows_security::current_user_name()
-        .unwrap_or_else(|| "<this account>".into());
     let fix = |writer: Option<&str>| {
         format!(
             "Fix: make it private to this account, keeping access for what is in it ({}), then retry.",
-            private_folder_command(&shown.to_string(), &me, writer)
+            private_folder_command(&shown.to_string(), writer)
         )
     };
     match distrust {
         MarkerDistrust::Owner(owner) => format!(
             "pseudolife-mcp: not using {shown}: it is owned by {owner}, not this account, so private state there could be read or replaced. Fix: move it aside and retry; this client creates it again."
         ),
-        MarkerDistrust::Writer(writer) => format!(
-            "pseudolife-mcp: not using {shown}: {writer} can add, delete or replace what is in it, so private state there could be forged. {}",
-            fix(Some(writer))
+        MarkerDistrust::Writer { name, sid } => format!(
+            "pseudolife-mcp: not using {shown}: {name} can add, delete or replace what is in it, so private state there could be forged. {}",
+            fix(Some(sid.as_str()))
+        ),
+        // icacls cannot name an entry it does not read; /reset replaces the
+        // folder's explicit entries, that one included, with inherited ones.
+        MarkerDistrust::Unreadable => format!(
+            "pseudolife-mcp: not using {shown}: its access list holds an entry this client cannot read (a callback or object entry), which could let another account change what is in it. Fix: drop its own entries and give this account full control of it and what is in it ({}; from an elevated prompt if Administrators owns it), then retry.",
+            unreadable_folder_command(&shown.to_string())
         ),
         MarkerDistrust::NoDacl => format!(
             "pseudolife-mcp: not using {shown}: it has no access list, so every account can change what is in it. {}",
@@ -874,6 +1069,235 @@ mod tests {
         assert!(exists(&path));
     }
 
+    thread_local! {
+        /// A folder in which another task makes a child the moment
+        /// private_dir has created it, before it is protected.
+        static CHILD_MEANWHILE: std::cell::RefCell<Option<PathBuf>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    pub(super) fn create_child_meanwhile(path: &Path) {
+        if CHILD_MEANWHILE.with(|folder| folder.borrow().as_deref() == Some(path)) {
+            // As the handshake cache's `create_dir_all` does.
+            fs::create_dir(path.join("handshake-cache")).unwrap();
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_child_made_while_its_folder_is_created_keeps_its_access() {
+        // #1538 review finding 4: a folder made plainly and protected after
+        // left a child created in between with an empty access list.
+        let home = inheriting_folder("child-window");
+        let folder = home.0.join("agent-state");
+        CHILD_MEANWHILE.with(|meanwhile| *meanwhile.borrow_mut() = Some(folder.clone()));
+        let made = private_dir(&folder);
+        CHILD_MEANWHILE.with(|meanwhile| *meanwhile.borrow_mut() = None);
+        made.unwrap();
+        fs::write(folder.join("handshake-cache").join("cache.json"), b"{}")
+            .expect("the child made in the creation window lost its access");
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = OpenOptions::new()
+            .access_mode(0x0002_0000 | 0x80)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(&folder)
+            .unwrap();
+        crate::credentials::windows_security::validate(&directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_marker_in_a_folder_others_can_empty_is_refused() {
+        // #1538 review finding 3: whatever a marker's own access list says,
+        // an account that may delete entries in its folder can suppress a
+        // wake; the folder is held to the folder rule when reading too.
+        let home = inheriting_folder("marker-folder");
+        let digests = home.0.join("digests");
+        fs::create_dir(&digests).unwrap();
+        let marker = digests.join("k.wake");
+        powershell_write(&marker, "w\n");
+        assert_eq!(read_marker(&marker, 64).unwrap(), b"w\n");
+        // Users may now delete what is in the folder (FILE_DELETE_CHILD),
+        // not write the marker itself.
+        crate::credentials::windows_security::set_dacl_sddl(
+            &digests,
+            "D:(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;;0x40;;;BU)",
+        )
+        .unwrap();
+        // Freshly checked: the earlier pass is no longer cached.
+        if let Ok(mut trusted) = MARKER_FOLDERS.lock() {
+            trusted.clear();
+        }
+        assert_eq!(read_marker(&marker, 64), Err("invalid_state"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_marker_folder_swapped_under_its_name_is_checked_again() {
+        // The 30-second pass belongs to the folder it was made on, not to
+        // its name.
+        let home = inheriting_folder("marker-swap");
+        let digests = home.0.join("digests");
+        fs::create_dir(&digests).unwrap();
+        powershell_write(&digests.join("k.wake"), "w\n");
+        assert!(read_marker(&digests.join("k.wake"), 64).is_ok());
+        fs::rename(&digests, home.0.join("digests-old")).unwrap();
+        fs::create_dir(&digests).unwrap();
+        crate::credentials::windows_security::set_dacl_sddl(
+            &digests,
+            "D:(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;;0x40;;;BU)",
+        )
+        .unwrap();
+        powershell_write(&digests.join("k.wake"), "w\n");
+        assert_eq!(
+            read_marker(&digests.join("k.wake"), 64),
+            Err("invalid_state")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_ace_at_keeps_to_the_list_without_is_valid_acl() {
+        use crate::credentials::windows_security::ace_at_raw;
+        // One ACCESS_ALLOWED_ACE (20 bytes) for S-1-1-0 in a 28-byte list.
+        let list = |acl_size: u32, ace_size: u32| {
+            vec![
+                0x0000_0002u32 | (acl_size << 16),
+                0x0000_0001,
+                ace_size << 16,
+                0x001F_01FF,
+                0x0000_0101,
+                0x0100_0000,
+                0x0000_0000,
+            ]
+        };
+        assert_eq!(ace_at_raw(&list(28, 20), 0), Some((0, 20)));
+        // An entry shorter than a header.
+        assert_eq!(ace_at_raw(&list(28, 0), 0), None);
+        assert_eq!(ace_at_raw(&list(28, 2), 0), None);
+        // An entry running past the end of the list.
+        assert_eq!(ace_at_raw(&list(28, 24), 0), None);
+        // A header running past the end of the list.
+        assert_eq!(ace_at_raw(&list(10, 20), 0), None);
+        // No entry at an index past the count.
+        assert_eq!(ace_at_raw(&list(28, 20), 1), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_an_unreadable_entry_on_a_folder_gets_a_fix_that_works() {
+        // Under a folder that passes nothing on, as the shim's own are:
+        // `/reset` alone would leave it with an empty access list.
+        let root = Dir::new();
+        let folder = root.0.join("state$x");
+        fs::create_dir(&folder).unwrap();
+        // A callback (conditional) allow entry, which the rule does not read.
+        crate::credentials::windows_security::set_dacl_sddl(
+            &folder,
+            "D:(A;OICI;FA;;;OW)(XA;;FA;;;WD;(Member_of {SID(BA)}))",
+        )
+        .unwrap();
+        // A file whose access is only inherited from the folder.
+        fs::write(folder.join("kept"), b"x").unwrap();
+        assert_eq!(private_dir(&folder), Err("invalid_state"));
+        let line = folder_refusal_windows(
+            &folder,
+            &crate::credentials::windows_security::MarkerDistrust::Unreadable,
+        );
+        let printed = line
+            .split(" (in PowerShell: ")
+            .nth(1)
+            .and_then(|rest| rest.strip_suffix("), then retry."))
+            .unwrap_or_else(|| panic!("{line}"));
+        // Each call of the printed line must succeed, not only the last.
+        for call in printed.split("; ") {
+            let status = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command"])
+                .arg("Invoke-Expression $env:PRINTED_FIX; exit $LASTEXITCODE")
+                .env("PRINTED_FIX", call)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "{call}");
+        }
+        private_dir(&folder).unwrap();
+        fs::read(folder.join("kept")).unwrap();
+        fs::write(folder.join("kept"), b"y").unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_an_emptied_cache_folder_gets_a_fix_for_that_folder_only() {
+        // A host an earlier native client hit: the state root was protected
+        // with the cache's folder already in it, which emptied that folder.
+        let home = inheriting_folder("emptied-cache");
+        let root = home.0.join("agent-state");
+        fs::create_dir(&root).unwrap();
+        let cache = root.join("handshake-cache");
+        fs::create_dir(&cache).unwrap();
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let directory = OpenOptions::new()
+                .access_mode(0x00120089 | 0x000c0000)
+                .share_mode(0x1 | 0x2)
+                .custom_flags(0x02000000 | 0x00200000)
+                .open(&root)
+                .unwrap();
+            crate::credentials::windows_security::make_private(&directory).unwrap();
+        }
+        let error = fs::write(cache.join("c.json"), b"{}")
+            .expect_err("the emptied folder is still writable");
+        let line = crate::cache::store_failure_line(&cache, &error);
+        let command = cache_folder_fix(&cache);
+        assert!(
+            line.contains(&command) && line.contains("empty access list"),
+            "{line}"
+        );
+        // Never a reset of the state root, which would unprotect its files.
+        assert!(
+            !line.contains("/reset") && !line.contains(&format!("\"{}\"", root.display())),
+            "{line}"
+        );
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg("Invoke-Expression $env:PRINTED_FIX; exit $LASTEXITCODE")
+            .env("PRINTED_FIX", &command)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "{command}");
+        fs::write(cache.join("c.json"), b"{}").unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_the_powershell_form_of_the_fix_works_as_printed() {
+        // A folder name PowerShell would expand in double quotes.
+        let home = inheriting_folder("ps-fix");
+        let folder = home.0.join("state$x");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("kept"), b"x").unwrap();
+        crate::credentials::windows_security::set_dacl_sddl(
+            &folder,
+            "D:(A;OICI;FA;;;OW)(A;OICI;FA;;;WD)",
+        )
+        .unwrap();
+        assert_eq!(private_dir(&folder), Err("invalid_state"));
+        let printed = private_folder_command(&folder.display().to_string(), Some("S-1-1-0"));
+        let command = printed
+            .strip_prefix("in PowerShell: ")
+            .unwrap_or_else(|| panic!("{printed}"));
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg("Invoke-Expression $env:PRINTED_FIX; exit $LASTEXITCODE")
+            .env("PRINTED_FIX", command)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "{command}");
+        private_dir(&folder).unwrap();
+        fs::write(folder.join("kept"), b"y").unwrap();
+    }
+
     pub(super) fn create_meanwhile(path: &Path) {
         if MEANWHILE.with(|folders| folders.borrow().iter().any(|folder| folder == path)) {
             // As the handshake cache's `create_dir_all` does: the folder and
@@ -975,6 +1399,24 @@ mod tests {
         assert!(status.success(), "icacls on {}", path.display());
     }
 
+    /// The rule named `sid` as the writer, by SID and by the name Windows
+    /// gives it here (account names are localised).
+    #[cfg(windows)]
+    fn expect_writer(
+        found: Option<crate::credentials::windows_security::MarkerDistrust>,
+        sid: &str,
+        case: &str,
+    ) {
+        use crate::credentials::windows_security::{MarkerDistrust, sid_name_of};
+        match found {
+            Some(MarkerDistrust::Writer { name, sid: found }) => {
+                assert_eq!(found, sid, "{case}");
+                assert_eq!(name, sid_name_of(sid), "{case}");
+            }
+            other => panic!("{case}: {other:?}"),
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_folder_rule_refuses_what_lets_others_change_its_contents() {
@@ -993,18 +1435,12 @@ mod tests {
         }
         for (sddl, who) in [
             // Inherit-only entries decide what new files there grant.
-            ("O:MED:(A;;FA;;;ME)(A;OICIIO;FA;;;WD)", "Everyone"),
+            ("O:MED:(A;;FA;;;ME)(A;OICIIO;FA;;;WD)", "S-1-1-0"),
             // Deleting a child replaces it as surely as writing it.
-            ("O:MED:(A;;FA;;;ME)(A;;0x40;;;BU)", "Users"),
-            (
-                "O:MED:(A;;FA;;;ME)(A;OICI;0x1301bf;;;AU)",
-                "Authenticated Users",
-            ),
+            ("O:MED:(A;;FA;;;ME)(A;;0x40;;;BU)", "S-1-5-32-545"),
+            ("O:MED:(A;;FA;;;ME)(A;OICI;0x1301bf;;;AU)", "S-1-5-11"),
         ] {
-            match rule(sddl) {
-                Some(MarkerDistrust::Writer(name)) => assert!(name.contains(who), "{sddl}: {name}"),
-                other => panic!("{sddl}: {other:?}"),
-            }
+            expect_writer(rule(sddl), who, sddl);
         }
         assert!(matches!(
             rule("O:S-1-5-32-547D:(A;;FA;;;ME)"),
@@ -1031,13 +1467,19 @@ mod tests {
         assert_eq!(private_dir(&folder), Err("invalid_state"));
         // Refused, not rewritten: what is in it is still usable.
         fs::read(folder.join("kept")).unwrap();
+        let everyone = crate::credentials::windows_security::sid_name_of("S-1-1-0");
         let line = folder_refusal_windows(
             &folder,
-            &crate::credentials::windows_security::MarkerDistrust::Writer("Everyone".into()),
+            &crate::credentials::windows_security::MarkerDistrust::Writer {
+                name: everyone.clone(),
+                sid: "S-1-1-0".into(),
+            },
         );
         assert!(line.contains(&folder.display().to_string()), "{line}");
         assert!(
-            line.contains("Everyone can add, delete or replace what is in it"),
+            line.contains(&format!(
+                "{everyone} can add, delete or replace what is in it"
+            )),
             "{line}"
         );
         assert!(
@@ -1046,9 +1488,9 @@ mod tests {
         );
         // The printed fix, run as printed, makes the folder acceptable and
         // keeps what is in it usable.
-        let me = crate::credentials::windows_security::current_user_name().unwrap();
-        let command = private_folder_command(&folder.display().to_string(), &me, Some("Everyone"));
+        let command = private_folder_command(&folder.display().to_string(), Some("S-1-1-0"));
         assert!(line.contains(&command), "{line}");
+        assert!(command.contains("/remove:g \"*S-1-1-0\""), "{command}");
         // Run in PowerShell exactly as printed; the text travels in the
         // environment so no quoting layer sits in between.
         let status = std::process::Command::new("powershell")
@@ -1333,23 +1775,19 @@ mod tests {
             "another user's marker"
         );
         for (sddl, who) in [
-            ("O:MED:(A;;FA;;;ME)(A;;FW;;;WD)", "Everyone"),
-            (
-                "O:MED:(A;;FA;;;ME)(A;;0x1301bf;;;AU)",
-                "Authenticated Users",
-            ),
-            ("O:MED:(A;;FA;;;ME)(A;;FA;;;BU)", "Users"),
-            ("O:MED:(A;;FA;;;ME)(A;;0x4;;;OTHER)", "Power Users"),
-            ("O:MED:(A;;FA;;;ME)(A;;WD;;;OTHER)", "Power Users"),
-            ("O:MED:(A;;FA;;;ME)(A;;GW;;;OTHER)", "Power Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;FW;;;WD)", "S-1-1-0"),
+            ("O:MED:(A;;FA;;;ME)(A;;0x1301bf;;;AU)", "S-1-5-11"),
+            ("O:MED:(A;;FA;;;ME)(A;;FA;;;BU)", "S-1-5-32-545"),
+            ("O:MED:(A;;FA;;;ME)(A;;0x4;;;OTHER)", OTHER),
+            ("O:MED:(A;;FA;;;ME)(A;;WD;;;OTHER)", OTHER),
+            ("O:MED:(A;;FA;;;ME)(A;;GW;;;OTHER)", OTHER),
+            // FILE_WRITE_EA, part of FILE_GENERIC_WRITE.
+            ("O:MED:(A;;FA;;;ME)(A;;0x10;;;BU)", "S-1-5-32-545"),
             // Deleting or backdating a marker suppresses a wake too.
-            ("O:MED:(A;;FA;;;ME)(A;;SD;;;BU)", "Users"),
-            ("O:MED:(A;;FA;;;ME)(A;;0x100;;;BU)", "Users"),
+            ("O:MED:(A;;FA;;;ME)(A;;SD;;;BU)", "S-1-5-32-545"),
+            ("O:MED:(A;;FA;;;ME)(A;;0x100;;;BU)", "S-1-5-32-545"),
         ] {
-            match rule(sddl) {
-                Some(MarkerDistrust::Writer(name)) => assert!(name.contains(who), "{sddl}: {name}"),
-                other => panic!("{sddl}: {other:?}"),
-            }
+            expect_writer(rule(sddl), who, sddl);
         }
         assert_eq!(
             rule("O:MED:NO_ACCESS_CONTROL"),
@@ -1376,13 +1814,12 @@ mod tests {
                 0x0000_0000,
             ]
         };
-        match marker_distrust_raw(&mut well_formed()) {
-            Some(MarkerDistrust::Writer(name)) => assert!(name.contains("Everyone"), "{name}"),
-            other => panic!("{other:?}"),
-        }
-        let unreadable = Some(MarkerDistrust::Writer(
-            "an access rule that cannot be read".into(),
-        ));
+        expect_writer(
+            marker_distrust_raw(&mut well_formed()),
+            "S-1-1-0",
+            "well-formed list",
+        );
+        let unreadable = Some(MarkerDistrust::Unreadable);
         // More entries counted than the list holds.
         let mut counted = well_formed();
         counted[1] = 0x0000_0002;
@@ -1508,21 +1945,73 @@ mod tests {
     fn windows_marker_refusal_names_the_path_the_writer_and_the_fix() {
         use crate::credentials::windows_security::MarkerDistrust;
         let path = Path::new(r"C:\Users\<user>\.pseudolife-mcp\digests\k.wake");
-        let line = marker_refusal_windows(path, &MarkerDistrust::Writer("Everyone".into()));
+        let everyone = crate::credentials::windows_security::sid_name_of("S-1-1-0");
+        let writer = MarkerDistrust::Writer {
+            name: everyone.clone(),
+            sid: "S-1-1-0".into(),
+        };
+        let line = marker_refusal_windows(path, &writer);
         assert!(line.contains(&path.display().to_string()), "{line}");
-        assert!(line.contains("Everyone can change or delete it"), "{line}");
+        assert!(
+            line.contains(&format!("{everyone} can change or delete it")),
+            "{line}"
+        );
         assert!(
             line.contains(r#"icacls "C:\Users\<user>\.pseudolife-mcp\digests" /inheritance:r"#),
             "{line}"
         );
-        // The fix names this account: %USERNAME% expands only in cmd, and
-        // agents run the line in Git Bash or PowerShell.
-        let me = crate::credentials::windows_security::current_user_name().unwrap();
+        // Accounts are named by SID: no shell variable, no localised or
+        // special-character name to quote.
+        let me = crate::credentials::windows_security::current_user_sid().unwrap();
         assert!(
-            line.contains(&format!("/grant:r \"{me}:(OI)(CI)F\"")),
+            line.contains(&format!(
+                "/grant:r \"*{me}:(OI)(CI)F\" /remove:g \"*S-1-1-0\""
+            )),
             "{line}"
         );
         assert!(!line.contains('%') && !line.contains("del \""), "{line}");
+        // An entry the rule cannot read gets no command that cannot remove it.
+        let line = marker_refusal_windows(path, &MarkerDistrust::Unreadable);
+        assert!(
+            line.contains("cannot read")
+                && line.contains("Fix: delete that file")
+                && !line.contains("icacls"),
+            "{line}"
+        );
+        let line = folder_refusal_windows(Path::new(r"C:\d"), &MarkerDistrust::Unreadable);
+        assert!(
+            line.contains(
+                r"in PowerShell: icacls 'C:\d' /reset; icacls 'C:\d' /inheritance:r /grant:r '*"
+            ),
+            "{line}"
+        );
+        // A path a shell would expand gets the PowerShell form, single-quoted.
+        let plain = private_folder_command(r"D:\data\a b\digests", None);
+        assert!(
+            plain.starts_with(r#"icacls "D:\data\a b\digests" "#),
+            "{plain}"
+        );
+        let dollar = private_folder_command(r"D:\data\x$y\digests", Some("S-1-1-0"));
+        assert!(
+            dollar.starts_with(
+                r"in PowerShell: icacls 'D:\data\x$y\digests' /inheritance:r /grant:r '*"
+            ) && dollar.ends_with("/remove:g '*S-1-1-0'"),
+            "{dollar}"
+        );
+        // A drive root's trailing backslash cannot escape the closing quote.
+        let drive = private_folder_command(r"D:\", None);
+        assert!(drive.starts_with(r#"icacls "D:\." "#), "{drive}");
+        // PowerShell treats curly quotes as quotes too.
+        let curly = private_folder_command("D:\\data\\o\u{2019}n\\d", None);
+        assert!(curly.starts_with("in PowerShell: "), "{curly}");
+        let quoted = private_folder_command(r"D:\data\o'n\digests", None);
+        assert!(quoted.contains(r"'D:\data\o''n\digests'"), "{quoted}");
+        for percent in [r"D:\data\a%b%\d", r"D:\data\a!b\d"] {
+            assert!(
+                private_folder_command(percent, None).starts_with("in PowerShell: "),
+                "{percent}"
+            );
+        }
         let line = marker_refusal_windows(path, &MarkerDistrust::Owner(r"HOST\other".into()));
         assert!(
             line.contains(r"owned by HOST\other, not this user")
@@ -1535,8 +2024,9 @@ mod tests {
             "{line}"
         );
         for distrust in [
-            MarkerDistrust::Writer("Everyone".into()),
+            writer,
             MarkerDistrust::Owner("other".into()),
+            MarkerDistrust::Unreadable,
             MarkerDistrust::NoDacl,
         ] {
             let line = marker_refusal_windows(path, &distrust);

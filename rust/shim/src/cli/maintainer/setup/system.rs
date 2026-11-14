@@ -10,44 +10,22 @@ pub(super) enum Tier {
     Docker(OsString, String),
 }
 
+/// `maintainer_setup.which(name)`, `program_lookup.find_program`: only an
+/// absolute `PATH` directory, never the current directory.
 pub(super) fn which(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    let suffixes = if cfg!(windows) {
-        vec!["", ".exe", ".cmd", ".bat"]
-    } else {
-        vec![""]
-    };
-    for dir in std::env::split_paths(&paths) {
-        for suffix in &suffixes {
-            let path = dir.join(format!("{name}{suffix}"));
-            if path.is_file() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if std::fs::metadata(&path).ok()?.permissions().mode() & 0o111 == 0 {
-                        continue;
-                    }
-                }
-                return Some(path);
-            }
-        }
-    }
-    None
+    crate::cli::program_lookup::find_program_path(name)
 }
-pub(super) fn tailscale() -> Option<PathBuf> {
-    which("tailscale").or_else(|| {
-        if cfg!(windows) {
-            std::env::var_os("ProgramW6432")
-                .or_else(|| std::env::var_os("ProgramFiles"))
-                .map(PathBuf::from)
-                .map(|p| p.join("Tailscale").join("tailscale.exe"))
-                .filter(|p| p.is_file())
-        } else if cfg!(target_os = "macos") {
-            let path = PathBuf::from("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
-            path.is_file().then_some(path)
-        } else {
-            None
-        }
+
+/// `expose_cli.find_tailscale()`: `which("tailscale")`, then the default
+/// install location (a relative Program Files value is passed over).
+pub(super) fn tailscale() -> Result<Option<PathBuf>> {
+    if let Some(found) = which("tailscale") {
+        return Ok(Some(found));
+    }
+    crate::cli::program_lookup::tailscale_install_location().map_err(|()| {
+        Error::refused(
+            "ProgramW6432 or ProgramFiles holds a value this command cannot read (text that is not UTF-8, or a bare share root such as \\\\server\\): set it to the Program Files folder (C:\\Program Files), then retry",
+        )
     })
 }
 

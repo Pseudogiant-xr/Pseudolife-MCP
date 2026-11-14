@@ -120,7 +120,7 @@ STATIC_EXCLUDE = []
 # row_commands() sees no --row there: the row list and how the golden pass is
 # built from it are pinned here instead.
 W1C_ROWS = ("transfer", "test_login", "doctor", "connect", "maintainer", "invite", "pair",
-            "move", "tunnel", "console", "conductor_watch", "coordination_recovery", "maintainer_setup", "restore")
+            "move", "tunnel", "console", "expose", "conductor_watch", "coordination_recovery", "maintainer_setup", "restore")
 W1C_LINES = (
     "$golden = $rows | ForEach-Object { '--row'; $_ }",
 )
