@@ -259,7 +259,8 @@ fn the_embedded_tier_is_refused_before_any_effect() {
             .join("Local")
             .join("pseudolife-mcp")
     } else if cfg!(target_os = "macos") {
-        home.join("Library")
+        home.path()
+            .join("Library")
             .join("Application Support")
             .join("pseudolife-mcp")
     } else {

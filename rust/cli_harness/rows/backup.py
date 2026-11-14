@@ -392,9 +392,32 @@ def discovery_traceback(obs: dict) -> None:
             obs["stderr"] = base64.b64encode(match["error"]).decode()
 
 
+_PG_DUMP_MISSING = re.compile(
+    rb"\Abackup failed: pg_dump not found \xe2\x80\x94 install PostgreSQL client tools or the "
+    rb"pseudolife-mcp\[lite\] extra \(whose embedded runtime bundles it\)\.(?P<newline>\r?\n)\Z")
+
+
+@normalize.rule("backup-pg-dump-missing-native-text")
+def pg_dump_missing_native_text(obs: dict) -> None:
+    """Oracle only (``ORACLE_RULES``): the frozen oracle's missing-pg_dump
+    refusal also suggests the retired lite extra; the native one names the
+    PostgreSQL client tools alone. Only a stderr that is exactly the
+    oracle's line changes, keeping its line ending; the exit, the files and
+    the native side printing the oracle's words still compare."""
+    stderr = base64.b64decode(obs["stderr"])
+    match = _PG_DUMP_MISSING.match(stderr)
+    if match:
+        native = (b"backup failed: pg_dump not found \xe2\x80\x94 install the PostgreSQL client tools."
+                  + match["newline"])
+        obs["stderr"] = base64.b64encode(native).decode()
+
+
+normalize.ORACLE_RULES.add("backup-pg-dump-missing-native-text")
+
 # ---------------------------------------------------------------- cases
 
 RULES = ("backup-files",)
+PG_DUMP_MISSING_RULES = RULES + ("backup-pg-dump-missing-native-text",)
 
 
 @normalize.rule("backup-restoration")
@@ -531,10 +554,11 @@ def _cases() -> list[Case]:
         Case("dsn-pg-dump-relative-path-skipped", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://unused",
                   "PATH": os.pathsep.join(["", ".", "bin", f"{{HOME}}{sep}no-bin"])},
-             setup=with_decoy_pg_dump(tree()), rules=RULES, programs=("pg_dump", "docker")),
+             setup=with_decoy_pg_dump(tree()), rules=PG_DUMP_MISSING_RULES,
+             programs=("pg_dump", "docker")),
         Case("dsn-pg-dump-missing", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": dsn, **no_pg_dump},
-             setup=tree(), platforms=dsn_platforms, rules=RULES, programs=("pg_dump",)),
+             setup=tree(), platforms=dsn_platforms, rules=PG_DUMP_MISSING_RULES, programs=("pg_dump",)),
         Case("dsn-pg-dump-fails", ["backup", *data],
              env={"PSEUDOLIFE_MCP_DATABASE_URL": absent, **no_pg_dump},
              setup=with_pg0(tree()), after=drop_pg0, platforms=dsn_platforms, rules=RULES, timeout=60,
