@@ -1165,8 +1165,10 @@ default, the macOS default, or on Linux a desktop browser when `DISPLAY` or
 client does not start every such browser yet: on macOS, and on Linux when
 the desktop's default is a browser Python starts directly (Firefox or
 Chrome, say) rather than through `xdg-open`, it stops with `mode 'console'
-is deferred in this candidate` before minting a code. Set `BROWSER`, or use
-`--no-open` and open the printed link yourself. `pseudolife-mcp update` names it when the daemon offers sign-in and
+is deferred in this candidate` before minting a code. Use `--no-open` and
+open the printed link yourself, or set `BROWSER` to a command line of the
+form `<program> %s &`; a bare browser name there (`firefox`, say) stops
+the same way. `pseudolife-mcp update` names it when the daemon offers sign-in and
 no browser is signed in yet, and the update that moves the bank to schema
 v59 says, once, which principals are now treated as yours.
 
