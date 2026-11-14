@@ -9,24 +9,18 @@ use serde_json::json;
 use std::{ffi::OsStr, process::Command};
 
 #[test]
-fn daemon_launch_has_no_implicit_python_and_accepts_only_explicit_settings() {
+fn daemon_launch_never_starts_python_and_accepts_only_a_serve_command() {
     assert!(DaemonLaunch::from_settings(None, None).unwrap().is_none());
     assert!(
         DaemonLaunch::from_settings(Some(OsStr::new("")), None)
             .unwrap()
             .is_none()
     );
-    let python = DaemonLaunch::from_settings(Some(OsStr::new("fixture-python")), None)
-        .unwrap()
-        .unwrap();
-    assert_eq!(python.program, OsStr::new("fixture-python"));
-    assert_eq!(
-        python
-            .args
-            .iter()
-            .map(|arg| arg.to_str().unwrap())
-            .collect::<Vec<_>>(),
-        ["-m", "pseudolife_memory.cli", "serve"]
+    // PSEUDOLIFE_MCP_PYTHON no longer starts a Python daemon.
+    assert!(
+        DaemonLaunch::from_settings(Some(OsStr::new("fixture-python")), None)
+            .unwrap()
+            .is_none()
     );
     let explicit = DaemonLaunch::from_settings(
         Some(OsStr::new("ignored-python")),
@@ -113,4 +107,76 @@ fn remote_url_never_launches_the_python_updater() {
         "remote callback attempted a client update"
     );
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn an_unconfigured_or_python_only_shim_names_the_docker_tier_and_the_serve_command() {
+    use pseudolife_stdio::cli::retired::{DOCKER_INSTALL, DOCKER_START};
+    use pseudolife_stdio::lifecycle::{
+        NO_CONFIGURED_SPAWN_NOTE, PYTHON_SPAWN_RETIRED_NOTE, spawn_settings,
+    };
+    for note in [NO_CONFIGURED_SPAWN_NOTE, PYTHON_SPAWN_RETIRED_NOTE] {
+        assert!(note.contains(DOCKER_START), "{note}");
+        assert!(note.contains(DOCKER_INSTALL), "{note}");
+        assert!(note.contains("PSEUDOLIFE_MCP_SERVE_COMMAND"), "{note}");
+    }
+    assert!(!NO_CONFIGURED_SPAWN_NOTE.contains("PSEUDOLIFE_MCP_PYTHON"));
+    assert!(PYTHON_SPAWN_RETIRED_NOTE.contains("PSEUDOLIFE_MCP_PYTHON no longer starts"));
+    // Neither setting: nothing starts, and the reason is the unconfigured note.
+    let (launch, reason) = spawn_settings(None, None);
+    assert!(launch.is_none());
+    assert_eq!(reason, Some(NO_CONFIGURED_SPAWN_NOTE));
+    // Python alone: nothing starts, and the reason names the retired setting.
+    let (launch, reason) = spawn_settings(Some(OsStr::new("fixture-python")), None);
+    assert!(launch.is_none());
+    assert_eq!(reason, Some(PYTHON_SPAWN_RETIRED_NOTE));
+    // The near miss: a serve command still starts a daemon, Python or not.
+    for python in [None, Some(OsStr::new("fixture-python"))] {
+        let (launch, reason) = spawn_settings(python, Some(r#"["fixture-serve", "--flag"]"#));
+        let launch = launch.expect("a serve command starts a daemon");
+        assert_eq!(launch.program, OsStr::new("fixture-serve"));
+        assert_eq!(reason, None);
+    }
+}
+
+#[test]
+fn an_unreachable_unconfigured_daemon_tells_the_client_how_to_start_one() {
+    use pseudolife_stdio::lifecycle::{
+        INVALID_SERVE_COMMAND_NOTE, NO_CONFIGURED_SPAWN_NOTE, PYTHON_SPAWN_RETIRED_NOTE,
+        unreachable_remedy,
+    };
+    let remedy = unreachable_remedy(Some(NO_CONFIGURED_SPAWN_NOTE)).unwrap();
+    assert!(
+        remedy.contains(pseudolife_stdio::cli::retired::DOCKER_START),
+        "{remedy}"
+    );
+    assert!(remedy.contains("PSEUDOLIFE_MCP_SERVE_COMMAND"), "{remedy}");
+    assert!(
+        unreachable_remedy(Some(PYTHON_SPAWN_RETIRED_NOTE))
+            .unwrap()
+            .contains("PSEUDOLIFE_MCP_PYTHON no longer starts")
+    );
+    // A configured launch adds nothing here; a serve command that failed to
+    // parse gets its own remedy.
+    assert_eq!(unreachable_remedy(None), None);
+    assert!(
+        unreachable_remedy(Some(INVALID_SERVE_COMMAND_NOTE))
+            .unwrap()
+            .contains("is not a JSON argv array")
+    );
+    // The note reaches the instructions the client shows its agent.
+    let runtime = Runtime {
+        url: "http://127.0.0.1:9".into(),
+        provider: CredentialProvider::new(None, None).unwrap(),
+        session: SessionIdentity::new(None, None),
+        health: None,
+        instructions_note: remedy.clone(),
+        cache: None,
+    };
+    let shown = runtime.instructions(None, false, "", false).unwrap();
+    assert!(
+        shown.contains("did not answer when this session started"),
+        "{shown}"
+    );
+    assert!(shown.contains(&remedy), "{shown}");
 }

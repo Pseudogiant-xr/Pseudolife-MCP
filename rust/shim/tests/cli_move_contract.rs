@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
 //! `move` without a daemon: argparse help and usage, the refusals made
-//! before any effect, and the deferral of every argv that passes them. The
-//! differential proof against the Python oracle is the CLI harness
-//! (`rust/cli_harness --row move`).
+//! before any effect, the native answers to the argv that passes them (a
+//! dry run's own refusals, and its preflight refusing when no ssh is on an
+//! absolute PATH entry), and the deferral of shapes the native parser does
+//! not take. The differential proof against the Python oracle is the CLI
+//! harness (`rust/cli_harness --row move`); the dry run against both hosts
+//! is unit-tested in `restore_cli/move_native/tests.rs`.
 #[path = "common/cli.rs"]
 mod cli;
 use std::{
@@ -18,6 +21,19 @@ const BAD_TO: &str = "move: --to takes an ssh target such as root@box or a ~/.ss
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
+const NOT_DRY: &str = "move: the native client plans a move but does not perform one yet: run it with --dry-run to check both hosts and print the plan; the move itself needs the Python client's move for now (pseudolife-mcp 0.23.x installed with pip or pipx). Nothing was changed\n";
+const URL_REQUIRED: &str = "move: --target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765. Nothing was changed\n";
+const NO_CHECKOUT: &str = "move: --target-checkout is not supported: move goes to an installed (release) Docker bank on the target, with the native pseudolife-mcp client there; drop --target-checkout. Nothing was changed\n";
+const NO_SSH: &str = "move: no ssh program is on PATH (only absolute PATH entries are searched); install the OpenSSH client, then retry. Nothing was changed\n";
+/// A dry run that passes every argv check.
+const DRY: &[&str] = &[
+    "--to",
+    "root@box",
+    "--target-url",
+    "http://100.64.0.2:8765",
+    "--no-keep-tokens",
+    "--dry-run",
+];
 const USAGE: &str = "usage: pseudolife-mcp move [-h] --to SSH-TARGET [--target-checkout PATH]
                            [--target-url URL] [--no-keep-tokens] [--resume]
                            [--dry-run] [--expose-target] [--target-release]
@@ -98,35 +114,102 @@ fn listing(home: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn every_argv_that_passes_validation_defers_without_a_connection() {
+fn valid_argv_gets_the_native_answer_without_a_connection() {
     let home = Home::new("valid");
     let (socket, url) = listener();
-    for args in [
-        &["--to", "root@box"][..],
-        &["--to", "root@box", "--dry-run"],
-        &["--to", "root@box", "--resume", "--yes"],
-        &["--to", "root@box", "--json"],
-        &[
-            "--to",
-            "root@box",
-            "--target-checkout",
-            "/srv/pl",
-            "--target-url",
-            "http://100.64.0.2:8765",
-            "--no-keep-tokens",
-            "--resume",
-            "--dry-run",
-            "--yes",
-            "--json",
-        ],
-        &["--to", "box", "--target-url", "https://box.example.com/"],
-        &["--to", "box", "--target-checkout", "a\tb"],
+    for (args, code, stderr) in [
+        (&["--to", "root@box"][..], 2, NOT_DRY),
+        (&["--to", "root@box", "--dry-run"], 2, URL_REQUIRED),
+        (&["--to", "root@box", "--resume", "--yes"], 2, NOT_DRY),
+        (&["--to", "root@box", "--json"], 2, NOT_DRY),
+        (
+            &[
+                "--to",
+                "root@box",
+                "--target-checkout",
+                "/srv/pl",
+                "--target-url",
+                "http://100.64.0.2:8765",
+                "--no-keep-tokens",
+                "--resume",
+                "--dry-run",
+                "--yes",
+                "--json",
+            ],
+            2,
+            NO_CHECKOUT,
+        ),
+        (
+            &["--to", "box", "--target-url", "https://box.example.com/"],
+            2,
+            NOT_DRY,
+        ),
+        (&["--to", "box", "--target-checkout", "a\tb"], 2, NOT_DRY),
+        (
+            &["--to", "box", "--target-url", "http://[::1]:8765"],
+            2,
+            NOT_DRY,
+        ),
+        // Every argv check passes: the preflight's first need, ssh, is not
+        // on PATH (it holds only the empty home).
+        (DRY, 4, NO_SSH),
     ] {
         let output = run(&home.0, &url, "80", args);
-        assert_answer(&output, 1, "", DEFERRED);
+        assert_answer(&output, code, "", stderr);
         assert_quiet(&socket);
     }
-    assert!(listing(&home.0).is_empty(), "the deferral wrote a file");
+    // Under --json the preflight's refusal is one JSON document on stdout.
+    let output = run(&home.0, &url, "80", &[DRY, &["--json"]].concat());
+    assert_eq!(output.status.code(), Some(4));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["dry_run"], true);
+    assert_eq!(report["changed"], false);
+    assert_eq!(
+        report["error"],
+        NO_SSH.trim_start_matches("move: ").trim_end()
+    );
+    assert_quiet(&socket);
+    assert!(
+        listing(&home.0).is_empty(),
+        "the native answer wrote a file"
+    );
+}
+
+#[test]
+fn an_ssh_planted_in_the_working_directory_is_never_run() {
+    let home = Home::new("planted");
+    let (socket, url) = listener();
+    let (name, body): (&str, &[u8]) = if cfg!(windows) {
+        ("ssh.cmd", b"@echo ran> planted-ran\r\n")
+    } else {
+        ("ssh", b"#!/bin/sh\ntouch planted-ran\n")
+    };
+    let planted = home.0.join(name);
+    fs::write(&planted, body).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&planted, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // PATH names the working directory only by relative and empty entries.
+    let separator = if cfg!(windows) { ";" } else { ":" };
+    let mut command: Command =
+        cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
+    let output = command
+        .arg("move")
+        .args(DRY)
+        .current_dir(&home.0)
+        .env("HOME", &home.0)
+        .env("USERPROFILE", &home.0)
+        .env("PATH", [".", "", "bin"].join(separator))
+        .env("COLUMNS", "80")
+        .env("PSEUDOLIFE_MCP_DAEMON_URL", &url)
+        .output()
+        .unwrap();
+    assert_answer(&output, 4, "", NO_SSH);
+    assert!(!home.0.join("planted-ran").exists(), "the planted ssh ran");
+    assert_quiet(&socket);
 }
 
 #[test]
@@ -141,7 +224,6 @@ fn argparse_shapes_defer() {
         &["--dry", "--to", "root@box"],
         &["--yes", "--yes", "--to", "root@box"],
         &["--to", "root@box", "extra"],
-        &["--to", "box", "--target-url", "http://[::1]:8765"],
     ] {
         assert_answer(&run(&home.0, &url, "80", args), 1, "", DEFERRED);
     }
@@ -201,13 +283,26 @@ fn refusals_before_any_effect() {
     ] {
         assert_answer(&run(&home.0, &url, "80", args), 2, "", stderr);
     }
-    // Under --json, Mover.run's refusals are a JSON report with a fresh move id.
-    for args in [
-        &["--json", "--to", "root\u{1}box"][..],
-        &["--to", "box", "--target-checkout", "x\n", "--json"],
-    ] {
-        assert_answer(&run(&home.0, &url, "80", args), 1, "", DEFERRED);
-    }
+    // Python reports Mover.run's refusals under --json as a JSON report;
+    // the native client answers these argv checks as text, as it does
+    // without --json.
+    assert_answer(
+        &run(&home.0, &url, "80", &["--json", "--to", "root\u{1}box"]),
+        2,
+        "",
+        BAD_TO,
+    );
+    assert_answer(
+        &run(
+            &home.0,
+            &url,
+            "80",
+            &["--to", "box", "--target-checkout", "x\n", "--json"],
+        ),
+        2,
+        "",
+        NOT_DRY,
+    );
     assert_quiet(&socket);
     assert!(listing(&home.0).is_empty(), "a refusal wrote a file");
 }

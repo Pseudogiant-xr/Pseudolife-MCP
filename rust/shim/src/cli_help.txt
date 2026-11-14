@@ -9,8 +9,8 @@ modes:
   board-audit    export, verify, redact or stats on the agent board's audit log
                  (operator-only; reads PSEUDOLIFE_MCP_DATABASE_URL, else runs
                  inside the pseudolife-mcp-daemon container)
-  serve          run the HTTP memory daemon (deployment mode)
-  embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
+  serve          refused: the daemon is pseudolife-daemon, in the Docker tier
+  embedded       refused: retired with file mode
   briefing       print the session-start briefing (for a SessionStart hook;
                  --hook-json emits the memory core + bounded briefing as
                  Claude Code/Codex hook JSON; --coordination prints the

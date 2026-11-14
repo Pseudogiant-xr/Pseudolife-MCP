@@ -40,13 +40,13 @@
   },
   "export-no-database": {
    "home": null,
-   "utc_offset": 0,
+   "utc_offset": 39600,
    "exit": 1,
    "stdout": "",
-   "stderr": "bm8gZGF0YWJhc2UgY29uZmlndXJlZCDigJQgc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCAoRG9ja2VyIHRpZXI6IHBvc3RncmVzcWw6Ly9wc2V1ZG9saWZlOjxQT1NUR1JFU19QQVNTV09SRCBmcm9tIG9wcy8uZW52PkAxMjcuMC4wLjE6NTQzMy9wc2V1ZG9saWZlX21lbW9yeSkgb3IgdXNlIGEgbGl0ZSBkYXRhIGRpciB0aGF0IGhvbGRzIGEgYmFuay4K",
+   "stderr": "bm8gZGF0YWJhc2UgY29uZmlndXJlZCDigJQgc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCAoRG9ja2VyIHRpZXI6IHBvc3RncmVzcWw6Ly9wc2V1ZG9saWZlOjxQT1NUR1JFU19QQVNTV09SRCBmcm9tIG9wcy8uZW52PkAxMjcuMC4wLjE6NTQzMy9wc2V1ZG9saWZlX21lbW9yeSkuCg==",
    "window": [
-    1793646381.845473,
-    1793646382.2731273
+    1794625798.8134031,
+    1794625798.815468
    ],
    "files": {
     "cwd": "dir"
@@ -57,13 +57,13 @@
   },
   "import-no-database": {
    "home": null,
-   "utc_offset": 0,
+   "utc_offset": 39600,
    "exit": 1,
    "stdout": "",
-   "stderr": "bm8gZGF0YWJhc2UgY29uZmlndXJlZCDigJQgc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCAoRG9ja2VyIHRpZXI6IHBvc3RncmVzcWw6Ly9wc2V1ZG9saWZlOjxQT1NUR1JFU19QQVNTV09SRCBmcm9tIG9wcy8uZW52PkAxMjcuMC4wLjE6NTQzMy9wc2V1ZG9saWZlX21lbW9yeSkgb3IgdXNlIGEgbGl0ZSBkYXRhIGRpciB0aGF0IGhvbGRzIGEgYmFuay4K",
+   "stderr": "bm8gZGF0YWJhc2UgY29uZmlndXJlZCDigJQgc2V0IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCAoRG9ja2VyIHRpZXI6IHBvc3RncmVzcWw6Ly9wc2V1ZG9saWZlOjxQT1NUR1JFU19QQVNTV09SRCBmcm9tIG9wcy8uZW52PkAxMjcuMC4wLjE6NTQzMy9wc2V1ZG9saWZlX21lbW9yeSkuCg==",
    "window": [
-    1793646382.2736545,
-    1793646382.6897373
+    1794625798.8161705,
+    1794625798.8177233
    ],
    "files": {
     "cwd": "dir"
@@ -28187,6 +28187,20 @@
     "cwd": "0o755",
     "cwd/bank.zip": "0o644"
    }
+  }
+ },
+ "recorded_from_candidate": {
+  "export-no-database": {
+   "commit": "b56cd2c365c4251be3e12317a59865479bc9488b",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "1633d4f30e805b2e56025e37db34b550f9aeeb4e2b6c7a9d869f2ef621a19ad1"
+  },
+  "import-no-database": {
+   "commit": "b56cd2c365c4251be3e12317a59865479bc9488b",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "1633d4f30e805b2e56025e37db34b550f9aeeb4e2b6c7a9d869f2ef621a19ad1"
   }
  }
 }

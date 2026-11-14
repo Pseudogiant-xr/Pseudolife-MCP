@@ -5,10 +5,12 @@ is frozen: when a Rust change alters behaviour on purpose, its golden is
 recorded again from the candidate, through the replay's own path, so that
 what is written is exactly what the replay will compare. The runners that
 support it (``w2e.py golden --record-candidate``, ``run.py golden
---record-candidate``) share the rules here: a dry run unless ``--write``,
-every scenario reported as unchanged, changed (with the replay's own
-difference) or new, a refusal for a deferral or an entry that would not
-replay against the run it came from, and provenance that replay never reads.
+--record-candidate``, and ``schema_cases.py``, ``startup_cases.py`` and
+``clock_retry_cases.py --record-candidate`` through ``Recording`` below)
+share the rules here: a dry run unless ``--write``, every scenario reported
+as unchanged, changed (with the replay's own difference) or new, a refusal
+for a deferral or an entry that would not replay against the run it came
+from, and provenance that replay never reads.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -76,3 +79,224 @@ def write_json(path: Path, data: dict, *, newline_at_end: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, indent=1, sort_keys=True) + ("\n" if newline_at_end else "")
     path.write_text(text, encoding="utf-8", newline="\n")
+
+
+# ---- the startup harnesses' goldens (schema, startup hydration, clock retry) --
+#
+# Their goldens map a case to a list of stages (or, for clock-retry.json, hold
+# one case as sections), and one file serves both operating systems, so after
+# ``--write`` the golden is checked with ``--check-goldens --mutants`` on this
+# OS and the other. On top of the rules above, a case is refused when its run
+# failed the harness's own checks (clock, idempotence, epoch, refusal state,
+# the expected outcome) or produced no entry, or when its entry names a host
+# path; a whole run is refused with ``PSEUDOLIFE_DAEMON_MUTANT`` set.
+MUTANT_ENV = "PSEUDOLIFE_DAEMON_MUTANT"
+
+
+def refuse_mutant_environment() -> str | None:
+    """Why a recording must not start: a mutant selected in the environment."""
+    if os.environ.get(MUTANT_ENV):
+        return (f"{MUTANT_ENV}={os.environ[MUTANT_ENV]} is set, so the candidate would run a source "
+                "mutant and its state would become the golden; unset it and record again")
+    return None
+
+
+def host_paths(entry) -> list[str]:
+    """The host paths an entry names, raw or JSON-escaped: the checkout, the
+    home directory and the temporary directory. A golden must hold none."""
+    text = json.dumps(entry, allow_nan=False)
+    found = []
+    for path in {str(REPO), str(Path.home()), tempfile.gettempdir()}:
+        if len(path) < 4:
+            continue
+        spellings = {path, path.replace("\\", "/"), json.dumps(path)[1:-1]}
+        if any(spelling in text for spelling in spellings):
+            found.append(path)
+    return sorted(found)
+
+
+def round_trip(entry) -> list[str]:
+    """The differences between an entry and its JSON round trip: the entry
+    is exactly what --check-goldens compares, so it must survive the file."""
+    import dbstate
+    return dbstate.diff(entry, json.loads(json.dumps(entry, allow_nan=False)))
+
+
+def labelled(differences: list[str]) -> list[str]:
+    """dbstate.diff names its sides python and rust; here they are the
+    committed golden and the candidate's observation."""
+    swaps = (("only in python", "only in golden"), ("only in rust", "only in candidate"),
+             (": python ", ": golden "), (" vs rust ", " vs candidate "))
+    out = []
+    for difference in differences:
+        for old, new in swaps:
+            difference = difference.replace(old, new)
+        out.append(difference)
+    return out
+
+
+def section_diff(want, got, path: str) -> list[str]:
+    """dbstate.diff, descending into lists of the same length: dbstate.diff
+    compares a list outside ``/rows`` as one value, printing only its first
+    300 characters, so a change late in a stage would show identical
+    prefixes. A ``/rows`` list keeps dbstate's row-set comparison."""
+    import dbstate
+    if isinstance(want, dict) and isinstance(got, dict):
+        out = []
+        for key in sorted(set(want) | set(got)):
+            if key in want and key in got:
+                out += section_diff(want[key], got[key], f"{path}/{key}")
+            else:
+                out += dbstate.diff({key: want[key]} if key in want else {},
+                                    {key: got[key]} if key in got else {}, path)
+        return out
+    if (isinstance(want, list) and isinstance(got, list) and len(want) == len(got)
+            and not path.endswith("/rows")):
+        return [d for index, (left, right) in enumerate(zip(want, got))
+                for d in section_diff(left, right, f"{path}/{index}")]
+    return dbstate.diff(want, got, path)
+
+
+class Recording:
+    """One golden file's candidate recording: classify each case, then write."""
+
+    def __init__(self, golden: Path, sections: tuple[str, ...], candidate: Path, *, whole: bool,
+                 defined: list[str], single: bool = False):
+        """``sections`` are the golden's top-level maps from case to entry;
+        with ``single`` the golden holds one case and each section is that
+        case's entry itself (clock-retry.json)."""
+        self.golden, self.sections, self.candidate = golden, sections, candidate
+        self.whole, self.defined, self.single = whole and not single, defined, single
+        self.committed = json.loads(golden.read_text(encoding="utf-8")) if golden.is_file() else {}
+        self.report: dict = {"unchanged": [], "changed": [], "new": [], "removed": [], "refused": {},
+                             "written": False}
+        self.write = False   # set by the caller before observing, for the per-case lines
+        self.updates: dict[str, dict] = {}
+
+    def entry(self, case: str) -> dict | None:
+        """The committed entry of ``case``: each section's value, or None if
+        any section lacks it."""
+        values = {}
+        if self.single:
+            return ({section: self.committed[section] for section in self.sections}
+                    if all(section in self.committed for section in self.sections) else None)
+        for section in self.sections:
+            table = self.committed.get(section)
+            if not isinstance(table, dict) or case not in table:
+                return None
+            values[section] = table[case]
+        return values
+
+    def observe(self, case: str, observed: dict | None, failures: list[str], recheck) -> None:
+        """Class one case. ``observed`` maps each section to the candidate's
+        entry (None when the run produced none); ``failures`` are the
+        harness's own checks that failed; ``recheck(observed)`` returns the
+        differences between the entry and the comparison of the run it came
+        from, which must be empty."""
+        import dbstate
+        want = self.entry(case)
+        if observed is None or failures:
+            why = ("its observation is vacuous: the run produced no entry" if observed is None else
+                   "its observation failed the harness's own checks: " + "; ".join(failures[:5]))
+            self.report["refused"][case] = why
+            print(summary_line(case, "", self.write, why), flush=True)
+            return
+        named = host_paths(observed)
+        if named:
+            why = ("its entry names a host path (" + ", ".join("<home>" if p == str(Path.home()) else p
+                                                         for p in named) + "), which a golden must not hold")
+            self.report["refused"][case] = why
+            print(summary_line(case, "", self.write, why), flush=True)
+            return
+        again = recheck(observed)
+        if again:
+            why = "the entry would not check against the run it came from: " + "; ".join(again[:3])
+            self.report["refused"][case] = why
+            print(summary_line(case, "", self.write, why), flush=True)
+            return
+        if want is not None:
+            differences = labelled([d for section in self.sections
+                                    for d in section_diff(want[section], observed[section], f"/{section}")])
+            kind = classify(True, differences)
+            if kind == "unchanged":
+                self.report["unchanged"].append(case)
+                print(summary_line(case, kind, False, None), flush=True)
+                return
+            for difference in differences[:20]:
+                print(f"        {difference}")
+        else:
+            kind = "new"
+            for section in self.sections:
+                print(f"        {section}: {json.dumps(observed[section])[:400]}")
+        self.report[kind].append(case)
+        print(summary_line(case, kind, self.write, None), flush=True)
+        self.updates[case] = observed
+
+    def finish(self, write: bool, check_command: str) -> int:
+        """Write or report; the exit status the harness returns."""
+        if not self.whole and not self.single:
+            observed = set(self.report["unchanged"]) | set(self.updates) | set(self.report["refused"])
+            kept = [case for case in self.defined if self.entry(case) is not None and case not in observed]
+            if kept:
+                print(f"  kept as recorded (not selected): {', '.join(kept)}", flush=True)
+        if self.whole:
+            recorded = set()
+            for section in self.sections:
+                recorded |= set(self.committed.get(section) or {})
+            self.report["removed"] = sorted(recorded - set(self.defined))
+            for case in self.report["removed"]:
+                print(f"  removed {case} (recorded, but no longer a case)", flush=True)
+        if self.report["refused"]:
+            print(f"  refused {len(self.report['refused'])} case(s): nothing written to {self.golden.name}",
+                  flush=True)
+            return 1
+        would_change = bool(self.updates or self.report["removed"])
+        if not would_change:
+            print(f"  {self.golden.name}: nothing to change", flush=True)
+            return 0
+        if not write:
+            print(f"  dry run: {self.golden.name} would change ({len(self.report['changed'])} changed, "
+                  f"{len(self.report['new'])} new, {len(self.report['removed'])} removed); review the "
+                  "differences above, then add --write", flush=True)
+            return 1
+        golden = self.committed
+        for section in self.sections:
+            if self.single:
+                for observed in self.updates.values():
+                    golden[section] = observed[section]
+                continue
+            table = dict(golden.get(section) or {})
+            for case in self.report["removed"]:
+                table.pop(case, None)
+            for case, observed in self.updates.items():
+                table[case] = observed[section]
+            golden[section] = table
+        stamp = provenance(self.candidate)
+        record = dict(golden.get(PROVENANCE_KEY) or {})
+        for case in self.updates:
+            record[case] = stamp
+        for case in self.report["removed"]:
+            record.pop(case, None)
+        golden[PROVENANCE_KEY] = record
+        write_json(self.golden, golden, newline_at_end=True)
+        self.report["written"] = True
+        print(f"  wrote {self.golden} ({len(self.updates)} case(s) from the candidate at "
+              f"{(stamp['commit'] or 'an unknown commit')[:12]}, Rust tree {stamp['rust_tree']}); one "
+              f"golden serves both operating systems, so check it here and on the other OS before "
+              f"committing: {check_command}", flush=True)
+        return 0
+
+
+def stage_failures(stage: dict, ignore: tuple[str, ...] = ()) -> list[str]:
+    """Every difference a stage's own checks report, by key."""
+    return [f"{key}: {difference}" for key, value in stage.items()
+            if key.endswith("_diffs") and key not in ignore
+            for difference in (value if isinstance(value, list) else
+                               [d for phase in value.values() for d in phase] if isinstance(value, dict) else [])]
+
+
+
+
+def dump_sorted(value: dict) -> str:
+    """The text ``write_json(..., newline_at_end=True)`` writes."""
+    return json.dumps(value, indent=1, sort_keys=True) + "\n"

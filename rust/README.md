@@ -54,9 +54,10 @@ records the main ones and their invariants. Review any change to an
 With no mode, or `shim` or `channel`, the binary is the stdio bridge: it reads
 the client's configuration environment and forwards daemon tool operations
 over fresh MCP HTTP sessions. Remote daemon URLs never start a process. A
-local daemon is started only from an explicit `PSEUDOLIFE_MCP_PYTHON`
-interpreter or a `PSEUDOLIFE_MCP_SERVE_COMMAND` JSON argv; with neither, the
-shim waits for a daemon and says so on stderr.
+local daemon is started only from a `PSEUDOLIFE_MCP_SERVE_COMMAND` JSON argv
+(`PSEUDOLIFE_MCP_PYTHON` no longer starts one); without it, the shim waits for
+a daemon and, when none answers, tells stderr and the client how to start the
+Docker tier's daemon.
 
 Every other mode is a `pseudolife-mcp` command. A command or shape that is not
 ported prints a deferral on stderr, usually `pseudolife-stdio: mode '<mode>'

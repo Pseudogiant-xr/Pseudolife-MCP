@@ -242,7 +242,11 @@ pub(super) fn read_journal(data_dir: &Path, plan: &Plan) -> Result<Option<Earlie
         let state = PathBuf::from(value["safety_state"].as_str()?);
         let dump = value["safety_dump"].as_str().map(PathBuf::from);
         Some(Earlier {
-            pair: Pair { dump, state },
+            pair: Pair {
+                dump,
+                state,
+                archive_retries: Vec::new(),
+            },
             started: value["started"]
                 .as_str()
                 .unwrap_or("an earlier run")
@@ -256,7 +260,7 @@ pub(super) fn read_journal(data_dir: &Path, plan: &Plan) -> Result<Option<Earlie
 
 fn unreadable_journal(path: &Path, why: &str) -> String {
     format!(
-        "the restore journal {} cannot be read ({why}); it records the safety backup an earlier interrupted restore of this bank took before it began replacing the bank. Keep the backup it names (pseudolife_memory-*.sql.gz and pseudolife_state-*.tgz in the safety directory), then delete the file and retry. Nothing was changed",
+        "the restore journal {} cannot be read ({why}); it records the safety backup an earlier interrupted restore of this bank took before it began replacing the bank. Keep the backup it names (pseudolife_safety_memory-*.sql.gz and pseudolife_safety_state-*.tgz in the safety directory, or pseudolife_memory-*.sql.gz and pseudolife_state-*.tgz from an earlier version), then delete the file and retry. Nothing was changed",
         path.display()
     )
 }
@@ -551,7 +555,11 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         self.host
             .info("==> Safety-dumping the current database and state volume...");
         let stamp = self.host.stamp();
-        let pair = step(safety::backup(&mut self.bank, plan, &stamp))?;
+        let pair = step(safety::backup(
+            &mut self.bank,
+            &safety::Target::safety(plan),
+            &stamp,
+        ))?;
         match &pair.dump {
             Some(dump) => self.host.info(&format!(
                 "Safety backup: {} + {}",
@@ -778,6 +786,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             "safety_dump": pair.dump.as_ref().map(|p| p.to_string_lossy().into_owned()),
             "safety_state": pair.state.to_string_lossy(),
             "backup_file": self.cx.backup_file.to_string_lossy(),
+            "state_archive": self.cx.state_archive.as_ref().map(|p| p.to_string_lossy().into_owned()),
             "started": now,
         });
         let path = journal_path(self.cx);

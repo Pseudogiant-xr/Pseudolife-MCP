@@ -25,7 +25,9 @@ def native_sent(prefix, private, dsn, *, configuration="{}", token=None, tokens=
     env = isolated_env(private / "home")
     env.update(PSEUDOLIFE_MCP_DATABASE_URL=dsn, PSEUDOLIFE_MCP_CONFIG=str(config),
                PSEUDOLIFE_MCP_HOST="127.0.0.1", PSEUDOLIFE_MCP_PORT=str(port),
-               PSEUDOLIFE_BASELINE_NONCE=nonce)
+               PSEUDOLIFE_BASELINE_NONCE=nonce,
+               # `serve` refuses unless asked for the maintainer-testing candidate.
+               PSEUDOLIFE_STDIO_SENT_CANDIDATE="1")
     if token is not None:
         env["PSEUDOLIFE_MCP_TOKEN"] = token
     if tokens is not None:
