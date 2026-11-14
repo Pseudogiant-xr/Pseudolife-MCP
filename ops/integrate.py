@@ -482,7 +482,7 @@ def _checks_why(rollup: list[dict] | None) -> tuple[str, str]:
     counted = [check for check in rollup or [] if not _report_only(check)]
     word, why = _counted_checks_why(counted if rollup else rollup)
     if word == "failing" and not why:
-        red = sorted({_check_name(check) for check in counted if _check_state(check) in FAILED})
+        red = sorted({_check_name(check) for check in _standing_failures(counted)})
         why = ", ".join(red)
     return word, why
 
@@ -497,10 +497,17 @@ def _counted_checks_why(rollup: list[dict] | None) -> tuple[str, str]:
     annotations that cannot be read leave the head `unverified` (retry).
     A FAILURE of a gate job counts as cancelled when it failed at its
     cancelled-need step only because jobs it needs were cancelled
-    (`_gate_cancelled`); any other failure is `failing` before any read."""
+    (`_gate_cancelled`); any other failure is `failing` before any read.
+
+    A failure is counted unless a run of the same check finished after it
+    started (`_standing_failures`): a head carries one run per event for
+    workflows such as Python freeze, so a failure made before a
+    `freeze-exception` label is superseded by the labelled event's run,
+    while a newer failure still outweighs an older success, and an older
+    run that is still going hides nothing."""
     if not rollup:
         return "none", ""
-    failures = [check for check in rollup if _check_state(check) in FAILED]
+    failures = _standing_failures(rollup)
     if any(_check_state(check) != "FAILURE"
            or not _ACTIONS_JOB.search(check.get("detailsUrl") or "")
            for check in failures):
@@ -2164,6 +2171,34 @@ def _merge_plan() -> Plan:
     return plan
 
 
+def _check_key(check: dict) -> tuple:
+    """What makes two rollup entries runs of the same check: a CheckRun's
+    workflow and name, a StatusContext's context."""
+    if check.get("__typename") == "StatusContext" or "context" in check:
+        return ("status", check.get("context", ""))
+    return ("check", check.get("workflowName", ""), check.get("name", ""))
+
+
+def _standing_failures(rollup: list[dict] | None) -> list[dict]:
+    """The failed runs no later verdict of the same check has replaced: a
+    run that started after the failure and finished passing or failing.
+    An unfinished run replaces nothing (it may yet fail, and admission
+    admits a pending head), nor does a cancelled or skipped one (no
+    verdict), nor one that started at the same time, nor any run when
+    either start time is missing or the check has no name."""
+    runs = rollup or []
+
+    def replaces(other: dict, failure: dict) -> bool:
+        key = _check_key(failure)
+        return (other is not failure and _check_key(other) == key and bool(key[-1])
+                and not _unfinished(other) and _check_state(other) not in (CANCELLED, "SKIPPED")
+                and bool(_when(failure)[0]) and bool(_when(other)[0])
+                and _when(other)[0] > _when(failure)[0])
+
+    return [check for check in runs if _check_state(check) in FAILED
+            and not any(replaces(other, check) for other in runs)]
+
+
 def _latest_checks(rollup: list[dict] | None) -> list[dict]:
     """The latest result of each check, so a rerun that superseded a failure
     counts: a CheckRun is keyed by workflow and name, a StatusContext by its
@@ -2173,10 +2208,7 @@ def _latest_checks(rollup: list[dict] | None) -> list[dict]:
     on a tie."""
     latest: dict[tuple, dict] = {}
     for check in rollup or []:
-        if check.get("__typename") == "StatusContext" or "context" in check:
-            key = ("status", check.get("context", ""))
-        else:
-            key = ("check", check.get("workflowName", ""), check.get("name", ""))
+        key = _check_key(check)
         held = latest.get(key)
         if held is None or _unfinished(check) or (
                 not _unfinished(held) and _when(check) >= _when(held)):

@@ -21,6 +21,8 @@ on:
 
 permissions:
   contents: read
+  # To read the pull request's labels as they are when the job runs.
+  pull-requests: read
 
 # The newest event on a pull request decides: a label change supersedes an
 # in-flight check of the same pull request.
@@ -44,16 +46,28 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
-          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         # The base commit's copy of the script decides, so an edit to
         # python_freeze.py cannot change its own verdict (the pull request
         # that adds it, with no copy on its base, runs its own). This
         # workflow file itself comes from the pull request, so an edit to it
         # can pass this check: review catches that, and batch admission,
         # which uses master's guard, does not depend on it.
+        #
+        # The labels are read from the API when the job runs, not from the
+        # event: a rerun replays its event's payload, so a run made before
+        # `freeze-exception` was added would fail again on every rerun, and
+        # one made before the label was removed would pass. A failed read
+        # judges with no labels, which refuses only a change that needs the
+        # exception: rerun once the API answers.
         run: |
+          if ! labels=$(gh api "repos/$BASE_REPO/pulls/$PR_NUMBER" --jq '[.labels[].name]'); then
+            echo "::warning::could not read the pull request's labels; judging without them (rerun this job once the API answers)"
+            labels='[]'
+          fi
           script="$RUNNER_TEMP/python_freeze.py"
           if ! git show HEAD^1:rust/ci/python_freeze.py > "$script" 2>/dev/null; then
             cp rust/ci/python_freeze.py "$script"
           fi
-          python3 "$script" --head-ref "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" --labels "$PR_LABELS"
+          python3 "$script" --head-ref "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" --labels "$labels"
