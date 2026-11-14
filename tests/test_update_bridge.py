@@ -127,7 +127,11 @@ def bridge(env, native=None, args=ARGS, lines=None):
 
 
 def handed(release, **extra):
-    return {**HANDOFF, update_bridge.ARCHIVE_URL_ENV: release.base, **extra}
+    """A hand-off child's environment that asked for the native client;
+    an ``extra`` value of None removes that variable."""
+    env = {**HANDOFF, update_bridge.ARCHIVE_URL_ENV: release.base,
+           update_bridge.ENGINE_ENV: update_bridge.NATIVE, **extra}
+    return {key: value for key, value in env.items() if value is not None}
 
 
 def test_the_bridge_runs_the_native_client_steps_with_the_handoff_unchanged(release, monkeypatch):
@@ -309,7 +313,8 @@ def test_downloads_are_size_capped(release):
                                    "https://example.com/x?y=1"])
 def test_a_bad_override_keeps_python(value):
     native = Native()
-    note = kept(bridge({**HANDOFF, update_bridge.ARCHIVE_URL_ENV: value}, native))
+    note = kept(bridge({**HANDOFF, update_bridge.ARCHIVE_URL_ENV: value,
+                        update_bridge.ENGINE_ENV: update_bridge.NATIVE}, native))
     assert update_bridge.ARCHIVE_URL_ENV in note
 
 
@@ -392,7 +397,8 @@ def test_a_truncated_download_keeps_python(release):
     threading.Thread(target=serve, daemon=True).start()
     base = f"http://127.0.0.1:{listener.getsockname()[1]}/v{__version__}"
     native = Native()
-    note = kept(bridge({**HANDOFF, update_bridge.ARCHIVE_URL_ENV: base}, native))
+    note = kept(bridge({**HANDOFF, update_bridge.ARCHIVE_URL_ENV: base,
+                        update_bridge.ENGINE_ENV: update_bridge.NATIVE}, native))
     assert "SHA256SUMS" in note
     assert native.started == []
     listener.close()
@@ -455,9 +461,80 @@ def test_an_override_redirect_never_leaves_http_or_drops_to_http():
 def test_only_an_ascii_pid_and_the_exact_engine_value_count(release):
     release.publish()
     native = Native()
-    assert bridge({**handed(release), "PSEUDOLIFE_UPDATE_HANDOFF": "\u0664\u0662"}, native) is None
-    # runtimes.py honours exactly "python"; anything else is not a choice.
-    assert bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE="Python"), Native()) == 7
+    # Not a hand-off, and not asked for: untouched.
+    assert bridge({**handed(release, PSEUDOLIFE_SHIM_ENGINE=None),
+                   "PSEUDOLIFE_UPDATE_HANDOFF": "\u0664\u0662"}, native) is None
+    # Not a hand-off but asked for: a hand-run, whose child sees no
+    # hand-off variable at all.
+    assert bridge({**handed(release), "PSEUDOLIFE_UPDATE_HANDOFF": "\u0664\u0662"}, native) == 7
+    (_, child_env, _), = native.started
+    assert not any(key.startswith("PSEUDOLIFE_UPDATE_HANDOFF") for key in child_env)
+    native = Native()
+    before = len(release.seen)
+    # Only the exact "native" asks for the move; "Python" is no choice of
+    # Python either (runtimes.py honours exactly "python"), so it keeps the
+    # default, which is Python.
+    for value in ("Python", "Native", "NATIVE", " native", "native ", ""):
+        note = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=value), native)
+        assert note.startswith("the native client is opt-in in"), (value, note)
+    assert release.seen[before:] == [] and native.started == []
+    assert bridge(handed(release), Native()) == 7
+
+
+def test_by_default_a_handoff_keeps_python_and_says_how_to_opt_in(release):
+    # 0.24.0: the move to the native client happens only when asked for, so
+    # nothing is downloaded and the Python child finishes the client steps.
+    release.publish()
+    native = Native()
+    note = bridge(handed(release, PSEUDOLIFE_SHIM_ENGINE=None), native)
+    assert note == (
+        f"the native client is opt-in in {__version__}: this machine keeps the Python client, and this "
+        f"run's own code finishes the client steps; to move it to the native client, set "
+        f"PSEUDOLIFE_SHIM_ENGINE=native and run pseudolife-mcp update --clients-only")
+    assert release.seen == [] and native.probes == [] and native.started == []
+
+
+@pytest.mark.parametrize("args", [
+    ["--clients-only"],
+    ["--clients-only", "--daemon-url", URL],
+    ARGS,
+    ARGS + ["--allow-downgrade"],
+])
+def test_a_hand_run_clients_update_moves_when_the_native_client_is_asked_for(release, args, monkeypatch):
+    # A machine that kept Python at this release moves without waiting for
+    # the next one: its own `update --clients-only`, with the opt-in set.
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DAEMON_URL", raising=False)
+    release.publish(b"the native binary")
+    env = {update_bridge.ARCHIVE_URL_ENV: release.base, update_bridge.ENGINE_ENV: update_bridge.NATIVE}
+    native = Native(exit_code=0)
+    lines: list[str] = []
+    assert bridge(env, native, args=args, lines=lines) == 0
+    (argv, child_env, _), = native.started
+    url = URL if "--daemon-url" in args else update_cli.build_parser().parse_args([]).daemon_url
+    want = ["update", "--clients-only", "--tag", __version__, "--daemon-url", url]
+    assert argv[1:] == want + (["--allow-downgrade"] if "--allow-downgrade" in args else [])
+    # An ordinary top-level native run: no hand-off variables, so it takes
+    # its own update lock.
+    assert not any(key in child_env for key in HANDOFF)
+    assert "moving this machine to the native client" in lines[0]
+
+
+@pytest.mark.parametrize("args, engine", [
+    (["--clients-only"], None),                                       # not asked for
+    (["--clients-only"], "Native"),
+    (["--tag", __version__, "--daemon-url", URL], "native"),          # a full update
+    (["--clients-only", "--reinstall"], "native"),
+    (["--clients-only", "--json"], "native"),
+    (["--clients-only", "--tag", "0.0.1"], "native"),                 # another release
+])
+def test_other_hand_runs_stay_python_and_say_nothing(release, args, engine):
+    release.publish()
+    env = {update_bridge.ARCHIVE_URL_ENV: release.base}
+    if engine is not None:
+        env[update_bridge.ENGINE_ENV] = engine
+    native = Native()
+    assert bridge(env, native, args=args) is None
+    assert release.seen == [] and native.probes == [] and native.started == []
 
 
 def test_interrupt_stops_the_native_child_even_on_a_second_interrupt():
