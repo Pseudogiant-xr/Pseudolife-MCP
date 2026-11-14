@@ -26,3 +26,10 @@ three-way against the directory and restores this pointer; a file both
 sides changed on the same lines gets conflict markers to resolve by hand.
 Merge, don't rebase: the script needs the merge base. A stack forward-merges
 bottom-up, each layer merging the forward-merged layer below it.
+
+Since the Python freeze the parity goldens are Rust regression snapshots,
+re-recorded from the Rust candidate when a deliberate change moves them:
+the CLI harness rows with `rust/cli_harness --record-candidate`
+(`rust/cli_harness/README.md`, "Goldens after the freeze") and the daemon's
+schema, startup and clock-retry goldens with `schema_ci.py` and
+`startup_ci.py --record-candidate` (`rust/daemon/harness/candidate_record.py`).

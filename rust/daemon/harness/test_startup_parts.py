@@ -11,6 +11,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
 sys.path.insert(0, str(HERE))
+import candidate_record
 import clock_retry_cases
 import schema_cases
 import schema_ci
@@ -275,11 +276,212 @@ class GoldenChecking(unittest.TestCase):
     def test_checking_schema_goldens_opens_only_the_rust_storage(self):
         self.assertEqual(self.opens(["--check-goldens"]), ["rust", "rust"])
 
+    def test_recording_from_the_candidate_starts_only_rust_and_a_dry_run_writes_nothing(self):
+        goldens = [HERE / "goldens" / name for name in ("startup-hydration.json", "clock-retry.json")]
+        before = [path.read_bytes() for path in goldens]
+        self.assertEqual(self.starts(startup_cases, ["--record-candidate", "--only", "empty"]), ["rust", "rust"])
+        self.assertEqual(self.starts(clock_retry_cases, ["--record-candidate"]), ["rust"])
+        self.assertEqual([path.read_bytes() for path in goldens], before)
+
     def test_without_golden_checking_both_sides_still_run(self):
         # Recording (and a plain run) still compares the two live.
         self.assertEqual(self.starts(startup_cases, ["--only", "empty"]), ["python", "rust"] * 2)
         self.assertEqual(self.starts(clock_retry_cases, []), ["python", "rust"])
         self.assertEqual(self.opens([]), ["python", "rust"] * 2)
+
+
+
+class CandidateRecording(unittest.TestCase):
+    """--record-candidate (candidate_record.py): the CLI harness's recorder
+    vocabulary for the three startup goldens."""
+
+    def setUp(self):
+        self.scratch = Path(tempfile.mkdtemp(prefix="pl-candidate-record-"))
+        self.binary = self.scratch / "daemon-test"
+        self.binary.write_bytes(b"candidate")
+
+    def golden(self, value):
+        path = self.scratch / "golden.json"
+        path.write_text(candidate_record.dump_sorted(value), encoding="utf-8")
+        return path
+
+    def recording(self, path, **kwargs):
+        options = dict(sections=("cases", "database"), whole=True, defined=["a", "b"],
+                       dump=candidate_record.dump_sorted)
+        options.update(kwargs)
+        return candidate_record.Recording(path, options.pop("sections"), self.binary, **options)
+
+    @staticmethod
+    def no_difference(entry):
+        return []
+
+    def run_quietly(self, recording, write, observations):
+        with patch("sys.stdout"):
+            for case, observed, failures in observations:
+                recording.observe(case, observed, failures, self.no_difference)
+            return recording.finish(write, "<check command>")
+
+    def test_an_unchanged_golden_is_left_alone_and_passes(self):
+        path = self.golden({"cases": {"a": [1], "b": [2]}, "database": {"a": [10], "b": [20]}, "other": 1})
+        before = path.read_bytes()
+        recording = self.recording(path)
+        code = self.run_quietly(recording, True, [("a", {"cases": [1], "database": [10]}, []),
+                                                  ("b", {"cases": [2], "database": [20]}, [])])
+        self.assertEqual(code, 0)
+        self.assertEqual(recording.report["unchanged"], ["a", "b"])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_dry_run_names_the_change_writes_nothing_and_fails(self):
+        path = self.golden({"cases": {"a": [1], "b": [2]}, "database": {"a": [10], "b": [20]}})
+        before = path.read_bytes()
+        recording = self.recording(path)
+        code = self.run_quietly(recording, False, [("a", {"cases": [1], "database": [11]}, []),
+                                                   ("b", {"cases": [2], "database": [20]}, [])])
+        self.assertEqual(code, 1)
+        self.assertEqual(recording.report["changed"], ["a"])
+        self.assertFalse(recording.report["written"])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_write_replaces_only_the_changed_and_new_cases_and_records_where_they_came_from(self):
+        path = self.golden({"cases": {"a": [1], "b": [2]}, "database": {"a": [10], "b": [20]}, "other": 1})
+        recording = self.recording(path, defined=["a", "b", "c"])
+        code = self.run_quietly(recording, True, [("a", {"cases": [1], "database": [11]}, []),
+                                                  ("c", {"cases": [3], "database": [30]}, [])])
+        self.assertEqual(code, 0)
+        written = json.loads(path.read_text())
+        self.assertEqual(written["cases"], {"a": [1], "b": [2], "c": [3]})
+        self.assertEqual(written["database"], {"a": [11], "b": [20], "c": [30]})
+        self.assertEqual(written["other"], 1)
+        stamp = written[candidate_record.CANDIDATE_PROVENANCE]
+        self.assertEqual(set(stamp), {"a", "c"})
+        self.assertEqual(set(stamp["a"]), {"commit", "rust_tree", "platform", "candidate_sha256"})
+        self.assertEqual(stamp["a"]["candidate_sha256"], candidate_record.hashlib.sha256(b"candidate").hexdigest())
+
+    def test_a_failed_or_vacuous_observation_refuses_the_whole_file(self):
+        for observed, failures in (({"cases": [1], "database": [11]}, ["clock_diffs: relations.x"]),
+                                   (None, [])):
+            with self.subTest(vacuous=observed is None):
+                path = self.golden({"cases": {"a": [1], "b": [2]}, "database": {"a": [10], "b": [20]}})
+                before = path.read_bytes()
+                recording = self.recording(path)
+                code = self.run_quietly(recording, True, [("a", observed, failures),
+                                                          ("b", {"cases": [2], "database": [21]}, [])])
+                self.assertEqual(code, 1)
+                self.assertIn("a", recording.report["refused"])
+                self.assertFalse(recording.report["written"])
+                self.assertEqual(path.read_bytes(), before)
+
+    def test_an_entry_that_does_not_check_against_its_own_run_is_refused(self):
+        path = self.golden({"cases": {"a": [1]}, "database": {"a": [10]}})
+        recording = self.recording(path, defined=["a"])
+        with patch("sys.stdout"):
+            recording.observe("a", {"cases": [2], "database": [10]}, [], lambda entry: ["/cases: scrubbed"])
+            self.assertEqual(recording.finish(True, "<check command>"), 1)
+        self.assertIn("would not check", recording.report["refused"]["a"])
+
+    def test_only_the_whole_matrix_removes_a_case(self):
+        for whole, removed in ((True, ["gone"]), (False, [])):
+            with self.subTest(whole=whole):
+                path = self.golden({"cases": {"a": [1], "gone": [9]}, "database": {"a": [10], "gone": [90]}})
+                recording = self.recording(path, whole=whole, defined=["a"])
+                self.run_quietly(recording, True, [("a", {"cases": [1], "database": [10]}, [])])
+                self.assertEqual(recording.report["removed"], removed)
+                self.assertEqual("gone" in json.loads(path.read_text())["cases"], not whole)
+
+    def test_a_single_case_golden_is_its_sections(self):
+        path = self.golden({"oracle": {"attempts": [1]}, "database": {"initial": [1]}, "declared_noop_callbacks": []})
+        recording = self.recording(path, sections=("oracle", "database"), whole=False,
+                                   defined=["clock-retry"], single=True)
+        code = self.run_quietly(recording, True, [("clock-retry", {"oracle": {"attempts": [2]},
+                                                                    "database": {"initial": [1]}}, [])])
+        self.assertEqual(code, 0)
+        written = json.loads(path.read_text())
+        self.assertEqual(written["oracle"], {"attempts": [2]})
+        self.assertEqual(written["declared_noop_callbacks"], [])
+        self.assertEqual(set(written[candidate_record.CANDIDATE_PROVENANCE]), {"clock-retry"})
+
+    def test_rewriting_a_real_golden_changes_only_the_recorded_case(self):
+        # The committed startup golden with one entry corrupted: re-recording
+        # that case from its true value restores every other byte.
+        real = HERE / "goldens" / "startup-hydration.json"
+        committed = json.loads(real.read_text(encoding="utf-8"))
+        case = "preset-rename"
+        truth = {"cases": committed["cases"][case], "database": committed["database"][case]}
+        corrupted = json.loads(json.dumps(committed))
+        corrupted["database"][case][0]["rows"] = {}
+        path = self.golden(corrupted)
+        recording = self.recording(path, whole=False, defined=list(startup_cases.CASES))
+        self.assertEqual(self.run_quietly(recording, True, [(case, truth, [])]), 0)
+        self.assertEqual(recording.report["changed"], [case])
+        rewritten = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(set(rewritten.pop(candidate_record.CANDIDATE_PROVENANCE)), {case})
+        self.assertEqual(candidate_record.dump_sorted(rewritten), real.read_text(encoding="utf-8"))
+
+    def test_a_mutant_in_the_environment_refuses_every_recording(self):
+        with patch.dict(os.environ, {"PSEUDOLIFE_DAEMON_MUTANT": "startup-skip-world"}), patch("sys.stdout"):
+            self.assertIn("PSEUDOLIFE_DAEMON_MUTANT", candidate_record.refuse_mutant_environment())
+            for module, extra in ((startup_cases, ["--only", "empty"]), (clock_retry_cases, [])):
+                with self.subTest(module=module.__name__), patch.object(module, "cell") as cell:
+                    code = module.main(["--rust-test-bin", str(self.binary), "--out",
+                                        str(self.scratch / "out.json"), "--record-candidate", "--write", *extra])
+                    self.assertEqual(code, 1)
+                    cell.assert_not_called()
+        with patch.dict(os.environ, {"PSEUDOLIFE_DAEMON_MUTANT": ""}):
+            self.assertIsNone(candidate_record.refuse_mutant_environment())
+
+    def test_the_differences_name_the_golden_and_the_candidate(self):
+        self.assertEqual(candidate_record.labelled(["/x: python 1 vs rust 2", "/y: only in python",
+                                                    "/rows/t/rows: row only in rust: [1]"]),
+                         ["/x: golden 1 vs candidate 2", "/y: only in golden",
+                          "/rows/t/rows: row only in candidate: [1]"])
+
+    def test_write_needs_record_candidate_and_record_candidate_takes_no_controls(self):
+        for module, arguments in ((startup_cases, ["--write"]), (startup_cases, ["--record-candidate", "--mutants"]),
+                                  (startup_cases, ["--record-candidate", "--part", "1"]),
+                                  (clock_retry_cases, ["--write"]), (clock_retry_cases, ["--record-candidate", "--mutants"]),
+                                  (schema_cases, ["--write"]), (schema_cases, ["--record-candidate", "--refusals"]),
+                                  (startup_ci, ["--write"]), (startup_ci, ["--record-candidate", "--record-goldens"]),
+                                  (schema_ci, ["--write"]), (schema_ci, ["--record-candidate", "--record-goldens"])):
+            with self.subTest(module=module.__name__, arguments=arguments), \
+                    patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}), \
+                    self.assertRaises(SystemExit), patch("sys.stderr"):
+                module.main(["--rust-test-bin", str(self.binary), "--out", str(self.scratch / "out.json"),
+                             *(["--no-build"] if module in (startup_ci, schema_ci) else []), *arguments])
+
+    def drive(self, module, *arguments):
+        commands = []
+
+        def fake_run(command, **kwargs):
+            commands.append(list(map(str, command)))
+            # The pre-checks pass; each recorder is a dry run that found a change.
+            recorder = "--record-candidate" in map(str, command)
+            return subprocess.CompletedProcess(command, 1 if recorder else 0, "", "")
+
+        with patch.object(module.subprocess, "run", side_effect=fake_run):
+            code = module.main(["--no-build", "--rust-test-bin", str(self.binary),
+                                "--out", str(self.scratch / "out.json"), *arguments])
+        return code, commands
+
+    def test_startup_ci_records_both_goldens_even_when_the_first_would_change(self):
+        for write in ([], ["--write"]):
+            with self.subTest(write=bool(write)):
+                code, commands = self.drive(startup_ci, "--record-candidate", *write)
+                recorders = [c for c in commands if script(c) in ("startup_cases.py", "clock_retry_cases.py")]
+                self.assertEqual([script(c) for c in recorders], ["startup_cases.py", "clock_retry_cases.py"])
+                for command in recorders:
+                    self.assertIn("--record-candidate", command)
+                    self.assertEqual("--write" in command, bool(write))
+                    self.assertNotIn("--mutants", command)
+                    self.assertNotIn("--record-goldens", command)
+                self.assertEqual(code, 1)
+
+    def test_schema_ci_records_the_schema_golden_from_the_candidate(self):
+        code, commands = self.drive(schema_ci, "--record-candidate", "--write")
+        schema = [c for c in commands if script(c) == "run.py"]
+        self.assertEqual(len(schema), 1)
+        self.assertTrue({"schema", "--all-versions", "--record-candidate", "--write"} <= set(schema[0]))
+        self.assertFalse({"--refusals", "--mutants", "--check-goldens", "--record-goldens"} & set(schema[0]))
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

@@ -312,6 +312,10 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--record-goldens", action="store_true")
     mode.add_argument("--check-goldens", action="store_true")
+    mode.add_argument("--record-candidate", action="store_true",
+                      help="re-record the golden from the Rust candidate (candidate_record.py); a dry run "
+                           "unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed golden")
     parser.add_argument("--dump-db", choices=PHASES, help=argparse.SUPPRESS)
     parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--seed-cell", action="store_true", help=argparse.SUPPRESS)
@@ -326,7 +330,13 @@ def main(argv=None):
         return 0
     if args.rust_test_bin is None or args.out is None:
         parser.error("--rust-test-bin and --out are required")
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if args.record_candidate and args.mutants:
+        parser.error("--record-candidate records the cell only; check the result with --check-goldens --mutants")
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    if args.record_candidate:
+        return record_candidate(args)
     result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
               "declared_noop_callbacks": [*NOOP_CALLBACKS, "curation_safety.recover_slot_curation"]}
     number = time.time_ns()
@@ -373,6 +383,34 @@ def main(argv=None):
     bad = failed(result) or any(not value["caught"] for value in result.get("mutants", {}).values())
     print(f"clock retry: {'FAIL' if bad else '0 diffs'}", flush=True)
     return int(bad)
+
+
+def record_candidate(args):
+    """--record-candidate: the cell runs on the candidate alone and is
+    classed against clock-retry.json (candidate_record.py)."""
+    import candidate_record
+    why = candidate_record.refuse_mutant_environment()
+    if why:
+        print(f"clock retry record-candidate refused: {why}", flush=True)
+        return 1
+    binary = args.rust_test_bin.resolve()
+    recording = candidate_record.Recording(GOLDEN, ("oracle", "database"), binary, whole=False,
+                                           defined=["clock-retry"], dump=candidate_record.dump_sorted, single=True)
+    result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip()}
+    try:
+        cell(binary, time.time_ns(), result, oracle=False)
+    except Exception as error:
+        result["error"] = str(error)
+    failures = ([f"error: {result['error']}"] if result.get("error") else []) + [
+        f"cleanup: {e}" for e in result.get("cleanup_errors", [])] + candidate_record.stage_failures(result)
+    snapshot = result.get("snapshots", {}).get("rust")
+    observed = ({"oracle": normalized(snapshot), "database": result["database"]["rust"]}
+                if snapshot is not None and "database" in result else None)
+    recording.observe("clock-retry", observed, failures,
+                      lambda entry: dbstate.diff(entry, json.loads(json.dumps(entry, allow_nan=False))))
+    result["record_candidate"] = recording.report
+    args.out.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    return recording.finish(args.write, "python rust/daemon/harness/startup_ci.py --out <scratch>/startup.json")
 
 
 if __name__ == "__main__":

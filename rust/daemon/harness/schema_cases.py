@@ -125,6 +125,7 @@ def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True
             created.append(name)
         stages = []
         recorded = []
+        observed = []   # the candidate's entry per open, for --record-candidate
         rules = {("relations", "created_at"): "clock"}
         for restart in range(2):
             for dsn in dsns.values():
@@ -156,8 +157,9 @@ def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True
             if oracle:
                 stage["diffs"] = dbstate.diff(normalized["python"], normalized["rust"])
                 recorded.append(golden_state(normalized["python"]))
+            observed.append(golden_state(normalized["rust"]))
             if expected is not None:
-                stage["golden_diffs"] = dbstate.diff(expected[restart], golden_state(normalized["rust"]))
+                stage["golden_diffs"] = dbstate.diff(expected[restart], observed[-1])
             if dimension != 1024:
                 stage["refusal_state_diffs"] = [d for arm in arms for d in dbstate.diff(before[arm], states[arm])]
             if restart == 0:
@@ -173,7 +175,7 @@ def cell(binary, number, commit=None, dimension=1024, expected=None, oracle=True
                     strict.extend(dbstate.diff(prior, state))
                 stage["idempotence_diffs"] = strict
             stages.append(stage)
-        return {"source_commit": commit, "stages": stages, "_recorded": recorded}
+        return {"source_commit": commit, "stages": stages, "_recorded": recorded, "_observed": observed}
     finally:
         for name in reversed(created):
             pg.drop(name)
@@ -192,12 +194,24 @@ def main(argv=None):
     ap.add_argument("--all-versions", action="store_true")
     ap.add_argument("--refusals", action="store_true")
     ap.add_argument("--mutants", action="store_true")
-    ap.add_argument("--record-goldens", action="store_true")
-    ap.add_argument("--check-goldens", action="store_true")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--record-goldens", action="store_true")
+    mode.add_argument("--check-goldens", action="store_true")
+    mode.add_argument("--record-candidate", action="store_true",
+                      help="re-record the golden from the Rust candidate (candidate_record.py); a dry run "
+                           "unless --write")
+    ap.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args(argv)
     if pg.SLICE != "pgs":
         ap.error("schema cells require PL_HARNESS_SLICE=pgs")
+    if args.write and not args.record_candidate:
+        ap.error("--write needs --record-candidate")
+    if args.record_candidate:
+        if args.refusals or args.mutants:
+            ap.error("--record-candidate records the golden's cases only; check the result with "
+                     "--check-goldens --refusals --mutants")
+        return record_candidate(args)
     results = []
     recorded = {}
     goldens = json.loads(GOLDEN_FILE.read_text()) if args.check_goldens else None
@@ -267,6 +281,40 @@ def main(argv=None):
         }, "oracle_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
            "cases": recorded}, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return int(failed)
+
+
+def record_candidate(args):
+    """--record-candidate: each selected source schema runs on the candidate
+    alone and is classed against schema-startup.json (candidate_record.py)."""
+    import candidate_record
+    why = candidate_record.refuse_mutant_environment()
+    if why:
+        print(f"schema record-candidate refused: {why}", flush=True)
+        return 1
+    binary = args.rust_test_bin.resolve()
+    history = json.loads((HERE / "schema_history.json").read_text())["versions"]
+    sources = [{"commit": None, "embedding_dimension": 1024},
+               *({"commit": c, "embedding_dimension": 1024} for c in args.commit),
+               *(history if args.all_versions else [])]
+    # Only the whole matrix (fresh and every recorded version) may remove a case.
+    whole = args.all_versions and not args.commit
+    recording = candidate_record.Recording(
+        GOLDEN_FILE, ("cases",), binary, whole=whole,
+        defined=["fresh", *(source["commit"] for source in history)], dump=candidate_record.dump_sorted)
+    number = time.time_ns() // 1000
+    results = []
+    for i, source in enumerate(sources):
+        key = source["commit"] or "fresh"
+        result = cell(binary, number + i * 3, source["commit"], source["embedding_dimension"], oracle=False)
+        entry = result.pop("_observed")
+        result.pop("_recorded", None)
+        results.append(result)
+        failures = [d for stage in result["stages"] for d in stage_diffs(stage)]
+        recording.observe(key, {"cases": entry} if len(entry) == 2 else None, failures,
+                          lambda observed: dbstate.diff(observed, json.loads(json.dumps(observed))))
+    args.out.write_text(json.dumps({"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
+                                    "cells": results, "record_candidate": recording.report}, indent=2), encoding="utf-8")
+    return recording.finish(args.write, "python rust/daemon/harness/schema_ci.py --out <scratch>/schema.json")
 
 
 if __name__ == "__main__":
