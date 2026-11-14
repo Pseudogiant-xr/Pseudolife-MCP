@@ -452,10 +452,9 @@ comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
 `principal_not_allowed` or `coordination_requires_postgres`).
 
 To keep an open-loopback install with the board dormant, pass `--no-token`
-(`-NoToken`). `--transport http` mints no token either, nor does a host that
-cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
-pipx), since its registrations fall back to HTTP. None of these removes a
-token that is already configured.
+(`-NoToken`). `--transport http` mints no token either, since its
+registrations cannot carry a token file. None of these removes a token that is
+already configured.
 
 ### Coordination diagnostic quickstart
 

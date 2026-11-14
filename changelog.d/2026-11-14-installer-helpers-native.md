@@ -12,6 +12,3 @@
 - A first install checks its flags before the native client is downloaded,
   so a mistyped flag is refused at once; a rerun downloads it first, because
   it reads its recorded choices through it.
-- The installer preflight (`ops/preflight.sh`, `ops/preflight.ps1`) and the
-  Claude Code session-hook writer `ops/install-hook.sh` still need Python
-  3.10 or newer until a following change replaces them.
