@@ -17,6 +17,19 @@ use super::lease::lock as os_lock;
 pub(crate) use options::Options;
 use seams::{Environment, compose_args, compose_environment, display, stamp, tree_state};
 pub(crate) use seams::{data_dir, fetch_json, home, run_cli};
+
+/// The unattended-update schedules as `connect` reads and re-creates them.
+pub(crate) mod schedules {
+    pub(crate) use super::unattended::{NAMES, installed, preflight, reschedule};
+
+    /// A command this process ran for them was cancelled by a signal.
+    pub(crate) fn cancelled() -> bool {
+        #[cfg(unix)]
+        return super::signals::cancelled();
+        #[cfg(not(unix))]
+        false
+    }
+}
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{

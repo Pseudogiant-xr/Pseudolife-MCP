@@ -21,9 +21,10 @@ use std::{
 const DEFERRED: &str = "pseudolife-stdio: mode 'connect' is deferred in this candidate\n";
 const DEAD: &str = "http://127.0.0.1:9";
 
-/// `connect --yes` re-points a Windows User-scope daemon URL it finds, and
-/// these tests run the real binary against the real registry: never on a
-/// host that has one.
+/// `connect --yes` re-points a Windows User-scope daemon URL it finds and
+/// re-creates an unattended-update scheduled task it finds, and these tests
+/// run the real binary against the real registry and Task Scheduler: never
+/// on a host that has either.
 fn refuse_a_host_with_a_user_scope_url() {
     #[cfg(windows)]
     {
@@ -46,6 +47,21 @@ fn refuse_a_host_with_a_user_scope_url() {
             assert!(
                 !found.success(),
                 "this host has a {scope}-scope PSEUDOLIFE_MCP_DAEMON_URL: connect would re-point a User-scope one and report a Machine-scope one, so these runs need a host without either"
+            );
+        }
+        let schtasks = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("schtasks.exe");
+        for task in ["Pseudolife Unattended Update", "Pseudolife Client Update"] {
+            let found = std::process::Command::new(&schtasks)
+                .args(["/Query", "/TN", task])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(
+                !found.success(),
+                "this host has the scheduled task '{task}', which connect would re-create; these runs need a host without one"
             );
         }
     }
@@ -507,9 +523,10 @@ fn a_dry_run_never_reads_a_token_or_stdin() {
 }
 
 #[test]
-fn a_question_on_a_character_device_defers() {
+fn a_question_on_a_character_device_reads_no_and_changes_nothing() {
     // Python's isatty is true for any Windows character device, NUL included,
-    // so `connect <url>` there would ask; elsewhere /dev/null is no terminal.
+    // so `connect <url>` there asks, reads end of file and so no; elsewhere
+    // /dev/null is no terminal.
     let home = Home::new();
     let health = Health::start();
     let url = health.url.clone();
@@ -522,8 +539,14 @@ fn a_question_on_a_character_device_defers() {
         .output()
         .unwrap();
     if cfg!(windows) {
-        deferred(&output);
-        assert!(health.requests().is_empty());
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+        assert!(stderr.contains("Apply these changes? [y/N] "), "{stderr}");
+        assert!(
+            stderr.ends_with("connect: not confirmed; nothing was changed\n"),
+            "{stderr}"
+        );
+        assert_eq!(health.requests(), ["/health"]);
     } else {
         assert_eq!(output.status.code(), Some(2), "{output:?}");
         assert!(String::from_utf8_lossy(&output.stderr).ends_with(

@@ -15,9 +15,10 @@ use std::sync::{Arc, Mutex};
 
 const CODE: &str = "abcd-efgh-jkmn";
 
-/// `connect --yes` re-points a Windows User-scope daemon URL it finds, and
-/// these tests run the real binary against the real registry: never on a
-/// host that has one.
+/// `connect --yes` re-points a Windows User-scope daemon URL it finds and
+/// re-creates an unattended-update scheduled task it finds, and these tests
+/// run the real binary against the real registry and Task Scheduler: never
+/// on a host that has either.
 fn refuse_a_host_with_a_user_scope_url() {
     #[cfg(windows)]
     {
@@ -40,6 +41,21 @@ fn refuse_a_host_with_a_user_scope_url() {
             assert!(
                 !found.success(),
                 "this host has a {scope}-scope PSEUDOLIFE_MCP_DAEMON_URL: connect would re-point a User-scope one and report a Machine-scope one, so these runs need a host without either"
+            );
+        }
+        let schtasks = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("schtasks.exe");
+        for task in ["Pseudolife Unattended Update", "Pseudolife Client Update"] {
+            let found = std::process::Command::new(&schtasks)
+                .args(["/Query", "/TN", task])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(
+                !found.success(),
+                "this host has the scheduled task '{task}', which connect would re-create; these runs need a host without one"
             );
         }
     }

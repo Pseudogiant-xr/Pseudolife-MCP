@@ -4,6 +4,28 @@ const TASK: &str = "Pseudolife Unattended Update";
 const CLIENT_TASK: &str = "Pseudolife Client Update";
 const UNIT: &str = "pseudolife-update";
 const CLIENT_UNIT: &str = "pseudolife-client-update";
+
+/// The scheduled task and systemd unit names one schedule writes and reads:
+/// the real ones, or a test's unique ones.
+#[derive(Clone, Copy)]
+pub(crate) struct Names<'a> {
+    pub task: &'a str,
+    pub client_task: &'a str,
+    pub unit: &'a str,
+    pub client_unit: &'a str,
+}
+
+pub(crate) const NAMES: Names<'static> = Names {
+    task: TASK,
+    client_task: CLIENT_TASK,
+    unit: UNIT,
+    client_unit: CLIENT_UNIT,
+};
+
+#[path = "reschedule.rs"]
+mod reschedule;
+pub(crate) use reschedule::{installed, preflight, reschedule};
+
 const LAYOUT: &[&str] = &[
     "PSEUDOLIFE_SHIM_RUNTIMES",
     "PSEUDOLIFE_SHIM_LAUNCHER",
@@ -149,19 +171,7 @@ fn credential(file: Option<String>, token: Option<String>) -> bool {
 }
 
 fn no_bearer(update: &mut Update, windows: bool) -> Result<()> {
-    let fix = if windows {
-        "Set PSEUDOLIFE_MCP_TOKEN_FILE once in your Windows User-scope environment with [Environment]::SetEnvironmentVariable('PSEUDOLIFE_MCP_TOKEN_FILE','<private token file>','User'), then run --schedule again"
-    } else {
-        "Run --schedule again from a shell with PSEUDOLIFE_MCP_TOKEN_FILE=<private token file>"
-    };
-    let text = format!(
-        "no bearer resolves for the scheduled run{}: the scheduled run cannot read the board, so it would hold off every day (exit 4, which the scheduler counts as success) and never apply a release. {fix}",
-        if windows {
-            " in your User-scope environment, which the task inherits"
-        } else {
-            " in this shell, whose token file the unit carries"
-        }
-    );
+    let text = no_bearer_text(windows);
     if update.o.allow_no_bearer {
         update.warn(format!("{text}. Installed anyway (--allow-no-bearer)"));
         Ok(())
@@ -172,7 +182,38 @@ fn no_bearer(update: &mut Update, windows: bool) -> Result<()> {
     }
 }
 
+/// systemd's `ExecStart=` value for `argv`.
+fn exec_line(argv: &[String]) -> Result<String> {
+    Ok(argv
+        .iter()
+        .map(|s| unit_quote(s, true))
+        .collect::<Result<Vec<_>>>()?
+        .join(" "))
+}
+
+fn no_bearer_text(windows: bool) -> String {
+    let fix = if windows {
+        "Set PSEUDOLIFE_MCP_TOKEN_FILE once in your Windows User-scope environment with [Environment]::SetEnvironmentVariable('PSEUDOLIFE_MCP_TOKEN_FILE','<private token file>','User'), then run --schedule again"
+    } else {
+        "Run --schedule again from a shell with PSEUDOLIFE_MCP_TOKEN_FILE=<private token file>"
+    };
+    format!(
+        "no bearer resolves for the scheduled run{}: the scheduled run cannot read the board, so it would hold off every day (exit 4, which the scheduler counts as success) and never apply a release. {fix}",
+        if windows {
+            " in your User-scope environment, which the task inherits"
+        } else {
+            " in this shell, whose token file the unit carries"
+        }
+    )
+}
+
 fn environment(client: bool) -> Result<Vec<String>> {
+    environment_lines(client, true)
+}
+
+/// The unit's `Environment=` lines; with `write` false, the lines alone,
+/// nothing written (the token file is named where `--schedule` would put it).
+fn environment_lines(client: bool, write: bool) -> Result<Vec<String>> {
     let mut lines = Vec::new();
     // Both jobs need the same selected runtime and data directory on next run.
     for key in LAYOUT {
@@ -193,20 +234,22 @@ fn environment(client: bool) -> Result<Vec<String>> {
         && let Some(token) = bearer()
     {
         let path = seams::data_dir().join("unattended-update.token");
-        seams::write_atomic(&path, token.as_bytes()).map_err(|_| {
-            UpdateError::usage("could not write the private token file; nothing was installed")
-        })?;
-        let provider = CredentialProvider::new(None, Some(path.clone()))
-            .and_then(|p| p.snapshot())
-            .map_err(|_| {
-                UpdateError::usage(
-                    "could not validate the private token file; nothing was installed",
-                )
+        if write {
+            seams::write_atomic(&path, token.as_bytes()).map_err(|_| {
+                UpdateError::usage("could not write the private token file; nothing was installed")
             })?;
-        if provider.token() != Some(token.as_str()) {
-            return Err(UpdateError::usage(
-                "the private token file could not be verified; nothing was installed",
-            ));
+            let provider = CredentialProvider::new(None, Some(path.clone()))
+                .and_then(|p| p.snapshot())
+                .map_err(|_| {
+                    UpdateError::usage(
+                        "could not validate the private token file; nothing was installed",
+                    )
+                })?;
+            if provider.token() != Some(token.as_str()) {
+                return Err(UpdateError::usage(
+                    "the private token file could not be verified; nothing was installed",
+                ));
+            }
         }
         token_file = Some(
             path.to_str()
@@ -244,6 +287,32 @@ fn atomic_unit(path: &Path, bytes: &[u8]) -> Result<()> {
     result
 }
 
+fn unit_label(name: &str) -> &'static str {
+    if name.starts_with(CLIENT_UNIT) {
+        "client"
+    } else {
+        "daemon"
+    }
+}
+
+/// The `.service` file `--schedule` writes for `argv` with `environment`.
+fn service_body(name: &str, argv: &[String], environment: &[String]) -> Result<String> {
+    let exec = exec_line(argv)?;
+    let label = unit_label(name);
+    Ok(format!(
+        "[Unit]\nDescription=Pseudolife-MCP unattended {label} update\n\n[Service]\nType=oneshot\n{}\nExecStart={exec}\nSuccessExitStatus=3 4\n",
+        environment.join("\n")
+    ))
+}
+
+/// The `.timer` file `--schedule` writes for a daily run at `hour:minute`.
+fn timer_body(name: &str, hour: u8, minute: u8) -> String {
+    let label = unit_label(name);
+    format!(
+        "[Unit]\nDescription=Pseudolife-MCP unattended {label} update (daily)\n\n[Timer]\nOnCalendar=*-*-* {hour:02}:{minute:02}:00\nPersistent=true\nRandomizedDelaySec=300\n\n[Install]\nWantedBy=timers.target\n"
+    )
+}
+
 fn install_systemd(
     unit_dir: &Path,
     name: &str,
@@ -264,23 +333,8 @@ fn install_systemd(
     };
     let old_service = previous(&service)?;
     let old_timer = previous(&timer)?;
-    let exec = argv
-        .iter()
-        .map(|s| unit_quote(s, true))
-        .collect::<Result<Vec<_>>>()?
-        .join(" ");
-    let label = if name == CLIENT_UNIT {
-        "client"
-    } else {
-        "daemon"
-    };
-    let body = format!(
-        "[Unit]\nDescription=Pseudolife-MCP unattended {label} update\n\n[Service]\nType=oneshot\n{}\nExecStart={exec}\nSuccessExitStatus=3 4\n",
-        environment.join("\n")
-    );
-    let timer_body = format!(
-        "[Unit]\nDescription=Pseudolife-MCP unattended {label} update (daily)\n\n[Timer]\nOnCalendar=*-*-* {hour:02}:{minute:02}:00\nPersistent=true\nRandomizedDelaySec=300\n\n[Install]\nWantedBy=timers.target\n"
-    );
+    let body = service_body(name, argv, environment)?;
+    let timer_body = timer_body(name, hour, minute);
     let result = (|| {
         atomic_unit(&service, body.as_bytes())?;
         atomic_unit(&timer, timer_body.as_bytes())?;
@@ -429,8 +483,9 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
-pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
-    let (hour, minute) = at(when)?;
+/// Whether `--schedule` writes the client schedule here (a shim runtime with
+/// no daemon container) rather than the daemon's, or why it writes neither.
+fn client_kind(update: &Update) -> Result<bool> {
     if !cfg!(any(windows, target_os = "linux")) {
         return Err(UpdateError::usage(
             "--schedule installs a Windows scheduled task or a systemd --user timer; on this platform run pseudolife-mcp update --unattended from your own scheduler",
@@ -443,6 +498,16 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
             "--schedule needs a daemon container or a shim runtime; this install is neither. Run it through the launcher the client install put on PATH. Nothing was installed",
         ));
     }
+    Ok(client)
+}
+
+pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
+    schedule_named(update, when, &NAMES)
+}
+
+fn schedule_named(update: &mut Update, when: &str, names: &Names) -> Result<()> {
+    let (hour, minute) = at(when)?;
+    let client = client_kind(update)?;
     if client && update.daemon_health().is_none() {
         return Err(UpdateError::usage(format!(
             "this is a client machine, and the daemon at {} did not answer /health; the scheduled run follows that daemon's release. Check that the daemon is up. Nothing was installed. {}",
@@ -451,24 +516,54 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
         )));
     }
     let argv = command(&update.o.daemon_url)?;
-    if !client {
-        let file = if cfg!(windows) {
-            user_environment("PSEUDOLIFE_MCP_TOKEN_FILE")
-        } else {
-            std::env::var("PSEUDOLIFE_MCP_TOKEN_FILE").ok()
-        };
-        let token = if cfg!(windows) {
-            user_environment("PSEUDOLIFE_MCP_TOKEN")
-        } else {
-            std::env::var("PSEUDOLIFE_MCP_TOKEN").ok()
-        };
-        if !credential(file, token) {
-            no_bearer(update, cfg!(windows))?;
-        }
+    if !client && !daemon_bearer_resolves() {
+        no_bearer(update, cfg!(windows))?;
     }
+    write(update, names, client, hour, minute, &argv)?;
+    if client {
+        update.step(format!("the run moves this machine's clients to the release the daemon at {} runs, never past it; running sessions keep their runtime. The log is {}",update.o.daemon_url,seams::data_dir().join(LOG_NAME).display()));
+        update.step(super::client_rearm_hint(&format!("{hour:02}:{minute:02}")));
+    } else {
+        update.step(format!("the run applies a release only while updates.unattended_daemon is on in the daemon's config.yaml (off by default) and no session is active on the board; the log is {}",seams::data_dir().join(LOG_NAME).display()));
+        update.step("its board notice needs its own principal: a PSEUDOLIFE_MCP_TOKENS entry token:<name> on the daemon, <name> in coordination.daemon_notice_principals and allowed_principals, and that token as this run's bearer; until then the notice is refused and the log is the only record");
+    }
+    Ok(())
+}
+
+/// A bearer the daemon schedule's run will find: the User-scope environment
+/// the Windows task inherits, or this shell's, whose token file the unit
+/// carries.
+fn daemon_bearer_resolves() -> bool {
+    let file = if cfg!(windows) {
+        user_environment("PSEUDOLIFE_MCP_TOKEN_FILE")
+    } else {
+        std::env::var("PSEUDOLIFE_MCP_TOKEN_FILE").ok()
+    };
+    let token = if cfg!(windows) {
+        user_environment("PSEUDOLIFE_MCP_TOKEN")
+    } else {
+        std::env::var("PSEUDOLIFE_MCP_TOKEN").ok()
+    };
+    credential(file, token)
+}
+
+/// Register the task or install the timer that runs `argv` daily at
+/// `hour:minute`, replacing one of the same name.
+fn write(
+    update: &mut Update,
+    names: &Names,
+    client: bool,
+    hour: u8,
+    minute: u8,
+    argv: &[String],
+) -> Result<()> {
     if cfg!(windows) {
-        let task = if client { CLIENT_TASK } else { TASK };
-        let (executable, arguments) = schedule_windows(&argv)?;
+        let task = if client {
+            names.client_task
+        } else {
+            names.task
+        };
+        let (executable, arguments) = schedule_windows(argv)?;
         let script = windows_registration(task, hour, minute, &executable, &arguments)?;
         let encoded = base64(
             &script
@@ -499,18 +594,15 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
     } else {
         let environment = environment(client)?;
         let dir = systemd_dir();
-        let name = if client { CLIENT_UNIT } else { UNIT };
-        install_systemd(&dir, name, hour, minute, &argv, &environment, |args| {
+        let name = if client {
+            names.client_unit
+        } else {
+            names.unit
+        };
+        install_systemd(&dir, name, hour, minute, argv, &environment, |args| {
             seams::run_cli(args, None, 30, false)
         })?;
         update.step(format!("installed {name}.timer under {} (daily at {hour:02}:{minute:02}); the unit carries its own token file",dir.display()));
-    }
-    if client {
-        update.step(format!("the run moves this machine's clients to the release the daemon at {} runs, never past it; running sessions keep their runtime. The log is {}",update.o.daemon_url,seams::data_dir().join(LOG_NAME).display()));
-        update.step(super::client_rearm_hint(&format!("{hour:02}:{minute:02}")));
-    } else {
-        update.step(format!("the run applies a release only while updates.unattended_daemon is on in the daemon's config.yaml (off by default) and no session is active on the board; the log is {}",seams::data_dir().join(LOG_NAME).display()));
-        update.step("its board notice needs its own principal: a PSEUDOLIFE_MCP_TOKENS entry token:<name> on the daemon, <name> in coordination.daemon_notice_principals and allowed_principals, and that token as this run's bearer; until then the notice is refused and the log is the only record");
     }
     Ok(())
 }

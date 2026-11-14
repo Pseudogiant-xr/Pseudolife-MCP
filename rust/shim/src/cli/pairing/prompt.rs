@@ -1,9 +1,10 @@
-//! A terminal code prompt with echo restored before the result is consumed.
+//! A terminal prompt without echo (getpass), with the terminal's modes
+//! restored before the result is consumed.
 use std::io::{self, Write};
 
 #[cfg(unix)]
 #[allow(unsafe_code)]
-pub(super) async fn password() -> io::Result<String> {
+pub(in crate::cli) async fn password(prompt: &str) -> io::Result<String> {
     use std::{
         io::Read,
         os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
@@ -40,7 +41,7 @@ pub(super) async fn password() -> io::Result<String> {
         return Err(io::Error::last_os_error());
     }
     let restore = Restore(fd, previous);
-    tty.write_all(b"pairing code: ")?;
+    tty.write_all(prompt.as_bytes())?;
     tty.flush()?;
     let result = async {
         let mut text = Vec::new();
@@ -74,7 +75,7 @@ pub(super) async fn password() -> io::Result<String> {
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-pub(super) async fn password() -> io::Result<String> {
+pub(in crate::cli) async fn password(prompt: &str) -> io::Result<String> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::System::Console::{
         ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT, GetConsoleMode, ReadConsoleW,
@@ -106,7 +107,7 @@ pub(super) async fn password() -> io::Result<String> {
     }
     let restore = Restore(handle, previous);
     let mut stderr = io::stderr().lock();
-    stderr.write_all(b"pairing code: ")?;
+    stderr.write_all(prompt.as_bytes())?;
     stderr.flush()?;
     let mut text = Vec::new();
     let result = loop {
