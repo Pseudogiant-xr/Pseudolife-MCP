@@ -130,8 +130,9 @@ pub struct Report {
 impl Report {
     /// Records a displaced file's backup in the spelling the user can use:
     /// the ordinary one, or the verbatim `\\?\` one only where Windows needs
-    /// it (`setup::codex::resolved_path`). The writers return the verbatim
-    /// spelling of the paths they canonicalized.
+    /// it (`setup::codex::resolved_path`). `write_config` returns the
+    /// verbatim spelling of the target it canonicalized, and a backup beside
+    /// a resolved path can grow past the length the ordinary spelling allows.
     pub(super) fn backed_up(&mut self, path: PathBuf) {
         let path = crate::setup::codex::resolved_path(&path).unwrap_or(path);
         self.backups.push(path);

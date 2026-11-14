@@ -1383,22 +1383,18 @@ async fn an_existing_instruction_file_is_backed_up_and_reported_in_its_resolved_
     // The memory block is appended to an AGENTS.md that already exists, so
     // the displaced file's backup is reported, as the hooks' backups are.
     let world = World::new();
-    fs::write(
-        world.home.join("AGENTS.md"),
-        "# Mine
-",
-    )
-    .unwrap();
+    fs::write(world.home.join("AGENTS.md"), "# Mine\n").unwrap();
     let report = world.run("manual", "yes", "append").await;
     assert_eq!(report.status, "ready", "{:?}", report.recovery);
     assert_eq!(report.instructions, "appended");
+    // The displaced AGENTS.md itself is among the reported backups (the
+    // hooks file's backup sits in a folder of the same name, so match the
+    // bytes, not the folder).
     assert!(
         report
             .backups
             .iter()
-            .any(|b| b.parent().is_some_and(|folder| folder
-                .file_name()
-                .is_some_and(|n| n.to_string_lossy().starts_with(".client-native-backup-")))),
+            .any(|b| fs::read(b).is_ok_and(|bytes| bytes == b"# Mine\n")),
         "{:?}",
         report.backups
     );
