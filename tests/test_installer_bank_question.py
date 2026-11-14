@@ -26,6 +26,7 @@ import sys
 import pytest
 
 from pseudolife_memory.credentials import CredentialProvider
+from tests import native_client_stub as native_stub
 from tests.test_client_install_ux import _heredoc_payload, _marker_block
 from tests.test_installer_client_only import (
     BASH, CRED_READY, FIXTURE_TOKEN, HEALTH_ON, REMOTE, _Shell, _stub,
@@ -1033,14 +1034,16 @@ def _connect_stages_sh(shell: _Shell, *, plan: str, plan_exit: int = 0, apply_ex
         f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
         "CLIENTS=codex CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD=''\n"
         "AGENTS_FILE='' TRANSPORT=shim\n"
-        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + stages
+        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + native_stub.BASH + "\n" + stages
         + "\nprintf 'MCP_CODEX=%s\\n' \"$MCP_CODEX\"\n",
         strict="set -euo pipefail",
         extra_env={"FIXTURE_PYTHON": _bash_fixture_path(shell.bash, Path(sys.executable),
                                                         shell.env),
                    "FAKE_CRED": CRED_READY % cred_url, "FAKE_PLAN": plan,
                    "FAKE_PLAN_EXIT": str(plan_exit), "FAKE_APPLY_EXIT": str(apply_exit),
-                   "FAKE_INSTALL_BIN": _bash_fixture_path(shell.bash, installed, shell.env)})
+                   "FAKE_INSTALL_BIN": _bash_fixture_path(shell.bash, installed, shell.env),
+                   "FAKE_LAUNCHER": _bash_fixture_path(shell.bash, installed / "pseudolife-mcp", shell.env),
+                   "FAKE_KEEP_LAUNCHER": "1"})
     return proc, shell.logged()
 
 

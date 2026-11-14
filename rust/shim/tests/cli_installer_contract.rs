@@ -381,3 +381,135 @@ fn usage_errors_exit_two_before_reading_anything() {
         assert!(output.stdout.is_empty(), "{args:?}");
     }
 }
+
+#[test]
+fn expose_links_the_launcher_once_and_reruns_quietly() {
+    let home = Home::new();
+    home.install_native();
+    let bin = home.0.join("user-bin");
+    let run = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
+        command.env_clear();
+        for key in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+        let layout = home.layout();
+        command
+            .env("HOME", &home.0)
+            .env("USERPROFILE", &home.0)
+            .env("PATH", home.0.join("empty-path"))
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", layout.root)
+            .env("PSEUDOLIFE_SHIM_LAUNCHER", layout.launcher)
+            .env("PSEUDOLIFE_SHIM_USER_BIN", &bin)
+            .args(["installer", "expose", "--json"])
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let first_report = report(&first);
+    assert_eq!(first.status.code(), Some(0), "{first_report}");
+    let second = report(&run());
+    if cfg!(unix) {
+        assert_eq!(first_report["state"], "linked", "{first_report}");
+        assert_eq!(second["state"], "current", "{second}");
+    } else {
+        assert_ne!(first_report["state"], "failed", "{first_report}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn expose_moves_the_old_python_entry_aside_and_leaves_a_foreign_one() {
+    for (content, moved) in [
+        (
+            "#!/usr/bin/python3\nimport sys\nfrom pseudolife_memory.cli import main\nsys.exit(main())\n",
+            true,
+        ),
+        ("#!/bin/sh\necho another tool\n", false),
+    ] {
+        let home = Home::new();
+        home.install_native();
+        let bin = home.0.join("user-bin");
+        fs::create_dir_all(&bin).unwrap();
+        let entry = bin.join(BINARY);
+        fs::write(&entry, content).unwrap();
+        let layout = home.layout();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
+        command
+            .env_clear()
+            .env("HOME", &home.0)
+            .env("PATH", &bin)
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", layout.root)
+            .env("PSEUDOLIFE_SHIM_LAUNCHER", &layout.launcher)
+            .env("PSEUDOLIFE_SHIM_USER_BIN", &bin)
+            .args(["installer", "expose", "--json"]);
+        let output = command.output().unwrap();
+        let result = report(&output);
+        assert_eq!(output.status.code(), Some(0), "{result}");
+        let asides: Vec<_> = fs::read_dir(&bin)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".python-"))
+            .collect();
+        if moved {
+            assert_eq!(result["state"], "replaced", "{result}");
+            assert_eq!(asides.len(), 1, "{result}");
+            assert_eq!(fs::read_to_string(asides[0].path()).unwrap(), content);
+            assert_eq!(
+                fs::canonicalize(&entry).unwrap(),
+                fs::canonicalize(&layout.launcher).unwrap()
+            );
+        } else {
+            assert_eq!(result["state"], "left", "{result}");
+            assert!(asides.is_empty(), "{result}");
+            assert_eq!(fs::read_to_string(&entry).unwrap(), content);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn expose_keeps_the_old_entry_while_a_self_spawning_registration_runs_it() {
+    let home = Home::new();
+    home.install_native();
+    let bin = home.0.join("user-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let entry = bin.join(BINARY);
+    let content = "#!/usr/bin/python3\nfrom pseudolife_memory.cli import main\nmain()\n";
+    fs::write(&entry, content).unwrap();
+    // No PSEUDOLIFE_MCP_NO_SPAWN: this client starts its own daemon through the entry.
+    fs::write(
+        home.0.join("claude").join(".claude.json"),
+        serde_json::to_vec(
+            &json!({"mcpServers": {"pseudolife-memory": {"command": entry, "args": []}}}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let layout = home.layout();
+    let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+        .env_clear()
+        .env("HOME", &home.0)
+        .env("CLAUDE_CONFIG_DIR", home.0.join("claude"))
+        .env("CODEX_HOME", home.0.join("codex"))
+        .env("PATH", &bin)
+        .env("PSEUDOLIFE_SHIM_RUNTIMES", layout.root)
+        .env("PSEUDOLIFE_SHIM_LAUNCHER", &layout.launcher)
+        .env("PSEUDOLIFE_SHIM_USER_BIN", &bin)
+        .args(["installer", "expose", "--json"])
+        .output()
+        .unwrap();
+    let result = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{result}");
+    assert_eq!(result["state"], "left", "{result}");
+    assert!(
+        result["detail"]
+            .as_str()
+            .unwrap()
+            .contains("claude-code registration still runs it"),
+        "{result}"
+    );
+    assert_eq!(fs::read_to_string(&entry).unwrap(), content);
+}

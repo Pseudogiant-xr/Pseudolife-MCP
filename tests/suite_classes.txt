@@ -310,11 +310,12 @@ live test_installer_extractor_modes_ps.py
 live test_installer_legacy_hooks.py
 live test_installer_lite.py
 live test_installer_maintainer_setup.py
+live test_installer_native_client.py
+live test_installer_native_client_ps.py
 live test_installer_plugin.py
 live test_installer_py_launcher_ps.py
 live test_installer_reruns.py
 live test_installer_resources.py
-live test_installer_shim_upgrade.py
 live test_installer_test_login.py
 live test_installer_unattended.py
 live test_integrate_script.py

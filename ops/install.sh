@@ -1035,6 +1035,212 @@ fi
 choose_bank_token
 
 # ── 2. preflight ───────────────────────────────────────────────────────────
+# >>> native client >>>
+# The client side (the stdio MCP shim every agent registers, and the
+# pseudolife-mcp CLI) is the native binary published with this checkout's
+# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
+# docs/dev/release-assets.md). It is fetched, verified against the release's
+# SHA256SUMS and run once from a private staging directory before anything on
+# this host changes; ensure_shim then installs that exact archive with the
+# native runtime installer, which keeps every older runtime a running session
+# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
+# another URL or a local directory holding the archive and SHA256SUMS, and
+# PSEUDOLIFE_NATIVE_TARGET names the release target to install.
+NATIVE_VERSION=""
+NATIVE_TARGET=""
+NATIVE_ARCHIVE=""
+NATIVE_SUMS=""
+NATIVE_STAGED=""
+native_target() {  # echoes this host's release target triple, or nothing
+    # PSEUDOLIFE_NATIVE_TARGET picks one of the five release targets instead
+    # (an emulated one, or a test's).
+    case "${PSEUDOLIFE_NATIVE_TARGET:-}" in
+        x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|x86_64-pc-windows-msvc)
+            echo "$PSEUDOLIFE_NATIVE_TARGET"; return 0 ;;
+        "") ;;
+        *) return 0 ;;
+    esac
+    case "$(uname -s 2>/dev/null)" in
+        Linux)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-unknown-linux-gnu ;;
+                aarch64|arm64) echo aarch64-unknown-linux-gnu ;;
+            esac ;;
+        Darwin)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64) echo x86_64-apple-darwin ;;
+                arm64|aarch64) echo aarch64-apple-darwin ;;
+            esac ;;
+        MINGW*|MSYS*|CYGWIN*)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-pc-windows-msvc ;;
+            esac ;;
+    esac
+}
+native_sha256() {  # $1 = file; echoes its lowercase SHA-256
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        return 1
+    fi
+}
+native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no such file there) or another failure
+    case "$native_base" in
+        http://*|https://*)
+            # A stalled transfer gives up instead of hanging an unattended run.
+            native_curl=0
+            curl -fsSL --retry 2 --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 \
+                -o "$2.part" "$native_base/$1" || native_curl=$?
+            if [ "$native_curl" = 0 ]; then mv -f "$2.part" "$2"; else rm -f "$2.part"; fi
+            return "$native_curl" ;;
+        *)
+            [ -f "$native_base/$1" ] || return 22
+            cp "$native_base/$1" "$2" ;;
+    esac
+}
+native_unstage() {  # removes this run's staging directory
+    if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
+    native_stage_dir=""
+}
+native_refuse() {  # $1 = cause, $2 = fix
+    echo "The native pseudolife-mcp client cannot be installed: $1. $2 Nothing was changed." >&2
+    exit 1
+}
+native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
+    NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
+    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    NATIVE_TARGET="$(native_target)"
+    if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
+        native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
+    fi
+    [ -n "$NATIVE_TARGET" ] || native_refuse "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only)."
+    case "$NATIVE_TARGET" in
+        *windows*) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.zip"; native_binary=pseudolife-mcp.exe ;;
+        *) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.tar.gz"; native_binary=pseudolife-mcp ;;
+    esac
+    native_base="${PSEUDOLIFE_NATIVE_ARCHIVE_URL:-https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$NATIVE_VERSION}"
+    native_base="${native_base%/}"
+    case "$native_base" in
+        http://*|https://*)
+            native_authority="${native_base#*://}"; native_authority="${native_authority%%/*}"
+            case "$native_authority" in
+                *@*) native_refuse "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL." ;;
+            esac ;;
+    esac
+    native_dir="$HOME/.pseudolife-mcp/downloads/$NATIVE_VERSION"
+    # Owner-only, but only for the directories this run creates.
+    for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
+        [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
+    done
+    NATIVE_SUMS="$native_dir/SHA256SUMS"
+    NATIVE_ARCHIVE="$native_dir/$native_name"
+    native_sums_status=0
+    native_download SHA256SUMS "$NATIVE_SUMS" || native_sums_status=$?
+    case "$native_sums_status" in
+        0) ;;
+        22) native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun." ;;
+        *) native_refuse "SHA256SUMS could not be downloaded from $native_base (curl exit $native_sums_status: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun." ;;
+    esac
+    native_expected="$(grep -E "^[0-9a-f]{64}  $(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
+    case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
+        1) ;;
+        *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
+    esac
+    if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
+        native_download "$native_name" "$NATIVE_ARCHIVE" ||
+            native_refuse "the download of $native_name from $native_base failed" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+    fi
+    native_actual="$(native_sha256 "$NATIVE_ARCHIVE")" ||
+        native_refuse "neither sha256sum nor shasum is installed to verify the download" "Install coreutils (sha256sum) and rerun."
+    if [ "$native_actual" != "$native_expected" ]; then
+        rm -f "$NATIVE_ARCHIVE"
+        native_refuse "$native_name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+    fi
+    native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
+        chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."
+    # The staged copy is only for this run; the verified download is kept.
+    trap native_unstage EXIT
+    case "$native_name" in
+        *.zip)
+            if command -v unzip >/dev/null 2>&1; then
+                unzip -q -o "$NATIVE_ARCHIVE" "$native_binary" -d "$native_stage_dir"
+            else
+                powershell.exe -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '$(cygpath -w "$NATIVE_ARCHIVE")' -DestinationPath '$(cygpath -w "$native_stage_dir")' -Force"
+            fi ;;
+        *) tar -xzf "$NATIVE_ARCHIVE" -C "$native_stage_dir" "$native_binary" ;;
+    esac || native_refuse "$native_name could not be unpacked" "Rerun; the verified archive is kept in $native_dir."
+    NATIVE_STAGED="$native_stage_dir/$native_binary"
+    chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
+    if ! native_says="$("$NATIVE_STAGED" version 2>&1)"; then
+        case "$NATIVE_TARGET" in
+            *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
+            *apple*) native_run_fix="The macOS client needs macOS 11 or newer." ;;
+            *) native_run_fix="Check that nothing (an antivirus or an execution policy) blocks it, and rerun." ;;
+        esac
+        native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
+    fi
+}
+# ensure_shim's install: the verified archive into a new side-by-side runtime
+# behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
+native_install() {
+    [ -n "$NATIVE_STAGED" ] || native_stage
+    native_launcher_before="$(native_installed_launcher)"
+    native_sum_before=""
+    [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
+    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
+    native_launcher="${native_launcher%$'\r'}"
+    if command -v cygpath >/dev/null 2>&1; then
+        case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
+    fi
+    [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
+    SHIM_PATH="$native_launcher"
+    if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
+        step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
+    else
+        step "Native client $NATIVE_VERSION installed at $SHIM_PATH (running sessions keep the client they started with)"
+    fi
+    native_expose_line="$("$SHIM_PATH" installer expose 2>/dev/null)" || true
+    case "$native_expose_line" in *"not on PATH"*|*"kept as"*|*"left as it is"*) echo "  $native_expose_line" ;; esac
+    native_user_path
+    return 0
+}
+native_user_path() {  # Git Bash on Windows: the launcher's directory first on the user PATH, as install.ps1 does
+    case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
+    # A test's or a custom layout never touches PATH.
+    [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] || return 0
+    native_path_dir="$(cygpath -w "$(dirname "$SHIM_PATH")" 2>/dev/null)" || return 0
+    native_path_state="$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$repo/ops/add-user-path.ps1")" -Dir "$native_path_dir" 2>/dev/null | tr -d '\r')" || native_path_state=failed
+    case "$native_path_state" in
+        current) ;;
+        changed) echo "  shim: $native_path_dir is now first on your user PATH; new terminals run pseudolife-mcp from there" ;;
+        *) echo "  shim: the user PATH could not be updated; run $SHIM_PATH by its full path" ;;
+    esac
+    # This run's later steps find the launcher by name too.
+    PATH="$(dirname "$SHIM_PATH"):$PATH"
+    export PATH
+}
+native_installed_launcher() {  # echoes the stable launcher when it is the native client
+    native_candidate="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*)
+            if [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] && [ -n "${LOCALAPPDATA:-}" ]; then
+                native_candidate="$(cygpath -u "$LOCALAPPDATA")/pseudolife-mcp/bin/pseudolife-mcp.exe"
+            fi ;;
+    esac
+    [ -f "$native_candidate" ] || return 0
+    native_capability="$("$native_candidate" update --native-capability 2>/dev/null)" || return 0
+    [ "${native_capability%$'\r'}" = "pseudolife-mcp native-update-v1" ] || return 0
+    printf '%s\n' "$native_candidate"
+}
+# <<< native client <<<
+# >>> native client stage >>>
+# Fetched and verified before anything here changes: a refusal leaves the
+# host as it was.
+native_stage
+# <<< native client stage <<<
+
 # >>> client-only preflight >>>
 # Nothing Docker-shaped to check: a client-only install depends on the
 # token file and on the remote daemon answering. The token is never read
@@ -1901,250 +2107,57 @@ describe_legacy_hooks() {  # $1 = state
 # Codex credential setup here and the registrars in section 11.
 #
 # The shim install itself is client-agnostic; memoize one attempt so
-# multi-provider runs don't run pipx/pip twice. Every install command runs as
-# an `if` condition so `set -e` is suspended around it: a failed pipx/pip —
-# PEP 668 externally-managed-environment on Ubuntu 24.04 / Debian 12 /
-# Fedora 40 / Arch is the common case — leaves SHIM_OK unset so the
-# per-client HTTP fallback and its remediation text fire, instead of
+# multi-provider runs install once. The install runs as an `if` condition so
+# `set -e` is suspended around it: a failed install leaves SHIM_OK unset so
+# the per-client HTTP fallback and its remediation text fire, instead of
 # aborting the run after the images are already built (issue #176;
-# install.ps1 has always exit-checked these same paths).
+# install.ps1 exit-checks the same path).
 SHIM_TRIED=""
 SHIM_OK=""
 SHIM_PATH=""
 SHIM_HELD=""
-SHIM_PY=""
 SHIM_MANAGER_KIND=""
-shim_pipx_venv=""
-resolve_installed_shim() {  # optional $1 = runtime, pipx, python3, or python
-    shim_manager="${1:-}"
-    if [ -z "$shim_manager" ] || [ "$shim_manager" = runtime ]; then
-        # The launcher every client registers, once a complete side-by-side
-        # runtime stands behind it (pseudolife_memory/runtimes.py).
-        if [ -z "${SHIM_PY:-}" ]; then SHIM_PY="$(shim_runtime_python)"; fi
-        if [ -n "$SHIM_PY" ] && shim_launcher="$("$SHIM_PY" "$repo/ops/shim_runtime.py" launcher --if-installed 2>/dev/null)" && [ -n "$shim_launcher" ]; then
-            if command -v cygpath >/dev/null 2>&1; then
-                case "$shim_launcher" in [A-Za-z]:\\*) shim_launcher="$(cygpath -u "$shim_launcher")" ;; esac
-            fi
-            SHIM_PATH="$shim_launcher"
-            return 0
-        fi
-        if [ "$shim_manager" = runtime ]; then return 1; fi
-    fi
-    if [ -z "$shim_manager" ]; then
-        if command -v pipx >/dev/null 2>&1; then
-            shim_manager=pipx
-        elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-            shim_manager=python3
-        elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-            shim_manager=python
-        else
-            return 1
-        fi
-    fi
-    if [ "$shim_manager" = pipx ]; then
-        shim_bin_dir="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || true)"
-    else
-        shim_bin_dir="$("$shim_manager" -c "import sysconfig; print(sysconfig.get_path('scripts', scheme=sysconfig.get_preferred_scheme('user')))" 2>/dev/null || true)"
-    fi
-    if [ -n "$shim_bin_dir" ] && command -v cygpath >/dev/null 2>&1; then
-        case "$shim_bin_dir" in [A-Za-z]:\\*) shim_bin_dir="$(cygpath -u "$shim_bin_dir")" ;; esac
-    fi
-    for shim_candidate in "$shim_bin_dir/pseudolife-mcp" "$shim_bin_dir/pseudolife-mcp.exe"; do
-        if [ -n "$shim_bin_dir" ] && [ -f "$shim_candidate" ] && [ -x "$shim_candidate" ]; then
-            SHIM_PATH="$shim_candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-shim_runtime_python() {  # the interpreter that installs the side-by-side runtime
-    # PSEUDOLIFE_SHIM_PYTHON names one explicitly (an operator keeping the
-    # shim on a particular interpreter; the tests, a fake); else the
-    # installer's own python.
-    if [ -n "${PSEUDOLIFE_SHIM_PYTHON:-}" ]; then echo "$PSEUDOLIFE_SHIM_PYTHON"; return 0; fi
-    installer_python
-}
-# On Windows neither pipx nor pip can replace a shim that sessions are running,
-# and neither puts back what it removed first. pip 24.0 stashes an uninstall in
-# sorted order, so site-packages is already renamed to `~` siblings when the
-# running launcher raises WinError 32, from uninstall(), outside the try that
-# rolls back. `pipx install --force` deletes the venv with
-# rmtree(ignore_errors=True), taking everything that is not locked. On
-# 2026-09-25 this left a runtime without its own package. So an installed shim
-# that a session is running is left in place, still usable, and the rerun named.
-shim_process_table() {  # prints pid|parent pid|image rows; status 2 off Windows, 1 when unreadable
-    case "$(uname -s 2>/dev/null || true)" in
-        MINGW*|MSYS*|CYGWIN*) ;;
-        *) return 2 ;;  # an open or running file does not stop pip or pipx here
-    esac
-    shim_ps="$(command -v powershell.exe 2>/dev/null || true)"
-    shim_root="${SYSTEMROOT:-${SystemRoot:-${WINDIR:-}}}"
-    if [ -z "$shim_ps" ] && [ -n "$shim_root" ]; then
-        shim_ps="$(cygpath -u "$shim_root" 2>/dev/null || printf '%s' "$shim_root")/System32/WindowsPowerShell/v1.0/powershell.exe"
-    fi
-    if [ -z "$shim_ps" ] || [ ! -f "$shim_ps" ]; then return 1; fi
-    shim_rows="$("$shim_ps" -NoProfile -NonInteractive -Command '[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId, ExecutablePath -ErrorAction Stop | ForEach-Object { "{0}|{1}|{2}" -f $_.ProcessId, $_.ParentProcessId, $_.ExecutablePath }' 2>/dev/null)" || return 1
-    if [ -z "$shim_rows" ]; then return 1; fi
-    printf '%s\n' "$shim_rows"
-}
-shim_held_paths() {  # $1 = pipx, python3 or python; prints what a running session of the installed shim executes from
-    # The whole pipx venv (its launcher and the venv's python.exe redirector
-    # both run there) and the installed launcher. A --user scripts directory
-    # holds other tools' launchers too, so only the shim's own launcher counts.
-    # Runs in a command substitution: resolve_installed_shim's SHIM_PATH stays put.
-    if [ "$1" = pipx ]; then
-        shim_pipx_home="$(pipx environment --value PIPX_HOME 2>/dev/null || true)"
-        if [ -n "$shim_pipx_home" ]; then
-            shim_pipx_home="$(cygpath -u "$shim_pipx_home" 2>/dev/null || printf '%s' "$shim_pipx_home")"
-            if [ -d "$shim_pipx_home/venvs/pseudolife-mcp" ]; then
-                cygpath -w "$shim_pipx_home/venvs/pseudolife-mcp" 2>/dev/null || printf '%s\n' "$shim_pipx_home/venvs/pseudolife-mcp"
-            fi
-        fi
-    fi
-    if resolve_installed_shim "$1"; then
-        cygpath -w "$SHIM_PATH" 2>/dev/null || printf '%s\n' "$SHIM_PATH"
-    fi
-}
-shim_upgrade_held() {  # $1 = pipx, python3 or python; status 0 = leave the installed shim alone (SHIM_HELD says why)
-    shim_table_status=0
-    shim_table="$(shim_process_table)" || shim_table_status=$?
-    if [ "$shim_table_status" -eq 2 ]; then return 1; fi
-    shim_held="$(shim_held_paths "$1")"
-    # Nothing installed yet: nothing a session could be running.
-    if [ -z "$shim_held" ]; then return 1; fi
-    shim_held_list="$(printf '%s\n' "$shim_held" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
-    shim_rerun="\"$repo/ops/install.sh\" (with the options you used)"
-    if [ "$shim_table_status" -ne 0 ]; then
-        SHIM_HELD="Could not read the Windows process table to see whether a session is running the pseudolife-mcp shim from $shim_held_list; it was left as it is rather than upgraded. Close every Claude Code / Codex session using it, then rerun: $shim_rerun"
-        echo "WARNING: $SHIM_HELD" >&2
-        return 0
-    fi
-    # A Claude session is the launcher plus the venv redirector it starts, a
-    # Codex one the redirector alone: each process tree counts once.
-    # powershell.exe writes CRLF rows. Git for Windows' awk drops the CR
-    # itself; the sub() below is for awks that keep it.
-    shim_counts="$(printf '%s\n' "$shim_table" | SHIM_HELD_ROOTS="$shim_held" awk -F'|' '
-        BEGIN {
-            n = split(ENVIRON["SHIM_HELD_ROOTS"], roots, "\n")
-            for (i = 1; i <= n; i++) { roots[i] = tolower(roots[i]); gsub(/\\/, "/", roots[i]); sub(/\/+$/, "", roots[i]) }
-        }
-        {
-            image = tolower($3); sub(/\r$/, "", image); gsub(/\\/, "/", image)
-            if (image == "") next
-            for (i = 1; i <= n; i++)
-                if (roots[i] != "" && (image == roots[i] || index(image, roots[i] "/") == 1)) { parent[$1] = $2; break }
-        }
-        END {
-            for (pid in parent) { processes++; if (!(parent[pid] in parent)) sessions++ }
-            printf "%d %d\n", sessions, processes
-        }')"
-    shim_sessions="${shim_counts% *}"
-    shim_processes="${shim_counts#* }"
-    if [ "$shim_processes" -eq 0 ]; then return 1; fi
-    if [ "$shim_sessions" -eq 1 ]; then shim_who="1 session is"; else shim_who="$shim_sessions sessions are"; fi
-    if [ "$shim_processes" -eq 1 ]; then shim_what="1 process"; else shim_what="$shim_processes processes"; fi
-    if [ "$1" = pipx ]; then shim_tool=pipx; else shim_tool=pip; fi
-    SHIM_HELD="$shim_who running the pseudolife-mcp shim from $shim_held_list ($shim_what); it was not upgraded, because on Windows $shim_tool cannot replace a running shim and would leave it half-removed. The installed shim stays in place and registered. Close every Claude Code / Codex session using it, then rerun: $shim_rerun"
-    echo "WARNING: $SHIM_HELD" >&2
+resolve_installed_shim() {  # status 0 with SHIM_PATH = the stable launcher, when it is the native client
+    resolved_launcher="$(native_installed_launcher)"
+    [ -n "$resolved_launcher" ] || return 1
+    SHIM_PATH="$resolved_launcher"
     return 0
 }
 ensure_shim() {
     if [ -n "$SHIM_TRIED" ]; then return 0; fi
     SHIM_TRIED=1
-    shim_install_succeeded=""
-    shim_manager=""
-    # Side-by-side runtime behind one launcher path (pseudolife_memory/
-    # runtimes.py): the checkout installs into a NEW runtime beside any
-    # older one, so nothing a running session uses is ever replaced, and the
+    # The native client (the native client block): a new runtime beside any
+    # older one, so nothing a running session uses is replaced, and the
     # launcher every client registers starts the newest complete runtime.
-    # pipx / pip --user below remain the fallback for a host whose python
-    # cannot make a virtualenv (Debian without python3-venv).
-    if [ -z "${SHIM_PY:-}" ]; then SHIM_PY="$(shim_runtime_python)"; fi
-    if [ -n "$SHIM_PY" ]; then
-        if shim_launcher="$("$SHIM_PY" "$repo/ops/shim_runtime.py" install --source "$repo" --python "$SHIM_PY")" && [ -n "$shim_launcher" ]; then
-            if command -v cygpath >/dev/null 2>&1; then
-                case "$shim_launcher" in [A-Za-z]:\\*) shim_launcher="$(cygpath -u "$shim_launcher")" ;; esac
-            fi
-            SHIM_PATH="$shim_launcher"
-            SHIM_OK=1
-            SHIM_MANAGER_KIND=runtime
-            # `pseudolife-mcp` typed in a terminal reaches the launcher too: a
-            # ~/.local/bin/pseudolife-mcp link to it (an old pipx or pip --user
-            # entry there is moved aside, anything else is left and named; a
-            # ~/.local/bin missing from PATH gets its one-line fix printed).
-            "$SHIM_PY" "$repo/ops/shim_runtime.py" expose || true
-            # A pipx environment from an earlier install: registrations that
-            # still name it move to the launcher (shim_registration_migrates).
-            if command -v pipx >/dev/null 2>&1; then
-                shim_pipx_home="$(pipx environment --value PIPX_HOME 2>/dev/null || true)"
-                if [ -n "$shim_pipx_home" ]; then
-                    shim_pipx_home="$(cygpath -u "$shim_pipx_home" 2>/dev/null || printf '%s' "$shim_pipx_home")"
-                    if [ -d "$shim_pipx_home/venvs/pseudolife-mcp" ]; then shim_pipx_venv="$shim_pipx_home/venvs/pseudolife-mcp"; fi
-                fi
-            fi
-            return 0
-        fi
-        echo "WARNING: the side-by-side shim runtime could not be installed with $SHIM_PY (see above); falling back to pipx / pip --user." >&2
-    fi
-    # A held shim counts as installed: the one in place stays usable.
-    if command -v pipx >/dev/null 2>&1; then
-        if shim_upgrade_held pipx; then
-            shim_install_succeeded=1
-            shim_manager=pipx
-        # --force replaces a stale same-version environment as well as
-        # installing fresh, and the local path keeps shim and daemon aligned.
-        elif pipx install --force "$repo"; then
-            shim_install_succeeded=1
-            shim_manager=pipx
-        fi
-    elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        if shim_upgrade_held python3; then
-            shim_install_succeeded=1
-            shim_manager=python3
-        elif python3 -m pip install --user --upgrade "$repo"; then
-            shim_install_succeeded=1
-            shim_manager=python3
-        fi
-    elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        if shim_upgrade_held python; then
-            shim_install_succeeded=1
-            shim_manager=python
-        elif python -m pip install --user --upgrade "$repo"; then
-            shim_install_succeeded=1
-            shim_manager=python
-        fi
-    fi
-    if [ -n "$shim_install_succeeded" ] && resolve_installed_shim "$shim_manager"; then
+    if native_install; then
         SHIM_OK=1
-    elif [ -n "$shim_install_succeeded" ]; then
-        echo "WARNING: shim installation completed, but its installed executable was not found in the manager's scripts directory." >&2
+        SHIM_MANAGER_KIND=runtime
+    else
+        echo "WARNING: the native client could not be installed from $NATIVE_ARCHIVE (see above); rerun the installer, which reuses the verified download." >&2
     fi
     return 0
 }
 
-shim_registration_migrates() {  # $1 = client id (claude-code, codex, gemini), optional $2 = the registered shim path; status 0 = its registration now runs the launcher
-    # Only the side-by-side runtime takes a registration over: the launcher
-    # it installed is what the registration is moved to (the file is backed
-    # up first). $2 names the exact file the registration was found to run
-    # (a pipx bin-dir copy, a pip --user script), so it moves even when it
-    # is not under a known root. Status 3 (nothing to move) and 1 (the
-    # write failed) both leave the registration as it was.
-    # Without a runtime python there is no launcher to move to, and the
-    # pipx / pip fallback must not be triggered for a registration that is
-    # only being looked at.
-    if [ -z "${SHIM_PY:-}" ]; then SHIM_PY="$(shim_runtime_python)"; fi
-    if [ -z "$SHIM_PY" ]; then return 1; fi
+shim_registration_migrates() {  # $1 = client id (claude-code, codex, gemini); status 0 = its registration now runs the native launcher
+    # A pipx, pip --user or Python runtime registration moves to the native
+    # launcher (each changed file is backed up first); editable, self-spawning
+    # and unrecognised registrations stay as they are. Status 0 once it runs
+    # the launcher, with SHIM_MIGRATED=moved (now) or current (already); 1
+    # leaves it as it was.
     ensure_shim
-    if [ -z "$SHIM_OK" ] || [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then return 1; fi
-    if [ -n "${shim_pipx_venv:-}" ] && [ -n "${2:-}" ]; then
-        "$SHIM_PY" "$repo/ops/shim_runtime.py" migrate --client "$1" --bare --from "$shim_pipx_venv" --from "$2"
-    elif [ -n "${shim_pipx_venv:-}" ]; then
-        "$SHIM_PY" "$repo/ops/shim_runtime.py" migrate --client "$1" --bare --from "$shim_pipx_venv"
-    elif [ -n "${2:-}" ]; then
-        "$SHIM_PY" "$repo/ops/shim_runtime.py" migrate --client "$1" --bare --from "$2"
-    else
-        "$SHIM_PY" "$repo/ops/shim_runtime.py" migrate --client "$1" --bare
-    fi
+    if [ -z "$SHIM_OK" ]; then return 1; fi
+    SHIM_MIGRATED=""
+    migrate_output="$("$SHIM_PATH" installer migrate-registrations --client "$1")" || true
+    case "$migrate_output" in
+        "moved $1 to the native client"*) SHIM_MIGRATED=moved; printf '%s\n' "$migrate_output" ;;
+        "$1 already runs the native client"*)
+            SHIM_MIGRATED=current
+            # Where the old Python client stays is said even when the
+            # registration needed no edit (it named the stable launcher).
+            case "$migrate_output" in *"old Python client"*) echo "  ${migrate_output#*(}" | sed 's/)$//' ;; esac ;;
+        *) [ -z "$migrate_output" ] || printf '%s\n' "$migrate_output"; return 1 ;;
+    esac
+    return 0
 }
 
 cli_env_flag() {  # $1 = cli; echoes the supported env flag, or nothing
@@ -2817,7 +2830,7 @@ for selected_client in $CLIENTS; do
         ensure_shim
         desktop_py="$(installer_python)"
         if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
-            echo "WARNING: pseudolife-mcp shim installation did not yield a usable executable — Claude Desktop not wired. Re-run after fixing pipx/Python, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>" >&2
+            echo "WARNING: pseudolife-mcp shim installation did not yield a usable executable — Claude Desktop not wired. Re-run once the native client installs, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>" >&2
             MCP_CLAUDE_DESKTOP=failed
             continue
         fi
@@ -2913,8 +2926,13 @@ for selected_client in $CLIENTS; do
                     if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
                 fi
                 if [ -z "$managed_registered_shim" ] && shim_registration_migrates codex; then
-                    step "Codex registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                    MCP_CODEX=present-migrated
+                    if [ "$SHIM_MIGRATED" = current ]; then
+                        step "Codex registration preserved; it already runs the native client."
+                        MCP_CODEX=present-current
+                    else
+                        step "Codex registration moved to the shim launcher; the native client is installed."
+                        MCP_CODEX=present-migrated
+                    fi
                 elif [ -n "$managed_registered_shim" ]; then
                     ensure_shim
                     if [ -n "$SHIM_OK" ]; then
@@ -2922,20 +2940,30 @@ for selected_client in $CLIENTS; do
                             echo "WARNING: the existing Codex registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
                             MCP_CODEX=failed
                         elif [ -z "$bare_registered_shim" ]; then
-                            # a pipx or pip launcher registration moves to the side-by-side launcher
+                            # a pipx or pip launcher registration moves to the native launcher
                             if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
-                                step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                step "Codex registration preserved; it runs the native client installed from this release."
                                 MCP_CODEX=present-upgraded
                             elif shim_registration_migrates codex "$registered_shim"; then
-                                step "Codex registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                                MCP_CODEX=present-upgraded
+                                if [ "$SHIM_MIGRATED" = current ]; then
+                                    step "Codex registration preserved; it already runs the native client."
+                                    MCP_CODEX=present-current
+                                else
+                                    step "Codex registration moved to the shim launcher; the native client is installed."
+                                    MCP_CODEX=present-upgraded
+                                fi
                             else
-                                echo "WARNING: the Codex registration still names $registered_shim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops/shim_runtime.py migrate --client codex --from \"$registered_shim\"" >&2
+                                echo "WARNING: the Codex registration still names $registered_shim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: \"$SHIM_PATH\" installer migrate-registrations --client codex" >&2
                                 MCP_CODEX=failed
                             fi
                         elif shim_registration_migrates codex; then
-                            step "Codex registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
-                            MCP_CODEX=present-upgraded
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Codex registration preserved; it already runs the native client."
+                                MCP_CODEX=present-current
+                            else
+                                step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                MCP_CODEX=present-upgraded
+                            fi
                         else
                         resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
                         installed_shim="$SHIM_PATH"
@@ -2947,7 +2975,7 @@ for selected_client in $CLIENTS; do
                             installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
                         fi
                         if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
-                            step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            step "Codex registration preserved; it runs the native client installed from this release."
                             MCP_CODEX=present-upgraded
                         else
                             echo "WARNING: the existing Codex registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
@@ -2955,7 +2983,7 @@ for selected_client in $CLIENTS; do
                         fi
                         fi
                     else
-                        echo "WARNING: the existing Codex registration was preserved, but its pseudolife-mcp shim upgrade failed — see the pip/pipx output above and re-run." >&2
+                        echo "WARNING: the existing Codex registration was preserved, but its pseudolife-mcp native client install failed — see the message above and re-run." >&2
                         MCP_CODEX=failed
                     fi
                 else
@@ -3039,8 +3067,13 @@ for selected_client in $CLIENTS; do
                     managed_registered_shim=1
                 fi
                 if [ -z "$managed_registered_shim" ] && shim_registration_migrates gemini; then
-                    step "Gemini CLI registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                    MCP_GEMINI=present-migrated
+                    if [ "$SHIM_MIGRATED" = current ]; then
+                        step "Gemini CLI registration preserved; it already runs the native client."
+                        MCP_GEMINI=present-current
+                    else
+                        step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                        MCP_GEMINI=present-migrated
+                    fi
                 elif [ -n "$managed_registered_shim" ]; then
                     ensure_shim
                     if [ -n "$SHIM_OK" ]; then
@@ -3048,20 +3081,30 @@ for selected_client in $CLIENTS; do
                             echo "WARNING: the existing Gemini CLI registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
                             MCP_GEMINI=failed
                         elif [ -z "$bare_registered_shim" ]; then
-                            # a pipx or pip launcher registration moves to the side-by-side launcher
+                            # a pipx or pip launcher registration moves to the native launcher
                             if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
-                                step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                step "Gemini CLI registration preserved; it runs the native client installed from this release."
                                 MCP_GEMINI=present-upgraded
                             elif shim_registration_migrates gemini "$registered_shim"; then
-                                step "Gemini CLI registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                                MCP_GEMINI=present-upgraded
+                                if [ "$SHIM_MIGRATED" = current ]; then
+                                    step "Gemini CLI registration preserved; it already runs the native client."
+                                    MCP_GEMINI=present-current
+                                else
+                                    step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                                    MCP_GEMINI=present-upgraded
+                                fi
                             else
-                                echo "WARNING: the Gemini CLI registration still names $registered_shim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops/shim_runtime.py migrate --client gemini --from \"$registered_shim\"" >&2
+                                echo "WARNING: the Gemini CLI registration still names $registered_shim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: \"$SHIM_PATH\" installer migrate-registrations --client gemini" >&2
                                 MCP_GEMINI=failed
                             fi
                         elif shim_registration_migrates gemini; then
-                            step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
-                            MCP_GEMINI=present-upgraded
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Gemini CLI registration preserved; it already runs the native client."
+                                MCP_GEMINI=present-current
+                            else
+                                step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                MCP_GEMINI=present-upgraded
+                            fi
                         else
                         resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
                         installed_shim="$SHIM_PATH"
@@ -3073,7 +3116,7 @@ for selected_client in $CLIENTS; do
                             installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
                         fi
                         if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
-                            step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            step "Gemini CLI registration preserved; it runs the native client installed from this release."
                             MCP_GEMINI=present-upgraded
                         else
                             echo "WARNING: the existing Gemini CLI registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
@@ -3081,7 +3124,7 @@ for selected_client in $CLIENTS; do
                         fi
                         fi
                     else
-                        echo "WARNING: the existing Gemini CLI registration was preserved, but its pseudolife-mcp shim upgrade failed — see the pip/pipx output above and re-run." >&2
+                        echo "WARNING: the existing Gemini CLI registration was preserved, but its pseudolife-mcp native client install failed — see the message above and re-run." >&2
                         MCP_GEMINI=failed
                     fi
                 else
@@ -3130,7 +3173,7 @@ for selected_client in $CLIENTS; do
                     step "Wired into Gemini CLI via the pseudolife-mcp shim — per-session identity."
                 fi
             elif [ -n "${CLIENT_ONLY:-}" ]; then
-                echo "WARNING: shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx and re-run." >&2
+                echo "WARNING: shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run." >&2
                 MCP_GEMINI=failed
             else
                 echo "WARNING: shim unavailable for Gemini CLI (see warnings above) — falling back to HTTP." >&2
@@ -3165,8 +3208,13 @@ for selected_client in $CLIENTS; do
                 if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
             fi
             if [ -z "$managed_registered_shim" ] && shim_registration_migrates claude-code; then
-                step "Claude Code registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                MCP_CLAUDE=present-migrated
+                if [ "$SHIM_MIGRATED" = current ]; then
+                    step "Claude Code registration preserved; it already runs the native client."
+                    MCP_CLAUDE=present-current
+                else
+                    step "Claude Code registration moved to the shim launcher; the native client is installed."
+                    MCP_CLAUDE=present-migrated
+                fi
             elif [ -n "$managed_registered_shim" ]; then
                 ensure_shim
                 if [ -n "$SHIM_OK" ]; then
@@ -3174,20 +3222,30 @@ for selected_client in $CLIENTS; do
                         echo "WARNING: the existing Claude Code registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
                         MCP_CLAUDE=failed
                     elif [ -z "$bare_registered_shim" ]; then
-                        # a pipx or pip launcher registration moves to the side-by-side launcher
+                        # a pipx or pip launcher registration moves to the native launcher
                         if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
-                            step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                            step "Claude Code registration preserved; it runs the native client installed from this release."
                             MCP_CLAUDE=present-upgraded
                         elif shim_registration_migrates claude-code "$registered_shim"; then
-                            step "Claude Code registration moved to the shim launcher; a new shim runtime was installed from this checkout."
-                            MCP_CLAUDE=present-upgraded
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Claude Code registration preserved; it already runs the native client."
+                                MCP_CLAUDE=present-current
+                            else
+                                step "Claude Code registration moved to the shim launcher; the native client is installed."
+                                MCP_CLAUDE=present-upgraded
+                            fi
                         else
-                            echo "WARNING: the Claude Code registration still names $registered_shim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops/shim_runtime.py migrate --client claude-code --from \"$registered_shim\"" >&2
+                            echo "WARNING: the Claude Code registration still names $registered_shim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: \"$SHIM_PATH\" installer migrate-registrations --client claude-code" >&2
                             MCP_CLAUDE=failed
                         fi
                     elif shim_registration_migrates claude-code; then
-                        step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
-                        MCP_CLAUDE=present-upgraded
+                        if [ "$SHIM_MIGRATED" = current ]; then
+                            step "Claude Code registration preserved; it already runs the native client."
+                            MCP_CLAUDE=present-current
+                        else
+                            step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                            MCP_CLAUDE=present-upgraded
+                        fi
                     else
                     resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
                     installed_shim="$SHIM_PATH"
@@ -3199,7 +3257,7 @@ for selected_client in $CLIENTS; do
                         installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
                     fi
                     if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
-                        step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                        step "Claude Code registration preserved; it runs the native client installed from this release."
                         MCP_CLAUDE=present-upgraded
                     else
                         echo "WARNING: the existing Claude Code registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
@@ -3207,7 +3265,7 @@ for selected_client in $CLIENTS; do
                     fi
                     fi
                 else
-                    echo "WARNING: the existing Claude Code registration was preserved, but its pseudolife-mcp shim upgrade failed — see the pip/pipx output above and re-run." >&2
+                    echo "WARNING: the existing Claude Code registration was preserved, but its pseudolife-mcp native client install failed — see the message above and re-run." >&2
                     MCP_CLAUDE=failed
                 fi
             else
@@ -3224,7 +3282,7 @@ for selected_client in $CLIENTS; do
         # the registration in place (never a remove and re-add), keeping any
         # credential it already has. Anything else gets the manual fix.
         claude_credential_ok=""
-        if { [ "$MCP_CLAUDE" = present-upgraded ] || [ "$MCP_CLAUDE" = present-migrated ]; } && [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
+        if { [ "$MCP_CLAUDE" = present-upgraded ] || [ "$MCP_CLAUDE" = present-migrated ] || [ "$MCP_CLAUDE" = present-current ]; } && [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
             claude_env_output=$("$(installer_python)" "$repo/ops/client_credentials.py" registration-env \
                 --config "$CLAUDE_JSON" \
                 --set "PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE" \
@@ -3286,12 +3344,12 @@ for selected_client in $CLIENTS; do
                 step "Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
             fi
         elif [ -n "${CLIENT_ONLY:-}" ]; then
-            echo "WARNING: the pseudolife-mcp shim is unavailable (see the pip/pipx output above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx and re-run." >&2
+            echo "WARNING: the pseudolife-mcp shim is unavailable (see the message above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run." >&2
             MCP_CLAUDE=failed
         else
-            echo "WARNING: the pseudolife-mcp shim is unavailable — tooling missing (pipx / python3 >=3.10) or the install failed (see the pip/pipx output above; on PEP 668 distros 'pip install --user' refuses with externally-managed-environment)." >&2
+            echo "WARNING: the pseudolife-mcp shim is unavailable: the native client install failed (see the message above)." >&2
             echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
-            echo "  Install pipx and re-run (pipx sidesteps externally-managed distros), or pass --transport http to silence this." >&2
+            echo "  Re-run once that is fixed (the verified download is reused), or pass --transport http to silence this." >&2
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
             step "Wired into Claude Code via HTTP (fallback — shim tooling not found)."
             MCP_CLAUDE=http
@@ -3627,8 +3685,9 @@ describe_mcp() {  # $1 = state
         shim)     echo "stdio shim (writer id: daemon default in ops/.env)" ;;
         http)     echo "HTTP (writer id: daemon default in ops/.env)" ;;
         present)  echo "already wired (unchanged)" ;;
-        present-upgraded) echo "already wired; checkout shim upgraded" ;;
-        present-migrated) echo "already wired; registration moved to the shim launcher (side-by-side runtime installed, old file backed up)" ;;
+        present-current) echo "already wired (unchanged; it runs the native client)" ;;
+        present-upgraded) echo "already wired; it runs the native client from this release" ;;
+        present-migrated) echo "already wired; registration moved to the native launcher (old file backed up)" ;;
         present-custom) echo "already wired with custom command (unchanged)" ;;
         failed)   echo "registration or shim upgrade FAILED - see warning above and re-run" ;;
         *)        echo "not wired" ;;
