@@ -697,6 +697,22 @@ def unapproved_removals(name: str, entry: dict, raw: dict | None, records: list[
                   if job not in current and not approval_reason(records, name, job, before, None))
 
 
+def unbudgeted_changes(name: str, records: list[dict]) -> list[str]:
+    """For a workflow the generated baseline names and the budget no longer
+    has (deleted, or no longer started by a pull request): its jobs whose
+    definition differs from the baseline, the file's removal included, with
+    no accepted reason. ops/integrate.py's member check judges the workflows
+    of both the head's and the merge base's budget, so it refuses these."""
+    recorded = read_fingerprint_baseline().get(name, {})
+    try:
+        current = current_definitions(name)
+    except FileNotFoundError:
+        current = {}
+    return sorted(job for job in recorded.keys() | current.keys()
+                  if recorded.get(job) != current.get(job)
+                  and not approval_reason(records, name, job, recorded.get(job), current.get(job)))
+
+
 def budget_data(document: dict) -> dict:
     if not isinstance(document, dict) or any(not isinstance(entry, dict) for entry in document.values()):
         raise ValueError("malformed authored CI budget data")
@@ -847,9 +863,8 @@ def problems(name: str, workflow: dict, budget: dict, raw: dict | None = None) -
                          f"--workflow {name} --job {job_id} --reason \"...\"")
     try:
         removed_jobs = unapproved_removals(name, entry, raw, records)
-    except (OSError, ValueError) as error:
-        found.append(f"{name}: fingerprint state unavailable ({error})")
-        removed_jobs = []
+    except (OSError, ValueError):
+        removed_jobs = []   # reported once above, by approved_definitions
     for job_id in removed_jobs:
         found.append(f"{name}: job {job_id} was removed since its minutes were measured, and the batch "
                      "tool's member check wants a reviewed reason for that too: python rust/ci/ci_budget.py "
@@ -1049,6 +1064,17 @@ def main(argv: list[str] | None = None) -> int:
         found = [problem for name in names for problem in problems(name, load(name), budget, load(name, resolved=False))]
         found += [f"{name}: a pull request starts it, and the budget has no entry for it"
                   for name in pull_request_workflows() if name not in budget]
+        if not options.workflow:
+            try:
+                dropped = sorted(set(read_fingerprint_baseline()) - set(budget))
+                records, _ = read_acceptances()
+                for name in dropped:
+                    for job_id in unbudgeted_changes(name, records):
+                        found.append(f"{name}: job {job_id} changed or went with its workflow's budget entry, and "
+                                     "the batch tool's member check wants a reviewed reason: python "
+                                     f"rust/ci/ci_budget.py accept --workflow {name} --job {job_id} --reason \"...\"")
+            except (OSError, ValueError) as error:
+                found.append(f"fingerprint state unavailable ({error})")
         for name in names:
             if estimates(budget[name]):
                 print(f"{name}: estimated, not measured: {estimates(budget[name])}")
@@ -1076,7 +1102,7 @@ def main(argv: list[str] | None = None) -> int:
         if not options.reason.strip():
             parser.error("--reason must say why the job's cost is unchanged")
         try:
-            recorded, _ = recorded_definitions(options.workflow, budget[options.workflow])
+            recorded, _ = recorded_definitions(options.workflow, budget.get(options.workflow, {}))
             try:
                 raw = load(options.workflow, resolved=False)
             except FileNotFoundError:

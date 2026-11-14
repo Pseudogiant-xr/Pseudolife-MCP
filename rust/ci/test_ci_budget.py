@@ -726,8 +726,31 @@ def test_a_removed_job_needs_an_accepted_reason_as_the_batch_check_does(monkeypa
 
 
 def test_check_names_a_removed_job_without_a_reason():
+    # #1550's shape: the job leaves the workflow and its measured minutes
+    # leave the budget, so only the removal itself is left to explain.
     workflow, raw = copy.deepcopy(load("ci.yml")), copy.deepcopy(load("ci.yml", resolved=False))
     for target in (workflow, raw):
         del target["jobs"]["frontend"]
-    found = problems("ci.yml", workflow, budget(), raw)
-    assert any("job frontend was removed since its minutes were measured" in problem for problem in found), found
+    entry = budget()
+    del entry["ci.yml"]["jobs"]["frontend"]
+    found = problems("ci.yml", workflow, entry, raw)
+    assert [problem for problem in found if "frontend" in problem] == [
+        next(problem for problem in found if "job frontend was removed since its minutes were measured" in problem)]
+
+
+def test_a_workflow_dropped_from_the_budget_still_needs_its_reasons(monkeypatch):
+    # The reviewer of 101e0ccba: the gate judges the merge base's workflows
+    # too, so a workflow deleted with its budget entry needs a reason per job.
+    monkeypatch.setattr(ci_budget, "read_fingerprint_baseline", lambda: {"gone.yml": {"a": "x", "b": "y"}})
+
+    def missing(name, raw=None):
+        raise FileNotFoundError(name)
+
+    monkeypatch.setattr(ci_budget, "current_definitions", missing)
+    assert ci_budget.unbudgeted_changes("gone.yml", []) == ["a", "b"]
+    records = [{"workflow": "gone.yml", "job": job, "before": before, "fingerprint": None, "reason": "deleted"}
+               for job, before in (("a", "x"), ("b", "y"))]
+    assert ci_budget.unbudgeted_changes("gone.yml", records) == []
+    # The near miss: a workflow still present and unchanged needs nothing.
+    monkeypatch.setattr(ci_budget, "current_definitions", lambda name, raw=None: {"a": "x", "b": "y"})
+    assert ci_budget.unbudgeted_changes("gone.yml", []) == []
