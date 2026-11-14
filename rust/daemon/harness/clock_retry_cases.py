@@ -5,6 +5,9 @@ that clock and dropping entries.text proves the next initialization retries
 only the clock; a later malformed clock proves healthy calls skip its read.
 Python's unported recovery/curation preamble is explicitly inert in this cell.
 The native embedder loads the existing four-dimensional offline ONNX fixture.
+Checking goldens (--check-goldens, what CI runs) starts only the native service
+and compares its attempts and each phase's database with the committed golden;
+recording runs both.
 """
 from __future__ import annotations
 
@@ -234,8 +237,12 @@ def expectations(result):
     return differences
 
 
-def cell(binary, number, result, mutant=None):
-    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(3)]
+def cell(binary, number, result, mutant=None, expected=None, oracle=True):
+    """The cell on cloned banks. With ``oracle`` the Python service runs beside
+    Rust and the two are compared; without it only Rust runs and ``expected``
+    (the committed golden) is its expectation. Python seeds the template."""
+    arms = ("python", "rust") if oracle else ("rust",)
+    names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []
     try:
         with tempfile.TemporaryDirectory(prefix="pl-pgs-clock-retry-") as scratch:
@@ -243,7 +250,7 @@ def cell(binary, number, result, mutant=None):
             from embedding_fixture import create
             model = root / "model"
             create(model)
-            homes = [daemons.make_home(root, name, CONFIG) for name in ("seed", "python", "rust")]
+            homes = [daemons.make_home(root, name, CONFIG) for name in ("seed", *arms)]
             template = pg.create(names[0])
             created.append(names[0])
             invoke(binary, "python", template, homes[0], model, root / "seed-db", root / "seed.json", seed_only=True)
@@ -253,14 +260,24 @@ def cell(binary, number, result, mutant=None):
                 dsns.append(pg.create(name, template=names[0]))
                 created.append(name)
             outputs, states = [], []
-            for kind, dsn, home in zip(("python", "rust"), dsns, homes[1:]):
+            for kind, dsn, home in zip(arms, dsns, homes[1:]):
                 phases = root / f"{kind}-db"
                 outputs.append(invoke(binary, kind, dsn, home, model, phases, root / f"{kind}.json", mutant=mutant))
                 states.append({phase: json.loads((phases / f"{phase}.json").read_text()) for phase in PHASES})
-            result["snapshots"] = dict(zip(("python", "rust"), outputs))
-            result["snapshot_diffs"] = compare_attempts(*outputs)
+            result["snapshots"] = dict(zip(arms, outputs))
+            result["snapshot_diffs"] = compare_attempts(*outputs) if oracle else []
             result["expectation_diffs"] = [difference for output in outputs for difference in expectations(output)]
-            result["db_diffs"] = {phase: dbstate.diff(states[0][phase], states[1][phase]) for phase in PHASES}
+            rules = {("relations", "created_at"): "clock"}
+            result["database"] = {kind: {phase: startup.start_delta(before, state[phase], rules) for phase in PHASES}
+                                  for kind, state in zip(arms, states)}
+            if oracle:
+                result["db_diffs"] = {phase: dbstate.diff(states[0][phase], states[1][phase]) for phase in PHASES}
+            if expected is not None:
+                # The golden is the left side, which dbstate.diff labels "python".
+                result["golden_diffs"] = compare_attempts(expected["oracle"], outputs[-1])
+                result["db_golden_diffs"] = {phase: dbstate.diff(expected["database"][phase],
+                                                                 result["database"]["rust"][phase])
+                                             for phase in PHASES}
             result["write_diffs"] = []
             result["epoch_diffs"] = []
             for arm, state in enumerate(states):
@@ -271,7 +288,7 @@ def cell(binary, number, result, mutant=None):
                 result["write_diffs"] += dbstate.diff(state["column-dropped"], state["retry"])
                 result["write_diffs"] += dbstate.diff(meta_value(state["retry"], "malformed"), state["healthy-clock-broken"])
                 result["write_diffs"] += dbstate.diff(state["healthy-clock-broken"], state["healthy"])
-            result["db_phases"] = dict(zip(("python", "rust"), states))
+            result["db_phases"] = dict(zip(arms, states))
     finally:
         for name in reversed(created):
             try:
@@ -283,7 +300,8 @@ def cell(binary, number, result, mutant=None):
 def failed(result):
     return bool(result.get("error") or result.get("cleanup_errors") or result.get("snapshot_diffs")
                 or result.get("expectation_diffs") or result.get("write_diffs") or result.get("epoch_diffs")
-                or any(result.get("db_diffs", {}).values()) or result.get("golden_diffs"))
+                or any(result.get("db_diffs", {}).values()) or result.get("golden_diffs")
+                or any(result.get("db_golden_diffs", {}).values()))
 
 
 def main(argv=None):
@@ -312,35 +330,41 @@ def main(argv=None):
     result = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
               "declared_noop_callbacks": [*NOOP_CALLBACKS, "curation_safety.recover_slot_curation"]}
     number = time.time_ns()
+    expected = json.loads(GOLDEN.read_text()) if args.check_goldens else None
+    oracle = expected is None
     try:
-        cell(args.rust_test_bin.resolve(), number, result)
+        cell(args.rust_test_bin.resolve(), number, result, expected=expected, oracle=oracle)
     except Exception as error:
         result["error"] = str(error)
-    if args.check_goldens and not failed(result):
-        expected = json.loads(GOLDEN.read_text())["oracle"]
-        result["golden_diffs"] = dbstate.diff(expected, normalized(result["snapshots"]["rust"]))
     if args.mutants and not failed(result):
         mutant = {}
         try:
-            cell(args.rust_test_bin.resolve(), number + 1000, mutant, "startup-clock-reloads")
+            cell(args.rust_test_bin.resolve(), number + 1000, mutant, "startup-clock-reloads",
+                 expected=expected, oracle=oracle)
         except Exception as error:
             mutant["error"] = str(error)
+        # Live, the mutant shows as a Python/Rust attempt difference; checking
+        # goldens, as a difference from the committed attempts. Either way a
+        # database difference means the cell itself broke.
         infrastructure_failed = bool(mutant.get("error") or mutant.get("cleanup_errors")
                                      or mutant.get("epoch_diffs") or mutant.get("write_diffs")
-                                     or any(mutant.get("db_diffs", {}).values()))
+                                     or any(mutant.get("db_diffs", {}).values())
+                                     or any(mutant.get("db_golden_diffs", {}).values()))
         native_attempts = mutant.get("snapshots", {}).get("rust", {}).get("attempts", [])
         infrastructure_failed |= len(native_attempts) != 3 or (
             normalized({"attempts": native_attempts})["attempts"][0].get("error") != "coordination-highwater"
             if native_attempts else True)
+        differences = mutant.get("snapshot_diffs", []) + mutant.get("golden_diffs", [])
         caught = not infrastructure_failed and any(difference.startswith("/attempts/1/ok:")
-                                                   for difference in mutant.get("snapshot_diffs", []))
+                                                   for difference in differences)
         result["mutants"] = {"startup-clock-reloads": {"caught": caught,
-            "snapshot_diffs": mutant.get("snapshot_diffs", []),
+            "snapshot_diffs": differences,
             "error": mutant.get("error"), "infrastructure_failed": infrastructure_failed}}
     if args.record_goldens and not failed(result) and all(value["caught"] for value in result.get("mutants", {}).values()):
         GOLDEN.write_text(json.dumps({"oracle_head": result["head"],
             "declared_noop_callbacks": result["declared_noop_callbacks"],
-            "oracle": normalized(result["snapshots"]["python"])}, indent=1, sort_keys=True, allow_nan=False) + "\n",
+            "oracle": normalized(result["snapshots"]["python"]),
+            "database": result["database"]["python"]}, indent=1, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8", newline="\n")
     args.out.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     bad = failed(result) or any(not value["caught"] for value in result.get("mutants", {}).values())

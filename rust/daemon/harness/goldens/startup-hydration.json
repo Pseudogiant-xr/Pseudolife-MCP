@@ -216203,11 +216203,7083 @@
    }
   ]
  },
+ "database": {
+  "deep-overflow": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5",
+       "6",
+       "7",
+       "8",
+       "9"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "shallow",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "shallow",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "shallow",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "shallow",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "shallow",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        6,
+        "shallow",
+        "Startup entry 5",
+        "<vector sha256:e63a1c526b58613e>",
+        0.4375,
+        1005.25,
+        5,
+        "agent",
+        null,
+        null,
+        5,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-5"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "5",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        7,
+        "shallow",
+        "Startup entry 6",
+        "<vector sha256:dd546e8faafe7e9d>",
+        0.5,
+        1006.25,
+        6,
+        "agent",
+        null,
+        null,
+        6,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-6"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "6",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        8,
+        "shallow",
+        "Startup entry 7",
+        "<vector sha256:2f83be83d0346d40>",
+        0.5625,
+        1007.25,
+        7,
+        "agent",
+        null,
+        null,
+        7,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-7"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "7",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        9,
+        "shallow",
+        "Startup entry 8",
+        "<vector sha256:c924b2190e3b5688>",
+        0.625,
+        1008.25,
+        8,
+        "agent",
+        null,
+        null,
+        8,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-8"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "8",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5",
+       "6",
+       "7",
+       "8",
+       "9"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "shallow",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "shallow",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "shallow",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "shallow",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "shallow",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        6,
+        "shallow",
+        "Startup entry 5",
+        "<vector sha256:e63a1c526b58613e>",
+        0.4375,
+        1005.25,
+        5,
+        "agent",
+        null,
+        null,
+        5,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-5"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "5",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        7,
+        "shallow",
+        "Startup entry 6",
+        "<vector sha256:dd546e8faafe7e9d>",
+        0.5,
+        1006.25,
+        6,
+        "agent",
+        null,
+        null,
+        6,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-6"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "6",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        8,
+        "shallow",
+        "Startup entry 7",
+        "<vector sha256:2f83be83d0346d40>",
+        0.5625,
+        1007.25,
+        7,
+        "agent",
+        null,
+        null,
+        7,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-7"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "7",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        9,
+        "shallow",
+        "Startup entry 8",
+        "<vector sha256:c924b2190e3b5688>",
+        0.625,
+        1008.25,
+        8,
+        "agent",
+        null,
+        null,
+        8,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-8"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "8",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "empty": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "malformed-highwater-bool": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "malformed-highwater-component": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "malformed-highwater-float": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "malformed-highwater-negative": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "malformed-highwater-short": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "preset-rename": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "shallow",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "shallow",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "shallow",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "shallow",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "shallow",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "shallow",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "shallow",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "shallow",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "shallow",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "shallow",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "record-highwater": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "required-cortex-loader-failure": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "required-entry-loader-failure": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "required-episode-loader-failure": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "required-loader-failure": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "required-world-loader-failure": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "seeded": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "stale-combined-dims": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "[0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "[0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "stale-cortex-dims": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "stale-entry-dims": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "[0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "[0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "startup-tags-non-string-preservation": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "surprise-real-text-rounding": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "world-lesson-dims-accepted": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.entries": {
+      "rows": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.entries": {
+      "rows": [
+       [
+        1,
+        "flat",
+        "Startup entry 0",
+        "<vector sha256:18b7734b2833133e>",
+        0.125,
+        1000.25,
+        0,
+        "agent",
+        1011.25,
+        "Startup entry 1",
+        0,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-0"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "0",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "acknowledged",
+        0,
+        0
+       ],
+       [
+        2,
+        "flat",
+        "Startup entry 1",
+        "<vector sha256:287b07bc74cae1eb>",
+        0.1875,
+        1001.25,
+        1,
+        "agent",
+        null,
+        null,
+        1,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-1"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "1",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        3,
+        "flat",
+        "Startup entry 2",
+        "<vector sha256:628410e59e3fc93e>",
+        0.25,
+        1002.25,
+        2,
+        "agent",
+        null,
+        null,
+        2,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-2"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "2",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ],
+       [
+        4,
+        "flat",
+        "Startup entry 3",
+        "<vector sha256:47e24be3894931c7>",
+        0.3125,
+        1003.25,
+        3,
+        "agent",
+        null,
+        null,
+        3,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-3"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "3",
+          "+"
+         ]
+        ],
+        "observation",
+        "episodic",
+        "pending",
+        0,
+        0
+       ],
+       [
+        5,
+        "flat",
+        "Startup entry 4",
+        "<vector sha256:e4a499f736a9aafa>",
+        0.375,
+        1004.25,
+        4,
+        "agent",
+        null,
+        null,
+        4,
+        "00000000000000000000000000000003",
+        "Episode 2",
+        [
+         "startup",
+         "tag-4"
+        ],
+        [
+         [
+          "Fixture",
+          "entry",
+          "4",
+          "+"
+         ]
+        ],
+        null,
+        null,
+        "pending",
+        0,
+        0
+       ]
+      ]
+     },
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ],
+  "zero-timestamp-seating": [
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        2
+       ]
+      ]
+     }
+    }
+   },
+   {
+    "catalog_changed": [],
+    "replaced": {
+     "public.meta": {
+      "rows": [
+       "\"writer_lease_epoch\""
+      ]
+     }
+    },
+    "rows": {
+     "public.meta": {
+      "rows": [
+       [
+        "writer_lease_epoch",
+        3
+       ]
+      ]
+     }
+    }
+   }
+  ]
+ },
  "normalizers": {
   "error": "named coordination-highwater, five loader/column failures, and stale-dimension wording; exact typed count/dims retained",
   "refusal.entries.band": "cosmetic seating repair precedes a later required-loader/HLC refusal; still exact in cross-arm DB diff",
   "relations.created_at": "new constructor rows only, checked against each arm's invocation window",
   "restart.meta.writer_lease_epoch": "removed only for idempotence; increment checked separately"
  },
- "oracle_head": "785a0103514cfb5617e3bc3fcb6a2cc5b4691bfa"
+ "oracle_head": "05d0ff81d882503aaf30e75ed6413fe4928f7f10"
 }

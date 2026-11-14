@@ -1,4 +1,166 @@
 {
+ "database": {
+  "clock-corrected": {
+   "catalog_changed": [],
+   "replaced": {
+    "public.meta": {
+     "rows": [
+      "\"coordination_hlc_highwater\"",
+      "\"writer_lease_epoch\""
+     ]
+    }
+   },
+   "rows": {
+    "public.meta": {
+     "rows": [
+      [
+       "coordination_hlc_highwater",
+       [
+        20000,
+        2
+       ]
+      ],
+      [
+       "writer_lease_epoch",
+       2
+      ]
+     ]
+    }
+   }
+  },
+  "column-dropped": {
+   "catalog_changed": [
+    "column_types",
+    "columns",
+    "constraints"
+   ],
+   "replaced": {
+    "public.meta": {
+     "rows": [
+      "\"coordination_hlc_highwater\"",
+      "\"writer_lease_epoch\""
+     ]
+    }
+   },
+   "rows": {
+    "public.meta": {
+     "rows": [
+      [
+       "coordination_hlc_highwater",
+       [
+        20000,
+        2
+       ]
+      ],
+      [
+       "writer_lease_epoch",
+       2
+      ]
+     ]
+    }
+   }
+  },
+  "healthy": {
+   "catalog_changed": [
+    "column_types",
+    "columns",
+    "constraints"
+   ],
+   "replaced": {
+    "public.meta": {
+     "rows": [
+      "\"writer_lease_epoch\""
+     ]
+    }
+   },
+   "rows": {
+    "public.meta": {
+     "rows": [
+      [
+       "writer_lease_epoch",
+       2
+      ]
+     ]
+    }
+   }
+  },
+  "healthy-clock-broken": {
+   "catalog_changed": [
+    "column_types",
+    "columns",
+    "constraints"
+   ],
+   "replaced": {
+    "public.meta": {
+     "rows": [
+      "\"writer_lease_epoch\""
+     ]
+    }
+   },
+   "rows": {
+    "public.meta": {
+     "rows": [
+      [
+       "writer_lease_epoch",
+       2
+      ]
+     ]
+    }
+   }
+  },
+  "initial": {
+   "catalog_changed": [],
+   "replaced": {
+    "public.meta": {
+     "rows": [
+      "\"writer_lease_epoch\""
+     ]
+    }
+   },
+   "rows": {
+    "public.meta": {
+     "rows": [
+      [
+       "writer_lease_epoch",
+       2
+      ]
+     ]
+    }
+   }
+  },
+  "retry": {
+   "catalog_changed": [
+    "column_types",
+    "columns",
+    "constraints"
+   ],
+   "replaced": {
+    "public.meta": {
+     "rows": [
+      "\"coordination_hlc_highwater\"",
+      "\"writer_lease_epoch\""
+     ]
+    }
+   },
+   "rows": {
+    "public.meta": {
+     "rows": [
+      [
+       "coordination_hlc_highwater",
+       [
+        20000,
+        2
+       ]
+      ],
+      [
+       "writer_lease_epoch",
+       2
+      ]
+     ]
+    }
+   }
+  }
+ },
  "declared_noop_callbacks": [
   "_rehydrate_if_bank_changed_hands",
   "_recover_correction_locked",
@@ -1153,5 +1315,5 @@
    }
   ]
  },
- "oracle_head": "6cf481c119a5ed4d6c9a62cc5a551733a2c2e74e"
+ "oracle_head": "05d0ff81d882503aaf30e75ed6413fe4928f7f10"
 }
