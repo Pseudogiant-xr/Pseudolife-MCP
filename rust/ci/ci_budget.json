@@ -171,8 +171,8 @@
         "minutes": 0.2
       },
       "guards": {
-        "minutes": 9.0,
-        "estimate": "2026-11-14: a Rust-only batch or push now also runs the 20 live tests that read rust/ files, with a PostgreSQL service. That step took 12.3 min on two workers on a Windows desktop (1,532 passed, 7 platform skips); about 6 is expected on hosted ubuntu-latest, plus the 1.9 measured for the tree-wide guards and about 0.5 for the service. An ordinary pull request skips the step (about 2.4). Re-measure from the first Rust-only batch's run."
+        "minutes": 9.9,
+        "estimate": "2026-11-14: a Rust-only batch or push now also runs the 20 live tests that read rust/ files, with a PostgreSQL service. That step took 12.3 min on two workers on a Windows desktop (1,532 passed, 7 platform skips); about 6 is expected on hosted ubuntu-latest, plus the 1.9 measured for the tree-wide guards and about 0.5 for the service. The step also runs tests/test_installer_legacy_hooks.py since #1560: 82 cases in 54.6 s on two workers in WSL (Linux) on the Windows host on 14 November 2026, so about 0.9 more. An ordinary pull request skips the step (about 2.4). Re-measure from the first Rust-only batch's run."
       },
       "lock-resolve": {
         "minutes": 0.5

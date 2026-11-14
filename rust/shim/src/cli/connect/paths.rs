@@ -8,10 +8,10 @@
 use super::Defer;
 use std::path::{Path, PathBuf};
 
-pub(super) const PACKAGE: &str = "pseudolife-mcp";
+pub(in crate::cli) const PACKAGE: &str = "pseudolife-mcp";
 
 /// `os.environ.get(key)`, deferring on a value that is not valid Unicode.
-pub(super) fn env(key: &str) -> Result<Option<String>, Defer> {
+pub(in crate::cli) fn env(key: &str) -> Result<Option<String>, Defer> {
     match std::env::var(key) {
         Ok(value) => Ok(Some(value)),
         Err(std::env::VarError::NotPresent) => Ok(None),
@@ -20,11 +20,11 @@ pub(super) fn env(key: &str) -> Result<Option<String>, Defer> {
 }
 
 /// `env.get(key)` when truthy (set and non-empty).
-pub(super) fn env_truthy(key: &str) -> Result<Option<String>, Defer> {
+pub(in crate::cli) fn env_truthy(key: &str) -> Result<Option<String>, Defer> {
     Ok(env(key)?.filter(|value| !value.is_empty()))
 }
 
-pub(super) fn canonical(text: &str) -> bool {
+pub(in crate::cli) fn canonical(text: &str) -> bool {
     if cfg!(windows) {
         let bytes = text.as_bytes();
         if bytes.len() < 3
@@ -52,7 +52,7 @@ pub(super) fn canonical(text: &str) -> bool {
 }
 
 /// A base directory from the environment, admitted only in canonical form.
-pub(super) fn base(value: &str) -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn base(value: &str) -> Result<PathBuf, Defer> {
     if canonical(value) {
         Ok(PathBuf::from(value))
     } else {
@@ -60,12 +60,12 @@ pub(super) fn base(value: &str) -> Result<PathBuf, Defer> {
     }
 }
 
-pub(super) fn show(path: &Path) -> Result<String, Defer> {
+pub(in crate::cli) fn show(path: &Path) -> Result<String, Defer> {
     path.to_str().map(str::to_owned).ok_or(Defer)
 }
 
 /// `runtimes.home(env)`.
-pub(super) fn home() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn home() -> Result<PathBuf, Defer> {
     match env_truthy("USERPROFILE")?.or(env_truthy("HOME")?) {
         Some(value) => base(&value),
         // Path.home() would consult the platform's own records.
@@ -73,13 +73,13 @@ pub(super) fn home() -> Result<PathBuf, Defer> {
     }
 }
 
-pub(super) struct Layout {
+pub(in crate::cli) struct Layout {
     pub root: PathBuf,
     pub launcher: PathBuf,
 }
 
 /// `runtimes.default_layout(env)`; `Ok(None)` is its ValueError.
-pub(super) fn layout() -> Result<Option<Layout>, Defer> {
+pub(in crate::cli) fn layout() -> Result<Option<Layout>, Defer> {
     let root = env_truthy("PSEUDOLIFE_SHIM_RUNTIMES")?;
     let launcher = env_truthy("PSEUDOLIFE_SHIM_LAUNCHER")?;
     if let (Some(root), Some(launcher)) = (root, launcher) {
@@ -120,7 +120,7 @@ pub(super) fn layout() -> Result<Option<Layout>, Defer> {
 }
 
 /// `runtimes._claude_config_file(env)`.
-pub(super) fn claude_config() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn claude_config() -> Result<PathBuf, Defer> {
     Ok(match env_truthy("CLAUDE_CONFIG_DIR")? {
         Some(value) => base(&value)?,
         None => home()?,
@@ -129,7 +129,7 @@ pub(super) fn claude_config() -> Result<PathBuf, Defer> {
 }
 
 /// `_settings_row`'s `settings.json`.
-pub(super) fn claude_settings() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn claude_settings() -> Result<PathBuf, Defer> {
     Ok(match env_truthy("CLAUDE_CONFIG_DIR")? {
         Some(value) => base(&value)?,
         None => home()?.join(".claude"),
@@ -138,7 +138,7 @@ pub(super) fn claude_settings() -> Result<PathBuf, Defer> {
 }
 
 /// `runtimes._codex_config_file(env)`; only its existence is consulted.
-pub(super) fn codex_config() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn codex_config() -> Result<PathBuf, Defer> {
     Ok(match env_truthy("CODEX_HOME")? {
         Some(value) => PathBuf::from(value),
         None => home()?.join(".codex"),
@@ -146,12 +146,12 @@ pub(super) fn codex_config() -> Result<PathBuf, Defer> {
     .join("config.toml"))
 }
 
-pub(super) fn gemini_settings() -> Result<PathBuf, Defer> {
+pub(in crate::cli) fn gemini_settings() -> Result<PathBuf, Defer> {
     Ok(home()?.join(".gemini").join("settings.json"))
 }
 
 /// `runtimes.desktop_config_files(env)`.
-pub(super) fn desktop_configs() -> Result<Vec<PathBuf>, Defer> {
+pub(in crate::cli) fn desktop_configs() -> Result<Vec<PathBuf>, Defer> {
     let user = home()?;
     let mut found = Vec::new();
     if cfg!(windows) {
@@ -208,7 +208,7 @@ pub(super) fn desktop_configs() -> Result<Vec<PathBuf>, Defer> {
 
 /// `os.path.normcase`: Windows lowercases (LCMapStringEx's simple mapping)
 /// and turns `/` into `\`.
-pub(super) fn normcase(text: &str) -> String {
+pub(in crate::cli) fn normcase(text: &str) -> String {
     if !cfg!(windows) {
         return text.to_owned();
     }
@@ -228,7 +228,7 @@ pub(super) fn normcase(text: &str) -> String {
 }
 
 /// `os.path.abspath`.
-pub(super) fn abspath(path: &Path) -> Option<PathBuf> {
+pub(in crate::cli) fn abspath(path: &Path) -> Option<PathBuf> {
     let absolute = std::path::absolute(path).ok()?;
     let mut clean = PathBuf::new();
     for component in absolute.components() {
@@ -267,7 +267,7 @@ pub(super) fn strip_verbatim(path: PathBuf) -> PathBuf {
 /// first and resolves the longest existing prefix; POSIX walks the path
 /// one component at a time, so a `..` after a symlink leaves the link's
 /// target (`posixpath._joinrealpath`). `None` is an OSError.
-pub(super) fn realpath(path: &Path) -> Option<PathBuf> {
+pub(in crate::cli) fn realpath(path: &Path) -> Option<PathBuf> {
     #[cfg(unix)]
     {
         posix::realpath(path.to_str()?).map(PathBuf::from)
@@ -365,7 +365,7 @@ mod posix {
     }
 
     /// `posixpath.realpath(path)`: the walk, then `abspath`.
-    pub(super) fn realpath(path: &str) -> Option<String> {
+    pub(in crate::cli) fn realpath(path: &str) -> Option<String> {
         let (resolved, _) = walk(String::new(), path, &mut Seen::new())?;
         let absolute = super::abspath(std::path::Path::new(&resolved))?;
         absolute.to_str().map(str::to_owned)
@@ -409,7 +409,7 @@ fn prefix_realpath(path: &Path) -> Option<PathBuf> {
 }
 
 /// `runtimes._path_forms`.
-pub(super) fn forms(path: &Path) -> Vec<String> {
+pub(in crate::cli) fn forms(path: &Path) -> Vec<String> {
     let mut found = Vec::new();
     for form in [abspath(path), realpath(path)].into_iter().flatten() {
         if let Some(text) = form.to_str() {
@@ -422,13 +422,13 @@ pub(super) fn forms(path: &Path) -> Vec<String> {
     found
 }
 
-pub(super) fn same_path(a: &Path, b: &Path) -> bool {
+pub(in crate::cli) fn same_path(a: &Path, b: &Path) -> bool {
     let a = forms(a);
     forms(b).iter().any(|form| a.contains(form))
 }
 
 /// `processes_inside`'s test: the image is the root or lies under it.
-pub(super) fn inside(image: &Path, held: &[String]) -> bool {
+pub(in crate::cli) fn inside(image: &Path, held: &[String]) -> bool {
     let sep = std::path::MAIN_SEPARATOR;
     forms(image).iter().any(|form| {
         held.iter().any(|root| {

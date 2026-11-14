@@ -31,8 +31,6 @@ PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
 # host with no GitHub key or known_hosts entry (homelab box, 2026-10-04).
 MARKETPLACE_SOURCE = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
 FAKE_VERSION = "0.15.0"
-# What the owner/repo shorthand the installers used up to 0.16.1 recorded.
-GITHUB_SOURCE = {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP"}
 
 
 def _plugins_dir(home: Path) -> Path:
@@ -49,21 +47,21 @@ def _record_plugin(home: Path, version: str = FAKE_VERSION) -> None:
     }, indent=2), encoding="utf-8")
 
 
-def _record_marketplace(home: Path, source: dict | None = None) -> None:
+def _record_marketplace(home: Path) -> None:
     (_plugins_dir(home) / "known_marketplaces.json").write_text(json.dumps({
-        "pseudolife-mcp": {"source": source or {"source": "git", "url": MARKETPLACE_SOURCE}},
+        "pseudolife-mcp": {"source": {"source": "git", "url": MARKETPLACE_SOURCE}},
     }, indent=2), encoding="utf-8")
 
 
 class Scenario:
     def __init__(self, *, clients="claude", flag="auto", cli=True, marketplace=False,
                  plugin=False, marketplace_exit=0, install_exit=0, install_records=True,
-                 help_has_yes=True, python=True, py_out="", py_exit=0, github_source=False):
+                 help_has_yes=True, helper_out="", helper_exit=0):
         self.clients, self.flag, self.cli = clients, flag, cli
-        # ops/plugin_marketplace.py as the installer runs it: a stub that
-        # records its call and answers with ``py_out`` / ``py_exit``.
-        self.python, self.py_out, self.py_exit = python, py_out, py_exit
-        self.github_source = github_source
+        # The native client's plugin-marketplace step as the installer runs
+        # it (native_helper / Invoke-NativeHelper): a stub that records its
+        # call and answers with ``helper_out`` / ``helper_exit``.
+        self.helper_out, self.helper_exit = helper_out, helper_exit
         self.marketplace, self.plugin = marketplace, plugin
         self.marketplace_exit, self.install_exit = marketplace_exit, install_exit
         self.install_records, self.help_has_yes = install_records, help_has_yes
@@ -74,7 +72,7 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
     env = _fixture_env(tmp_path / "bash-env")
     home = Path(env["HOME"])
     if sc.marketplace:
-        _record_marketplace(home, GITHUB_SOURCE if sc.github_source else None)
+        _record_marketplace(home)
     if sc.plugin:
         _record_plugin(home)
     fake_bin = tmp_path / "bin"
@@ -113,7 +111,7 @@ def _run_bash(bash: str, tmp_path: Path, sc: Scenario) -> tuple[subprocess.Compl
         (fake_bin / "claude").chmod(0o755)
     fake_bin_shell = _bash_fixture_path(bash, fake_bin, env).replace("'", "'\\''")
     call_log_shell = _bash_fixture_path(bash, call_log, env).replace("'", "'\\''")
-    py_log_shell = _bash_fixture_path(bash, tmp_path / "py-calls.txt", env).replace("'", "'\\''")
+    helper_log_shell = _bash_fixture_path(bash, tmp_path / "helper-calls.txt", env).replace("'", "'\\''")
     repo_shell = _bash_fixture_path(bash, ROOT, env).replace("'", "'\\''")
     # The installer's own strict mode: an abort in the block must fail here.
     script = f"""set -euo pipefail
@@ -124,9 +122,8 @@ export FAKE_INSTALL_EXIT='{sc.install_exit}' FAKE_INSTALL_RECORD='{"yes" if sc.i
 CLIENTS='{sc.clients}'
 CLAUDE_PLUGIN='{sc.flag}'
 repo='{repo_shell}'
-export PY_LOG='{py_log_shell}' FAKE_PY_OUT={shlex.quote(sc.py_out)} FAKE_PY_EXIT='{sc.py_exit}'
-installer_python() {{ {"echo fakepy" if sc.python else ":"}; }}
-fakepy() {{ printf 'py|%s\\n' "$*" >>"$PY_LOG"; [ -z "$FAKE_PY_OUT" ] || printf '%s\\n' "$FAKE_PY_OUT"; return "$FAKE_PY_EXIT"; }}
+export HELPER_LOG='{helper_log_shell}' FAKE_HELPER_OUT={shlex.quote(sc.helper_out)} FAKE_HELPER_EXIT='{sc.helper_exit}'
+native_helper() {{ printf 'helper|%s\\n' "$*" >>"$HELPER_LOG"; [ -z "$FAKE_HELPER_OUT" ] || printf '%s\\n' "$FAKE_HELPER_OUT"; return "$FAKE_HELPER_EXIT"; }}
 step() {{ printf 'STEP: %s\\n' "$*"; }}
 {block}
 install_claude_plugin
@@ -147,11 +144,11 @@ def _run_powershell(tmp_path: Path, sc: Scenario) -> tuple[subprocess.CompletedP
     env = _fixture_env(tmp_path / "powershell-env")
     home = Path(env["USERPROFILE"])
     if sc.marketplace:
-        _record_marketplace(home, GITHUB_SOURCE if sc.github_source else None)
+        _record_marketplace(home)
     if sc.plugin:
         _record_plugin(home)
     call_log = tmp_path / "calls.txt"
-    escaped_py_log = str(tmp_path / "py-calls.txt").replace("'", "''")
+    escaped_helper_log = str(tmp_path / "helper-calls.txt").replace("'", "''")
     escaped_log = str(call_log).replace("'", "''")
     fake = "" if not sc.cli else f"""function global:claude {{
     $callArgs = @($args)
@@ -200,13 +197,12 @@ $env:PATH = ''
 $clients = @({", ".join("'" + c + "'" for c in sc.clients.split())})
 $ClaudePlugin = '{sc.flag}'
 $repo = '{str(ROOT).replace("'", "''")}'
-$env:FAKE_PY_OUT = '{sc.py_out.replace("'", "''")}'
-$env:FAKE_PY_EXIT = '{sc.py_exit}'
-function Get-InstallerPython {{ {"'fakepy'" if sc.python else "$null"} }}
-function global:fakepy {{
-    Add-Content -LiteralPath '{escaped_py_log}' -Value ('py|' + (@($args) -join ' '))
-    if ($env:FAKE_PY_OUT) {{ Write-Output $env:FAKE_PY_OUT }}
-    $global:LASTEXITCODE = [int]$env:FAKE_PY_EXIT
+$env:FAKE_HELPER_OUT = '{sc.helper_out.replace("'", "''")}'
+$env:FAKE_HELPER_EXIT = '{sc.helper_exit}'
+function Invoke-NativeHelper {{
+    Add-Content -LiteralPath '{escaped_helper_log}' -Value ('helper|' + (@($args) -join ' '))
+    if ($env:FAKE_HELPER_OUT) {{ Write-Output $env:FAKE_HELPER_OUT }}
+    $global:LASTEXITCODE = [int]$env:FAKE_HELPER_EXIT
 }}
 function Step($message) {{ Write-Output "STEP: $message" }}
 {fake}
@@ -515,8 +511,8 @@ MOVED = ("The pseudolife-mcp plugin marketplace moved from its github source (SS
 CURRENT = "The pseudolife-mcp plugin marketplace already fetches over HTTPS; nothing to change."
 
 
-def _py_calls(tmp_path: Path) -> list[str]:
-    log = tmp_path / "py-calls.txt"
+def _helper_calls(tmp_path: Path) -> list[str]:
+    log = tmp_path / "helper-calls.txt"
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
@@ -527,12 +523,12 @@ def test_a_rerun_checks_the_marketplace_source_and_says_so_in_one_line(variant, 
     shorthand, which Claude Code refreshes over SSH; on a host with no
     GitHub SSH key the plugin stopped updating (homelab box, 2026-10-04).
     Rerunning the installer on an installed host now moves it to HTTPS
-    through ops/plugin_marketplace.py (its logic is tested in
+    through the native client's plugin-marketplace step (the
+    ops/plugin_marketplace.py logic it replaced is tested in
     tests/test_update_clients.py) and reports that in one line; an HTTPS
     marketplace is reported current in one line."""
-    state, _, calls, proc = _run(variant, tmp_path, Scenario(marketplace=True, plugin=True, py_out=said))
-    (call,) = _py_calls(tmp_path)
-    assert call.startswith("py|") and call.replace("\\", "/").endswith("ops/plugin_marketplace.py")
+    state, _, calls, proc = _run(variant, tmp_path, Scenario(marketplace=True, plugin=True, helper_out=said))
+    assert _helper_calls(tmp_path) == ["helper|plugin-marketplace"]
     assert _all_output(proc).count(said) == 1
     assert state == f"present:{FAKE_VERSION}"
     assert not any("plugin" in c for c in calls)
@@ -541,7 +537,7 @@ def test_a_rerun_checks_the_marketplace_source_and_says_so_in_one_line(variant, 
 @pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
 def test_a_fresh_machine_runs_the_check_silently(variant, tmp_path):
     state, _, _, proc = _run(variant, tmp_path, Scenario())
-    assert len(_py_calls(tmp_path)) == 1
+    assert _helper_calls(tmp_path) == ["helper|plugin-marketplace"]
     assert "marketplace moved" not in _all_output(proc) and "WARNING" not in _all_output(proc)
     assert state == f"installed:{FAKE_VERSION}"
 
@@ -550,7 +546,7 @@ def test_a_fresh_machine_runs_the_check_silently(variant, tmp_path):
 def test_a_failed_move_is_a_warning_not_a_stop(variant, tmp_path):
     said = ("The pseudolife-mcp plugin marketplace could not be moved from its github source (SSH) to HTTPS: "
             "claude plugin marketplace add failed (offline).")
-    state, _, _, proc = _run(variant, tmp_path, Scenario(marketplace=True, plugin=True, py_out=said, py_exit=1))
+    state, _, _, proc = _run(variant, tmp_path, Scenario(marketplace=True, plugin=True, helper_out=said, helper_exit=1))
     assert "WARNING" in _all_output(proc) and "could not be moved" in _all_output(proc)
     assert state == f"present:{FAKE_VERSION}"
 
@@ -560,16 +556,4 @@ def test_a_failed_move_is_a_warning_not_a_stop(variant, tmp_path):
                          ids=["skip-flag", "no-cli"])
 def test_the_check_needs_the_cli_and_respects_skip(variant, tmp_path, scenario):
     _run(variant, tmp_path, Scenario(**scenario))
-    assert _py_calls(tmp_path) == []
-
-
-@pytest.mark.parametrize("variant", VARIANTS, ids=IDS)
-@pytest.mark.parametrize("github", [True, False], ids=["github-source", "https-source"])
-def test_without_python_an_old_source_is_named(variant, tmp_path, github):
-    _, _, _, proc = _run(variant, tmp_path, Scenario(marketplace=True, plugin=True, python=False,
-                                                     github_source=github))
-    out = _all_output(proc)
-    if github:
-        assert "WARNING" in out and "github source" in out and "Updating section" in out
-    else:
-        assert "WARNING" not in out
+    assert _helper_calls(tmp_path) == []

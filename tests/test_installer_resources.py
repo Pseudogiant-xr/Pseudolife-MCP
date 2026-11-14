@@ -236,8 +236,11 @@ def test_ps_volume_creation_consumes_resolved_names_and_stops_on_failure(tmp_pat
     ps = _PowerShell(tmp_path)
     proc = ps.run(
         "$ClientOnly=$false\n$envFile='fixture.env'\n"
-        "function Get-InstallerPython { 'volume_helper' }\n"
-        "function volume_helper { 'custom-bank'; 'custom-state'; $global:LASTEXITCODE=0 }\n"
+        # The native client's volume-names step, answering resolved names.
+        "function Invoke-NativeHelper {\n"
+        "    if ($args[0] -ne 'volume-names') { throw \"unexpected native step $($args[0])\" }\n"
+        "    'custom-bank'; 'custom-state'; $global:LASTEXITCODE=0\n"
+        "}\n"
         + ps.stub_function("docker", "if ($args[1] -eq 'ls') { $global:LASTEXITCODE=0 } else { $global:LASTEXITCODE=1 }")
         + block + "\n'CONTINUED'\n")
     assert proc.returncode != 0
@@ -315,12 +318,23 @@ def test_preflight_refuses_a_foreign_stack_before_install_can_continue(tmp_path,
         "    out='fixture' if argv[1]=='ps' else json.dumps([inventory])\n"
         "    return subprocess.CompletedProcess(argv,0,out,'')\n"
         "m.subprocess.run=run\nm.port_busy=lambda port: False\n"
+        # Called as the native client: installer preflight-check --repo R --env-file F.
+        "sys.argv=[sys.argv[0], '--env-file', sys.argv[sys.argv.index('--env-file') + 1]]\n"
         "sys.exit(m.main())\n", encoding="utf-8")
+    # The native client the block runs (PSEUDOLIFE_NATIVE_CLI): this fixture
+    # check, which loads the Python reference with Docker's replies faked.
+    if os.name == "nt":
+        client = fixture / "pseudolife-mcp.cmd"
+        client.write_text(f'@"{sys.executable}" "{helper}" %*\r\n', encoding="utf-8")
+    else:
+        client = fixture / "pseudolife-mcp"
+        client.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{helper}" "$@"\n', encoding="utf-8")
+        client.chmod(0o755)
     if script.endswith(".ps1"):
         ps = _PowerShell(tmp_path)
         proc = ps.run(
             f"$PSScriptRoot='{_q(fixture)}'\n"
-            f"function python {{ & '{_q(sys.executable)}' @args }}\n"
+            f"$env:PSEUDOLIFE_NATIVE_CLI = '{_q(client)}'\n"
             "function docker { 'pseudolife-mcp-daemon'; $global:LASTEXITCODE=0 }\n"
             "function Get-NetTCPConnection { }\nfunction Ok {}\nfunction Warn {}\n"
             "function Fail { throw $args[0] }\n" + block + "\n'CONTINUED'\n")
@@ -331,12 +345,12 @@ def test_preflight_refuses_a_foreign_stack_before_install_can_continue(tmp_path,
             pytest.skip("Bash unavailable")
         shell = _Shell(variants[0], tmp_path)
         _stub(shell.bin / "docker", "echo pseudolife-mcp-daemon\n")
-        _stub(shell.bin / "python3", f"exec '{shell.path(sys.executable)}' \"$@\"\n")
+
         block = block.replace('preflight_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
                               f"preflight_dir='{shell.path(fixture)}'")
         proc = shell.run(
             f"preflight_dir='{shell.path(fixture)}'\n"
-            f"resource_python='{shell.path(sys.executable)}'\n"
+            f"export PSEUDOLIFE_NATIVE_CLI='{shell.path(client)}'\n"
             "ok() { :; }; warn() { :; }; fail() { exit 1; }\n"
             + block + "\necho CONTINUED\n")
         output = proc.stdout + proc.stderr
@@ -348,6 +362,7 @@ def test_preflight_refuses_a_foreign_stack_before_install_can_continue(tmp_path,
 @pytest.mark.parametrize("project", ["user-stack", "", "pseudolife-mcp"])
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 def test_extractor_removal_rechecks_project_and_uses_verified_id(tmp_path, script, project):
+    from tests.native_client_stub import HELPER_PS, HELPER_SH
     from tests.test_installer_client_only import _Shell, _stub
     from tests.test_installer_existing_upgrade import _bash_variants
     from tests.test_installer_client_only_ps import _PowerShell, _q, _output
@@ -365,7 +380,7 @@ def test_extractor_removal_rechecks_project_and_uses_verified_id(tmp_path, scrip
                              f"'{identifier} {project}'" + " }\n$global:LASTEXITCODE=0")
             + f"$ClientOnly=$false\n$overrideFile='{_q(override)}'\n"
             f"$OverrideMarker='{marker}'\n$LegacyOverrideMarker='old'\n$LegacyShimOverrideMarker='older'\n"
-            "function Test-ExtractorDisablesSidecar { $true }\n" + block)
+            "function Test-ExtractorDisablesSidecar { $true }\n" + HELPER_PS + block)
         output, calls = _output(proc), ps.logged()
     else:
         variants = _bash_variants()
@@ -376,7 +391,10 @@ def test_extractor_removal_rechecks_project_and_uses_verified_id(tmp_path, scrip
               f'if [ "$1" = inspect ]; then echo "{identifier} {project}"; fi\n')
         proc = shell.run(f"CLIENT_ONLY=''\noverride_file='{shell.path(override)}'\n"
                          f"OVERRIDE_MARKER='{marker}'\nLEGACY_OVERRIDE_MARKER=old\nLEGACY_SHIM_OVERRIDE_MARKER=older\n"
-                         "extractor_disables_sidecar() { return 0; }\n" + block)
+                         "extractor_disables_sidecar() { return 0; }\n" + HELPER_SH
+                         # The override is written through the installer's own state step.
+                         + next(line for line in text.splitlines() if line.startswith("installer_state() {"))
+                         + "\n" + block)
         output, calls = proc.stdout + proc.stderr, shell.logged()
     assert proc.returncode == 0, output
     removed = [call for call in calls if call.startswith("docker|rm")]

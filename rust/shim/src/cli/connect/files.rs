@@ -8,7 +8,7 @@ use std::{
     path::Path,
 };
 
-pub(super) enum Read {
+pub(in crate::cli) enum Read {
     Missing,
     Error(String),
     Ok(Dict),
@@ -16,7 +16,7 @@ pub(super) enum Read {
 
 /// A failure inside a write, named as Python names it.
 #[derive(Debug)]
-pub(super) enum Fail {
+pub(in crate::cli) enum Fail {
     /// `client_config.HelperError`: its own message is shown.
     Helper(String),
     /// Anything else: only the exception's class name is shown.
@@ -25,7 +25,7 @@ pub(super) enum Fail {
 
 /// The Python exception class an OS error becomes (CPython's errno and
 /// Windows error maps for the cases a config write meets).
-pub(super) fn os_error_name(error: &io::Error) -> &'static str {
+pub(in crate::cli) fn os_error_name(error: &io::Error) -> &'static str {
     match python_errno(error) {
         1 | 13 => "PermissionError",
         2 => "FileNotFoundError",
@@ -64,7 +64,7 @@ fn ignored_by_pathlib(error: &io::Error) -> bool {
 }
 
 /// `Path.exists()`; any error pathlib would raise defers.
-pub(super) fn exists(path: &Path) -> Result<bool, Defer> {
+pub(in crate::cli) fn exists(path: &Path) -> Result<bool, Defer> {
     match fs::metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if ignored_by_pathlib(&error) => Ok(false),
@@ -73,7 +73,7 @@ pub(super) fn exists(path: &Path) -> Result<bool, Defer> {
 }
 
 /// `Path.is_file()`; any error pathlib would raise defers.
-pub(super) fn is_file(path: &Path) -> Result<bool, Defer> {
+pub(in crate::cli) fn is_file(path: &Path) -> Result<bool, Defer> {
     match fs::metadata(path) {
         Ok(info) => Ok(info.is_file()),
         Err(error) if ignored_by_pathlib(&error) => Ok(false),
@@ -86,7 +86,7 @@ fn name(path: &Path) -> Result<&str, Defer> {
 }
 
 /// `client_config._load_json`.
-pub(super) fn load_json(path: &Path) -> Result<Read, Defer> {
+pub(in crate::cli) fn load_json(path: &Path) -> Result<Read, Defer> {
     if !exists(path)? {
         return Ok(Read::Ok(Vec::new()));
     }
@@ -112,7 +112,7 @@ pub(super) fn load_json(path: &Path) -> Result<Read, Defer> {
 }
 
 /// `connect_cli._read_json`.
-pub(super) fn read_json(path: &Path) -> Result<Read, Defer> {
+pub(in crate::cli) fn read_json(path: &Path) -> Result<Read, Defer> {
     if !exists(path)? {
         return Ok(Read::Missing);
     }
@@ -120,7 +120,7 @@ pub(super) fn read_json(path: &Path) -> Result<Read, Defer> {
 }
 
 /// `connect_cli._bytes`: only FileNotFoundError reads as "no file".
-pub(super) fn bytes(path: &Path) -> io::Result<Option<Vec<u8>>> {
+pub(in crate::cli) fn bytes(path: &Path) -> io::Result<Option<Vec<u8>>> {
     match fs::read(path) {
         Ok(data) => Ok(Some(data)),
         Err(error) if python_errno(&error) == 2 => Ok(None),
@@ -166,7 +166,7 @@ fn make_private(file: &fs::File) -> Result<(), Fail> {
 
 /// `client_config._write_private`: an owner-only temporary file beside the
 /// (symlink-resolved) target, then an atomic replace.
-pub(super) fn write_private(path: &Path, data: &[u8]) -> Result<(), Fail> {
+pub(in crate::cli) fn write_private(path: &Path, data: &[u8]) -> Result<(), Fail> {
     let path = super::paths::realpath(path).unwrap_or_else(|| path.to_path_buf());
     let parent = path.parent().unwrap_or(Path::new("."));
     fs::create_dir_all(parent).map_err(|error| Fail::Name(os_error_name(&error)))?;
@@ -201,7 +201,7 @@ pub(super) fn write_private(path: &Path, data: &[u8]) -> Result<(), Fail> {
 }
 
 /// `client_config._backup` for a file that exists.
-pub(super) fn backup(path: &Path) -> Result<String, Fail> {
+pub(in crate::cli) fn backup(path: &Path) -> Result<String, Fail> {
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S-%6f");
     let name = path
         .file_name()
@@ -217,14 +217,14 @@ pub(super) fn backup(path: &Path) -> Result<String, Fail> {
 }
 
 /// `client_config._write_json`.
-pub(super) fn write_json(path: &Path, data: &Dict) -> Result<(), Fail> {
+pub(in crate::cli) fn write_json(path: &Path, data: &Dict) -> Result<(), Fail> {
     let mut text = pyjson::dumps(&J::Dict(data.clone()), false);
     text.push('\n');
     write_private(path, text.as_bytes())
 }
 
 /// How `write_token_file` refused, in connect's terms.
-pub(super) enum TokenFail {
+pub(in crate::cli) enum TokenFail {
     /// HelperError: connect prints `{message}; nothing was changed`.
     Helper(String),
     /// OSError or CredentialError: connect prints the class name.
@@ -239,7 +239,7 @@ fn already_exists(target: &Path) -> TokenFail {
 }
 
 /// `client_config.write_token_file(path, stdin)` with stdin's first bytes.
-pub(super) fn write_token_file(target: &Path, data: &[u8]) -> Result<(), TokenFail> {
+pub(in crate::cli) fn write_token_file(target: &Path, data: &[u8]) -> Result<(), TokenFail> {
     if fs::symlink_metadata(target).is_ok() {
         return Err(already_exists(target));
     }

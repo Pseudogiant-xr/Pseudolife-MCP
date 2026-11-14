@@ -270,24 +270,32 @@ def test_the_install_records_an_explicit_python_choice_and_accepts_rust(tmp_path
 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
-@pytest.mark.parametrize("flag", ["", "rust"])
-def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, flag):
-    # Conductor round-4 delta: with the shim transport, no token set and no
-    # pipx or pip, stage 5b mints none. Stage 4b now knows that before its
-    # prepare pulls the image and fills the models volume.
+@pytest.mark.parametrize("flag,installed", [("", "none"), ("", "rust-unaccepted"), ("rust", "none")],
+                         ids=["default", "unfinished-rust", "explicit-rust"])
+@pytest.mark.parametrize("transport", ["shim", "http"], ids=["no-token", "http-without-token"])
+def test_a_bearer_the_install_cannot_mint_is_decided_before_anything_is_pulled(tmp_path, script, flag,
+                                                                               installed, transport):
+    # Conductor round-4 delta: an install that will have no bearer token
+    # (--no-token, or the http transport with none set: the engine flag block
+    # leaves the bearer flag empty for both) gets none from stage 5b. Stage 4b
+    # knows that before its prepare pulls the image and fills the models
+    # volume. A full run reaches the refusal through this checkout's own
+    # unfinished Rust install; an explicit --engine rust is refused earlier
+    # by the engine flag block, so that row holds stage 4b's own guard. (The
+    # shim transport always mints a bearer otherwise: the native client
+    # needs no pipx or pip, so "no shim tooling" is no longer a case.)
     if script.endswith(".ps1"):
         stage = _stage(script, "# -- 4b. daemon engine", "# -- 4c. create volumes")
         definition = stage[stage.index("function Invoke-EngineHelper"):stage.index("$installedEngine =")]
-        stage = stage.replace(definition, "").replace("function Test-ShimToolingReady(", "function Test-ShimToolingReady-Real(")
+        stage = stage.replace(definition, "")
         ps = _PowerShell(tmp_path)
         stub = ("function Invoke-EngineHelper {\n"
                 f"    Add-Content -LiteralPath '{ps.calls}' -Value ('helper|' + (@($args) -join ' '))\n"
                 "    $global:LASTEXITCODE = 0\n"
-                "    if ($args[0] -eq 'detect') { return 'none' }\n}\n"
-                "function Test-ShimToolingReady($python) { return $false }\n"
-                "function Get-EnvValue($name) { return $null }\n"
-                "function Get-InstallerPython { return 'python' }\n")
-        proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$rustBearer=$true\n$Transport='shim'\n"
+                f"    if ($args[0] -eq 'detect') {{ return '{installed}' }}\n}}\n"
+                "function Get-EnvValue($name) { return $null }\n")
+        proc = ps.run(f"$ClientOnly=$false\n$Engine='{flag}'\n$rustBearer=$false\n"
+                      f"$Transport='{transport}'\n"
                       "$env:PSEUDOLIFE_MCP_TOKEN=$null\n$env:PSEUDOLIFE_MCP_TOKENS=$null\n"
                       "$engineDefaulted=$false\n$bankExisted=$false\n" + stub + stage
                       + "Write-Output \"RESULT:$composeEngine\"\n")
@@ -298,18 +306,18 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
             pytest.skip("Bash unavailable")
         stage = _stage(script, "# ── 4b. daemon engine", "# ── 4c. create volumes")
         definition = next(line for line in stage.splitlines() if line.startswith("engine_helper()"))
-        stage = stage.replace(definition, "").replace("shim_tooling_ready() {", "shim_tooling_ready_real() {")
+        stage = stage.replace(definition, "")
         shell = _Shell(variants[0], tmp_path)
         stub = ('engine_helper() { printf "helper|%s\\n" "$*" >>"$CALL_LOG"; '
-                'case "$1" in detect) echo none ;; esac; }\n'
-                'step() { echo "STEP: $*"; }\nshim_tooling_ready() { return 1; }\nget_env() { :; }\n')
-        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=1\nTRANSPORT=shim\nBANK_EXISTED=''\n"
+                f'case "$1" in detect) echo {installed} ;; esac; }}\n'
+                'step() { echo "STEP: $*"; }\nget_env() { :; }\n')
+        proc = shell.run(f"CLIENT_ONLY=''\nENGINE='{flag}'\nRUST_BEARER=''\nTRANSPORT={transport}\nBANK_EXISTED=''\n"
                          "unset PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKENS\n" + stub + stage
                          + 'echo "RESULT:$COMPOSE_ENGINE"\n')
         calls, output = shell.logged(), proc.stdout + proc.stderr
     prepares = [call for call in calls if "prepare" in call]
-    if flag == "rust":
-        # An explicit Rust install refuses before it pulls anything.
+    if flag == "rust" or installed == "rust-unaccepted":
+        # A Rust install that is not a default refuses before it pulls anything.
         assert proc.returncode == 2, output
         assert "cannot mint one" in output and "Nothing was pulled or started" in output
         assert prepares == []
@@ -322,12 +330,13 @@ def test_no_shim_tooling_is_decided_before_anything_is_pulled(tmp_path, script, 
 
 @pytest.mark.parametrize("script", ["install.sh", "install.ps1"])
 @pytest.mark.parametrize("token_state,defaulted,expected", [
-    ("minted", True, "rust"), ("present", True, "rust"), ("no-shim", True, "python"), ("failed", True, "python"),
-    ("no-shim", False, "refused"), ("present", False, "rust"),
+    ("minted", True, "rust"), ("present", True, "rust"), ("opted-out", True, "python"), ("failed", True, "python"),
+    ("http", False, "refused"), ("failed", False, "refused"), ("present", False, "rust"),
 ])
 def test_the_rust_engine_follows_the_token_the_install_produced(tmp_path, script, token_state, defaulted, expected):
-    # Codex P1 (round 3): with the shim transport but no pipx or pip, stage 4b
-    # predicted a bearer that stage 5b never minted.
+    # Codex P1 (round 3): stage 4b predicted a bearer that stage 5b never
+    # minted (then: the shim transport with no pipx or pip; still: a mint
+    # that fails), so the engine follows the token state stage 5b recorded.
     if script.endswith(".ps1"):
         stage = _stage(script, "# >>> engine token >>>", "# <<< engine token <<<")
         ps = _PowerShell(tmp_path)

@@ -15,6 +15,7 @@ import subprocess
 
 import pytest
 
+from tests import native_client_stub as native_stub
 from tests.test_installer_client_only import BASH, ROOT, _Shell, _q, _stub
 
 ALIASES = {"sonnet-only": "claude-only", "sonnet-fallback": "claude-fallback",
@@ -273,12 +274,23 @@ def test_the_script_refuses_an_endpoint_mode_without_its_url(bash, tmp_path):
     assert shell.logged() == []
 
 
+def _release_env(shell: _Shell) -> dict[str, str]:
+    """A local fake release of this checkout's version: the whole installer
+    stages the native client before it reads the client-only flags."""
+    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"',
+                        (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    env = native_stub.write_release(shell.tmp / "release", version, "exit 0\n")
+    env["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] = shell.path(shell.tmp / "release")
+    return env
+
+
 @BASH
 def test_client_only_refuses_an_extractor_url(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install.sh')}' "
                      "--daemon-url http://100.64.0.2:8765 "
-                     "--extractor-url http://pl.example.invalid:1234/v1 --no-art\n")
+                     "--extractor-url http://pl.example.invalid:1234/v1 --no-art\n",
+                     extra_env=_release_env(shell))
     assert proc.returncode == 2
     # The client-only refusal itself, not an unknown-flag usage exit.
     [line] = [line for line in proc.stderr.splitlines() if "client-only install" in line]
@@ -710,12 +722,20 @@ def _marker_texts() -> list[str]:
     return [line.split("=", 1)[1].strip('"') for line in _markers().splitlines()]
 
 
+def _installer_state() -> str:
+    """The recorded-choices block's installer_state, which the sidecar
+    override writes its file through."""
+    text = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    [line] = [line for line in text.splitlines() if line.startswith("installer_state() {")]
+    return line + "\n"
+
+
 def _override(shell: _Shell, mode: str, first_line: str):
     override = shell.tmp / "docker-compose.override.yml"
     override.write_text(first_line + "\nservices:\n  mine: {}\n", encoding="utf-8")
     proc = shell.run(
         f"EXTRACTOR='{mode}'\nMODEL=''\nEXTRACTOR_URL=''\nCLIENT_ONLY=''\n"
-        f"override_file='{shell.path(override)}'\n" + _markers()
+        f"override_file='{shell.path(override)}'\n" + _markers() + _installer_state()
         + _block("extractor modes") + _block("sidecar override"))
     return proc, override
 

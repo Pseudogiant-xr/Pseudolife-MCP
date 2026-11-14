@@ -21,7 +21,7 @@ foreach ($tok in ($Client -split '[,\s]+' | Where-Object { $_ })) {
         "all" { $checks += @("claude", "codex", "gemini") }
         { $_ -in "claude", "codex", "gemini" } { $checks += $_ }
         "generic" { }  # no CLI to probe — its MCP config is pasted by hand
-        "claude-desktop" { $checks += $_ }  # no CLI; needs python >= 3.10 (config writer)
+        "claude-desktop" { }  # no CLI to probe: the native client writes its config
         default {
             Write-Host "invalid -Client '$tok' (claude|claude-desktop|codex|gemini|generic|both|all)"
             exit 2
@@ -75,71 +75,39 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 }
 
 # -- ports, volumes and Compose ownership: fail before any installer writes ----
-$resourcePython = $null
-foreach ($candidate in @("python", "python3", "py")) {
-    if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-    # Assigned: an if-expression unrolls a one-item array to a string, which
-    # splats as characters (py - 3).
-    $probeArgs = @()
-    if ($candidate -eq "py") { $probeArgs = @("-3") }
-    try {
-        $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-        if ($LASTEXITCODE -eq 0 -and $probe) { $resourcePython = "$probe".Trim(); break }
-    } catch { continue }
+# The native client's check (`installer preflight-check`): the binary named by
+# PSEUDOLIFE_NATIVE_CLI (the installer passes its verified copy), else
+# PSEUDOLIFE_SHIM_LAUNCHER, else the stable launcher, the order ops\update.ps1
+# uses.
+$nativeCli = $env:PSEUDOLIFE_NATIVE_CLI
+if (-not $nativeCli) { $nativeCli = $env:PSEUDOLIFE_SHIM_LAUNCHER }
+if (-not $nativeCli) {
+    if ($IsWindows -or ($null -eq $IsWindows)) {
+        $localData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' }
+        $nativeCli = Join-Path $localData 'pseudolife-mcp/bin/pseudolife-mcp.exe'
+    } else {
+        $dataHome = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
+        $nativeCli = Join-Path $dataHome 'pseudolife-mcp/bin/pseudolife-mcp'
+    }
 }
-if (-not $resourcePython) {
-    Fail "Python >= 3.10 is needed to verify Docker ownership safely" "install Python 3.10 or newer, then rerun ops/preflight.ps1"
-    exit 1
+if (-not (Test-Path -LiteralPath $nativeCli -PathType Leaf)) {
+    # Run by hand before an install: the installer verifies the client, then
+    # runs this check before it changes anything.
+    Warn "the Docker ownership check needs the native pseudolife-mcp client, which is not installed yet ($nativeCli)" "ops\install.ps1 downloads and verifies it, then runs this check before anything changes (or set PSEUDOLIFE_NATIVE_CLI to a client)"
+} else {
+    & $nativeCli installer preflight-check --repo (Split-Path -Parent $PSScriptRoot) --env-file (Join-Path $PSScriptRoot ".env")
+    if ($LASTEXITCODE -eq 2) {
+        Fail "the native client at $nativeCli is older than this checkout and has no Docker ownership check" "run ops\install.ps1, which installs this checkout's client first"
+        exit 1
+    }
+    if ($LASTEXITCODE -ne 0) { exit 1 }
 }
-& $resourcePython (Join-Path $PSScriptRoot "preflight.py") --env-file (Join-Path $PSScriptRoot ".env")
-if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # -- git ----------------------------------------------------------------------
 if (Get-Command git -ErrorAction SilentlyContinue) { Ok "git" }
 else { Fail "git is not installed" "https://git-scm.com/downloads or: winget install Git.Git" }
 
-# -- python 3 (only needed for the optional Sonnet shim + eval tooling) --------
-if ((Get-Command python -ErrorAction SilentlyContinue) -or (Get-Command python3 -ErrorAction SilentlyContinue)) {
-    Ok "python 3 (optional Sonnet shim)"
-} else {
-    Fail "python 3 not found (optional - needed only for the Sonnet shim)" `
-         "https://www.python.org/downloads/ or: winget install Python.Python.3.12"
-}
-
-# -- pipx (preferred installer for the stdio MCP shim) --------------------------
-# Without pipx the installer falls back to `pip install --user`; pipx keeps
-# the shim on PATH in its own venv on every platform.
-if (Get-Command pipx -ErrorAction SilentlyContinue) {
-    Ok "pipx (stdio shim install)"
-} else {
-    Warn "pipx not found - the shim install falls back to 'pip install --user'" `
-         "python -m pip install --user pipx   (https://pipx.pypa.io/stable/installation/)"
-}
-
 # -- selected MCP client CLI(s) -------------------------------------------------
-if ($checks -contains "claude-desktop") {
-    # Claude Desktop has no CLI; its config is written by
-    # ops\register_claude_desktop.py, which needs python >= 3.10. Probe each
-    # candidate independently: the Microsoft Store alias stub answers to
-    # Get-Command but is not an interpreter.
-    $desktopPythonOk = $false
-    foreach ($candidate in @("python", "python3", "py")) {
-        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-        # Assigned: an if-expression unrolls a one-item array to a string, which
-        # splats as characters (py - 3).
-        $probeArgs = @()
-        if ($candidate -eq "py") { $probeArgs = @("-3") }
-        try {
-            & $candidate @probeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) { $desktopPythonOk = $true; break }
-        } catch { continue }
-    }
-    if ($desktopPythonOk) { Ok "python >= 3.10 (writes claude_desktop_config.json)" }
-    else {
-        Fail "python >= 3.10 not found - the Claude Desktop registration runs ops\register_claude_desktop.py" `
-             "https://www.python.org/downloads/ or: winget install Python.Python.3.12"
-    }
-}
 if ($checks -contains "claude") {
     if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "claude CLI" }
     else {

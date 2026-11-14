@@ -58,7 +58,8 @@ def test_installers_wire_codex_via_shim_by_default() -> None:
     spawns its own shim process and gets tier-1 per-session identity instead
     of inheriting the Claude hook's machine-scoped tier-3 pointer
     (configuration.md#session-identity, cross-client paragraph). The HTTP
-    one-liner stays as the no-shim-tooling fallback."""
+    one-liner stays for --transport http and as the fallback when the
+    native client cannot be installed."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
@@ -144,7 +145,10 @@ def test_hook_installers_wire_user_prompt_submit_for_both_clients() -> None:
     for text in (ps, sh):
         assert "UserPromptSubmit" in text
         assert "pseudolife-mcp prompt-hook" in text
-    assert 'add_group(hooks["UserPromptSubmit"], prompt_cmd)' in sh
+    # install-hook.sh's JSON edit is the native client's hook-settings step.
+    assert '"$NATIVE_CLI" installer hook-settings install' in sh
+    rust = _read("rust/shim/src/cli/installer/hook_settings.rs")
+    assert 'add_group(prompt_groups, &prompt)' in rust and "UserPromptSubmit" in rust
     assert 'if ($Client -in "claude", "codex")' in ps
 
 
@@ -161,7 +165,7 @@ def test_installers_offer_dreamer_model_choice() -> None:
                       "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5",
                       "claude-fable-5-1", "claude-fable-5"):
             assert model in text, f"missing model option: {model}"
-    assert "-Model $Model" in ps          # choice forwarded to autostart
+    assert '"--model", $Model' in ps     # choice forwarded to autostart
     assert '--model "$MODEL"' in sh
 
 
@@ -240,8 +244,17 @@ def test_installer_env_block_covers_codex_modes() -> None:
         assert "managed override (sonnet-only)" in text     # legacy accepted
     # codex modes reach the autostart stage with the codex script, not the
     # claude one.
-    assert "install-codex-shim-autostart.ps1" in ps
-    assert "install-codex-shim-autostart.sh" in sh
+    assert '@("extractor-shim", "install-autostart", $shimAutostartFamily' in ps
+    assert '(extractor-shim install-autostart "$shim_autostart_family"' in sh
+    assert "shim_autostart_family=codex" in sh and 'elseif ($codexShimMode) { "codex" }' in ps
+
+
+def test_the_shim_autostart_runs_the_stable_launcher() -> None:
+    """The launcher re-executes the newest numbered runtime, so without
+    --native-exe the service would record that runtime and keep running it
+    after an update (or fail once it is pruned)."""
+    assert '"${shim_autostart_args[@]}" --native-exe "$SHIM_PATH"' in _read("ops/install.sh")
+    assert '$autostartArgs += @("--native-exe", $script:shimInstallPath)' in _read("ops/install.ps1")
 
 
 def test_mode_switch_tears_down_the_sibling_shim_autostart() -> None:
@@ -321,12 +334,15 @@ def test_preflight_accepts_provider_lists_and_checks_gemini() -> None:
     assert '[ValidateSet("claude", "codex", "both")]' not in ps
 
 
-def test_preflight_checks_pipx_on_both_platforms() -> None:
-    """pipx is the preferred shim installer on every platform; only the .sh
-    preflight used to mention it (the PEP 668 rationale is Linux-specific but
-    the recommendation is not)."""
-    assert "pipx" in _read("ops/preflight.sh")
-    assert "pipx" in _read("ops/preflight.ps1")
+def test_preflight_checks_for_no_python_tooling_on_either_platform() -> None:
+    """The client is the native binary on every platform, so neither
+    preflight checks for Python, venv or pipx any more (they used to, when
+    the shim was a Python package); the Docker ownership check is the native
+    client's ``installer preflight-check``."""
+    for rel in ("ops/preflight.sh", "ops/preflight.ps1"):
+        text = _read(rel)
+        assert "pipx" not in text and "ensurepip" not in text, rel
+        assert "installer preflight-check" in text, rel
 
 
 def test_preflight_checks_buildx_on_both_platforms() -> None:
@@ -374,8 +390,10 @@ def test_installers_pass_writer_id_and_refuse_flagless_registration() -> None:
 def test_codex_installers_bootstrap_and_register_rotatable_credentials() -> None:
     for rel in ("ops/install.sh", "ops/install.ps1"):
         text = _read(rel)
-        assert "setup-codex-coordination.py" in text, rel
-        assert "--credentials" in text, rel
+        # The native client's codex-credentials step (what
+        # ops/setup-codex-coordination.py --credentials did).
+        assert "codex-credentials" in text, rel
+        assert "setup-codex-coordination.py" not in text, rel
         assert "PSEUDOLIFE_MCP_TOKEN_FILE" in text, rel
 
 
@@ -383,7 +401,8 @@ def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration()
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
     for rel, text in (("ops/install.sh", sh), ("ops/install.ps1", ps)):
-        assert "--runtime-defaults" in text, rel
+        # The native client's step for setup-codex-coordination.py --runtime-defaults.
+        assert "codex-runtime-defaults" in text, rel
         assert "startup_timeout_sec = 240" not in text, rel
         assert "tool_timeout_sec = 180" not in text, rel
         assert "runtime defaults were not confirmed" in text, rel
@@ -561,21 +580,17 @@ def test_capability_matrix_states_codex_hook_limits() -> None:
 
 def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
     """A failed shim install must leave SHIM_OK unset so the HTTP fallback
-    fires — not kill the run via errexit (issue #176). On PEP 668 distros
-    (Ubuntu 24.04, Debian 12, Fedora 40, Arch) ``pip install --user`` exits 1
-    with externally-managed-environment; a bare call under ``set -e`` aborted
-    the installer after the multi-GB image build with no remediation text.
-    install.ps1 already exit-checks both paths; this pins install.sh to the
-    same contract."""
+    fires, not kill the run via errexit (issue #176). The native client
+    install is the condition of an `if`, so errexit is suspended around it,
+    and its own failure paths return a status instead of exiting."""
     sh = _read("ops/install.sh")
-    # Every install command is the condition of an `if`, so errexit is
-    # suspended and failure reaches the fallback branch instead of aborting.
-    assert 'if pipx install --force "$repo"; then' in sh
-    assert 'if python3 -m pip install --user --upgrade "$repo"; then' in sh
-    assert 'if python -m pip install --user --upgrade "$repo"; then' in sh
-    # The failure-mode hint names the PEP 668 cause and the recovery paths.
-    assert "externally-managed" in sh
-    assert "pipx" in _read("ops/preflight.sh")
+    ensure = sh[sh.index("ensure_shim() {"):]
+    ensure = ensure[:ensure.index("\n}\n")]
+    assert "    if native_install; then" in ensure
+    install = sh[sh.index("native_install() {"):]
+    install = install[:install.index("\n}\n")]
+    assert '--version "$NATIVE_VERSION" | tail -1)" || return 1' in install
+    assert "|| return 1" in install.split("SHIM_PATH=", 1)[0]
 
 
 def test_elevated_autostart_steps_warn_against_elevating_inside_claude_desktop() -> None:
@@ -707,7 +722,7 @@ def test_installers_register_the_shim_autostart_after_installing_the_shim() -> N
         assert text.count("# >>> shim autostart >>>") == 1
         assert text.index(health) < start < text.index("# <<< shim autostart <<<") < text.index(wait)
     # The failure hint names the interpreter refusal beside the systemd one.
-    assert "imports pseudolife_memory" in sh.split("CLI shim autostart (Claude / Codex modes)", 1)[1]
+    assert "extractor-shim install-autostart" in sh.split("CLI shim autostart (Claude / Codex modes)", 1)[1]
 
 
 def test_a_mode_switch_says_which_shim_autostart_it_removed_and_why() -> None:
@@ -727,15 +742,17 @@ def test_a_mode_switch_says_which_shim_autostart_it_removed_and_why() -> None:
 def test_installers_wire_claude_desktop_through_the_shared_register_script() -> None:
     """Claude Desktop has no `mcp add` CLI and launches MCP servers with a
     sanitized environment (no PATH extras, no user env vars), so its entry
-    is merged into claude_desktop_config.json by ops/register_claude_desktop.py
-    — one implementation both installers call — with the shim's ABSOLUTE
+    is merged into claude_desktop_config.json by the native client's
+    claude-desktop step (ops/register_claude_desktop.py's logic) — one
+    implementation both installers call — with the shim's ABSOLUTE
     path and, for a token-gated daemon, a token FILE path: never a token
     value, never a reliance on the OS environment (2026-09-19 incident:
     four days of 401s behind "unhandled errors in a TaskGroup")."""
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
-    for text, rel in ((sh, "install.sh"), (ps, "install.ps1")):
-        assert "register_claude_desktop.py" in text, rel
+    for text, rel, call in ((sh, "install.sh", "native_helper claude-desktop"),
+                            (ps, "install.ps1", "Invoke-NativeHelper claude-desktop")):
+        assert call in text, rel
         assert "--writer-id" in text and "--token-file" in text, rel
         assert "Claude Desktop" in text, rel          # menu + ladder
         assert "fully quit" in text, rel              # the relaunch step
@@ -900,19 +917,32 @@ def test_the_client_only_notes_point_at_the_update_command() -> None:
     assert "--clients-only" in notes
 
 def test_install_ps1_puts_the_launcher_on_the_user_path_and_says_so_in_the_summary() -> None:
-    """Once the shim runtime installs, the launcher directory goes first on
-    the user PATH (ops/shim_runtime.py expose, HKCU only), so `pseudolife-mcp`
-    in a new terminal is the launcher rather than an older pipx copy
-    (2026-09-29); the outcome is repeated in the summary, before the board
-    line, marked [!] when the step failed."""
+    """Once the native client installs, the launcher directory goes first on
+    the user PATH (HKCU only), so `pseudolife-mcp` in a new terminal is the
+    launcher rather than an older pipx copy (2026-09-29); the outcome is
+    repeated in the summary, before the board line, marked [!] when the step
+    failed."""
     ps = _read("ops/install.ps1")
-    install_shim = ps[ps.index("function Install-ShimOnce"):]
-    install_shim = install_shim[:install_shim.index("\nfunction ")]
-    assert '(Join-Path $repo "ops\shim_runtime.py") --json expose' in install_shim
-    assert install_shim.index("--json expose") < install_shim.index("$script:shimInstallResult = $true")
+    native = ps[ps.index("function Install-NativeClient"):]
+    native = native[:native.index("\n}\n")]
+    assert "Add-NativeLauncherToUserPath $launcher" in native
+    assert native.index("Add-NativeLauncherToUserPath") < native.index("return $launcher")
+    add_path = ps[ps.index("function Add-NativeLauncherToUserPath"):]
+    add_path = add_path[:add_path.index("\n}\n")]
+    assert '& (Join-Path $repo "ops/add-user-path.ps1") -Dir $dir' in add_path
+    # a test or custom layout (PSEUDOLIFE_SHIM_LAUNCHER) never touches PATH
+    assert "if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $null }" in add_path
+    helper = _read("ops/add-user-path.ps1")
+    # %VAR% entries stay as written: the raw value, written back with its kind
+    assert "DoNotExpandEnvironmentNames" in helper
+    assert '$key.SetValue("Path", ((@($dir) + $rest) -join ";"), $kind)' in helper
+    assert "Registry]::CurrentUser" in helper and "LocalMachine" not in helper
+    assert "add-user-path.ps1" in _read("ops/install.sh")
+    once = ps[ps.index("function Install-ShimOnce"):]
+    once = once[:once.index("\n}\n")]
+    assert once.index("Install-NativeClient") < once.index("$script:shimInstallResult = $true")
     summary = ps[ps.index('if ($script:shimPathNotes.Count -gt 0) {'):]
     assert summary.index("Launcher on PATH") < summary.index("# >>> board line >>>")
     assert '$pathMarker = if ($script:shimPathState -eq "failed") { "[!]" } else { "[x]" }' in summary
-    # the machine PATH is never written, here or in the module the step runs
+    # the machine PATH is never written
     assert "'Machine'" not in ps and '"Machine"' not in ps
-    assert "HKEY_LOCAL_MACHINE" not in _read("pseudolife_memory/runtimes.py")

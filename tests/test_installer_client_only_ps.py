@@ -21,6 +21,9 @@ import threading
 
 import pytest
 
+from tests import installer_sandbox
+from tests import native_client_stub as native_stub
+
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
 from tests.test_installer_existing_upgrade import _between, _fixture_env
@@ -96,21 +99,9 @@ class _PowerShell:
             "trap { [Console]::Error.WriteLine(\"ERROR: $($_.Exception.Message)\"); exit 1 }\n"
             f"$repo = '{_q(ROOT)}'\n"
             "function Step($message) { Write-Output \"STEP: $message\" }\n"
-            f"function Get-InstallerPython {{ '{_q(sys.executable)}' }}\n"
-            # The side-by-side shim runtime is never really installed here:
-            # ops/shim_runtime.py install fails in the shim-install-failed
-            # scenario (FAKE_PIPX_EXIT), otherwise the launcher is the
-            # installed shim path and nothing migrates.
-            "$env:PSEUDOLIFE_SHIM_PYTHON = 'fake_runtime_python'\n"
-            "function global:fake_runtime_python {\n"
-            "    $callArgs = @($args)\n"
-            "    $global:LASTEXITCODE = 0\n"
-            "    if (\"$($callArgs[0])\" -notlike '*shim_runtime.py') { $global:LASTEXITCODE = 91; return }\n"
-            "    if ($env:FAKE_PIPX_EXIT -and ($env:FAKE_PIPX_EXIT -ne '0')) { $global:LASTEXITCODE = 1; return }\n"
-            "    if ($callArgs[1] -eq 'migrate') { $global:LASTEXITCODE = 3; return }\n"
-            "    $bin = if ($env:FAKE_INSTALL_BIN) { $env:FAKE_INSTALL_BIN } else { '/fixture/installed-bin' }\n"
-            "    return (Join-Path $bin 'pseudolife-mcp')\n"
-            "}\n"
+            # The native client's installer steps, answered by the Python
+            # helpers they replaced (native_helper_standin.py).
+            + native_stub.HELPER_PS
             + _between(INSTALL, "function Get-HelperStatus($output)", "\n}\n") + "\n}\n"
         )
         script = self.tmp / "run.ps1"
@@ -120,6 +111,7 @@ class _PowerShell:
         env.update(extra_env or {})
         stdin = {"input": stdin_text} if stdin_text is not None else {
             "stdin": subprocess.DEVNULL}
+        installer_sandbox.require(env, self.tmp)
         return subprocess.run(
             [self.pwsh, "-NoProfile", "-NonInteractive", "-File", str(script)],
             capture_output=True, text=True, encoding="utf-8", timeout=120, env=env, check=False, **stdin)
@@ -128,7 +120,7 @@ class _PowerShell:
 @pytest.mark.parametrize("direction", ["input", "output", "ascii"])
 def test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent(tmp_path, monkeypatch, direction):
     ps = object.__new__(_PowerShell)
-    ps.pwsh, ps.tmp, ps.env = "fixture-pwsh", tmp_path, {}
+    ps.pwsh, ps.tmp, ps.env = "fixture-pwsh", tmp_path, installer_sandbox.environment(tmp_path)
     payload = "memory ready" if direction == "ascii" else "memory ─ café"
     stdin = payload if direction == "input" else "ASCII input"
     body = "# memory ─ café\n"
@@ -213,11 +205,13 @@ def test_loopback_is_the_shims_own_answer(tmp_path, url):
 
 
 def test_the_installer_asks_the_shims_helper(tmp_path):
-    """The decision is the helper's, not a copy of its rule: a stand-in
-    interpreter answering "loopback" (exit 10) keeps even a remote URL local."""
+    """The decision is the native client's, not a copy of its rule: an
+    is-loopback step answering "loopback" (exit 10) keeps even a remote URL
+    local."""
     ps = _PowerShell(tmp_path)
-    proc = ps.run("function Get-InstallerPython { 'fake-loopback-python' }\n"
-                  "function global:fake-loopback-python { $global:LASTEXITCODE = 10 }\n"
+    proc = ps.run("function Invoke-NativeHelper {\n"
+                  "    $global:LASTEXITCODE = if ($args[0] -eq 'is-loopback') { 10 } else { 2 }\n"
+                  "}\n"
                   f"$DaemonUrl = '{REMOTE}'\n$ReadToken = [switch]$false\n"
                   "$ClientOnly = [switch]$false\n$TokenFile = ''\n$Extractor = ''\n"
                   "$Model = ''\n$ShimPort = 0\n$NoToken = [switch]$false\n$Transport = 'shim'\n"
@@ -229,9 +223,11 @@ def test_the_installer_asks_the_shims_helper(tmp_path):
 
 @pytest.mark.parametrize("url,client_only", [
     ("http://127.0.0.1:8765", False), ("http://[::1]:8765", False), (REMOTE, True)])
-def test_without_python_the_host_rule_decides(tmp_path, url, client_only):
+def test_without_the_clients_answer_the_host_rule_decides(tmp_path, url, client_only):
+    """A native step that answers neither 10 nor 11 leaves the decision to
+    the installer's own host rule."""
     ps = _PowerShell(tmp_path)
-    proc = ps.run("function Get-InstallerPython { $null }\n"
+    proc = ps.run("function Invoke-NativeHelper { $global:LASTEXITCODE = 1 }\n"
                   f"$DaemonUrl = '{url}'\n$ReadToken = [switch]$false\n"
                   "$ClientOnly = [switch]$false\n$TokenFile = ''\n$Extractor = ''\n"
                   "$Model = ''\n$ShimPort = 0\n$NoToken = [switch]$false\n$Transport = 'shim'\n"
@@ -342,10 +338,10 @@ def test_a_pairing_code_with_a_remote_daemon_url_is_client_only(tmp_path):
 
 def test_the_script_itself_refuses_client_only_without_a_url(tmp_path):
     ps = _PowerShell(tmp_path)
-    proc = subprocess.run(
+    proc = installer_sandbox.run(
         [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
          "-ClientOnly", "-NoArt"],
-        capture_output=True, text=True, timeout=120, env=ps.env, check=False,
+        capture_output=True, text=True, timeout=120, env=ps.env, root=tmp_path, check=False,
         stdin=subprocess.DEVNULL)
     assert proc.returncode == 2
     assert "-ClientOnly needs" in _output(proc)
@@ -715,12 +711,13 @@ def _assert_code_unseen(ps: _PowerShell, proc, code: str = PAIRING_CODE) -> None
         assert code.strip() not in text and canonical not in text.upper().replace("-", ""), text
 
 
-def _is_code_ps(ps: _PowerShell, values: list[str], python: bool = True) -> list[bool]:
+def _is_code_ps(ps: _PowerShell, values: list[str], helper_answers: bool = True) -> list[bool]:
+    """Test-PairingCode on each value; without ``helper_answers`` the native
+    step answers neither 10 nor 11."""
     feed = ps.tmp / "values.txt"
     feed.write_bytes("".join(value + "\n" for value in values).encode("utf-8"))
-    prelude = ("" if python else
-               "function Get-InstallerPython { 'broken-python' }\n"
-               "function global:broken-python { $global:LASTEXITCODE = 1 }\n")
+    prelude = ("" if helper_answers else
+               "function Invoke-NativeHelper { $global:LASTEXITCODE = 1 }\n")
     proc = ps.run(prelude + _block("client-only preflight")
                   + f"foreach ($value in [IO.File]::ReadAllLines('{_q(feed)}')) {{\n"
                     "    if (Test-PairingCode $value) { Write-Output CODE } else { Write-Output TOKEN }\n}\n")
@@ -728,11 +725,11 @@ def _is_code_ps(ps: _PowerShell, values: list[str], python: bool = True) -> list
     return [line == "CODE" for line in proc.stdout.splitlines()]
 
 
-@pytest.mark.parametrize("python", [True, False], ids=["python", "own-rule"])
-def test_a_pairing_code_is_recognised_exactly_as_pair_reads_one(tmp_path, python):
+@pytest.mark.parametrize("helper_answers", [True, False], ids=["client", "own-rule"])
+def test_a_pairing_code_is_recognised_exactly_as_pair_reads_one(tmp_path, helper_answers):
     from pseudolife_memory.principals import normalize_pairing_code
     values = CODE_FORMS + NOT_CODES
-    assert _is_code_ps(_PowerShell(tmp_path), values, python) == [
+    assert _is_code_ps(_PowerShell(tmp_path), values, helper_answers) == [
         normalize_pairing_code(value) is not None for value in values]
 
 
@@ -890,12 +887,40 @@ def test_the_paired_token_file_is_checked_as_a_given_one_is(tmp_path):
 
 # -- Codex: the credential helper gets the operator's token and the remote URL --
 
+def _codex_steps_ps(credentials: str) -> str:
+    """The native client's Codex steps, canned, after native_stub.POWERSHELL;
+    every other step goes to the stand-in. ``credentials`` is the body of the
+    codex-credentials step, which the installer always pipes the token to
+    here."""
+    return (native_stub.HELPER_PS.replace("function Invoke-NativeHelper",
+                                          "function Invoke-StandinHelper")
+            + "function Invoke-NativeHelper {\n"
+              "    $global:LASTEXITCODE = 0\n"
+              "    if ($args[0] -eq 'codex-credentials') {\n"
+              f"        {credentials}\n"
+              "    }\n"
+              "    if ($args[0] -eq 'codex-runtime-defaults') {\n"
+              "        return '{\"status\":\"ready\",\"runtime_defaults\":\"configured\"}'\n"
+              "    }\n"
+              "    if ($args[0] -eq 'codex-hooks') {\n"
+              "        return '{\"status\":\"ready\",\"source\":\"manual\",\"instructions\":\"covered-by-hooks\",\"recovery\":null}'\n"
+              "    }\n"
+              "    if ($MyInvocation.ExpectingInput) { $input | Invoke-StandinHelper @args }\n"
+              "    else { Invoke-StandinHelper @args }\n"
+              "}\n")
+
+
 def test_codex_credentials_come_from_the_token_file_and_the_remote_url(tmp_path):
     ps = _PowerShell(tmp_path)
     token = _token(ps)
     captured = tmp_path / "helper.txt"
     stages = re.search(r"(?ms)^# -- 9\. session lifecycle hooks[^\n]*\n(.*?)"
                        r"^# -- 10\. standing", (ROOT / INSTALL).read_text(encoding="utf-8"))[1]
+    steps = _codex_steps_ps(
+        "$stdin = @($input) -join ''\n"
+        f"        Set-Content -LiteralPath '{_q(captured)}' -Value (\"ARGS=\" + (@($args) -join ' ') + \"`nSTDIN=\" + $stdin)\n"
+        "        return ('{\"status\":\"ready\",\"credential_file_configured\":true,\"connection_configured\":true,' +\n"
+        f"                '\"credential_file_path\":\"/fixture/codex/token\",\"daemon_url\":\"{REMOTE}\"}}')")
     body = f"""$clients = @('codex'); $CodexHooks = 'auto'; $CodexHookTrust = 'yes'
 $Instructions = 'auto'; $ClaudeMd = ''; $interactive = $false
 $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
@@ -905,23 +930,12 @@ function Get-EnvValue($name) {{
     return $null
 }}
 $env:PATH = '{_q(tmp_path)}'
-function global:python {{
-    $global:LASTEXITCODE = 0
-    if ("$args" -match 'sys\\.executable') {{ return 'fake-codex-python' }}
-}}
-function global:fake-codex-python {{
-    $stdin = @($input) -join ''
-    $callArgs = @($args)
-    $global:LASTEXITCODE = 0
-    if ("$($callArgs[0])" -like '*setup-codex-coordination.py') {{
-        Set-Content -LiteralPath '{_q(captured)}' -Value ("ARGS=" + ($callArgs -join ' ') + "`nSTDIN=" + $stdin)
-        return ('{{"status":"ready","credential_file_configured":true,"connection_configured":true,' +
-                '"credential_file_path":"/fixture/codex/token","daemon_url":"{REMOTE}"}}')
-    }}
-    if ("$($callArgs[0])" -like '*setup-codex-hooks.py') {{
-        return '{{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}}'
-    }}
-}}
+$env:FAKE_LAUNCHER = '{_q(tmp_path / "native" / ("pseudolife-mcp.cmd" if os.name == "nt" else "pseudolife-mcp"))}'
+$env:FAKE_LAUNCHER_SH = @'
+{native_stub.LAUNCHER_SH}
+'@
+{native_stub.POWERSHELL}
+{steps}
 {stages}
 Write-Output "URL=$codexCredentialUrl"
 """
@@ -950,63 +964,38 @@ CODEX_STUB = """$global:LASTEXITCODE = 0
     if ($callArgs -contains '--help') { return '  --env <KEY=VALUE>' }"""
 
 
-def _codex_wiring(ps: _PowerShell, *, python_ok: bool = True, cred: str | None = None,
-                  cred_exit: int = 0, pipx_exit: int = 0, existing: str = ""):
-    """Sections 9 to 11 for a Codex-only client-only install, with stub
-    python, pipx and codex commands. Returns the run and the codex adds."""
+def _codex_wiring(ps: _PowerShell, *, cred: str | None = None,
+                  cred_exit: int = 0, native_exit: int = 0, existing: str = ""):
+    """Sections 9 to 11 for a Codex-only client-only install, with canned
+    Codex steps, the native client (``native_exit`` is its install result)
+    and a stub codex. Returns the run and the codex adds."""
     token = _token(ps)
     installed = ps.tmp / "installed-bin"
     installed.mkdir()
-    (installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")).write_text(
-        "placeholder\n", encoding="utf-8")
+    launcher = installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
+    launcher.write_text("placeholder\n", encoding="utf-8")
+    if "FAKE_INSTALL_BIN" in ps.env:  # a test's own launcher that answers connect
+        launcher = Path(ps.env["FAKE_INSTALL_BIN"]) / "pseudolife-mcp.ps1"
     stages = re.search(r"(?ms)^# -- 9\. session lifecycle hooks[^\n]*\n(.*?)^# -- 12\. health",
                        (ROOT / INSTALL).read_text(encoding="utf-8"))[1]
+    steps = _codex_steps_ps(
+        "$null = @($input); $global:LASTEXITCODE = [int]$env:FAKE_CRED_EXIT; return $env:FAKE_CRED")
     body = f"""$env:PATH = '{_q(ps.tmp)}'
 $clients = @('codex'); $CodexHooks = 'auto'; $CodexHookTrust = 'yes'
 $Instructions = 'auto'; $ClaudeMd = ''; $AgentsFile = ''; $interactive = $false
 $Transport = 'shim'
 $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
 function Get-EnvValue($name) {{ return $null }}
-function global:python {{
-    $global:LASTEXITCODE = 1
-    if (($env:FAKE_PY_OK -eq '1') -and ("$args" -match 'sys\.executable')) {{
-        $global:LASTEXITCODE = 0
-        return 'fake-codex-python'
-    }}
-}}
-function global:fake-codex-python {{
-    $null = @($input)
-    $callArgs = @($args)
-    $global:LASTEXITCODE = 0
-    if ("$($callArgs[0])" -like '*setup-codex-coordination.py') {{
-        if ($callArgs -contains '--runtime-defaults') {{
-            return '{{"status":"ready","runtime_defaults":"configured"}}'
-        }}
-        $global:LASTEXITCODE = [int]$env:FAKE_CRED_EXIT
-        return $env:FAKE_CRED
-    }}
-    if ("$($callArgs[0])" -like '*setup-codex-hooks.py') {{
-        return '{{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}}'
-    }}
-}}
-function global:pipx {{
-    $callArgs = @($args)
-    $global:LASTEXITCODE = 0
-    if ($callArgs[0] -eq 'environment') {{
-        if ($callArgs[2] -eq 'PIPX_BIN_DIR') {{ return '{_q(installed)}' }}
-        return
-    }}
-    $global:LASTEXITCODE = [int]$env:FAKE_PIPX_EXIT
-}}
+{native_stub.POWERSHELL}
+{steps}
 {ps.stub_function("codex", CODEX_STUB)}
 {stages}
 Write-Output ("MCP_CODEX=" + $mcpState['codex'])
 """
     proc = ps.run(body, extra_env={
-        "FAKE_PY_OK": "1" if python_ok else "0",
         "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
-        "FAKE_CRED_EXIT": str(cred_exit), "FAKE_PIPX_EXIT": str(pipx_exit),
-        "FAKE_EXISTING": existing})
+        "FAKE_CRED_EXIT": str(cred_exit), "FAKE_NATIVE_EXIT": str(native_exit),
+        "FAKE_EXISTING": existing, "FAKE_LAUNCHER": str(launcher), "FAKE_KEEP_LAUNCHER": "1"})
     adds = [call for call in ps.logged()
             if call.startswith("codex|mcp add") and "--help" not in call]
     return proc, adds
@@ -1023,11 +1012,10 @@ def test_codex_registers_with_the_remote_url_and_its_credential_file(tmp_path):
 
 
 @pytest.mark.parametrize("scenario,kwargs,says", [
-    ("no python", {"python_ok": False}, "Python 3.10"),
     ("credential setup failed",
      {"cred": '{"status":"needs-configuration","recovery":"fixture"}', "cred_exit": 1},
      "credential setup failed"),
-    ("shim install failed", {"pipx_exit": 1}, "stdio shim"),
+    ("shim install failed", {"native_exit": 1}, "stdio shim"),
     ("existing registration elsewhere",
      {"cred": CRED_READY % "http://127.0.0.1:8765",
       "existing": "pseudolife-memory\n  command: pseudolife-mcp\n"
@@ -1083,7 +1071,7 @@ def _copy_repo(tmp_path: Path) -> Path:
     wrote ops/.env or the compose override must not touch the real tree."""
     repo = tmp_path / "repo"
     for rel in ("ops/install.ps1", "ops/install-hook.ps1", "ops/client_credentials.py",
-                "ops/.env.example", "examples/CLAUDE.memory.md"):
+                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     return repo
@@ -1095,6 +1083,10 @@ def _script_stub(bin_dir: Path, calls: Path, name: str, body: str = "exit 0") ->
         + body + "\n", encoding="utf-8")
 
 
+@pytest.mark.skipif(os.name == "nt", reason=(
+    "the installer runs the staged native client before anything else, and a "
+    "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
+    "that stage with a real binary"))
 def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daemon_server):
     ps = _PowerShell(tmp_path)
     token = _token(ps)
@@ -1103,25 +1095,26 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     fake_bin.mkdir()
     installed = tmp_path / "installed-bin"
     installed.mkdir()
-    shim = installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
-    # Off Windows the installed shim answers connect's dry run as the real one
-    # does on a fresh machine (its report of no registration, exit 3). A
-    # Windows .exe cannot be a script here, so there the shim cannot start and
-    # the install carries on with the warning (that path is pinned too).
-    shim.write_text("placeholder\n" if os.name == "nt" else
-                    "#!/bin/sh\n"
-                    f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
-                    "if [ \"$1\" = connect ]; then\n"
-                    "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
-                    "exit 0\n", encoding="utf-8")
-    shim.chmod(0o755)
+    shim = installed / "pseudolife-mcp"
+    # The release's client answers connect's dry run as the real one does on
+    # a fresh machine (its report of no registration, exit 3), and its
+    # installer steps through the stand-in, which runs this checkout's
+    # helpers as the native client carries its own.
+    standin = ROOT / "tests" / "native_helper_standin.py"
+    version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8"))[1]
+    release_env = native_stub.write_release(
+        tmp_path / "release", version,
+        "if [ \"$1\" = installer ] && [ \"$2\" != migrate-registrations ]; then\n"
+        f"  shift; exec '{sys.executable}' '{standin}' '{ROOT}' \"$@\"\nfi\n"
+        f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
+        "if [ \"$1\" = connect ]; then\n"
+        "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+        "exit 0\n")
     calls = ps.calls
-    for name in ("docker", "codex"):
+    # docker and codex must not run; neither may any Python tooling (the
+    # installer runs every step through the native client).
+    for name in ("docker", "codex", "python", "python3", "py", "pip", "pip3", "pipx"):
         _script_stub(fake_bin, calls, name, "exit 99")
-    _script_stub(fake_bin, calls, "python", f"& '{_q(sys.executable)}' @args\nexit $LASTEXITCODE")
-    _script_stub(fake_bin, calls, "pipx",
-                 "if (($args[0] -eq 'environment') -and ($args[2] -eq 'PIPX_BIN_DIR')) "
-                 f"{{ Write-Output '{_q(installed)}' }}\nexit 0")
     _script_stub(fake_bin, calls, "claude",
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'get')) { exit 1 }\n"
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'add') -and ($args -contains '--help')) "
@@ -1138,21 +1131,26 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     env = dict(ps.env)
     system_dirs = [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")] \
         if os.name == "nt" else ["/usr/bin", "/bin"]
+    env.update(release_env)
+    env.update({"PSEUDOLIFE_SHIM_RUNTIMES": str(installed / "runtimes"),
+                "PSEUDOLIFE_SHIM_LAUNCHER": str(shim)})
     env.update({"PATH": os.pathsep.join([str(fake_bin), *system_dirs]),
-                "PYTHONPATH": str(ROOT), "NO_COLOR": "1", "TERM": "dumb",
+                "NO_COLOR": "1", "TERM": "dumb",
                 # The installer's own environment carries an older credential.
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
-    proc = subprocess.run(
+    proc = installer_sandbox.run(
         [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"),
          "-ClientOnly", "-DaemonUrl", daemon_server, "-TokenFile", str(token),
          "-Client", "claude,gemini", "-ClaudePlugin", "skip", "-Instructions", "skip",
          "-NoArt"],
-        capture_output=True, text=True, timeout=300, env=env, check=False,
+        capture_output=True, text=True, timeout=300, env=env, root=tmp_path, check=False,
         stdin=subprocess.DEVNULL)
     output = _output(proc)
     assert proc.returncode == 0, output
     logged = ps.logged()
     assert not any(call.startswith(("docker|", "codex|")) for call in logged)
+    assert not [call for call in logged
+                if call.split("|", 1)[0] in ("python", "python3", "py", "pip", "pip3", "pipx")], logged
     assert not (repo / "ops" / ".env").exists()
     assert not (repo / "ops" / "docker-compose.override.yml").exists()
     assert FIXTURE_TOKEN not in output

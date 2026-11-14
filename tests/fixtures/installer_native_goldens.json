@@ -1,0 +1,1278 @@
+{
+  "comment": "Recorded from the Python helpers by tests/test_installer_native_goldens.py; replayed against the native steps by rust/shim/tests/cli_installer_goldens.rs.",
+  "cases": [
+    {
+      "name": "state-choices-claude-shim-crlf",
+      "files": {
+        "ops/.env": "PSEUDOLIFE_MCP_TOKEN=secret-token-value\r\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\r\nPSEUDOLIFE_INSTALL_CLIENT=claude,codex\r\nPSEUDOLIFE_INSTALL_TRANSPORT=shim\r\nPSEUDOLIFE_INSTALL_BANK_LOCATION=local\r\nPSEUDOLIFE_INSTALL_GENERIC_TARGET_B64=L29wdC9hZ2VudHMvQUdFTlRTLm1k\r\nPSEUDOLIFE_INSTALL_INSTRUCTIONS_GENERIC=append\r\nPSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8790/v1\r\nPSEUDOLIFE_DREAM_MODEL=extractor\r\nPSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-sonnet-5-5\r\nPSEUDOLIFE_CLAUDE_SHIM_PORT=8790\r\n# <<< pseudolife-mcp install <<<\r\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=claude-only\nMODEL=claude-sonnet-5-5\nSHIM_PORT=8790\nCLIENT=claude,codex\nBANK_LOCATION=local\nTRANSPORT=shim\nINSTRUCTIONS_GENERIC=append\nGENERIC_TARGET_JSON=\"/opt/agents/AGENTS.md\"\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-endpoint-on-host-docker-internal",
+      "files": {
+        "ops/.env": "﻿# operator line\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_DREAM_BASE_URL='http://host.docker.internal:9000/v1'\nPSEUDOLIFE_DREAM_MODEL=\"qwen3-30b\"\nPSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081\nPSEUDOLIFE_WRITER_ID=claude-desktop\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=endpoint-fallback\nMODEL=qwen3-30b\nEXTRACTOR_URL=http://127.0.0.1:9000/v1\nCLIENT=claude-desktop\nBANK_LOCATION=local\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-open-loopback-and-sidecar",
+      "files": {
+        "ops/.env": "# kept\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CODEX_HOOKS=plugin\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=sidecar\nBANK_LOCATION=local\nCODEX_HOOKS=plugin\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-refuses-reversed-markers",
+      "files": {
+        "ops/.env": "# <<< pseudolife-mcp install <<<\nX=1\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "ops/.env has reversed installer markers. Restore its original managed block, then rerun; nothing changed.\n"
+        }
+      ]
+    },
+    {
+      "name": "state-choices-refuses-a-bad-client",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CLIENT=claude,cursor\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "The recorded client list is invalid. Repeat the original --client/-Client flag; nothing changed.\n"
+        }
+      ]
+    },
+    {
+      "name": "state-write-file-then-unchanged",
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "write-file",
+            "--path",
+            "{HOME}/ops/docker-compose.override.yml"
+          ],
+          "stdin": "services:\n  x: {}\n",
+          "exit": 0,
+          "stdout": "changed\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "state",
+            "write-file",
+            "--path",
+            "{HOME}/ops/docker-compose.override.yml"
+          ],
+          "stdin": "services:\n  x: {}\n",
+          "exit": 0,
+          "stdout": "unchanged\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        "ops/docker-compose.override.yml": "services:\n  x: {}\n"
+      }
+    },
+    {
+      "name": "state-write-env-keeps-operator-lines",
+      "files": {
+        "ops/.env": "PSEUDOLIFE_MCP_TOKEN=keep-me\n# café note\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nOLD=1\n# <<< pseudolife-mcp install <<<\nTAIL=2\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "write-env",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CLIENT=gemini\nPSEUDOLIFE_DREAM_MODEL=extractor\n# <<< pseudolife-mcp install <<<\n",
+          "exit": 0,
+          "stdout": "changed\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        "ops/.env": "PSEUDOLIFE_MCP_TOKEN=keep-me\n# café note\nTAIL=2\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_CLIENT=gemini\nPSEUDOLIFE_DREAM_MODEL=extractor\n# <<< pseudolife-mcp install <<<\n"
+      }
+    },
+    {
+      "name": "state-target-is-absolute",
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "target",
+            "--path",
+            "notes/AGENTS.md"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "\"{HOME}/notes/AGENTS.md\"\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "credentials-token-file-round-trip",
+      "env": {
+        "PSEUDOLIFE_INSTALLER_TOKENS": "tok-alpha-0123456789abcdef:Claude-Code, tok-beta-0123456789abcdef:gemini, bad, tok-x:default"
+      },
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "claude-code",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\", \"path\": \"{HOME}/.pseudolife-mcp/claude-code.token\"}\n",
+          "stderr": null
+        },
+        {
+          "argv": [
+            "credentials",
+            "check-token-file",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\"}\n",
+          "stderr": null
+        },
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "claude-code",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\", \"path\": \"{HOME}/.pseudolife-mcp/claude-code.token\"}\n",
+          "stderr": null
+        },
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "codex",
+            "--path",
+            "{HOME}/.pseudolife-mcp/codex.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"tokenless\"}\n",
+          "stderr": null
+        }
+      ],
+      "files_after": {
+        ".pseudolife-mcp/claude-code.token": "tok-alpha-0123456789abcdef",
+        ".pseudolife-mcp/codex.token": null
+      },
+      "compare_stderr": false,
+      "stderr_note": "The Python token-map parser logs a warning per skipped entry; the native step skips them silently."
+    },
+    {
+      "name": "credentials-write-token-file-then-refuse-a-second",
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "write-token-file",
+            "--path",
+            "{HOME}/client/remote.token"
+          ],
+          "stdin": "tok-remote-0123456789abcdef\n",
+          "exit": 0,
+          "stdout": "{\"status\": \"written\", \"path\": \"{HOME}/client/remote.token\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "check-token-file",
+            "--path",
+            "{HOME}/client/remote.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"ready\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "write-token-file",
+            "--path",
+            "{HOME}/client/remote.token"
+          ],
+          "stdin": "tok-other\n",
+          "exit": 1,
+          "stdout": "{\"status\": \"failed\", \"recovery\": \"{HOME}/client/remote.token already exists; the installer creates a token file but never replaces one\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "check-token-file",
+            "--path",
+            "{HOME}/client/missing.token"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "{\"status\": \"failed\", \"recovery\": \"configured credential file is missing\"}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        "client/remote.token": "tok-remote-0123456789abcdef"
+      }
+    },
+    {
+      "name": "credentials-registration-env-adds-only-missing-keys",
+      "paths": true,
+      "files": {
+        ".claude.json": "{\n  \"numStartups\": 3,\n  \"mcpServers\": {\n    \"pseudolife-memory\": {\n      \"type\": \"stdio\",\n      \"command\": \"/opt/pseudolife/bin/pseudolife-mcp\",\n      \"args\": [],\n      \"env\": {\n        \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\"\n      }\n    }\n  }\n}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/.claude.json",
+            "--set",
+            "PSEUDOLIFE_MCP_TOKEN_FILE={HOME}/.pseudolife-mcp/claude-code.token",
+            "--set",
+            "PSEUDOLIFE_MCP_DAEMON_URL=http://10.0.0.5:8765",
+            "--set",
+            "PSEUDOLIFE_AGENT_STATE_DIR={HOME}/.pseudolife-mcp/claude-code-agents"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": \"{HOME}/.claude.json.bak-pseudolife-<stamp>\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/.claude.json",
+            "--set",
+            "PSEUDOLIFE_MCP_TOKEN_FILE={HOME}/other.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"unchanged\", \"backup\": null}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude.json": "{\n  \"numStartups\": 3,\n  \"mcpServers\": {\n    \"pseudolife-memory\": {\n      \"type\": \"stdio\",\n      \"command\": \"/opt/pseudolife/bin/pseudolife-mcp\",\n      \"args\": [],\n      \"env\": {\n        \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\",\n        \"PSEUDOLIFE_MCP_TOKEN_FILE\": \"{HOME}/.pseudolife-mcp/claude-code.token\",\n        \"PSEUDOLIFE_AGENT_STATE_DIR\": \"{HOME}/.pseudolife-mcp/claude-code-agents\"\n      }\n    }\n  }\n}\n"
+      }
+    },
+    {
+      "name": "credentials-registration-env-absent-and-unsupported",
+      "files": {
+        "http.json": "{\"mcpServers\": {\"pseudolife-memory\": {\"type\": \"http\", \"url\": \"http://127.0.0.1:8765/mcp\"}}}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/none.json",
+            "--set",
+            "A=1"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"absent\", \"backup\": null}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "registration-env",
+            "--config",
+            "{HOME}/http.json",
+            "--set",
+            "A=1"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"unsupported\", \"backup\": null}\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "credentials-claude-settings-env",
+      "paths": true,
+      "files": {
+        ".claude/settings.json": "{\n  \"env\": {\n    \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://10.0.0.9:8765\"\n  },\n  \"theme\": \"dark\"\n}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "claude-settings-env",
+            "--settings",
+            "{HOME}/.claude/settings.json",
+            "--token-file",
+            "{HOME}/.pseudolife-mcp/claude-code.token",
+            "--daemon-url",
+            "http://127.0.0.1:8765"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": \"{HOME}/.claude/settings.json.bak-pseudolife-<stamp>\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "claude-settings-env",
+            "--settings",
+            "{HOME}/.claude/settings.json",
+            "--token-file",
+            "{HOME}/.pseudolife-mcp/claude-code.token",
+            "--daemon-url",
+            "http://127.0.0.1:8765",
+            "--replace"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": \"{HOME}/.claude/settings.json.bak-pseudolife-<stamp>\", \"changed\": [\"PSEUDOLIFE_MCP_DAEMON_URL\"]}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "claude-settings-env",
+            "--settings",
+            "{HOME}/fresh/settings.json",
+            "--token-file",
+            "{HOME}/t.token",
+            "--daemon-url",
+            "http://127.0.0.1:8765"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"updated\", \"backup\": null}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"env\": {\n    \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\",\n    \"PSEUDOLIFE_MCP_TOKEN_FILE\": \"{HOME}/.pseudolife-mcp/claude-code.token\"\n  },\n  \"theme\": \"dark\"\n}\n",
+        "fresh/settings.json": "{\n  \"env\": {\n    \"PSEUDOLIFE_MCP_TOKEN_FILE\": \"{HOME}/t.token\",\n    \"PSEUDOLIFE_MCP_DAEMON_URL\": \"http://127.0.0.1:8765\"\n  }\n}\n"
+      }
+    },
+    {
+      "name": "credentials-mint-then-present",
+      "files": {
+        "ops/.env": "# empty\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "mint",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"minted\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "mint",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "{\"status\": \"present\"}\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "credentials-board-without-a-daemon",
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "board",
+            "--daemon-url",
+            "http://127.0.0.1:1"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "off - no bearer token, so the daemon has no principal to admit (open-loopback install)\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "board",
+            "--daemon-url",
+            "http://127.0.0.1:1",
+            "--token-file",
+            "{HOME}/missing.token"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "off - the client token file is missing, unsafe or malformed\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "helpers-json-field-and-json-string",
+      "steps": [
+        {
+          "argv": [
+            "json-field",
+            "action"
+          ],
+          "stdin": "{\"action\": \"start\", \"n\": 1}",
+          "exit": 0,
+          "stdout": "start\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-field",
+            "n"
+          ],
+          "stdin": "{\"action\": \"start\", \"n\": 1}",
+          "exit": 0,
+          "stdout": "\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-field",
+            "action"
+          ],
+          "stdin": "not json",
+          "exit": 0,
+          "stdout": "\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-string"
+          ],
+          "stdin": "\"C:\\\\agents\\\\caf\\u00e9.md\"",
+          "exit": 0,
+          "stdout": "C:\\agents\\café.md",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "json-string"
+          ],
+          "stdin": "{\"not\": \"a string\"}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "helpers-connect-report",
+      "steps": [
+        {
+          "argv": [
+            "connect-report",
+            "valid"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "error"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "plan"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "    change   claude-code registration: ~/.claude.json [pseudolife-memory]\n             PSEUDOLIFE_MCP_DAEMON_URL: http://127.0.0.1:8765 -> http://10.0.0.5:8765\n             PSEUDOLIFE_MCP_TOKEN: x -> (removed)\n    current  codex registration: ~/.codex/config.toml\n    manual   claude-desktop hooks: settings.json\n             edit it by hand\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "manual"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "    manual   claude-desktop hooks: settings.json\n             edit it by hand\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "handled"
+          ],
+          "stdin": "{\"url\": \"http://10.0.0.5:8765\", \"exit\": 0, \"error\": null, \"rows\": [{\"client\": \"claude-code\", \"place\": \"registration\", \"state\": \"change\", \"file\": \"~/.claude.json\", \"key\": \"pseudolife-memory\", \"changes\": {\"PSEUDOLIFE_MCP_DAEMON_URL\": [\"http://127.0.0.1:8765\", \"http://10.0.0.5:8765\"], \"PSEUDOLIFE_MCP_TOKEN\": [\"x\", null]}}, {\"client\": \"codex\", \"place\": \"registration\", \"state\": \"current\", \"file\": \"~/.codex/config.toml\", \"key\": null}, {\"client\": \"gemini\", \"place\": \"registration\", \"state\": \"absent\"}, {\"client\": \"claude-desktop\", \"place\": \"hooks\", \"state\": \"manual\", \"file\": \"settings.json\", \"detail\": \"edit it by hand\"}]}",
+          "exit": 0,
+          "stdout": "claude-code codex\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "valid"
+          ],
+          "stdin": "{\"rows\": []}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "connect-report",
+            "plan"
+          ],
+          "stdin": "[]",
+          "exit": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "helpers-codex-fields",
+      "steps": [
+        {
+          "argv": [
+            "codex-fields",
+            "credentials"
+          ],
+          "stdin": "{\"status\": \"ready\", \"credential_file_configured\": true, \"connection_configured\": false, \"credential_file_path\": \"/t/c.token\", \"daemon_url\": null}",
+          "exit": 0,
+          "stdout": "1\n0\n/t/c.token\n\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "credentials"
+          ],
+          "stdin": "{\"status\": \"ready\", \"credential_file_configured\": \"yes\", \"connection_configured\": false}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "hooks"
+          ],
+          "stdin": "{\"status\": \"pending\", \"source\": \"manual\", \"instructions\": \"skipped\", \"recovery\": \"Hooks are not installed.\\nRerun the installer.\"}",
+          "exit": 0,
+          "stdout": "pending\nmanual\nskipped\nHooks are not installed. Rerun the installer.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "hooks"
+          ],
+          "stdin": "{\"status\": \"ready\", \"source\": \"elsewhere\", \"instructions\": \"present\"}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "runtime-defaults"
+          ],
+          "stdin": "{\"status\": \"ready\", \"runtime_defaults\": \"configured\"}",
+          "exit": 0,
+          "stdout": "configured\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "codex-fields",
+            "runtime-defaults"
+          ],
+          "stdin": "{\"status\": \"needs-configuration\", \"recovery\": \"x\"}",
+          "exit": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "helpers-loopback-and-pairing-code",
+      "steps": [
+        {
+          "argv": [
+            "is-loopback",
+            "http://127.0.0.1:8765"
+          ],
+          "stdin": null,
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://127.0.0.01:8765"
+          ],
+          "stdin": null,
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://[::ffff:127.0.0.1]:8765"
+          ],
+          "stdin": null,
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://LOCALHOST:8765/"
+          ],
+          "stdin": null,
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "http://10.0.0.5:8765"
+          ],
+          "stdin": null,
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "is-loopback",
+            "https://daemon.example.com"
+          ],
+          "stdin": null,
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "7KQ2-MX4P-9TZC\n",
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "oil2mx4p9tzc\n",
+          "exit": 10,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "7KQ2-MX4P-9TZ\n",
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "pairing-code-valid"
+          ],
+          "stdin": "tok-abc\n",
+          "exit": 11,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "engine-without-docker-and-choices",
+      "needs": "no-docker",
+      "steps": [
+        {
+          "argv": [
+            "engine",
+            "detect",
+            "--repo",
+            "{HOME}/repo"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Cannot reach Docker; start Docker and rerun the installer. Nothing was started.\n"
+        },
+        {
+          "argv": [
+            "engine",
+            "prepare",
+            "--repo",
+            "{HOME}/repo",
+            "--engine",
+            "rust-checkout"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "This host runs a Rust daemon selected by checkout-mode update, which the installer does not rebuild. Update it with pseudolife-mcp update --checkout {HOME}/repo, or switch it back with pseudolife-mcp update --engine python --checkout {HOME}/repo and rerun the installer. Nothing was started.\n"
+        },
+        {
+          "argv": [
+            "engine",
+            "choose",
+            "--engine",
+            "rust"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "choose records only --engine python.\n"
+        },
+        {
+          "argv": [
+            "engine",
+            "choose",
+            "--engine",
+            "python"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "recorded\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "engine",
+            "prepare",
+            "--repo",
+            "{HOME}/repo"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "prepare needs --repo and --engine.\n"
+        }
+      ],
+      "files_after": {
+        ".pseudolife-mcp/update-engine/engine-choice.json": "{\"engine\": \"python\"}\n"
+      },
+      "paths": true
+    },
+    {
+      "name": "volume-names-without-docker",
+      "needs": "no-docker",
+      "files": {
+        "repo/ops/.env.example": "PSEUDOLIFE_BANK_VOLUME=b\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "volume-names",
+            "--repo",
+            "{HOME}/repo",
+            "--env-file",
+            "{HOME}/repo/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "FAIL Cannot inspect Docker safely. Run docker info, fix Docker access, then rerun.\n"
+        }
+      ]
+    },
+    {
+      "name": "state-choices-keep-an-explicit-default-port",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:80/v1?x=1\nPSEUDOLIFE_DREAM_MODEL=m1\nPSEUDOLIFE_INSTALL_CLIENT=gemini\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=endpoint\nMODEL=m1\nEXTRACTOR_URL=http://127.0.0.1:80/v1\nCLIENT=gemini\nBANK_LOCATION=local\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-cli-family-on-port-443",
+      "files": {
+        "ops/.env": "PSEUDOLIFE_CODEX_SHIM_PORT=443\nPSEUDOLIFE_CODEX_SHIM_MODEL=gpt-5.5\n# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_DREAM_BASE_URL=https://host.docker.internal:443/v1\nPSEUDOLIFE_DREAM_MODEL=extractor\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "EXTRACTOR=openai-only\nMODEL=gpt-5.5\nSHIM_PORT=443\nBANK_LOCATION=local\nNO_TOKEN=1\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "state-choices-first-bad-value-in-python-order",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_INSTRUCTIONS=append;skip\nPSEUDOLIFE_DREAM_BASE_URL=http://u:p@host.docker.internal:9000/v1\nPSEUDOLIFE_DREAM_MODEL=m1\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Recorded installer choices are invalid. Repeat the original installer flags to replace the managed block; nothing changed.\n"
+        }
+      ],
+      "note": "Python checks the recorded values in insertion order: INSTRUCTIONS (recorded) before EXTRACTOR_URL (inferred later), so the general refusal wins; alphabetical order would give the credentials one."
+    },
+    {
+      "name": "state-choices-userinfo-without-a-password",
+      "files": {
+        "ops/.env": "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>\nPSEUDOLIFE_INSTALL_EXTRACTOR=endpoint\nPSEUDOLIFE_INSTALL_MODEL=m1\nPSEUDOLIFE_INSTALL_EXTRACTOR_URL=http://@10.0.0.5:9000/v1\n# <<< pseudolife-mcp install <<<\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "state",
+            "choices",
+            "--env-file",
+            "{HOME}/ops/.env"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "The recorded extractor URL contains credentials. Remove URL credentials from ops/.env and keep API keys outside the managed block; nothing changed.\n"
+        }
+      ]
+    },
+    {
+      "name": "credentials-a-bad-source-token-leaves-the-file",
+      "env": {
+        "PSEUDOLIFE_INSTALLER_TOKEN": "tok-new value  # rotated"
+      },
+      "paths": true,
+      "steps": [
+        {
+          "argv": [
+            "credentials",
+            "write-token-file",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": "tok-good-0123456789abcdef\n",
+          "exit": 0,
+          "stdout": "{\"status\": \"written\", \"path\": \"{HOME}/.pseudolife-mcp/claude-code.token\"}\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "credentials",
+            "token-file",
+            "--principal",
+            "claude-code",
+            "--path",
+            "{HOME}/.pseudolife-mcp/claude-code.token"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "{\"status\": \"failed\", \"recovery\": \"could not write the token file {HOME}/.pseudolife-mcp/claude-code.token: credential file contains an invalid bearer token\"}\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".pseudolife-mcp/claude-code.token": "tok-good-0123456789abcdef"
+      }
+    },
+    {
+      "name": "hook-settings-install-on-a-fresh-claude-home",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "BRIEFING_COMMAND": "pseudolife-mcp briefing --hook-json",
+        "PROMPT_COMMAND": "pseudolife-mcp prompt-hook",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "DISCIPLINE_LINE": "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.",
+        "COORDINATION_COMMAND": "pseudolife-mcp briefing --hook-json --coordination",
+        "LEGACY_COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installed SessionStart briefing hook -> {HOME}/.claude/settings.json\n  command: pseudolife-mcp briefing --hook-json\nInstalled SessionStart coordination hook -> {HOME}/.claude/settings.json\n  command: pseudolife-mcp briefing --hook-json --coordination\nInstalled UserPromptSubmit memory-change hook -> {HOME}/.claude/settings.json\n  command: pseudolife-mcp prompt-hook\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Briefing hook already present in {HOME}/.claude/settings.json - skipping.\nMemory-change hook already present in {HOME}/.claude/settings.json - skipping.\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json --coordination\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp prompt-hook\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      },
+      "files": {
+        ".claude/CLAUDE.md": "# the directory install-hook.sh creates before the edit\n"
+      },
+      "note": "install-hook.sh makes the settings directory (mkdir -p) before the edit runs."
+    },
+    {
+      "name": "hook-settings-install-replaces-the-static-and-obsolete-hooks",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "BRIEFING_COMMAND": "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json",
+        "PROMPT_COMMAND": "docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "DISCIPLINE_LINE": "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.",
+        "COORDINATION_COMMAND": "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json --coordination",
+        "LEGACY_COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-start\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'\"\n          }\n        ]\n      },\n      {\n        \"matcher\": \"x\",\n        \"hooks\": []\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-end\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"echo bye\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installed SessionStart briefing hook -> {HOME}/.claude/settings.json\n  command: docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json\nRemoved the unconditional coordination check-in hook.\nInstalled SessionStart coordination hook -> {HOME}/.claude/settings.json\n  command: docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json --coordination\nRemoved the static mid-session discipline hook.\nInstalled UserPromptSubmit memory-change hook -> {HOME}/.claude/settings.json\n  command: docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook\nRemoved obsolete episode-start hook (daemon owns episodes now).\nRemoved obsolete episode-end hook (daemon owns episodes now).\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json --coordination\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"docker exec -i pseudolife-mcp-daemon pseudolife-mcp prompt-hook\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo bye\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-install-for-codex-keeps-commandwindows-pairs",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.codex/hooks.json",
+        "BRIEFING_COMMAND": "pseudolife-mcp briefing --hook-json",
+        "PROMPT_COMMAND": "pseudolife-mcp prompt-hook",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "DISCIPLINE_LINE": "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.",
+        "COORDINATION_COMMAND": "pseudolife-mcp briefing --hook-json --coordination",
+        "LEGACY_COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".codex/hooks.json": "{\"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\", \"commandWindows\": \"Write-Output 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"}, {\"type\": \"command\", \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\", \"commandWindows\": \"Write-Output 'mine'\"}]}]}}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installed SessionStart briefing hook -> {HOME}/.codex/hooks.json\n  command: pseudolife-mcp briefing --hook-json\nInstalled SessionStart coordination hook -> {HOME}/.codex/hooks.json\n  command: pseudolife-mcp briefing --hook-json --coordination\nRemoved the static mid-session discipline hook.\nInstalled UserPromptSubmit memory-change hook -> {HOME}/.codex/hooks.json\n  command: pseudolife-mcp prompt-hook\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".codex/hooks.json": "{\n  \"hooks\": {\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\",\n            \"commandWindows\": \"Write-Output 'mine'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp prompt-hook\"\n          }\n        ]\n      }\n    ],\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json --coordination\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": []\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-with-the-plugin-active",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "DRY_RUN": "",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\r\n  \"theme\": \"dark café 😀\",\r\n  \"enabledPlugins\": {\r\n    \"pseudolife-memory@pseudolife-mcp\": true\r\n  },\r\n  \"hooks\": {\r\n    \"SessionStart\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\r\n          }\r\n        ]\r\n      },\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\r\n          }\r\n        ]\r\n      },\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\r\n          }\r\n        ]\r\n      }\r\n    ],\r\n    \"UserPromptSubmit\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\r\n          },\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo mine\"\r\n          }\r\n        ]\r\n      }\r\n    ],\r\n    \"SessionEnd\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"pseudolife-mcp episode-end\"\r\n          }\r\n        ]\r\n      }\r\n    ],\r\n    \"Stop\": [\r\n      {\r\n        \"hooks\": [\r\n          {\r\n            \"type\": \"command\",\r\n            \"command\": \"echo stop\"\r\n          }\r\n        ]\r\n      }\r\n    ]\r\n  }\r\n}\r\n",
+        ".claude/plugins/installed_plugins.json": "{\"plugins\": {\"pseudolife-memory@pseudolife-mcp\": [{\"scope\": \"user\", \"version\": \"1\"}]}}"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 0,
+          "stdout": "Installer-written hooks in {HOME}/.claude/settings.json (the pseudolife-memory plugin provides these now):\n  SessionStart: pseudolife-mcp briefing --hook-json\n  SessionStart: echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), t...\n  UserPromptSubmit: echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_...\n  SessionEnd: pseudolife-mcp episode-end\nLeft alone - not an exact installer-written entry; review by hand:\n  SessionStart: my own pseudolife-mcp briefing wrapper\nBacked up -> {HOME}/.claude/settings.json.bak-<stamp>\nRemoved 4 installer-written hook entries from {HOME}/.claude/settings.json.\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 3,
+          "stdout": "No installer-written Pseudolife hooks in {HOME}/.claude/settings.json.\nLeft alone - not an exact installer-written entry; review by hand:\n  SessionStart: my own pseudolife-mcp briefing wrapper\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"theme\": \"dark café 😀\",\n  \"enabledPlugins\": {\n    \"pseudolife-memory@pseudolife-mcp\": true\n  },\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [],\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo stop\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-dry-run-and-inactive-plugin",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "DRY_RUN": "1",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\n  \"theme\": \"dark caf\\u00e9 \\ud83d\\ude00\",\n  \"enabledPlugins\": {\n    \"pseudolife-memory@pseudolife-mcp\": true\n  },\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-end\"\n          }\n        ]\n      }\n    ],\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo stop\"\n          }\n        ]\n      }\n    ]\n  }\n}\n",
+        ".claude/plugins/installed_plugins.json": "{\"plugins\": {\"pseudolife-memory@pseudolife-mcp\": {\"scope\": \"project\"}}}"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 4,
+          "stdout": "Installer-written hooks in {HOME}/.claude/settings.json (the pseudolife-memory plugin provides these now):\n  SessionStart: pseudolife-mcp briefing --hook-json\n  SessionStart: echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), t...\n  UserPromptSubmit: echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_...\n  SessionEnd: pseudolife-mcp episode-end\nLeft alone - not an exact installer-written entry; review by hand:\n  SessionStart: my own pseudolife-mcp briefing wrapper\nNot removed: the pseudolife-memory plugin is not installed and enabled for all projects, so these may be the only Pseudolife hooks that run.\n",
+          "stderr": ""
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"theme\": \"dark caf/u00e9 /ud83d/ude00\",\n  \"enabledPlugins\": {\n    \"pseudolife-memory@pseudolife-mcp\": true\n  },\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp briefing --hook-json\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently.'\"\n          }\n        ]\n      },\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"my own pseudolife-mcp briefing wrapper\"\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'\"\n          },\n          {\n            \"type\": \"command\",\n            \"command\": \"echo mine\"\n          }\n        ]\n      }\n    ],\n    \"SessionEnd\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"pseudolife-mcp episode-end\"\n          }\n        ]\n      }\n    ],\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo stop\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-refuses-a-duplicate-key",
+      "paths": true,
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "DRY_RUN": "",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\"hooks\": {\"SessionStart\": []}, \"hooks\": {}}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": "Could not read {HOME}/.claude/settings.json: duplicate key 'hooks'\n"
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\"hooks\": {\"SessionStart\": []}, \"hooks\": {}}\n"
+      }
+    },
+    {
+      "name": "hook-settings-remove-legacy-without-a-file",
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/none.json",
+        "DRY_RUN": "",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "remove-legacy"
+          ],
+          "stdin": null,
+          "exit": 3,
+          "stdout": "No settings file at {HOME}/.claude/none.json - nothing to remove.\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "name": "hook-settings-install-refuses-a-malformed-hook-group",
+      "paths": true,
+      "compare_stderr": false,
+      "stderr_note": "Python stopped with an AttributeError traceback; the native step refuses with one line. Both exit 1 and leave the file as it was.",
+      "env": {
+        "SETTINGS_PATH": "{HOME}/.claude/settings.json",
+        "BRIEFING_COMMAND": "pseudolife-mcp briefing --hook-json",
+        "PROMPT_COMMAND": "pseudolife-mcp prompt-hook",
+        "UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.'",
+        "LEGACY_UPS_COMMAND": "echo 'Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome.'",
+        "DISCIPLINE_LINE": "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome with used_ids.",
+        "COORDINATION_COMMAND": "pseudolife-mcp briefing --hook-json --coordination",
+        "LEGACY_COORDINATION_LINE": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list), then memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show scope. Use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. If unavailable, report that and continue independently."
+      },
+      "files": {
+        ".claude/settings.json": "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": {\n          \"x\": 1\n        }\n      },\n      \"note\",\n      {\n        \"hooks\": []\n      }\n    ]\n  }\n}\n"
+      },
+      "steps": [
+        {
+          "argv": [
+            "hook-settings",
+            "install"
+          ],
+          "stdin": null,
+          "exit": 1,
+          "stdout": "",
+          "stderr": null
+        }
+      ],
+      "files_after": {
+        ".claude/settings.json": "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"hooks\": {\n          \"x\": 1\n        }\n      },\n      \"note\",\n      {\n        \"hooks\": []\n      }\n    ]\n  }\n}\n"
+      }
+    }
+  ]
+}

@@ -6,9 +6,10 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 
 import pytest
+
+from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 
@@ -81,14 +82,10 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
-# The side-by-side runtime install is refused here (PSEUDOLIFE_SHIM_PYTHON
-# names this function), so the pipx path stays what this test drives.
-function fake-no-runtime {{ $global:LASTEXITCODE = 1 }}
-function pipx {{
-    $global:LASTEXITCODE={0 if shim_available else 1}
-    if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
-}}
+$env:FAKE_LAUNCHER = '{shim_executable}'
+$env:FAKE_KEEP_LAUNCHER = '1'
+$env:FAKE_NATIVE_EXIT = '{0 if shim_available else 1}'
+{native_stub.POWERSHELL}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
     if ($args -contains '--help') {{ $global:LASTEXITCODE=0; return '--env' }}
@@ -108,7 +105,7 @@ function codex {{
     environment = os.environ.copy()
     environment.update(CODEX_HOME=home.as_posix(), HOME=home.as_posix(), USERPROFILE=home.as_posix(),
         PYTHONPATH=str(ROOT), FIXTURE_HOOK=str(marker), FIXTURE_RUNTIME=str(runtime),
-        FIXTURE_SHIM_BIN=str(shim_bin), PSEUDOLIFE_SHIM_PYTHON="fake-no-runtime",
+        FIXTURE_SHIM_BIN=str(shim_bin),
         PSEUDOLIFE_MCP_TOKEN="fixture-literal",
         PSEUDOLIFE_MCP_TOKEN_FILE=ambient.as_posix(), PSEUDOLIFE_MCP_DAEMON_URL="http://127.0.0.1:4321")
     completed = subprocess.run([pwsh, "-NoProfile", "-File", str(driver)], env=environment,

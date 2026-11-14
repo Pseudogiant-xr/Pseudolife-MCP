@@ -5639,10 +5639,9 @@ comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
 `principal_not_allowed` or `coordination_requires_postgres`).
 
 To keep an open-loopback install with the board dormant, pass `--no-token`
-(`-NoToken`). `--transport http` mints no token either, nor does a host that
-cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
-pipx), since its registrations fall back to HTTP. None of these removes a
-token that is already configured.
+(`-NoToken`). `--transport http` mints no token either, since its
+registrations cannot carry a token file. None of these removes a token that is
+already configured.
 
 ### Coordination diagnostic quickstart
 
@@ -8736,60 +8735,43 @@ daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 ### Where the shim lives: side-by-side runtimes behind one launcher
 
 The installers put the shim into its own **runtime** and register one
-**launcher** path with every client (`pseudolife_memory/runtimes.py`;
-`python ops/shim_runtime.py` from a checkout):
+**launcher** path with every client (`docs/dev/native-runtimes.md`):
 
 | | Windows | Linux / macOS |
 |---|---|---|
 | runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
 | launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` (its directory goes on the user `PATH`) | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp`, linked from `~/.local/bin/pseudolife-mcp` |
 
-A runtime is a plain virtualenv holding the package (`pip install
---no-deps`) and the shim's own dependencies — not torch, chromadb or the
-embedder, which a stdio shim never loads (`serve` and `embedded` need a
-full install). `runtime.json` inside it (version, source, commit) is
-written last, so a directory without it is an install that did not
-finish; the launcher starts the highest-numbered complete runtime (on
-Windows a console-script executable of the kind pip writes, on POSIX a
-`/bin/sh` script that `exec`s it). Installing a new version — the
-installer, `ops/update.ps1 -All` / `update.sh --all`, or `python
-ops/shim_runtime.py install --source <checkout or requirement>` — builds a
-new runtime beside the old ones and never touches a file a running session
-has open: sessions keep the runtime they started with, the next session
-start takes the new one, and an old runtime is removed (by the same step,
-or `shim_runtime.py prune`) only once no process runs from it (the
-update doing the removing included) and no registration names it. A registration that still names a runtime, pipx or
-virtualenv path directly is moved to the launcher in place, the file
-backed up first and its permission bits kept (`shim_runtime.py migrate`); a
-mode argument such as `channel` stays. A registration that would spawn its
-own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1` and a loopback daemon URL — the
-pip and lite tiers) is never moved onto a shim runtime, which cannot serve.
-The same steps make `pseudolife-mcp` typed in a terminal reach the
-launcher (`shim_runtime.py expose` runs that step alone). On POSIX
+A runtime holds one native `pseudolife-mcp` binary: the release archive
+for the host (Linux x86_64 or aarch64, macOS Intel or Apple silicon,
+Windows x86_64) that the installer downloaded from the release its
+checkout names and checked against that release's `SHA256SUMS`; no Python
+is involved. `runtime.json` inside it is written last, so a directory
+without it is an install that did not finish; the launcher starts the
+newest complete runtime. Installing a new version (the installer, or
+`pseudolife-mcp update`) builds a new runtime beside the old ones and never
+touches a file a running session has open: sessions keep the runtime they
+started with and the next session start takes the new one. A registration
+that still names a pipx, `pip --user` or older Python runtime path is moved
+to the launcher in place, the file backed up first (`pseudolife-mcp
+installer migrate-registrations`); the old Python client stays on disk,
+unregistered, and the installer says where. A registration that would
+spawn its own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1` and a loopback daemon
+URL) or an editable checkout install is left as it is. The same step makes
+`pseudolife-mcp` typed in a terminal reach the launcher. On POSIX
 `~/.local/bin/pseudolife-mcp` becomes a symlink to the launcher: a free
-name is linked; an older pipx link into `venvs/pseudolife-mcp`, or a
-pip --user console script of this package, is moved aside as
-`pseudolife-mcp.<kind>-<stamp>` (never deleted; `pipx uninstall` removes a
-moved pipx link with its venv and leaves the new link, which resolves
-outside every pipx venv); anything else is left as it is and named. When
-`~/.local/bin` is not on `PATH` the step prints the one-line fix
-(`export PATH="$HOME/.local/bin:$PATH"` in your shell profile) and edits no
-profile; when an earlier `PATH` entry still wins, it names that entry. On
-Windows the launcher directory is prepended to the user `PATH`
-(`HKCU\Environment`, never the machine `PATH`) and a settings-change
-broadcast reaches consoles opened afterwards. A terminal that was already
-open keeps its old `PATH`, so the step says to open a new one when this
-one still runs another copy. An older pipx `pseudolife-mcp.exe` further
-down `PATH` is left in place; `pipx uninstall pseudolife-mcp` removes it
-once no session runs it. `pseudolife-mcp doctor` reports
-`path_resolution`: what the name resolves to, the launcher, and a warning
-when they differ. Set `PSEUDOLIFE_SHIM_PYTHON` to choose the interpreter
-the runtimes are created from; `PSEUDOLIFE_SHIM_RUNTIMES` and
+name is linked; this package's older pipx or `pip --user` entry there is
+moved aside as `pseudolife-mcp.python-<stamp>` (never deleted); anything
+else is left as it is and named, and when `~/.local/bin` is not on `PATH`
+the step prints the one-line fix and edits no profile. On Windows the
+launcher directory is prepended to the user `PATH` (`HKCU\Environment`,
+never the machine `PATH`, `%VAR%` entries kept as written) and a
+settings-change broadcast reaches consoles opened afterwards; a terminal
+that was already open keeps its old `PATH`. `PSEUDOLIFE_SHIM_RUNTIMES` and
 `PSEUDOLIFE_SHIM_LAUNCHER` (together) move both paths, and then no `PATH`
 is changed unless `PSEUDOLIFE_SHIM_USER_BIN` names the directory to link
-from (on POSIX it also moves the default `~/.local/bin`). A host whose Python cannot make a virtualenv falls back to the
-earlier pipx / `pip install --user` install, which does need every session
-closed to upgrade.
+from. A host with no published native client refuses the install with its
+cause and fix; there is no Python fallback.
 
 **Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
 checkout. Run inside one, a 0.16.x updater can record the wrong version in the
@@ -10922,8 +10904,10 @@ run, or keep both when a standing copy is useful for subagents.
 The source installers install the host shim from their checkout, including
 when an older installation has the same version number. This keeps the shim's
 credential handling aligned with the daemon built from that checkout. The
-Codex setup helpers can run before package installation; no `PYTHONPATH`
-setting or preinstalled Pseudolife package is required.
+Codex setup runs as steps of the native client the installer has just
+downloaded and verified (`pseudolife-mcp installer codex-credentials`,
+`codex-hooks`, `codex-runtime-defaults`), so no Python, `PYTHONPATH` setting
+or preinstalled Pseudolife package is required.
 
 Fresh registrations use the executable produced by the selected package
 manager. A competing older executable on `PATH` must not be mistaken for the
