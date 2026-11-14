@@ -67,9 +67,12 @@ PREFIX = "integrate/"
 # CI as a batch of one instead of merging directly.
 MIN_MEMBERS = 1
 # A release cut (a member changing project.version in pyproject.toml) is
-# batched alone: evals/rust_port/oracle_selection.py release_cut() accepts a
-# cut only when nothing else changes, so a cut batched with code would run
-# parity against the old release.
+# batched alone: the release is tagged at the batch's merge, so whatever
+# shares the batch ships in that release, while its notes are the fragments
+# the cut folded; a change merged beside the cut would ship with its
+# fragment unfolded, described under the next release. For the same reason
+# a cut must fold every fragment on master (_release_cut_alone).
+CHANGELOG_FRAGMENTS = "changelog.d"
 VERSION_LINE_RE = re.compile(r'version\s*=\s*"([^"]*)"\s*$')
 BATCH_RE = re.compile(r"^integrate/(\d{4}-\d{2}-\d{2})-batch-(\d+)$")
 MARKER_RE = r"^(<<<<<<<|>>>>>>>)( |$)"
@@ -224,6 +227,10 @@ class Plan:
     # them (a stacked child merged first, or a head already on master): no
     # merge commit of their own, so `open` and `merge` do not demand one.
     contained: list[int] = field(default_factory=list)
+    # Pull requests whose own labelled change to the frozen package is in the
+    # batch through another member's merge (a stacked child) although they
+    # did not merge themselves: `open` and `merge` read their labels again.
+    carried: list[int] = field(default_factory=list)
     # `passed` or `not needed`, which `open` accepts, or `failed: ...` or
     # `not run: ...`; empty for a plan built before the check existed.
     rust_check: str = ""
@@ -244,7 +251,13 @@ class Plan:
     def save(self) -> None:
         path = Plan.path(self.branch)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
+        data = asdict(self)
+        # Left out when empty, so the loader before `carried` existed
+        # (Plan(**raw)) still reads the plan: a revert of the change that
+        # added it, landed as a batch, runs that loader at `open`.
+        if not data["carried"]:
+            del data["carried"]
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @staticmethod
     def load(branch: str) -> Plan | None:
@@ -1048,24 +1061,64 @@ def _project_version(rev: str) -> str | None:
     return None
 
 
-def _release_cut_alone(plan: Plan, members: list[Member]) -> list[Member]:
+def _fragments(rev: str) -> set[str]:
+    """The changelog fragments at `rev`: changelog.d/*.md but its README, as
+    ops/assemble_changelog.py folds them."""
+    listed = git("ls-tree", "-z", "--name-only", rev, f"{CHANGELOG_FRAGMENTS}/", check=False)
+    return {path for path in listed.stdout.split("\0")
+            if path.endswith(".md") and path != f"{CHANGELOG_FRAGMENTS}/README.md"}
+
+
+def _is_release_cut(base_sha: str, m: Member) -> bool:
+    """A member whose own diff changes project.version."""
+    common = git("merge-base", base_sha, m.sha, check=False)
+    return common.returncode == 0 and _project_version(m.sha) != _project_version(common.stdout.strip())
+
+
+def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None = None) -> list[Member]:
     """The members to merge: all of them, or only the first ready release cut
     (a member whose own diff changes project.version), with the others
-    left out keeping their labels."""
+    left out keeping their labels.
+
+    The cut is alone because the release is tagged at the batch's merge:
+    whatever shares the batch ships in the release, but only the fragments
+    the cut folded are its notes. For the same reason a cut that would leave
+    a fragment unfolded on the batch head (one that landed on master after
+    the cut was folded, or one the cut adds) is left out, with what to do.
+    A cut the freeze refuses (``refused``: its own change, or one its head
+    carries) is not chosen: it is dropped with the rest of the merge, and the
+    other members batch as usual."""
+    refused = refused or {}
     for m in members:
         if _not_ready(m) or _fetch_head(m.number) != m.sha:
+            continue
+        if m.sha in refused or any(sha != m.sha and _is_ancestor(sha, m.sha) for sha in refused):
             continue
         base = _out("merge-base", plan.base_sha, m.sha)
         if _project_version(m.sha) == _project_version(base):
             continue
+        at_base, at_fork, at_cut = _fragments(plan.base_sha), _fragments(base), _fragments(m.sha)
+        # What the merge keeps: master's fragments the cut did not fold,
+        # and any the cut adds.
+        unfolded = sorted((at_base - (at_fork - at_cut)) | (at_cut - at_fork))
+        if unfolded:
+            reason = (f"it is a release cut, but merging it onto {BASE} leaves "
+                      f"{len(unfolded)} changelog fragment(s) unfolded "
+                      f"({', '.join(unfolded[:3])}{', ...' if len(unfolded) > 3 else ''}), "
+                      "so the release would ship changes its notes do not describe; merge "
+                      f"{BASE} forward, run `python ops/assemble_changelog.py` again, "
+                      "rerun the cut's pinned tests, then re-apply the label")
+            plan.dropped.append(Dropped(m, reason))
+            print(f"  dropped #{m.number}: {reason}")
+            # Another cut among the rest is still batched alone.
+            return _release_cut_alone(plan, [other for other in members if other is not m], refused)
         for other in members:
             if other is not m:
                 plan.dropped.append(Dropped(
-                    other, f"#{m.number} is a release cut, which is batched alone: "
-                           "parity tests a cut against its own head only when nothing "
-                           "else changes (release_cut() in "
-                           "evals/rust_port/oracle_selection.py); this joins the next "
-                           "batch", comment=False))
+                    other, f"#{m.number} is a release cut, which is batched alone: the "
+                           "release is tagged at the batch's merge, so anything beside "
+                           "the cut would ship without being in the release notes; this "
+                           "joins the next batch", comment=False))
         print(f"  #{m.number} is a release cut; it is batched alone")
         return [m]
     return members
@@ -1303,7 +1356,14 @@ def _freeze_module(base_sha: str, members: list[Member] = (), head: str = ""):
     outcome this must not have."""
     text = _guard_text(base_sha)
     if text is None:
-        if _out("rev-list", "-1", base_sha, "--", FREEZE_GUARD):
+        # --full-history: default history simplification follows only the
+        # parent a merge is TREESAME to, so a guard dropped while resolving a
+        # merge would read as never added. A shallow clone may hide both.
+        if _out("rev-parse", "--is-shallow-repository") == "true":
+            raise Refusal(f"this checkout is a shallow clone, so it cannot tell whether {BASE} "
+                          f"ever had {FREEZE_GUARD}; run `git fetch --unshallow {REMOTE}` "
+                          "and try again")
+        if _out("rev-list", "-1", "--full-history", base_sha, "--", FREEZE_GUARD):
             raise Refusal(f"{BASE} has no {FREEZE_GUARD} although it had one, so the Python "
                           "freeze cannot be applied to this batch; restore it on master. The "
                           "pull request that deletes pseudolife_memory/ removes this check "
@@ -1420,6 +1480,21 @@ def _batch_freeze_refusal(plan: Plan) -> str | None:
                and not (m.number in plan.contained and _is_ancestor(m.sha, plan.head))]
     if missing:
         return f"the batch lacks the merges of {', '.join(missing)}; rebuild it"
+    for m in plan.merged:
+        if _own_frozen_refusal(freeze, plan.base_sha, m, (freeze.EXCEPTION_LABEL,)):
+            return f"#{m.number}'s change could not be read for the Python freeze check; rebuild it"
+        if _own_frozen_refusal(freeze, plan.base_sha, m, ()):
+            frozen = _own_frozen_refusal(freeze, plan.base_sha, m, _labels_now(m.number))
+            if frozen:
+                return (f"#{m.number}'s own change touches the frozen package without the "
+                        f"{freeze.EXCEPTION_LABEL} label: {frozen}; rebuild without it, or "
+                        "restore the label if the maintainer's exception stands")
+    for number in plan.carried:
+        if freeze.EXCEPTION_LABEL not in _labels_now(number):
+            return (f"#{number}'s change to the frozen package is in this batch through a stacked "
+                    f"pull request, and #{number} no longer carries the {freeze.EXCEPTION_LABEL} "
+                    "label it was admitted with; rebuild without the stack, or restore the label "
+                    "if the maintainer's exception stands")
     return None
 
 
@@ -1427,8 +1502,173 @@ def _is_ancestor(ancestor: str, descendant: str) -> bool:
     return git("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
 
 
-def _merge_members(plan: Plan, members: list[Member]) -> None:
-    freeze = _freeze_module(plan.base_sha, members)
+# The files of the release-procedure skill's seven-file version cut that
+# lie inside the frozen package: the only package paths a cut may change,
+# label or no label.
+CUT_FROZEN_FILES = frozenset({"pseudolife_memory/compose/docker-compose.yml"})
+# The open pull requests build lists to find any a member's head carries; a
+# listing that reaches this many may be cut off, so build refuses.
+OPEN_PR_LIMIT = 500
+
+
+def _own_frozen_paths(freeze, base_sha: str, sha: str) -> list[str] | None:
+    """The frozen paths a pull request's own change against master touches
+    (from its merge base); None when it cannot be read."""
+    common = git("merge-base", base_sha, sha, check=False)
+    paths = freeze.changed_paths(Path.cwd(), common.stdout.strip(), sha) if common.returncode == 0 else None
+    return None if paths is None else freeze.frozen_paths(paths)
+
+
+def _has_commit(sha: str) -> bool:
+    return git("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
+
+
+def _open_rows() -> list[dict]:
+    """Every open pull request, whatever its base: one a member's head
+    carries is judged on its own change. Fails closed on a failed or
+    possibly cut-off listing, since a missing row is a parent unjudged."""
+    try:
+        text = gh("pr", "list", "--state", "open", "--limit", str(OPEN_PR_LIMIT), "--json",
+                  "number,headRefOid,labels")
+    except Refusal as error:
+        raise Refusal(f"build lists every open pull request, to judge any a member's head carries "
+                      f"for the Python freeze, and that listing failed: {error}; rerun once "
+                      "`gh pr list --state open` works (`gh auth status`, the network)") from None
+    rows = json.loads(text or "[]")
+    if len(rows) >= OPEN_PR_LIMIT:
+        raise Refusal(f"the listing of open pull requests reached its limit of {OPEN_PR_LIMIT}, so an "
+                      "open pull request a member's head carries could be missing from it and go "
+                      "unjudged by the Python freeze; raise OPEN_PR_LIMIT in ops/integrate.py and rebuild")
+    return rows
+
+
+def _fetch_listed(members: list[Member]) -> None:
+    """Fetch each listed head not yet local, so the freeze can read it."""
+    for m in members:
+        if not _has_commit(m.sha):
+            git("fetch", "-q", REMOTE, f"pull/{m.number}/head", check=False)
+
+
+class _Prepass:
+    """What the freeze decided before anything merges, for every listed
+    member and every open pull request a member's head carries:
+    ``refused`` (sha -> (number, reason, keep the label)) and ``exceptions``
+    (sha -> (number, frozen paths)) for the labelled changes to the package."""
+
+    def __init__(self):
+        self.refused: dict[str, tuple[int, str, bool]] = {}
+        self.exceptions: dict[str, tuple[int, set[str]]] = {}
+
+
+def _freeze_prepass(plan: Plan, freeze, members: list[Member]) -> _Prepass:
+    """Each pull request is judged on its own change, whichever merge carries
+    it. A member's head can carry open pull requests that are not listed
+    (no batch label, or not ready): those are found among the open pull
+    requests whose head is in a member's history, and judged the same way."""
+    result = _Prepass()
+    listed = {m.number for m in members}
+    _fetch_listed(members)
+    # A listed head that cannot be had (it moved after listing) is left to
+    # _merge_members, which drops it as moved; nothing of it can merge.
+    present = [m for m in members if _has_commit(m.sha)]
+    judged: list[tuple[Member, bool]] = [(m, True) for m in present]
+    history: set[str] = set()
+    for m in present:
+        history.update(_out("rev-list", m.sha, f"^{plan.base_sha}").split())
+    heads = {m.sha for m in present}
+    for row in _open_rows():
+        head = row.get("headRefOid") or ""
+        # Whatever its base: a parent stacked on another branch is carried
+        # all the same. A head a member has is judged as that member.
+        if row.get("number") in listed or head not in history or head in heads:
+            continue
+        labels = tuple(label.get("name", "") for label in row.get("labels") or [] if isinstance(label, dict))
+        judged.append((Member(number=row["number"], title="", sha=head, url="", review="", checks="",
+                              labels=labels), False))
+    own: dict[str, list[str]] = {}
+    for m, is_member in judged:
+        paths = _own_frozen_paths(freeze, plan.base_sha, m.sha)
+        if paths is None:
+            # The checkout's fault or the branch's, not the change's: no
+            # comment, no label removed, and nothing is built.
+            raise Refusal(f"#{m.number}'s change against {BASE} could not be read for the Python "
+                          f"freeze check (git merge-base or diff of {m.sha[:12]} failed): the batch "
+                          "checkout is shallow or missing objects (fetch with full history), or the "
+                          f"branch has no history in common with {BASE} (remove `{plan.label}` from "
+                          f"#{m.number} until it does); no label was changed")
+        own[m.sha] = paths
+        beyond = sorted(set(paths) - CUT_FROZEN_FILES)
+        if paths and beyond and _is_release_cut(plan.base_sha, m):
+            result.refused[m.sha] = (m.number, (
+                f"it is a release cut, and its change against {BASE} also changes "
+                f"{', '.join(beyond)} inside the frozen Python package, where a cut may change only "
+                f"{', '.join(sorted(CUT_FROZEN_FILES))} (the version cut), label or no label: move "
+                f"that change to its own pull request, then re-apply `{plan.label}`"), False)
+        elif paths and freeze.EXCEPTION_LABEL in m.labels:
+            result.exceptions[m.sha] = (m.number, set(paths))
+    for m, is_member in judged:
+        paths = own[m.sha]
+        if not paths or freeze.EXCEPTION_LABEL in m.labels or m.sha in result.refused:
+            continue
+        # A stacked child whose frozen files are exactly a labelled
+        # parent's (nothing frozen changes from that parent's head to its
+        # own) waits for that parent, keeping its label, rather than being
+        # told to rewrite in Rust a change it did not make. One that edits
+        # them further has a Python change of its own, refused below.
+        parents = [number for sha, (number, _) in result.exceptions.items()
+                   if sha != m.sha and _is_ancestor(sha, m.sha) and _frozen_between(freeze, sha, m.sha) == []]
+        if parents:
+            names = ", ".join(f"#{number}" for number in parents)
+            result.refused[m.sha] = (m.number, (
+                f"its own change against {BASE} holds {names}'s labelled change to the frozen "
+                f"Python package, since it is stacked on {names}; it joins once {names} has "
+                f"landed, or carries `{freeze.EXCEPTION_LABEL}` itself if the maintainer rules "
+                "the exception covers it"), True)
+            continue
+        reason = freeze.refusal(paths)
+        if is_member and set(paths) <= CUT_FROZEN_FILES and _is_release_cut(plan.base_sha, m):
+            # Not "do it in Rust": a cut may still edit the packaged compose
+            # copy, under an exception only the maintainer grants, per cut.
+            reason += (f" This is a release cut, which may still edit that version file under an "
+                       f"exception only the maintainer grants: once the maintainer has ruled it for "
+                       f"this cut, it carries `{freeze.EXCEPTION_LABEL}` (applied by the maintainer, "
+                       f"or by the conductor after that ruling), then re-apply `{plan.label}`")
+        result.refused[m.sha] = (m.number, reason, False)
+    return result
+
+
+def _frozen_between(freeze, a: str, b: str) -> list[str] | None:
+    """The frozen paths that differ between two commits; None when unread."""
+    paths = freeze.changed_paths(Path.cwd(), a, b)
+    return None if paths is None else freeze.frozen_paths(paths)
+
+
+def _own_frozen_refusal(freeze, base_sha: str, m: Member, labels) -> str | None:
+    """Why a member's own change against master (from its merge base) may
+    not land: it touches the frozen package without the exception label.
+    Judged per pull request, whichever merge carries the change: a stacked
+    child merged first carries its parent's change, and the parent still
+    needs its own label."""
+    common = git("merge-base", base_sha, m.sha, check=False)
+    paths = (freeze.changed_paths(Path.cwd(), common.stdout.strip(), m.sha)
+             if common.returncode == 0 else None)
+    if paths is None:
+        return "its change could not be read for the Python freeze check; rebuild once git can read it"
+    refused = freeze.frozen_paths(paths)
+    if refused and freeze.EXCEPTION_LABEL not in labels:
+        return freeze.refusal(refused)
+    return None
+
+
+def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Prepass | None = None) -> None:
+    freeze = freeze or _freeze_module(plan.base_sha, members)
+    # Every pull request's own change is judged before anything merges
+    # (_freeze_prepass, over the whole listing when _merge_batch gives it),
+    # so a member whose head carries a refused one (a stacked child over a
+    # parent still waiting on its CI, or not listed at all) is left out too,
+    # whichever order they were labelled in.
+    prepass = prepass or _freeze_prepass(plan, freeze, members)
+    own = prepass.refused
     for m in members:
         reason = _not_ready(m)
         if reason:
@@ -1439,6 +1679,24 @@ def _merge_members(plan: Plan, members: list[Member]) -> None:
             plan.dropped.append(Dropped(
                 m, f"head moved from {m.sha[:12]} to {head[:12]} after listing; "
                    "rebuild to include it", comment=False))
+            continue
+        if m.sha in own:
+            _, reason, keep = own[m.sha]
+            plan.dropped.append(Dropped(m, reason, comment=not keep))
+            print(f"  {'left out' if keep else 'dropped'} #{m.number}: {reason}")
+            continue
+        # A waiting entry (keep) only waits on a labelled parent, and its
+        # frozen files are that parent's: carrying it carries nothing unruled.
+        carried = [number for sha, (number, _, keep) in own.items()
+                   if not keep and sha != m.sha and _is_ancestor(sha, m.sha)]
+        if carried:
+            names = ", ".join(f"#{number}" for number in carried)
+            reason = (f"its head carries {names}'s change to the frozen Python package, which "
+                      f"{names} is not labelled `{freeze.EXCEPTION_LABEL}` for; it joins once "
+                      f"{names} lands, leaves the stack, or the maintainer rules {names}'s change "
+                      "an exception")
+            plan.dropped.append(Dropped(m, reason, comment=False))
+            print(f"  left out #{m.number}: {reason}")
             continue
         try:
             _budget_member_evidence(plan.base_sha, m)
@@ -1649,11 +1907,22 @@ def _census_reason(member: Member, files: list[str], failure: str,
 
 
 def _remerge(plan: Plan, members: list[Member], dropped: list[Dropped],
-             out: set[int]) -> None:
+             out: set[int], freeze=None, prepass: _Prepass | None = None) -> None:
     """Merge `members` but `out` again from the base, in their order."""
     git("reset", "-q", "--hard", plan.base_sha)
-    plan.merged, plan.dropped, plan.contained = [], list(dropped), []
-    _merge_members(plan, [m for m in members if m.number not in out])
+    plan.merged, plan.dropped, plan.contained, plan.carried = [], list(dropped), [], []
+    _merge_members(plan, [m for m in members if m.number not in out], freeze, prepass)
+    _record_carried(plan, prepass)
+
+
+def _record_carried(plan: Plan, prepass: _Prepass | None) -> None:
+    """The labelled exceptions in the batch head that did not merge themselves."""
+    if prepass is None:
+        return
+    merged = {m.number for m in plan.merged}
+    head = _out("rev-parse", "HEAD")
+    plan.carried = sorted({number for sha, (number, _) in prepass.exceptions.items()
+                           if number not in merged and _is_ancestor(sha, head)})
 
 
 def _merge_batch(plan: Plan, members: list[Member]) -> None:
@@ -1661,9 +1930,15 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
     (see `_regenerate_census`). When the head's census script fails, the
     members whose own diff changes the census inputs leave and the rest
     merge again from the base. Nothing else is added inside a batch."""
-    members = _release_cut_alone(plan, members)
+    # The freeze judges the whole listing (and the open pull requests it
+    # carries) before the cut search narrows it to one member.
+    _fetch_listed(members)       # the first landing reads the guard the members carry
+    freeze = _freeze_module(plan.base_sha, members)
+    prepass = _freeze_prepass(plan, freeze, members)
+    members = _release_cut_alone(plan, members, prepass.refused)
     cut_drops = list(plan.dropped)
-    _merge_members(plan, members)
+    _merge_members(plan, members, freeze, prepass)
+    _record_carried(plan, prepass)
     inputs = _census_inputs(plan.base_sha)
     if not plan.merged or inputs is None and _budget_tools(plan.base_sha) is None:
         return    # master has no supported generated metadata
@@ -1687,7 +1962,7 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
             print(f"  dropped #{m.number}: {drops[-1].reason}")
         out = {d.member.number for d in drops}
         print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
-        _remerge(plan, members, cut_drops + drops, out)
+        _remerge(plan, members, cut_drops + drops, out, freeze, prepass)
 
 
 def _new_markers(base_sha: str) -> list[str]:

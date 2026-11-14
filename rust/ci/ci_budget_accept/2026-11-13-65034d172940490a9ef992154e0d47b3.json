@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "f3e61581c78da942",
+  "fingerprint": "3f91ff5ea28a9da9",
+  "reason": "Builds the native client the installer tests run (PSEUDOLIFE_NATIVE_TEST_BINARY) before the tests: toolchain, the weekly cache, a debug cargo build and a version smoke; the added cost is the estimate recorded in ci_budget.json."
+}

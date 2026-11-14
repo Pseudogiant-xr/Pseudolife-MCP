@@ -8,6 +8,7 @@ answers the handful of calls the script makes.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import subprocess
@@ -647,9 +648,9 @@ def _cut(version: str) -> str:
 
 @pytest.mark.parametrize("cut_first", [True, False])
 def test_a_release_cut_is_batched_alone(world, capsys, cut_first):
-    # oracle_selection.release_cut() accepts a cut only when nothing else
-    # changes, so a cut batched with code would run parity against the old
-    # release; the others keep their labels and join the next batch.
+    # The release is tagged at the batch's merge, so anything beside the cut
+    # would ship without being in its notes; the others keep their labels
+    # and join the next batch.
     world.advance_master({"pyproject.toml": _cut("0.19.0")})
     sha10 = world.pr(10, {"pyproject.toml": _cut("0.19.1")})
     sha11 = world.pr(11, {"b.txt": "b\n"})
@@ -662,7 +663,63 @@ def test_a_release_cut_is_batched_alone(world, capsys, cut_first):
 
     assert _second_parents(world.origin, f"integrate/{DATE}-batch-1") == [sha10]
     assert "#11" in out and "release cut" in out
+    assert "release notes" in out and "oracle" not in out and "parity" not in out
     assert world.gh.bodies("comment") == [] and world.gh.bodies("edit") == []
+
+
+def _fold_cut(world, number: int, version: str, *, fold: tuple[str, ...] = (),
+              add: dict[str, str] | None = None) -> str:
+    """A version cut on master's tip: pyproject bumped, `fold` fragments
+    deleted as ops/assemble_changelog.py would, `add` files written."""
+    seed = world.gh.seed
+    _git(seed, "fetch", "-q", "origin")
+    _git(seed, "switch", "-q", "-C", f"pr-{number}", "origin/master")
+    (seed / "pyproject.toml").write_text(_cut(version), encoding="utf-8", newline="\n")
+    for name in fold:
+        _git(seed, "rm", "-q", name)
+    for name, text in (add or {}).items():
+        (seed / name).parent.mkdir(parents=True, exist_ok=True)
+        (seed / name).write_text(text, encoding="utf-8", newline="\n")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-q", "-m", f"cut {version}")
+    _git(seed, "push", "-q", "-f", "origin", f"HEAD:refs/pull/{number}/head")
+    return _git(seed, "rev-parse", "HEAD")
+
+
+FRAGMENT_A = "changelog.d/2026-11-14-a.md"
+FRAGMENT_B = "changelog.d/2026-11-14-b.md"
+
+
+def test_a_cut_that_folded_every_fragment_on_master_joins(world, capsys):
+    world.advance_master({"pyproject.toml": _cut("0.19.0"), FRAGMENT_A: "### Added (a)\n",
+                          "changelog.d/README.md": "readme\n"})
+    sha = _fold_cut(world, 10, "0.19.1", fold=(FRAGMENT_A,))
+    world.gh.add(10, sha)
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "unfolded" not in out
+
+
+@pytest.mark.parametrize("late, adds", [(True, False), (False, True)],
+                         ids=["fragment-landed-after-the-fold", "cut-adds-a-fragment"])
+def test_a_cut_leaving_a_fragment_unfolded_is_left_out_and_the_rest_batch(world, capsys, late, adds):
+    # The release would ship a change its notes do not describe.
+    world.advance_master({"pyproject.toml": _cut("0.19.0"), FRAGMENT_A: "### Added (a)\n"})
+    sha10 = _fold_cut(world, 10, "0.19.1", fold=(FRAGMENT_A,),
+                      add={FRAGMENT_B: "### Added (b)\n"} if adds else None)
+    if late:
+        world.advance_master({FRAGMENT_B: "### Added (b)\n"})
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z")
+    world.gh.add(11, sha11, labeled_at="2026-10-19T09:30:00Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "merged #11 " in out, out
+    assert FRAGMENT_B in out and "assemble_changelog" in out
 
 
 def test_open_refuses_when_a_members_own_ci_went_red_after_build(world, capsys):
@@ -3240,8 +3297,8 @@ def test_open_refuses_a_batch_commit_that_is_neither_a_member_merge_nor_generate
     world.gh.add(10, sha)
     original = integrate._merge_members
 
-    def rogue(plan, members):
-        result = original(plan, members)
+    def rogue(plan, members, *rest):
+        result = original(plan, members, *rest)
         (world.work / "pseudolife_memory").mkdir(exist_ok=True)
         (world.work / "pseudolife_memory" / "core.py").write_text("rogue\n", encoding="utf-8")
         _git(world.work, "add", "-A")
@@ -3423,3 +3480,454 @@ def test_a_member_already_on_master_is_contained_and_the_batch_stays_above_maste
     head = _git(world.work, "rev-parse", "HEAD")
     assert _git(world.work, "merge-base", master, head) == master
     assert _open(world) == 0, capsys.readouterr()
+
+
+# --- after the guard landed (reviewer of 18e0babaa, S7) ---
+
+def test_a_guard_dropped_in_a_merge_resolution_still_reads_as_had(world, capsys):
+    # An old branch, cut before the guard, merges master forward and drops
+    # the guard while resolving; default history simplification then
+    # follows the side that never had it.
+    seed = world.gh.seed
+    _git(seed, "fetch", "-q", "origin")
+    _git(seed, "switch", "-q", "-C", "old", "origin/master~1")
+    (seed / "d.txt").write_text("d\n", encoding="utf-8", newline="\n")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-qm", "old work")
+    _git(seed, "merge", "-q", "--no-ff", "--no-commit", "origin/master")
+    _git(seed, "rm", "-q", "-f", "rust/ci/python_freeze.py")
+    _git(seed, "commit", "-qm", "merge master, dropping the guard")
+    _git(seed, "push", "-q", "-f", "origin", "HEAD:master")
+    _git(world.work, "fetch", "-q", "origin")
+    _git(world.work, "reset", "-q", "--hard", "origin/master")
+    base = _git(world.work, "rev-parse", "origin/master")
+    assert _git(world.work, "rev-list", "-1", base, "--", "rust/ci/python_freeze.py") == ""
+    # A member re-adds a copy that refuses nothing, beside a Python change.
+    switched_off = GUARD.replace("def frozen_paths(paths: list[str]) -> list[str]:\n",
+                                 "def frozen_paths(paths: list[str]) -> list[str]:\n    return []\n", 1)
+    sha = world.pr(10, {"rust/ci/python_freeze.py": switched_off, "pseudolife_memory/core.py": "x\n"})
+    world.gh.add(10, sha)
+
+    assert _build() == 2
+
+    captured = capsys.readouterr()
+    assert "although it had one" in captured.err and "merged #10 " not in captured.out
+    member = integrate.Member(number=10, title="re-adds", sha=sha, url="u", review="APPROVED",
+                              checks="SUCCESS")
+    with pytest.raises(integrate.Refusal, match="although it had one"):
+        integrate._freeze_module(base, [member], sha)     # what open and merge load
+
+
+def test_a_shallow_checkout_refuses_to_guess_whether_master_had_the_guard(world_without_guard, capsys,
+                                                                            monkeypatch):
+    world = world_without_guard
+    sha = world.pr(10, {"rust/ci/python_freeze.py": GUARD})
+    world.gh.add(10, sha)
+    real = integrate._out
+    monkeypatch.setattr(integrate, "_out", lambda *args: "true"
+                        if args == ("rev-parse", "--is-shallow-repository") else real(*args))
+
+    assert _build() == 2
+
+    assert "shallow clone" in capsys.readouterr().err
+
+
+def test_the_first_landing_path_is_dead_once_master_has_the_guard(world, capsys):
+    # One member deletes the guard and another re-adds a copy that refuses
+    # nothing: master's own copy still decides every member.
+    switched_off = GUARD.replace("def frozen_paths(paths: list[str]) -> list[str]:\n",
+                                 "def frozen_paths(paths: list[str]) -> list[str]:\n    return []\n", 1)
+    seed = world.gh.seed
+    _git(seed, "fetch", "-q", "origin")
+    _git(seed, "switch", "-q", "-C", "pr-10", "origin/master")
+    _git(seed, "rm", "-q", "rust/ci/python_freeze.py")
+    _git(seed, "commit", "-qm", "delete the guard")
+    _git(seed, "push", "-q", "-f", "origin", "HEAD:refs/pull/10/head")
+    sha10 = _git(seed, "rev-parse", "HEAD")
+    sha11 = world.pr(11, {"rust/ci/python_freeze.py": switched_off}, base="pr-10")
+    sha12 = world.pr(12, {"pseudolife_memory/core.py": "unruled\n"})
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z")
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z")
+    world.gh.add(12, sha12, labeled_at="2026-11-14T00:00:03Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "this batch introduces it" not in out
+    assert "merged #12 " not in out and "Python is frozen since 14 November 2026" in out
+
+
+# --- a stacked parent needs its own label (reviewer of 6953d0ba0 and 18e0babaa, N10) ---
+
+@pytest.mark.parametrize("child_first", [True, False], ids=["child-first", "parent-first"])
+def test_a_stacked_parents_unlabelled_python_change_lands_under_no_label(world, capsys, child_first):
+    # The parent writes the Python change and carries no label; the child,
+    # stacked on it, carries one. Each pull request is judged on its own
+    # change against master, so neither lands the parent's exception.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    first, second = ("2026-11-14T00:00:02Z", "2026-11-14T00:00:01Z") if child_first else \
+        ("2026-11-14T00:00:01Z", "2026-11-14T00:00:02Z")
+    world.gh.add(10, sha10, labeled_at=first)
+    world.gh.add(11, sha11, labeled_at=second, labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "merged #11 " not in out, out
+    assert "Python is frozen since 14 November 2026" in out
+    assert "carries #10's change to the frozen Python package" in out
+    assert not (world.work / "pseudolife_memory" / "core.py").exists()
+
+
+def test_a_stacked_child_needs_the_label_for_its_parents_python_change_too(world, capsys):
+    # Labelled parent, unlabelled child: the child's own change against
+    # master holds the parent's, so it waits; the parent lands alone.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z", labels=[{"name": "freeze-exception"}])
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "merged #11 " not in out, out
+    # Reviewer of the third task: it waits for #10 rather than being told
+    # to rewrite in Rust a change it did not make, and keeps its label.
+    assert "left out #11" in out and "joins once #10 has landed" in out
+    assert not [args for args, _ in world.gh.bodies("comment") if args[2] == "11"]
+
+
+def test_open_refuses_a_contained_member_whose_label_was_removed(world, capsys):
+    # The parent is contained in its child's merge; open still reads its label.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:02Z", labels=[{"name": "freeze-exception"}])
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:01Z", labels=[{"name": "freeze-exception"}])
+    assert _build() == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+    assert "already contained" in out and "merged #11 " in out, out
+    world.gh.pr(10)["labels"] = []
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "#10" in err and "freeze-exception" in err
+    assert not world.gh.bodies("create")
+
+
+def test_a_ready_child_carrying_a_waiting_parents_python_change_is_left_out(world, capsys):
+    # Security review of the stacked-member rule: the parent is listed but
+    # not ready (its CI is failing), so it never merges; its unlabelled
+    # Python change must not land under its ready, labelled child.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z",
+                 statusCheckRollup=[{"status": "COMPLETED", "conclusion": "FAILURE"}])
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z", labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #11 " not in out and "carries #10's change to the frozen Python package" in out, out
+    assert not (world.work / "pseudolife_memory" / "core.py").exists()
+
+
+def test_a_second_cut_is_still_batched_alone_when_the_first_leaves_a_fragment_unfolded(world, capsys):
+    world.advance_master({"pyproject.toml": _cut("0.19.0"), FRAGMENT_A: "### Added (a)\n"})
+    sha10 = _fold_cut(world, 10, "0.19.1")                       # folds nothing
+    sha11 = _fold_cut(world, 11, "0.20.0", fold=(FRAGMENT_A,))
+    sha12 = world.pr(12, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z")
+    world.gh.add(11, sha11, labeled_at="2026-10-19T09:10:00Z")
+    world.gh.add(12, sha12, labeled_at="2026-10-19T09:20:00Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "merged #11 " in out and "merged #12 " not in out, out
+    assert "#11 is a release cut; it is batched alone" in out
+
+
+@pytest.mark.parametrize("labelled", [False, True])
+def test_a_release_cut_editing_the_packaged_compose_needs_only_the_label(world, capsys, labelled):
+    # The dry run of a real cut showed the guard's "make the change in Rust"
+    # advice, which a cut cannot follow: its next step is the label.
+    world.advance_master({"pyproject.toml": _cut("0.19.0"),
+                          "pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.0\n"})
+    sha = _fold_cut(world, 10, "0.19.1", add={"pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.1\n"})
+    world.gh.add(10, sha, labels=[{"name": "freeze-exception"}] if labelled else [])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert ("merged #10 " in out) is labelled, out
+    if not labelled:
+        assert "This is a release cut" in out and "freeze-exception" in out
+        assert "then re-apply `ready-to-batch`" in out
+
+
+# --- the third task's review round ---
+
+def test_a_release_cut_stacked_on_an_unlabelled_python_parent_does_not_land_it(world, capsys):
+    # Codex and the reviewer: the cut search narrowed the members to the cut
+    # before the freeze looked at its parent.
+    world.advance_master({"pyproject.toml": _cut("0.19.0")})
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    seed = world.gh.seed
+    _git(seed, "switch", "-q", "-C", "pr-11", "pr-10")
+    (seed / "pyproject.toml").write_text(_cut("0.19.1"), encoding="utf-8", newline="\n")
+    _git(seed, "commit", "-qam", "cut 0.19.1")
+    _git(seed, "push", "-q", "-f", "origin", "HEAD:refs/pull/11/head")
+    sha11 = _git(seed, "rev-parse", "HEAD")
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z")
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z", labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #11 " not in out and "merged #10 " not in out, out
+    assert not (world.work / "pseudolife_memory" / "core.py").exists()
+
+
+def test_a_cut_the_freeze_refuses_does_not_evict_the_rest(world, capsys):
+    world.advance_master({"pyproject.toml": _cut("0.19.0"),
+                          "pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.0\n"})
+    sha10 = _fold_cut(world, 10, "0.19.1", add={"pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.1\n"})
+    sha12 = world.pr(12, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z")
+    world.gh.add(12, sha12, labeled_at="2026-10-19T09:30:00Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "merged #12 " in out, out
+    assert "batched alone" not in out
+
+
+def test_the_cut_hint_is_only_for_the_version_file(world, capsys):
+    # A cut that also edits package code is not told a label covers it.
+    world.advance_master({"pyproject.toml": _cut("0.19.0")})
+    sha = _fold_cut(world, 10, "0.19.1", add={"pseudolife_memory/compose/docker-compose.yml": "image: x\n",
+                                               "pseudolife_memory/core.py": "code\n"})
+    world.gh.add(10, sha)
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "it is a release cut" in out
+    assert "pseudolife_memory/core.py" in out and "label or no label" in out
+    assert "This is a release cut" not in out
+
+
+def test_a_child_carrying_an_unlisted_unlabelled_parent_is_left_out(world, capsys):
+    # The reviewer's P1: the parent is an open pull request with no batch
+    # label at all, so build never lists it.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.history.append({"number": 10, "state": "OPEN", "headRefName": "pr-10", "headRefOid": sha10,
+                             "labels": [], "baseRefName": "master"})
+    world.gh.add(11, sha11, labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #11 " not in out and "carries #10's change to the frozen Python package" in out, out
+    assert not (world.work / "pseudolife_memory" / "core.py").exists()
+
+
+def test_open_refuses_a_carried_parent_whose_label_was_removed(world, capsys):
+    # The reviewer's P5: a labelled parent that did not merge itself (its CI
+    # is failing) rides in its labelled child; its label is then removed.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z", labels=[{"name": "freeze-exception"}],
+                 statusCheckRollup=[{"status": "COMPLETED", "conclusion": "FAILURE"}])
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z", labels=[{"name": "freeze-exception"}])
+    assert _build() == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+    assert "merged #11 " in out, out
+    world.gh.pr(10)["labels"] = []
+
+    assert _open(world) == 2
+
+    err = capsys.readouterr().err
+    assert "#10" in err and "no longer carries the freeze-exception" in err
+    assert not world.gh.bodies("create")
+
+
+
+# --- the fourth review round (independent review of 17f9c8d54) ---
+
+def _three_stack(world, middle: dict[str, str]) -> None:
+    """#10 (labelled) changes the package; #11, unlabelled, is stacked on it
+    with ``middle``; #12, labelled, is stacked on #11."""
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, middle, base="pr-10")
+    sha12 = world.pr(12, {"d.txt": "d\n"}, base="pr-11")
+    label = [{"name": "freeze-exception"}]
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z", labels=label)
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z")
+    world.gh.add(12, sha12, labeled_at="2026-11-14T00:00:03Z", labels=label)
+
+
+def test_a_labelled_child_joins_beside_its_labelled_grandparent_over_a_waiting_middle(world, capsys):
+    # The reviewer's P4: #11 only waits for #10 (its Python change is
+    # #10's), so it does not keep #12 out.
+    _three_stack(world, {"c.txt": "c\n"})
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "merged #12 " in out, out
+    assert "left out #11" in out and "joins once #10 has landed" in out
+    assert _open(world) == 0, capsys.readouterr()
+
+
+def test_a_middle_with_its_own_python_change_still_keeps_its_labelled_child_out(world, capsys):
+    # The near miss: #11 edits the file #10 labelled, so its own change is
+    # not #10's. It is refused, and #12, which carries it, is left out with
+    # a next step that grants nothing.
+    _three_stack(world, {"pseudolife_memory/core.py": "middle\n"})
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "merged #11 " not in out and "merged #12 " not in out, out
+    assert "dropped #11: Python is frozen since 14 November 2026" in out
+    assert "left out #12: its head carries #11's change to the frozen Python package" in out
+    assert "the maintainer rules #11's change an exception" in out
+    assert "once #11 carries the label" not in out
+    assert (world.work / "pseudolife_memory" / "core.py").read_text(encoding="utf-8") == "parent\n"
+
+
+def test_a_parent_targeting_another_branch_is_still_judged(world, capsys):
+    # The reviewer's P2: #10 targets a middle-of-stack branch, not master.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.history.append({"number": 10, "state": "OPEN", "headRefName": "pr-10", "headRefOid": sha10,
+                             "labels": [], "baseRefName": "pr-9"})
+    world.gh.add(11, sha11, labels=[{"name": "freeze-exception"}])
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #11 " not in out and "carries #10's change to the frozen Python package" in out, out
+    assert not (world.work / "pseudolife_memory" / "core.py").exists()
+
+
+@pytest.mark.parametrize("labelled", [False, True])
+def test_a_release_cut_changing_package_code_is_refused_label_or_not(world, capsys, labelled):
+    # The reviewer's P3: a labelled cut skipped every scope check. A cut may
+    # change only the version file inside the package; the rest batch.
+    world.advance_master({"pyproject.toml": _cut("0.19.0"),
+                          "pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.0\n"})
+    sha10 = _fold_cut(world, 10, "0.19.1", add={"pseudolife_memory/compose/docker-compose.yml": "image: x:0.19.1\n",
+                                                 "pseudolife_memory/core.py": "code\n"})
+    sha12 = world.pr(12, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-10-19T09:00:00Z",
+                 labels=[{"name": "freeze-exception"}] if labelled else [])
+    world.gh.add(12, sha12, labeled_at="2026-10-19T09:30:00Z")
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " not in out and "merged #12 " in out and "batched alone" not in out, out
+    assert ("dropped #10: it is a release cut, and its change against master also changes "
+            "pseudolife_memory/core.py") in out
+    assert "label or no label" in out
+    assert not (world.work / "pseudolife_memory" / "core.py").exists()
+
+
+def test_a_plan_without_carried_parents_saves_no_carried_key(world, capsys):
+    # A revert of this change, landed as a batch, runs the old loader
+    # (Plan(**raw), which knows no `carried`) on a plan the new build saved.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    assert _build() == 0, capsys.readouterr()
+    path = integrate.Plan.path(f"integrate/{DATE}-batch-1")
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert "carried" not in saved
+    old_fields = {f.name for f in dataclasses.fields(integrate.Plan)} - {"carried"}
+    assert set(saved) <= old_fields
+    assert integrate.Plan.load(f"integrate/{DATE}-batch-1").carried == []
+
+
+def test_a_plan_with_carried_parents_keeps_them(world, capsys):
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, labeled_at="2026-11-14T00:00:01Z", labels=[{"name": "freeze-exception"}],
+                 statusCheckRollup=[{"status": "COMPLETED", "conclusion": "FAILURE"}])
+    world.gh.add(11, sha11, labeled_at="2026-11-14T00:00:02Z", labels=[{"name": "freeze-exception"}])
+    assert _build() == 0, capsys.readouterr()
+    plan = integrate.Plan.load(f"integrate/{DATE}-batch-1")
+    assert plan.carried == [10]
+    saved = json.loads(integrate.Plan.path(plan.branch).read_text(encoding="utf-8"))
+    assert saved["carried"] == [10]
+
+
+def test_a_member_whose_change_cannot_be_read_refuses_the_build_and_keeps_its_label(world, capsys):
+    # The reviewer's N4: the cause is the checkout or the branch, not the
+    # author's change, so nothing is posted and no label is removed.
+    seed = world.gh.seed
+    _git(seed, "switch", "-q", "--orphan", "pr-13")
+    (seed / "x.txt").write_text("x\n", encoding="utf-8")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-qm", "unrelated history")
+    _git(seed, "push", "-q", "-f", "origin", "HEAD:refs/pull/13/head")
+    world.gh.add(13, _git(seed, "rev-parse", "HEAD"))
+
+    assert _build() == 2
+
+    err = capsys.readouterr().err
+    assert "#13" in err and "no history in common" in err and "shallow" in err, err
+    assert not world.gh.mutations()
+
+
+def _failing_open_listing(world, monkeypatch, *, rows=None):
+    real = world.gh
+
+    def gh(*args, input=None):
+        args = list(args)
+        if args[:2] == ["pr", "list"] and "--label" not in args and "number,headRefOid,labels" in args:
+            if rows is None:
+                raise integrate.Refusal("`gh pr list --state open` failed (1): HTTP 502")
+            return json.dumps(rows)
+        return real(*args, input=input)
+
+    monkeypatch.setattr(integrate, "gh", gh)
+
+
+def test_a_failed_open_listing_names_its_cause(world, capsys, monkeypatch):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    _failing_open_listing(world, monkeypatch)
+
+    assert _build() == 2
+
+    err = capsys.readouterr().err
+    assert "HTTP 502" in err and "every open pull request" in err and "gh auth status" in err, err
+    assert not world.gh.mutations()
+
+
+def test_an_open_listing_cut_off_at_its_limit_refuses_the_build(world, capsys, monkeypatch):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    rows = [{"number": 2000 + i, "headRefOid": "", "labels": []} for i in range(integrate.OPEN_PR_LIMIT)]
+    _failing_open_listing(world, monkeypatch, rows=rows)
+
+    assert _build() == 2
+
+    err = capsys.readouterr().err
+    assert f"limit of {integrate.OPEN_PR_LIMIT}" in err and "OPEN_PR_LIMIT" in err, err
+    assert not world.gh.mutations()
+
+
+def test_an_open_listing_just_under_its_limit_builds(world, capsys, monkeypatch):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    world.gh.add(10, sha10)
+    rows = [{"number": 2000 + i, "headRefOid": "", "labels": []} for i in range(integrate.OPEN_PR_LIMIT - 1)]
+    _failing_open_listing(world, monkeypatch, rows=rows)
+
+    assert _build() == 0, capsys.readouterr()
+    assert "merged #10 " in capsys.readouterr().out

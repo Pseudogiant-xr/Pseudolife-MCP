@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "e4dc2164dbd909e4",
+  "fingerprint": "b8d920ee0dc31621",
+  "reason": "Against master 81057402a (batch 7, which landed #1550 and regenerated the baseline): this branch's only change to the lane is the native client build before the tests, estimated at 2.5 minutes in ci_budget.json (14.6 = the measured 12.1 plus 2.5), and timeout-minutes 20 -> 30 for the cold weekly build, which is headroom only. Re-measure from the first batches that carry it, a cold one included."
+}

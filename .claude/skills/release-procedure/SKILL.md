@@ -71,7 +71,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the daemon image tag in **both** compose files (`ops/docker-compose.yml`
    and the packaged copy `pseudolife_memory/compose/docker-compose.yml`,
-   so, as nothing under the package may change, the cut PR is an exception that carries the `freeze-exception` label, applied by the maintainer or the conductor on a maintainer ruling),
+   so, as nothing under the package may change, the cut PR is an exception: the maintainer rules it for each cut, and only then does it carry the `freeze-exception` label, applied by the maintainer or by the conductor after that ruling),
    **both** version fields in `server.json`,
    `plugin/release.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the release the hooks report for the
@@ -108,19 +108,22 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    `tests/test_plugin_packaging.py::test_the_native_crates_report_the_release_version`
    fails.
 
-   **Keep the cut version-only.** PR parity tests the release PR against
-   its own head only when
-   `evals.rust_port.oracle_selection.release_cut(base, head)` accepts it:
-   `pyproject.toml` changes only `project.version`, and every other changed
-   path is a recognised document (`DOCUMENTS`, or a `.md` under `docs/`,
-   `changelog.d/` or `rust/`) or an allowlisted version file
-   (`VERSION_FILES`). Anything else, such as `plugin/README.md`, makes it
-   return None, and parity then compares the new native shim against the old
-   Python release. Put such doc fixes in a separate PR, and quote the
-   `release_cut(<base>, <head>)` result in the release PR. Land it as a
-   batch of one (`ops/integrate.py build` batches a cut alone), because its
-   own PR runs only the fast CI lanes and a cut batched with code would
-   fail `release_cut`.
+   **Keep the cut to the release.** Since the Python freeze nothing in CI
+   compares the cut with the old Python release (the parity jobs replay
+   goldens, which carry no version), so the cut no longer has to pass
+   `release_cut()`; keep unrelated fixes in their own PRs all the same, so
+   the cut's review is the release. `ops/integrate.py build` batches a cut
+   alone, because the release is tagged at the batch's merge: anything
+   beside the cut would ship without being in the notes the cut folded. For
+   the same reason `build` leaves out a cut that would leave a changelog
+   fragment unfolded on the batch head (one that landed on master after the
+   fold, or one the cut adds), saying so: merge master forward, run
+   `python ops/assemble_changelog.py` again and rerun the pinned tests.
+   The cut also carries `freeze-exception`, once the maintainer has ruled
+   it for this cut, while it edits the packaged compose copy, or `build`
+   drops it with the guard's refusal. Inside the package a cut may change
+   only that file: `build` refuses a cut that changes any other package
+   path, label or no label, naming the path.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
    then open the wheel — Console build present: every file

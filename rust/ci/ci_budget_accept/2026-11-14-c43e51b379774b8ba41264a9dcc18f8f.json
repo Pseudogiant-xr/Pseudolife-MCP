@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "92b7929dcce188df",
+  "fingerprint": "05800854cafe34cf",
+  "reason": "Merge of #1550 (with master c768b67bf, batch 6) into #1559: the Rust-readers step carries this branch's tests/test_ci_native_client.py and batch 6's tests/test_codex_hook_native_golden.py and tests/test_update_bridge.py, three small files; inside the 9.0-minute estimate, which the first Rust-only batch re-measures."
+}
