@@ -171,7 +171,9 @@ fn plugin_active(settings: &J, path: &Path) -> bool {
     let Ok(text) = String::from_utf8(bytes) else {
         return false;
     };
-    let Ok(Some(J::Dict(data))) = pyjson::loads(text.trim_start_matches('\u{feff}')) else {
+    // encoding="utf-8-sig": one byte-order mark.
+    let Ok(Some(J::Dict(data))) = pyjson::loads(text.strip_prefix('\u{feff}').unwrap_or(&text))
+    else {
         return false;
     };
     let Some(J::Dict(plugins)) = raw(&data, "plugins") else {
@@ -217,7 +219,7 @@ fn remove_legacy() -> Result<u8, String> {
     let text = String::from_utf8(raw_bytes.clone())
         .map_err(|_| format!("Could not read {}: the file is not UTF-8", path.display()))?;
     let (mut settings, duplicate) =
-        match pyjson::loads_noting_duplicates(text.trim_start_matches('\u{feff}')) {
+        match pyjson::loads_noting_duplicates(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
             Ok(Some(parsed)) => parsed,
             _ => {
                 return Err(format!(
@@ -349,7 +351,14 @@ fn write_through(path: &Path, text: &[u8]) -> Result<(), String> {
         uuid::Uuid::new_v4().simple()
     ));
     let result = (|| -> io::Result<()> {
-        fs::write(&temporary, text)?;
+        // Created owner-only and new, as tempfile.mkstemp did, before any of
+        // the settings (which can hold credentials) are in it; it takes the
+        // target's permissions only once written.
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options.open(&temporary)?.write_all(text)?;
         fs::set_permissions(&temporary, fs::metadata(&target)?.permissions())?;
         fs::rename(&temporary, &target)
     })();
@@ -447,9 +456,27 @@ fn event_list<'a>(hooks: &'a mut Dict, event: &str) -> Result<&'a mut Vec<J>, St
         hooks.push((event.into(), J::List(Vec::new())));
     }
     match pyjson::get_mut(hooks, event) {
-        Some(J::List(items)) => Ok(items),
+        Some(J::List(items)) => {
+            // The heredoc called .get on every group and hook here, so any
+            // other shape stopped it before it wrote anything: refuse the
+            // same file rather than drop what it cannot read.
+            let well_formed = items.iter().all(|group| match group {
+                J::Dict(fields) => match raw(fields, "hooks") {
+                    Some(J::List(entries)) => entries.iter().all(|hook| matches!(hook, J::Dict(_))),
+                    Some(other) => !other.truthy(),
+                    None => true,
+                },
+                _ => false,
+            });
+            if !well_formed {
+                return Err(format!(
+                    "installer hook-settings: hooks.{event} holds an entry that is not a hook group (an object whose \"hooks\" is a list of objects); fix it by hand and rerun. Nothing was changed."
+                ));
+            }
+            Ok(items)
+        }
         _ => Err(format!(
-            "installer hook-settings: hooks.{event} is not a list"
+            "installer hook-settings: hooks.{event} is not a list; fix it by hand and rerun. Nothing was changed."
         )),
     }
 }

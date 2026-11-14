@@ -106,6 +106,9 @@ if [ -n "$REMOVE_LEGACY" ]; then
   SETTINGS_PATH="$SETTINGS_PATH" DRY_RUN="$DRY_RUN" UPS_COMMAND="$UPS_COMMAND" \
     LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" COORDINATION_LINE="$COORDINATION_LINE" \
     "$NATIVE_CLI" installer hook-settings remove-legacy || rc=$?
+  # 2 is an older client without this step (remove-legacy itself never
+  # exits 2).
+  [ "$rc" != 2 ] || { echo "The native client at $NATIVE_CLI is older than this checkout and cannot edit hooks: run ops/install.sh, which installs this checkout's client." >&2; rc=1; }
   exit "$rc"
 fi
 
@@ -121,7 +124,11 @@ SETTINGS_PATH="$SETTINGS_PATH" BRIEFING_COMMAND="$COMMAND" \
   PROMPT_COMMAND="$PROMPT_COMMAND" UPS_COMMAND="$UPS_COMMAND" \
   LEGACY_UPS_COMMAND="$LEGACY_UPS_COMMAND" DISCIPLINE_LINE="$DISCIPLINE_LINE" \
   COORDINATION_COMMAND="$COORDINATION_COMMAND" \
-  LEGACY_COORDINATION_LINE="$COORDINATION_LINE" "$NATIVE_CLI" installer hook-settings install || exit 1
+  LEGACY_COORDINATION_LINE="$COORDINATION_LINE" "$NATIVE_CLI" installer hook-settings install || {
+    rc=$?
+    [ "$rc" != 2 ] || echo "The native client at $NATIVE_CLI is older than this checkout and cannot edit hooks: run ops/install.sh, which installs this checkout's client." >&2
+    exit 1
+  }
 
 if [ "$CLIENT" = codex ]; then
   echo ""

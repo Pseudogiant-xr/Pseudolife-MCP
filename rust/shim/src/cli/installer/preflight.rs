@@ -11,7 +11,6 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{self, Read, Write},
-    net::TcpListener,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -53,6 +52,45 @@ pub(super) trait Host {
     fn var(&self, name: &str) -> Option<String>;
     fn home(&self) -> PathBuf;
     fn warn(&self, line: &str);
+}
+
+/// `port_busy`: whether 127.0.0.1:`port` cannot be bound. On Unix the socket
+/// is plain, as Python's was: std's bind sets SO_REUSEADDR, which on macOS
+/// lets a loopback bind succeed beside a same-user listener on every
+/// address. On Windows std's plain bind answers as Python's exclusive one
+/// does for every listener shape (probed 14 November 2026).
+fn port_taken(port: u16) -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: a fresh socket, bound once and closed on every path.
+        unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+            if fd < 0 {
+                return true;
+            }
+            let mut address: libc::sockaddr_in = std::mem::zeroed();
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+            {
+                address.sin_len = std::mem::size_of::<libc::sockaddr_in>() as u8;
+            }
+            address.sin_family = libc::AF_INET as libc::sa_family_t;
+            address.sin_port = port.to_be();
+            address.sin_addr = libc::in_addr {
+                s_addr: u32::from(std::net::Ipv4Addr::LOCALHOST).to_be(),
+            };
+            let bound = libc::bind(
+                fd,
+                std::ptr::addr_of!(address).cast::<libc::sockaddr>(),
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            );
+            libc::close(fd);
+            bound != 0
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        std::net::TcpListener::bind(("127.0.0.1", port)).is_err()
+    }
 }
 
 struct RealHost;
@@ -115,7 +153,7 @@ impl Host for RealHost {
     /// Both shipped publications bind IPv4 loopback only; an IPv6-only
     /// listener on ::1 can coexist and is not an installer collision.
     fn port_busy(&self, port: u16) -> bool {
-        TcpListener::bind(("127.0.0.1", port)).is_err()
+        port_taken(port)
     }
     fn file_text(&self, path: &Path) -> Option<String> {
         let bytes = std::fs::read(path).ok()?;
@@ -127,8 +165,16 @@ impl Host for RealHost {
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
     }
-    /// `samefile`, else the case-normalized resolved paths.
+    /// `samefile` (one file: device and inode on Unix), else the
+    /// case-normalized resolved paths.
     fn same_path(&self, first: &Path, second: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let (Ok(a), Ok(b)) = (std::fs::metadata(first), std::fs::metadata(second)) {
+                return (a.dev(), a.ino()) == (b.dev(), b.ino());
+            }
+        }
         match (std::fs::canonicalize(first), std::fs::canonicalize(second)) {
             (Ok(a), Ok(b)) => a == b,
             _ => {
@@ -150,8 +196,14 @@ impl Host for RealHost {
     fn var(&self, name: &str) -> Option<String> {
         std::env::var(name).ok()
     }
+    /// `Path.home()`: HOME on POSIX, USERPROFILE on Windows.
     fn home(&self) -> PathBuf {
-        crate::cli::update::home()
+        let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        std::env::var_os(name)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(dirs::home_dir)
+            .unwrap_or_default()
     }
     fn warn(&self, line: &str) {
         let _ = writeln!(io::stderr().lock(), "{line}");
@@ -169,6 +221,8 @@ fn environment(host: &dyn Host, path: &Path) -> Result<(BTreeMap<String, String>
         String::new()
     };
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    // Universal newlines: a lone CR ends a line too.
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let lines: Vec<&str> = text.lines().collect();
     let mut values = BTreeMap::new();
     for line in &lines {
@@ -280,10 +334,19 @@ fn host_path(host: &dyn Host, value: &str) -> PathBuf {
         }
     }
     // Path(value).expanduser()
-    if value == "~" || value.starts_with("~/") || (cfg!(windows) && value.starts_with("~\\")) {
-        return host.home().join(value.get(2..).unwrap_or(""));
+    if value == "~" {
+        return py_path(&host.home().display().to_string());
     }
-    PathBuf::from(value)
+    if value.starts_with("~/") || (cfg!(windows) && value.starts_with("~\\")) {
+        return py_path(&host.home().join(&value[2..]).display().to_string());
+    }
+    py_path(&value)
+}
+
+/// `Path(text)` as Python prints it: the platform's separator, no repeated
+/// or trailing separator, no "." part.
+fn py_path(text: &str) -> PathBuf {
+    Path::new(text).components().collect()
 }
 
 /// `env_auth` plus whether a nonempty map lost every entry: the token map as
@@ -419,11 +482,14 @@ fn publishes(container: &Value, port: &str) -> bool {
                     .filter(|(publication, _)| publication.ends_with("/tcp"))
                     .any(|(_, bindings)| {
                         bindings.as_array().into_iter().flatten().any(|binding| {
+                            // .get("HostIp", ""): absent is every address,
+                            // a null is not.
+                            let ip = match binding.get("HostIp") {
+                                None => Some(""),
+                                Some(value) => value.as_str(),
+                            };
                             binding["HostPort"].as_str() == Some(port)
-                                && matches!(
-                                    binding["HostIp"].as_str().unwrap_or(""),
-                                    "" | "127.0.0.1" | "0.0.0.0"
-                                )
+                                && matches!(ip, Some("" | "127.0.0.1" | "0.0.0.0"))
                         })
                     })
             })
@@ -436,21 +502,23 @@ fn lite_data_dirs(host: &dyn Host) -> Vec<PathBuf> {
         host.var("LOCALAPPDATA")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("AppData/Local"))
+            .map(|v| py_path(&v.display().to_string()))
+            .unwrap_or_else(|| home.join("AppData").join("Local"))
     } else if cfg!(target_os = "macos") {
-        home.join("Library/Application Support")
+        home.join("Library").join("Application Support")
     } else {
         host.var("XDG_DATA_HOME")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".local/share"))
+            .map(|v| py_path(&v.display().to_string()))
+            .unwrap_or_else(|| home.join(".local").join("share"))
     };
     let mut candidates = vec![base.join("pseudolife-mcp"), home.join(".pseudolife-mcp")];
     if let Some(custom) = host
         .var("PSEUDOLIFE_MCP_DATA_DIR")
         .filter(|v| !v.is_empty())
     {
-        candidates.insert(0, PathBuf::from(custom));
+        candidates.insert(0, py_path(&custom));
     }
     let mut unique = Vec::new();
     for candidate in candidates {

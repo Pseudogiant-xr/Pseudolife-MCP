@@ -92,11 +92,21 @@ if [ -z "$native_cli" ]; then
     esac
 fi
 if [ ! -f "$native_cli" ]; then
-    fail "the native pseudolife-mcp client is needed to verify Docker ownership safely, and it is not at $native_cli" \
-         "run ops/install.sh, which downloads and verifies it before this check, or set PSEUDOLIFE_NATIVE_CLI to its binary"
-    exit 1
+    # Run by hand before an install: the installer verifies the client, then
+    # runs this check before it changes anything.
+    warn "the Docker ownership check needs the native pseudolife-mcp client, which is not installed yet ($native_cli)" \
+         "ops/install.sh downloads and verifies it, then runs this check before anything changes (or set PSEUDOLIFE_NATIVE_CLI to a client)"
+else
+    native_rc=0
+    "$native_cli" installer preflight-check --repo "$(dirname "$preflight_dir")" --env-file "$preflight_dir/.env" || native_rc=$?
+    case "$native_rc" in
+        0) ;;
+        2) fail "the native client at $native_cli is older than this checkout and has no Docker ownership check" \
+                "run ops/install.sh, which installs this checkout's client first"
+           exit 1 ;;
+        *) exit 1 ;;
+    esac
 fi
-"$native_cli" installer preflight-check --repo "$(dirname "$preflight_dir")" --env-file "$preflight_dir/.env" || exit 1
 
 # ── git ────────────────────────────────────────────────────────────────────
 if command -v git >/dev/null 2>&1; then

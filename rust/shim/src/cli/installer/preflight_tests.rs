@@ -859,7 +859,7 @@ fn an_env_file_that_is_not_utf8_refuses() {
 
 #[test]
 fn a_real_listener_makes_the_port_busy() {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     assert!(RealHost.port_busy(port));
     drop(listener);

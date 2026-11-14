@@ -23,24 +23,32 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ("ops/install.sh", "ops/install.ps1", "ops/preflight.sh", "ops/preflight.ps1",
            "ops/install-hook.sh", "ops/install-hook.ps1", "ops/add-user-path.ps1")
 
+# A host interpreter or package tool, by name or by path, with or without a
+# version or .exe.
+NAME = r"(?:[\w./\\:-]*[/\\])?(?:python[\d.]*|py|pip[\d.]*|pipx)(?:\.exe)?"
+START = r"(^|[\s;(|&=\"'])"
 # A host interpreter or package tool, looked up or started.
 LOOKUPS = [
-    re.compile(r"\bcommand\s+-v\s+[\"']?(python3?|py|pip3?|pipx)\b"),
-    re.compile(r"\bwhich\s+(python3?|pip3?|pipx)\b"),
-    re.compile(r"Get-Command\s+[\"']?(python3?|py|pip3?|pipx)\b", re.I),
+    re.compile(r"\bcommand\s+-v\s+[\"']?(python[\d.]*|py|pip[\d.]*|pipx)\b"),
+    re.compile(r"\bwhich\s+(python[\d.]*|pip[\d.]*|pipx)\b"),
+    re.compile(r"Get-Command\s+[\"']?(python[\d.]*|py|pip[\d.]*|pipx)\b", re.I),
+    re.compile(r"Start-Process\s+(-FilePath\s+)?[\"']?" + NAME + r"\b", re.I),
     re.compile(r"@\(\s*\"python\"\s*,\s*\"python3\""),        # a candidate list
-    re.compile(r"(^|[\s;(|&])(python3?|py|pip3?|pipx)\s+(-c|-m|-3)\b"),
-    re.compile(r"(^|[\s;(|&\"'])(python3?|py|pip3?|pipx)\s+[\"']?[\w$./{}\\-]*\.py\b"),
+    # Started with a flag, a script on stdin or a heredoc.
+    re.compile(START + NAME + r"[\"']?\s+(-[cm3]\b|-\s|-$|<<)"),
+    re.compile(START + NAME + r"[\"']?\s*<<"),
+    # Started on a .py script.
+    re.compile(START + NAME + r"[\"']?\s+[\"']?[\w$./{}\\-]*\.py\b"),
     re.compile(r"\b(installer_python|Get-InstallerPython|shim_tooling_ready|Test-ShimToolingReady)\b"),
     # A candidate loop, and a probe of its variable.
-    re.compile(r"\bfor\s+\w+\s+in\s+(python3?|py)\b"),
+    re.compile(r"\bfor\s+\w+\s+in\s+(python[\d.]*|py)\b"),
     re.compile(r"\$\{?(candidate|c|py\w*|PYBIN)\}?[\"']?\s+(@\w+\s+)?(-c|-m)\b", re.I),
     re.compile(r"\bPYBIN\b|<<\s*'?PY'?\s*$"),
     # A variable named for the interpreter, run ("$resource_python" x, & $python x).
-    re.compile(r"(^|[\s;(|&=])[\"']?\$\{?\w*[Pp]ython\w*\}?[\"']?\s+[\"'$\w@-]"),
+    re.compile(r"(^|[\s;(|&=])[\"']?\$\{?\w*python\w*\}?[\"']?\s+[\"'$\w@-]", re.I),
     re.compile(r"\bensurepip\b"),
     # pip or pipx in command position (a sentence that names them is text).
-    re.compile(r"(^|[;&|(]\s*|\bthen\s+|&\s+)(pip3?|pipx)\s+install\b"),
+    re.compile(r"(^|[;&|(]\s*|\bthen\s+|&\s+)(pip[\d.]*|pipx)\s+install\b"),
 ]
 # Python run inside the daemon container is the container's, not the host's.
 IN_CONTAINER = re.compile(r"docker\s+exec\b")
@@ -74,6 +82,14 @@ def test_no_installer_script_looks_up_or_starts_python(script):
     'python3 -m venv "$runtime"',
     'pipx install --force "$repo"',
     'if "$c" -c "" >/dev/null 2>&1; then PYBIN="$c"; break; fi',
+    # The forms a review found the first version of this scan missed.
+    "python3 - <<'EOF'",
+    'out=$(python3 <<EOF',
+    '"$PYTHON" "$repo/ops/x.py"',
+    '/usr/bin/python3 -c "import sys"',
+    'python3.12 -m venv "$runtime"',
+    'py.exe -3 -c "import sys"',
+    'Start-Process python -ArgumentList "x.py"',
 ])
 def test_the_scan_finds_the_lookups_the_installers_used_to_make(line):
     if line.startswith("for candidate in"):

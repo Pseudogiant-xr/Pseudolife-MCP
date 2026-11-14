@@ -1311,9 +1311,10 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
         "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
         "exit 0\n")
     release_env["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] = shell.path(tmp_path / "release")
-    # No Python anywhere: the installer, its preflight and its hook writer
-    # run every step through the native client, so each of these records the
-    # call and fails it (the guard: any line here fails the test).
+    # No Python anywhere: the installer and its hook writer run every step
+    # through the native client (a client-only install runs no Docker
+    # preflight; tests/test_installer_no_python.py scans that script), so
+    # each of these records the call and fails it: any line fails the test.
     python_calls = tmp_path / "python-calls"
     for name in ("python", "python3", "py", "pip", "pip3", "pipx"):
         _stub(shell.bin / name, f"echo {name} \"$*\" >>'{shell.path(python_calls)}'\nexit 99\n")
@@ -1472,14 +1473,37 @@ def test_preflight_looks_for_no_python_pip_or_pipx(bash, tmp_path):
 
 
 @BASH
-def test_preflight_without_a_native_client_names_how_to_get_one(bash, tmp_path):
+def test_preflight_run_by_hand_before_an_install_warns_and_carries_on(bash, tmp_path):
+    """Before an install there is no native client yet: the ownership check
+    runs when ops/install.sh runs the preflight, so a hand run says so and
+    still checks everything else."""
     shell = _Shell(bash, tmp_path)
+    _stub(shell.bin / "git", "exit 0\n")
+    _stub(shell.bin / "docker", "exit 0\n")
     script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
     proc = shell.run("set -- --client generic\n" + script,
                      extra_env={"PSEUDOLIFE_NATIVE_CLI": shell.path(tmp_path / "absent" / "pseudolife-mcp")})
+    assert "the Docker ownership check needs the native pseudolife-mcp client" in proc.stdout
+    assert "ops/install.sh downloads and verifies it" in proc.stdout
+    assert re.search(r"OK\S*\s+git", proc.stdout), proc.stdout
+    assert proc.returncode == 0, proc.stdout
+
+
+@BASH
+def test_preflight_names_a_client_too_old_for_the_check(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    _stub(shell.bin / "git", "exit 0\n")
+    _stub(shell.bin / "docker", "exit 0\n")
+    old = tmp_path / "old" / "pseudolife-mcp"
+    old.parent.mkdir()
+    old.write_text("#!/bin/sh\necho 'pseudolife-mcp installer: expected an installer step' >&2\nexit 2\n",
+                   encoding="utf-8", newline="\n")
+    old.chmod(0o755)
+    script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
+    proc = shell.run("set -- --client generic\n" + script,
+                     extra_env={"PSEUDOLIFE_NATIVE_CLI": shell.path(old)})
     assert proc.returncode == 1, proc.stdout
-    assert "native pseudolife-mcp client is needed to verify Docker ownership" in proc.stdout
-    assert "run ops/install.sh" in proc.stdout
+    assert "is older than this checkout and has no Docker ownership check" in proc.stdout
 
 
 @pytest.mark.parametrize("buildx_exit", [0, 1])

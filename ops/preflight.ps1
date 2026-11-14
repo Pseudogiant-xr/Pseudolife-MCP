@@ -91,11 +91,17 @@ if (-not $nativeCli) {
     }
 }
 if (-not (Test-Path -LiteralPath $nativeCli -PathType Leaf)) {
-    Fail "the native pseudolife-mcp client is needed to verify Docker ownership safely, and it is not at $nativeCli" "run ops\install.ps1, which downloads and verifies it before this check, or set PSEUDOLIFE_NATIVE_CLI to its binary"
-    exit 1
+    # Run by hand before an install: the installer verifies the client, then
+    # runs this check before it changes anything.
+    Warn "the Docker ownership check needs the native pseudolife-mcp client, which is not installed yet ($nativeCli)" "ops\install.ps1 downloads and verifies it, then runs this check before anything changes (or set PSEUDOLIFE_NATIVE_CLI to a client)"
+} else {
+    & $nativeCli installer preflight-check --repo (Split-Path -Parent $PSScriptRoot) --env-file (Join-Path $PSScriptRoot ".env")
+    if ($LASTEXITCODE -eq 2) {
+        Fail "the native client at $nativeCli is older than this checkout and has no Docker ownership check" "run ops\install.ps1, which installs this checkout's client first"
+        exit 1
+    }
+    if ($LASTEXITCODE -ne 0) { exit 1 }
 }
-& $nativeCli installer preflight-check --repo (Split-Path -Parent $PSScriptRoot) --env-file (Join-Path $PSScriptRoot ".env")
-if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # -- git ----------------------------------------------------------------------
 if (Get-Command git -ErrorAction SilentlyContinue) { Ok "git" }
