@@ -625,10 +625,14 @@ def host(tmp_path, failure="", mode="release"):
         thread.join(timeout=5)
 
 
-# Since the Python freeze (14 November 2026) these transactions run on the
-# native CLI only: the python-oracle cases ran the frozen Python updater
+# Since the Python freeze (14 November 2026) the transaction cases run the
+# native CLI only: their python-oracle cases ran the frozen Python updater
 # under the same assertions, so they could fail only on frozen code. The
-# ``native`` parameter is kept so each case still reads as it did.
+# ``native`` parameter is kept so each case still reads as it did. The two
+# interop tests (test_release_rust_selection_is_shared_by_both_updaters,
+# test_release_updaters_can_follow_each_other) still run the Python updater
+# on purpose: what they test is the two updaters acting on one host, which
+# an install with the Python updater still meets.
 def run_arm(repo, env, native, args):
     if native:
         command = [native, "update", *args]
@@ -1078,15 +1082,17 @@ def test_native_checkout_still_refuses_an_undeclared_mount_beside_the_rust_model
 
 @pytest.mark.parametrize("models", ["volume", "legacy"])
 def test_rust_to_rust_rollback_keeps_the_model_directory_the_daemon_ran_with(tmp_path, models):
-    """Both updaters print the same restore command for a failed Rust-to-Rust
+    """The native updater prints the restore command for a failed Rust-to-Rust
     rerun: with the checkout overlay's /models volume when the running daemon
-    uses it, without it for one that read /data/models."""
+    uses it, without it for one that read /data/models. The file lists are the
+    frozen Python updater's, recorded on 14 November 2026, when both agreed."""
     import re
     binary = _native_binary()
     if not binary:
         pytest.skip("native binary build is owned by the parent; set PSEUDOLIFE_RUST_BINARY")
-    files = {}
-    for arm, native in (("python", None), ("native", binary)):
+    expected = {"volume": ["docker-compose.yml", "docker-compose.rust-daemon.yml", "docker-compose.rollback.json"],
+                "legacy": ["docker-compose.yml", "docker-compose.rollback.json"]}
+    for arm, native in (("native", binary),):
         with host(tmp_path / arm, "", "engine") as (repo, env, state_path):
             args = ["--checkout", str(repo), "--engine", "rust", "--no-test-login", "--no-cache-prune", "--json",
                     "--health-retries", "1", "--health-delay-ms", "0"]
@@ -1110,10 +1116,7 @@ def test_rust_to_rust_rollback_keeps_the_model_directory_the_daemon_ran_with(tmp
             command = restore[restore.index("docker compose"):restore.index(" up ")]
             found = [re.sub(r"rollback-.*\.json$", "rollback.json", name)
                      for name in re.findall(r"[\w.\-]+\.(?:yml|json)", command)]
-            files[arm] = found
-            assert ("docker-compose.rust-daemon.yml" in found) is (models == "volume"), restore
-            assert found[-1] == "docker-compose.rollback.json", restore
-    assert files["python"] == files["native"]
+            assert found == expected[models], restore
 
 
 @pytest.mark.parametrize("native", [True], ids=["native"])

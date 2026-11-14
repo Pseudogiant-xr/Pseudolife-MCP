@@ -198,7 +198,9 @@ def test_docker_selectors_defer_before_bank_effects(tmp_path, option, inline):
 
 # What the frozen Python CLI prints for an unrecognised backup option at 80
 # columns, recorded on Windows and Linux on 14 November 2026 (only the line
-# separator differs).
+# separator differs). A deliberate change to the native backup help edits
+# this and fixtures/backup-help.linux.json by hand; from then on they
+# describe the native CLI.
 BACKUP_USAGE = ("usage: pseudolife-mcp backup [-h] [--data-dir DATA_DIR] [--out OUT]\n"
                 "                             [--keep-days KEEP_DAYS] [--container CONTAINER]\n"
                 "                             [--daemon-container DAEMON_CONTAINER] [--db DB]\n"
@@ -224,7 +226,6 @@ def test_unknown_options_keep_python_errors(arguments, unrecognized):
 def test_nss_errors_keep_numeric_ownership_and_empty_names(tmp_path):
     import os
     import subprocess
-    import sys
     import tarfile
     compiler = _nss_compiler()
     native = _native_backup()
@@ -261,7 +262,6 @@ struct group *getgrgid(gid_t id) { errno=EIO; return 0; }
 def test_non_utf8_nss_names_roundtrip_through_binary_pax(tmp_path):
     import os
     import subprocess
-    import sys
     import tarfile
     compiler = _nss_compiler()
     native = _native_backup()

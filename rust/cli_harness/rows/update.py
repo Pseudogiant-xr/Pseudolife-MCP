@@ -1,7 +1,8 @@
 """Native update's read-only and no-op leaves, with isolated Docker and HTTP.
 
-Transaction fault acceptance is in test_update_transactions.py: its Python
-and native arms assert the same ordered mutation trace and recovery state.
+Transaction fault acceptance is in test_update_transactions.py: since the
+Python freeze its cases run the native CLI and assert the ordered mutation
+trace and recovery state the frozen Python updater's arm agreed with.
 The release-archive/schema probes extend the oracle's release preparation;
 they do not weaken its backup, rollback, health or client gates.
 """
