@@ -1,16 +1,25 @@
-//! `pseudolife-mcp move --dry-run`, natively: check both hosts without
-//! changing anything and print the plan.
+//! `pseudolife-mcp move`, natively: move this host's Docker bank to another
+//! host's, or (`--dry-run`) check both hosts without changing anything and
+//! print the plan.
 //!
 //! The source is this host's Docker bank (the installer's container names);
 //! the target is another host's, reached over key-based ssh, where the
 //! native client's hidden `move-target` helper checks its bank with the
-//! same code ([`probe`]). The move itself (stop, fenced final backup, copy,
-//! restore, start, commit, rollback) is not native yet: without
-//! `--dry-run` the command refuses, naming it. Nothing here takes the
-//! update lock, creates a move record or writes a file on either host.
+//! same code ([`probe`]) and runs the transaction's target operations
+//! ([`ops`]). The transaction and its rollback are [`engine`]; a dry run
+//! takes no update lock, creates no move record and writes no file on
+//! either host.
 mod argv;
+mod command;
+mod engine;
+#[cfg(test)]
+mod engine_tests;
+mod ops;
 pub(super) mod probe;
+pub(in crate::cli) mod protocol;
+mod record;
 pub(super) mod remote;
+mod source;
 pub(in crate::cli) mod target;
 #[cfg(test)]
 mod tests;
@@ -38,9 +47,9 @@ const PROBE_TIME: Duration = Duration::from_secs(300);
 
 /// The remote script: the native client's stable launcher, its user-bin
 /// link, then PATH; the first that is executable runs the helper.
-fn script() -> String {
+pub(super) fn script(protocol: u32) -> String {
     format!(
-        r#"for c in "${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp" "$HOME/.local/bin/pseudolife-mcp" "$(command -v pseudolife-mcp 2>/dev/null)"; do if [ -n "$c" ] && [ -x "$c" ]; then exec "$c" move-target {PROTOCOL}; fi; done; echo {NO_CLIENT}; exit 3"#
+        r#"for c in "${{XDG_DATA_HOME:-$HOME/.local/share}}/pseudolife-mcp/bin/pseudolife-mcp" "$HOME/.local/bin/pseudolife-mcp" "$(command -v pseudolife-mcp 2>/dev/null)"; do if [ -n "$c" ] && [ -x "$c" ]; then exec "$c" move-target {protocol}; fi; done; echo {NO_CLIENT}; exit 3"#
     )
 }
 
@@ -91,8 +100,29 @@ fn sized(bytes: Option<u64>) -> String {
     bytes.map_or_else(|| "size unknown".to_owned(), mib)
 }
 
+/// The move gates a daemon with a file in `/data` (`move.json` on the target,
+/// `moved.json` on the source), which stops a start only when the daemon's
+/// `PSEUDOLIFE_MCP_DATA_DIR` is that volume, as the installer's images set it.
+pub(super) fn gate_refusal(host: &str, facts: &Facts) -> Option<String> {
+    (facts.data_dir != "/data").then(|| {
+        format!(
+            "the {host} daemon {} has PSEUDOLIFE_MCP_DATA_DIR {:?}, not /data, so the move's gate could not keep it from starting; run it as the installer's compose does (the data directory is /data), then retry",
+            facts.daemon, facts.data_dir
+        )
+    })
+}
+
 /// The source's own checks.
 fn source_refusal(facts: &Facts) -> Option<String> {
+    if let Some(why) = gate_refusal("source", facts) {
+        return Some(why);
+    }
+    if !source::valid_database(&facts.db) {
+        return Some(format!(
+            "the source database is named {:?}, which the move's fence cannot name safely; move needs a plain lower-case name (letters, digits, underscores), so rename it, then retry",
+            facts.db
+        ));
+    }
     if !facts.running {
         return Some(format!(
             "the source daemon {} is not running; move moves a running bank, so start it (docker compose start in its install directory), then retry",
@@ -184,12 +214,26 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
         source_bank: source.bank.clone().unwrap_or_default(),
         work_dir: request.target_work_dir.clone().unwrap_or_default(),
         need_bytes: need,
+        resume_move: request.resume_move.clone(),
     };
-    let body = serde_json::to_vec(&ask).map_err(|e| e.to_string())?;
+    // Protocol 2's `check`: the same checks protocol 1 answers, from a
+    // helper that can also run the move, so an older target is refused here.
+    let ask = protocol::Request {
+        protocol: protocol::PROTOCOL,
+        move_id: String::new(),
+        work_dir: ask.work_dir.clone(),
+        rollback: false,
+        op: protocol::Op::Check { ask },
+    };
+    let mut body = serde_json::to_vec(&ask).map_err(|e| e.to_string())?;
+    body.push(b'\n');
     let to = request.to.clone();
-    let ran = world
-        .remote()?
-        .run(&to, &remote::sh(&script()), &body, PROBE_TIME);
+    let ran = world.remote()?.run(
+        &to,
+        &remote::sh(&script(protocol::PROTOCOL)),
+        &body,
+        PROBE_TIME,
+    );
     // A reply the helper printed is its answer even if ssh then failed (a
     // helper killed after printing): the frame is read first.
     let stdout = String::from_utf8_lossy(&ran.stdout).into_owned();
@@ -215,16 +259,37 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
             )
         ));
     };
-    let reply: Reply = serde_json::from_str(framed).map_err(|_| {
-        format!("the native move helper on {to} answered something this client cannot read; update both clients (pseudolife-mcp update) so they match, then retry")
-    })?;
+    let unreadable = || {
+        format!(
+            "the native move helper on {to} answered something this client cannot read; update both clients (pseudolife-mcp update) so they match, then retry"
+        )
+    };
+    let answer: protocol::Answer = serde_json::from_str(framed).map_err(|_| unreadable())?;
+    let skew = |version: &str, protocol: u32| {
+        format!(
+            "the client on {to} ({version}) speaks move protocol {protocol}, and this one ({}) speaks {}; update the older one (pseudolife-mcp update) so both match, then retry",
+            env!("CARGO_PKG_VERSION"),
+            protocol::PROTOCOL
+        )
+    };
+    let reply = match answer.check {
+        Some(reply) if answer.protocol == protocol::PROTOCOL => reply,
+        _ if answer.protocol != protocol::PROTOCOL && answer.protocol > PROTOCOL => {
+            return Err(skew(&answer.version, answer.protocol));
+        }
+        _ if !answer.error.is_empty() => return Err(answer.error),
+        _ => {
+            // A helper that speaks only protocol 1 answers 2 with its own
+            // refusal, which names the update.
+            let old: Reply = serde_json::from_str(framed).map_err(|_| unreadable())?;
+            if !old.refusals.is_empty() {
+                return Err(old.refusals.join("; "));
+            }
+            return Err(unreadable());
+        }
+    };
     if reply.protocol != PROTOCOL {
-        return Err(format!(
-            "the client on {to} ({}) speaks move protocol {}, and this one ({}) speaks {PROTOCOL}; update the older one (pseudolife-mcp update) so both match, then retry",
-            reply.version,
-            reply.protocol,
-            env!("CARGO_PKG_VERSION")
-        ));
+        return Err(skew(&reply.version, reply.protocol));
     }
     if !reply.refusals.is_empty() {
         return Err(reply.refusals.join("; "));
@@ -234,6 +299,18 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
             "the native move helper on {to} sent no facts about its bank; update both clients so they match, then retry"
         ));
     };
+    // A resumed move's target is stopped behind its gate: its URL answers
+    // only once the move starts it, and the move checks it then (before the
+    // commit point).
+    if !request.resume_move.is_empty() {
+        return Ok(Plan {
+            to,
+            target_url,
+            source,
+            target: reply.clone(),
+            url_tied: false,
+        });
+    }
     let health = format!("{}/health", argv::base(&target_url));
     let answer = world.reach(&health).map_err(|why| {
         format!(
@@ -274,12 +351,16 @@ fn preflight<W: World>(world: &mut W, request: &Request) -> Result<Plan, String>
 }
 
 /// The plan as text.
-fn render(plan: &Plan) -> String {
+fn render(plan: &Plan, dry_run: bool) -> String {
     let s = &plan.source;
     let t = plan.target.facts.clone().unwrap_or_default();
     let unknown = "unknown".to_owned();
     let mut out = String::new();
-    out.push_str("Move plan (dry run): both hosts checked; nothing was changed on either.\n");
+    out.push_str(if dry_run {
+        "Move plan (dry run): both hosts checked; nothing was changed on either.\n"
+    } else {
+        "Move plan: both hosts checked; nothing is changed until you confirm.\n"
+    });
     out.push_str(&format!(
         "  source: this host, {} (image {}), bank {}, schema {}, PostgreSQL {}; database {} ({}), /data ({})\n",
         s.daemon,
@@ -316,13 +397,21 @@ fn render(plan: &Plan) -> String {
         plan.target.work_dir,
         sized(plan.target.free_bytes)
     ));
-    out.push_str("The move would, in this order:\n");
+    out.push_str(if dry_run {
+        "The move would, in this order:\n"
+    } else {
+        "The move will, in this order:\n"
+    });
     let steps = steps(plan);
     for (n, step) in steps.iter().enumerate() {
         out.push_str(&format!("  {}. {step}\n", n + 1));
     }
-    out.push_str("A failure before the commit point rolls back: the target is stopped first, then the source's database fence is lifted and the source started again; the target never runs beside a running source.\n");
-    out.push_str("The native client does not perform the move yet; this run only checked it.\n");
+    out.push_str("A failure or an interrupt before the commit point rolls back: the target is proved stopped and gated before the source's fence lifts and its daemon starts, so two daemons never serve one bank; if the target cannot be proved so, the source stays stopped and the move says what to run next.\n");
+    if dry_run {
+        out.push_str(
+            "This run only checked both hosts: run it without --dry-run to move the bank.\n",
+        );
+    }
     out
 }
 
@@ -346,25 +435,47 @@ fn steps(plan: &Plan) -> Vec<String> {
             t.restart_policy
         )
     };
-    vec![
+    let source_policy = if plan.source.restart_policy.is_empty()
+        || plan.source.restart_policy == "no"
+    {
+        None
+    } else {
+        Some(format!(
+            "set the source daemon's restart policy to no (it is {}), so no Docker restart or reboot starts it during the move",
+            plan.source.restart_policy
+        ))
+    };
+    let mut steps = vec![
+        "claim the target for this move (refused while another move holds it)".to_owned(),
         timer,
         policy,
         "pause this host's unattended update, if enabled".to_owned(),
+    ];
+    steps.extend(source_policy);
+    steps.extend([
         format!("stop the source daemon {} (docker stop -t 120; never removed)", plan.source.daemon),
         format!(
-            "take a final backup of {} from the stopped source, then fence that database (ALLOW_CONNECTIONS false)",
+            "make {} read-only for new sessions, take a final backup of it from the stopped source, then fence that database (ALLOW_CONNECTIONS false)",
             plan.source.db
         ),
         format!(
             "copy the dump, the state archive and a manifest to {} on the target and check their SHA-256",
             plan.target.work_dir
         ),
-        "stop the target daemon, recheck its bank, and restore it from those files, left stopped behind /data/move.json".to_owned(),
+        "stop the target daemon, check its bank is still empty, and archive its own state".to_owned(),
+        "gate the target (/data/move.json), restore it from those files, and check the restored bank's identity and row counts".to_owned(),
         "keep the target's own tokens (--no-keep-tokens)".to_owned(),
-        "start the target once and wait until its bank fingerprint equals the source's".to_owned(),
+        format!(
+            "lift the gate, start the target once, and wait until {} serves the moved bank",
+            plan.target_url
+        ),
         "write /data/moved.json into the stopped source: the commit point, after which the move is not rolled back".to_owned(),
-        format!("re-point this machine's clients to {}", plan.target_url),
-    ]
+        format!(
+            "re-point this machine's clients to {} (a client holding this host's token needs one of the target's: the report names the command)",
+            plan.target_url
+        ),
+    ]);
+    steps
 }
 
 /// The plan as one JSON document.
@@ -400,6 +511,13 @@ impl World for Real {
         super::http_json(url, Duration::from_secs(5))
     }
     fn reach(&mut self, url: &str) -> Result<Value, String> {
+        get_json(url)
+    }
+}
+
+/// `GET <url>` from this host, http or https, no redirects, as JSON.
+pub(super) fn get_json(url: &str) -> Result<Value, String> {
+    {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -433,13 +551,57 @@ fn say(stdout: bool, text: &str) -> bool {
     }
 }
 
+/// `move --rollback <id>`: `None` for any other argv.
+pub(in crate::cli) fn run_rollback(arguments: &[OsString]) -> Option<u8> {
+    let rollback = argv::parse_rollback(arguments)?;
+    Some(command::rollback(&rollback))
+}
+
 /// `move` for the argv `move_cli` passed on: `None` keeps the deferral for
 /// shapes this module does not parse.
 pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
-    let request = argv::parse(arguments)?;
+    let mut request = argv::parse(arguments)?;
     if let Some(why) = argv::refusal(&request) {
         say(false, &format!("move: {why}\n"));
         return Some(2);
+    }
+    // What this host's records say comes first: a move that died without
+    // its rollback left the source stopped, which the preflight would only
+    // call "not running".
+    // The newest record, when it is a committed move: a later preflight's
+    // refusal is then read in its light (the source is gated and fenced).
+    let mut moved: Option<record::Record> = None;
+    if let Some(home) = command::home() {
+        let mut store = record::Files::under_home(&home);
+        let records = match command::records(&mut store) {
+            Ok(records) => records,
+            Err(why) => {
+                return Some(finish(
+                    &request,
+                    Err(format!(
+                        "{why}; a move record this client cannot read could be an unfinished move, so fix or move that file aside, then retry"
+                    )),
+                ));
+            }
+        };
+        moved = records.first().filter(|r| r.committed).cloned();
+        if let Some(open) = records.iter().find(|r| command::unfinished(r)) {
+            return Some(finish(&request, Err(command::unfinished_refusal(open))));
+        }
+        if request.resume {
+            match command::resumable(&records, &request.to) {
+                Some(earlier) => request.resume_move = earlier.move_id.clone(),
+                None => {
+                    return Some(finish(
+                        &request,
+                        Err(format!(
+                            "this host's records hold no move to {} to resume (one rolled back after its restore ran there); run the move without --resume",
+                            request.to
+                        )),
+                    ));
+                }
+            }
+        }
     }
     // ssh first: a missing one is named before Docker is asked anything.
     let ssh = match remote::Ssh::find() {
@@ -453,7 +615,19 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
         }),
         ssh: Ok(ssh),
     };
-    Some(finish(&request, preflight(&mut world, &request)))
+    let outcome = preflight(&mut world, &request).map_err(|why| match &moved {
+        Some(done) => format!(
+            "this host's bank moved to {} with move {} ({}): its daemon stays stopped behind /data/moved.json and its database is fenced, so there is nothing here to move (the check said: {why})",
+            done.target, done.move_id, done.target_url
+        ),
+        None => why,
+    });
+    match (outcome, world.docker, world.ssh) {
+        (Ok(plan), Ok(docker), Ok(ssh)) if !request.dry_run => {
+            Some(command::transaction(&request, &plan, docker, ssh))
+        }
+        (outcome, _, _) => Some(finish(&request, outcome)),
+    }
 }
 
 /// Print a preflight's outcome; the exit code.
@@ -462,7 +636,7 @@ fn finish(request: &Request, outcome: Result<Plan, String>) -> u8 {
         // Under --json the outcome is one JSON document on stdout either way.
         Err(why) if request.json => {
             let report = json!({
-                "dry_run": true,
+                "dry_run": request.dry_run,
                 "changed": false,
                 "error": format!("{why}. {NOTHING}"),
             });
@@ -477,7 +651,7 @@ fn finish(request: &Request, outcome: Result<Plan, String>) -> u8 {
             let text = if request.json {
                 format!("{}\n", document(&plan))
             } else {
-                render(&plan)
+                render(&plan, true)
             };
             if say(true, &text) { 0 } else { 120 }
         }

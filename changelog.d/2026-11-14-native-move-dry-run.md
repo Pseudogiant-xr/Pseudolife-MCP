@@ -19,10 +19,9 @@
 - ssh never prompts and never weakens host-key checking: an unknown or
   changed host key fails with ssh's refusal and the fix. `ssh` and `docker`
   are found only in absolute `PATH` directories.
-- Without `--dry-run`, and for `--expose-target`, `--resume`, carried tokens
-  (pass `--no-keep-tokens`), `--target-env-file`, `--target-compose-file` and
-  `--target-checkout`, the native client refuses before any effect, naming
-  what to do instead; the move itself arrives in a later release.
+- For `--expose-target`, carried tokens (pass `--no-keep-tokens`),
+  `--target-env-file`, `--target-compose-file` and `--target-checkout`, the
+  native client refuses before any effect, naming what to do instead.
 - A source daemon on the host network is read where it binds
   (`PSEUDOLIFE_MCP_HOST` / `PSEUDOLIFE_MCP_PORT`, default
   `127.0.0.1:8765`), as the Python move's fixed source address did.

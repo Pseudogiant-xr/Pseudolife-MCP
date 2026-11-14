@@ -3,7 +3,8 @@
 Oracle: `pseudolife_memory/move_cli.py` and `codex_connection._validated_daemon_url`
 at origin/master 151c3faa. Candidate: `rust/shim/src/cli/move_cli.rs` (the
 refusals Python makes before any effect) and, for the argv it passes on,
-`rust/shim/src/cli/restore_cli/move_native/` (the native dry run).
+`rust/shim/src/cli/restore_cli/move_native/` (the native move and its dry
+run).
 Harness row: `move` (`rust/cli_harness/rows/move.py`). Oracle test:
 `tests/test_move_cli.py::test_usage_errors_exit_2`.
 
@@ -12,11 +13,18 @@ Harness row: `move` (`rust/cli_harness/rows/move.py`). Oracle test:
 Since the maintainer's ruling of 14 November 2026 (works, not matches),
 `move` is rebuilt as a native feature rather than ported. This row compares
 the two where they still answer alike: what the command decides from its
-argv before any effect. The native dry run (`--dry-run`: both hosts checked
+argv before any effect. The native move is not compared (below): its
+transaction and rollback, its dry run (`--dry-run`: both hosts checked
 read-only, the target's half in the hidden `move-target` helper over ssh)
-and its own refusals are not compared (below); they are tested in Rust
-(`restore_cli/move_native/tests.rs` against recording fakes of both hosts,
-and `tests/cli_move_contract.rs` through the binary).
+and their own refusals. They are tested in Rust:
+`restore_cli/move_native/engine_tests.rs` runs the transaction against a
+model of both hosts with a fault at every call;
+`restore_cli/move_native/tests.rs` and `ops.rs` use recording fakes; and
+`tests/cli_move_contract.rs` runs through the binary.
+
+`move --rollback <move id>` is native only: Python's move has no such
+option. The dispatcher reads that shape before `move_cli`'s argparse checks,
+so the oracle's usage error for it is not compared either.
 
 ## What runs before the first effect (checked)
 

@@ -21,7 +21,7 @@ const BAD_TO: &str = "move: --to takes an ssh target such as root@box or a ~/.ss
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
-const NOT_DRY: &str = "move: the native client plans a move but does not perform one yet: run it with --dry-run to check both hosts and print the plan; the move itself needs the Python client's move for now (pseudolife-mcp 0.23.x installed with pip or pipx). Nothing was changed\n";
+const TOKENS: &str = "move: carrying the source's tokens to the target is not available in the native client yet: pass --no-keep-tokens (the target keeps its own tokens, and clients re-pair or use the target's). Nothing was changed\n";
 const URL_REQUIRED: &str = "move: --target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765. Nothing was changed\n";
 const NO_CHECKOUT: &str = "move: --target-checkout is not supported: move goes to an installed (release) Docker bank on the target, with the native pseudolife-mcp client there; drop --target-checkout. Nothing was changed\n";
 const NO_SSH: &str = "move: no ssh program is on PATH (only absolute PATH entries are searched); install the OpenSSH client, then retry. Nothing was changed\n";
@@ -118,10 +118,10 @@ fn valid_argv_gets_the_native_answer_without_a_connection() {
     let home = Home::new("valid");
     let (socket, url) = listener();
     for (args, code, stderr) in [
-        (&["--to", "root@box"][..], 2, NOT_DRY),
+        (&["--to", "root@box"][..], 2, URL_REQUIRED),
         (&["--to", "root@box", "--dry-run"], 2, URL_REQUIRED),
-        (&["--to", "root@box", "--resume", "--yes"], 2, NOT_DRY),
-        (&["--to", "root@box", "--json"], 2, NOT_DRY),
+        (&["--to", "root@box", "--resume", "--yes"], 2, URL_REQUIRED),
+        (&["--to", "root@box", "--json"], 2, URL_REQUIRED),
         (
             &[
                 "--to",
@@ -142,17 +142,25 @@ fn valid_argv_gets_the_native_answer_without_a_connection() {
         (
             &["--to", "box", "--target-url", "https://box.example.com/"],
             2,
-            NOT_DRY,
+            TOKENS,
         ),
-        (&["--to", "box", "--target-checkout", "a\tb"], 2, NOT_DRY),
+        (
+            &["--to", "box", "--target-checkout", "a\tb"],
+            2,
+            NO_CHECKOUT,
+        ),
         (
             &["--to", "box", "--target-url", "http://[::1]:8765"],
             2,
-            NOT_DRY,
+            TOKENS,
         ),
         // Every argv check passes: the preflight's first need, ssh, is not
         // on PATH (it holds only the empty home).
         (DRY, 4, NO_SSH),
+        // So does the move itself: it is refused at the same need, before
+        // anything is changed or asked.
+        (&DRY[..DRY.len() - 1], 4, NO_SSH),
+        (&[&DRY[..DRY.len() - 1], &["--yes"]].concat(), 4, NO_SSH),
     ] {
         let output = run(&home.0, &url, "80", args);
         assert_answer(&output, code, "", stderr);
@@ -301,7 +309,7 @@ fn refusals_before_any_effect() {
         ),
         2,
         "",
-        NOT_DRY,
+        NO_CHECKOUT,
     );
     assert_quiet(&socket);
     assert!(listing(&home.0).is_empty(), "a refusal wrote a file");
@@ -356,4 +364,137 @@ fn the_leaf_source_reaches_no_io_beyond_its_answer() {
             &rest[..rest.len().min(40)]
         );
     }
+}
+
+const MOVE_ID: &str = "20261114-080000-abcdef01";
+
+/// A move record in `home`, as a move on this host would have left it.
+fn plant(home: &Path, body: &str) {
+    let folder = home.join(".pseudolife-mcp").join("moves").join(MOVE_ID);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("record.json"), body).unwrap();
+}
+
+fn record(phase: &str, committed: bool, flags: &str) -> String {
+    format!(
+        r#"{{"version":1,"move_id":"{MOVE_ID}","target":"dev@target","target_url":"http://100.64.0.2:8765","source_bank":"75d0c7a836eb6af5","phase":"{phase}","committed":{committed},"flags":{{{flags}}}}}"#
+    )
+}
+
+fn rollback(home: &Path, listener: &str, args: &[&str]) -> Output {
+    let mut command: Command =
+        cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
+    command
+        .arg("move")
+        .args(args)
+        .current_dir(home)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("PATH", home)
+        .env("PSEUDOLIFE_MCP_DAEMON_URL", listener)
+        .stdin(std::process::Stdio::null());
+    command.output().unwrap()
+}
+
+#[test]
+fn an_unfinished_move_is_named_before_anything_else_is_asked() {
+    let home = Home::new("unfinished");
+    let (socket, url) = listener();
+    plant(
+        &home.0,
+        &record(
+            "moving",
+            false,
+            r#""claimed":true,"source_stopped":true,"fenced":true"#,
+        ),
+    );
+    let want = format!(
+        "move: move {MOVE_ID} to dev@target did not finish: its record (Moving) says the last thing it may have done is the source database fenced, and it is not committed. Roll it back first with pseudolife-mcp move --rollback {MOVE_ID}. Nothing was changed\n"
+    );
+    // A dry run, the move itself and a resume all meet it first, before the
+    // ssh lookup that would otherwise refuse them (PATH holds no ssh).
+    for args in [DRY, &DRY[..DRY.len() - 1], &[DRY, &["--resume"]].concat()] {
+        assert_answer(&run(&home.0, &url, "80", args), 4, "", &want);
+    }
+    assert_quiet(&socket);
+}
+
+#[test]
+fn rollback_answers_from_the_record_and_refuses_what_it_cannot_do() {
+    let home = Home::new("rollback");
+    let (socket, url) = listener();
+    // A malformed ID never names a path.
+    let output = rollback(&home.0, &url, &["--rollback", "../../etc"]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("is not a move ID"));
+    // No record of that move here.
+    let output = rollback(&home.0, &url, &["--rollback", MOVE_ID]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("this host has no record of move"),
+        "{output:?}"
+    );
+    // A committed move is not rolled back: the bank lives on the target.
+    plant(&home.0, &record("moved", true, r#""moved_written":true"#));
+    let output = rollback(&home.0, &url, &["--rollback", MOVE_ID, "--yes"]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("a committed move is not rolled back"),
+        "{output:?}"
+    );
+    // One already rolled back has nothing to do.
+    plant(&home.0, &record("rolled_back", false, r#""fenced":true"#));
+    let output = rollback(&home.0, &url, &["--rollback", MOVE_ID, "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["exit"], 0);
+    // Rolled back: the bank never moved, however often this is asked.
+    assert_eq!(report["moved"], false);
+    assert!(
+        report["message"]
+            .as_str()
+            .unwrap()
+            .contains("nothing to do")
+    );
+    // An unfinished one needs --yes without a terminal.
+    plant(
+        &home.0,
+        &record("moving", false, r#""source_stopped":true"#),
+    );
+    let output = rollback(&home.0, &url, &["--rollback", MOVE_ID]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("this run is not interactive: re-run with --yes"),
+        "{output:?}"
+    );
+    assert_quiet(&socket);
+}
+
+#[test]
+fn resume_without_a_move_to_resume_is_refused_before_any_change() {
+    let home = Home::new("resume");
+    let (socket, url) = listener();
+    let output = run(&home.0, &url, "80", &[DRY, &["--resume"]].concat());
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("this host's records hold no move to root@box to resume"),
+        "{output:?}"
+    );
+    assert!(listing(&home.0).is_empty(), "the refusal wrote a file");
+    assert_quiet(&socket);
+}
+
+#[test]
+fn a_move_record_this_client_cannot_read_blocks_a_move() {
+    let home = Home::new("unreadable");
+    let (socket, url) = listener();
+    plant(&home.0, "{ this is not a move record");
+    let output = run(&home.0, &url, "80", DRY);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("is not a move record"), "{stderr}");
+    assert!(stderr.contains("could be an unfinished move"), "{stderr}");
+    assert_quiet(&socket);
 }

@@ -34,6 +34,11 @@ pub(in crate::cli) struct Ask {
     pub work_dir: String,
     /// What the artifacts may take at most: the database and `/data`.
     pub need_bytes: u64,
+    /// `--resume`: the move this one resumes, whose claim the target must
+    /// hold; the target may then be stopped and hold that move's restored
+    /// bank behind its gate.
+    #[serde(default)]
+    pub resume_move: String,
 }
 
 /// What the target answers.
@@ -109,8 +114,36 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
     {
         probe::apply_health(&mut facts, &answer);
     }
+    // The claim's one place, whatever --target-work-dir says.
+    let claim = super::ops::base(home.as_deref(), "")
+        .ok()
+        .and_then(|base| super::ops::read_claim(&base).ok().flatten());
+    let resuming = !ask.resume_move.is_empty();
+    // A resumed move's target may hold that move's restored bank, stopped
+    // behind its gate: the running, health, identity and emptiness checks
+    // then do not apply (the move checks that bank again before it starts).
+    let holds_clone =
+        resuming && facts.meta_fingerprint.as_deref() == Some(ask.source_bank.as_str());
     let refuse = &mut reply.refusals;
-    if !facts.running {
+    match (&claim, resuming) {
+        (Some(held), false) => refuse.push(format!(
+            "move {} (from bank {}) holds this target; on its source host roll it back (pseudolife-mcp move --rollback {}) or resume it (--resume)",
+            held.move_id, held.source_bank, held.move_id
+        )),
+        (Some(held), true) if held.move_id != ask.resume_move => refuse.push(format!(
+            "this target is held by move {}, not move {}; resume that move on its own source host instead",
+            held.move_id, ask.resume_move
+        )),
+        (None, true) => refuse.push(format!(
+            "this target holds no claim for move {}, so there is nothing to resume there; run the move without --resume",
+            ask.resume_move
+        )),
+        _ => {}
+    }
+    if let Some(why) = super::gate_refusal("target", &facts) {
+        refuse.push(why);
+    }
+    if !facts.running && !resuming {
         refuse.push(format!(
             "the target daemon {} is not running; start it (docker compose start in its install directory) so move can check it, then retry",
             facts.daemon
@@ -127,7 +160,7 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
             facts.compose_dir
         ));
     }
-    if facts.running {
+    if facts.running && !holds_clone {
         if facts.health_url.is_empty() {
             refuse.push(format!(
                 "the target daemon {} publishes no health port, so move cannot check it; publish its port 8765 as the installer's compose does (or run it on the host network), then retry",
@@ -168,6 +201,12 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
                 )),
                 _ => {}
             }
+            if facts.auth == Some(false) {
+                refuse.push(format!(
+                    "the target daemon at {}/health does not require authentication (auth false); move keeps the target's own tokens, so it would serve the moved bank to anyone who reaches it; turn authentication on there (set PSEUDOLIFE_MCP_TOKEN), then retry",
+                    facts.health_url
+                ));
+            }
         }
     }
     // A dump restores into the same or a newer major version (Python's
@@ -180,7 +219,9 @@ pub(super) fn answer<P: Place>(place: &mut P, ask: &Ask) -> Reply {
             ask.source_pg_version / 10000
         )),
     }
-    if let Ok(docker) = place.docker() {
+    if let Ok(docker) = place.docker()
+        && !holds_clone
+    {
         match probe::used_tables(docker, &facts) {
             Ok(used) if used.is_empty() => {}
             Ok(used) => refuse.push(format!(
@@ -316,12 +357,16 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
         let _ = out.write_all(line.as_bytes());
         let _ = out.flush();
     };
+    if asked == super::protocol::PROTOCOL.to_string() && arguments.len() == 1 {
+        return run_ops();
+    }
     if asked != PROTOCOL.to_string() || arguments.len() != 1 {
         print(&Reply {
             protocol: PROTOCOL,
             version: env!("CARGO_PKG_VERSION").to_owned(),
             refusals: vec![format!(
-                "the target's pseudolife-mcp speaks move protocol {PROTOCOL}, and the source asked for {asked:?}; update the older client (pseudolife-mcp update) so both match, then retry"
+                "the target's pseudolife-mcp speaks move protocols {PROTOCOL} and {}, and the source asked for {asked:?}; update the older client (pseudolife-mcp update) so both match, then retry",
+                super::protocol::PROTOCOL
             )],
             ..Reply::default()
         });
@@ -353,4 +398,163 @@ pub(in crate::cli) fn run(arguments: &[std::ffi::OsString]) -> u8 {
     };
     print(&answer(&mut here, &ask));
     0
+}
+
+/// The real target host, for protocol 2's operations.
+struct Site2 {
+    docker: Option<docker::Real>,
+    missing: String,
+}
+
+impl super::ops::Site for Site2 {
+    type D = docker::Real;
+    fn docker(&mut self) -> Result<&mut docker::Real, String> {
+        self.docker.as_mut().ok_or_else(|| self.missing.clone())
+    }
+    fn home(&self) -> Option<PathBuf> {
+        Here {
+            docker: None,
+            missing: None,
+        }
+        .home()
+    }
+    fn now(&self) -> String {
+        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    }
+    fn systemctl(&mut self, args: &[&str]) -> Result<String, String> {
+        let systemctl = crate::cli::program_lookup::find_program_path("systemctl")
+            .ok_or("no systemctl on PATH")?;
+        let output = std::process::Command::new(systemctl)
+            .arg("--user")
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|error| error.to_string())?;
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if output.status.success() {
+            Ok(text)
+        } else {
+            let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            Err(if said.is_empty() { text } else { said })
+        }
+    }
+    fn restore(&mut self, args: &[String], abort_file: &Path) -> (i32, String) {
+        let program = match std::env::current_exe() {
+            Ok(program) => program,
+            Err(error) => return (1, format!("this program cannot be found: {error}")),
+        };
+        match std::process::Command::new(program)
+            .args(args)
+            .env(crate::cli::restore_cli::MOVE_ABORT_ENV, abort_file)
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            Ok(output) => {
+                let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+                text.push_str(&String::from_utf8_lossy(&output.stderr));
+                (output.status.code().unwrap_or(1), text)
+            }
+            Err(error) => (1, format!("restore could not be started: {error}")),
+        }
+    }
+}
+
+fn print_answer(answer: &super::protocol::Answer) {
+    let line = format!(
+        "{FRAME}{}\n",
+        serde_json::to_string(answer).unwrap_or_else(|_| "{}".to_owned())
+    );
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_all(line.as_bytes());
+    let _ = out.flush();
+}
+
+/// `pseudolife-mcp move-target 2`: one operation, its request on stdin's
+/// first line and, for a copy, the file's bytes after it.
+fn run_ops() -> u8 {
+    use super::protocol::{Answer, Op, PROTOCOL as OPS, Request};
+    use std::io::BufRead;
+    let refuse = |error: String| Answer {
+        protocol: OPS,
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        error,
+        ..Answer::default()
+    };
+    let stdin = std::io::stdin();
+    let mut reader = std::io::BufReader::new(stdin.lock());
+    let mut line = Vec::new();
+    if (&mut reader)
+        .take(1 << 20)
+        .read_until(b'\n', &mut line)
+        .is_err()
+        || !line.ends_with(b"\n")
+    {
+        print_answer(&refuse(
+            "the source's request could not be read; update both clients so they match, then retry"
+                .to_owned(),
+        ));
+        return 3;
+    }
+    let Ok(request) = serde_json::from_slice::<Request>(&line) else {
+        print_answer(&refuse(
+            "the source's request could not be read; update both clients so they match, then retry"
+                .to_owned(),
+        ));
+        return 3;
+    };
+    let (docker, missing) = match super::docker_program() {
+        Ok(program) => (
+            Some(docker::Real {
+                program,
+                interruptible: false,
+            }),
+            String::new(),
+        ),
+        Err(why) => (None, format!("the target: {why}")),
+    };
+    if let Op::Check { ask } = &request.op {
+        let mut here = Here {
+            docker,
+            missing: (!missing.is_empty()).then_some(missing),
+        };
+        let mut answer = refuse(String::new());
+        answer.ok = true;
+        answer.check = Some(answer_check(&mut here, ask));
+        print_answer(&answer);
+        return 0;
+    }
+    let mut site = Site2 { docker, missing };
+    let needs_lock = request.op.changes() && !matches!(request.op, Op::Restore);
+    let answer = if needs_lock {
+        let Some(directory) = super::super::data_dir() else {
+            print_answer(&refuse(
+                "the target has no home directory for its update lock".to_owned(),
+            ));
+            return 0;
+        };
+        let _ = crate::board::state::private_dir(&directory);
+        match super::super::with_update_lock(&directory, || {
+            super::ops::perform(&mut site, &request, &mut reader)
+        }) {
+            Ok(answer) => answer,
+            Err(super::super::LockRefusal::Busy(pid)) => Answer {
+                busy: true,
+                ..refuse(format!(
+                    "another update, restore or backup holds the target's update lock (pid {pid}); wait for it to finish, then retry the move"
+                ))
+            },
+            Err(super::super::LockRefusal::Unavailable(error)) => refuse(format!(
+                "the target's update lock cannot be taken ({error}); check {}, then retry",
+                directory.display()
+            )),
+        }
+    } else {
+        super::ops::perform(&mut site, &request, &mut reader)
+    };
+    print_answer(&answer);
+    0
+}
+
+fn answer_check(here: &mut Here, ask: &Ask) -> Reply {
+    answer(here, ask)
 }
