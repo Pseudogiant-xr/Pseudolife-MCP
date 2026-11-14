@@ -62,7 +62,9 @@ pub(super) trait Host {
 fn port_taken(port: u16) -> bool {
     #[cfg(unix)]
     {
-        // SAFETY: a fresh socket, bound once and closed on every path.
+        // SAFETY: a fresh socket, bound once and closed on every path; the
+        // address is a zeroed sockaddr_in of the size passed.
+        #[allow(unsafe_code)]
         unsafe {
             let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             if fd < 0 {
