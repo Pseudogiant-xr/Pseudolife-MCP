@@ -21,9 +21,40 @@ use std::{
 const DEFERRED: &str = "pseudolife-stdio: mode 'connect' is deferred in this candidate\n";
 const DEAD: &str = "http://127.0.0.1:9";
 
+/// `connect --yes` re-points a Windows User-scope daemon URL it finds, and
+/// these tests run the real binary against the real registry: never on a
+/// host that has one.
+fn refuse_a_host_with_a_user_scope_url() {
+    #[cfg(windows)]
+    {
+        let reg = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("reg.exe");
+        for (key, scope) in [
+            (r"HKCU\Environment", "User"),
+            (
+                r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+                "Machine",
+            ),
+        ] {
+            let found = std::process::Command::new(&reg)
+                .args(["query", key, "/v", "PSEUDOLIFE_MCP_DAEMON_URL"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
+            assert!(
+                !found.success(),
+                "this host has a {scope}-scope PSEUDOLIFE_MCP_DAEMON_URL: connect would re-point a User-scope one and report a Machine-scope one, so these runs need a host without either"
+            );
+        }
+    }
+}
+
 struct Home(PathBuf);
 impl Home {
     fn new() -> Self {
+        refuse_a_host_with_a_user_scope_url();
         let path = std::env::temp_dir().join(format!("connect-contract-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(path.join("cwd")).unwrap();
         Self(path)
@@ -174,8 +205,7 @@ fn non_canonical_argv_defers_without_effect() {
     for shape in [
         &[][..],
         &["--dry-run", DEAD],
-        &[DEAD, "--code", "7K3Q-M9XA-2PDF"],
-        &[DEAD, "--read-code"],
+        &[DEAD, "--code"],
         &[DEAD, "--help"],
         &[DEAD, "-h"],
         &[DEAD, "--yes", "--yes"],
@@ -264,7 +294,9 @@ fn an_unreachable_daemon_is_refused_with_nothing_changed() {
 }
 
 #[test]
-fn a_codex_config_defers_before_any_request() {
+fn a_codex_registration_without_codex_on_path_is_a_manual_row() {
+    // Codex's config.toml is written only through Codex's own app-server;
+    // with no Codex to run, its registration is a manual row naming why.
     let home = Home::new();
     home.write(
         ".codex/config.toml",
@@ -272,10 +304,34 @@ fn a_codex_config_defers_before_any_request() {
     );
     let health = Health::start();
     let before = home.tree();
-    deferred(&home.run(&health.url, &[&health.url, "--dry-run"]));
-    deferred(&home.run(&health.url, &[&health.url, "--client", "codex", "--yes"]));
-    assert!(health.requests().is_empty());
+    let output = home.run(&health.url, &[&health.url, "--client", "codex", "--yes"]);
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert!(
+        stdout.contains("  manual   codex registration: ")
+            && stdout.contains("Codex CLI is unavailable"),
+        "{stdout}"
+    );
+    assert_eq!(health.requests(), ["/health"]);
     assert_eq!(home.tree(), before);
+}
+
+#[test]
+fn another_clients_unreadable_config_does_not_hide_the_codex_registration() {
+    let home = Home::new();
+    home.write(".claude.json", "{ not json");
+    home.write(
+        ".codex/config.toml",
+        "[mcp_servers.pseudolife-memory]\ncommand = \"x\"\n",
+    );
+    let health = Health::start();
+    let output = home.run(
+        &health.url,
+        &[&health.url, "--client", "codex", "--dry-run"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert!(stdout.contains("Codex CLI is unavailable"), "{stdout}");
+    assert!(!stdout.contains("a url server"), "{stdout}");
 }
 
 #[test]

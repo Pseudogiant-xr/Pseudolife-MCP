@@ -4,11 +4,15 @@ Canonical argv (the producers: ``ops/install.sh`` / ``ops/install.ps1``'s
 client-only connect block, ``docs/guide/remote-bank.md``, ``move_cli``):
 ``connect <url> [--token-file P] [--read-token] [--client NAMES] [--dry-run]
 [--yes] [--json]``, the URL first, each option at most once with its value
-as the next argument. Pairing (``--code`` / ``--read-code``), a Codex
-``config.toml``, an interactive question or token prompt, a Windows
-User-scope daemon URL and an unattended-update schedule defer before any
-effect; the Rust tests (``rust/shim/tests/cli_connect_contract.rs``) pin
-those deferrals. This row compares answered cases only.
+as the next argument. An interactive question or token prompt and an
+unattended-update schedule defer before any effect; pairing
+(``--code`` / ``--read-code``), a Codex ``config.toml`` and a Windows
+User-scope daemon URL are native, covered by the Rust tests
+(``rust/shim/tests/cli_connect_contract.rs``, ``cli_connect_pairing.rs``,
+``src/cli/connect/native_tests.rs``). This row compares answered cases only,
+and refuses to run on a Windows host whose User- or Machine-scope
+environment sets ``PSEUDOLIFE_MCP_DAEMON_URL``: the native arm's ``--yes``
+cases would re-point a real User-scope one.
 
 Contract per arm: exit code, both streams byte-exact, every file under the
 home (written configs, backups, created token files), and the requests the
@@ -703,7 +707,27 @@ def _real_state() -> dict:
         state["token-files"] = sorted(p.name for p in (tokens / ".pseudolife-mcp").glob("*.token"))
     except OSError:
         state["token-files"] = None
+    state.update(_windows_daemon_urls())
     return state
+
+
+def _windows_daemon_urls() -> dict:
+    """The Windows User- and Machine-scope ``PSEUDOLIFE_MCP_DAEMON_URL``,
+    which native ``connect --yes`` re-points (User) or reports (Machine)."""
+    if not WINDOWS:
+        return {}
+    import winreg
+    found = {}
+    for scope, root, key in (
+            ("user", winreg.HKEY_CURRENT_USER, "Environment"),
+            ("machine", winreg.HKEY_LOCAL_MACHINE,
+             r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+        try:
+            with winreg.OpenKey(root, key) as opened:
+                found[f"{scope}-scope-url"] = winreg.QueryValueEx(opened, "PSEUDOLIFE_MCP_DAEMON_URL")[0]
+        except OSError:
+            found[f"{scope}-scope-url"] = None
+    return found
 
 
 _BASELINE: dict | None = None
@@ -886,6 +910,11 @@ def cases() -> list[Case]:
     global _BASELINE
     if _BASELINE is None:
         _BASELINE = _real_state()
+        present = [key for key, value in _windows_daemon_urls().items() if value is not None]
+        if present:
+            raise AssertionError(
+                f"connect row: this host sets PSEUDOLIFE_MCP_DAEMON_URL in its Windows environment ({', '.join(present)}); "
+                "the native arm's --yes cases would re-point a real User-scope value. Run the row on a host without one")
     out: list[Case] = []
     add = out.append
 
@@ -1279,8 +1308,8 @@ MUTANTS = [
            "const EXIT_NOTHING: u8 = 3;", "const EXIT_NOTHING: u8 = 4;",
            ("none-found", "manual-only")),
     Mutant("connect-skip-settings-write", "connect", "shim/src/cli/connect/mod.rs",
-           'if row.state != "change" || row.json.is_none() {',
-           'if row.state != "change" || row.json.is_none() || row.place == "settings" {',
+           'let applied = if rows[index].json.is_some() {',
+           'let applied = if rows[index].json.is_some() && rows[index].place != "settings" {',
            ("apply-move-yes",)),
     Mutant("connect-changes-reverse-sort", "connect", "shim/src/cli/connect/discover.rs",
            "sorted.sort_by(|a, b| a.0.cmp(&b.0));", "sorted.sort_by(|a, b| b.0.cmp(&a.0));",
@@ -1295,7 +1324,7 @@ MUTANTS = [
            "backup = Some(files::backup(&path)?);", "backup = None;",
            ("apply-move-yes",)),
     Mutant("connect-rollback-keeps-writes", "connect", "shim/src/cli/connect/mod.rs",
-           "let outcome = rollback(&steps, &created);", "let outcome = rollback(&[], &created);",
+           "outcome.extend(rollback(&steps, &created));", "outcome.extend(rollback(&[], &created));",
            ("rollback-held-file", "rollback-read-only-dir")),
     Mutant("connect-cache-url-last", "connect", "shim/src/cache.rs",
            'let mut data = Map::from_iter([("url".to_owned(), Value::String(self.url.clone()))]);\n'
