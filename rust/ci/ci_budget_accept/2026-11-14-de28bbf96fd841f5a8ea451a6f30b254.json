@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "e4dc2164dbd909e4",
+  "fingerprint": "0fa3dc50df1e0847",
+  "reason": "Removes eight files frozen again once the #1539 and #1537 freeze exceptions landed (test_backup_cli, test_docker_backup_restore, test_migrate_flat, test_child_python, test_program_lookup and the three test_tunnel_* files, with their three deselects) from the one pytest step; no step, setup or job is added, so the lane can only get shorter. Re-measure from the next batches."
+}

@@ -6,9 +6,8 @@
 #                       since the 2026-08-14 16→18 bump), every test on the
 #                       real embedding weights (PSEUDOLIFE_TEST_EMBEDDER=real);
 #   * test-lite-windows — the product paths that differ on Windows (embedded
-#                       provider, backup round trip, shim daemon spawn,
-#                       credential ACLs, tunnel DPAPI and process handling,
-#                       the msvcrt locks) on a real Windows runner, with no
+#                       provider, shim daemon spawn, credential ACLs, the
+#                       msvcrt locks) on a real Windows runner, with no
 #                       retries. Windows runners cannot host service
 #                       containers at all, so embedded PG is the only
 #                       Postgres coverage possible there; the FULL suite on
@@ -567,10 +566,12 @@ jobs:
         # service container (unsupported on Windows runners), no HF download.
         # Only live files run (tests/suite_classes.txt): since the Python
         # freeze the credentials and coordination-credentials files, one
-        # tool-annotations test and the tunnel profiles left; the tests of
-        # the open freeze exceptions (#1539, #1537) stay until they land.
-        # - test_embedded_pg, test_backup_cli: the embedded provider's attach,
-        #   crash and msvcrt start-lock paths, and the backup round trip.
+        # tool-annotations test and the tunnel profiles left, and the tests
+        # kept live for the freeze exceptions #1539 and #1537 left once both
+        # landed (14 November 2026): the backup, Docker restore, flat
+        # migration, child-Python, program lookup and tunnel files.
+        # - test_embedded_pg: the embedded provider's attach, crash and
+        #   msvcrt start-lock paths.
         # - test_shim (picks): the Windows daemon spawn (creationflags, no
         #   console window), its msvcrt spawn lock, and one real shim-to-daemon
         #   handshake.
@@ -579,9 +580,7 @@ jobs:
         #   Win32_Process listing, and the weekly task's registration.
         # - test_repository_claims: file claims refuse Windows junctions and
         #   reserved names (CON, trailing dots and spaces).
-        # - test_tunnel_*: the tunnel's DPAPI key storage, owner-only ACLs and
-        #   Windows process handling, which no other lane reaches; the three
-        #   cancellation tests that reap real children run nightly.
+        # - test_tunnel_cli: the tunnel command's Windows paths.
         # - test_suite_lock (picks): the only CI coverage of the msvcrt lock
         #   backend, crash release and the native-Windows full-run refusal,
         #   and of ops/wsl-suite.ps1 forwarding a held lease's marker.
@@ -595,24 +594,16 @@ jobs:
         #   client-only install, Windows-only installer code.
         # - test_schema_version, test_doctor_cli: schema pins and doctor,
         #   cheap and platform-sensitive.
-        # - test_migrate_flat: interrupted config replacement, file handling,
-        #   and recovery refusals on native Windows.
         # - test_runner_cleanup: the parity runners' disk cleanup treats a
         #   directory junction as a link, which only Windows can make.
         # - test_selfhosted_windows_scripts: the Windows parity runner's hook
         #   refuses a job when the account's LAN block does not bind.
-        # - test_child_python: a child re-run of the package from inside an
-        #   older checkout imports the installed package (`-P`), with real
-        #   Windows interpreter spawns.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-
           python -m pytest -ra --durations=30
           --junitxml=ci-results/test-lite-windows.xml
           tests/test_embedded_pg.py
-          tests/test_backup_cli.py
-          tests/test_docker_backup_restore.py
-          tests/test_migrate_flat.py
           tests/test_schema_version.py
           tests/test_doctor_cli.py
           tests/test_installer_claude_profile.py
@@ -630,8 +621,6 @@ jobs:
           tests/test_ops_install_worktree_retention.py
           tests/test_runner_cleanup.py
           tests/test_selfhosted_windows_scripts.py
-          tests/test_child_python.py
-          tests/test_program_lookup.py
           tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve
           tests/test_move_cli.py::test_a_new_target_expose_is_undone_on_move_failure
           tests/test_move_cli.py::test_failed_exposure_cleanup_is_recorded_for_manual_recovery
@@ -657,13 +646,7 @@ jobs:
           tests/test_installer_lite.py
           rust/ci/test_pr_precheck.py
           rust/ci/test_pr_precheck_run.py
-          tests/test_tunnel_service.py
           tests/test_tunnel_cli.py
-          tests/test_tunnel_bridge.py
-          tests/test_tunnel_runtime.py
-          --deselect tests/test_tunnel_runtime.py::test_refresh_cancellation_reaps_actual_children_and_private_launch
-          --deselect tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
-          --deselect tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child
           tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations
           tests/test_claude_shim_windows_prompt.py
           tests/test_shim.py::test_spawn_daemon_never_allocates_a_console_window
@@ -746,20 +729,18 @@ jobs:
         # store tests in test_coordination_turn_digest.py skip; the Linux
         # lanes run them. -rs prints every skip reason, so a platform skip
         # cannot pass for coverage.
-        # The test_tunnel_*.py files run the tunnel's owner-only files and
-        # process handling on macOS; test_conductor_watch.py runs the
-        # watcher's `ps` start-time check there, test_prune_worktrees.py
-        # the retention script's `ps` process listing, and
-        # test_child_python.py a child re-run of the package from inside an
-        # older checkout. Only live files run (tests/suite_classes.txt).
+        # test_tunnel_cli.py runs the tunnel command on macOS;
+        # test_conductor_watch.py runs the watcher's `ps` start-time check
+        # there, and test_prune_worktrees.py the retention script's `ps`
+        # process listing. Only live files run (tests/suite_classes.txt).
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py tests/test_prune_worktrees.py tests/test_child_python.py tests/test_update_bridge.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
+        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_cli.py tests/test_prune_worktrees.py tests/test_update_bridge.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
     # Windows plumbing that starts real processes and shells (installer
-    # matrix, Codex hook setup and doorbell, coordination digest and adapter,
+    # matrix, Codex hook setup, coordination digest,
     # wait-mail, update CLI, register-claude-desktop, the stop-wake hook's
     # timing tests, the rest of the suite lock, shim and conductor watcher).
     # The 2026-10-20 CI flake review found the Windows flakes live here, so
@@ -818,10 +799,9 @@ jobs:
           PY
 
       - name: Windows plumbing (one recorded retry)
-        # Tests the merge gate names from a split file are deselected here (and
-        # the reverse for test_tunnel_runtime), so each runs in one Windows
-        # lane. The last nine files hold Windows-only tests that no CI lane
-        # ran before 2026-10-20.
+        # Tests the merge gate names from a split file are deselected here, so
+        # each runs in one Windows lane. The last seven files hold
+        # Windows-only tests that no CI lane ran before 2026-10-20.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-
@@ -829,12 +809,10 @@ jobs:
           -ra --durations=30
           tests/test_memory_changes_hook.py
           tests/test_coordination_turn_digest.py
-          tests/test_coordination_adapter.py
           tests/test_wait_mail_cli.py
           tests/test_subagent_board_guard.py
           tests/test_codex_hook_setup.py
           tests/test_codex_hook_setup_edges.py
-          tests/test_codex_doorbell.py
           tests/test_update_cli.py
           tests/test_ops_update_wrappers.py
           tests/test_register_claude_desktop.py
@@ -879,16 +857,11 @@ jobs:
           --deselect tests/test_conductor_watch.py::test_the_pid_file_names_the_watcher_while_it_runs
           --deselect tests/test_conductor_watch.py::test_a_state_held_for_another_owner_is_refused
           --deselect tests/test_conductor_watch.py::test_stop_asks_the_running_watcher_to_exit_at_its_next_poll
-          tests/test_tunnel_runtime.py::test_refresh_cancellation_reaps_actual_children_and_private_launch
-          tests/test_tunnel_runtime.py::test_initial_registration_cancellation_reaps_actual_child
-          tests/test_tunnel_runtime.py::test_refresh_registration_sigint_reaps_actual_child
           tests/test_stop_wake_hook.py
           tests/test_codex_shim_health.py
           tests/test_connect.py
-          tests/test_expose_cli.py
           tests/test_shim_runtimes.py
           tests/test_wake_defaults.py
-          tests/test_codex_doorbell_revision.py
           tests/test_installer_legacy_hooks.py
           tests/test_ops_install_cache_retention.py
 
