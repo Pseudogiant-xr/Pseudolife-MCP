@@ -130,11 +130,13 @@ SHIM_COMMANDS = {
     # The conservative import scan also sees update's private backup module.
     # Doctor shares update's Codex hook checks; its dependencies inherit that row,
     # and console's, which reads doctor's registration search.
-    "backup": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
-    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "console", "restore"),
+    "backup": ("backup", "migrate_flat", "update", "doctor", "console", "restore", "connect", "expose", "move", "conductor_watch"),
+    "backup_help.txt": ("backup", "migrate_flat", "update", "doctor", "console", "restore", "connect", "expose", "move", "conductor_watch"),
     "board_audit": ("audit", "coordination_recovery"),
     "migrate_flat.rs": ("migrate_flat",),
-    "update": ("update", "doctor", "console"),
+    # connect re-creates an unattended-update schedule through update's own
+    # schedule code, so update's rows include connect's.
+    "update": ("update", "doctor", "console", "connect", "expose", "move", "conductor_watch", "restore"),
     # console and conductor_watch also read move's argv and stream helpers;
     # expose reads them too, and connect's stdin check, so connect's rows
     # include expose's.
@@ -143,7 +145,7 @@ SHIM_COMMANDS = {
     # The import scan also reads move's help text ("use `expose status`")
     # as a use of expose, so expose's rows include move's.
     "expose": ("expose", "move", "console", "conductor_watch"),
-    "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console"),
+    "maintainer": ("maintainer", "maintainer_setup", "update", "doctor", "console", "connect", "expose", "move", "conductor_watch", "restore"),
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
