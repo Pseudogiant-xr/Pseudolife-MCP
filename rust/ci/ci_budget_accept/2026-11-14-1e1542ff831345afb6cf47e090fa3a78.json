@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "200ef2b514faec86",
+  "fingerprint": "5a48f3fe0091a46b",
+  "reason": "The merge of #1550's switch change (PYTEST_ADDOPTS dropped; test reads PSEUDOLIFE_CI_INCLUDE_FROZEN) with this branch's native-client build steps; each side's cost is recorded already, and the combination adds nothing to either."
+}
