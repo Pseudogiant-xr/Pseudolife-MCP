@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "0c68fc4d053a291c",
+  "fingerprint": "f2bf3793edfec0a1",
+  "reason": "rust/ci/parity_scope.py's SHIM_COMMANDS map gives update, backup, backup_help.txt, restore_cli and connect one shared row set (UPDATE_CYCLE) and maintainer that set plus its own: those commands import one another in a cycle once connect re-creates an unattended-update schedule through update's schedule code (#1568) beside backup's Docker tier in restore_cli (#1558). The set is the union of the rows both pull requests named; no shard was added and no shard's steps changed, and a full batch run, which the budget prices, runs every shard either way."
+}

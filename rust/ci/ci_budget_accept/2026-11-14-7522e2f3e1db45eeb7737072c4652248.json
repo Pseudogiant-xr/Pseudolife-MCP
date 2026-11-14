@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "64afdc26e053f2d7",
-  "fingerprint": "ca4449ce67d86933",
-  "reason": "rust/ci/parity_scope.py's SHIM_COMMANDS map now also selects the existing w1c-connect suite for a change under rust/shim/src/cli/update, backup or maintainer, because connect re-creates an unattended-update schedule through update's schedule code (#1568). No shard was added and no shard's steps changed; a full batch run, which the budget prices, runs every shard either way."
-}
