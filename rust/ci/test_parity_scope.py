@@ -2,6 +2,7 @@
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,39 @@ def test_the_import_scan_follows_test_helpers_transitively(tmp_path, monkeypatch
         assert not {"oracle_selection", "unrelated"} & rust_port
     finally:
         parity_scope.harness_imports.cache_clear()
+
+
+def _scan_tree(root):
+    (root / "rust").mkdir()
+    (root / "rust/.gitignore").write_text("/target/\n", encoding="utf-8")
+    (root / "rust/harness.py").write_text("from evals.rust_port import used\n", encoding="utf-8")
+    (root / "rust/target/mutant-src/rust").mkdir(parents=True)
+    # A leftover mutant-source copy of the tree in the ignored cargo output.
+    (root / "rust/target/mutant-src/rust/copy.py").write_text("from evals.rust_port import leaked\n", encoding="utf-8")
+    (root / "evals/rust_port").mkdir(parents=True)
+    for name in ("used", "leaked", "fresh"):
+        (root / f"evals/rust_port/{name}.py").write_text("x = 1\n", encoding="utf-8")
+
+
+def test_the_import_scan_skips_ignored_build_output(tmp_path, monkeypatch):
+    # W5's report: a rust/target/mutant-src/ copy made oracle_selection reach
+    # every suite and failed the floor case in a long-lived worktree.
+    _scan_tree(tmp_path)
+    for args in (["init", "-q"], ["add", "-A"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    # The near miss: a harness file not yet added still counts.
+    (tmp_path / "rust/new_harness.py").write_text("from evals.rust_port import fresh\n", encoding="utf-8")
+    monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
+    found = parity_scope.harness_imports.__wrapped__("evals.rust_port")
+    assert {"used", "fresh"} <= found and "leaked" not in found
+
+
+def test_the_import_scan_skips_cargo_output_without_git(tmp_path, monkeypatch):
+    _scan_tree(tmp_path)
+    monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
+    monkeypatch.setattr(parity_scope.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("no git")))
+    found = parity_scope.harness_imports.__wrapped__("evals.rust_port")
+    assert "used" in found and "leaked" not in found
 
 
 def test_ordinary_pr_precheck_imports_do_not_widen_batch_routing(tmp_path, monkeypatch):

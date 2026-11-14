@@ -29,6 +29,7 @@ import functools
 import json
 import re
 import subprocess
+import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -255,6 +256,26 @@ SCAN_EXCLUDES = ("rust/ci/test_parity_scope.py", "rust/ci/pr_precheck.py", "rust
                  "rust/ci/test_pr_precheck.py", "rust/ci/test_pr_precheck_run.py")
 
 
+def _scanned(sources: list[Path]) -> list[Path]:
+    """The Python files under ``sources`` that git does not ignore (tracked,
+    or new and not yet added), as the other scans list them
+    (`git ls-files --exclude-standard`): never ignored build output, where a
+    leftover rust/target/mutant-src/ copy of the tree once made every eval
+    module look imported by a harness. Without git (a bare directory), the
+    ignored cargo output rust/target/ is left out by name."""
+    relative = [str(source.relative_to(ROOT)) for source in sources]
+    try:
+        listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
+                                 *relative], cwd=ROOT, capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        listed = None
+    if listed is not None and listed.returncode == 0:
+        return [ROOT / name for name in listed.stdout.decode("utf-8", "surrogateescape").split("\0")
+                if name.endswith(".py") and (ROOT / name).is_file()]
+    build = ROOT / "rust/target"
+    return [path for source in sources for path in source.rglob("*.py") if build not in path.parents]
+
+
 @functools.lru_cache(maxsize=None)
 def harness_imports(package: str) -> frozenset[str]:
     """The top-level modules of ``package`` (tests or evals.rust_port) that
@@ -279,10 +300,9 @@ def harness_imports(package: str) -> frozenset[str]:
     excluded = {ROOT / path for path in SCAN_EXCLUDES}
     seen: set[str] = set()
     pending = set(ORACLE_MODULES) if package == "evals.rust_port" else set()
-    for source in sources:
-        for path in source.rglob("*.py"):
-            if path not in excluded:
-                pending |= names(absolute, path.read_text(encoding="utf-8", errors="replace"))
+    for path in _scanned([source for source in sources if source.is_dir()]):
+        if path not in excluded:
+            pending |= names(absolute, path.read_text(encoding="utf-8", errors="replace"))
     while pending:
         name = pending.pop()
         if name in seen:
