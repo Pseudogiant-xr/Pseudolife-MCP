@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "64afdc26e053f2d7",
+  "fingerprint": "0c68fc4d053a291c",
+  "reason": "parity_scope.py: restore_cli and connect now also select backup's rows and its users' (backup's Docker tier is restore_cli's docker_backup); a full parity run's rows, jobs and minutes are unchanged"
+}

@@ -670,6 +670,26 @@ ones), 4 verification refused, 5 applied but the post-apply check failed.
 installed Docker bank (its daemon and Postgres containers exist), with no
 lost writes. Run it on the bank's current host.
 
+**With the native client**, `move` plans a move but does not perform one
+yet: `pseudolife-mcp move --to <ssh-target> --target-url <url>
+--no-keep-tokens --dry-run` checks both hosts without changing anything on
+either and prints what the move would do, and without `--dry-run` it refuses
+and says so (move with pseudolife-mcp 0.23.x for now). The target needs the
+native client installed (its installer), an installed Docker bank (one
+compose stack, not a source checkout) that is healthy, empty and at least the
+source's schema and PostgreSQL version, and free space for the move's files
+under `~/.pseudolife-mcp/moves` (or `--target-work-dir`). ssh runs with
+`BatchMode=yes` and no option that touches host-key checking: a host key that
+is unknown or has changed fails with ssh's own refusal and the fix (connect
+once with `ssh <target>` and check the fingerprint, or `ssh-keygen -R` after
+confirming a changed key); move never accepts a key itself. `ssh` and
+`docker` are found only in absolute `PATH` directories. Not available in the
+native client yet: `--expose-target` (expose the target yourself and pass
+`--target-url`), carrying the source's tokens (pass `--no-keep-tokens`),
+`--resume`, `--target-env-file`, `--target-compose-file` and checkout targets
+(`--target-checkout`). The rest of this section describes pseudolife-mcp
+0.23.x's move.
+
 **Install the destination first**, using the installer or your stack manager,
 then run the move on the source. An owning checkout supplies restore/update;
 without one, move uses the target's installed CLI and needs its clone-free

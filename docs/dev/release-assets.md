@@ -1,9 +1,12 @@
 # Native release assets
 
-Publishing the native CLI and the Rust daemon image requires the
-existing human-approved `publish` job in `.github/workflows/release.yml`.
-The native CLI archives publish with every approved release, because the
-installers download them; the Rust daemon image additionally needs its
+The native CLI archives publish with every release
+(`.github/workflows/release.yml`), because the installers download them,
+and they are on the GitHub release before PyPI publishes. The updaters
+learn that a release exists from PyPI and then download its archives,
+and PyPI cannot be unpublished, so a failed native build stops the
+release before PyPI. The Rust daemon image needs the human-approved
+`publish` job, and additionally its
 repository variable, which stays enabled since it became the default
 Docker engine in 0.23.0. This contract does not authorize a release.
 
@@ -95,8 +98,9 @@ does not imply a daemon image for every target. The runtime installs
 
 The image job is enabled only by the maintainer setting
 `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true`; unset or other values disable it.
-The native asset set has no variable: it publishes whenever the approved
-`publish` job succeeded. Build-only CI proofs neither attach release
+The native asset set has no variable: it publishes on every release
+event once the `build` job's version guards passed, before the `publish`
+(PyPI) job, which needs it. Build-only CI proofs neither attach release
 assets nor push images. Installers and updaters still treat an asset as
 unavailable until the release actually carries it (a 404 or a missing
 `SHA256SUMS` line refuses with nothing changed).
@@ -122,12 +126,21 @@ To prove the matrix without publication, dispatch `release.yml` on the
 candidate branch. The native build and bundle jobs upload an Actions
 artifact named `native-release-complete`; all publishing jobs are skipped,
 even if the Rust image variable is enabled. A release event builds the same
-archives only after `publish` succeeds, then verifies the downloaded `SHA256SUMS` immediately before attaching the
-complete set. Publication requires exactly the six listed archives plus the
+archives after the `build` job's guards, then verifies the downloaded
+`SHA256SUMS` immediately before attaching the complete set to the
+already published GitHub release; PyPI, the images and the registry wait
+for that attachment. Publication requires exactly the six listed archives plus the
 checksum manifest. On a retry, it downloads and verifies every already
 published asset, including `SHA256SUMS`, before uploading only missing assets;
 any differing published bytes fail the job without replacement. Rerun the
 publication job with the same complete artifact after a partial upload.
+Re-running the failed jobs of a release run reruns only what failed and
+what waits for it: a failed target build rebuilds that target, then the
+bundle, the attachment (only missing assets) and PyPI's approval; a
+failure after the attachment leaves the assets in place. Use "Re-run
+failed jobs", never "Re-run all jobs": a rebuild need not be byte-identical,
+so its `SHA256SUMS` would differ from the attached one and the attachment
+would refuse, which blocks PyPI until the attached assets are deleted.
 Packaging fixes
 gzip/tar timestamps at the Unix epoch and ZIP timestamps at 1980-01-01;
 identical input bytes produce identical archives with the same packager.

@@ -60,8 +60,8 @@ trap cleanup EXIT
 # old 35-minute bound killed batch 43525635914 at 99%; 50 is about 40% over
 # the slowest. Install plus a cold embedder download (up to ~10 min) and
 # the kill grace must still fit inside the job's 65 (tests/
-# test_hang_diagnostics.py). test-lite-linux shares the bound; its step
-# took 17.9-23.8 min on the same runs.
+# test_hang_diagnostics.py). Those runs collected every test file; the
+# live set alone (tests/suite_classes.txt) has not been measured on CI yet.
 # ops/pytest_failure_lines.py prints `FAILED <node id> - <reason>` the moment
 # a test fails, so a run killed before its summary still names it, and
 # appends each test phase's seconds to ci-results/test-times.tsv, so a
@@ -70,6 +70,15 @@ trap cleanup EXIT
 # timeline, resource and test-server samples, run manifest) into
 # ci-results/profile and folds its summary; the selection, workers and exit
 # status are unchanged. Off by default until its overhead is measured.
+# PSEUDOLIFE_CI_INCLUDE_FROZEN=true (ci.yml's scope: a change to the frozen
+# package, or the weekly run) adds the frozen test files (tests/
+# suite_classes.txt). An argument to this pytest only: PYTEST_ADDOPTS would
+# reach every pytest a test starts as well, and the suite's own collection
+# tests start several.
+frozen=()
+if [[ "${PSEUDOLIFE_CI_INCLUDE_FROZEN:-}" == true ]]; then
+    frozen=(--include-frozen)
+fi
 profile=()
 case "${PSEUDOLIFE_SUITE_PROFILE:-}" in
     ""|0|off|false|no) ;;
@@ -83,7 +92,7 @@ export PSEUDOLIFE_CI_TEST_TIMES="$PWD/ci-results/test-times.tsv"
 set +e
 /usr/bin/time -v -o ci-results/process.txt \
     timeout --signal=ABRT --kill-after=60s 50m \
-    python -m pytest -p ops.pytest_failure_lines ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
+    python -m pytest -p ops.pytest_failure_lines ${frozen[@]+"${frozen[@]}"} ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
     --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml "$@"
 test_status=$?
 if (( ${#profile[@]} )) && [[ -f ci-results/profile/manifest.json ]]; then

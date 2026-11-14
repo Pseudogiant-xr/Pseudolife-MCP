@@ -8,31 +8,42 @@ pub(super) struct Args {
     pub data_dir: Option<std::path::PathBuf>,
     pub out: Option<std::path::PathBuf>,
     pub keep_days: f64,
+    /// The Docker bank's selectors; any of them chooses the Docker tier.
+    pub container: Option<String>,
+    pub daemon_container: Option<String>,
+    pub db: Option<String>,
+    pub user: Option<String>,
+    pub db_port: Option<i128>,
+}
+
+impl Args {
+    /// Whether any Docker selector was given.
+    pub fn docker(&self) -> bool {
+        self.container.is_some()
+            || self.daemon_container.is_some()
+            || self.db.is_some()
+            || self.user.is_some()
+            || self.db_port.is_some()
+    }
 }
 pub(super) enum Parsed {
     Args(Args),
     Help,
     Error(String),
 }
-const OPTIONS: [&str; 4] = ["--help", "--data-dir", "--out", "--keep-days"];
-const DOCKER_OPTIONS: [&str; 5] = [
+/// argparse's option strings in registration order (an ambiguity message
+/// lists its matches in this order).
+const OPTIONS: [&str; 9] = [
+    "--help",
+    "--data-dir",
+    "--out",
+    "--keep-days",
     "--container",
     "--daemon-container",
     "--db",
     "--user",
     "--db-port",
 ];
-
-pub(in crate::cli) fn columns_supported() -> bool {
-    let Some(value) = std::env::var("COLUMNS")
-        .ok()
-        .and_then(|raw| normalized_number(&raw))
-    else {
-        return true;
-    };
-    let digits = value.strip_prefix(['+', '-']).unwrap_or(&value);
-    !(digits.bytes().all(|byte| byte.is_ascii_digit()) && digits.len() > 4300)
-}
 
 pub(in crate::cli) fn width() -> usize {
     std::env::var("COLUMNS")
@@ -119,19 +130,35 @@ fn optional(raw: &str) -> bool {
             .is_match(number)
 }
 
+/// An `int()` value: decimal digits (Unicode decimal digits read as
+/// Python reads them), an optional sign, single underscores between digits.
+fn integer(raw: &str) -> Option<i128> {
+    let normalized = normalized_number(raw)?;
+    let (negative, digits) = match normalized.strip_prefix('-') {
+        Some(digits) => (true, digits),
+        None => (false, normalized.strip_prefix('+').unwrap_or(&normalized)),
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    // Past i128 every value is out of the port range, its only use.
+    let value = digits.parse::<i128>().unwrap_or(i128::MAX);
+    Some(if negative { -value } else { value })
+}
+
 pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
-    let values: Vec<_> = arguments
+    let Some(values) = arguments
         .iter()
         .map(|value| value.to_str())
-        .collect::<Option<_>>()?;
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Some(Parsed::Error(
+            "every argument must be valid Unicode text; pass a path without undecodable bytes"
+                .into(),
+        ));
+    };
     // argparse classifies the full argv before executing actions (including help).
     for raw in values.iter().take_while(|raw| **raw != "--") {
-        let name = raw.split_once('=').map_or(*raw, |(name, _)| name);
-        // Python owns Docker selectors, including prefixes whose ambiguity
-        // depends on its complete option set. Defer before parsing or effects.
-        if name.starts_with("--") && DOCKER_OPTIONS.iter().any(|option| option.starts_with(name)) {
-            return None;
-        }
         if let Err(message) = option(raw) {
             return Some(Parsed::Error(message));
         }
@@ -140,6 +167,11 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
         data_dir: None,
         out: None,
         keep_days: 7.0,
+        container: None,
+        daemon_container: None,
+        db: None,
+        user: None,
+        db_port: None,
     };
     let mut unknown = Vec::new();
     let mut index = 0;
@@ -149,7 +181,7 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
             unknown.extend_from_slice(&values[index..]);
             break;
         }
-        let matched = option(raw).ok()?;
+        let matched = option(raw).unwrap_or(None);
         let Some(matched) = matched else {
             unknown.push(raw);
             index += 1;
@@ -189,6 +221,19 @@ pub(super) fn parse(arguments: &[OsString]) -> Option<Parsed> {
         match matched {
             "--data-dir" => args.data_dir = Some(pathlib(Path::new(value))),
             "--out" => args.out = Some(pathlib(Path::new(value))),
+            "--container" => args.container = Some(value.to_owned()),
+            "--daemon-container" => args.daemon_container = Some(value.to_owned()),
+            "--db" => args.db = Some(value.to_owned()),
+            "--user" => args.user = Some(value.to_owned()),
+            "--db-port" => match integer(value) {
+                Some(value) => args.db_port = Some(value),
+                None => {
+                    return Some(Parsed::Error(format!(
+                        "argument --db-port: invalid int value: {}",
+                        super::super::mode_repr(value)
+                    )));
+                }
+            },
             "--keep-days" => match float(value) {
                 Some(value) => args.keep_days = value,
                 None => {

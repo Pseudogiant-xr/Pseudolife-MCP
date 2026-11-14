@@ -267,20 +267,24 @@ URLS_UNSURE = ("http://[::1]:8765", "http://@h", "http://h:", "http://h:+80", "h
 
 def _url_cases() -> list[Case]:
     out = []
-    for kind, urls in (("valid", URLS_VALID), ("invalid", URLS_INVALID), ("unsure", URLS_UNSURE)):
+    # URLS_UNSURE (validity that differs between Python releases) is not
+    # compared: the native move decides those itself (argv.rs origin, its
+    # Rust test target_urls_are_origins).
+    for kind, urls in (("valid", URLS_VALID), ("invalid", URLS_INVALID)):
         for n, url in enumerate(urls, 1):
             argv = ["--to", "a b", "--target-url", url]
-            case = _deferred(f"url-{kind}-{n}", argv) if kind == "unsure" else _case(f"url-{kind}-{n}", argv)
+            # The native move decides every URL itself now; with --to "a b"
+            # both arms refuse before any effect.
+            case = _case(f"url-{kind}-{n}", argv)
             case.note = url
             out.append(case)
     return out
 
 # Cases whose argv passes validation: the oracle never runs them.
-ORACLE_NOT_RUN = ("valid-minimal", "valid-dry-run", "valid-resume-yes", "valid-json",
-                  "valid-every-option", "valid-url-trailing-slash", "valid-checkout-tab",
-                  "valid-to-del", "defer-url-bracketed", "defer-url-empty-userinfo",
-                  "defer-url-empty-port", "defer-joined-to", "defer-abbreviation",
-                  "defer-repeated-flag")
+# Valid argv the native move answers itself (its dry run, or its own
+# refusals) is tested in Rust (`tests/cli_move_contract.rs`,
+# `restore_cli/move_native/tests.rs`), not compared: see move.md.
+ORACLE_NOT_RUN = ("defer-joined-to", "defer-abbreviation", "defer-repeated-flag")
 
 
 def cases() -> list[Case]:
@@ -331,28 +335,14 @@ def cases() -> list[Case]:
         _deferred("defer-to-joined-dash", ["--to=-x"]),
         _deferred("defer-unknown-flag", ["--to", "root@box", "--bogus"]),
         _deferred("defer-positional", ["--to", "root@box", "extra"]),
-        _deferred("defer-control-json", ["--json", "--to", "a\x01b"]),
-        _deferred("defer-checkout-json", ["--to", "root@box", "--target-checkout", "x\n", "--json"]),
-        _deferred("defer-url-invalid-unsure", ["--to", "a b", "--target-url", "http://[::1"]),
+        _case("url-invalid-bracket-unclosed", ["--to", "a b", "--target-url", "http://[::1"]),
         # a value starting with '-' is argparse's "expected one argument"
         _deferred("defer-url-dash-value", ["--to", "box", "--target-url", "-x"]),
         _deferred("defer-checkout-dash-newline", ["--to", "box", "--target-checkout", "-\n"]),
         _deferred("defer-to-dash-control", ["--to", "-\x01"]),
         *_url_cases(),
-        # argv that passes validation: the candidate defers; the oracle is never run
-        _valid("valid-minimal", ["--to", "root@box"]),
-        _valid("valid-dry-run", ["--to", "root@box", "--dry-run"]),
-        _valid("valid-resume-yes", ["--to", "box", "--resume", "--yes"]),
-        _valid("valid-json", ["--to", "box", "--json"]),
-        _valid("valid-every-option", ["--to", "root@box", "--target-checkout", "/srv/pl",
-                                      "--target-url", GOOD_URL, "--no-keep-tokens", "--resume",
-                                      "--dry-run", "--yes", "--json"]),
-        _valid("valid-url-trailing-slash", ["--to", "box", "--target-url", "https://box.example.com/"]),
-        _valid("valid-checkout-tab", ["--to", "box", "--target-checkout", "a\tb"]),
-        _valid("valid-to-del", ["--to", "a\x7fb"]),
-        _valid("defer-url-bracketed", ["--to", "box", "--target-url", "http://[::1]:8765"]),
-        _valid("defer-url-empty-userinfo", ["--to", "box", "--target-url", "http://@box"]),
-        _valid("defer-url-empty-port", ["--to", "box", "--target-url", "http://box:"]),
+        # argv shapes the native parser does not take: the candidate defers;
+        # the oracle is never run
         _valid("defer-joined-to", ["--to=root@box"]),
         _valid("defer-abbreviation", ["--dry", "--to", "root@box"]),
         _valid("defer-repeated-flag", ["--yes", "--yes", "--to", "root@box"]),
@@ -364,23 +354,13 @@ MUTANTS = [
            "(no path, query, or credentials)", ("url-path",)),
     Mutant("move-refusal-exit", "move", FILE, "settle(2, emit(&mut io::stderr()",
            "settle(1, emit(&mut io::stderr()", ("to-empty",)),
-    Mutant("move-isspace-separators", "move", FILE,
-           "c.is_whitespace() || ('\\u{1c}'..='\\u{1f}').contains(&c)", "c.is_whitespace()",
-           ("to-separator-json",)),
-    Mutant("move-json-control", "move", FILE,
-           "    if to.chars().any(|c| c < ' ') {\n        return if args.json {",
-           "    if to.chars().any(|c| c < ' ') {\n        return if false {",
-           ("defer-control-json",)),
     Mutant("move-checkout-cr", "move", FILE, "path.contains(['\\n', '\\r'])", "path.contains('\\n')",
            ("checkout-cr",)),
     Mutant("move-unsure-as-valid", "move", FILE,
            "Some(Origin::Unsure) => return Decision::Defer,", "Some(Origin::Unsure) => {}",
-           ("defer-url-invalid-unsure",)),
+           ("url-invalid-bracket-unclosed",)),
     Mutant("move-help-any-width", "move", FILE, "let wrapped_at_80 = context.columns == Some(\"80\");",
            "let wrapped_at_80 = context.columns.is_some();", ("defer-help-columns",)),
-    Mutant("move-valid-refused", "move", FILE,
-           "    }\n    Decision::Defer\n}", "    }\n    Decision::Refuse(BAD_TO.to_owned())\n}",
-           ("valid-minimal",)),
     Mutant("move-url-checked-after-to", "move", FILE,
            "        Some(Origin::Invalid) => return Decision::Refuse(BAD_URL.to_owned()),",
            "        Some(Origin::Invalid) if !to.is_empty() => return Decision::Refuse(BAD_URL.to_owned()),\n"
@@ -391,7 +371,7 @@ MUTANTS = [
     Mutant("move-direct-socket", "move", FILE, "        Decision::Defer => None,\n",
            "        Decision::Defer => {\n            if false {\n"
            "                let _ = std::net::TcpStream::connect(\"127.0.0.1:8765\");\n"
-           "            }\n            None\n        }\n", ("valid-minimal",)),
+           "            }\n            None\n        }\n", ("defer-joined-to",)),
     Mutant("move-dash-value-admitted", "move", FILE,
            "        if value.starts_with('-') {\n            return None;\n        }\n", "",
            ("defer-url-dash-value", "defer-checkout-dash-newline", "defer-to-dash-control")),

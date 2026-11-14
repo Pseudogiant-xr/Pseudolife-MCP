@@ -1,13 +1,13 @@
 //! Native process leaves at Python lease_cli.py pin 165f4125.
 pub(super) mod args;
-mod board;
+pub(super) mod board;
 mod hold;
 pub(crate) use hold::pid_alive;
 mod json;
 pub(crate) mod lock;
 pub mod operator;
 mod run;
-mod view;
+pub(super) mod view;
 
 fn whitespace(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)

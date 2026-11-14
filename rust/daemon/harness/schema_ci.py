@@ -55,10 +55,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rust-test-bin", type=Path, help="test executable required with --no-build")
     parser.add_argument("--test-bin-out", type=Path, help="write the selected executable path for another parity step")
     parser.add_argument("--record-goldens", action="store_true", help="record oracle post-state fixtures after a clean run")
+    parser.add_argument("--record-candidate", action="store_true",
+                        help="re-record schema-startup.json from the Rust candidate (candidate_record.py): a dry "
+                             "run that exits 1 if anything would change, unless --write")
+    parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     args = parser.parse_args(argv)
+    if args.record_goldens and args.record_candidate:
+        parser.error("--record-goldens records the oracle and --record-candidate the candidate; give one")
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if args.record_candidate:
+        import candidate_record
+        why = candidate_record.refuse_mutant_environment()
+        if why:
+            # Before the checks and the build, not only in the child.
+            parser.error(why)
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
-    if args.build_only and (args.no_build or args.out or args.record_goldens or not args.test_bin_out):
+    if args.build_only and (args.no_build or args.out or args.record_goldens or args.record_candidate
+                            or not args.test_bin_out):
         parser.error("--build-only takes only --test-bin-out")
     if not args.build_only and args.out is None:
         parser.error("--out is required")
@@ -107,6 +122,12 @@ def main(argv: list[str] | None = None) -> int:
 
         output = args.out.resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
+        if args.record_candidate:
+            # The golden's cases only; check the written golden afterwards.
+            command = [sys.executable, str(HERE / "run.py"), "schema", "--rust-test-bin", str(binary),
+                       "--all-versions", "--record-candidate", *(["--write"] if args.write else []),
+                       "--out", str(output)]
+            return subprocess.run(command, cwd=REPO, env=env).returncode
         command = [sys.executable, str(HERE / "run.py"), "schema", "--rust-test-bin", str(binary),
                    "--all-versions", "--refusals", "--mutants", "--out", str(output)]
         command.append("--record-goldens" if args.record_goldens else "--check-goldens")

@@ -468,12 +468,21 @@ normalize.rule("transfer-schema-lock-failure")(_expect(
 
 
 _NO_DATABASE = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL"
+# The lite tier is retired (14 November 2026): the candidate refuses a lite
+# bank with rust/shim/src/cli/retired.rs `lite_bank_refusal`, after import's
+# own "import refused: " prefix. The data dir is the case's {HOME}<sep>lite.
+LITE_REFUSAL = (
+    "import refused: {HOME}" + _SEP + "lite holds a lite-tier bank (embedded PostgreSQL), "
+    "and the lite tier is retired, so this client does not open it. Move the bank to the "
+    "Docker tier with the pip release (pseudolife-mcp 0.23.x), which still opens it: "
+    "follow \"Move a lite bank to Docker\" in docs/guide/configuration.md, which backs "
+    "the stopped bank up first and then has you install the Docker tier with "
+    "ops/install.sh (Linux, macOS) or ops\\install.ps1 (Windows).")
 # Host-independent: an oracle with pg0 refuses the unreadable marker with a
 # traceback, one without pg0 never attaches and prints the no-database
-# refusal. The candidate defers by name either way.
-normalize.rule("expect-import-lite-deferred")(_expect(
-    "pseudolife-stdio: mode 'import' on the embedded lite tier is deferred in this "
-    "candidate (needs native embedded_pg)", False,
+# refusal. The candidate refuses the lite bank plainly either way.
+normalize.rule("expect-import-lite-refused")(_expect(
+    LITE_REFUSAL, False,
     lambda obs, stderr: (_traceback(obs, stderr) and "PG_VERSION" in stderr)
     or (obs["exit"] == 1 and stderr.startswith(_NO_DATABASE))))
 # A COMMIT the server refuses (an ERROR: rolled back) keeps the certain
@@ -723,10 +732,10 @@ def _cases() -> list[core.Case]:
                   note="no DSN, no lite bank: the no-database refusal"),
         core.Case("import-no-database", ["import", "x.zip", "--data-dir", "{HOME}" + _SEP + "none"],
                   note="no DSN, explicit data dir without a bank"),
-        core.Case("import-lite-defers", ["import", "x.zip", "--data-dir", "{HOME}" + _SEP + "lite"],
+        core.Case("import-lite-refused", ["import", "x.zip", "--data-dir", "{HOME}" + _SEP + "lite"],
                   setup=_lite_marker, after=_lite_after,
-                  rules=("expect-import-lite-deferred",),
-                  note="an embedded bank marker: native deferral, nothing touched"),
+                  rules=("expect-import-lite-refused",),
+                  note="an embedded bank marker: the plain lite-tier refusal, nothing touched"),
         _export("export-seeded", ["--out", _SEP.join(["{CWD}", "nested", "dir", "bank.zip"])],
                 note="every exported table, created parent dirs, absolute --out"),
         _export("export-relative-out", ["--data-dir", "ignored", "--out", "rel.zip"],

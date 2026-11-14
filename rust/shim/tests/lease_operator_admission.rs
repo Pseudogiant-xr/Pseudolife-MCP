@@ -3,7 +3,7 @@ mod common;
 use common::{LeaseHome as Home, cli::native_text};
 use std::path::PathBuf;
 
-const NO_BANK: &str = "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, or run where the lite tier's data dir holds one (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)\n";
+const NO_BANK: &str = "no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL (Docker tier: start the daemon, or run `docker exec -it pseudolife-mcp-daemon pseudolife-mcp lease ...` on its host)\n";
 
 /// The one stderr line an old action name prints before it runs as conductor.
 fn deprecation(action: &str) -> String {
@@ -104,7 +104,7 @@ fn lease_home_blocks_container_even_when_an_executable_is_available() {
 }
 
 #[test]
-fn existing_embedded_data_refuses_lease_actions_before_container_launch() {
+fn a_lite_bank_refuses_lease_actions_plainly_before_container_launch() {
     let home = Home::new();
     let data_dir = home.0.join("data");
     let pgdata = data_dir.join("embedded_pg");
@@ -138,13 +138,14 @@ fn existing_embedded_data_refuses_lease_actions_before_container_launch() {
         assert_eq!(
             output.stderr,
             native_text(&format!(
-                "{}lease: {} refused: phase4-embedded-pg-deferred\n",
+                "{}lease: {} refused: {}\n",
                 deprecation(action),
                 if action == "break" {
                     "break"
                 } else {
                     "conductor"
-                }
+                },
+                pseudolife_stdio::cli::retired::lite_bank_refusal(&data_dir)
             ))
         );
         assert_eq!(output.status.code(), Some(1));

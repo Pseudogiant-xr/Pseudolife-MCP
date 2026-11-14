@@ -349,7 +349,10 @@ def test_native_setup_refuses_lite_before_config_mutation(tmp_path):
     finally:
         daemon.close()
     assert result.returncode == 4, result.stderr
-    assert "phase4-embedded-pg-deferred" in result.stderr
+    # The plain lite-tier refusal (rust/shim/src/cli/retired.rs), naming no
+    # Python command and no Phase 4 label.
+    assert "holds a lite-tier bank (embedded PostgreSQL)" in result.stderr, result.stderr
+    assert "phase4" not in result.stderr and "python -m" not in result.stderr
     assert path.read_text(encoding="utf-8") == "memory: {preset: flat}\n"
     assert not list(tmp_path.glob("config.yaml.*"))
 

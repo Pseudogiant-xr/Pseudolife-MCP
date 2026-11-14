@@ -109,3 +109,13 @@ def test_a_different_max_seq_length_gets_its_own_model() -> None:
         "the capped pipeline's max_seq_length leaked onto the default "
         "pipeline's model — exactly the ratchet this test exists to prevent"
     )
+
+
+def test_the_suite_runs_the_embedder_in_fp32() -> None:
+    """conftest pins fp32 for every pipeline the suite builds, and every
+    daemon it spawns inherits the variable — so a runner that reports
+    native bf16 cannot flip the suite's numerics. GitHub's runners report
+    none today; this keeps it that way on any host. (Moved from the frozen
+    test_embedding_cpu_dtype.py: it pins conftest, which still changes.)"""
+    import os
+    assert os.environ.get("PSEUDOLIFE_EMBEDDING_CPU_DTYPE") == "fp32"

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "8d99314724dc5541",
+  "fingerprint": "60bb9f1d6288101a",
+  "reason": "Python freeze (#1550): the lane's file list loses its frozen files, so its cost can only fall from the 12.1 measured; re-measure with test from the first two live-set batches."
+}

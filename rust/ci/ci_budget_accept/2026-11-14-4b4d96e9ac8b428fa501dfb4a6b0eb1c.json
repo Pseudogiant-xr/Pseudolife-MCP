@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "92b7929dcce188df",
+  "fingerprint": "a8fd221926016f9f",
+  "reason": "Merge of master c768b67bf (batch 6) into #1550: the Rust-readers step gains tests/test_codex_hook_native_golden.py and tests/test_update_bridge.py, two small files batch 6 added that read rust/ paths; well inside the 9.0-minute estimate, which the first Rust-only batch re-measures."
+}

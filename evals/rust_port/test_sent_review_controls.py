@@ -61,7 +61,8 @@ def startup_refusal(prefix, private, configuration):
     config = private / "config.yaml"
     config.write_text(configuration, encoding="utf-8")
     env = isolated_env(private / "home")
-    env.update(PSEUDOLIFE_MCP_CONFIG=str(config), PSEUDOLIFE_MCP_HOST="127.0.0.1", PSEUDOLIFE_MCP_PORT="0")
+    env.update(PSEUDOLIFE_MCP_CONFIG=str(config), PSEUDOLIFE_MCP_HOST="127.0.0.1", PSEUDOLIFE_MCP_PORT="0",
+               PSEUDOLIFE_STDIO_SENT_CANDIDATE="1")  # `serve` refuses without it
     with owned_process([*prefix, "serve"], cwd=private, env=env, stdin=subprocess.DEVNULL,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
         out, error = process.communicate(timeout=15)
@@ -101,7 +102,8 @@ def pg_open_observation(prefix, private, dsn, *, ambient=None, default_file=None
     port, nonce = free_port(), secrets.token_hex(32)
     env.update(PSEUDOLIFE_MCP_CONFIG=str(config), PSEUDOLIFE_MCP_DATABASE_URL=dsn,
                PSEUDOLIFE_MCP_HOST="127.0.0.1", PSEUDOLIFE_MCP_PORT=str(port),
-               PSEUDOLIFE_MCP_TOKEN=TOKEN, PSEUDOLIFE_BASELINE_NONCE=nonce)
+               PSEUDOLIFE_MCP_TOKEN=TOKEN, PSEUDOLIFE_BASELINE_NONCE=nonce,
+               PSEUDOLIFE_STDIO_SENT_CANDIDATE="1")  # `serve` refuses without it
     env.update(ambient or {})
     if default_file is not None:
         directory = Path(env["APPDATA"]) / "postgresql" if os.name == "nt" else Path(env["HOME"]) / ".postgresql"

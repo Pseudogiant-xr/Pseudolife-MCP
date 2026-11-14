@@ -530,7 +530,7 @@ async fn transaction(
     }
     if !held.is_empty() {
         return Err(Stop::Refuse(format!(
-            "target bank is not empty ({}) — import only fills a fresh bank. Point PSEUDOLIFE_MCP_DATABASE_URL at a new database (or start a fresh lite data dir) and retry.",
+            "target bank is not empty ({}) — import only fills a fresh bank. Point PSEUDOLIFE_MCP_DATABASE_URL at a new database and retry.",
             held.join(", ")
         )));
     }
