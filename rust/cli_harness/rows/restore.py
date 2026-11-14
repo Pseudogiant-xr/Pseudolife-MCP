@@ -678,7 +678,7 @@ def _docker_cases() -> list[Case]:
             *_probes(pg=_pg_doc(Mounts=[socket]))[:5], _inspect(PG, _pg_doc(Mounts=[socket])),
             _call(_lit("exec", PG, "sh", "-c", FIND, "_", "/var/run/postgresql"), 1)]),
         # the lock: another update holds it, so the oracle refuses before Docker
-        _scripted("docker-lock-busy", [], prepare=_hold_lock),
+        _scripted("docker-lock-busy", [], prepare=_hold_lock, rules=("restore-busy-holders",)),
     ]
 
 

@@ -134,7 +134,7 @@ fn main(arguments: Vec<OsString>) -> ExitCode {
     match with_update_lock(&directory, || locked(&args, &directory, state_size)) {
         Ok(code) => code,
         Err(LockRefusal::Busy(pid)) => refuse(&format!(
-            "another pseudolife-mcp update is running (pid {pid}); nothing was changed. Run this again when it has finished"
+            "another pseudolife-mcp update, restore or backup is running (pid {pid}); nothing was changed. Run this again when it has finished"
         )),
         Err(LockRefusal::Unavailable(error)) => refuse(&format!(
             "cannot take the update lock in {} ({error}); make that directory writable, then retry. Nothing was restored",

@@ -1104,6 +1104,24 @@ def test_oracle_rules_skip_the_native_observation():
     assert normalize.apply(native, rule, native["home"], oracle=True)["stderr"] == b64(b"")
 
 
+def test_restore_busy_rule_maps_only_the_oracles_holder_span():
+    rule = ("restore-busy-holders",)
+    tail = b"; nothing was changed. Run this again when it has finished\n"
+    oracle = b"restore failed: another pseudolife-mcp update is running (pid 4242)" + tail
+    native = b"restore failed: another pseudolife-mcp update, restore or backup is running (pid 4242)" + tail
+    assert compare.diff(obs(stderr=oracle), obs(stderr=native), rule) == []
+    assert compare.diff(obs(stderr=oracle), obs(stderr=native), ())
+    # The native side keeping the oracle's words, another pid, another tail,
+    # or the text anywhere but the start of stderr all stay diffs.
+    assert compare.diff(obs(stderr=oracle), obs(stderr=oracle), rule)
+    assert compare.diff(obs(stderr=oracle), obs(stderr=native.replace(b"4242", b"4243")), rule)
+    assert compare.diff(obs(stderr=oracle), obs(stderr=native.replace(b"nothing was changed", b"x")), rule)
+    assert compare.diff(obs(stderr=b"x" + oracle), obs(stderr=b"x" + native), rule)
+    from cli_harness.rows import restore
+    busy = [case for case in restore._docker_cases() if case.id == "docker-lock-busy"]
+    assert len(busy) == 1 and busy[0].rules == rule
+
+
 def test_doctor_rows_take_the_proactor_abort_rule():
     from cli_harness.rows import doctor
     assert "python-proactor-self-pipe-abort" in doctor.RULES

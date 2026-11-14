@@ -104,6 +104,12 @@ pub(super) struct Fake {
     pub(super) docs: HashMap<String, String>,
     /// The database-exists probe answers `f`.
     pub(super) absent_db: bool,
+    /// Each state archive's helper fails once with the next of these as
+    /// tar's stderr (exit 1), in order, before the archive is written.
+    pub(super) archive_failures: Vec<&'static str>,
+    /// The first call with this label never runs, for this reason (a
+    /// spawn failure, a timeout, an output file that cannot be created).
+    pub(super) fault_on: Option<(&'static str, &'static str)>,
 }
 
 impl Docker for Fake {
@@ -120,6 +126,28 @@ impl Docker for Fake {
             Input::Null => None,
             Input::File(path) => Some(path.to_path_buf()),
         });
+        // The real runner creates its output file new, never over one.
+        if let Output::File(path) = output
+            && path.exists()
+        {
+            return Ran {
+                code: 1,
+                failed: true,
+                fault: Some(format!("{} cannot be created (it exists)", path.display())),
+                ..Ran::default()
+            };
+        }
+        if let Some((wanted, fault)) = self.fault_on
+            && label(args) == wanted
+        {
+            self.fault_on = None;
+            return Ran {
+                code: 1,
+                failed: true,
+                fault: Some(fault.to_owned()),
+                ..Ran::default()
+            };
+        }
         let write = |bytes: &[u8]| {
             if let Output::File(path) = output {
                 std::fs::write(path, bytes).unwrap();
@@ -178,6 +206,15 @@ impl Docker for Fake {
             ["start", "-a", helper] => {
                 let script = self.helpers.get(*helper).cloned().unwrap_or_default();
                 if script.starts_with("tar czf") {
+                    if !self.archive_failures.is_empty() {
+                        let stderr = self.archive_failures.remove(0);
+                        write(b"partial");
+                        return Ran {
+                            code: 1,
+                            stderr: stderr.as_bytes().to_vec(),
+                            ..Ran::default()
+                        };
+                    }
                     write(&archive());
                     ok("")
                 } else if let (Some(mount), true) = (self.df_nested, script.contains("df -Pk")) {
@@ -774,6 +811,29 @@ fn an_incomplete_safety_dump_stops_before_anything_is_dropped() {
         std::fs::read_dir(safety).unwrap().next().is_none(),
         "no partial file is left"
     );
+}
+
+#[test]
+fn an_interrupted_restores_journal_names_its_state_archive_for_backup_rotation() {
+    let setup = Setup::new(true);
+    let mut docker = Fake {
+        fail_on: Some("replay"),
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 1);
+    let journal: Value =
+        serde_json::from_str(&std::fs::read_to_string(setup.journal()).unwrap()).unwrap();
+    let archive = setup.args.state_archive.clone().unwrap();
+    assert_eq!(
+        journal["state_archive"].as_str(),
+        Some(archive.to_string_lossy().as_ref()),
+        "{journal}"
+    );
+    // Backup reads it back: the archive, named unlike any backup, is
+    // never rotated while the journal stands.
+    let protected = super::docker_backup::journal_files(&setup.data_dir()).unwrap();
+    assert!(protected.contains(&archive), "{protected:?}");
 }
 
 #[test]

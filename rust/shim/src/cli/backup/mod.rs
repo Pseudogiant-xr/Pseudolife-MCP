@@ -223,8 +223,26 @@ fn main(arguments: Vec<OsString>) -> u8 {
         }
     };
     // The Docker tier: a Docker selector, or no --data-dir and a bank
-    // container that answers `docker inspect`.
-    if args.docker() || (args.data_dir.is_none() && docker_backup::configured()) {
+    // container `docker ps -a` lists.
+    let tier = if args.docker() {
+        docker_backup::Configured::Yes
+    } else if args.data_dir.is_none() {
+        docker_backup::configured()
+    } else {
+        docker_backup::Configured::No
+    };
+    // Docker that could not be asked never turns into a file-tier backup
+    // without a database dump that exits 0.
+    if let docker_backup::Configured::Unknown(cause) = &tier
+        && nonempty_env("PSEUDOLIFE_MCP_DATABASE_URL")
+            .flatten()
+            .is_none()
+    {
+        return refused(&format!(
+            "Docker is installed but could not be asked whether this host runs a Docker bank ({cause}), and without that this backup would archive a data directory without its database; start Docker and retry, or pass --data-dir <directory> to back up a data directory without a database. No backup was written"
+        ));
+    }
+    if tier == docker_backup::Configured::Yes {
         return docker_backup::run(&docker_backup::Request {
             container: args.container.clone(),
             daemon_container: args.daemon_container.clone(),

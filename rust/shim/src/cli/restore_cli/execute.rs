@@ -242,7 +242,11 @@ pub(super) fn read_journal(data_dir: &Path, plan: &Plan) -> Result<Option<Earlie
         let state = PathBuf::from(value["safety_state"].as_str()?);
         let dump = value["safety_dump"].as_str().map(PathBuf::from);
         Some(Earlier {
-            pair: Pair { dump, state },
+            pair: Pair {
+                dump,
+                state,
+                archive_retries: Vec::new(),
+            },
             started: value["started"]
                 .as_str()
                 .unwrap_or("an earlier run")

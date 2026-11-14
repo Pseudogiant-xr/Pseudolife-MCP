@@ -1199,3 +1199,68 @@ fn nested_self_junction_cycle_is_refused_with_output_outside_the_bank() {
     assert!(!out.exists());
     fs::remove_dir(link).unwrap();
 }
+
+#[test]
+fn a_held_update_lock_refuses_a_docker_backup_naming_every_holder() {
+    let home = Home::new("lock-busy");
+    let data = home.path().join(".pseudolife-mcp");
+    fs::create_dir(&data).unwrap();
+    // Another update, restore or backup holds the update lock.
+    let lock = fs::File::create(data.join("update.lock")).unwrap();
+    lock.try_lock().unwrap();
+    fs::write(data.join("update.lock.pid"), "4242\n").unwrap();
+    let before = home.listing();
+    let output = run(home.path(), &["--container", "pseudolife-mcp-postgres"]);
+    drop(lock);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&cli::native_text(
+            "backup failed: another pseudolife-mcp update, restore or backup is running (pid 4242); nothing was changed. Run this again when it has finished\n"
+        ))
+    );
+    assert_eq!(home.listing(), before);
+}
+
+#[test]
+fn docker_that_cannot_be_asked_never_becomes_a_backup_without_its_database() {
+    let home = Home::new("docker-unknown");
+    fs::create_dir(home.path().join("data")).unwrap();
+    fs::write(home.path().join("data").join("config.yaml"), "x").unwrap();
+    // A docker that is there but cannot run, as an engine that cannot be
+    // reached answers no listing.
+    let docker = home.path().join(if cfg!(windows) {
+        "docker.exe"
+    } else {
+        "docker"
+    });
+    fs::write(&docker, b"not a program").unwrap();
+    let before = home.listing();
+    let output = command(home.path())
+        .env("PSEUDOLIFE_DOCKER", &docker)
+        .output()
+        .unwrap();
+    let stderr = assert_refusal(&output);
+    assert!(
+        stderr.starts_with(
+            "backup failed: Docker is installed but could not be asked whether this host runs a Docker bank (docker ps -a failed: "
+        ) && stderr.contains("cannot be started"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("pass --data-dir <directory>"), "{stderr}");
+    assert_eq!(home.listing(), before);
+    // Naming the data directory chooses the file tier.
+    let output = command(home.path())
+        .env("PSEUDOLIFE_DOCKER", &docker)
+        .args(["--data-dir", "data"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .replace("\r\n", "\n")
+            .starts_with(SKIPPED),
+        "{output:?}"
+    );
+}

@@ -25,6 +25,74 @@ pub(super) struct Pair {
     /// `None` when the destination database did not exist.
     pub dump: Option<PathBuf>,
     pub state: PathBuf,
+    /// tar's reason for each archive attempt retried before the one kept
+    /// (a file in /data changed while it was read); empty when the first
+    /// attempt was kept.
+    pub archive_retries: Vec<String>,
+}
+
+/// How many times the state archive is taken when tar reports a file in
+/// /data changed or vanished while it was read, and the pause between
+/// attempts. A serving daemon writes /data in bursts (a deep dream writes
+/// and prunes graph snapshots in place), so a few seconds apart three
+/// attempts outlast one burst; a writer that never pauses still fails the
+/// backup, with tar's text.
+const ARCHIVE_ATTEMPTS: usize = 3;
+const ARCHIVE_PAUSE: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(20)
+} else {
+    std::time::Duration::from_secs(10)
+};
+
+/// tar's own last line of complaint, or `None`.
+fn last_line(stderr: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_owned)
+}
+
+/// GNU tar's words for a file that changed or was removed while it read
+/// it: the archive is then not a consistent copy, but a later attempt can be.
+fn changed_while_read(stderr: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(stderr);
+    text.contains("changed as we read it") || text.contains("removed before we read it")
+}
+
+/// Removes files this run published; the ones that could not be removed,
+/// named for the message (they stand under their final names).
+pub(super) fn unpublish(paths: &[&Path]) -> Vec<String> {
+    paths
+        .iter()
+        .filter_map(|path| match fs::remove_file(path) {
+            Ok(()) => None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => Some(format!("{} ({error})", path.display())),
+        })
+        .collect()
+}
+
+/// The words that say a published file could not be removed again; the
+/// caller then never says nothing was written.
+pub(super) const LEFT_BEHIND: &str = "could not be removed and still stands under its final name";
+
+/// `message`, telling what still stands when a removal failed: this run
+/// reports no backup, so the user deletes those files.
+pub(super) fn with_leftovers(message: String, left: &[String]) -> String {
+    if left.is_empty() {
+        return message;
+    }
+    let each: Vec<String> = left
+        .iter()
+        .map(|file| format!("{file} {LEFT_BEHIND}"))
+        .collect();
+    let them = if left.len() == 1 { "it" } else { "them" };
+    format!(
+        "{message}; {}. This run reports no backup, so delete {them}",
+        each.join(", and ")
+    )
 }
 
 const DUMP: &str = r#"unset PGHOSTADDR PGSERVICE PGSERVICEFILE; exec pg_dump --no-owner --no-acl -h "$1" -p "$2" -U "$3" -d "$4" -Z9"#;
@@ -158,6 +226,15 @@ pub(super) fn backup<D: Docker>(bank: &mut Bank<'_, D>, plan: &Target, stamp: &s
             let ran = bank
                 .docker
                 .run_io(&argv, BULK, Input::Null, Output::File(&dump_part));
+            if ran.failed && !ran.interrupted {
+                let fault = ran.fault.clone().unwrap_or_else(|| "it failed".to_owned());
+                return Err(Stop(
+                    format!(
+                        "the {kind}dump of the current database could not be taken: {fault}; fix that, then retry"
+                    ),
+                    1,
+                ));
+            }
             if !ran.ok() {
                 let cause = bank.psql_failure(&ran, plan.port);
                 if cause.1 == 130 {
@@ -184,27 +261,56 @@ pub(super) fn backup<D: Docker>(bank: &mut Bank<'_, D>, plan: &Target, stamp: &s
                 ));
             }
         }
-        let helper = bank.helper(&plan.image, ARCHIVE, false)?;
-        let argv: Vec<String> = vec!["start".into(), "-a".into(), helper.clone()];
-        let ran = bank
-            .docker
-            .run_io(&argv, BULK, Input::Null, Output::File(&state_part));
-        bank.quiet(&["rm", "-f", &helper]);
-        if ran.interrupted {
-            return Err(Stop("interrupted".into(), 130));
-        }
-        if !ran.ok() {
-            // GNU tar exits 1 when a file changed while it was read, which
-            // a backup of a serving daemon can meet; the archive is then not
-            // a consistent copy and is not kept.
-            let why = if ran.code == 1 {
-                "tar reports a file in /data changed while it was read, or Docker failed to run the helper"
+        let mut retries = Vec::new();
+        loop {
+            let _ = fs::remove_file(&state_part);
+            let helper = bank.helper(&plan.image, ARCHIVE, false)?;
+            let argv: Vec<String> = vec!["start".into(), "-a".into(), helper.clone()];
+            let ran = bank
+                .docker
+                .run_io(&argv, BULK, Input::Null, Output::File(&state_part));
+            bank.quiet(&["rm", "-f", &helper]);
+            if ran.interrupted {
+                return Err(Stop("interrupted".into(), 130));
+            }
+            if ran.ok() {
+                break;
+            }
+            if ran.failed {
+                let fault = ran.fault.clone().unwrap_or_else(|| "it failed".to_owned());
+                return Err(Stop(
+                    format!(
+                        "the {kind}archive of the state volume could not be taken: {fault}; fix that, then retry"
+                    ),
+                    1,
+                ));
+            }
+            let said = last_line(&ran.stderr).map_or_else(
+                || "it printed nothing".to_owned(),
+                |line| format!("it said: {line}"),
+            );
+            // GNU tar exits 1 when a file changed or vanished while it read
+            // it (a serving daemon writing /data); that archive is not a
+            // consistent copy and is not kept, but a later attempt can be.
+            if changed_while_read(&ran.stderr) && retries.len() + 1 < ARCHIVE_ATTEMPTS {
+                retries.push(said);
+                let end = std::time::Instant::now() + ARCHIVE_PAUSE;
+                while std::time::Instant::now() < end {
+                    if bank.docker.interrupted() {
+                        return Err(Stop("interrupted".into(), 130));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                continue;
+            }
+            let attempts = if retries.is_empty() {
+                String::new()
             } else {
-                "tar or Docker exited with an error"
+                format!(" on attempt {} of {ARCHIVE_ATTEMPTS}", retries.len() + 1)
             };
             return Err(Stop(
                 format!(
-                    "the {kind}archive of the state volume failed ({why}, code {}); check the daemon's /data volume and the free space on {}, then retry",
+                    "the {kind}archive of the state volume failed{attempts}: tar or Docker exited {} and {said}; check the daemon's /data volume and the free space on {}, then retry",
                     ran.code,
                     directory.display()
                 ),
@@ -253,18 +359,27 @@ pub(super) fn backup<D: Docker>(bank: &mut Bank<'_, D>, plan: &Target, stamp: &s
             fs::rename(&dump_part, &dump_path).map_err(unflushed)?;
         }
         // The pair is published whole or not at all: a dump renamed before
-        // the archive's rename or the directory sync failed is removed.
-        let published = fs::rename(&state_part, &state_path).and_then(|()| sync_dir(directory));
+        // the archive's rename or the directory sync failed is removed, and
+        // the archive only when this run renamed it into place.
+        let renamed = fs::rename(&state_part, &state_path);
+        let state_renamed = renamed.is_ok();
+        let published = renamed.and_then(|()| sync_dir(directory));
         if let Err(error) = published {
+            let mut mine: Vec<&Path> = Vec::new();
             if plan.include_database {
-                let _ = fs::remove_file(&dump_path);
+                mine.push(&dump_path);
             }
-            let _ = fs::remove_file(&state_path);
-            return Err(unflushed(error));
+            if state_renamed {
+                mine.push(&state_path);
+            }
+            let left = unpublish(&mine);
+            let Stop(message, code) = unflushed(error);
+            return Err(Stop(with_leftovers(message, &left), code));
         }
         Ok(Pair {
             dump: plan.include_database.then(|| dump_path.clone()),
             state: state_path.clone(),
+            archive_retries: retries,
         })
     })();
     // Partial files never outlive the run (a renamed file is complete).

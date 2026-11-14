@@ -9239,33 +9239,60 @@ Backup detects the Docker bank, dumps through its PostgreSQL container and
 archives the daemon's `/data`, even if the daemon is stopped. It prints
 both artifact paths, by default under `~/.pseudolife-mcp/backups`. Keep the
 pair together and copy it off-disk. `--keep-days` defaults to 7; Docker
-rotation touches only this tool's own files and always keeps the newest
-three of each kind. For nonstandard names, pass `--container <postgres>`
-and `--daemon-container <daemon>`; `--db`, `--user` and `--db-port` override
-the database identity otherwise read from the daemon configuration.
+rotation keeps or removes a dump and its state archive together and always
+keeps the newest three pairs. For nonstandard names, pass `--container
+<postgres>` and `--daemon-container <daemon>`; `--db`, `--user` and
+`--db-port` override the database identity otherwise read from the daemon
+configuration. If Docker is installed but cannot be asked whether the bank
+containers exist (the engine is stopped or still starting), backup refuses
+rather than archive a data directory without its database: start Docker
+and retry, or pass `--data-dir <directory>` to back up a data directory
+without a database.
 
 The daemon keeps serving throughout: nothing is stopped. The dump is the
-database at one moment (pg_dump's snapshot) and `/data` is archived just
-after it, so writes made between the two can be in one and not the other;
-for a pair taken at one instant, stop the daemon first. Each file is
-written under a `.part` name, read back (the dump's completion marker, the
-archive read to its end with restore's path checks) and only then renamed,
-so the two printed paths exist and are complete; a failure or Ctrl-C
-leaves no file under a backup name and says `No backup was written`. If a
-file in `/data` changes while it is archived, `tar` exits 1 and the backup
-fails with that cause: run it again (or stop the daemon first). Backup
-refuses an `--out` inside the daemon's `/data` volume (the archive would
-contain itself), a missing database, and a lite bank, which needs the
-Docker install. Rotation removes only files with this command's exact
-names (`pseudolife_memory-<date>-<time>-<8 hex>.sql.gz` and
-`pseudolife_state-…tgz`), never restore's safety pairs or a file a
-restore journal names, and never one of the newest three of each kind. A
-safety pair an earlier native restore wrote under those names is kept by
-the `pseudolife_restore-<timestamp>.txt` note beside it; one the Python
-restore wrote has no note and the same names as a backup, so it rotates
-like one, as it did under the Python backup. A
-staging directory a killed restore left in `/data` is left out of the
-archive.
+database at the moment pg_dump starts (its snapshot); `/data` is archived
+after the dump has finished, so the pair is two points in time a few
+seconds or minutes apart, and a write made between them can be in one and
+not the other. For a pair taken at one instant, stop the daemon first.
+Each file is written under a `.part` name, read back (the dump's
+completion marker, the archive read to its end with restore's path checks)
+and only then renamed, so the two printed paths exist and are complete; a
+failure or Ctrl-C leaves no file under a backup name and says `No backup
+was written`. If a file in `/data` changes or vanishes while it is
+archived, `tar` reports it and that archive is discarded: backup takes the
+archive again, up to three attempts 10 seconds apart, keeping the verified
+dump, and says which attempt it kept (the archive is then later than the
+dump by those attempts). If every attempt meets a change, the backup fails
+with tar's own line. Any other failure names its cause: a directory that
+cannot be written, a step that timed out or could not start, or tar's or
+Docker's last line of complaint. If a file this run had already published
+cannot be removed again, the message names it instead of saying nothing was
+written. Backup refuses an `--out` inside the daemon's `/data` volume (the
+archive would contain itself), a missing database, and a lite bank, which
+needs the Docker install. Another update, restore or backup holding the
+update lock refuses it, naming that process's pid.
+
+Rotation looks only at files with this command's exact names
+(`pseudolife_memory-<date>-<time>-<8 hex>.sql.gz` and
+`pseudolife_state-…tgz`) and groups them by that timestamp. A dump and an
+archive with one timestamp are a pair, kept or removed together: the newest
+three pairs stay, and an older pair goes once both of its files are older
+than `--keep-days`. A file whose partner is missing (one half deleted by
+hand, a backup killed between its two renames, or the state-only safety
+archive the Python restore writes when the database did not exist) is
+never removed: backup lists it as `kept unpaired:` so you can delete it
+yourself. Rotation never touches restore's safety pairs or a file a
+restore journal names. A safety pair an earlier native restore wrote under
+the backup names is kept by the `pseudolife_restore-<timestamp>.txt` note
+beside it; one the Python restore wrote has no note and the same names as a
+backup, so it rotates like one, as it did under the Python backup. If the
+data directory cannot be listed or a restore journal in it cannot be read,
+rotation is skipped for that run with a warning that says why, and the new
+backup still succeeds. A `.part` file a killed backup left in the backup
+directory is removed by the next backup once it has not changed for 10
+minutes (a newer one may still be written by an older client, which takes
+no update lock). A staging directory a killed restore left in `/data` is
+left out of the archive.
 
 Restore **replaces** the existing bank:
 
