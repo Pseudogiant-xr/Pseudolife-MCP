@@ -526,6 +526,10 @@ fn release_target_answers_from_the_record_and_names_what_it_keeps() {
     plant(&home.0, &record("moved", true, r#""moved_written":true"#));
     let output = release(&["--release-target", MOVE_ID, "--yes"]);
     assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("passed its commit point"),
+        "{output:?}"
+    );
     // A move not yet rolled back is rolled back first.
     plant(
         &home.0,
