@@ -4076,7 +4076,8 @@ archived, `tar` reports it and that archive is discarded: backup takes the
 archive again, up to three attempts 10 seconds apart, keeping the verified
 dump, and says which attempt it kept (the archive is then later than the
 dump by those attempts). If every attempt meets a change, the backup fails
-with tar's own line. Any other failure names its cause: a directory that
+with tar's own line and says to retry when the daemon is quieter or to
+stop it for the backup. Any other failure names its cause: a directory that
 cannot be written, a step that timed out or could not start, or tar's or
 Docker's last line of complaint. If a file this run had already published
 cannot be removed again, the message names it instead of saying nothing was

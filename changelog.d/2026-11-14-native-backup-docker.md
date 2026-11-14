@@ -25,7 +25,8 @@
 - When `tar` reports a file in `/data` changing or vanishing while it was
   archived, backup takes the archive again (up to three attempts, 10
   seconds apart), keeping the verified dump, and says which attempt it
-  kept; if every attempt meets a change it fails with tar's line. Other
+  kept; if every attempt meets a change it fails with tar's line and says to
+  retry when the daemon is quieter or stop it for the backup. Other
   failures name their true cause (an unwritable directory, a timeout, a
   program that could not start, tar's or Docker's own last line), and a
   published file that could not be removed again is named rather than

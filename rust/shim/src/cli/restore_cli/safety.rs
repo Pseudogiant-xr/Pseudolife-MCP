@@ -308,11 +308,20 @@ pub(super) fn backup<D: Docker>(bank: &mut Bank<'_, D>, plan: &Target, stamp: &s
             } else {
                 format!(" on attempt {} of {ARCHIVE_ATTEMPTS}", retries.len() + 1)
             };
+            // The next step follows the cause: a file that kept changing
+            // needs a quieter /data, anything else the volume or the space.
+            let next = if changed_while_read(&ran.stderr) {
+                "a file in /data kept changing while it was archived; retry when the daemon is quieter, or stop the daemon for the backup".to_owned()
+            } else {
+                format!(
+                    "check the daemon's /data volume and the free space on {}, then retry",
+                    directory.display()
+                )
+            };
             return Err(Stop(
                 format!(
-                    "the {kind}archive of the state volume failed{attempts}: tar or Docker exited {} and {said}; check the daemon's /data volume and the free space on {}, then retry",
-                    ran.code,
-                    directory.display()
+                    "the {kind}archive of the state volume failed{attempts}: tar or Docker exited {} and {said}; {next}",
+                    ran.code
                 ),
                 1,
             ));

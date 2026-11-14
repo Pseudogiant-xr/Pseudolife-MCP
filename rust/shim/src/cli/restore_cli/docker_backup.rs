@@ -1351,8 +1351,12 @@ mod tests {
             text.starts_with(&format!("backup failed: the archive of the state volume failed on attempt 3 of 3: tar or Docker exited 1 and it said: {changed};")),
             "{text}"
         );
-        assert!(text.ends_with("No backup was written"), "{text}");
-        // Another tar error is not retried.
+        // The next step is the one a changing file needs.
+        assert!(
+            text.ends_with("; a file in /data kept changing while it was archived; retry when the daemon is quieter, or stop the daemon for the backup. No backup was written"),
+            "{text}"
+        );
+        // Another tar error is not retried, and names the volume and space.
         let mut docker = Fake {
             archive_failures: vec!["tar: ./x: Cannot open: Permission denied"],
             ..fake("")
@@ -1361,7 +1365,7 @@ mod tests {
         assert_eq!(backup(&mut docker, &mut host, &request(&out), &dir.0), 1);
         let text = host.errors.join("\n");
         assert!(
-            text.starts_with("backup failed: the archive of the state volume failed: tar or Docker exited 1 and it said: tar: ./x: Cannot open: Permission denied;"),
+            text.starts_with("backup failed: the archive of the state volume failed: tar or Docker exited 1 and it said: tar: ./x: Cannot open: Permission denied; check the daemon's /data volume and the free space on"),
             "{text}"
         );
         let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
