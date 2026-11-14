@@ -600,7 +600,7 @@ fn desktop_source(source: &str) -> String {
 }
 
 /// The free bytes on the filesystem holding `path`.
-fn free_space(path: &str) -> Option<u128> {
+pub(super) fn free_space(path: &str) -> Option<u128> {
     #[cfg(unix)]
     {
         let stats = rustix::fs::statvfs(path).ok()?;
@@ -961,7 +961,7 @@ pub(super) fn probe<D: Docker>(
 
 /// The health URL: the option, else the daemon's published 8765/tcp
 /// binding; "" when neither names one (or the binding is unreadable).
-fn daemon_url(running: &Value, option: Option<&str>, container: &str) -> Step<String> {
+pub(super) fn daemon_url(running: &Value, option: Option<&str>, container: &str) -> Step<String> {
     if let Some(option) = option.filter(|o| !o.is_empty()) {
         return Ok(option.to_owned());
     }

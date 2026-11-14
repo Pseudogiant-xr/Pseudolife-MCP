@@ -204,10 +204,22 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     {
         return Some(code);
     }
-    if mode == "move"
-        && let Some(code) = move_cli::run(std::env::args_os().skip(2).collect())
-    {
-        return Some(ExitCode::from(code));
+    if mode == "move" {
+        let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
+        if let Some(code) = move_cli::run(arguments.clone()) {
+            return Some(ExitCode::from(code));
+        }
+        // What move_cli passes on: the native dry run, or its refusals.
+        if let Some(code) = restore_cli::move_native::run(&arguments) {
+            return Some(ExitCode::from(code));
+        }
+    }
+    // Hidden: the target half of `move`'s preflight, run over ssh.
+    if mode == "move-target" {
+        let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
+        return Some(ExitCode::from(restore_cli::move_native::target::run(
+            &arguments,
+        )));
     }
     if mode == "tunnel"
         && let Some(code) = tunnel::run(std::env::args_os().skip(2).collect())

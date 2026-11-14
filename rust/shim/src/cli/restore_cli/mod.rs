@@ -28,6 +28,7 @@ mod dump;
 mod execute;
 mod gzip;
 mod interrupt;
+pub(super) mod move_native;
 mod pathlib;
 mod safety;
 mod state;
