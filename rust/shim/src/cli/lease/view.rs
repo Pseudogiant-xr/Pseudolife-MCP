@@ -237,6 +237,27 @@ fn state(path: &std::path::Path) -> Value {
         None => Value::Null,
     }
 }
+/// Whether `name` is held, as `lease check` decides it: this machine's
+/// own lock, or a board holder unless that holder is this machine's
+/// `lease hold` whose lock is already free. `leases` is the board's page
+/// for `name`.
+pub(in crate::cli) fn held_with(name: &str, leases: &[Value]) -> bool {
+    let local = local_state(name);
+    let holder = leases
+        .iter()
+        .find(|lease| lease["name"] == name && lease["holder"].is_object())
+        .map(|lease| &lease["holder"]);
+    let here = if is_suite(name) {
+        suite_directory()
+    } else {
+        lock::directory()
+    };
+    let stale = local["state"] == "free"
+        && lock::instance_id(&here).is_some_and(|id| {
+            holder.is_some_and(|holder| holder["label"] == format!("lease-hold@{id}"))
+        });
+    local["state"] == "held" || (holder.is_some() && !stale)
+}
 fn local_state(name: &str) -> Value {
     if is_suite(name) && name != local_suite() {
         return json!({"file":"full-suite.lock","state":Value::Null,"elsewhere":local_suite()});

@@ -225,6 +225,88 @@ impl Board {
             reply["truncated"] == true,
         ))
     }
+    /// The listed peers and whether the page was cut short: a peer
+    /// missing from a cut page may still be on the board.
+    pub async fn agents_page(&self) -> Result<(Vec<Value>, bool), Failure> {
+        let reply = self.post("agents", json!({"limit":50}), true, 5).await?;
+        let Some(agents) = reply["agents"].as_array() else {
+            return Err(Failure::refused(
+                "the daemon's agents reply was not understood",
+            ));
+        };
+        Ok((
+            agents
+                .iter()
+                .filter(|agent| agent.is_object() && agent["agent_id"].is_string())
+                .cloned()
+                .collect(),
+            reply["truncated"] == true,
+        ))
+    }
+    /// A message that rings a recipient parked on `clears`.
+    pub async fn send_clearing(
+        &self,
+        to: &str,
+        text: &str,
+        request_id: &str,
+        clears: &str,
+    ) -> Result<(), Failure> {
+        self.post(
+            "send",
+            json!({"to":to,"text":text,"request_id":request_id,"clears":clears}),
+            true,
+            5,
+        )
+        .await?;
+        Ok(())
+    }
+    /// This address's status; `expect` (seconds) marks it overdue once it
+    /// is not renewed in time.
+    pub async fn update_status(&self, status: &str, expect: Option<u64>) -> Result<(), Failure> {
+        let mut body = json!({"status":status});
+        if let Some(expect) = expect {
+            body["expect"] = json!(expect);
+        }
+        self.post("update", body, true, 5).await?;
+        Ok(())
+    }
+    /// Attach (or renew) `attachment_id`; returns its generation. While the
+    /// attachment's lease runs, the board shows this address as live.
+    pub async fn attach(&self, attachment_id: &str) -> Result<i64, Failure> {
+        let reply = self
+            .post(
+                "attach",
+                json!({"attachment_id":attachment_id,"wake_enabled":false}),
+                true,
+                5,
+            )
+            .await?;
+        reply["generation"]
+            .as_i64()
+            .ok_or_else(|| Failure::refused("the daemon's attach reply was not understood"))
+    }
+    /// Renew an attachment's lease.
+    pub async fn heartbeat(&self, attachment_id: &str, generation: i64) -> Result<(), Failure> {
+        self.post(
+            "heartbeat",
+            json!({"attachment_id":attachment_id,"generation":generation,"active":true}),
+            true,
+            5,
+        )
+        .await?;
+        Ok(())
+    }
+    /// End an attachment: the board shows this address as detached.
+    pub async fn detach(&self, attachment_id: &str, generation: i64) -> Result<(), Failure> {
+        self.post(
+            "detach",
+            json!({"attachment_id":attachment_id,"generation":generation}),
+            true,
+            5,
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 fn decode(status: u16, payload: Option<Value>) -> Result<Value, Failure> {

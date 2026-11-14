@@ -62,21 +62,16 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
     // `console` answers every bare form itself now (with this machine's own
     // registration it would ask the daemon for a sign-in link and open a
     // browser), so it gets the one argv that defers before it reads a
-    // credential: help at a width other than 80 columns. The watcher gets a
-    // start with no watcher on its state (with no argument it answers the
-    // missing owner itself). The emptied home, the closed daemon address and
-    // the browser that is no program fence a mode that stops deferring off
-    // the machine's real daemon and browser.
+    // credential: help at a width other than 80 columns. The watcher runs
+    // natively now; an abbreviated option (`--sto`) is one of the argument
+    // spellings it still defers before any effect. The emptied home, the
+    // closed daemon address and the browser that is no program fence a mode
+    // that stops deferring off the machine's real daemon and browser.
     let home = std::env::temp_dir().join(format!("pl-dispatch-home-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
     let state = home.join("watch.json");
     let state = state.to_str().unwrap();
-    let start = [
-        "--owner",
-        "0123456789abcdef0123456789abcdef",
-        "--state",
-        state,
-    ];
+    let start = ["--sto", "--state", state];
     let cases: [(&str, &[&str]); 5] = [
         ("maintainer", &[]),
         ("console", &["--help"]),

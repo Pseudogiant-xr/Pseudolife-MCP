@@ -535,7 +535,10 @@ fn python_text(value: &Value) -> String {
 }
 
 pub const WINDOWS_DETACHED_FLAGS: u32 = 0x08000000 | 0x00000200;
-fn detached(command: &mut Command) {
+/// Make `command` outlive this process and its session: on Windows no
+/// window, a new process group and, where the job allows it, out of the
+/// launcher's job; on POSIX a new session.
+pub(crate) fn detached(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

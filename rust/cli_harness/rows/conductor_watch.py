@@ -6,12 +6,12 @@ and a start that finds a watcher already running on its state, for the same
 owner (exit 0) or another (exit 2), with or without ``--detach``; the
 deprecated name ``delegate-watch`` prints its notice first.
 
-Nothing here reaches the watcher's lock, board or ``gh``: every compared
-case ends before ``main`` takes the state's lock. The one deferral case
-(a foreground start with no watcher running) gives the oracle no bearer
-token, so it stops at "no board" right after its lock; PATH holds only an
-empty directory, so no ``gh`` or ``pseudolife-mcp`` resolves for either arm
-(checked before each arm), and the daemon URL is the closed loopback port.
+Nothing here reaches the watcher's board or ``gh``: every compared case
+ends before ``main`` takes the state's lock, except the two starts with no
+watcher running, which give both arms no bearer token, so each takes the
+lock and stops at "no board"; PATH holds only an empty directory, so no
+``gh`` or ``pseudolife-mcp`` resolves for either arm (checked before each
+arm), and the daemon URL is the closed loopback port.
 A running watcher is a sleeping child the row starts and stops itself, with
 a pid file the oracle's own ``_process_start`` dates. Scope and deferrals:
 ``rows/conductor_watch.md``.
@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -66,6 +67,19 @@ def conductor_watch_deferral(obs: dict) -> None:
     obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
     obs["files"] = obs.get("setup_files", {})
     obs["modes"] = obs.get("setup_modes", {})
+
+
+@normalize.rule("conductor-watch-start-no-board")
+def conductor_watch_start_no_board(obs: dict) -> None:
+    """A start with no bearer token: both arms take the state's lock and
+    stop at "no board", leaving the empty lock file and one ledger line.
+    The line's timestamp and line ending are the run's own."""
+    files = obs.get("files") or {}
+    for key, value in list(files.items()):
+        if key.endswith(".ledger") and value.startswith("file:"):
+            text = base64.b64decode(value[5:]).decode("utf-8", "replace").replace("\r\n", "\n")
+            text = re.sub(r"(?m)^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ", "<time> ", text)
+            files[key] = "file:" + base64.b64encode(text.encode()).decode()
 
 
 @normalize.rule("conductor-watch-notice-unwritten")
@@ -382,12 +396,14 @@ def cases() -> list[Case]:
     add(case("start-already-deprecated-name", ["--owner", OWNER, "--state", STATE],
              mode="delegate-watch", steps=(running,)))
 
-    # Declared deferrals: the candidate answers before any effect.
-    add(case("defer-foreground-start", ["--owner", OWNER, "--state", STATE],
-             rules=("conductor-watch-deferral",)))
-    add(case("defer-stale-record-start", ["--owner", OWNER, "--state", STATE],
+    # A start with no watcher running takes the lock and stops at the
+    # board: the cases give no bearer token and a closed daemon address.
+    add(case("start-no-board", ["--owner", OWNER, "--state", STATE],
+             rules=("conductor-watch-start-no-board",)))
+    add(case("start-stale-record-no-board", ["--owner", OWNER, "--state", STATE],
              steps=(_record("w/s.json", pid=0, agent_id=WATCHER, owner=OWNER),),
-             rules=("conductor-watch-deferral",)))
+             rules=("conductor-watch-start-no-board",)))
+    # Declared deferrals: argument spellings answered before any effect.
     add(case("defer-abbreviation", ["--sto", "--state", STATE], rules=("conductor-watch-deferral",)))
     add(case("defer-dash-value", ["--state", "-x", "--stop"], rules=("conductor-watch-deferral",)))
     add(case("defer-underscore-interval", ["--interval", "1_0", "--stop", "--state", STATE],

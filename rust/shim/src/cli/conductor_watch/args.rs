@@ -21,13 +21,65 @@ pub(super) fn usage() -> &'static str {
     &HELP[..HELP.find("\n\n").map_or(HELP.len(), |end| end + 1)]
 }
 
-/// The parsed namespace: only the fields the answered shapes read.
+/// The parsed namespace. `values` keeps every option given with its
+/// value, in order, for the watch's settings.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Args {
     pub(super) owner: Option<String>,
     pub(super) detach: bool,
     pub(super) stop: bool,
     pub(super) state: Option<String>,
+    pub(super) values: Vec<(String, String)>,
+}
+
+impl Args {
+    /// The last value given for `option`.
+    pub(super) fn last(&self, option: &str) -> Option<&str> {
+        self.values
+            .iter()
+            .rev()
+            .find(|(name, _)| name == option)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Every value given for `option`, in order (`--lease` appends).
+    pub(super) fn all(&self, option: &str) -> Vec<String> {
+        self.values
+            .iter()
+            .filter(|(name, _)| name == option)
+            .map(|(_, value)| value.clone())
+            .collect()
+    }
+
+    /// A seconds value parse admitted (`--quiet-after`, `--interval`,
+    /// `--settle`), or `default`.
+    pub(super) fn seconds(&self, option: &str, default: f64) -> f64 {
+        self.last(option)
+            .and_then(|text| python_float(text).ok().flatten())
+            .unwrap_or(default)
+    }
+
+    /// `--max-age` in seconds, or `default` (`90`, `90s`, `20m`, `2h`, `7d`).
+    pub(super) fn max_age(&self, default: f64) -> f64 {
+        self.last("--max-age").and_then(age_seconds).unwrap_or(default)
+    }
+}
+
+/// `lease_cli.parse_duration` for a spelling `age` admitted.
+pub(super) fn age_seconds(text: &str) -> Option<f64> {
+    let stripped = super::super::pyjson::py_strip(text);
+    let (number, unit) = match stripped.chars().last() {
+        Some(c) if "smhdSMHD".contains(c) => (&stripped[..stripped.len() - 1], c.to_ascii_lowercase()),
+        _ => (stripped, 's'),
+    };
+    let count: f64 = number.parse().ok()?;
+    let scale = match unit {
+        'm' => 60.0,
+        'h' => 3600.0,
+        'd' => 86400.0,
+        _ => 1.0,
+    };
+    Some(count * scale)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -223,6 +275,7 @@ fn path_name(text: &str) -> Result<&str, ()> {
 }
 
 fn store(args: &mut Args, option: &str, value: &str) {
+    args.values.push((option.to_owned(), value.to_owned()));
     match option {
         "--owner" => args.owner = Some(value.to_owned()),
         "--state" => args.state = Some(value.to_owned()),
@@ -400,17 +453,45 @@ mod tests {
                 owner: Some("b".into()),
                 stop: true,
                 state: Some("s".into()),
+                values: [
+                    ("--owner", "a"),
+                    ("--state", "s"),
+                    ("--owner", "b"),
+                    ("--lease", "x"),
+                    ("--lease", "y"),
+                    ("--max-age", " 2H "),
+                    ("--interval", "1e-3"),
+                    ("--settle", "0"),
+                    ("--nonce", "n"),
+                ]
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
                 ..Args::default()
             })
         );
-        assert_eq!(
-            run(&["--detach", "--state", "a/."]),
-            Parsed::Args(Args {
-                detach: true,
-                state: Some("a/.".into()),
-                ..Args::default()
-            })
-        );
+        let Parsed::Args(args) = run(&["--detach", "--state", "a/."]) else {
+            panic!("parsed");
+        };
+        assert!(args.detach && args.state.as_deref() == Some("a/."));
+    }
+
+    #[test]
+    fn settings_read_the_last_value_and_every_lease() {
+        let Parsed::Args(args) = run(&[
+            "--lease", "x", "--interval", "5", "--lease=y", "--interval", "7",
+            "--max-age", " 2H ", "--settle", "0",
+        ]) else {
+            panic!("parsed");
+        };
+        assert_eq!(args.all("--lease"), ["x", "y"]);
+        assert_eq!(args.seconds("--interval", 60.0), 7.0);
+        assert_eq!(args.seconds("--quiet-after", 3300.0), 3300.0);
+        assert_eq!(args.seconds("--settle", 45.0), 0.0);
+        assert_eq!(args.max_age(1.0), 7200.0);
+        assert_eq!(age_seconds("90"), Some(90.0));
+        assert_eq!(age_seconds("20m"), Some(1200.0));
+        assert_eq!(age_seconds("7d"), Some(604_800.0));
     }
 
     fn no_file_name(text: &str) -> Parsed {
@@ -538,7 +619,7 @@ mod tests {
             run(&["--settle=-0.5"]),
             error("argument --settle: must be 0 or more")
         );
-        assert_eq!(run(&["--settle=-0"]), Parsed::Args(Args::default()));
+        assert!(matches!(run(&["--settle=-0"]), Parsed::Args(args) if args.seconds("--settle", 45.0) == 0.0));
         assert_eq!(
             run(&["--settle", "1.2.3"]),
             error("argument --settle: invalid _non_negative value: '1.2.3'")
