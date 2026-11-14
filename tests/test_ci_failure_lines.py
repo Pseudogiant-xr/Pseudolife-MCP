@@ -59,10 +59,15 @@ def _run(tmp_path: Path, *plugin: str, wait: float = 60):
                 seen.set()
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
-    saw_it_early = seen.wait(wait)
-    before_release = list(lines)
-    marker.write_text("go", encoding="utf-8")
-    proc.wait(120)
+    try:
+        saw_it_early = seen.wait(wait)
+        before_release = list(lines)
+        marker.write_text("go", encoding="utf-8")
+        proc.wait(120)
+    finally:
+        if proc.poll() is None:       # never leave the child (and its worker) running
+            proc.kill()
+            proc.wait(30)
     reader.join(10)
     return saw_it_early, before_release, lines, proc.returncode, tmp_path / "times.tsv"
 
@@ -93,3 +98,36 @@ def test_ci_tests_sh_loads_the_plugin_and_records_the_times():
     script = (REPO / "ops" / "ci_tests.sh").read_text(encoding="utf-8")
     assert "-p ops.pytest_failure_lines" in script
     assert 'PSEUDOLIFE_CI_TEST_TIMES="$PWD/ci-results/test-times.tsv"' in script
+
+
+def _plain(tmp_path: Path, files: dict[str, str], *extra: str, env: dict | None = None):
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    run_env = {**os.environ, "PYTHONPATH": str(REPO), "PSEUDOLIFE_SUITE_LOCK": "off", **(env or {})}
+    return subprocess.run([sys.executable, "-m", "pytest", "-p", "ops.pytest_failure_lines", "-q", "-n", "1",
+                           "-p", "no:cacheprovider", "--rootdir", str(tmp_path), "-c", str(tmp_path / "pytest.ini"),
+                           *extra, str(tmp_path)], cwd=tmp_path, env=run_env, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=300)
+
+
+def test_a_file_that_fails_to_collect_is_named_before_the_summary(tmp_path):
+    # Reviewer of 59e3a4316: xdist sends a collection error through
+    # pytest_collectreport, not pytest_runtest_logreport.
+    result = _plain(tmp_path, {"test_broken.py": "import a_module_that_does_not_exist\n",
+                               "test_fine.py": "def test_ok():\n    pass\n"})
+    out = result.stdout
+    early = next(i for i, line in enumerate(out.splitlines()) if line.startswith("ERROR test_broken.py"))
+    summary = next(i for i, line in enumerate(out.splitlines()) if "short test summary" in line or "ERRORS" in line)
+    assert early < summary, out
+    assert "ModuleNotFoundError" in out.splitlines()[early]
+
+
+def test_an_unwritable_times_file_never_fails_the_run(tmp_path):
+    # A diagnostic must not abort the suite (a full disk on a runner, say).
+    result = _plain(tmp_path, {"test_fine.py": "def test_ok():\n    pass\n"},
+                    env={"PSEUDOLIFE_CI_TEST_TIMES": str(tmp_path / "no-such-dir" / "times.tsv")})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "INTERNALERROR" not in result.stdout + result.stderr
+    assert result.stdout.count("stopped recording test times") == 1
+
