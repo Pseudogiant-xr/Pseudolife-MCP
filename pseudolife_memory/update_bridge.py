@@ -1,5 +1,5 @@
-"""The update bridge: a handed-off client update moves the machine to the
-native client.
+"""The update bridge: a client update that asks for it moves the machine to
+the native client.
 
 An installed Python updater (0.23.x) installs the next release as a Python
 shim runtime and hands the client steps after the shim to it
@@ -33,6 +33,7 @@ and nothing else.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import http.client
 import io
@@ -85,6 +86,18 @@ _TARGETS = {
 
 class Kept(Exception):
     """The native client could not be used; the message says why."""
+
+
+def _python_shim_runtime() -> bool:
+    """Whether this interpreter runs from a Python shim runtime whose stable
+    launcher is not native yet: the only machine a hand-run moves."""
+    try:
+        from pseudolife_memory import runtimes
+        layout = runtimes.default_layout()
+        return (runtimes._under(str(Path(sys.prefix)), layout.root)
+                and runtimes._launcher_kind(layout) != "native")
+    except Exception:  # noqa: BLE001 - a layout that cannot be read is not one to move
+        return False
 
 
 def target(system: str | None = None, machine: str | None = None) -> str | None:
@@ -279,13 +292,18 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
     marker = env.get(HANDOFF_ENV) or ""
     handed_off = marker.isascii() and marker.isdigit()
     engine = env.get(ENGINE_ENV)
-    # A hand-run moves only when it asks for the native client.
-    if not handed_off and engine != NATIVE:
+    # A hand-run moves only when it asks for the native client, from a shim
+    # runtime whose launcher is not native already (a native machine reaches
+    # this code only through its explicit --python-runtime legacy updater).
+    if not handed_off and (engine != NATIVE or not _python_shim_runtime()):
         return None
     try:
         parser = parser_factory()
-        args = parser.parse_args(arguments)
-        defaults = vars(parser.parse_args([]))
+        # Silent: main() parses these arguments again and reports their help
+        # or their usage error itself, once.
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            args = parser.parse_args(arguments)
+            defaults = vars(parser.parse_args([]))
     except SystemExit:
         return None
     version = __version__
@@ -300,21 +318,24 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
         return None
     if not handed_off and args.tag not in (None, version):
         return None
-    tag = args.tag or version
     if engine == "python":     # the exact value runtimes.py honours
         return f"{ENGINE_ENV}=python keeps the Python client; this run's own code finishes the client steps"
+    triple = target()
     if engine != NATIVE:
         # 0.24.0: the native client still defers commands the Python client
         # runs (interactive connect, most tunnel commands, doctor on a
         # tunnel host), and a moved machine has no command back, so the move
-        # is the user's choice, never the default.
+        # is the user's choice, never the default. A platform with no
+        # native build has nothing to opt in to: nothing is said.
+        if triple is None:
+            return None
         return (f"the native client is opt-in in {version}: this machine keeps the Python client, and this "
-                f"run's own code finishes the client steps; to move it to the native client, set "
-                f"{ENGINE_ENV}={NATIVE} and run pseudolife-mcp update --clients-only")
+                f"run's own code finishes the client steps; to move it to the native client, run "
+                f"`{ENGINE_ENV}={NATIVE} pseudolife-mcp update --clients-only` (in PowerShell: "
+                f"`$env:{ENGINE_ENV}='{NATIVE}'; pseudolife-mcp update --clients-only`)")
     kept = "the Python client was kept and this run's own code finishes the client steps"
-    if tag != version:
-        return f"the native client was not installed (this runtime is {version}, not {tag}); {kept}"
-    triple = target()
+    if handed_off and args.tag != version:
+        return f"the native client was not installed (this runtime is {version}, not {args.tag}); {kept}"
     if triple is None:
         return (f"the native client was not installed (no native client is built for "
                 f"{platform.system()} {platform.machine()}); {kept}")
@@ -347,7 +368,13 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
             return f"the native client was not installed ({exc}{note}); {kept}"
         except Exception as exc:  # noqa: BLE001 - nothing has changed yet: Python is always a safe fallback
             return f"the native client was not installed ({type(exc).__name__}: {exc}); {kept}"
-        argv = [str(binary), "update", "--clients-only", "--tag", version, "--daemon-url", args.daemon_url]
+        # A hand-run without --tag leaves the release to the native updater,
+        # which picks it as this one would (the daemon's release on a client
+        # machine, the newest published on a Docker host).
+        argv = [str(binary), "update", "--clients-only"]
+        if args.tag is not None:
+            argv += ["--tag", args.tag]
+        argv += ["--daemon-url", args.daemon_url]
         if args.allow_downgrade:
             argv.append("--allow-downgrade")
         say = out or (lambda line: print(line, flush=True))
@@ -367,8 +394,10 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
             return f"the native client was not installed (it did not start: {exc}); {kept}"
         code = _wait(proc)
         if code != 0:
-            say(f"==> the native client steps ended with exit {code}; to keep the Python client instead, rerun "
-                f"with {ENGINE_ENV}=python set")
+            # The native updater does not read the setting, so this holds only
+            # while the launcher is still the Python one.
+            say(f"==> the native client steps ended with exit {code} (see above); while this machine still "
+                f"runs the Python client, an update without {ENGINE_ENV}={NATIVE} keeps it")
         return code
     finally:
         if scratch is not None:
