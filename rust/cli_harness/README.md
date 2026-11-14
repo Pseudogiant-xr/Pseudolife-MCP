@@ -156,10 +156,20 @@ applies the same rules a live run does.
 
 ## Goldens after the freeze
 
-With Python frozen, a golden is a regression snapshot of the Rust candidate.
-When a pull request changes on purpose a behaviour a golden pins, it
-re-records the affected cases from the candidate, on each OS whose golden
-pins them:
+Since 14 November 2026 Python is frozen and exact parity with it is no
+longer the acceptance bar: the Rust system has to work. CI no longer runs
+the live mode (oracle beside candidate) of any row; every parity shard
+replays the committed goldens with `--golden`, so they are Rust regression
+snapshots. Only the weekly CLI source mutants (`--mutants`), the one
+security step no Rust test replaces yet (`rust/ci/inventory.py`
+`LIVE_SECURITY_EXCEPTIONS`) and a stress loop still run the frozen oracle.
+
+`--record` still records the oracle, which can no longer change, so it
+reproduces the golden a deliberate Rust change departs from. A pull request
+that changes on purpose a behaviour a golden pins therefore re-records the
+affected cases from the candidate with `--record-candidate [--write]
+[--allow-deferral]`, on each OS whose golden pins them, and names the cases
+and the reason in its body:
 
 ```sh
 # dry run: shows each case's difference and exits 1 if anything would change
@@ -204,3 +214,9 @@ exactly that change, and the pull request names the cases and why. A red
 replay you do not understand (a flake, a host difference, a regression) is
 investigated, never re-recorded: `--write` exists to update a snapshot, not to
 turn CI green.
+
+Rows with no replayed golden, whose only CI replay was a recording the same
+run made from the oracle, are listed in `rust/ci/parity_scope.py`
+(`UNREPLAYED_ROWS`); daemon scenarios no shard replays are listed in
+`rust/ci/inventory.py` (`UNREPLAYED_SCENARIOS`). The plan for the rest is
+`rust/CUTOVER.md` "Stop comparing with Python".
