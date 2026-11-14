@@ -614,10 +614,16 @@ fn check_failure_at(index: usize, interrupt: bool) {
         }
         "stopped" => {
             assert!(text.contains("The bank was not changed and the daemon d was started again. Nothing was restored."), "{context}");
-            assert!(
-                text.contains("retry with:\n  pseudolife-mcp restore --backup-file"),
-                "{context}"
+            // The printed command quotes the path as the platform's shell
+            // needs it (a temp folder spelt `RUNNER~1` is quoted on Windows).
+            let retry = format!(
+                "retry with:\n  pseudolife-mcp restore {}",
+                execute::shell_word(&format!(
+                    "--backup-file={}",
+                    setup.args.backup_file.to_string_lossy()
+                ))
             );
+            assert!(text.contains(&retry), "{context}");
             assert!(!setup.journal().exists(), "{context}");
         }
         "replacing" => {
@@ -798,8 +804,12 @@ fn a_rerun_after_an_interrupted_replay_keeps_the_first_safety_backup() {
     );
     assert!(
         text.contains(&format!(
-            "If you have repaired it since, this run changed nothing: start the daemon with:\n  docker start d\nthen delete {}; then retry this restore with:\n  pseudolife-mcp restore --backup-file=",
-            setup.journal().display()
+            "If you have repaired it since, this run changed nothing: start the daemon with:\n  docker start d\nthen delete {}; then retry this restore with:\n  pseudolife-mcp restore {}",
+            setup.journal().display(),
+            execute::shell_word(&format!(
+                "--backup-file={}",
+                setup.args.backup_file.to_string_lossy()
+            ))
         )),
         "{text}"
     );
