@@ -47,6 +47,17 @@ class GoldenCoverage(unittest.TestCase):
                         self.assertEqual(len(value["responses"]), 2, key)
                 self.assertEqual(run.host_paths(cases), [])
 
+    def test_the_goldens_were_recorded_against_todays_python_shims(self):
+        # The Python extractor shims and the autostart writer are live code
+        # the installers still run; a change to one asks for a new two-shim
+        # recording, which is what the live comparison used to prove.
+        for path in sorted(run.GOLDENS.glob("contract.*.json")):
+            with self.subTest(golden=path.name):
+                recorded = json.loads(path.read_text(encoding="utf-8")).get("python_sources")
+                self.assertEqual(recorded, run.python_sources(),
+                                 f"{', '.join(run.PYTHON_SOURCES)} changed since {path.name} was recorded: "
+                                 "re-record it with `run.py --suite contract --record-goldens` on its OS")
+
 
 class NativeOnly(unittest.TestCase):
     def setUp(self):
@@ -54,53 +65,81 @@ class NativeOnly(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, True)
 
     def starts(self, slice_, mode):
+        """Run a slice to completion with every shim start faked; the starts."""
         started = []
+        scratch = Path(tempfile.mkdtemp(dir=self.root))
 
         @contextlib.contextmanager
-        def server(binary, *args, **kwargs):
+        def server(binary, kind, root, *args, **kwargs):
             started.append(binary)
-            raise Started
-            yield
+            plan = scratch / f"plan-{len(started)}.json"
+            yield 1, plan, scratch / "journal.jsonl", None, scratch / "cli"
 
         with patch.object(run, "server", server), patch.object(run, "CONTRACT", run.Contract(mode)), \
+                patch.object(run, "call", lambda *args, **kwargs: (200, b"{}")), \
+                patch.object(run, "journal_rows", lambda path: []), \
                 patch.object(run.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"", b"")), \
                 patch.object(run.autostart_oracle, "write_config", lambda *args, **kwargs: None):
-            with self.assertRaises(Started):
-                slice_(NATIVE, Path(tempfile.mkdtemp(dir=self.root)) / slice_.__name__)
+            slice_(NATIVE, scratch / slice_.__name__)
         return started
 
     def test_checking_starts_no_python_shim(self):
         for slice_ in (run.differential, run.tools_differential, run.health_differential, run.configuration):
             for mode in ("check", "candidate"):
                 with self.subTest(slice=slice_.__name__, mode=mode):
-                    self.assertEqual(self.starts(slice_, mode), [NATIVE])
+                    started = self.starts(slice_, mode)
+                    self.assertTrue(started)
+                    self.assertEqual(set(started), {NATIVE})
 
-    def test_recording_still_starts_the_python_shim_first(self):
-        self.assertEqual(self.starts(run.differential, "record"), [None])
+    def test_recording_still_starts_both_shims(self):
+        for slice_ in (run.differential, run.tools_differential, run.health_differential, run.configuration):
+            with self.subTest(slice=slice_.__name__):
+                started = self.starts(slice_, "record")
+                self.assertEqual(started[:2], [None, NATIVE])
+                self.assertEqual(started.count(None), started.count(NATIVE))
 
 
 class Tokens(unittest.TestCase):
-    def setUp(self):
-        self.models = run.listed_models()
+    @staticmethod
+    def models_body(ids):
+        return ('{"object": "list", "data": [' + ", ".join(f'{{"id": "{m}", "object": "model"}}' for m in ids) + "]}")
 
-    def test_listed_models_and_the_prompt_become_tokens_and_unlisted_ones_stay(self):
-        listed = self.models[0]
-        text = (f'[{{"id": "{listed}", "object": "model"}}, {{"id": "{self.models[1]}", "object": "model"}}, '
-                f'{{"id": "extractor", "object": "model"}}] {listed}-x claude-future PROMPT')
-        self.assertEqual(run.tokens(text, "PROMPT", self.models),
-                         f'[{{"id": "{run.MODEL_TOKEN}", "object": "model"}}, {{"id": "extractor", "object": "model"}}] '
-                         f'{listed}-x claude-future {run.PROMPT_TOKEN}')
+    def test_a_models_body_tokens_exactly_the_native_ordered_list(self):
+        listed = run.provider_models("claude")
+        launch = listed[3]
+        body = self.models_body(dict.fromkeys([launch, *listed, "extractor", "bench"]))
+        self.assertEqual(run.models_body(body, "claude"),
+                         self.models_body([launch, "<claude listed models>", "extractor", "bench"]))
+        # The launch model (the default) stays literal, so a changed default differs.
+        other = self.models_body(dict.fromkeys([listed[0], *listed, "extractor", "bench"]))
+        self.assertNotEqual(run.models_body(other, "claude"), run.models_body(body, "claude"))
 
-    def test_a_model_release_leaves_the_snapshot_unchanged(self):
-        one = '[{"id": "claude-a", "object": "model"}]'
-        two = '[{"id": "claude-a", "object": "model"}, {"id": "claude-b", "object": "model"}]'
-        self.assertEqual(run.tokens(one, "P", ["claude-a"]), run.tokens(two, "P", ["claude-a", "claude-b"]))
+    def test_a_dropped_reordered_or_foreign_model_is_not_a_token(self):
+        listed = run.provider_models("claude")
+        for ids in (listed[:-1], list(reversed(listed)), [*listed[:2], "gpt-6-sol", *listed[2:]]):
+            with self.subTest(ids=ids):
+                body = self.models_body(["claude-sonnet-5", *ids, "extractor", "bench"])
+                self.assertEqual(run.models_body(body, "claude"), body)
+
+    def test_the_prompt_becomes_a_token_and_model_ids_stay(self):
+        text = "argv --model claude-sonnet-5 and PROMPT"
+        self.assertEqual(run.tokens(text, "PROMPT"), f"argv --model claude-sonnet-5 and {run.PROMPT_TOKEN}")
 
     def test_a_long_string_is_stored_as_its_digest(self):
         long = "é" * (run.LONG + 1)
-        stored = run.tokens(long, "P", [])
+        stored = run.tokens(long, "P")
         self.assertTrue(stored.startswith(f"<{run.LONG + 1} chars sha256:"))
-        self.assertNotEqual(stored, run.tokens(long[:-1] + "e", "P", []))
+        self.assertNotEqual(stored, run.tokens(long[:-1] + "e", "P"))
+
+    def test_any_users_home_is_a_host_path(self):
+        for text in ("C:\\Users\\someone\\x", "C:/Users/someone/x", "/home/runner/work", "/Users/someone/x"):
+            with self.subTest(text=text):
+                self.assertTrue(run.host_paths({"value": text}))
+        self.assertEqual(run.host_paths({"value": "fine /usr/bin and Users"}), [])
+
+    def test_only_the_harness_directory_becomes_a_cwd_token(self):
+        rows = run.journal_snapshot([{"cwd": os.getcwd()}, {"cwd": "<root>"}, {"cwd": tempfile.gettempdir()}])
+        self.assertEqual([row["cwd"] for row in rows], ["<harness cwd>", "<root>", tempfile.gettempdir()])
 
     def test_a_difference_is_named_at_its_path(self):
         golden = {"responses": [["models", 200, "a" * 500], ["missing", 404, '{"error": "not found"}']]}

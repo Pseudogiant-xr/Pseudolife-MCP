@@ -28,8 +28,12 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "rust/daemon/harness"))
-import candidate_record  # noqa: E402  (the recorders' shared vocabulary)
+# The recorders' shared vocabulary, loaded by file: rust/daemon/harness has
+# its own run.py and other names this harness must not resolve to.
+_record_spec = importlib.util.spec_from_file_location(
+    "candidate_record", ROOT / "rust/daemon/harness/candidate_record.py")
+candidate_record = importlib.util.module_from_spec(_record_spec)
+_record_spec.loader.exec_module(candidate_record)
 spec = importlib.util.spec_from_file_location("autostart_oracle", ROOT / "ops/shim_autostart.py")
 autostart_oracle = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(autostart_oracle)
@@ -217,7 +221,6 @@ GOLDENS = Path(__file__).with_name("goldens")
 PLATFORM = "windows" if os.name == "nt" else "linux"
 PROMPT_FILE = ROOT / "evals/prompts/assistant_facts_provenance.txt"
 PROMPT_TOKEN = "<production prompt>"
-MODEL_TOKEN = "<listed model>"
 # A longer string is stored as its length and digest (run.py's golden_scrub does the same).
 LONG = 4096
 
@@ -226,33 +229,61 @@ def contract_golden():
     return GOLDENS / f"contract.{PLATFORM}.json"
 
 
-def listed_models():
-    """The native shims' listed model IDs (test_prompt.py pins them to both
-    shims), longest first, so a snapshot never pins the list itself: a model
-    release changes the lists, not this golden."""
+# The live Python files a recording proves the native shim against. A
+# change to one asks for --record-goldens again (test_contract_golden.py).
+PYTHON_SOURCES = ("evals/claude_shim.py", "evals/codex_shim.py", "ops/shim_autostart.py")
+
+
+def provider_models(kind):
+    """The native shim's listed models for ``kind``, in its order
+    (``Kind::models`` in rust/shim/src/extractor_shim/config.rs; test_prompt.py
+    pins the same set to the Python shims)."""
     native = (ROOT / "rust/shim/src/extractor_shim/config.rs").read_text(encoding="utf-8")
-    return sorted(set(re.findall(r'"((?:claude|gpt)-[a-z0-9.-]+)"', native)), key=len, reverse=True)
+    arm = "Claude" if kind == "claude" else "Codex"
+    block = re.search(rf"Self::{arm} => &\[(.*?)\]", native.split("pub fn models", 1)[1], re.S)
+    return re.findall(r'"([^"]+)"', block[1])
 
 
-def tokens(value, prompt, models):
-    """A snapshot with the production prompt's text and each listed model ID
-    replaced by a token, and /models' entries collapsed once their IDs are
-    tokens. Unlisted IDs (``claude-future``) stay, since they test pass-through."""
+def models_body(text, kind):
+    """A /models body with its run of the provider's listed models (after the
+    launch model, which stays literal and pins the default) as one token,
+    when it is exactly the native list in its order. A model release changes
+    that list on both sides and leaves this snapshot alone; a dropped,
+    reordered or foreign entry leaves the body as it is, and differs."""
+    if not isinstance(text, str) or not text.startswith('{"object": "list", "data": ['):
+        return text
+    launch = re.match(r'\{"object": "list", "data": \[\{"id": "([^"]*)", "object": "model"\}', text)
+    if not launch:
+        return text
+    rest = [model for model in provider_models(kind) if model != launch[1]]
+    run_text = ", ".join(f'{{"id": "{model}", "object": "model"}}' for model in rest)
+    if not rest or f", {run_text}, " not in text:
+        return text
+    return text.replace(f", {run_text}, ", f', {{"id": "<{kind} listed models>", "object": "model"}}, ', 1)
+
+
+def tokens(value, prompt):
+    """A snapshot with the production prompt's text as a token and every
+    string longer than LONG as its length and digest. Model IDs stay
+    literal: /models is handled by models_body, and an argv or response
+    model is the behaviour under test."""
     if isinstance(value, dict):
-        return {key: tokens(item, prompt, models) for key, item in value.items()}
+        return {key: tokens(item, prompt) for key, item in value.items()}
     if isinstance(value, list):
-        return [tokens(item, prompt, models) for item in value]
+        return [tokens(item, prompt) for item in value]
     if isinstance(value, str):
         value = value.replace(prompt, PROMPT_TOKEN)
-        for model in models:
-            value = re.sub(rf"(?<![a-z0-9.-]){re.escape(model)}(?![a-z0-9.-])", MODEL_TOKEN, value)
-        entry = re.escape(f'{{"id": "{MODEL_TOKEN}", "object": "model"}}')
-        value = re.sub(rf"({entry})(?:, {entry})+", r"\1", value)
         if len(value) > LONG:
             # Still exact, without storing the long request bodies themselves.
             value = f"<{len(value)} chars sha256:{hashlib.sha256(value.encode('utf-8', 'surrogatepass')).hexdigest()}>"
         return value
     return value
+
+
+def python_sources():
+    """The digests of PYTHON_SOURCES, line endings normalised."""
+    return {name: hashlib.sha256((ROOT / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+            for name in PYTHON_SOURCES}
 
 
 def body_text(body: bytes):
@@ -262,6 +293,13 @@ def body_text(body: bytes):
         return body.decode("utf-8")
     except UnicodeDecodeError:
         return {"base64": base64.b64encode(body).decode()}
+
+
+def _same_dir(left, right):
+    try:
+        return os.path.normcase(os.path.realpath(left)) == os.path.normcase(os.path.realpath(right))
+    except (OSError, ValueError):
+        return False
 
 
 def journal_snapshot(rows):
@@ -274,7 +312,7 @@ def journal_snapshot(rows):
         # harness's, wherever that was launched (the checkout by hand,
         # rust/shim under cargo test): a host path no golden may hold.
         # The stub already names the fixture's own root <root>.
-        if isinstance(row.get("cwd"), str) and not row["cwd"].startswith("<root>"):
+        if isinstance(row.get("cwd"), str) and _same_dir(row["cwd"], os.getcwd()):
             row["cwd"] = "<harness cwd>"
         if row.get("instructions"):
             raw = base64.b64decode(row["instructions"])
@@ -295,7 +333,6 @@ class Contract:
     def __init__(self, mode):
         self.mode = mode
         self.prompt = PROMPT_FILE.read_text(encoding="utf-8")
-        self.models = listed_models()
         self.observed: dict[str, object] = {}
 
     def arms(self, binary):
@@ -310,7 +347,7 @@ class Contract:
     def settle(self, key, per_arm):
         """Keep one observation per key: in recording, the two shims' agreed
         one (a difference fails, as the live comparison always did)."""
-        snapshots = [tokens(observation, self.prompt, self.models) for observation in per_arm]
+        snapshots = [tokens(observation, self.prompt) for observation in per_arm]
         if self.mode == "record":
             assert snapshots[0] == snapshots[1], (key, "the Python and native shims differ", snapshots)
         if key in self.observed:
@@ -319,7 +356,6 @@ class Contract:
 
     def finish(self, binary, write=False):
         """Check, record or re-record the golden; the number of cases."""
-        import dbstate
         path = contract_golden()
         committed = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
         named = host_paths(self.observed)
@@ -331,8 +367,11 @@ class Contract:
             golden = {"normalizers": {
                 "ids": "generated completion and tool-call IDs (normalize)",
                 "prompt": f"the production prompt's text as {PROMPT_TOKEN}",
-                "models": f"each listed model ID as {MODEL_TOKEN}, /models entries collapsed",
-            }, "oracle_head": _head(), "cases": dict(sorted(self.observed.items()))}
+                "models": "a /models body's run of the provider's listed models, exactly in the native "
+                          "order after the launch model, as one token",
+                "cwd": "a shim started in the harness's own directory journals <harness cwd>",
+            }, "oracle_head": _head(), "python_sources": python_sources(),
+                "cases": dict(sorted(self.observed.items()))}
             candidate_record.write_json(path, golden, newline_at_end=True)
             print(f"recorded {path.name}: {len(self.observed)} contract observations", flush=True)
             return len(self.observed)
@@ -391,8 +430,8 @@ def snapshot_diff(want, got, path=""):
     """Differences between a golden snapshot and an observation, at the path
     where they differ: dbstate.diff alone compares a list as one value and
     prints 300 characters of each side, so a change late in the responses
-    would show identical prefixes. The golden is the left side."""
-    import dbstate
+    would show identical prefixes. The golden is the left side. Standard
+    library only: the Rust jobs that run this install no PostgreSQL client."""
     if isinstance(want, dict) and isinstance(got, dict):
         out = []
         for key in sorted(set(want) | set(got)):
@@ -404,8 +443,9 @@ def snapshot_diff(want, got, path=""):
     if isinstance(want, list) and isinstance(got, list) and len(want) == len(got):
         return [d for index, (left, right) in enumerate(zip(want, got))
                 for d in snapshot_diff(left, right, f"{path}/{index}")]
-    return [d.replace(": python ", ": golden ").replace(" vs rust ", " vs observed ")
-            for d in dbstate.diff(want, got, path)]
+    if type(want) is type(got) and want == got:
+        return []
+    return [f"{path}: golden {json.dumps(want)[:300]} vs observed {json.dumps(got)[:300]}"]
 
 
 def host_paths(value) -> list[str]:
@@ -413,6 +453,8 @@ def host_paths(value) -> list[str]:
     home and the temporary directory."""
     text = json.dumps(value)
     found = []
+    if re.search(r"[A-Za-z]:(?:\\\\|\\|/)Users(?:\\\\|\\|/)|/home/[^/\"]+/|/Users/[^/\"]+/", text):
+        found.append("a user's home directory")
     for path in {str(ROOT), str(Path.home()), tempfile.gettempdir()}:
         if len(path) >= 4 and any(spelling in text for spelling in
                                   {path, path.replace("\\", "/"), json.dumps(path)[1:-1]}):
@@ -485,7 +527,7 @@ def differential(binary, root):
                         status, response = call(port, method, path, body)
                     except OSError as error:
                         raise AssertionError(f"{root.name}/{kind}/{arm}/{label}: {error}") from error
-                    responses.append([label, status, body_text(normalize(response))])
+                    responses.append([label, status, models_body(body_text(normalize(response)), kind)])
                 observations.append({"responses": responses, "journal": journal_snapshot(journal_rows(journal))})
         CONTRACT.settle(f"differential/{CONTRACT.launcher()}/{kind}", observations)
         count += len(observations[-1]["responses"])
@@ -514,7 +556,8 @@ def configuration(binary, root):
         for arm, exe in CONTRACT.arms(binary):
             with server(exe, kind, root / f"managed-{kind}-{arm}", canned(kind, "OK"), managed=True) as (port, _, journal, _, _):
                 answers = [call(port, "GET", "/models"), call(port, "POST", "/chat/completions", {"messages": [{"role": "user", "content": "hello"}]})]
-                observations.append({"responses": [[status, body_text(normalize(body))] for status, body in answers],
+                observations.append({"responses": [[status, models_body(body_text(normalize(body)), kind)]
+                                                   for status, body in answers],
                                      "journal": journal_snapshot(journal_rows(journal))})
         CONTRACT.settle(f"managed/{kind}", observations)
         count += 2
