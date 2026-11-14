@@ -13,6 +13,7 @@ pub mod coordination_recovery;
 mod doctor;
 mod doorbell_seen;
 mod episode;
+mod expose;
 mod hook_http;
 mod hook_json;
 mod host_connection;
@@ -22,6 +23,7 @@ pub mod maintainer;
 mod migrate_flat;
 mod move_cli;
 mod pairing;
+pub(crate) mod program_lookup;
 mod pyjson;
 mod restore_cli;
 pub mod retired;
@@ -50,7 +52,6 @@ const DEFERRED_MODES: &[&str] = &[
     "tunnel",
     "move",
     "backup",
-    "restore",
     "export",
     "import",
     "maintainer",
@@ -227,6 +228,11 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     if mode == "embedded" {
         crate::stderrln!("{}", retired::embedded_message());
         return Some(ExitCode::from(1));
+    }
+    if mode == "expose"
+        && let Some(code) = expose::run(std::env::args_os().skip(2).collect())
+    {
+        return Some(code);
     }
     if matches!(mode, "conductor-watch" | "delegate-watch")
         && let Some(code) = conductor_watch::run(mode, std::env::args_os().skip(2).collect())

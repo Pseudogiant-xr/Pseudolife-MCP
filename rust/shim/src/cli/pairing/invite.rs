@@ -508,7 +508,7 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
     let dsn = crate::pg::Dsn::parse(&dsn).map_err(|_| Defer)?;
     let mut url = args.url.clone().filter(|url| !url.is_empty());
     if name.is_some() && url.is_none() {
-        url = transport::exposed_url(port).await;
+        url = transport::exposed_url(port).await?;
     }
     // Everything that could still defer happens here, before an invite's
     // only request: the connection (Python opens it after `/health`; a
