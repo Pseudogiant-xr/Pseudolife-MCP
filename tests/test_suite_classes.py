@@ -52,7 +52,31 @@ def test_a_repeated_file_is_refused(tmp_path):
 def _collect(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider",
                            *args], cwd=ROOT, capture_output=True, text=True, timeout=600,
-                          env={**__import__("os").environ, "PSEUDOLIFE_SUITE_LOCK": "off"})
+                          env={**{k: v for k, v in __import__("os").environ.items() if k != "PYTEST_ADDOPTS"},
+                               "PSEUDOLIFE_SUITE_LOCK": "off"})
+
+
+def test_the_collection_checks_ignore_a_parents_pytest_addopts(monkeypatch):
+    # Reviewer of 912c17308 (B1): CI once handed the switch to pytest as
+    # PYTEST_ADDOPTS, which reached these child runs and made them collect
+    # frozen files; they must judge the child's own command line only.
+    monkeypatch.setenv("PYTEST_ADDOPTS", suite_classes.SWITCH)
+    frozen = sorted(suite_classes.frozen())[0]
+    result = _collect(f"tests/{frozen}")
+    assert result.returncode != 0 and suite_classes.SWITCH in result.stderr + result.stdout
+
+
+def test_ci_passes_the_switch_as_an_argument_never_through_the_environment():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
+    for name, job in jobs.items():
+        envs = [job.get("env") or {}] + [step.get("env") or {} for step in job.get("steps", [])]
+        assert not any("PYTEST_ADDOPTS" in env for env in envs), name
+    assert jobs["test"]["env"]["PSEUDOLIFE_CI_INCLUDE_FROZEN"] == "${{ needs.scope.outputs.include_frozen }}"
+    script = (ROOT / "ops" / "ci_tests.sh").read_text(encoding="utf-8")
+    assert 'if [[ "${PSEUDOLIFE_CI_INCLUDE_FROZEN:-}" == true ]]; then\n    frozen=(--include-frozen)' in script
+    assert 'python -m pytest ${frozen[@]+"${frozen[@]}"}' in script
+    # conftest reads only its own option, never that variable.
+    assert "PSEUDOLIFE_CI_INCLUDE_FROZEN" not in (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
 
 
 def test_naming_a_frozen_file_without_the_switch_is_refused_with_its_name():
@@ -130,6 +154,10 @@ def test_stress_forwards_the_frozen_switch(tmp_path, monkeypatch):
     monkeypatch.chdir(ROOT)
     argv = stress.command("pytest", ["tests/test_abstain.py::test_x"], tmp_path, tmp_path)
     assert suite_classes.SWITCH in argv
+    # A selection outside tests/ gets no switch: only tests/conftest.py
+    # defines it (reviewer of 912c17308, S1).
+    for outside in (["rust/cli_harness/test_fork.py"], ["rust/ci/test_ci_budget.py::test_x"]):
+        assert suite_classes.SWITCH not in stress.command("pytest", outside, tmp_path, tmp_path), outside
     monkeypatch.chdir(tmp_path)        # a checkout without the switch
     assert suite_classes.SWITCH not in stress.command("pytest", ["tests/test_x.py"], tmp_path, tmp_path)
 
@@ -211,7 +239,10 @@ def test_the_frozen_guard_catches_the_files_it_was_written_for():
 
 # A live test that reads a rust/ file runs in the guards job, since a
 # Rust-only batch skips the Python lanes on its pull request and its push.
-RUST_PATH = re.compile(r"""["']rust/[^"'\s]*["']|/\s*["']rust["']""")
+RUST_PATH = re.compile(r"""["']rust/[^"'\s]*["']|/\s*["']rust["']"""
+                       # rust.yml as a workflow path or a quoted name, not
+                       # docker-compose.rust.yml (a compose overlay).
+                       r"""|^\s*(?:from|import)\s+rust\b|(?:workflows/|["'])rust\.yml\b""", re.M)
 
 
 def test_every_live_test_of_rust_files_runs_in_guards():

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "f3e61581c78da942",
+  "fingerprint": "2e2d194f4691c1b7",
+  "reason": "Drops the PYTEST_ADDOPTS it never needed (its list names live files only); the same tests run."
+}

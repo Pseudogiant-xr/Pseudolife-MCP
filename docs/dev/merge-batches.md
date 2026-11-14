@@ -91,11 +91,16 @@ Each change waits for hosted CI once, on its batch:
   (`tests/test_suite_classes.py` keeps that list complete). Every Python
   lane runs only the live test files (`tests/suite_classes.txt`):
   `test-lite-linux`, the whole suite on embedded PostgreSQL, left with the
-  lite tier. The frozen files run too (`--include-frozen`, as scope's
-  `pytest_addopts`) when a change touches `pseudolife_memory/` outside the
-  Console build, which only a freeze-exception change can, when the diff is
-  unreadable, and in the weekly nightly (Sunday UTC, 02:17 AEDT Monday),
-  since the package still ships with floor-only dependencies. Anything doubtful skips nothing and logs
+  lite tier. The frozen files run too in `test` (`--include-frozen`,
+  which `ops/ci_tests.sh` adds to its own pytest when scope's
+  `include_frozen` is true) when a change touches `pseudolife_memory/`
+  outside the Console build (once #1546's guard is on master only a
+  freeze-exception change can), when the diff is unreadable, and in the
+  weekly nightly (Sunday UTC, 02:17 AEDT Monday), since the package still
+  ships with floor-only dependencies; that run is Linux-only, as the
+  Windows and macOS lanes name live files. While a release still publishes
+  the Python package, its local validation runs the whole suite with
+  `--include-frozen` too (the `release-procedure` skill). Anything doubtful skips nothing and logs
   one line saying why: not exactly one merged `integrate/*` pull request
   into master with this commit as its merge commit, a different tree, the
   newest batch run not completed, or an API error. In `ci.yml` that covers

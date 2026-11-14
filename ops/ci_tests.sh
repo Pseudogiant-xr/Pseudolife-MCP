@@ -60,6 +60,15 @@ trap cleanup EXIT
 # timeline, resource and test-server samples, run manifest) into
 # ci-results/profile and folds its summary; the selection, workers and exit
 # status are unchanged. Off by default until its overhead is measured.
+# PSEUDOLIFE_CI_INCLUDE_FROZEN=true (ci.yml's scope: a change to the frozen
+# package, or the weekly run) adds the frozen test files (tests/
+# suite_classes.txt). An argument to this pytest only: PYTEST_ADDOPTS would
+# reach every pytest a test starts as well, and the suite's own collection
+# tests start several.
+frozen=()
+if [[ "${PSEUDOLIFE_CI_INCLUDE_FROZEN:-}" == true ]]; then
+    frozen=(--include-frozen)
+fi
 profile=()
 case "${PSEUDOLIFE_SUITE_PROFILE:-}" in
     ""|0|off|false|no) ;;
@@ -71,7 +80,7 @@ esac
 set +e
 /usr/bin/time -v -o ci-results/process.txt \
     timeout --signal=ABRT --kill-after=60s 35m \
-    python -m pytest ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
+    python -m pytest ${frozen[@]+"${frozen[@]}"} ${profile[@]+"${profile[@]}"} -q -n 2 --dist loadfile -ra \
     --durations=50 --durations-min=1 --junitxml=ci-results/junit.xml "$@"
 test_status=$?
 if (( ${#profile[@]} )) && [[ -f ci-results/profile/manifest.json ]]; then

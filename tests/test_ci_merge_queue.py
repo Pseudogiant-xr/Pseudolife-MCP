@@ -173,7 +173,7 @@ def run_scope(tmp_path, event, files, *, base_ref="refs/heads/master", fetch_exi
     result = subprocess.run([BASH, str(script)], env=env, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not unexpected.exists(), unexpected.read_text(encoding="utf-8")
-    # Sorted: the step writes pytest_addopts and python in either order.
+    # Sorted: the step writes include_frozen and python in either order.
     return sorted(output.read_text(encoding="utf-8").split())
 
 
@@ -199,7 +199,7 @@ def test_a_mixed_or_non_rust_merge_group_runs_the_python_lanes(tmp_path, group):
     # A frozen-package change also runs the frozen tests (below).
     expected = ["python=true"]
     if any(path.startswith("pseudolife_memory/") for path in group):
-        expected = ["pytest_addopts=--include-frozen", "python=true"]
+        expected = ["include_frozen=true", "python=true"]
     assert run_scope(tmp_path, "merge_group", group) == expected
 
 
@@ -222,7 +222,7 @@ def test_a_master_push_diffs_from_the_tip_it_moved_from(tmp_path):
     assert run_scope(tmp_path, "push", RUST_ONLY, before="0123abc") == ["python=false", "rust_only=true"]
     assert run_scope(tmp_path, "push", PYTHON_CHANGE, before="0123abc") == ["python=true"]
     # An unreadable before (a missing commit in the shallow clone) runs everything.
-    assert run_scope(tmp_path, "push", RUST_ONLY, before="0123abc", diff_exit=128) == ["pytest_addopts=--include-frozen", "python=true"]
+    assert run_scope(tmp_path, "push", RUST_ONLY, before="0123abc", diff_exit=128) == ["include_frozen=true", "python=true"]
 
 
 @pytest.mark.parametrize("base_ref, fetch_exit", [
@@ -230,13 +230,13 @@ def test_a_master_push_diffs_from_the_tip_it_moved_from(tmp_path):
     ("refs/heads/master x", 0), ("refs/heads/master", 128)])
 def test_a_merge_group_without_a_fetched_master_tip_runs_everything(tmp_path, base_ref, fetch_exit):
     assert run_scope(tmp_path, "merge_group", RUST_ONLY, base_ref=base_ref,
-                     fetch_exit=fetch_exit) == ["pytest_addopts=--include-frozen", "python=true"]
+                     fetch_exit=fetch_exit) == ["include_frozen=true", "python=true"]
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
 @pytest.mark.parametrize("files, diff_exit", [([], 0), (RUST_ONLY, 128)])
 def test_an_empty_or_unreadable_diff_runs_everything(tmp_path, event, files, diff_exit):
-    assert run_scope(tmp_path, event, files, diff_exit=diff_exit) == ["pytest_addopts=--include-frozen", "python=true"]
+    assert run_scope(tmp_path, event, files, diff_exit=diff_exit) == ["include_frozen=true", "python=true"]
 
 
 # Ordinary pull requests run the fast lanes only; their integration batch's
@@ -279,7 +279,7 @@ def test_an_ordinary_pull_request_changing_ci_inputs_runs_the_fast_lanes_only(tm
 def test_an_ordinary_pull_request_with_an_unreadable_diff_runs_everything(tmp_path, files,
                                                                           diff_exit):
     assert run_scope(tmp_path, "pull_request", files, diff_exit=diff_exit,
-                     head_ref="claude/some-change") == ["pytest_addopts=--include-frozen", "python=true"]
+                     head_ref="claude/some-change") == ["include_frozen=true", "python=true"]
 
 
 @pytest.mark.parametrize("head_ref", [BATCH_REF, "integrate/2026-10-07-rust-modes"])
@@ -302,21 +302,21 @@ def test_a_pull_request_without_a_head_ref_is_classified_by_its_diff(tmp_path):
 @pytest.mark.parametrize("event", ["push", "merge_group"])
 def test_a_change_to_the_frozen_package_runs_its_tests_too(tmp_path, event, files, frozen):
     # Only a freeze-exception change can touch the package; its lanes then
-    # collect the frozen files as well (PYTEST_ADDOPTS).
+    # collect the frozen files as well (ops/ci_tests.sh's --include-frozen).
     out = run_scope(tmp_path, event, files)
     assert "python=true" in out
-    assert ("pytest_addopts=--include-frozen" in out) is frozen
+    assert ("include_frozen=true" in out) is frozen
 
 
 def test_a_batch_carrying_a_freeze_exception_runs_the_frozen_tests(tmp_path):
     out = run_scope(tmp_path, "pull_request", ["pseudolife_memory/expose_cli.py"])
-    assert out == ["pytest_addopts=--include-frozen", "python=true"]
+    assert out == ["include_frozen=true", "python=true"]
 
 
 @pytest.mark.parametrize("weekly, frozen", [("true", True), ("", False)])
 def test_the_weekly_nightly_runs_the_frozen_tests(tmp_path, weekly, frozen):
     out = run_scope(tmp_path, "schedule", [], weekly=weekly)
-    assert out == (["pytest_addopts=--include-frozen", "python=true"] if frozen else ["python=true"])
+    assert out == (["include_frozen=true", "python=true"] if frozen else ["python=true"])
 
 
 def test_the_weekly_run_is_sunday_and_never_reuses_the_push():
@@ -325,10 +325,9 @@ def test_the_weekly_run_is_sunday_and_never_reuses_the_push():
     assert steps["weekly"]["if"] == "github.event_name == 'schedule'"
     assert steps["push"]["if"].endswith("&& steps.weekly.outputs.frozen != 'true'")
     jobs = load("ci.yml")["jobs"]
-    for name in ("test", "test-lite-windows", "test-lite-macos"):
-        assert jobs[name]["env"]["PYTEST_ADDOPTS"] == "${{ needs.scope.outputs.pytest_addopts }}", name
-    assert load("ci.yml")["jobs"]["scope"]["outputs"]["pytest_addopts"] == \
-        "${{ steps.scope.outputs.pytest_addopts }}"
+    assert jobs["test"]["env"]["PSEUDOLIFE_CI_INCLUDE_FROZEN"] == "${{ needs.scope.outputs.include_frozen }}"
+    assert load("ci.yml")["jobs"]["scope"]["outputs"]["include_frozen"] == \
+        "${{ steps.scope.outputs.include_frozen }}"
 
 
 @pytest.mark.parametrize("event", ["push", "schedule", "workflow_dispatch", "merge_group"])
