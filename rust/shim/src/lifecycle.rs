@@ -576,7 +576,10 @@ fn python_text(value: &Value) -> String {
 }
 
 pub const WINDOWS_DETACHED_FLAGS: u32 = 0x08000000 | 0x00000200;
-fn detached(command: &mut Command) {
+/// Make `command` outlive this process and its session: on Windows no
+/// window, a new process group and, where the job allows it, out of the
+/// launcher's job; on POSIX a new session.
+pub(crate) fn detached(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -586,6 +589,92 @@ fn detached(command: &mut Command) {
     }
     #[cfg(unix)]
     posix_session::detached(command);
+}
+/// Whether this process's job ends its processes when the job closes and
+/// lets none break away: a "detached" child then still ends with the job.
+/// Always false outside Windows, and outside a job.
+pub(crate) fn job_ends_detached_children() -> bool {
+    #[cfg(windows)]
+    {
+        job_ends_its_children(std::ptr::null_mut())
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+/// `job_ends_detached_children` for the job `job` (null: this process's).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn job_ends_its_children(job: windows_sys::Win32::Foundation::HANDLE) -> bool {
+    use windows_sys::Win32::System::JobObjects::{
+        JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectExtendedLimitInformation, QueryInformationJobObject,
+    };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    // SAFETY: `job` is null (this process's job) or a live job handle; the
+    // output buffer is initialized, correctly sized and outlives the call.
+    let queried = unsafe {
+        QueryInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&mut limits as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of_val(&limits) as u32,
+            std::ptr::null_mut(),
+        )
+    };
+    let flags = limits.BasicLimitInformation.LimitFlags;
+    queried != 0
+        && flags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0
+        && flags & (JOB_OBJECT_LIMIT_BREAKAWAY_OK | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK) == 0
+}
+#[cfg(all(test, windows))]
+mod job_tests {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::JobObjects::{
+            CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectExtendedLimitInformation, SetInformationJobObject,
+        },
+    };
+
+    #[allow(unsafe_code)]
+    fn job_with(flags: u32) -> bool {
+        // SAFETY: an unnamed job this test creates, sets and closes; no
+        // process is assigned to it.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            assert!(!job.is_null());
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = flags;
+            assert_ne!(
+                SetInformationJobObject(
+                    job,
+                    JobObjectExtendedLimitInformation,
+                    (&raw const limits).cast(),
+                    std::mem::size_of_val(&limits) as u32,
+                ),
+                0
+            );
+            let ends = super::job_ends_its_children(job);
+            CloseHandle(job);
+            ends
+        }
+    }
+
+    #[test]
+    fn a_job_that_kills_on_close_and_allows_no_breakaway_ends_detached_children() {
+        assert!(job_with(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE));
+        assert!(!job_with(
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        ));
+        assert!(!job_with(
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+        ));
+        assert!(!job_with(0));
+    }
 }
 #[cfg(windows)]
 #[allow(unsafe_code)]
