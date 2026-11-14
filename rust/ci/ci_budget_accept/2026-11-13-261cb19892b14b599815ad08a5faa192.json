@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "scope",
+  "before": "53f970c03bdfbd83",
+  "fingerprint": "9be3c717c6d2e583",
+  "reason": "The push case diffs from github.event.before instead of HEAD^1: one env var and one git diff, the same seconds-long step."
+}

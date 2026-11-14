@@ -14,16 +14,14 @@ tests: `tests/test_conductor_watch.py`.
 ## Scope
 
 `conductor-watch` polls GitHub, the suite results and the suite leases, and
-sends its owner board mail when something needs a decision. This row ports
-everything `main` does before it takes the state's lock. From the lock on,
-the run writes (the lock file, the board registration, the state file, the
-pid file, the ledger) and must own every branch after that: the `gh` and
-suite-result shapes it refuses or skips, the fresh baseline from a state it
-cannot read, the refusal of a state it cannot write, and texts this port
-does not reproduce yet (the httpx exception class in "the daemon at ... is
-unreachable (...)", the `strerror` of a lock or state write that fails, the
-`gh` and lease CLI it runs). None of that is ported, so the watch, in the
-foreground or with `--detach`, defers by name before its first write.
+sends its owner board mail when something needs a decision. This row
+compares everything `main` does before it takes the state's lock, plus a
+start that takes the lock and stops at "no board" (no bearer token, a
+closed daemon address). The watch itself runs natively since 2026-11-14
+(`start.rs`, `watch.rs`); it is held to its own Rust tests
+(`shim/src/cli/conductor_watch/watch_tests.rs`,
+`shim/tests/cli_conductor_watch.rs`), not to this row, because past the
+lock it works rather than matches.
 
 ## What runs, in the oracle's order (checked)
 
@@ -53,7 +51,11 @@ foreground or with `--detach`, defers by name before its first write.
    the process's own token (Windows creation `FILETIME`, Linux `/proc` stat
    field 22); `_foreign` (stderr, exit 2) or `_already` (stdout, exit 0).
    This holds with `--detach` too.
-8. Otherwise `--detach` or the lock: deferred.
+8. Otherwise `--detach` (not compared here) or the lock: with no bearer
+   token, `no board: no bearer token (...)` on stderr, exit 2, leaving the
+   empty `.lock` and one `.ledger` line (cases `start-no-board` and
+   `start-stale-record-no-board`; rule `conductor-watch-start-no-board`
+   blanks the ledger line's timestamp and line ending).
 
 ## Exact contract items
 
@@ -76,10 +78,6 @@ foreground or with `--detach`, defers by name before its first write.
 
 Every deferral is decided before any effect.
 
-- The watch itself: a start with no watcher running on its state, in the
-  foreground (the lock, the board, `gh`) or with `--detach` (a detached
-  process, separate Windows work). Cases `defer-foreground-start`,
-  `defer-stale-record-start`.
 - argparse corners: abbreviations and ambiguous prefixes (case
   `defer-abbreviation`), `--`, a value starting with `-` after a space (case
   `defer-dash-value`), an unknown `--word=V`, any other token starting with

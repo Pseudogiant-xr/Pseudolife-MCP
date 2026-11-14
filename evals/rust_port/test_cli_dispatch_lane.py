@@ -215,6 +215,24 @@ def test_cli_judge_rejects_exit_stream_and_newline_changes(field, replacement):
 PINNED_USAGE_SHA256 = "5806d34185cdd94f2c83af42426d2954a6202abd10aba75d6dcfd9e53a65b0ef"
 
 
+# The native help is Python's usage with two modes the native client refuses
+# (14 November 2026: serve is the separate pseudolife-daemon, embedded was
+# retired with file mode); Python is frozen, so only these lines differ.
+NATIVE_HELP_LINES = (
+    (b"  serve          run the HTTP memory daemon (deployment mode)\n",
+     b"  serve          refused: the daemon is pseudolife-daemon, in the Docker tier\n"),
+    (b"  embedded       in-process stdio server \xe2\x80\x94 no daemon, no Postgres (escape hatch)\n",
+     b"  embedded       refused: retired with file mode\n"),
+)
+
+
+def native_help(usage: bytes) -> bytes:
+    for old, new in NATIVE_HELP_LINES:
+        assert usage.count(old) == 1, old
+        usage = usage.replace(old, new)
+    return usage
+
+
 def pinned_usage():
     root = Path(__file__).resolve().parents[2]
     tree = ast.parse((root / "pseudolife_memory/cli.py").read_text(encoding="utf-8"))
@@ -264,14 +282,14 @@ def test_every_python_mode_is_served_or_deferred_by_the_native_shim():
 
 def test_help_source_matches_pinned_python_literal_bytes():
     root = Path(__file__).resolve().parents[2]
-    assert (root / "rust/shim/src/cli_help.txt").read_bytes() == pinned_usage()
+    assert (root / "rust/shim/src/cli_help.txt").read_bytes() == native_help(pinned_usage())
 
 
 def test_native_help_contract_pins_match_python_wire_bytes():
     root = Path(__file__).resolve().parents[2]
     contract = (root / "rust/shim/tests/cli_dispatch_contract.rs").read_text(encoding="utf-8")
     pins = set(re.findall(r'"([0-9a-f]{64})"', contract))
-    usage = pinned_usage()
+    usage = native_help(pinned_usage())
     assert pins == {hashlib.sha256(usage).hexdigest(),
                     hashlib.sha256(usage.replace(b"\n", b"\r\n")).hexdigest()}
 
@@ -292,7 +310,7 @@ def test_help_asset_stays_canonical_in_autocrlf_checkout(tmp_path):
     subprocess.run(["git", "-c", "core.autocrlf=true", "checkout-index",
                     f"--prefix={checkout.as_posix()}/", "--", "rust/shim/src/cli_help.txt"],
                    cwd=source, check=True)
-    assert (checkout / "rust/shim/src/cli_help.txt").read_bytes() == pinned_usage()
+    assert (checkout / "rust/shim/src/cli_help.txt").read_bytes() == native_help(pinned_usage())
 
 
 def prompt_subprocess_request(monkeypatch, dispatched, node=None):

@@ -55,7 +55,14 @@ fn main() -> ExitCode {
         std::process::exit(run_lease(&lease_arguments));
     }
     if arguments.first().and_then(|mode| mode.to_str()) == Some("serve") {
-        return run_sent();
+        // `serve` is not the daemon (that is `pseudolife-daemon`, in the
+        // Docker tier). Only the harnesses' opt-in reaches the bounded
+        // maintainer-testing candidate.
+        if pseudolife_stdio::cli::retired::sent_candidate_requested() {
+            return run_sent();
+        }
+        pseudolife_stdio::stderrln!("{}", pseudolife_stdio::cli::retired::serve_message());
+        return ExitCode::from(1);
     }
     if let Some(code) =
         pseudolife_stdio::cli::dispatch(arguments.first().and_then(|mode| mode.to_str()))

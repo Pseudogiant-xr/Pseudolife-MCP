@@ -281,6 +281,10 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
         if args.list || args.revoke.is_some() {
             return through_postgres(args, report).await;
         }
+        // No daemon container answers: a lite bank here is refused plainly.
+        if let Some(bank) = crate::cli::retired::find_lite_bank(None) {
+            return Ok(report.fail(EXIT_REFUSED, &crate::cli::retired::lite_bank_refusal(&bank)));
+        }
         return Ok(report.fail(EXIT_REFUSED, "the pseudolife-mcp-daemon container is not running: start the daemon (an invite needs it to report its bank), then re-run"));
     }
     let rust = resolution::inspect(&resolution::container_engine_inspect(&docker))
@@ -302,7 +306,7 @@ pub(super) async fn run(args: &Args, report: &mut Report, port: u32) -> Result<u
         .flatten();
     let Some(version) = version else {
         let message = if checked.code == 127 || checked.stderr.contains("No such container") {
-            "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset and no lite bank was found) and no pseudolife-mcp-daemon container: run this on the daemon's host"
+            "no database here (PSEUDOLIFE_MCP_DATABASE_URL is unset) and no pseudolife-mcp-daemon container: run this on the daemon's host"
         } else {
             "the daemon's image predates `invite`: update the daemon first (pseudolife-mcp update), then re-run"
         };

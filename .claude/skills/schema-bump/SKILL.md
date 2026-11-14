@@ -47,13 +47,25 @@ The Rust plan hashes the whole file, so even a comment change needs this.
    with `--check` must pass. The changed `schema.sql`, `schema_plan.json`
    and `schema_meta.rs` under `rust/daemon/src/storage/` ship in the same PR.
 10. **When the DDL or migrations change, re-record the schema startup
-    golden** `rust/daemon/harness/goldens/schema-startup.json`:
-    `python rust/daemon/harness/schema_ci.py --record-goldens --out
-    <scratch>/schema-record.json`. It needs the bench Postgres, a Rust
-    toolchain, and the commits listed in
+    golden** `rust/daemon/harness/goldens/schema-startup.json`, and, when
+    what a start writes or hydrates changes, `startup-hydration.json` and
+    `clock-retry.json` beside it. Since the Python freeze these are Rust
+    regression snapshots, recorded from the Rust candidate:
+    `python rust/daemon/harness/schema_ci.py --record-candidate --out
+    <scratch>/schema.json` (and `startup_ci.py --record-candidate` for the
+    other two). That is a dry run: it prints each changed case's difference
+    (the committed golden labelled `golden`) and exits 1 if anything would
+    change; review it, then add `--write`. A case whose run fails the
+    harness's own checks is refused and nothing is written. It needs the
+    bench Postgres, a Rust toolchain, and the commits listed in
     `rust/daemon/harness/schema_history.json`; `--no-build --rust-test-bin
-    <exe>` reuses a built test binary. Inspect the golden's diff, then run
-    it again without `--record-goldens` to check.
+    <exe>` reuses a built test binary. One golden serves both operating
+    systems, so then run `schema_ci.py` and `startup_ci.py` without a
+    recording flag (what CI runs: Rust only, with the mutant controls) on
+    this OS and the other, and name the cases and the reason in the pull
+    request (`rust/daemon/harness/candidate_record.py` has the rules).
+    `--record-goldens` still records the frozen Python beside Rust, so it
+    reproduces only a golden for a change Python also has.
 
 ## C. A schema bump also moves the Rust parity pin (the register, `rust/parity/`)
 
@@ -62,12 +74,21 @@ The Rust plan hashes the whole file, so even a comment change needs this.
     (`tests/test_schema_version.py` pins them).
 12. **Every harness golden that digests the catalog or dumps a bank**,
     re-recorded on both OSes:
-    - dream cursors: `rust/daemon/harness/dream_cursors.py live --record`;
-    - the daemon `run.py` golden rows, the graph store and the principals;
     - the CLI harness rows whose goldens carry a bank dump or an export
       (`rust/cli_harness/goldens/<row>.{linux,windows}.json`: transfer,
-      invite and maintainer at least):
-      `python rust/cli_harness --row <row> --record --candidate <shim>`.
+      invite and maintainer at least), from the candidate:
+      `python rust/cli_harness --row <row> --record-candidate --candidate
+      <shim>`, then `--write` (`rust/cli_harness/README.md`, "Goldens after
+      the freeze");
+    - the daemon `run.py` golden rows and the W2-E scenarios, from the
+      candidate: `python rust/daemon/harness/run.py golden
+      --record-candidate` and `w2e.py golden --record-candidate`, then
+      `--write`;
+    - dream cursors (`rust/daemon/harness/dream_cursors.py live --record`),
+      the graph store and the principals have no candidate recorder yet:
+      their `--record` records the frozen Python, so a Rust-only change to
+      what they pin stops and asks the maintainer rather than editing those
+      goldens by hand.
 
 ## D. Before merge
 
