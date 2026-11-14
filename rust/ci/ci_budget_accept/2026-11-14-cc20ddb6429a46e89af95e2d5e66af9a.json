@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "4e8423b74765fec3",
+  "fingerprint": "31bec07946c9c5d7",
+  "reason": "Removes six files frozen again once the #1539 and #1537 freeze exceptions landed (test_coordination_adapter, test_codex_doorbell, test_child_python and the three test_tunnel_* files) from the one pytest step; no step, setup or job is added, so the lane can only get shorter. Re-measure from the next batches."
+}
