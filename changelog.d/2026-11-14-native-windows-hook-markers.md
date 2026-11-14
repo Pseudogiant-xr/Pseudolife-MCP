@@ -1,4 +1,0 @@
-### Fixed (2026-11-14 — board mail wakes a Windows session on the native client) [#1326]
-
-- On Windows the native client refused every digest marker the plugin hooks write (`<key>.wake`, `<key>.<token>.wake-armed`, `<key>.seen`, `<key>.reprint`), because it required the protected, owner-only access list of its own private state, which files written by Git Bash and PowerShell never have. So the Stop-hook board-mail wake could not fire there and a hook-written `.seen` was ignored.
-- It now applies the marker rule the POSIX client already uses: the owner must be this user, SYSTEM or Administrators, and no other account may be able to write, delete or backdate the file. A marker another account can write or owns is still refused, with one line naming the file, who can write it, and the fix. The hooks and their definitions are unchanged.
