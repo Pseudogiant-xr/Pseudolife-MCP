@@ -134,8 +134,12 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    version fields == tag (issue #185 moved the server.json guard here, from
    the `registry` job below, so a mismatch fails before anything builds or
    uploads — it used to run after the irreversible PyPI publish and burn a
-   release number), then builds, twine-checks, and waits for the user's
-   one-click approval on the `pypi` environment. Manual `twine upload
+   release number), then builds and twine-checks. The five native
+   archives are then built, verified and attached to the GitHub release
+   (with `SHA256SUMS`) before the `publish` job waits for the user's
+   one-click approval on the `pypi` environment: the updaters learn a
+   release exists from PyPI and then download its archives, so a failed
+   native build stops the release before PyPI. Manual `twine upload
    dist/*` remains the fallback. PyPI never accepts a same-version
    re-upload — metadata-only fixes are a `.postN`.
 4. **MCP registry — automated.** The `registry` job in `release.yml` runs
@@ -168,9 +172,10 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    "denied". Verify:
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.
 
-   **Rust artifacts.** Two repository variables, disabled when unset, gate
-   them, and all publication remains downstream of the human-approved
-   `publish` job. `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` publishes the
+   **Rust artifacts.** One repository variable, disabled when unset, gates
+   the Rust image, and its publication remains downstream of the human-approved
+   `publish` job (the native archives, which have no variable, come
+   before it). `PSEUDOLIFE_PUBLISH_RUST_DAEMON=true` publishes the
    separate `pseudolife-daemon-rust:<version>` image. Since 0.23.0 the Rust
    daemon is the default Docker engine, so confirm before the release that
    this variable is still `true`: with the image published, install and
@@ -180,8 +185,8 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    with nothing changed. The Rust image gets only the explicit version
    tag; the workflow pushes no `latest` for it.
    The five native CLI archives, `SHA256SUMS` and
-   `pseudolife-compose-<version>.tar.gz` publish with every release once
-   `publish` succeeds (no variable); the installers download the archive
+   `pseudolife-compose-<version>.tar.gz` publish with every release before
+   `publish` (no variable), once `build`'s guards passed; the installers download the archive
    for their host, so check after the run that all seven assets are on
    the release (`gh release view v<version> --json assets`). Verify a published image with
    `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon-rust:<version>`
@@ -203,6 +208,13 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    exact file set and checksums, downloads and verifies already published
    assets (including `SHA256SUMS`), and uploads only missing ones. It never
    replaces existing bytes; investigate a mismatch before publication.
+   Rerun a failed release with "Re-run failed jobs", never "Re-run all
+   jobs": rebuilt archives need not be byte-identical, so the attachment
+   would refuse the new `SHA256SUMS` and PyPI could not follow until the
+   attached assets are deleted. The archives are attached before the PyPI
+   approval, so to abandon a version after rejecting that approval, delete
+   the GitHub release (or its assets): otherwise a checkout of that tag
+   installs its native client although PyPI never got it.
    Missing opt-in assets are a failed native publication, not permission
    to enable a fallback or change the default engine; keep installation
    and update readiness as release prerequisites.
