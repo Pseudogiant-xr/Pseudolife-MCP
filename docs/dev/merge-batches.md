@@ -199,8 +199,19 @@ touches the package, or a member whose label has gone since `build`.
 Each member's own change against master is judged too, whichever merge
 carries it: a stacked child merged first brings its parent's change, and
 the parent still needs its own label, so an unlabelled parent is dropped
-and any member whose head carries it is left out until it is labelled or
-leaves the stack. A guard deleted from master is found with
+and any member whose head carries it is left out until the parent lands,
+leaves the stack, or the maintainer rules it an exception. The parents
+looked for are the open pull requests, whatever their base, whose current
+head is in a member's history. Two shapes are not found, so the member's
+own label covers what its diff shows: a parent that pushed again after the
+child stacked on it (its current head is not in the child), and a parent
+change from a branch with no open pull request. A child whose frozen files
+are exactly a labelled parent's waits for that parent, keeping its label,
+and does not keep out a labelled pull request stacked on it; one that
+edits them further is refused as its own change. A member whose change
+cannot be read (a shallow checkout, or a branch with no history in common
+with master) refuses the whole build and changes no label, and so does a
+failed or possibly cut-off listing of the open pull requests. A guard deleted from master is found with
 `--full-history`, so a deletion inside a merge resolution still refuses, and
 a shallow clone refuses rather than guess. A
 member whose head the batch already holds (a stacked child merged first, a
@@ -318,8 +329,10 @@ the cut adds) is left out instead, with the fix in its comment, and the
 others batch as usual. Nothing in CI compares a cut with the old Python
 release since the Python freeze, so a cut no longer has to be version-only
 for CI (`release_cut()` in `evals/rust_port/oracle_selection.py` is used
-only by a manual stress dispatch); it still needs `freeze-exception` while
-it edits `pseudolife_memory/compose/docker-compose.yml`.
+only by a manual stress dispatch); it still needs `freeze-exception`, a
+label only the maintainer's ruling for that cut puts on it, while it edits
+`pseudolife_memory/compose/docker-compose.yml`, and a cut that changes any
+other package path is refused, label or no label.
 
 ```bash
 python ops/integrate.py status

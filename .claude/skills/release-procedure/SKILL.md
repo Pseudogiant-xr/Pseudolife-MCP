@@ -71,7 +71,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the daemon image tag in **both** compose files (`ops/docker-compose.yml`
    and the packaged copy `pseudolife_memory/compose/docker-compose.yml`,
-   so, as nothing under the package may change, the cut PR is an exception that carries the `freeze-exception` label, applied by the maintainer or the conductor on a maintainer ruling),
+   so, as nothing under the package may change, the cut PR is an exception: the maintainer rules it for each cut, and only then does it carry the `freeze-exception` label, applied by the maintainer or by the conductor after that ruling),
    **both** version fields in `server.json`,
    `plugin/release.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the release the hooks report for the
@@ -119,8 +119,11 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    fragment unfolded on the batch head (one that landed on master after the
    fold, or one the cut adds), saying so: merge master forward, run
    `python ops/assemble_changelog.py` again and rerun the pinned tests.
-   The cut also carries `freeze-exception` while it edits the packaged
-   compose copy, or `build` drops it with the guard's refusal.
+   The cut also carries `freeze-exception`, once the maintainer has ruled
+   it for this cut, while it edits the packaged compose copy, or `build`
+   drops it with the guard's refusal. Inside the package a cut may change
+   only that file: `build` refuses a cut that changes any other package
+   path, label or no label, naming the path.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
    then open the wheel — Console build present: every file

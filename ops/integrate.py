@@ -251,7 +251,13 @@ class Plan:
     def save(self) -> None:
         path = Plan.path(self.branch)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
+        data = asdict(self)
+        # Left out when empty, so the loader before `carried` existed
+        # (Plan(**raw)) still reads the plan: a revert of the change that
+        # added it, landed as a batch, runs that loader at `open`.
+        if not data["carried"]:
+            del data["carried"]
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @staticmethod
     def load(branch: str) -> Plan | None:
@@ -1496,9 +1502,13 @@ def _is_ancestor(ancestor: str, descendant: str) -> bool:
     return git("merge-base", "--is-ancestor", ancestor, descendant, check=False).returncode == 0
 
 
-# The version-bearing file a release cut may still change inside the
-# frozen package (the release-procedure skill's version cut).
+# The files of the release-procedure skill's seven-file version cut that
+# lie inside the frozen package: the only package paths a cut may change,
+# label or no label.
 CUT_FROZEN_FILES = frozenset({"pseudolife_memory/compose/docker-compose.yml"})
+# The open pull requests build lists to find any a member's head carries; a
+# listing that reaches this many may be cut off, so build refuses.
+OPEN_PR_LIMIT = 500
 
 
 def _own_frozen_paths(freeze, base_sha: str, sha: str) -> list[str] | None:
@@ -1511,6 +1521,25 @@ def _own_frozen_paths(freeze, base_sha: str, sha: str) -> list[str] | None:
 
 def _has_commit(sha: str) -> bool:
     return git("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
+
+
+def _open_rows() -> list[dict]:
+    """Every open pull request, whatever its base: one a member's head
+    carries is judged on its own change. Fails closed on a failed or
+    possibly cut-off listing, since a missing row is a parent unjudged."""
+    try:
+        text = gh("pr", "list", "--state", "open", "--limit", str(OPEN_PR_LIMIT), "--json",
+                  "number,headRefOid,labels")
+    except Refusal as error:
+        raise Refusal(f"build lists every open pull request, to judge any a member's head carries "
+                      f"for the Python freeze, and that listing failed: {error}; rerun once "
+                      "`gh pr list --state open` works (`gh auth status`, the network)") from None
+    rows = json.loads(text or "[]")
+    if len(rows) >= OPEN_PR_LIMIT:
+        raise Refusal(f"the listing of open pull requests reached its limit of {OPEN_PR_LIMIT}, so an "
+                      "open pull request a member's head carries could be missing from it and go "
+                      "unjudged by the Python freeze; raise OPEN_PR_LIMIT in ops/integrate.py and rebuild")
+    return rows
 
 
 def _fetch_listed(members: list[Member]) -> None:
@@ -1546,33 +1575,50 @@ def _freeze_prepass(plan: Plan, freeze, members: list[Member]) -> _Prepass:
     history: set[str] = set()
     for m in present:
         history.update(_out("rev-list", m.sha, f"^{plan.base_sha}").split())
-    rows = json.loads(gh("pr", "list", "--state", "open", "--limit", "500", "--json",
-                         "number,headRefOid,labels,baseRefName") or "[]")
-    for row in rows:
+    heads = {m.sha for m in present}
+    for row in _open_rows():
         head = row.get("headRefOid") or ""
-        if row.get("number") in listed or head not in history or row.get("baseRefName", BASE) != BASE:
+        # Whatever its base: a parent stacked on another branch is carried
+        # all the same. A head a member has is judged as that member.
+        if row.get("number") in listed or head not in history or head in heads:
             continue
         labels = tuple(label.get("name", "") for label in row.get("labels") or [] if isinstance(label, dict))
         judged.append((Member(number=row["number"], title="", sha=head, url="", review="", checks="",
                               labels=labels), False))
+    own: dict[str, list[str]] = {}
     for m, is_member in judged:
         paths = _own_frozen_paths(freeze, plan.base_sha, m.sha)
         if paths is None:
-            result.refused[m.sha] = (m.number, "its change could not be read for the Python freeze "
-                                               "check; rebuild once git can read it", False)
+            # The checkout's fault or the branch's, not the change's: no
+            # comment, no label removed, and nothing is built.
+            raise Refusal(f"#{m.number}'s change against {BASE} could not be read for the Python "
+                          f"freeze check (git merge-base or diff of {m.sha[:12]} failed): the batch "
+                          "checkout is shallow or missing objects (fetch with full history), or the "
+                          f"branch has no history in common with {BASE} (remove `{plan.label}` from "
+                          f"#{m.number} until it does); no label was changed")
+        own[m.sha] = paths
+        beyond = sorted(set(paths) - CUT_FROZEN_FILES)
+        if paths and beyond and _is_release_cut(plan.base_sha, m):
+            result.refused[m.sha] = (m.number, (
+                f"it is a release cut, and its change against {BASE} also changes "
+                f"{', '.join(beyond)} inside the frozen Python package, where a cut may change only "
+                f"{', '.join(sorted(CUT_FROZEN_FILES))} (the version cut), label or no label: move "
+                f"that change to its own pull request, then re-apply `{plan.label}`"), False)
         elif paths and freeze.EXCEPTION_LABEL in m.labels:
             result.exceptions[m.sha] = (m.number, set(paths))
     for m, is_member in judged:
-        paths = _own_frozen_paths(freeze, plan.base_sha, m.sha)
-        if not paths or freeze.EXCEPTION_LABEL in m.labels:
+        paths = own[m.sha]
+        if not paths or freeze.EXCEPTION_LABEL in m.labels or m.sha in result.refused:
             continue
-        # A stacked child's own diff holds its labelled parent's change: it
-        # waits for that parent, keeping its label, rather than being told to
-        # rewrite in Rust a change it did not make.
-        parents = [(number, frozen) for sha, (number, frozen) in result.exceptions.items()
-                   if sha != m.sha and _is_ancestor(sha, m.sha)]
-        if parents and set(paths) <= set().union(*(frozen for _, frozen in parents)):
-            names = ", ".join(f"#{number}" for number, _ in parents)
+        # A stacked child whose frozen files are exactly a labelled
+        # parent's (nothing frozen changes from that parent's head to its
+        # own) waits for that parent, keeping its label, rather than being
+        # told to rewrite in Rust a change it did not make. One that edits
+        # them further has a Python change of its own, refused below.
+        parents = [number for sha, (number, _) in result.exceptions.items()
+                   if sha != m.sha and _is_ancestor(sha, m.sha) and _frozen_between(freeze, sha, m.sha) == []]
+        if parents:
+            names = ", ".join(f"#{number}" for number in parents)
             result.refused[m.sha] = (m.number, (
                 f"its own change against {BASE} holds {names}'s labelled change to the frozen "
                 f"Python package, since it is stacked on {names}; it joins once {names} has "
@@ -1581,13 +1627,20 @@ def _freeze_prepass(plan: Plan, freeze, members: list[Member]) -> _Prepass:
             continue
         reason = freeze.refusal(paths)
         if is_member and set(paths) <= CUT_FROZEN_FILES and _is_release_cut(plan.base_sha, m):
-            # Not "do it in Rust": a cut that still edits the packaged
-            # compose copy is the ruled exception, and needs only the label.
-            reason += (f" This is a release cut, which may still edit that version file: ask the "
-                       f"maintainer, or the conductor on a maintainer ruling, for "
-                       f"`{freeze.EXCEPTION_LABEL}`, then re-apply `{plan.label}`")
+            # Not "do it in Rust": a cut may still edit the packaged compose
+            # copy, under an exception only the maintainer grants, per cut.
+            reason += (f" This is a release cut, which may still edit that version file under an "
+                       f"exception only the maintainer grants: once the maintainer has ruled it for "
+                       f"this cut, it carries `{freeze.EXCEPTION_LABEL}` (applied by the maintainer, "
+                       f"or by the conductor after that ruling), then re-apply `{plan.label}`")
         result.refused[m.sha] = (m.number, reason, False)
     return result
+
+
+def _frozen_between(freeze, a: str, b: str) -> list[str] | None:
+    """The frozen paths that differ between two commits; None when unread."""
+    paths = freeze.changed_paths(Path.cwd(), a, b)
+    return None if paths is None else freeze.frozen_paths(paths)
 
 
 def _own_frozen_refusal(freeze, base_sha: str, m: Member, labels) -> str | None:
@@ -1632,12 +1685,16 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
             plan.dropped.append(Dropped(m, reason, comment=not keep))
             print(f"  {'left out' if keep else 'dropped'} #{m.number}: {reason}")
             continue
-        carried = [number for sha, (number, _, _) in own.items() if sha != m.sha and _is_ancestor(sha, m.sha)]
+        # A waiting entry (keep) only waits on a labelled parent, and its
+        # frozen files are that parent's: carrying it carries nothing unruled.
+        carried = [number for sha, (number, _, keep) in own.items()
+                   if not keep and sha != m.sha and _is_ancestor(sha, m.sha)]
         if carried:
             names = ", ".join(f"#{number}" for number in carried)
             reason = (f"its head carries {names}'s change to the frozen Python package, which "
                       f"{names} is not labelled `{freeze.EXCEPTION_LABEL}` for; it joins once "
-                      f"{names} carries the label or leaves the stack")
+                      f"{names} lands, leaves the stack, or the maintainer rules {names}'s change "
+                      "an exception")
             plan.dropped.append(Dropped(m, reason, comment=False))
             print(f"  left out #{m.number}: {reason}")
             continue

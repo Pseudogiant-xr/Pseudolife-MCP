@@ -575,10 +575,16 @@ jobs:
     # weights here). Measured 2026-10-20 on the maintainer's Windows host,
     # serially, against embedded PG: this selection's 377 cases took 75 s
     # (85 s wall; 187 s while another session saturated loopback sockets); the 30-file, 1,865-case lane it replaced took 1,383 s
-    # there and 862 s on windows-latest (18 of its 25 minutes). 20, not 15:
-    # setup and the PG start take ~3.5 min, and a hung test must still reach
-    # pyproject's 600 s faulthandler dump before the job timeout.
-    timeout-minutes: 20
+    # there and 862 s on windows-latest (18 of its 25 minutes). Setup and the
+    # PG start take ~3.5 min, and a hung test must still reach pyproject's
+    # 600 s faulthandler dump before the job timeout. 30, about twice the
+    # 14.6-minute estimate (rust/ci/ci_budget.json), because the native
+    # client build's 1.3-1.8 minutes are warm: the Rust cache key rolls with
+    # the UTC ISO week, so from Monday 00:00 UTC until master's first Rust
+    # run that week this build is cold, and no cold Windows debug build of
+    # it has been measured yet. Measure it from the first batch run that
+    # builds cold, then set this from that figure.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
