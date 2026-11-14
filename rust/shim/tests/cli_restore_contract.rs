@@ -335,12 +335,14 @@ fn processes_network_and_writes_stay_in_their_modules() {
         // docker.rs runs the docker program and opens its stdout files;
         // mod.rs holds the update lock and asks the daemon's /health;
         // safety.rs writes the safety backup; execute.rs the note and the
-        // journal. No module reaches into the updater.
+        // journal; docker_backup.rs removes the old backups its rotation
+        // names. No module reaches into the updater.
         let allowed: &[&str] = match file {
             "docker.rs" => &["std::process", "Command", "OpenOptions"],
             "mod.rs" => &["fs::write", "remove_file", "std::net", "TcpStream"],
             "safety.rs" => &["OpenOptions", "remove_file", "create_dir", "fs::rename"],
             "execute.rs" => &["fs::write", "remove_file", "fs::rename"],
+            "docker_backup.rs" => &["remove_file"],
             _ => &[],
         };
         for name in [

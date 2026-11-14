@@ -293,6 +293,26 @@ def python_proactor_self_pipe_abort(obs: dict) -> None:
 ORACLE_RULES.add("python-proactor-self-pipe-abort")
 
 
+_RESTORE_BUSY = re.compile(
+    rb"\Arestore failed: another pseudolife-mcp update is running \(pid (?:[0-9]+|unknown)\); ")
+
+
+@rule("restore-busy-holders")
+def restore_busy_holders(obs: dict) -> None:
+    """Oracle only (``ORACLE_RULES``): the frozen oracle names an update as
+    the only holder of the update lock; the native restore names every
+    command that takes it (update, restore, backup). Only that span of a
+    stderr that starts with the oracle's busy refusal changes; the pid,
+    the rest of the line and every other byte still compare."""
+    stderr = _get(obs, "stderr")
+    if _RESTORE_BUSY.match(stderr):
+        _put(obs, "stderr", stderr.replace(b"pseudolife-mcp update is running",
+                                           b"pseudolife-mcp update, restore or backup is running", 1))
+
+
+ORACLE_RULES.add("restore-busy-holders")
+
+
 # A PostgreSQL SCRAM verifier (a server echoing a CREATE/ALTER ROLE statement).
 # The repo is public and secret scanners flag these, so no golden keeps one:
 # the recorder writes this fixed token instead, and compare-time rules that

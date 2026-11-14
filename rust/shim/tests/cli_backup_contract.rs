@@ -11,7 +11,8 @@ use std::{
     process::{Command, Output},
 };
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'backup' is deferred in this candidate\n";
+/// Every refusal before an effect ends with this, on stderr, exit 2.
+const NOTHING: &str = "No backup was written";
 const SKIPPED: &str =
     "bank dump:     skipped (no database configured — file-mode state archived only)\n";
 
@@ -74,7 +75,9 @@ fn command(home: &Path) -> Command {
         .current_dir(home)
         .env("HOME", home)
         .env("USERPROFILE", home)
-        .env("COLUMNS", "80");
+        .env("COLUMNS", "80")
+        // Never a Docker bank on this host: a program that does not exist.
+        .env("PSEUDOLIFE_DOCKER", home.join("no-docker"));
     command
 }
 
@@ -82,13 +85,30 @@ fn run(home: &Path, arguments: &[&str]) -> Output {
     command(home).args(arguments).output().unwrap()
 }
 
-fn assert_deferred(home: &Home, arguments: &[&str]) {
+/// `backup failed: <cause>. No backup was written`, exit 2, nothing written.
+fn assert_refusal(output: &Output) -> String {
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+    assert!(stderr.starts_with("backup failed: "), "{stderr}");
+    assert!(stderr.trim_end().ends_with(NOTHING), "{stderr}");
+    stderr
+}
+
+/// The shared lite-tier refusal as backup prints it.
+fn lite_refusal(bank: &Path) -> String {
+    format!(
+        "backup failed: {} {NOTHING}",
+        pseudolife_stdio::cli::retired::lite_bank_refusal(bank)
+    )
+}
+
+fn assert_refused_before_effects(home: &Home, arguments: &[&str]) -> String {
     let before = home.listing();
     let output = run(home.path(), arguments);
-    assert_eq!(output.status.code(), Some(1), "{arguments:?}");
-    assert!(output.stdout.is_empty(), "{arguments:?}");
-    assert_eq!(output.stderr, cli::native_text(DEFERRED), "{arguments:?}");
+    let stderr = assert_refusal(&output);
     assert_eq!(home.listing(), before, "{arguments:?} changed the home");
+    stderr
 }
 
 fn assert_refused(home: &Home, argument: &str) {
@@ -222,58 +242,45 @@ fn invalid_argv_reports_argparse_usage_without_effects() {
     }
 }
 
-fn lite_default(home: &Path) -> PathBuf {
-    if cfg!(windows) {
-        home.join("AppData").join("Local").join("pseudolife-mcp")
+#[test]
+fn the_embedded_tier_is_refused_before_any_effect() {
+    let home = Home::new("embedded");
+    let pgdata = home.path().join("bank").join("embedded_pg");
+    fs::create_dir_all(&pgdata).unwrap();
+    fs::write(pgdata.join("PG_VERSION"), "18\n").unwrap();
+    let bank = home.path().join("bank");
+    let stderr = assert_refused_before_effects(&home, &["--data-dir", &text(&bank)]);
+    assert_eq!(stderr.trim_end(), lite_refusal(&bank), "{stderr}");
+    // No argument and the per-user lite directory: alone (it also holds the
+    // installed client) it is no bank, and ./data is backed up.
+    let lite = if cfg!(windows) {
+        home.path()
+            .join("AppData")
+            .join("Local")
+            .join("pseudolife-mcp")
     } else if cfg!(target_os = "macos") {
         home.join("Library")
             .join("Application Support")
             .join("pseudolife-mcp")
     } else {
-        home.join(".local").join("share").join("pseudolife-mcp")
-    }
-}
-
-fn assert_lite_refused(home: &Home, arguments: &[&str], bank: &Path) {
-    let before = home.listing();
-    let output = run(home.path(), arguments);
-    assert_eq!(output.status.code(), Some(1), "{arguments:?}");
-    assert!(output.stdout.is_empty(), "{arguments:?}");
-    let expected = format!(
-        "pseudolife-mcp backup: {}",
-        pseudolife_stdio::cli::retired::lite_bank_refusal(bank)
-    );
-    assert_eq!(
-        output.stderr,
-        cli::native_text(&format!("{expected}\n")),
-        "{arguments:?}"
-    );
-    assert_eq!(home.listing(), before, "{arguments:?} changed the home");
-}
-
-#[test]
-fn a_lite_bank_is_refused_plainly_before_any_effect() {
-    let home = Home::new("embedded");
-    let bank = home.path().join("bank");
-    let pgdata = bank.join("embedded_pg");
-    fs::create_dir_all(&pgdata).unwrap();
-    fs::write(pgdata.join("PG_VERSION"), "18\n").unwrap();
-    assert_lite_refused(&home, &["--data-dir", &text(&bank)], &bank);
-    // The lite default existing is not a lite bank (the native client keeps
-    // its runtimes there), and the Docker bank Python backs up from there is
-    // not native yet: it still defers, and never archives ./data instead.
-    let lite = lite_default(home.path());
-    fs::create_dir_all(lite.join("runtimes")).unwrap();
-    fs::create_dir_all(home.path().join("data")).unwrap();
-    assert_deferred(&home, &[]);
-    // A lite default that holds a bank is refused by name.
+        home.path()
+            .join(".local")
+            .join("share")
+            .join("pseudolife-mcp")
+    };
+    fs::create_dir_all(&lite).unwrap();
+    assert_refused(&home, "data");
+    let output = run(home.path(), &[]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    // With a lite bank in it, the refusal names it.
     fs::create_dir_all(lite.join("embedded_pg")).unwrap();
     fs::write(lite.join("embedded_pg").join("PG_VERSION"), "18\n").unwrap();
-    assert_lite_refused(&home, &[], &lite);
+    let stderr = assert_refused_before_effects(&home, &[]);
+    assert_eq!(stderr.trim_end(), lite_refusal(&lite), "{stderr}");
 }
 
 #[test]
-fn outputs_that_would_archive_themselves_defer() {
+fn outputs_that_would_archive_themselves_are_refused() {
     let home = Home::new("nested");
     let bank = home.path().join("bank");
     fs::create_dir_all(bank.join("sub")).unwrap();
@@ -286,7 +293,7 @@ fn outputs_that_would_archive_themselves_defer() {
         text(&bank.join("new-child").join("bk")),
         text(&bank.join("sub").join("..").join("new-child").join("bk")),
     ] {
-        assert_deferred(&home, &["--data-dir", &bank_text, "--out", &out]);
+        assert_refused_before_effects(&home, &["--data-dir", &bank_text, "--out", &out]);
     }
     let output = run(home.path(), &["--data-dir", &parent]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
@@ -301,12 +308,12 @@ fn parent_after_missing_component_still_resolves_later_symlinks() {
     fs::write(bank.join("state"), "state").unwrap();
     std::os::unix::fs::symlink(bank.join("sub"), home.path().join("alias")).unwrap();
     let out = home.path().join("missing/../alias/bk");
-    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
     // Creating the missing ancestor could also make a currently broken
     // symlink resolve into the tree after admission.
     fs::remove_file(home.path().join("alias")).unwrap();
     std::os::unix::fs::symlink("missing/../bank/sub", home.path().join("alias")).unwrap();
-    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
 }
 
 #[test]
@@ -363,17 +370,17 @@ fn hard_links_in_the_tree_are_archived() {
 
 #[cfg(unix)]
 #[test]
-fn symlink_loops_and_aliased_outputs_defer() {
+fn symlink_loops_and_aliased_outputs_are_refused() {
     let home = Home::new("symlink");
     let bank = home.path().join("bank");
     fs::create_dir_all(bank.join("sub")).unwrap();
     std::os::unix::fs::symlink("loop", bank.join("loop")).unwrap();
-    assert_deferred(&home, &["--data-dir", &text(&bank)]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank)]);
     fs::remove_file(bank.join("loop")).unwrap();
     // An output reached through an outside alias of an archived child.
     std::os::unix::fs::symlink(bank.join("sub"), home.path().join("alias")).unwrap();
     let out = text(&home.path().join("alias").join("bk"));
-    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &out]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank), "--out", &out]);
 }
 
 #[cfg(windows)]
@@ -567,7 +574,7 @@ for name in ('file-link', 'dangling', 'directory-link'):
 
 #[cfg(windows)]
 #[test]
-fn external_and_cyclic_junctions_defer_before_effects() {
+fn external_and_cyclic_junctions_refuse_before_effects() {
     let home = Home::new("junction-boundary");
     let bank = home.path().join("bank");
     let outside = home.path().join("outside");
@@ -576,8 +583,7 @@ fn external_and_cyclic_junctions_defer_before_effects() {
     for target in [&outside, &bank] {
         junction(&bank.join("junction"), target);
         let output = run(home.path(), &["--data-dir", &text(&bank)]);
-        assert_eq!(output.status.code(), Some(1), "{output:?}");
-        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+        assert_refusal(&output);
         assert!(!bank.join("backups").exists());
         fs::remove_dir(bank.join("junction")).unwrap();
     }
@@ -760,8 +766,7 @@ fn windows_relative_outputs_cannot_hide_inside_the_source() {
             .args(["--data-dir", &data, "--out", &out])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1), "{label}: {output:?}");
-        assert_eq!(output.stderr, cli::native_text(DEFERRED));
+        assert_refusal(&output);
         assert!(output.stdout.is_empty());
         assert_eq!(home.listing(), before);
     }
@@ -782,7 +787,7 @@ fn windows_junction_parent_paths_cannot_bypass_output_containment() {
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let out = link.join("..").join("bank/sub/bk");
-    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
     fs::remove_dir(link).unwrap();
 }
 
@@ -814,7 +819,7 @@ fn local_unc_output_alias_cannot_archive_its_own_partial_file() {
         return;
     }
     let out = alias.join("sub").join("bk");
-    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
 }
 
 #[cfg(windows)]
@@ -862,7 +867,7 @@ fn unc_share_rooted_in_archived_child_cannot_include_partial_file() {
     fs::create_dir(&probe).unwrap();
     fs::remove_dir(&probe).unwrap();
     let out = alias.join("bk");
-    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
     let removal = share.remove();
     assert!(removal.status.success(), "{removal:?}");
     share.0.clear();
@@ -870,7 +875,7 @@ fn unc_share_rooted_in_archived_child_cannot_include_partial_file() {
 
 #[cfg(unix)]
 #[test]
-fn non_utf8_discovery_paths_defer_before_output_creation() {
+fn non_utf8_discovery_paths_refuse_before_output_creation() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     let home = Home::new("raw-discovery");
@@ -893,14 +898,13 @@ fn non_utf8_discovery_paths_defer_before_output_creation() {
         .args(["--data-dir", &text(&bank)])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_refusal(&output);
     assert!(!bank.join("backups").exists());
     assert_eq!(home.listing(), before);
 }
 
 #[test]
-fn columns_beyond_python_integer_limit_defer_before_effects() {
+fn columns_beyond_python_integer_limit_still_print_help() {
     let home = Home::new("long-columns");
     let before = home.listing();
     let output = command(home.path())
@@ -908,8 +912,8 @@ fn columns_beyond_python_integer_limit_defer_before_effects() {
         .arg("--help")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("usage: pseudolife-mcp backup"));
     assert_eq!(home.listing(), before);
 }
 
@@ -929,7 +933,7 @@ fn malformed_columns_with_multiple_signs_keep_fallback_help() {
 
 #[cfg(unix)]
 #[test]
-fn non_utf8_path_discovery_defers_before_output_creation() {
+fn non_utf8_path_discovery_are_refused_before_output_creation() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     let home = Home::new("raw-path-discovery");
@@ -946,8 +950,7 @@ fn non_utf8_path_discovery_defers_before_output_creation() {
         .args(["--data-dir", &text(&bank)])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_refusal(&output);
     assert!(!bank.join("backups").exists());
     assert_eq!(home.listing(), before);
 }
@@ -1117,7 +1120,7 @@ finally:
 
 #[cfg(unix)]
 #[test]
-fn matching_raw_rotation_names_defer_before_utf8_stdout_failure() {
+fn matching_raw_rotation_names_are_left_alone() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     let home = Home::new("raw-rotation-output");
@@ -1125,13 +1128,28 @@ fn matching_raw_rotation_names_defer_before_utf8_stdout_failure() {
     let backups = bank.join("backups");
     fs::create_dir_all(&backups).unwrap();
     let raw = OsString::from_vec(b"pseudolife_lite_state-old-\xff.tar.gz".to_vec());
-    fs::write(backups.join(raw), b"old state").unwrap();
-    assert_deferred(&home, &["--data-dir", &text(&bank)]);
+    fs::write(backups.join(&raw), b"old state").unwrap();
+    // Old enough to rotate, were its name readable.
+    fs::File::options()
+        .write(true)
+        .open(backups.join(&raw))
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 86400))
+        .unwrap();
+    // The backup is written, rotation never touches a name it cannot read,
+    // and nothing undecodable is printed.
+    let output = run(
+        home.path(),
+        &["--data-dir", &text(&bank), "--keep-days", "7"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(backups.join(&raw).exists());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("rotated out"));
 }
 
 #[cfg(windows)]
 #[test]
-fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
+fn windows_symlink_flags_that_python_cannot_restore_refuse_before_effects() {
     use std::os::windows::ffi::OsStrExt;
     let home = Home::new("link-flags");
     let bank = home.path().join("bank");
@@ -1141,8 +1159,7 @@ fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
         return;
     }
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_refusal(&output);
     assert!(!bank.join("backups").exists());
     fs::remove_dir(&link).unwrap();
     fs::create_dir(bank.join("z-directory")).unwrap();
@@ -1150,8 +1167,7 @@ fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
         return;
     }
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_refusal(&output);
     assert!(!bank.join("backups").exists());
     fs::remove_dir(&link).unwrap();
     let mut long_target = home.path().join("long-target");
@@ -1164,15 +1180,14 @@ fn windows_symlink_flags_that_python_cannot_restore_defer_before_effects() {
         return;
     }
     let output = run(home.path(), &["--data-dir", &text(&bank)]);
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_refusal(&output);
     assert!(!bank.join("backups").exists());
     fs::remove_dir(&link).unwrap();
 }
 
 #[cfg(windows)]
 #[test]
-fn nested_self_junction_cycle_defers_with_output_outside_the_bank() {
+fn nested_self_junction_cycle_is_refused_with_output_outside_the_bank() {
     let home = Home::new("nested-cycle");
     let bank = home.path().join("bank");
     let directory = bank.join("a");
@@ -1180,7 +1195,72 @@ fn nested_self_junction_cycle_defers_with_output_outside_the_bank() {
     fs::create_dir_all(&directory).unwrap();
     let link = directory.join("j");
     junction(&link, &directory);
-    assert_deferred(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
+    assert_refused_before_effects(&home, &["--data-dir", &text(&bank), "--out", &text(&out)]);
     assert!(!out.exists());
     fs::remove_dir(link).unwrap();
+}
+
+#[test]
+fn a_held_update_lock_refuses_a_docker_backup_naming_every_holder() {
+    let home = Home::new("lock-busy");
+    let data = home.path().join(".pseudolife-mcp");
+    fs::create_dir(&data).unwrap();
+    // Another update, restore or backup holds the update lock.
+    let lock = fs::File::create(data.join("update.lock")).unwrap();
+    lock.try_lock().unwrap();
+    fs::write(data.join("update.lock.pid"), "4242\n").unwrap();
+    let before = home.listing();
+    let output = run(home.path(), &["--container", "pseudolife-mcp-postgres"]);
+    drop(lock);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&cli::native_text(
+            "backup failed: another pseudolife-mcp update, restore or backup is running (pid 4242); nothing was changed. Run this again when it has finished\n"
+        ))
+    );
+    assert_eq!(home.listing(), before);
+}
+
+#[test]
+fn docker_that_cannot_be_asked_never_becomes_a_backup_without_its_database() {
+    let home = Home::new("docker-unknown");
+    fs::create_dir(home.path().join("data")).unwrap();
+    fs::write(home.path().join("data").join("config.yaml"), "x").unwrap();
+    // A docker that is there but cannot run, as an engine that cannot be
+    // reached answers no listing.
+    let docker = home.path().join(if cfg!(windows) {
+        "docker.exe"
+    } else {
+        "docker"
+    });
+    fs::write(&docker, b"not a program").unwrap();
+    let before = home.listing();
+    let output = command(home.path())
+        .env("PSEUDOLIFE_DOCKER", &docker)
+        .output()
+        .unwrap();
+    let stderr = assert_refusal(&output);
+    assert!(
+        stderr.starts_with(
+            "backup failed: Docker is installed but could not be asked whether this host runs a Docker bank (docker ps -a failed: "
+        ) && stderr.contains("cannot be started"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("pass --data-dir <directory>"), "{stderr}");
+    assert_eq!(home.listing(), before);
+    // Naming the data directory chooses the file tier.
+    let output = command(home.path())
+        .env("PSEUDOLIFE_DOCKER", &docker)
+        .args(["--data-dir", "data"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .replace("\r\n", "\n")
+            .starts_with(SKIPPED),
+        "{output:?}"
+    );
 }
