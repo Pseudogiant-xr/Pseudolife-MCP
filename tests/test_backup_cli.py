@@ -275,7 +275,7 @@ def test_pg_dump_discovery_prefers_pg0_bundle(tmp_path):
 
 def test_pg_dump_discovery_falls_back_to_path(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        backup_cli.shutil, "which", lambda name: r"C:\somewhere\pg_dump.exe",
+        backup_cli, "find_program", lambda name: r"C:\somewhere\pg_dump.exe",
     )
     found = backup_cli._find_pg_dump(home=tmp_path)  # no ~/.pg0 tree here
     assert str(found) == r"C:\somewhere\pg_dump.exe"

@@ -9,8 +9,8 @@ Runs on the daemon host and drives the ``tailscale`` CLI. ``tailscale``:
 1. ``GET http://127.0.0.1:<port>/health`` must answer ``status: ok`` and
    ``"auth": true``: an unauthenticated bank is never exposed, because a
    tunnel to loopback looks local to the daemon and bypasses its bind guard.
-2. The ``tailscale`` CLI is found (PATH, then the Windows and macOS default
-   install locations) and ``tailscale status --json`` must report
+2. The ``tailscale`` CLI is found (an absolute PATH directory, never the
+   current directory, then the Windows and macOS default install locations) and ``tailscale status --json`` must report
    ``BackendState: Running``.
 3. ``tailscale serve status --json`` is read. A TCP forward on the port to
    ``127.0.0.1:<port>`` is "already exposed" (exit 0, nothing run); any
@@ -32,7 +32,7 @@ there is none.
 
 Exit codes: 0 done or already in that state; 2 usage, declined, or no TTY
 without ``--yes``; 4 refused before any change; 5 changed but the serve did
-not take (undone), or its result could not be read back to verify.
+not take (undone), or its result (or that of `off`) could not be read back to verify.
 
 Standard library only, so it runs from a shim runtime: the daemon probe is
 a plain ``urllib`` GET with proxies and redirects disabled.
@@ -45,11 +45,12 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+from pseudolife_memory.program_lookup import find_program
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -63,6 +64,12 @@ DEFAULT_PORT = 8765
 LOCAL_HEALTH_TIMEOUT_S = 3.0
 TAILNET_HEALTH_TIMEOUT_S = 5.0
 TAILSCALE_TIMEOUT_S = 30.0
+# A design bound, not a measurement: tailscale's status and serve JSON and
+# the daemon's /health nest a few levels deep. Refusing anything with more
+# brackets open at once than this keeps every later json, repr() and
+# str() far under CPython's recursion limit, and makes the refusal the
+# same on every machine (the limit itself depends on the stack in use).
+JSON_DEPTH_LIMIT = 100
 
 OPERATOR_FIX = "sudo tailscale set --operator=$USER"
 INSTALL_FIX = "install Tailscale (https://tailscale.com/download), then run `tailscale up`"
@@ -85,8 +92,9 @@ def default_locations() -> list[Path]:
     On Windows the 64-bit Program Files (``ProgramW6432``) first: under a
     32-bit Python, ``ProgramFiles`` names the x86 folder instead."""
     if os.name == "nt":
-        base = (os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles")
-                or r"C:\Program Files")
+        # A relative base would resolve against the current directory.
+        bases = [os.environ.get("ProgramW6432"), os.environ.get("ProgramFiles")]
+        base = next((b for b in bases if b and Path(b).is_absolute()), r"C:\Program Files")
         return [Path(base) / "Tailscale" / "tailscale.exe"]
     if platform() == "darwin":
         return [Path("/Applications/Tailscale.app/Contents/MacOS/Tailscale")]
@@ -134,8 +142,8 @@ def fetch_health(url: str, timeout: float) -> tuple[str, dict | None]:
     except Exception:  # noqa: BLE001 — refused, reset, timed out, unreadable
         return "none", None
     try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+        payload = _json(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, _Unreadable):
         return "other", None
     return ("ok", payload) if isinstance(payload, dict) else ("other", None)
 
@@ -147,7 +155,9 @@ def probe_health(url: str, timeout: float) -> dict | None:
 
 
 def find_tailscale() -> str | None:
-    found = shutil.which("tailscale")
+    """An absolute PATH directory's ``tailscale``, never the current
+    directory's (``program_lookup``), then the default install location."""
+    found = find_program("tailscale")
     if found:
         return found
     for path in default_locations():
@@ -156,26 +166,95 @@ def find_tailscale() -> str | None:
     return None
 
 
+def _text(data: bytes | None, errors: str = "strict") -> str:
+    """What ``text=True`` gives under UTF-8 mode: UTF-8, then ``\\r\\n`` and
+    ``\\r`` as ``\\n``. Decoded here, not by ``subprocess``, so that output
+    that is not UTF-8 is an answer rather than an exception (or, on
+    Windows, a reader thread's traceback)."""
+    text = (data or b"").decode("utf-8", errors)
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def run_tailscale(binary: str, args: list[str]) -> subprocess.CompletedProcess:
+    """``tailscale <args>``. Output that is not UTF-8 comes back as empty
+    text with ``unreadable`` set on the result, so each caller answers
+    "could not read what tailscale said" at its own point."""
     try:
-        return subprocess.run([binary, *args], capture_output=True, text=True,
+        proc = subprocess.run([binary, *args], capture_output=True,
                               stdin=subprocess.DEVNULL, timeout=TAILSCALE_TIMEOUT_S)
     except subprocess.TimeoutExpired as exc:
         # What it printed before the timeout: a serve waiting for the admin
         # to turn Serve on prints the link that does it, then waits.
-        out = exc.stdout or ""
-        if isinstance(out, bytes):
-            out = out.decode("utf-8", "replace")
-        return subprocess.CompletedProcess([binary, *args], 124, out,
+        return subprocess.CompletedProcess([binary, *args], 124, _text(exc.stdout, "replace"),
                                            f"timed out after {TAILSCALE_TIMEOUT_S:g}s")
     except OSError as exc:
         return subprocess.CompletedProcess([binary, *args], 127, "", str(exc))
+    try:
+        out, err = _text(proc.stdout), _text(proc.stderr)
+    except UnicodeDecodeError:
+        done = subprocess.CompletedProcess(proc.args, proc.returncode, "", "")
+        done.unreadable = True
+        return done
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
 # ── reading tailscale's state ────────────────────────────────────────────────
 
 class _Refused(Exception):
     """A check failed before anything changed."""
+
+
+class _Unreadable(ValueError):
+    """JSON nested past ``JSON_DEPTH_LIMIT``: why it cannot be read."""
+
+
+def _too_deep(text: str) -> bool:
+    """More than ``JSON_DEPTH_LIMIT`` brackets open at once, read lexically
+    (``[`` and ``{`` outside strings open, ``]`` and ``}`` close), so the
+    answer does not depend on whether the rest is valid JSON."""
+    depth = 0
+    in_string = escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > JSON_DEPTH_LIMIT:
+                return True
+        elif char in "]}":
+            depth -= 1
+    return False
+
+
+def _json(text: str):
+    """``json.loads``; raises :class:`_Unreadable` for text nested past the
+    bound (before parsing), and ``ValueError`` for text that is not JSON."""
+    if _too_deep(text):
+        raise _Unreadable(f"it is nested more than {JSON_DEPTH_LIMIT} levels deep")
+    try:
+        return json.loads(text)
+    except RecursionError:  # unreachable under the bound; kept as a backstop
+        raise _Unreadable("it is nested too deeply to read") from None
+
+
+def _unreadable(binary: str, args: list[str], why: str) -> _Refused:
+    return _Refused(f"could not read what `tailscale {' '.join(args)}` printed ({why}): check that "
+                    f"{binary} is Tailscale's own CLI, and reinstall Tailscale if it is")
+
+
+def _read(binary: str, args: list[str]) -> subprocess.CompletedProcess:
+    """``run_tailscale`` for a read: output that is not UTF-8 is refused."""
+    proc = run_tailscale(binary, args)
+    if getattr(proc, "unreadable", False):
+        raise _unreadable(binary, args, "it is not UTF-8")
+    return proc
 
 
 def _first_line(text: str) -> str:
@@ -187,9 +266,12 @@ def _first_line(text: str) -> str:
 
 def _running(binary: str) -> dict:
     """``tailscale status --json``; raises _Refused unless the backend runs."""
-    proc = run_tailscale(binary, ["status", "--json"])
+    args = ["status", "--json"]
+    proc = _read(binary, args)
     try:
-        status = json.loads(proc.stdout) if proc.stdout.strip() else None
+        status = _json(proc.stdout) if proc.stdout.strip() else None
+    except _Unreadable as exc:
+        raise _unreadable(binary, args, str(exc)) from None
     except ValueError:
         status = None
     if not isinstance(status, dict):
@@ -202,13 +284,28 @@ def _running(binary: str) -> dict:
     return status
 
 
+_OCTET = re.compile(r"0|[1-9][0-9]{0,2}")
+
+
+def _is_ipv4(word: str) -> bool:
+    """A dotted quad in ASCII digits, each octet 0-255 with no leading zero
+    (which some parsers read as octal)."""
+    parts = word.split(".")
+    return len(parts) == 4 and all(_OCTET.fullmatch(p) and int(p) <= 255 for p in parts)
+
+
 def _tailnet_ipv4(binary: str, status: dict) -> str | None:
+    """The first address in ``tailscale ip -4``'s words, then in
+    ``Self.TailscaleIPs`` (a list; any other shape is ignored). Output of
+    ``ip -4`` that cannot be read counts as a failed ``ip -4``."""
     proc = run_tailscale(binary, ["ip", "-4"])
-    candidates = proc.stdout.split() if proc.returncode == 0 else []
-    own = (status.get("Self") or {}).get("TailscaleIPs") if isinstance(status.get("Self"), dict) else None
-    candidates += [ip for ip in own or [] if isinstance(ip, str)]
+    readable = proc.returncode == 0 and not getattr(proc, "unreadable", False)
+    candidates = proc.stdout.split() if readable else []
+    own = status.get("Self")
+    own = own.get("TailscaleIPs") if isinstance(own, dict) else None
+    candidates += [ip for ip in own if isinstance(ip, str)] if isinstance(own, list) else []
     for ip in candidates:
-        if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip):
+        if _is_ipv4(ip):
             return ip
     return None
 
@@ -217,7 +314,8 @@ def _serve_config(binary: str) -> dict:
     """``tailscale serve status --json`` (an ``ipn.ServeConfig``: ``TCP``
     keyed by port as a string, ``Web``, ``Services``, ``Foreground`` keyed
     by session). Empty output or ``null`` is an empty config."""
-    proc = run_tailscale(binary, ["serve", "status", "--json"])
+    args = ["serve", "status", "--json"]
+    proc = _read(binary, args)
     if proc.returncode != 0:
         raise _Refused("could not read `tailscale serve status --json` "
                        f"({_first_line(proc.stderr) or f'exit {proc.returncode}'})")
@@ -225,7 +323,9 @@ def _serve_config(binary: str) -> dict:
     if not text or text == "null":
         return {}
     try:
-        config = json.loads(text)
+        config = _json(text)
+    except _Unreadable as exc:
+        raise _unreadable(binary, args, str(exc)) from None
     except ValueError:
         raise _Refused("`tailscale serve status --json` printed something that is not JSON") from None
     if not isinstance(config, dict):
@@ -293,6 +393,14 @@ def _port_state(config: dict, port: int) -> tuple[str, str | None]:
 
 # ── the report ───────────────────────────────────────────────────────────────
 
+def _write(line: str, stream) -> None:
+    """``print(line, file=stream)``, with what the stream's encoding cannot
+    hold (a lone surrogate from tailscale's JSON, say) escaped as Python's
+    stderr escapes it, so a report never fails part-way."""
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    print(line.encode(encoding, "backslashreplace").decode(encoding, "replace"), file=stream)
+
+
 class _Report:
     def __init__(self, action: str, port: int, as_json: bool):
         self.as_json = as_json
@@ -302,12 +410,12 @@ class _Report:
 
     def say(self, line: str = "") -> None:
         if not self.as_json:
-            print(line)
+            _write(line, sys.stdout)
 
     def warn(self, line: str) -> None:
         self.data["warnings"].append(line)
         if not self.as_json:
-            print(line, file=sys.stderr)
+            _write(line, sys.stderr)
 
     def note(self, line: str) -> None:
         self.data["notes"].append(line)
@@ -316,7 +424,7 @@ class _Report:
     def fail(self, code: int, line: str) -> int:
         self.data["error"] = line
         if not self.as_json:
-            print(f"expose: {line}", file=sys.stderr)
+            _write(f"expose: {line}", sys.stderr)
         return self.finish(code)
 
     def finish(self, code: int) -> int:
@@ -506,7 +614,12 @@ def _off(args, report: _Report) -> int:
     try:
         after, _detail = _port_state(_serve_config(binary), port)
     except _Refused as exc:
-        return report.fail(EXIT_REFUSED, str(exc))
+        ran = f"exit {proc.returncode}" + (
+            f", {_first_line(proc.stderr)}" if _first_line(proc.stderr) else "")
+        return report.fail(EXIT_UNDONE, f"the removal ran ({ran}) but could not verify its result: "
+                                        f"{exc}. Check `tailscale serve status`; if port {port} still "
+                                        f"forwards to 127.0.0.1:{port}, run `tailscale serve "
+                                        f"--tcp={port} off` yourself")
     if after == "ours":
         return report.fail(EXIT_REFUSED, "tailscale did not remove the forward "
                                          f"({_first_line(proc.stderr) or f'exit {proc.returncode}'})")
@@ -551,6 +664,9 @@ def _status(args, report: _Report) -> int:
 
 def _port(value: str) -> int:
     try:
+        # int() also reads other scripts' digits ("８７６５"): ASCII only.
+        if not value.isascii():
+            raise ValueError(value)
         port = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"not a port: {value!r}") from None

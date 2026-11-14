@@ -97,6 +97,8 @@ pub(super) fn discovery_paths_supported(home: &Path) -> Option<()> {
     if let Some(path) = std::env::var_os("PATH") {
         path.to_str()?;
     }
+    // A PATH or PATHEXT the shared lookup cannot answer for defers.
+    crate::cli::program_lookup::find_program("pg_dump").ok()?;
     if let Ok(entries) = fs::read_dir(home.join(".pg0").join("installation")) {
         for entry in entries.flatten() {
             entry.path().to_str()?;
@@ -180,69 +182,13 @@ pub(super) fn find(home: &Path) -> Result<Option<PathBuf>, DiscoveryError> {
             }
         }
     }
-    Ok(which())
-}
-
-/// Python 3.11 `shutil.which("pg_dump")`: PATH split on the separator as
-/// text (quotes and empty entries kept), `None` for an empty PATH.
-fn which() -> Option<PathBuf> {
-    let path = match std::env::var_os("PATH") {
-        Some(path) => path.into_string().ok()?,
-        None if cfg!(windows) => ".;C:\\bin".into(),
-        None if cfg!(target_os = "macos") => "/usr/bin:/bin:/usr/sbin:/sbin".into(),
-        None => "/bin:/usr/bin".into(),
-    };
-    if path.is_empty() {
-        return None;
-    }
-    let separator = if cfg!(windows) { ';' } else { ':' };
-    let mut directories: Vec<&str> = path.split(separator).collect();
-    let files: Vec<String> = if cfg!(windows) {
-        if !directories.contains(&".") {
-            directories.insert(0, ".");
-        }
-        let pathext = std::env::var("PATHEXT")
-            .ok()
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC".into());
-        pathext
-            .split(';')
-            .filter(|ext| !ext.is_empty())
-            .map(|ext| format!("pg_dump{ext}"))
-            .collect()
-    } else {
-        vec!["pg_dump".into()]
-    };
-    let mut seen = Vec::new();
-    for directory in directories {
-        let key = if cfg!(windows) {
-            directory.replace('/', "\\").to_lowercase()
-        } else {
-            directory.to_owned()
-        };
-        if seen.contains(&key) {
-            continue;
-        }
-        seen.push(key);
-        for file in &files {
-            let candidate = Path::new(directory).join(file);
-            if executable(&candidate) {
-                return Some(candidate);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(windows)]
-fn executable(path: &Path) -> bool {
-    fs::metadata(path).is_ok_and(|meta| !meta.is_dir())
-}
-
-#[cfg(not(windows))]
-fn executable(path: &Path) -> bool {
-    fs::metadata(path).is_ok_and(|meta| !meta.is_dir())
-        && rustix::fs::access(path, rustix::fs::Access::EXEC_OK).is_ok()
+    // `program_lookup.find_program("pg_dump")`: absolute PATH directories
+    // only, never the current directory. `discovery_paths_supported` has
+    // already deferred a PATH the lookup cannot answer for.
+    Ok(crate::cli::program_lookup::find_program("pg_dump")
+        .ok()
+        .flatten()
+        .map(PathBuf::from))
 }
 
 /// Python `str.strip()`: Unicode whitespace plus the ASCII separators U+001C..U+001F.

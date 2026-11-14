@@ -1612,6 +1612,7 @@ jobs:
           - doctor-3
           - doctor-4
           - episode-0
+          - expose-0
           - hook-0
           - hook-1
           - invite-0
