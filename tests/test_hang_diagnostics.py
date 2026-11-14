@@ -7,7 +7,7 @@ log for the cancelled job: nothing said which test hung or where.
 test item (setup + call + teardown) outlives it. The dump is diagnostic
 only: the test keeps running and can still pass. It works from inside
 xdist workers too (checked 2026-09-25 with ``-n 2 --dist loadfile``).
-``ops/ci_tests.sh`` ends pytest at 35 minutes with SIGABRT inside the step,
+``ops/ci_tests.sh`` ends pytest at 50 minutes with SIGABRT inside the step,
 so a hang fails the step (keeping its log) instead of being cancelled with
 the job, and every pytest process dumps its stacks as it dies (checked
 2026-09-25 on Linux: ``timeout`` exits 124 after the dump). Neither helps

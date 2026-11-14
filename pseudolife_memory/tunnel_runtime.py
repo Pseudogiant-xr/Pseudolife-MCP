@@ -12,7 +12,6 @@ import platform
 import posixpath
 import re
 import shlex
-import shutil
 import signal
 import stat
 import threading
@@ -31,6 +30,7 @@ import psutil
 from pseudolife_memory.tunnel_profiles import (
     Profile, ProfileStore, TunnelError, checked_path, private_read, private_write, key_expiry,
 )
+from pseudolife_memory.program_lookup import find_program
 
 VERSION = '0.0.15'
 ASSETS = {
@@ -950,7 +950,7 @@ def stable_command(*, saved: bool = False) -> list[str]:
     working directory (a service, a client registration) rather than
     launching it now, so the helper's Python 3.10 notice about this working
     directory stays unsaid."""
-    candidates = [installed_launcher(), shutil.which('pseudolife-mcp')]
+    candidates = [installed_launcher(), find_program('pseudolife-mcp')]
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and not ({p.lower() for p in Path(candidate).parts} & {'.venv', 'venv', 'site-packages'}):
             return [str(checked_path(candidate))]

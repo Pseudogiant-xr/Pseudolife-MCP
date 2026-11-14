@@ -433,7 +433,7 @@ def test_stable_command_prefers_the_runtimes_launcher_over_path(tmp_path, monkey
     older = tmp_path / 'elsewhere' / 'pseudolife-mcp'
     older.parent.mkdir()
     older.write_text('an older install found first on PATH', encoding='utf-8')
-    monkeypatch.setattr(runtime.shutil, 'which', lambda name: str(older))
+    monkeypatch.setattr(runtime, 'find_program', lambda name: str(older))
     assert runtime.stable_command() == [str(layout.launcher)]
     # Without a complete runtime behind it the launcher starts nothing.
     import shutil
@@ -460,7 +460,7 @@ def test_stable_command_falls_back_to_this_interpreter_without_the_working_direc
     monkeypatch.setattr(runtime.sys, 'executable', str(python))
     monkeypatch.setattr(runtime, 'checked_path', lambda path: Path(path))
     monkeypatch.setattr(runtime, 'installed_launcher', lambda: None)
-    monkeypatch.setattr(runtime.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(runtime, 'find_program', lambda name: None)
     monkeypatch.setattr(runtime.sys, 'base_prefix', runtime.sys.prefix)
     monkeypatch.chdir(tmp_path)
     command = runtime.stable_command()
