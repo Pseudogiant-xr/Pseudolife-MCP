@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -159,12 +160,18 @@ def test_the_import_scan_skips_ignored_build_output(tmp_path, monkeypatch):
     monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
     found = parity_scope.harness_imports.__wrapped__("evals.rust_port")
     assert {"used", "fresh"} <= found and "leaked" not in found
+    assert parity_scope._scanned([]) == []   # never the whole tree for no sources
 
 
 def test_the_import_scan_skips_cargo_output_without_git(tmp_path, monkeypatch):
     _scan_tree(tmp_path)
     monkeypatch.setattr(parity_scope, "ROOT", tmp_path)
-    monkeypatch.setattr(parity_scope.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("no git")))
+    def no_git(*args, **kwargs):
+        raise OSError("no git")
+
+    # Only this module's view of subprocess, not the process-wide one.
+    monkeypatch.setattr(parity_scope, "subprocess",
+                        SimpleNamespace(run=no_git, SubprocessError=subprocess.SubprocessError))
     found = parity_scope.harness_imports.__wrapped__("evals.rust_port")
     assert "used" in found and "leaked" not in found
 

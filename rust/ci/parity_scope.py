@@ -29,7 +29,6 @@ import functools
 import json
 import re
 import subprocess
-import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -263,6 +262,8 @@ def _scanned(sources: list[Path]) -> list[Path]:
     leftover rust/target/mutant-src/ copy of the tree once made every eval
     module look imported by a harness. Without git (a bare directory), the
     ignored cargo output rust/target/ is left out by name."""
+    if not sources:
+        return []   # git ls-files with no pathspec would list the whole tree
     relative = [str(source.relative_to(ROOT)) for source in sources]
     try:
         listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
