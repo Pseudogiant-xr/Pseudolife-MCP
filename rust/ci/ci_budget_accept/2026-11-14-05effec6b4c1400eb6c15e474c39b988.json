@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "python-freeze.yml",
+  "job": "python-freeze",
+  "before": "11925709ebd29f33",
+  "fingerprint": "966b18bec375a6a2",
+  "reason": "The guard step now reads the pull request's labels with one gh api call before the script (a second or two); the 0.5-minute estimate, mostly runner start and checkout, still covers it."
+}
