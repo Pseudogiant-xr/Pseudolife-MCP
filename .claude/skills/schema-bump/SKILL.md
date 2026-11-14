@@ -53,7 +53,18 @@ The Rust plan hashes the whole file, so even a comment change needs this.
     toolchain, and the commits listed in
     `rust/daemon/harness/schema_history.json`; `--no-build --rust-test-bin
     <exe>` reuses a built test binary. Inspect the golden's diff, then run
-    it again without `--record-goldens` to check.
+    it again without `--record-goldens` to check (that check, what CI runs,
+    opens only the Rust storage against the golden).
+    Recording runs the frozen Python storage beside Rust, so it can only
+    reproduce a golden for a change Python also has. A Rust-only schema
+    change therefore cannot re-record this golden, nor the startup hydration
+    and clock retry goldens beside it (`startup-hydration.json`,
+    `clock-retry.json`, which also hold what each start writes to the
+    bank), against Python: their `cli-startup` parity checks then fail.
+    A recorder that writes them from the Rust side is the next change
+    (branch `ci/startup-goldens-candidate-recorder`); until it has landed,
+    stop and ask the maintainer before such a change, rather than editing
+    the goldens by hand.
 
 ## C. A schema bump also moves the Rust parity pin (the register, `rust/parity/`)
 
