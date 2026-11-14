@@ -6,7 +6,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -28,7 +28,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -52,7 +52,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -76,7 +76,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -100,7 +100,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -148,7 +148,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -174,7 +174,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -198,7 +198,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -222,7 +222,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -246,7 +246,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -270,7 +270,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -292,7 +292,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -314,7 +314,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -336,7 +336,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -360,7 +360,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -382,7 +382,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -404,7 +404,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -426,7 +426,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -448,7 +448,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -470,7 +470,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -492,7 +492,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -515,12 +515,12 @@
     [
      "models",
      200,
-     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+     "{\"object\": \"list\", \"data\": [{\"id\": \"claude-sonnet-5\", \"object\": \"model\"}, {\"id\": \"<claude listed models>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
     ],
     [
      "models-v1",
      200,
-     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+     "{\"object\": \"list\", \"data\": [{\"id\": \"claude-sonnet-5\", \"object\": \"model\"}, {\"id\": \"<claude listed models>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
     ],
     [
      "health",
@@ -550,22 +550,22 @@
     [
      "model-None",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-extractor",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-bench",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-Qwen/Qwen3",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-claude-future",
@@ -575,47 +575,47 @@
     [
      "effort-  high ",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "effort-",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "effort-17",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "effort-None",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "stream-is-ignored",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"text\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"text\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "empty",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "ascii-del",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\\u007f\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\\u007f\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "long-system",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "production-prompt",
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "bad-b''",
@@ -690,7 +690,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -722,7 +722,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -754,7 +754,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -786,7 +786,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -818,7 +818,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -882,7 +882,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -916,7 +916,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -948,7 +948,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -980,7 +980,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1012,7 +1012,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1044,7 +1044,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1072,7 +1072,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1100,7 +1100,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1132,7 +1132,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1164,7 +1164,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1192,7 +1192,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1220,7 +1220,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1248,7 +1248,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1276,7 +1276,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1304,7 +1304,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1332,7 +1332,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1360,7 +1360,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1388,7 +1388,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1416,7 +1416,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1444,7 +1444,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1472,7 +1472,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1500,7 +1500,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1528,7 +1528,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1556,7 +1556,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1584,7 +1584,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1612,7 +1612,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1640,7 +1640,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1668,7 +1668,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1696,7 +1696,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1724,7 +1724,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1752,7 +1752,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1780,7 +1780,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1808,7 +1808,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1836,7 +1836,7 @@
      "argv": [
       "exec",
       "--model",
-      "<listed model>",
+      "gpt-5.6-terra",
       "--json",
       "--sandbox",
       "read-only",
@@ -1865,12 +1865,12 @@
     [
      "models",
      200,
-     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+     "{\"object\": \"list\", \"data\": [{\"id\": \"gpt-5.6-terra\", \"object\": \"model\"}, {\"id\": \"<codex listed models>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
     ],
     [
      "models-v1",
      200,
-     "{\"object\": \"list\", \"data\": [{\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+     "{\"object\": \"list\", \"data\": [{\"id\": \"gpt-5.6-terra\", \"object\": \"model\"}, {\"id\": \"<codex listed models>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
     ],
     [
      "health",
@@ -1900,22 +1900,22 @@
     [
      "model-None",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-extractor",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-bench",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-Qwen/Qwen3",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"\\u00e9\\\": \\\"\\ud83d\\ude00\\\"}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "model-gpt-future",
@@ -1925,47 +1925,47 @@
     [
      "effort-  high ",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "effort-",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "effort-17",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "effort-None",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"[]\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "stream-is-ignored",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"text\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"text\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "empty",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "ascii-del",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\\u007f\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\\u007f\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "long-system",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"OK\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "production-prompt",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "bad-b''",
@@ -2050,7 +2050,7 @@
     [
      "reply-type-None-0",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "reply-type-None-1",
@@ -2060,7 +2060,7 @@
     [
      "reply-type-0-0",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "reply-type-0-1",
@@ -2070,7 +2070,7 @@
     [
      "reply-type-False-0",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "reply-type-False-1",
@@ -2080,7 +2080,7 @@
     [
      "reply-type-[]-0",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "reply-type-[]-1",
@@ -2090,7 +2090,7 @@
     [
      "reply-type-{}-0",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "reply-type-{}-1",
@@ -2100,7 +2100,7 @@
     [
      "invalid-earlier-reply",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"last\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"last\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      "turn-failed-0",
@@ -2120,7 +2120,7 @@
     [
      "last-reply",
      200,
-     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"last\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"codex-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"gpt-5.6-terra\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"last\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ]
    ]
   },
@@ -2190,7 +2190,7 @@
    "responses": [
     [
      200,
-     "{\"object\": \"list\", \"data\": [{\"id\": \"claude-fixture\", \"object\": \"model\"}, {\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+     "{\"object\": \"list\", \"data\": [{\"id\": \"claude-fixture\", \"object\": \"model\"}, {\"id\": \"<claude listed models>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
     ],
     [
      200,
@@ -2264,7 +2264,7 @@
    "responses": [
     [
      200,
-     "{\"object\": \"list\", \"data\": [{\"id\": \"gpt-fixture\", \"object\": \"model\"}, {\"id\": \"<listed model>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
+     "{\"object\": \"list\", \"data\": [{\"id\": \"gpt-fixture\", \"object\": \"model\"}, {\"id\": \"<codex listed models>\", \"object\": \"model\"}, {\"id\": \"extractor\", \"object\": \"model\"}, {\"id\": \"bench\", \"object\": \"model\"}]}"
     ],
     [
      200,
@@ -2278,7 +2278,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2300,7 +2300,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2324,7 +2324,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2348,7 +2348,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2372,7 +2372,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2396,7 +2396,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2420,7 +2420,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2444,7 +2444,7 @@
      "argv": [
       "-p",
       "--model",
-      "<listed model>",
+      "claude-sonnet-5",
       "--output-format",
       "json",
       "--strict-mcp-config",
@@ -2468,35 +2468,41 @@
    "responses": [
     [
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"x\\\": \\\"\\u00e9\\\"}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"x\\\": \\\"\\u00e9\\\"}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"x\\\": 1}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{\\\"x\\\": 1}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": null, \"tool_calls\": [{\"id\": \"call_<random>\", \"type\": \"function\", \"function\": {\"name\": \"lookup\", \"arguments\": \"{}\"}}]}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"tool_call\\\": broken}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"{\\\"tool_call\\\": broken}\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ],
     [
      200,
-     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"<listed model>\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"plain reply\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
+     "{\"id\": \"claude-shim-<time>\", \"object\": \"chat.completion\", \"model\": \"claude-sonnet-5\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"plain reply\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}}"
     ]
    ]
   }
  },
  "normalizers": {
+  "cwd": "a shim started in the harness's own directory journals <harness cwd>",
   "ids": "generated completion and tool-call IDs (normalize)",
-  "models": "each listed model ID as <listed model>, /models entries collapsed",
+  "models": "a /models body's run of the provider's listed models, exactly in the native order after the launch model, as one token",
   "prompt": "the production prompt's text as <production prompt>"
  },
- "oracle_head": "67e0402cc157733d4fee3d072881e8c8ed5de1dc"
+ "oracle_head": "25320ed0d29a18df567760533741875fd193d7d4",
+ "python_sources": {
+  "evals/claude_shim.py": "66326ead3e956cc2063a8f6f6ebb2447901cae7e7d1154c796b9e68082362191",
+  "evals/codex_shim.py": "6276e27963530046a54e600d35681d6288bafdcb4380b9f91ad377ae30a61a2b",
+  "ops/shim_autostart.py": "3f159a5be7c73c8070da787322abf79701404a1b273b990c691cb51872a25ec3"
+ }
 }
