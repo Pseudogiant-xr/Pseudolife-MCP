@@ -9,6 +9,10 @@
   and pairing-code reads are now steps of the verified native client
   (`pseudolife-mcp installer ...`), with the same answers, files and
   refusals as the Python helpers they replace.
+- These steps run `docker` and `git` only from an absolute `PATH`
+  directory, never from the current directory, a relative `PATH` entry or
+  the folders Windows also searches by itself (its system directory among
+  them), so a `docker.exe` left in a checkout is never started.
 - A first install checks its flags before the native client is downloaded,
   so a mistyped flag is refused at once; a rerun downloads it first, because
   it reads its recorded choices through it.

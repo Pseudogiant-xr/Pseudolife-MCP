@@ -66,11 +66,15 @@ fn unavailable(message: impl Into<String>) -> Refusal {
 }
 type Result<T> = std::result::Result<T, Refusal>;
 
-fn docker_program() -> String {
-    std::env::var("PSEUDOLIFE_DOCKER")
+/// `PSEUDOLIFE_DOCKER`, else `docker`, found as every installer step finds a
+/// program (`installer::state::program_path`): a name only in an absolute
+/// `PATH` directory, a path as given.
+fn docker_program() -> Option<std::path::PathBuf> {
+    let named = std::env::var("PSEUDOLIFE_DOCKER")
         .ok()
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "docker".into())
+        .unwrap_or_else(|| "docker".into());
+    crate::cli::installer::state::program_path(&named)
 }
 
 struct Ran {
@@ -84,7 +88,7 @@ struct Ran {
 /// carries only the answer. A call that cannot start or outlives `timeout`
 /// is a refusal, as Python's `subprocess.run` raised there.
 fn docker(args: &[&str], capture: bool, timeout: u64) -> Result<Ran> {
-    let mut command = Command::new(docker_program());
+    let mut command = Command::new(docker_program().ok_or_else(|| refusal(NO_DOCKER))?);
     command.args(args).stdin(Stdio::null());
     if capture {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
