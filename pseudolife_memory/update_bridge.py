@@ -88,14 +88,18 @@ class Kept(Exception):
     """The native client could not be used; the message says why."""
 
 
-def _python_shim_runtime() -> bool:
+def _python_shim_runtime(layout=None, prefix: str | None = None) -> bool:
     """Whether this interpreter runs from a Python shim runtime whose stable
-    launcher is not native yet: the only machine a hand-run moves."""
+    launcher is the Python one: the only machine a hand-run moves. Only a
+    launcher that reads as Python counts. On Windows a native launcher
+    reads as ``unknown`` (an MZ header alone cannot tell it from a distlib
+    launcher), and a missing or unreadable one is left alone too."""
     try:
         from pseudolife_memory import runtimes
-        layout = runtimes.default_layout()
-        return (runtimes._under(str(Path(sys.prefix)), layout.root)
-                and runtimes._launcher_kind(layout) != "native")
+        layout = runtimes.default_layout() if layout is None else layout
+        prefix = sys.prefix if prefix is None else prefix
+        return (runtimes._under(str(Path(prefix)), layout.root)
+                and runtimes._launcher_kind(layout) == "python")
     except Exception:  # noqa: BLE001 - a layout that cannot be read is not one to move
         return False
 
@@ -370,7 +374,12 @@ def bridge(arguments: list[str], parser_factory, *, env: dict | None = None,
             return f"the native client was not installed ({type(exc).__name__}: {exc}); {kept}"
         # A hand-run without --tag leaves the release to the native updater,
         # which picks it as this one would (the daemon's release on a client
-        # machine, the newest published on a Docker host).
+        # machine, the newest published on a Docker host) and checks that
+        # release's archive itself. Pinning the release verified here would
+        # turn the common case, a daemon ahead of this release, into a
+        # downgrade refusal. A picked release with no native client for this
+        # platform fails the native shim step before anything changes, so
+        # the machine stays on the Python client and the run says why.
         argv = [str(binary), "update", "--clients-only"]
         if args.tag is not None:
             argv += ["--tag", args.tag]

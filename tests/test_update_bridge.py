@@ -608,3 +608,66 @@ def test_interrupt_stops_the_native_child_even_on_a_second_interrupt():
     assert calls == [("wait", None), ("wait", update_bridge.INTERRUPT_GRACE), ("kill", None), ("wait", None)]
     # Shorter than the Python parent's own 10 s wait for this process.
     assert update_bridge.INTERRUPT_GRACE < 10
+
+
+# ---- which machine a hand-run moves: real scratch layouts, both shapes ----
+
+def _shim_layout(tmp_path, shape):
+    from pseudolife_memory import runtimes
+    launcher = tmp_path / "bin" / ("pseudolife-mcp.exe" if shape == "windows" else "pseudolife-mcp")
+    launcher.parent.mkdir(parents=True)
+    root = tmp_path / "runtimes"
+    (root / "000002").mkdir(parents=True)
+    return runtimes.Layout(root, launcher)
+
+
+def _python_launcher(layout, shape):
+    from pseudolife_memory import runtimes
+    if shape == "windows":
+        # A distlib launcher: an MZ stub with a stored zip appended whose
+        # __main__.py is the selector.
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as made:
+            made.writestr("__main__.py", runtimes.selector_content(layout))
+        layout.launcher.write_bytes(b"MZ" + b"\0" * 512 + archive.getvalue())
+    else:
+        layout.launcher.write_text(runtimes.launcher_content(layout), encoding="utf-8")
+
+
+@pytest.mark.parametrize("shape", ["posix", "windows"])
+def test_a_hand_run_moves_only_a_shim_runtime_behind_the_python_launcher(tmp_path, shape):
+    from pseudolife_memory import runtimes
+    layout = _shim_layout(tmp_path, shape)
+    inside = str(layout.root / "000002")
+    _python_launcher(layout, shape)
+    assert runtimes._launcher_kind(layout) == "python"
+    assert update_bridge._python_shim_runtime(layout, inside) is True
+    # Near misses on the interpreter: a pip install and an editable
+    # checkout's venv, both outside the runtimes root.
+    assert update_bridge._python_shim_runtime(layout, str(tmp_path / "pip-site")) is False
+    assert update_bridge._python_shim_runtime(layout, str(tmp_path / "checkout" / ".venv")) is False
+
+
+@pytest.mark.parametrize("shape, native", [
+    ("posix", b"\x7fELF\x02\x01\x01" + b"\0" * 64),
+    ("posix", b"\xcf\xfa\xed\xfe" + b"\0" * 64),            # Mach-O
+    ("windows", b"MZ\x90\0" + b"\0" * 1024),                 # a native PE reads as unknown
+], ids=["elf", "mach-o", "pe"])
+def test_a_native_launcher_is_left_alone_on_each_platform(tmp_path, shape, native):
+    from pseudolife_memory import runtimes
+    layout = _shim_layout(tmp_path, shape)
+    layout.launcher.write_bytes(native)
+    assert runtimes._launcher_kind(layout) in ("native", "unknown")
+    assert update_bridge._python_shim_runtime(layout, str(layout.root / "000002")) is False
+
+
+@pytest.mark.parametrize("shape", ["posix", "windows"])
+def test_a_missing_or_unreadable_launcher_is_left_alone(tmp_path, shape):
+    from pseudolife_memory import runtimes
+    layout = _shim_layout(tmp_path, shape)
+    inside = str(layout.root / "000002")
+    assert runtimes._launcher_kind(layout) == "missing"
+    assert update_bridge._python_shim_runtime(layout, inside) is False
+    layout.launcher.mkdir()                                  # not a regular file
+    assert runtimes._launcher_kind(layout) == "unreadable"
+    assert update_bridge._python_shim_runtime(layout, inside) is False
