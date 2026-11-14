@@ -293,9 +293,15 @@ def record_candidate(args):
         return 1
     binary = args.rust_test_bin.resolve()
     history = json.loads((HERE / "schema_history.json").read_text())["versions"]
-    sources = [{"commit": None, "embedding_dimension": 1024},
-               *({"commit": c, "embedding_dimension": 1024} for c in args.commit),
-               *(history if args.all_versions else [])]
+    by_commit = {source["commit"]: source for source in history}
+    unknown = [c for c in args.commit if c not in by_commit]
+    if unknown:
+        # The golden holds the fresh schema and the recorded history only.
+        print("schema record-candidate refused: --commit " + ", ".join(unknown) + " is not in "
+              "schema_history.json, so no golden case holds it", flush=True)
+        return 1
+    chosen = history if args.all_versions else [by_commit[c] for c in dict.fromkeys(args.commit)]
+    sources = [{"commit": None, "embedding_dimension": 1024}, *chosen]
     # Only the whole matrix (fresh and every recorded version) may remove a case.
     whole = args.all_versions and not args.commit
     recording = candidate_record.Recording(
@@ -305,16 +311,21 @@ def record_candidate(args):
     results = []
     for i, source in enumerate(sources):
         key = source["commit"] or "fresh"
-        result = cell(binary, number + i * 3, source["commit"], source["embedding_dimension"], oracle=False)
+        try:
+            result = cell(binary, number + i * 3, source["commit"], source["embedding_dimension"], oracle=False)
+        except Exception as error:   # a failed open is a refused case, not a crash
+            result = {"source_commit": source["commit"], "stages": [], "error": str(error), "_observed": []}
         entry = result.pop("_observed")
         result.pop("_recorded", None)
         results.append(result)
-        failures = [d for stage in result["stages"] for d in stage_diffs(stage)]
+        failures = ([f"error: {result['error']}"] if result.get("error") else []) + [
+            d for stage in result["stages"] for d in stage_diffs(stage)]
         recording.observe(key, {"cases": entry} if len(entry) == 2 else None, failures,
-                          lambda observed: dbstate.diff(observed, json.loads(json.dumps(observed))))
+                          candidate_record.round_trip)
+    code = recording.finish(args.write, "python rust/daemon/harness/schema_ci.py --out <scratch>/schema.json")
     args.out.write_text(json.dumps({"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
                                     "cells": results, "record_candidate": recording.report}, indent=2), encoding="utf-8")
-    return recording.finish(args.write, "python rust/daemon/harness/schema_ci.py --out <scratch>/schema.json")
+    return code
 
 
 if __name__ == "__main__":

@@ -17,8 +17,10 @@ recorder (``rust/cli_harness/README.md``, "Goldens after the freeze"):
   removed ones dropped), every other byte of the file stays;
 - a case whose observation failed the harness's own checks (clock,
   idempotence, epoch, refusal state, the expected outcome), or is vacuous, is
-  refused, and then nothing is written; so is a whole run with
-  ``PSEUDOLIFE_DAEMON_MUTANT`` set, which would record a mutant;
+  refused, and then nothing is written; so is a case whose entry names a host
+  path (the checkout, the home or temporary directory), which would not
+  replay on another machine and would publish a user name, and a whole run
+  with ``PSEUDOLIFE_DAEMON_MUTANT`` set, which would record a mutant;
 - the golden's top-level ``recorded_from_candidate`` names, for each case
   written this way, the checkout's commit, whether its Rust sources differed
   from that commit (``rust_tree``), the platform and the candidate's SHA-256.
@@ -35,6 +37,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -55,6 +58,27 @@ def refuse_mutant_environment() -> str | None:
     return None
 
 
+def host_paths(entry) -> list[str]:
+    """The host paths an entry names, raw or JSON-escaped: the checkout, the
+    home directory and the temporary directory. A golden must hold none."""
+    text = json.dumps(entry, allow_nan=False)
+    found = []
+    for path in {str(REPO), str(Path.home()), tempfile.gettempdir()}:
+        if len(path) < 4:
+            continue
+        spellings = {path, path.replace("\\", "/"), json.dumps(path)[1:-1]}
+        if any(spelling in text for spelling in spellings):
+            found.append(path)
+    return sorted(found)
+
+
+def round_trip(entry) -> list[str]:
+    """The differences between an entry and its JSON round trip: the entry
+    is exactly what --check-goldens compares, so it must survive the file."""
+    import dbstate
+    return dbstate.diff(entry, json.loads(json.dumps(entry, allow_nan=False)))
+
+
 def provenance(candidate: Path, repo: Path = REPO) -> dict:
     """Where a candidate recording comes from."""
     def git(*args):
@@ -72,7 +96,6 @@ def labelled(differences: list[str]) -> list[str]:
     """dbstate.diff names its sides python and rust; here they are the
     committed golden and the candidate's observation."""
     swaps = (("only in python", "only in golden"), ("only in rust", "only in candidate"),
-             ("row only in python", "row only in golden"), ("row only in rust", "row only in candidate"),
              (": python ", ": golden "), (" vs rust ", " vs candidate "))
     out = []
     for difference in differences:
@@ -80,6 +103,28 @@ def labelled(differences: list[str]) -> list[str]:
             difference = difference.replace(old, new)
         out.append(difference)
     return out
+
+
+def section_diff(want, got, path: str) -> list[str]:
+    """dbstate.diff, descending into lists of the same length: dbstate.diff
+    compares a list outside ``/rows`` as one value, printing only its first
+    300 characters, so a change late in a stage would show identical
+    prefixes. A ``/rows`` list keeps dbstate's row-set comparison."""
+    import dbstate
+    if isinstance(want, dict) and isinstance(got, dict):
+        out = []
+        for key in sorted(set(want) | set(got)):
+            if key in want and key in got:
+                out += section_diff(want[key], got[key], f"{path}/{key}")
+            else:
+                out += dbstate.diff({key: want[key]} if key in want else {},
+                                    {key: got[key]} if key in got else {}, path)
+        return out
+    if (isinstance(want, list) and isinstance(got, list) and len(want) == len(got)
+            and not path.endswith("/rows")):
+        return [d for index, (left, right) in enumerate(zip(want, got))
+                for d in section_diff(left, right, f"{path}/{index}")]
+    return dbstate.diff(want, got, path)
 
 
 class Recording:
@@ -125,6 +170,13 @@ class Recording:
             self.report["refused"][case] = why
             print(f"  REFUSED {case}: {why}", flush=True)
             return
+        named = host_paths(observed)
+        if named:
+            why = ("its entry names a host path (" + ", ".join("<home>" if p == str(Path.home()) else p
+                                                         for p in named) + "), which a golden must not hold")
+            self.report["refused"][case] = why
+            print(f"  REFUSED {case}: {why}", flush=True)
+            return
         again = recheck(observed)
         if again:
             why = "the entry would not check against the run it came from: " + "; ".join(again[:3])
@@ -133,7 +185,7 @@ class Recording:
             return
         if want is not None:
             differences = labelled([d for section in self.sections
-                                    for d in dbstate.diff(want[section], observed[section], f"/{section}")])
+                                    for d in section_diff(want[section], observed[section], f"/{section}")])
             if not differences:
                 self.report["unchanged"].append(case)
                 print(f"  unchanged {case}", flush=True)
@@ -151,6 +203,11 @@ class Recording:
 
     def finish(self, write: bool, check_command: str) -> int:
         """Write or report; the exit status the harness returns."""
+        if not self.whole and not self.single:
+            observed = set(self.report["unchanged"]) | set(self.updates) | set(self.report["refused"])
+            kept = [case for case in self.defined if self.entry(case) is not None and case not in observed]
+            if kept:
+                print(f"  kept as recorded (not selected): {', '.join(kept)}", flush=True)
         if self.whole:
             recorded = set()
             for section in self.sections:

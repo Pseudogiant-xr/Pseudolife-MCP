@@ -143,6 +143,12 @@ change, use one command with the isolated test login configured:
 python rust/daemon/harness/gen_schema_sql.py --record-goldens schema-capture.json
 ```
 
+That records the frozen Python oracle, so since the Python freeze it can only
+reproduce the committed golden. A deliberate Rust change re-records the schema
+golden from the candidate instead: `python rust/daemon/harness/schema_ci.py
+--record-candidate --out <scratch>/schema.json`, then `--write`
+(`harness/candidate_record.py`).
+
 The graph-store boundary uses the same disposable-bank and state helpers:
 
 ```bash

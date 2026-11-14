@@ -64,6 +64,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--record-goldens records the oracle and --record-candidate the candidate; give one")
     if args.write and not args.record_candidate:
         parser.error("--write needs --record-candidate")
+    if args.record_candidate:
+        import candidate_record
+        why = candidate_record.refuse_mutant_environment()
+        if why:
+            # Before the checks and the build, not only in the child.
+            parser.error(why)
     if args.no_build != (args.rust_test_bin is not None):
         parser.error("--no-build and --rust-test-bin must be supplied together")
     if args.build_only and (args.no_build or args.out or args.record_goldens or args.record_candidate

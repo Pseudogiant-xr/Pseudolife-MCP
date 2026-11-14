@@ -818,11 +818,11 @@ def record_candidate(args, binary):
         observed = ({"cases": [normalized_result(stage["snapshots"]["rust"]) for stage in stages],
                      "database": [stage["database"]["rust"] for stage in stages]}
                     if len(stages) == 2 else None)
-        recording.observe(case, observed, failures,
-                          lambda entry: dbstate.diff(entry, json.loads(json.dumps(entry, allow_nan=False))))
+        recording.observe(case, observed, failures, candidate_record.round_trip)
+    code = recording.finish(args.write, "python rust/daemon/harness/startup_ci.py --out <scratch>/startup.json")
     payload["record_candidate"] = recording.report
     args.out.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    return recording.finish(args.write, "python rust/daemon/harness/startup_ci.py --out <scratch>/startup.json")
+    return code
 
 
 if __name__ == "__main__":

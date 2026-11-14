@@ -144,6 +144,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--record-goldens records the oracle and --record-candidate the candidate; give one")
     if args.write and not args.record_candidate:
         parser.error("--write needs --record-candidate")
+    if args.record_candidate:
+        import candidate_record
+        why = candidate_record.refuse_mutant_environment()
+        if why:
+            # Before the checks and the build, not only in the child.
+            parser.error(why)
     if args.part and args.record_candidate:
         parser.error("--record-candidate records the complete startup matrix, not --part")
     if args.no_build != (args.rust_test_bin is not None):

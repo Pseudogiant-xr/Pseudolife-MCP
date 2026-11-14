@@ -1,6 +1,7 @@
 """CI's two startup parts run every cell and control once, with no extra build."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -173,6 +174,7 @@ class GoldenChecking(unittest.TestCase):
 
     def setUp(self):
         self.scratch = Path(tempfile.mkdtemp(prefix="pl-golden-checking-"))
+        self.addCleanup(shutil.rmtree, self.scratch, True)
         self.binary = self.scratch / "daemon-test"
         self.binary.write_text("")
         self.out = self.scratch / "out.json"
@@ -279,8 +281,10 @@ class GoldenChecking(unittest.TestCase):
     def test_recording_from_the_candidate_starts_only_rust_and_a_dry_run_writes_nothing(self):
         goldens = [HERE / "goldens" / name for name in ("startup-hydration.json", "clock-retry.json")]
         before = [path.read_bytes() for path in goldens]
-        self.assertEqual(self.starts(startup_cases, ["--record-candidate", "--only", "empty"]), ["rust", "rust"])
-        self.assertEqual(self.starts(clock_retry_cases, ["--record-candidate"]), ["rust"])
+        with patch.dict(os.environ):
+            os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+            self.assertEqual(self.starts(startup_cases, ["--record-candidate", "--only", "empty"]), ["rust", "rust"])
+            self.assertEqual(self.starts(clock_retry_cases, ["--record-candidate"]), ["rust"])
         self.assertEqual([path.read_bytes() for path in goldens], before)
 
     def test_without_golden_checking_both_sides_still_run(self):
@@ -297,6 +301,7 @@ class CandidateRecording(unittest.TestCase):
 
     def setUp(self):
         self.scratch = Path(tempfile.mkdtemp(prefix="pl-candidate-record-"))
+        self.addCleanup(shutil.rmtree, self.scratch, True)
         self.binary = self.scratch / "daemon-test"
         self.binary.write_bytes(b"candidate")
 
@@ -420,14 +425,75 @@ class CandidateRecording(unittest.TestCase):
     def test_a_mutant_in_the_environment_refuses_every_recording(self):
         with patch.dict(os.environ, {"PSEUDOLIFE_DAEMON_MUTANT": "startup-skip-world"}), patch("sys.stdout"):
             self.assertIn("PSEUDOLIFE_DAEMON_MUTANT", candidate_record.refuse_mutant_environment())
-            for module, extra in ((startup_cases, ["--only", "empty"]), (clock_retry_cases, [])):
-                with self.subTest(module=module.__name__), patch.object(module, "cell") as cell:
+            for module, extra in ((startup_cases, ["--only", "empty"]), (clock_retry_cases, []),
+                                  (schema_cases, ["--all-versions"])):
+                with self.subTest(module=module.__name__), patch.object(module, "cell") as cell, \
+                        patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}):
                     code = module.main(["--rust-test-bin", str(self.binary), "--out",
                                         str(self.scratch / "out.json"), "--record-candidate", "--write", *extra])
                     self.assertEqual(code, 1)
                     cell.assert_not_called()
+            for driver in (startup_ci, schema_ci):
+                with self.subTest(driver=driver.__name__), patch.object(driver.subprocess, "run") as run, \
+                        self.assertRaises(SystemExit), patch("sys.stderr"):
+                    driver.main(["--no-build", "--rust-test-bin", str(self.binary), "--out",
+                                 str(self.scratch / "out.json"), "--record-candidate"])
+                run.assert_not_called()   # refused before the checks and the build
         with patch.dict(os.environ, {"PSEUDOLIFE_DAEMON_MUTANT": ""}):
             self.assertIsNone(candidate_record.refuse_mutant_environment())
+
+    def test_a_change_late_in_a_stage_is_shown_at_its_own_path(self):
+        # Codex review of f126c9cce: dbstate.diff compares a list outside
+        # /rows as one value and prints 300 characters of each side.
+        stage = {"entries": [{"text": "x" * 400, "tags": []} for _ in range(3)]}
+        changed = json.loads(json.dumps(stage))
+        changed["entries"][2]["tags"] = ["late"]
+        differences = candidate_record.section_diff([stage, stage], [stage, changed], "/cases")
+        self.assertTrue(differences)
+        self.assertTrue(all(d.startswith("/cases/1") for d in differences), differences)
+        self.assertTrue(any("late" in d for d in differences), differences)
+
+    def test_an_entry_naming_a_host_path_is_refused(self):
+        for path in (str(Path.home()), tempfile.gettempdir(), str(candidate_record.REPO)):
+            with self.subTest(path=path):
+                golden = self.golden({"cases": {"a": [1]}, "database": {"a": [10]}})
+                before = golden.read_bytes()
+                recording = self.recording(golden, defined=["a"])
+                observed = {"cases": [{"error": f"could not open {Path(path) / 'x'}"}], "database": [10]}
+                self.assertEqual(self.run_quietly(recording, True, [("a", observed, [])]), 1)
+                self.assertIn("host path", recording.report["refused"]["a"])
+                self.assertEqual(golden.read_bytes(), before)
+        self.assertEqual(candidate_record.host_paths({"error": "ordinary text"}), [])
+
+    def test_a_failed_check_in_a_real_cell_result_refuses_the_case(self):
+        # The wiring from a cell's own *_diffs to the refusal, as main does it.
+        def failing_cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
+            stage = {"snapshots": {"rust": {"ok": True, "startup": {}, "entries": []}},
+                     "database": {"rust": {"rows": {}, "replaced": {}, "catalog_rows": {}}},
+                     "snapshot_diffs": [], "clock_diffs": [], "epoch_diffs": ["arm 0: constructor epoch did not increment once"]}
+            result["stages"] = [stage, stage]
+
+        golden = HERE / "goldens" / "startup-hydration.json"
+        before = golden.read_bytes()
+        with patch.object(startup_cases, "cell", failing_cell), patch("sys.stdout"), \
+                patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}):
+            os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+            code = startup_cases.main(["--rust-test-bin", str(self.binary), "--out", str(self.scratch / "out.json"),
+                                       "--record-candidate", "--write", "--only", "empty"])
+        self.assertEqual(code, 1)
+        report = json.loads((self.scratch / "out.json").read_text())["record_candidate"]
+        self.assertIn("epoch_diffs", report["refused"]["empty"])
+        self.assertFalse(report["written"])
+        self.assertEqual(golden.read_bytes(), before)
+
+    def test_a_schema_commit_outside_the_history_is_refused(self):
+        with patch.object(schema_cases, "cell") as cell, patch("sys.stdout"), \
+                patch.dict(os.environ, {"PL_HARNESS_SLICE": "pgs"}):
+            os.environ.pop("PSEUDOLIFE_DAEMON_MUTANT", None)
+            code = schema_cases.main(["--rust-test-bin", str(self.binary), "--out", str(self.scratch / "out.json"),
+                                      "--record-candidate", "--commit", "0" * 40])
+        self.assertEqual(code, 1)
+        cell.assert_not_called()
 
     def test_the_differences_name_the_golden_and_the_candidate(self):
         self.assertEqual(candidate_record.labelled(["/x: python 1 vs rust 2", "/y: only in python",

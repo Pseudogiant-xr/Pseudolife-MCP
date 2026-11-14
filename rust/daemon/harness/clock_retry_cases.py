@@ -406,11 +406,11 @@ def record_candidate(args):
     snapshot = result.get("snapshots", {}).get("rust")
     observed = ({"oracle": normalized(snapshot), "database": result["database"]["rust"]}
                 if snapshot is not None and "database" in result else None)
-    recording.observe("clock-retry", observed, failures,
-                      lambda entry: dbstate.diff(entry, json.loads(json.dumps(entry, allow_nan=False))))
+    recording.observe("clock-retry", observed, failures, candidate_record.round_trip)
+    code = recording.finish(args.write, "python rust/daemon/harness/startup_ci.py --out <scratch>/startup.json")
     result["record_candidate"] = recording.report
     args.out.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    return recording.finish(args.write, "python rust/daemon/harness/startup_ci.py --out <scratch>/startup.json")
+    return code
 
 
 if __name__ == "__main__":
