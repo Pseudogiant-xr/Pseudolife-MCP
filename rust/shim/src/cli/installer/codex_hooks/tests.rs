@@ -1382,11 +1382,15 @@ async fn an_instruction_file_that_cannot_be_written_is_reported_not_silent() {
         error["cause"].as_str().is_some_and(|c| !c.is_empty()),
         "{json}"
     );
+    // Each backup is reported in the spelling `resolved_path` gives it: the
+    // ordinary one, and the verbatim `\\?\` one only where the ordinary
+    // spelling would reach Win32's 260-character limit (a deep TEMP, or an
+    // 8.3 alias that expands to one), which nothing else can open.
     assert!(
         report
             .backups
             .iter()
-            .all(|b| !b.to_string_lossy().starts_with(r"\\?\")),
+            .all(|b| crate::setup::codex::resolved_path(b).is_ok_and(|resolved| &resolved == b)),
         "{:?}",
         report.backups
     );
