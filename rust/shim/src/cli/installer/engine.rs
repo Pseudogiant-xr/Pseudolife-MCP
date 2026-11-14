@@ -19,11 +19,13 @@
 //! - `choose --engine python` records an explicit Python choice.
 //!
 //! Progress goes to stderr; stdout carries only the machine-readable answer.
-use super::engine::{
+use crate::cli::update::engine::{
     ACTIVATION_LABEL, CHECKOUT_LABEL, ENGINE_LABEL, PYTHON_ACCEPTED, RELEASE_LABEL, SELECTION,
     record_choice, release_accepted, selection,
 };
-use super::{DAEMON_CONTAINER, DAEMON_SERVICE, Options, PG_CONTAINER, Update, data_dir, truthy};
+use crate::cli::update::{
+    DAEMON_CONTAINER, DAEMON_SERVICE, Options, PG_CONTAINER, Update, data_dir, truthy,
+};
 use serde_json::{Map, Value, json};
 use std::{
     fs,
@@ -67,14 +69,14 @@ fn unavailable(message: impl Into<String>) -> Refusal {
 type Result<T> = std::result::Result<T, Refusal>;
 
 /// `PSEUDOLIFE_DOCKER`, else `docker`, found as every installer step finds a
-/// program (`installer::state::program_path`): a name only in an absolute
+/// program (`state::program_path`): a name only in an absolute
 /// `PATH` directory, a path as given.
 fn docker_program() -> Option<std::path::PathBuf> {
     let named = std::env::var("PSEUDOLIFE_DOCKER")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "docker".into());
-    crate::cli::installer::state::program_path(&named)
+    super::state::program_path(&named)
 }
 
 struct Ran {
@@ -267,7 +269,7 @@ fn checkout_version(repo: &Path) -> Result<String> {
         (end > 0).then(|| value[..end].to_owned())
     });
     match version {
-        Some(version) if super::plain_release(&version) => Ok(version),
+        Some(version) if crate::cli::update::plain_release(&version) => Ok(version),
         _ => Err(unavailable(NO_VERSION)),
     }
 }
@@ -277,7 +279,7 @@ fn overlay_path() -> PathBuf {
 }
 
 fn quoted(text: &str) -> String {
-    crate::cli::installer::state::py_json_string(text)
+    super::state::py_json_string(text)
 }
 
 /// A YAML daemon overlay: JSON strings are YAML scalars; `!reset` drops the
@@ -356,7 +358,8 @@ fn read_overlay() -> Option<Value> {
 
 /// The updater's 8 GiB floor, before a multi-GB pull and model download.
 fn preflight_disk() -> Result<()> {
-    super::disk::host(&data_dir()).map_err(|e| refusal(format!("{e} Nothing was started.")))?;
+    crate::cli::update::disk::host(&data_dir())
+        .map_err(|e| refusal(format!("{e} Nothing was started.")))?;
     let mut update = Update::new(Options::default());
     update
         .disk_storage(DAEMON_CONTAINER, Some(PG_CONTAINER), None)
@@ -496,7 +499,7 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     let attempt = (|| -> Result<(String, String)> {
         let version = checkout_version(repo)?;
         refuse_foreign_unaccepted(found.as_ref(), &version)?;
-        let image = format!("{}:{version}", super::release::RUST_IMAGE);
+        let image = format!("{}:{version}", crate::cli::update::release::RUST_IMAGE);
         provision(&image)?;
         Ok((image, version))
     })();
@@ -564,7 +567,7 @@ fn bearer() -> Result<String> {
     }
     // The first principal `parse_token_map` accepts.
     let map = value("PSEUDOLIFE_MCP_TOKENS").unwrap_or_default();
-    Ok(crate::cli::installer::credentials::parse_token_map(&map)
+    Ok(super::credentials::parse_token_map(&map)
         .into_iter()
         .next()
         .map(|(token, _)| token)
@@ -599,9 +602,11 @@ fn accept(url: &str) -> Result<&'static str> {
         ));
     }
     let unrecorded = " The Rust selection was not recorded.";
-    let state =
-        super::seams::fetch_health_json(&format!("{}/health", url.trim_end_matches('/')), 3)
-            .unwrap_or_else(|| json!({}));
+    let state = crate::cli::update::seams::fetch_health_json(
+        &format!("{}/health", url.trim_end_matches('/')),
+        3,
+    )
+    .unwrap_or_else(|| json!({}));
     let release = &service["labels"][RELEASE_LABEL];
     if state["status"] != "ok" || state["ready"] != Value::Bool(true) {
         return Err(refusal(format!(
@@ -636,7 +641,7 @@ fn accept(url: &str) -> Result<&'static str> {
             "The Rust daemon runs without a bearer token, so pseudolife-mcp update could not verify it; rerun the installer without --no-token (its token step names any failure), or use --engine python.{unrecorded}"
         )));
     }
-    if !super::seams::authenticated_read(url, &token) {
+    if !crate::cli::update::seams::authenticated_read(url, &token) {
         return Err(refusal(format!(
             "The Rust daemon refused an authenticated bank read with its own bearer; check docker logs pseudolife-mcp-daemon and rerun.{unrecorded}"
         )));
@@ -644,7 +649,7 @@ fn accept(url: &str) -> Result<&'static str> {
     let path = release_accepted();
     fs::create_dir_all(path.parent().expect("selection directory"))
         .map_err(|_| refusal(BAD_OVERLAY))?;
-    super::engine::write_overlay(&path, &service)
+    crate::cli::update::engine::write_overlay(&path, &service)
         .map_err(|e| refusal(format!("{e}.{unrecorded}")))?;
     Ok("accepted")
 }

@@ -6,6 +6,7 @@ mod claude_desktop;
 mod codex_config;
 mod codex_hooks;
 pub(in crate::cli) mod credentials;
+mod engine;
 #[cfg(test)]
 mod fake_codex;
 mod helpers;
@@ -51,7 +52,7 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         Some("credentials") => credentials::run(&arguments[1..]),
         Some("state") => state::run(&arguments[1..]),
         Some("volume-names") => volumes::run(&arguments[1..]),
-        Some("engine") => crate::cli::update::installer_engine::run(&arguments[1..]),
+        Some("engine") => engine::run(&arguments[1..]),
         Some("json-field") => match &arguments[1..] {
             [field] => helpers::json_field(field),
             _ => usage("json-field takes one field name"),
