@@ -997,7 +997,15 @@ async fn isolated_cmd_launcher_fixture() {
     )
     .unwrap();
     let executable = pseudolife_stdio::setup::codex::resolve_codex().unwrap();
-    assert_eq!(executable, wrapper);
+    // The lookup spells the extension as PATHEXT does (`.CMD;.EXE` here), as
+    // Python's `program_lookup.find_program` does; Windows file names are
+    // case-insensitive, so it is the same file.
+    let found = executable.to_str().unwrap();
+    assert!(
+        found.eq_ignore_ascii_case(wrapper.to_str().unwrap()),
+        "{found}"
+    );
+    assert!(found.ends_with(".CMD"), "{found}");
     let mut client = pseudolife_stdio::setup::codex::Client::open_with_environment(
         &executable,
         &home,
