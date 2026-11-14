@@ -709,3 +709,25 @@ def test_a_workflow_new_to_the_baseline_needs_an_accepted_reason_for_each_job(mo
     assert ci_budget.approved_definitions("new.yml", raw, {}, raw, [])[1] == {}
     record = {"workflow": "new.yml", "job": "guard", "before": None, "fingerprint": "g", "reason": "a new job"}
     assert ci_budget.approved_definitions("new.yml", raw, {}, raw, [record])[1] == {"guard": "g"}
+
+
+def test_a_removed_job_needs_an_accepted_reason_as_the_batch_check_does(monkeypatch):
+    # ops/integrate.py's member check wants a record for a job the baseline
+    # has and the workflow lost; `check` passed #1550 without one, and the
+    # batch tool left it out of batch 7 (14 November 2026).
+    monkeypatch.setattr(ci_budget, "read_fingerprint_baseline", lambda: {"new.yml": {"guard": "g", "gone": "x"}})
+    monkeypatch.setattr(ci_budget, "current_definitions", lambda name, workflow: {"guard": "g"})
+    assert ci_budget.unapproved_removals("new.yml", {}, {}, []) == ["gone"]
+    record = {"workflow": "new.yml", "job": "gone", "before": "x", "fingerprint": None,
+              "reason": "removed with the lite tier"}
+    assert ci_budget.unapproved_removals("new.yml", {}, {}, [record]) == []
+    # The near miss: a record against another baseline does not count, as in the gate.
+    assert ci_budget.unapproved_removals("new.yml", {}, {}, [dict(record, before="y")]) == ["gone"]
+
+
+def test_check_names_a_removed_job_without_a_reason():
+    workflow, raw = copy.deepcopy(load("ci.yml")), copy.deepcopy(load("ci.yml", resolved=False))
+    for target in (workflow, raw):
+        del target["jobs"]["frontend"]
+    found = problems("ci.yml", workflow, budget(), raw)
+    assert any("job frontend was removed since its minutes were measured" in problem for problem in found), found

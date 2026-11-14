@@ -685,6 +685,18 @@ def approved_definitions(name: str, workflow: dict, entry: dict, raw: dict,
     return current, approved
 
 
+def unapproved_removals(name: str, entry: dict, raw: dict | None, records: list[dict]) -> list[str]:
+    """Jobs the generated baseline records that the workflow no longer has,
+    with no accepted reason for the removal. ops/integrate.py's member check
+    refuses such a pull request, so `check` names them too."""
+    recorded, legacy = recorded_definitions(name, entry)
+    if legacy:
+        return []
+    current = current_definitions(name, raw)
+    return sorted(job for job, before in recorded.items()
+                  if job not in current and not approval_reason(records, name, job, before, None))
+
+
 def budget_data(document: dict) -> dict:
     if not isinstance(document, dict) or any(not isinstance(entry, dict) for entry in document.values()):
         raise ValueError("malformed authored CI budget data")
@@ -833,6 +845,16 @@ def problems(name: str, workflow: dict, budget: dict, raw: dict | None = None) -
                          f"longer hold. Re-measure it (python rust/ci/ci_budget.py measure --workflow {name} "
                          "<run> <run>), or record why its cost is unchanged: python rust/ci/ci_budget.py accept "
                          f"--workflow {name} --job {job_id} --reason \"...\"")
+    try:
+        removed_jobs = unapproved_removals(name, entry, raw, records)
+    except (OSError, ValueError) as error:
+        found.append(f"{name}: fingerprint state unavailable ({error})")
+        removed_jobs = []
+    for job_id in removed_jobs:
+        found.append(f"{name}: job {job_id} was removed since its minutes were measured, and the batch "
+                     "tool's member check wants a reviewed reason for that too: python rust/ci/ci_budget.py "
+                     f"accept --workflow {name} --job {job_id} --reason \"...\" (what it ran and what "
+                     "removing it saves)")
     limits = entry["limits"]
     known = [job for job in reachable if job in measured]
     minutes = sum(measured[job]["minutes"] for job in known)

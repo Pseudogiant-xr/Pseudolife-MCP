@@ -1,0 +1,2 @@
+### Fixed (2026-11-14 — the CI budget check names a removed job that has no reason, as batch admission does)
+- `python rust/ci/ci_budget.py check` now reports a job that the generated baseline records and the workflow no longer has, when no accepted reason covers its removal. `ops/integrate.py`'s member check already refused such a pull request, while `check` passed it, which kept #1550 out of a batch. The docs say which check is the gate and when the two agree.
