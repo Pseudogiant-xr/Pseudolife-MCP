@@ -1,39 +1,99 @@
-//! Starting the browser [`browser::choose`] picked, as CPython 3.11 starts
-//! it, and the machine lookups that choice reads.
+//! Starting the browser [`browser::choose`] picked, and the machine lookups
+//! that choice reads.
 //!
-//! - `BackgroundBrowser.open`: `subprocess.Popen(cmdline)` and `p.poll() is
-//!   None`. POSIX: fds 0-2 inherited and every other descriptor closed
-//!   (`close_fds=True`), `setsid` (`start_new_session=True`), then
-//!   `_posixsubprocess`'s `execve` over each `PATH` candidate (never
-//!   execvp's `/bin/sh` fallback), reporting the first error that is not
-//!   ENOENT/ENOTDIR. Windows: `CreateProcess` with nothing redirected, so
-//!   the browser gets this command's own standard handles, as CPython's
-//!   child does (Windows copies a parent's redirected standard handles to a
-//!   child started with none named, also without handle inheritance:
-//!   measured 2026-11-13, a program CPython 3.11.9 started this way wrote
-//!   into its parent's stdout pipe).
-//! - `WindowsDefault.open`: `os.startfile(url)`, which is
-//!   `ShellExecuteW(NULL, NULL, url, NULL, NULL, SW_SHOWNORMAL)` (the
-//!   default verb) and True unless it returns 32 or less.
+//! - A background launch: `[program] + [arg.replace("%s", url) ...]` (the
+//!   URL is always one argument, never read by a shell). POSIX: fds 0-2
+//!   inherited and every other descriptor closed, `setsid`, then `execve`
+//!   over each `PATH` candidate (never execvp's `/bin/sh` fallback),
+//!   reporting the first error that is not ENOENT/ENOTDIR. The launcher is
+//!   then given [`SETTLE`] to exit: a zero exit or a program still running
+//!   (a browser in the foreground of its own session) is opened, a non-zero
+//!   exit is a failure with its status. Windows: `CreateProcess` with
+//!   nothing redirected, so the browser gets this command's own standard
+//!   handles, as CPython's child does (measured 2026-11-13, a program
+//!   CPython 3.11.9 started this way wrote into its parent's stdout pipe),
+//!   and opened when it is still running right after the start.
+//! - Windows `os.startfile(url)`: `ShellExecuteW(NULL, NULL, url, NULL,
+//!   NULL, SW_SHOWNORMAL)` (the default verb), opened unless it returns 32
+//!   or less.
 //!
-//! The URL is always one argument (or the one `ShellExecuteW` file): no
-//! shell ever reads it.
-use super::browser::{Host, Plan, Probe};
+//! Test builds start nothing: every launch passes [`intercept`] first,
+//! which panics unless the program is an absolute path inside the stub
+//! directory the calling test registered with [`stub_root`].
+use super::browser::{Host, Plan};
 use std::ffi::OsString;
 
-/// `open_browser(url)` once the plan is known.
-pub(super) fn open(plan: &Plan, url: &str) -> bool {
+/// The outcome of one launch: opened, or not, with the cause to print
+/// beside the link (none on Windows, whose printed answer is unchanged).
+pub(super) type Launched = Result<(), Option<String>>;
+
+/// How long a POSIX launcher has to report failure by exiting non-zero.
+/// Chosen, not measured: `open`, `xdg-open` and `gio open` hand the URL to
+/// a running desktop and exit well inside it; a launcher still running
+/// after it is taken as the browser itself, started in the foreground.
+#[cfg(unix)]
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The program's argv after `program`, each `%s` replaced by the URL.
+pub(super) fn arguments(args: &[String], url: &str) -> Vec<String> {
+    args.iter().map(|arg| arg.replace("%s", url)).collect()
+}
+
+/// Start what `plan` names for `url`, at most one program.
+pub(super) fn open(plan: &Plan, url: &str) -> Launched {
     match plan {
-        Plan::Refused => false,
-        Plan::StartFile => start_file(url),
+        Plan::Refused(cause) => Err(cause.clone()),
+        Plan::StartFile => {
+            intercept(plan);
+            start_file(url)
+        }
         Plan::Background { program, args } => {
-            let args: Vec<String> = args.iter().map(|arg| arg.replace("%s", url)).collect();
-            background(program, &args)
+            intercept(plan);
+            background(program, &arguments(args, url))
         }
     }
 }
 
-/// The machine as the oracle reads it.
+#[cfg(test)]
+thread_local! {
+    static STUB_ROOT: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A test's stub directory: programs inside it may start on this thread.
+#[cfg(test)]
+pub(super) fn stub_root(root: Option<std::path::PathBuf>) {
+    STUB_ROOT.with(|cell| *cell.borrow_mut() = root);
+}
+
+/// In a test build, refuse (panic) before any launch but a registered stub:
+/// a test that reaches a real launcher fails instead of opening a browser
+/// (#1509). `ShellExecuteW` is never a stub.
+#[cfg(test)]
+fn intercept(plan: &Plan) {
+    let allowed = match plan {
+        Plan::Background { program, .. } => STUB_ROOT.with(|cell| {
+            let path = std::path::Path::new(program);
+            cell.borrow().as_deref().is_some_and(|root| {
+                path.is_absolute()
+                    && path.starts_with(root)
+                    && !path
+                        .components()
+                        .any(|part| part == std::path::Component::ParentDir)
+            })
+        }),
+        _ => false,
+    };
+    assert!(
+        allowed,
+        "a test tried to start a real browser launcher ({plan:?}); tests start only stubs inside launch::stub_root"
+    );
+}
+
+#[cfg(not(test))]
+fn intercept(_plan: &Plan) {}
+
+/// The machine as the choice reads it.
 pub(super) struct Machine;
 
 impl Host for Machine {
@@ -44,15 +104,37 @@ impl Host for Machine {
     fn which(&self, name: &str) -> bool {
         posix::which(name)
     }
+}
 
-    fn probe(&self) -> Probe {
-        posix::probe()
+/// Windows `os.startfile(url)`; no cause, as before.
+#[cfg(windows)]
+fn start_file(url: &str) -> Launched {
+    if shell_execute(url) {
+        Ok(())
+    } else {
+        Err(None)
+    }
+}
+
+#[cfg(not(windows))]
+fn start_file(_url: &str) -> Launched {
+    // `os.startfile` exists only on Windows; the plan never names it here.
+    Err(None)
+}
+
+/// A Windows background start; no cause, as before.
+#[cfg(windows)]
+fn background(program: &str, args: &[String]) -> Launched {
+    if spawned(program, args) {
+        Ok(())
+    } else {
+        Err(None)
     }
 }
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn start_file(url: &str) -> bool {
+fn shell_execute(url: &str) -> bool {
     use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
     let mut file: Vec<u16> = url.encode_utf16().collect();
     // `path_converter` raises ValueError ("too long for Windows") past this.
@@ -76,14 +158,8 @@ fn start_file(url: &str) -> bool {
     instance as usize > 32
 }
 
-#[cfg(not(windows))]
-fn start_file(_url: &str) -> bool {
-    // `WindowsDefault` exists only on Windows; the plan never names it here.
-    false
-}
-
 #[cfg(windows)]
-fn background(program: &str, args: &[String]) -> bool {
+fn spawned(program: &str, args: &[String]) -> bool {
     // `browser::launchable` admits only a drive-absolute `.exe`. Nothing is
     // redirected: the browser gets this command's standard handles.
     match std::process::Command::new(program).args(args).spawn() {
@@ -93,31 +169,26 @@ fn background(program: &str, args: &[String]) -> bool {
 }
 
 /// `p.poll() is None` right after the start.
+#[cfg(windows)]
 fn running(mut child: std::process::Child) -> bool {
     matches!(child.try_wait(), Ok(None))
 }
 
 #[cfg(not(windows))]
-fn background(program: &str, args: &[String]) -> bool {
+fn background(program: &str, args: &[String]) -> Launched {
     posix::background(program, args)
+        .map_err(|cause| Some(format!("{cause}; {}", super::browser::SET_BROWSER)))
 }
 
 #[cfg(not(unix))]
 mod posix {
-    use super::Probe;
-
     pub(super) fn which(_name: &str) -> bool {
         false
-    }
-
-    pub(super) fn probe() -> Probe {
-        Probe::Missing
     }
 }
 
 #[cfg(unix)]
 mod posix {
-    use super::Probe;
     use std::{
         ffi::{CString, OsStr, OsString},
         io,
@@ -319,51 +390,33 @@ mod posix {
         Ok(command)
     }
 
-    /// `BackgroundBrowser.open` on POSIX.
-    pub(super) fn background(program: &str, args: &[String]) -> bool {
+    /// A background launch on POSIX: started in a session of its own with
+    /// `/dev/null` for its standard streams (a browser left running must
+    /// not hold a caller's pipe open, nor write into this terminal), then
+    /// given [`super::SETTLE`] to exit. `Err` is the cause, worded for the
+    /// user.
+    pub(super) fn background(program: &str, args: &[String]) -> Result<(), String> {
         let argv: Vec<&[u8]> = std::iter::once(program.as_bytes())
             .chain(args.iter().map(|arg| arg.as_bytes()))
             .collect();
-        let Ok(mut command) = command(&argv, true) else {
-            return false;
-        };
-        match command.spawn() {
-            Ok(child) => super::running(child),
-            Err(_) => false,
-        }
-    }
-
-    /// `subprocess.check_output(["xdg-settings", "get",
-    /// "default-web-browser"], stderr=DEVNULL)`, as
-    /// `register_standard_browsers` reads it.
-    pub(super) fn probe() -> Probe {
-        let argv: [&[u8]; 3] = [b"xdg-settings", b"get", b"default-web-browser"];
-        let Ok(mut command) = command(&argv, false) else {
-            return Probe::Raised;
-        };
-        let output = command
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::piped())
+        let mut command = command(&argv, true)
+            .map_err(|_| format!("could not start {program}: a NUL byte in its command line"))?;
+        let mut child = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .output();
-        let output = match output {
-            Ok(output) => output,
-            Err(error) => {
-                // FileNotFoundError, PermissionError, NotADirectoryError.
-                return match error.raw_os_error() {
-                    Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES | libc::EPERM) => {
-                        Probe::Missing
-                    }
-                    _ => Probe::Raised,
-                };
+            .spawn()
+            .map_err(|error| format!("could not start {program} ({error})"))?;
+        let deadline = std::time::Instant::now() + super::SETTLE;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(Some(status)) => return Err(format!("{program} failed ({status})")),
+                // Still running at the deadline: the browser itself.
+                Ok(None) if std::time::Instant::now() >= deadline => return Ok(()),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Err(error) => return Err(format!("could not wait for {program} ({error})")),
             }
-        };
-        if !output.status.success() {
-            return Probe::Missing;
-        }
-        match String::from_utf8(output.stdout) {
-            Ok(text) => Probe::Answer(super::super::pyjson::py_strip(&text).to_owned()),
-            Err(_) => Probe::Raised,
         }
     }
 
@@ -399,3 +452,7 @@ mod posix {
 
 #[cfg(all(test, unix))]
 pub(super) use posix::{candidates, which_in};
+
+#[cfg(test)]
+#[path = "launch_tests.rs"]
+mod tests;

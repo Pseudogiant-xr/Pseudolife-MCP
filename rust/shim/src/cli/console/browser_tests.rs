@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 struct Fake {
     vars: BTreeMap<&'static str, OsString>,
     found: Vec<&'static str>,
-    probe: Option<Probe>,
 }
 
 impl Fake {
@@ -20,11 +19,6 @@ impl Fake {
         self.found.extend(names);
         self
     }
-
-    fn probe(mut self, probe: Probe) -> Self {
-        self.probe = Some(probe);
-        self
-    }
 }
 
 impl Host for Fake {
@@ -35,10 +29,6 @@ impl Host for Fake {
     fn which(&self, name: &str) -> bool {
         self.found.contains(&name)
     }
-
-    fn probe(&self) -> Probe {
-        self.probe.clone().unwrap_or(Probe::Missing)
-    }
 }
 
 fn background(program: &str, args: &[&str]) -> Result<Plan, Unsupported> {
@@ -48,21 +38,18 @@ fn background(program: &str, args: &[&str]) -> Result<Plan, Unsupported> {
     })
 }
 
-use Platform::{Mac, Posix, Windows};
-
-#[test]
-fn a_display_is_needed_only_on_other_posix_systems() {
-    let none = Fake::default();
-    assert!(has_display(&none, Windows));
-    assert!(has_display(&none, Mac));
-    assert!(!has_display(&none, Posix));
-    assert!(!has_display(&Fake::default().with("DISPLAY", ""), Posix));
-    assert!(has_display(&Fake::default().with("DISPLAY", ":0"), Posix));
-    assert!(has_display(
-        &Fake::default().with("WAYLAND_DISPLAY", "wayland-0"),
-        Posix
-    ));
+/// The cause a refused POSIX plan prints, which every one of them has.
+fn cause(plan: Result<Plan, Unsupported>) -> String {
+    match plan {
+        Ok(Plan::Refused(Some(cause))) => {
+            assert!(cause.contains(SET_BROWSER), "{cause}");
+            cause
+        }
+        other => panic!("not a refusal with a cause: {other:?}"),
+    }
 }
+
+use Platform::{Mac, Posix, Windows};
 
 /// `[text, words or null]` from CPython 3.11.9's `shlex.split`, 2026-11-13.
 const SHLEX: &str = include_str!("shlex_cases.json");
@@ -91,31 +78,43 @@ fn shlex_splits_as_cpython_does() {
 }
 
 #[test]
-fn a_browser_command_with_a_trailing_ampersand_runs_in_the_background() {
-    let posix = |value: &str| choose(&Fake::default().with("BROWSER", value), Posix);
-    assert_eq!(
-        posix("'/opt/stand in/b' --new %s &"),
-        background("/opt/stand in/b", &["--new", "%s"])
-    );
-    // The first entry decides; the rest are only registered.
-    assert_eq!(posix("/x/b %s &:/y/c %s &"), background("/x/b", &["%s"]));
-    assert_eq!(posix(":/x/b %s &"), background("/x/b", &["%s"]));
-    assert_eq!(posix("b --url=%s '&'"), background("b", &["--url=%s"]));
-    // A bare name runs through CPython's own PATH search, reproduced.
-    assert_eq!(posix("b %s &"), background("b", &["%s"]));
-    // No trailing `&`: a GenericBrowser, which open_browser refuses.
-    assert_eq!(posix("/x/b %s"), Ok(Plan::Refused));
-    assert_eq!(posix("/x/b %s&"), Ok(Plan::Refused));
-    // shlex.split raises: webbrowser.get() raises.
-    assert_eq!(posix("'/x/b %s &"), Ok(Plan::Refused));
-    // An entry that is only whitespace raises IndexError in _synthesize.
-    assert_eq!(posix("/x/b %s &: "), Ok(Plan::Refused));
-    assert_eq!(posix("\u{3000}:/x/b %s &"), Ok(Plan::Refused));
-    // Not `%s`: a GenericBrowser, unless _synthesize may clone a standard one.
-    assert_eq!(posix("/x/my-browser --flag"), Ok(Plan::Refused));
-    assert_eq!(posix("/usr/bin/firefox"), Err(Unsupported));
-    assert_eq!(posix("Lynx -dump"), Err(Unsupported));
-    assert_eq!(posix("\u{212a}fm"), Err(Unsupported));
+fn a_posix_browser_variable_is_a_command_line_that_starts_in_the_background() {
+    for platform in [Posix, Mac] {
+        let posix = |value: &str| choose(&Fake::default().with("BROWSER", value), platform);
+        assert_eq!(
+            posix("'/opt/stand in/b' --new %s &"),
+            background("/opt/stand in/b", &["--new", "%s"])
+        );
+        // The first non-empty entry decides; the rest are never read.
+        assert_eq!(posix("/x/b %s &:/y/c %s &"), background("/x/b", &["%s"]));
+        assert_eq!(posix(":/x/b %s &"), background("/x/b", &["%s"]));
+        assert_eq!(posix("/x/b %s &: "), background("/x/b", &["%s"]));
+        assert_eq!(posix("b --url=%s '&'"), background("b", &["--url=%s"]));
+        assert_eq!(posix("b %s &"), background("b", &["%s"]));
+        // No trailing `&`: still a background start in its own session.
+        assert_eq!(posix("/x/b %s"), background("/x/b", &["%s"]));
+        assert_eq!(posix("/x/b %s&"), background("/x/b", &["%s&"]));
+        // Without `%s` the URL is the last argument.
+        assert_eq!(posix("firefox"), background("firefox", &["%s"]));
+        assert_eq!(
+            posix("/usr/bin/firefox"),
+            background("/usr/bin/firefox", &["%s"])
+        );
+        assert_eq!(
+            posix("open -a Safari"),
+            background("open", &["-a", "Safari", "%s"])
+        );
+        assert_eq!(
+            posix("/x/my-browser --flag"),
+            background("/x/my-browser", &["--flag", "%s"])
+        );
+        // Each refusal names its cause and the way out.
+        assert!(cause(posix("'/x/b %s &")).contains("unclosed quote"));
+        assert!(cause(posix(" ")).contains("names no program"));
+        assert!(cause(posix("Lynx -dump")).contains("terminal browser lynx"));
+        assert!(cause(posix("/usr/bin/w3m %s")).contains("terminal browser w3m"));
+        assert!(cause(posix("&")).contains("names no program"));
+    }
 }
 
 #[test]
@@ -153,9 +152,11 @@ fn windows_runs_only_an_absolute_exe_it_starts_the_same_way() {
     assert_eq!(windows("1:firefox"), Err(Unsupported));
     assert_eq!(windows("\u{e9}:Firefox --private"), Err(Unsupported));
     // A clone needs the basename itself to be a registered name.
-    assert_eq!(windows("C:\\b\\my.exe"), Ok(Plan::Refused));
-    assert_eq!(windows("C:\\b\\chrome.exe"), Ok(Plan::Refused));
-    assert_eq!(windows("C:/b/b.exe %s"), Ok(Plan::Refused));
+    assert_eq!(windows("C:\\b\\my.exe"), Ok(Plan::Refused(None)));
+    assert_eq!(windows("C:\\b\\chrome.exe"), Ok(Plan::Refused(None)));
+    assert_eq!(windows("C:/b/b.exe %s"), Ok(Plan::Refused(None)));
+    // An entry that is only whitespace raises IndexError in _synthesize.
+    assert_eq!(windows("C:/b/b.exe %s &; "), Ok(Plan::Refused(None)));
 }
 
 #[test]
@@ -169,86 +170,93 @@ fn without_a_browser_variable_the_platform_default_decides() {
         choose(&Fake::default().with("BROWSER", ";;"), Windows),
         Ok(Plan::StartFile)
     );
-    // macOS: the AppleScript launcher is not ported.
-    assert_eq!(choose(&Fake::default(), Mac), Err(Unsupported));
-    let x = || Fake::default().with("DISPLAY", ":0");
-    // Nothing found: webbrowser.Error, so no browser.
-    assert_eq!(choose(&x(), Posix), Ok(Plan::Refused));
+    // Windows reads none of the POSIX launchers.
     assert_eq!(
-        choose(&x().found(&["xdg-open", "firefox"]), Posix),
-        background("xdg-open", &["%s"])
+        choose(&Fake::default().found(&["xdg-open"]), Windows),
+        Ok(Plan::StartFile)
     );
+    // macOS: an empty BROWSER is no BROWSER.
+    for value in ["", "::"] {
+        assert_eq!(
+            choose(&Fake::default().with("BROWSER", value), Mac),
+            background(MAC_OPEN, &["%s"])
+        );
+    }
+    // macOS never searches PATH for its launcher.
     assert_eq!(
-        choose(&x().found(&["gio", "x-www-browser"]), Posix),
+        choose(&Fake::default().found(&["xdg-open"]), Mac),
+        background(MAC_OPEN, &["%s"])
+    );
+    let x = || Fake::default().with("DISPLAY", ":0");
+    // Nothing found: the link, the names looked for and the way out.
+    let none = cause(choose(&x(), Posix));
+    assert!(none.contains("no browser launcher found on PATH"), "{none}");
+    for (name, _) in POSIX_LAUNCHERS {
+        assert!(none.contains(name), "{none}");
+    }
+    // The order, each step against everything after it.
+    let names: Vec<&'static str> = POSIX_LAUNCHERS.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+        names,
+        [
+            "xdg-open",
+            "gio",
+            "x-www-browser",
+            "firefox",
+            "google-chrome",
+            "chromium",
+            "chromium-browser"
+        ]
+    );
+    for (index, (name, args)) in POSIX_LAUNCHERS.iter().enumerate() {
+        let found: Vec<&'static str> = names[index..].to_vec();
+        assert_eq!(
+            choose(&x().found(&found), Posix),
+            background(name, args),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        choose(&x().found(&["gio"]), Posix),
         background("gio", &["open", "--", "%s"])
     );
-    // gvfs-open only in a GNOME session.
-    assert_eq!(
-        choose(&x().found(&["gvfs-open", "mosaic"]), Posix),
-        background("mosaic", &["%s"])
-    );
+    // A set BROWSER decides alone, even when it cannot start.
     assert_eq!(
         choose(
-            &x().with("GNOME_DESKTOP_SESSION_ID", "")
-                .found(&["gvfs-open", "mosaic"]),
+            &x().with("BROWSER", "no-such-browser").found(&["xdg-open"]),
             Posix
         ),
-        background("gvfs-open", &["%s"])
+        background("no-such-browser", &["%s"])
     );
-    // xdg-settings' answer moves a matching name to the front.
-    let preferred = x()
-        .found(&["xdg-open", "firefox"])
-        .probe(Probe::Answer("firefox.desktop".to_owned()));
-    assert_eq!(choose(&preferred, Posix), Err(Unsupported));
-    let preferred = x()
-        .found(&["xdg-open", "skipstone"])
-        .probe(Probe::Answer("skipstone.desktop".to_owned()));
-    assert_eq!(choose(&preferred, Posix), background("skipstone", &["%s"]));
-    // A probe that raises makes webbrowser.get() raise, BROWSER or not.
-    let raised = x()
-        .with("BROWSER", "/x/b %s &")
-        .found(&["xdg-open"])
-        .probe(Probe::Raised);
-    assert_eq!(choose(&raised, Posix), Ok(Plan::Refused));
-    // Mozilla, Chrome and the other UnixBrowser launchers are not ported.
-    assert_eq!(
-        choose(
-            &x().found(&["firefox", "xdg-open"]).probe(Probe::Missing),
+    assert!(
+        cause(choose(
+            &x().with("BROWSER", "lynx").found(&["xdg-open"]),
             Posix
-        ),
-        background("xdg-open", &["%s"])
+        ))
+        .contains("terminal browser")
     );
     assert_eq!(
-        choose(&x().found(&["google-chrome"]), Posix),
-        Err(Unsupported)
+        choose(&Fake::default().with("BROWSER", "no-such-browser"), Mac),
+        background("no-such-browser", &["%s"])
     );
-    // Console browsers, with TERM: every one is refused, elinks (a
-    // UnixBrowser that falls back to the terminal) by name.
-    let term = || Fake::default().with("TERM", "xterm");
-    assert_eq!(
-        choose(&term().found(&["lynx", "w3m"]), Posix),
-        Ok(Plan::Refused)
-    );
-    assert_eq!(choose(&term().found(&["elinks"]), Posix), Ok(Plan::Refused));
-    assert_eq!(
-        choose(&term().found(&["elinks", "lynx"]), Posix),
-        Ok(Plan::Refused)
-    );
-    // With no display the X list is never registered.
-    assert_eq!(
-        choose(&term().found(&["xdg-open"]), Posix),
-        Ok(Plan::Refused)
+    // The old console browsers and launchers are no longer looked up.
+    assert!(
+        cause(choose(
+            &x().found(&["lynx", "w3m", "mosaic", "skipstone"]),
+            Posix
+        ))
+        .contains("no browser launcher found")
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn a_browser_variable_that_is_not_utf8_defers() {
+fn a_browser_variable_that_is_not_utf8_prints_the_link_with_its_cause() {
     use std::os::unix::ffi::OsStringExt;
     let mut fake = Fake::default();
     fake.vars
         .insert("BROWSER", OsString::from_vec(b"/x/\xff %s &".to_vec()));
-    assert_eq!(choose(&fake, Posix), Err(Unsupported));
+    assert!(cause(choose(&fake, Posix)).contains("not valid UTF-8"));
 }
 
 #[cfg(windows)]
@@ -290,4 +298,56 @@ fn programs_are_looked_up_as_cpython_looks_them_up() {
     assert!(!which_in("b", Some(format!("{dir}/dir").into())));
     assert!(!which_in("tool", Some("".into())));
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn an_ordinary_desktop_gets_a_launch_plan_without_a_browser_variable() {
+    // macOS: the system `open`, by absolute path, so PATH cannot swap it.
+    assert_eq!(
+        choose(&Fake::default(), Mac),
+        background("/usr/bin/open", &["%s"])
+    );
+    // Linux desktop whose default browser is Firefox: xdg-open honours that
+    // default itself, so it stays the launcher. (Watched red at 702180256
+    // with `xdg-settings` answering `firefox.desktop`: that deferred.)
+    let firefox_default = Fake::default()
+        .with("DISPLAY", ":0")
+        .found(&["xdg-open", "firefox"]);
+    assert_eq!(
+        choose(&firefox_default, Posix),
+        background("xdg-open", &["%s"])
+    );
+    // A Wayland desktop with only a browser installed: that browser.
+    let chrome_only = Fake::default()
+        .with("WAYLAND_DISPLAY", "wayland-0")
+        .found(&["google-chrome"]);
+    assert_eq!(
+        choose(&chrome_only, Posix),
+        background("google-chrome", &["%s"])
+    );
+}
+
+#[test]
+fn a_set_browser_decides_without_a_display_and_none_says_why() {
+    // A remote terminal (VS Code, Codespaces, WSL's wslview) has no display
+    // but names its own opener in BROWSER: that opener is what works.
+    let remote = Fake::default()
+        .with("BROWSER", "/home/u/.vscode-server/bin/helpers/browser.sh")
+        .found(&["xdg-open"]);
+    assert_eq!(
+        choose(&remote, Posix),
+        background("/home/u/.vscode-server/bin/helpers/browser.sh", &["%s"])
+    );
+    // Without BROWSER the desktop launchers need a display.
+    let headless = cause(choose(&Fake::default().found(&["xdg-open"]), Posix));
+    assert!(headless.starts_with(NO_DISPLAY), "{headless}");
+    for key in ["DISPLAY", "WAYLAND_DISPLAY"] {
+        let empty = Fake::default().with(key, "").found(&["xdg-open"]);
+        assert!(cause(choose(&empty, Posix)).starts_with(NO_DISPLAY));
+        let set = Fake::default().with(key, ":0").found(&["xdg-open"]);
+        assert_eq!(choose(&set, Posix), background("xdg-open", &["%s"]));
+    }
+    // macOS and Windows never read DISPLAY.
+    assert_eq!(choose(&Fake::default(), Mac), background(MAC_OPEN, &["%s"]));
+    assert_eq!(choose(&Fake::default(), Windows), Ok(Plan::StartFile));
 }

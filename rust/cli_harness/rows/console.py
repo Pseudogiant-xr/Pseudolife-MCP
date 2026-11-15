@@ -9,11 +9,14 @@ options. The daemon is a fixture serving ``/api/console/link``,
 arm sends are compared.
 
 No case lets either arm open a real browser: every case with a daemon that
-reaches ``open_browser`` runs with BROWSER naming a recording stand-in in
-the case's home and PATH holding only the home's ``bin`` (checked when the
-row loads), so ``webbrowser.get()`` never falls back to ``os.startfile`` or
-``xdg-open``; the stand-in's argv is compared. Scope and deferrals:
-``rows/console.md``.
+reaches ``open_browser`` runs with a BROWSER that decides (the recording
+stand-in in the case's home, a path in that home, or on Linux-only cases a
+bare name) and PATH holding only the home's ``bin`` (checked when the row
+loads), so neither arm falls back to ``os.startfile``, ``/usr/bin/open`` or
+``xdg-open``; the stand-in's argv is compared. Every other case runs with
+BROWSER naming no program (``NO_BROWSER``), so a candidate that wrongly
+takes the sign-in path prints the link instead of reaching a default
+launcher (#1509). Scope and deferrals: ``rows/console.md``.
 """
 
 from __future__ import annotations
@@ -276,19 +279,29 @@ def _reaches_browser(argv: list[str]) -> bool:
 def _check_browser_env(case_id: str, env: dict, served: bool) -> None:
     """The environment that keeps every default launcher out, asserted when
     the row loads, before any arm runs: a BROWSER whose first entry decides
-    (``os.startfile`` and the ``xdg-open`` family run only without one),
-    naming as a program only the stand-in's interpreter or a path in the
-    home, and a PATH of the home's ``bin`` alone (so no ``which`` lookup
-    finds a real browser to clone)."""
+    (``os.startfile``, ``/usr/bin/open`` and the ``xdg-open`` family run only
+    without one), naming as a program only the stand-in's interpreter or a
+    path in the home, and a PATH of the home's ``bin`` alone (so no
+    ``which`` lookup finds a real browser). On POSIX every entry starts a
+    program (the native client), and a bare name is allowed, since
+    ``execve`` finds it only through that PATH; on Windows only a ``%s``
+    entry starts one, and never a bare name, since ``CreateProcess`` also
+    searches the interpreter's directory, the current directory and the
+    system directories."""
     entries = [entry for entry in (env.get("BROWSER") or "").split(os.pathsep) if entry]
     if not entries or not entries[0].strip():
         raise AssertionError(f"{case_id}: BROWSER must decide the controller")
-    if served and "%s" in entries[0]:
+    if served:
         try:
             words = shlex.split(entries[0])
         except ValueError:
             words = [BIN]  # webbrowser.get() raises: nothing starts
-        if words[0] != _interpreter() and not words[0].startswith(BIN):
+        program = words[0] if words else BIN
+        bare = not core.WINDOWS and "/" not in program
+        # Windows starts a BROWSER entry only in the `%s ... &` form; any
+        # other is a GenericBrowser neither arm runs there.
+        started = not core.WINDOWS or "%s" in entries[0]
+        if started and program != _interpreter() and not program.startswith(BIN) and not bare:
             raise AssertionError(f"{case_id}: BROWSER may run only the stand-in")
     if env.get("PATH") != BIN:
         raise AssertionError(f"{case_id}: PATH must hold only the home's bin")
@@ -296,13 +309,21 @@ def _check_browser_env(case_id: str, env: dict, served: bool) -> None:
         raise AssertionError(f"{case_id}: WAYLAND_DISPLAY must stay unset")
 
 
+# The BROWSER every case without its own runs with: no program by that
+# name exists, so a candidate that reaches a launcher where the oracle does
+# not prints the link (Windows: a refused ``GenericBrowser``; POSIX: a start
+# that fails) instead of opening the machine's default browser (#1509).
+NO_BROWSER = "pl-console-harness-no-browser"
+
+
 def case(case_id: str, argv: list[str], *, routes=None, env=None, rules=(), setup=None,
          platforms=("windows", "linux"), timeout=40.0, tls=False,
          expect_output=False, during=None, after=_arm, programs=()) -> Case:
     full = ["console", *argv]
-    env = {**TOKEN, **(env or {})}
-    if "BROWSER" in env or (routes is not None and _reaches_browser(full)):
-        _check_browser_env(case_id, env, routes is not None)
+    own = env or {}
+    if "BROWSER" in own or (routes is not None and _reaches_browser(full)):
+        _check_browser_env(case_id, own, routes is not None)
+    env = {**TOKEN, "BROWSER": NO_BROWSER, **own}
     return Case(case_id, full, env=env, rules=rules, setup=setup, during=during,
                 after=after, platforms=platforms, timeout=timeout,
                 expect_output=expect_output, programs=programs,
@@ -623,6 +644,8 @@ def browser_cases() -> list[Case]:
                      browser=f"{interpreter} %s & '"))
     add(browser_case("open-whitespace-entry", [], routes=signin,
                      browser=standin_browser() + os.pathsep + " "))
+    # No display: the oracle prints the link; the native client lets a set
+    # BROWSER decide anyway (a remote terminal's opener), so it opens.
     add(browser_case("open-no-display", ["--json"], routes=signin, display=False,
                      platforms=("linux",)))
     add(browser_case("open-no-display-text", [], routes=signin, display=False,
@@ -667,12 +690,28 @@ def browser_cases() -> list[Case]:
     add(case("unless-no-open-signed-in", ["--no-open", "--unless-signed-in", "--json"],
              routes=signed_in([1], **signin)))
 
-    # Deferred before any request: a launcher this port does not start.
-    add(deferred_browser("defer-browser-standard-name", [], browser="firefox"))
-    add(deferred_browser("defer-browser-clone", ["--json"], browser=f"{BIN}{SEP}Lynx -dump"))
+    # Windows defers before any request: a launcher this port does not start.
+    add(deferred_browser("defer-browser-standard-name", [], browser="firefox",
+                         platforms=("windows",)))
+    add(deferred_browser("defer-browser-clone", ["--json"], browser=f"{BIN}{SEP}Lynx -dump",
+                         platforms=("windows",)))
     # After the session read (a read), before the sign-in request.
     add(browser_case("defer-browser-unless", ["--unless-signed-in"], browser="w3m",
-                     routes=signed_in([], **signin), rules=("console-deferral-after-read",)))
+                     routes=signed_in([], **signin), rules=("console-deferral-after-read",),
+                     platforms=("windows",)))
+    # The native POSIX client (recorded from it, 16 November 2026): any
+    # BROWSER entry is a command line started in the background, the URL
+    # appended when no word holds `%s`; a terminal browser, or a program
+    # that does not start, prints the link with its cause.
+    add(browser_case("browser-no-placeholder", ["--json"], routes=signin,
+                     browser=f"'{_interpreter()}' -I '{BIN}{SEP}stand-in.py' --flag",
+                     platforms=("linux",)))
+    add(browser_case("browser-name-missing", [], routes=signin, browser="firefox",
+                     platforms=("linux",)))
+    add(browser_case("browser-terminal", ["--json"], routes=signin,
+                     browser=f"{BIN}{SEP}Lynx -dump", platforms=("linux",)))
+    add(browser_case("browser-terminal-unless", ["--unless-signed-in"], browser="w3m",
+                     routes=signed_in([], **signin), platforms=("linux",)))
     add(deferred_browser("defer-browser-bare-name", [], browser="pythonw.exe -I x %s &",
                          platforms=("windows",)))
     add(deferred_browser("defer-browser-batch", [], browser=f"'{BIN}{SEP}b.cmd' %s &",
@@ -682,22 +721,33 @@ def browser_cases() -> list[Case]:
 
 # No mutant here may route the candidate to a default launcher
 # (os.startfile's ShellExecuteW, xdg-open): each breaks a step after
-# BROWSER has chosen the stand-in, or before any launch.
+# BROWSER has chosen the stand-in, or before any launch. The mutants run
+# against the live frozen oracle with no clean baseline, so a case whose
+# native answer departs from Python on purpose (the Linux `browser-*`
+# cases, `open-no-display`, the Linux `open-generic*`) cannot catch a
+# mutant: any difference would count. Those answers are guarded by the
+# golden replay and the unit tests instead.
 BROWSER_FILE = "shim/src/cli/console/browser.rs"
 LAUNCH_FILE = "shim/src/cli/console/launch.rs"
 MUTANTS = [
     Mutant("console-exited-counts-as-opened", "console", LAUNCH_FILE,
            "    matches!(child.try_wait(), Ok(None))",
-           "    matches!(child.try_wait(), Ok(Some(_)))", ("open",)),
+           "    matches!(child.try_wait(), Ok(Some(_)))", ("open",), platforms=("windows",)),
+    Mutant("console-running-counts-as-failed", "console", LAUNCH_FILE,
+           "Ok(None) if std::time::Instant::now() >= deadline => return Ok(()),",
+           "Ok(None) if std::time::Instant::now() >= deadline => return Err(String::new()),",
+           ("open",), platforms=("linux",)),
     Mutant("console-unless-skips-the-list", "console", FILE,
            "            if *unless {", "            if false && *unless {",
            ("unless-signed-in",)),
     Mutant("console-unsafe-link-launched", "console", FILE,
            "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin, to);",
            "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_)));", ("open-unsafe-link",)),
+    # Only Windows refuses a `%s` entry without `&`.
     Mutant("console-generic-launched", "console", BROWSER_FILE,
            'if words.last().map(String::as_str) != Some("&") {',
-           'if words.last().map(String::as_str) == Some("") {', ("open-generic",)),
+           'if words.last().map(String::as_str) == Some("") {', ("open-generic",),
+           platforms=("windows",)),
     Mutant("console-expiry-refusal-swallowed", "console", FILE,
            "    let Ok(minutes) = pyint::minutes(expires_in) else {",
            '    let Ok(minutes) = pyint::minutes(expires_in).or(Ok::<_, ()>("5".to_owned())) else {',
@@ -711,10 +761,6 @@ MUTANTS = [
     Mutant("console-localtime-refusal-deferred", "console", FILE,
            "        stamp::Minute::Refused => Ok(None),",
            "        stamp::Minute::Refused => Err(Defer),", ("list-bad-stamp-far",)),
-    # Only Linux gates the browser on a display.
-    Mutant("console-display-ignored", "console", BROWSER_FILE,
-           "    platform != Platform::Posix || display(host)", "    true",
-           ("open-no-display",), platforms=("linux",)),
     Mutant("console-405-not-old", "console", FILE, "if matches!(status, 404 | 405) {",
            "if matches!(status, 404) {", ("refused-405",)),
     Mutant("console-get-without-content-type", "console", "shim/src/cli/hook_http.rs",

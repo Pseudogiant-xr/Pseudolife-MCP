@@ -2,7 +2,8 @@
 //!
 //! Oracle: `pseudolife_memory/console_cli.py` (`main`, `credentials`,
 //! `request`, `_refusal`, `_list`, `_opened`, `open_browser`,
-//! `has_display`) with CPython 3.11's `webbrowser`. Answered natively: help
+//! `has_display`) with CPython 3.11's `webbrowser` (on macOS and Linux the
+//! browser follows native rules instead, `browser.rs`). Answered natively: help
 //! and argparse's errors (at `COLUMNS=80`), `--list [--json]`, `--revoke ID
 //! [--json]`, the sign-in (`[--no-open] [--to PAGE] [--json]
 //! [--unless-signed-in]`), the empty `--revoke` usage error and every
@@ -106,11 +107,14 @@ struct Context {
 }
 
 /// One answer: the text one `print` (or several) writes, and the exit code.
+/// `note` goes to stderr before it (empty: nothing); only a printed sign-in
+/// link carries one, the reason no browser opened.
 #[derive(Debug, PartialEq, Eq)]
 struct Out {
     stdout: bool,
     text: String,
     code: u8,
+    note: String,
 }
 
 impl Out {
@@ -119,6 +123,7 @@ impl Out {
             stdout: true,
             text,
             code,
+            note: String::new(),
         }
     }
 
@@ -127,6 +132,7 @@ impl Out {
             stdout: false,
             text,
             code,
+            note: String::new(),
         }
     }
 }
@@ -690,15 +696,16 @@ fn link_is_safe(url: Option<&J>, origin: Option<&J>, to: Option<&str>) -> bool {
         && (page.is_empty() || to.is_some_and(|to| page == format!("&to={to}")))
 }
 
-/// `_opened(payload, args, environ)`. `launch` is `open_browser` when a
-/// browser may open (no `--no-open`, and `has_display`); it runs only once
-/// the answer has passed every check, before anything is printed, as in
-/// the oracle.
+/// `_opened(payload, args, environ)`. `launch` starts the browser when one
+/// may open (no `--no-open`); it runs only once the answer has passed every
+/// check, before anything is printed, as in the oracle. When it reports a
+/// cause, the link is printed with that cause: on stderr beside the text,
+/// as `browser_error` in the JSON.
 fn opened(
     payload: &Dict,
     as_json: bool,
     to: Option<&str>,
-    launch: Option<&mut dyn FnMut(&str) -> bool>,
+    launch: Option<&mut dyn FnMut(&str) -> launch::Launched>,
 ) -> Out {
     let url = pyjson::get(payload, "url");
     let code = pyjson::get(payload, "code");
@@ -718,32 +725,40 @@ fn opened(
     let Ok(minutes) = pyint::minutes(expires_in) else {
         return bad_answer(BAD_EXPIRY, as_json);
     };
-    let opened = match launch {
-        Some(launch) => launch(link),
-        None => false,
+    let (opened, cause) = match launch.map(|launch| launch(link)) {
+        Some(Ok(())) => (true, None),
+        Some(Err(cause)) => (false, cause),
+        None => (false, None),
     };
     if as_json {
-        let out = dict(vec![
+        let mut items = vec![
             ("state", J::from(if opened { "opened" } else { "printed" })),
             ("url", J::Str(link.clone())),
             ("code", code.clone()),
             ("origin", J::Str(at.clone())),
             ("principal", or_null(pyjson::get(payload, "principal"))),
             ("expires_in", or_null(expires_in)),
-        ]);
-        return Out::stdout(pyjson::dumps_line(&out) + "\n", EXIT_OK);
+        ];
+        if let Some(cause) = cause {
+            items.push(("browser_error", J::Str(cause)));
+        }
+        return Out::stdout(pyjson::dumps_line(&dict(items)) + "\n", EXIT_OK);
     }
     let lead = if opened {
         "Opened the Console in your browser: confirm the sign-in there."
     } else {
         "Open this link to sign in to the Console:"
     };
-    Out::stdout(
+    let mut out = Out::stdout(
         format!(
             "{lead}\n  {link}\nOr type the code {shown} into the Console's sign-in dialog at {at}/ui/. It works once, within {minutes} minutes.\n"
         ),
         EXIT_OK,
-    )
+    );
+    if let Some(cause) = cause {
+        out.note = format!("pseudolife-mcp console: no browser opened: {cause}\n");
+    }
+    out
 }
 
 /// The `no_daemon` answer: no HTTP answer arrived.
@@ -763,6 +778,8 @@ fn no_daemon(origin: &str, reason: &str, as_json: bool) -> Res<Out> {
 
 /// What `open_browser` would start, decided before the code is minted.
 type Chooser<'a> = &'a dyn Fn() -> Result<browser::Plan, browser::Unsupported>;
+/// Starts a chosen plan for the link ([`launch::open`] outside the tests).
+type Launcher<'a> = &'a dyn Fn(&browser::Plan, &str) -> launch::Launched;
 
 /// `main` from the first request on.
 async fn answer(
@@ -771,6 +788,7 @@ async fn answer(
     token: &str,
     as_json: bool,
     browser: Chooser<'_>,
+    launcher: Launcher<'_>,
 ) -> Res<Out> {
     let mut plan = None;
     let (target, body) = match &call {
@@ -861,13 +879,13 @@ async fn answer(
             )
         }
         Call::Link { to, .. } => Ok(match plan {
-            // `open_browser` returns False without starting anything.
-            None | Some(browser::Plan::Refused) => opened(&payload, as_json, to.as_deref(), None),
+            // `--no-open`: nothing is chosen, nothing starts.
+            None => opened(&payload, as_json, to.as_deref(), None),
             Some(plan) => opened(
                 &payload,
                 as_json,
                 to.as_deref(),
-                Some(&mut |url: &str| launch::open(&plan, url)),
+                Some(&mut |url: &str| launcher(&plan, url)),
             ),
         }),
     }
@@ -885,15 +903,14 @@ fn decide(argv: &[String], context: &Context) -> Res<Out> {
             .enable_all()
             .build()
             .map_err(|_| Defer)?
-            .block_on(answer(call, &origin, &token, json, &|| {
-                let host = launch::Machine;
-                if browser::has_display(&host, browser::Platform::HERE) {
-                    browser::choose(&host, browser::Platform::HERE)
-                } else {
-                    // `open_browser` is never called: the link is printed.
-                    Ok(browser::Plan::Refused)
-                }
-            })),
+            .block_on(answer(
+                call,
+                &origin,
+                &token,
+                json,
+                &|| browser::choose(&launch::Machine, browser::Platform::HERE),
+                &launch::open,
+            )),
     }
 }
 
@@ -917,6 +934,10 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         utf8_argv: super::move_cli::utf8_argv(),
     };
     let out = decide(&argv, &context).ok()?;
+    if !out.note.is_empty() {
+        // Best effort: the link on stdout is what the user needs.
+        let _ = super::move_cli::emit(&mut io::stderr().lock(), &super::text_bytes(&out.note));
+    }
     let bytes = super::text_bytes(&out.text);
     let written = if out.stdout {
         super::move_cli::emit(&mut io::stdout().lock(), &bytes)
