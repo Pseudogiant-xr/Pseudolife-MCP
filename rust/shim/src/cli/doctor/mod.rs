@@ -264,7 +264,7 @@ impl BearerProblem {
             Self::Unavailable(reason) => (
                 "CredentialUnavailable",
                 format!(
-                    "doctor could not use the configured credential ({reason}; source: {source}). Point PSEUDOLIFE_MCP_TOKEN_FILE at an owner-only file holding only the token, or set PSEUDOLIFE_MCP_TOKEN, then retry; the checks that need no credential ran."
+                    "doctor could not use the configured credential ({reason}; source: {source}). Point PSEUDOLIFE_MCP_TOKEN_FILE at an owner-only file holding only the token, or unset PSEUDOLIFE_MCP_TOKEN_FILE and set PSEUDOLIFE_MCP_TOKEN instead (the file wins while it is set), then retry; the checks that need no credential ran."
                 ),
             ),
             Self::Unsendable => (
@@ -304,12 +304,14 @@ fn sendable(token: &str) -> bool {
 /// `unknown`; the version is always known.
 fn identity() -> Vec<(&'static str, String)> {
     let executable = std::env::current_exe().ok();
+    let resolved = executable
+        .as_deref()
+        .and_then(|path| std::fs::canonicalize(path).ok());
     let interpreter = executable
         .as_deref()
         .and_then(std::path::Path::to_str)
         .map_or_else(|| "unknown".to_owned(), str::to_owned);
-    let source = executable
-        .and_then(|executable| std::fs::canonicalize(executable).ok())
+    let source = resolved
         .and_then(|resolved| {
             let parent = resolved.parent()?.to_str()?;
             Some(parent.strip_prefix("\\\\?\\").unwrap_or(parent).to_owned())
@@ -580,7 +582,14 @@ async fn diagnose(
     let (overrides, credential_source, registrations_unread) =
         match clients::registration_credentials(&env) {
             Ok((overrides, source)) => (overrides, source, false),
-            Err(Defer) => (Vec::new(), None, true),
+            // An unreadable token variable defers here too; that is
+            // named as CredentialUnavailable below, not as a client file.
+            Err(Defer) => (
+                Vec::new(),
+                None,
+                env.var("PSEUDOLIFE_MCP_TOKEN").is_ok()
+                    && env.var("PSEUDOLIFE_MCP_TOKEN_FILE").is_ok(),
+            ),
         };
     for (key, value) in overrides {
         env.set(&key, value);
@@ -741,6 +750,7 @@ async fn diagnose(
         },
         (None, _) => not_checked("not checked - PSEUDOLIFE_MCP_DAEMON_URL is invalid"),
         (Some(_), _) if problem.is_some() => not_checked("not checked - no usable credential"),
+        (Some(_), "not_checked") => not_checked("not checked - the board answer could not be read"),
         _ => not_checked("not checked - the board is off for this token"),
     };
     let maintainer_invalid = maintainer.get("state") == Some(&json!("invalid"));

@@ -540,7 +540,7 @@ pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
         .iter()
         .map(|name| {
             let recovery = format!(
-                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside and run pseudolife-mcp tunnel setup again.",
+                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside. Setting the profile up again needs pseudolife-mcp tunnel setup, which the native client does not run yet (it hands it to the Python client).",
                 root.join(format!("{name}.profile.json")).display()
             );
             let profile = match store::load(root, name) {
@@ -572,7 +572,7 @@ pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
                 Ok(refresh) => {
                     if refresh.needs_attention() {
                         next.push(format!(
-                            "Last tunnel refresh: {}; needs attention. Inspect pseudolife-mcp tunnel status --profile {name} before retrying the update.",
+                            "Last tunnel refresh: {}; needs attention before the next pseudolife-mcp tunnel update for profile {name}.",
                             refresh.state()
                         ));
                     }
@@ -587,7 +587,7 @@ pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
             };
             if expired {
                 next.push(format!(
-                    "Renew privately: pseudolife-mcp tunnel setup --profile {name} --read-key --key-expires-at <ISO timestamp>."
+                    "The tunnel key has expired. Renew it privately with pseudolife-mcp tunnel setup --profile {name} --read-key --key-expires-at <ISO timestamp>; the native client does not run tunnel setup yet, so this needs the Python client."
                 ));
             }
             let process_record =

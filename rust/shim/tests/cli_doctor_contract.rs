@@ -802,8 +802,13 @@ fn client_files_the_native_client_cannot_read_are_named_and_the_rest_runs() {
         assert_handshake_passed(&map, &output);
         let text = String::from_utf8_lossy(&output.stdout);
         if name == "no PATH" {
-            // Searched in the platform's default directories instead.
-            assert!(map["path_resolution"].get("on_path").is_some(), "{text}");
+            // Searched in the platform's default directories instead: no
+            // `unknown (not read ...)` fallback anywhere in the report.
+            assert!(!text.contains("not read by the native client"), "{text}");
+            assert!(
+                map["path_resolution"]["on_path"].is_null(),
+                "pseudolife-mcp is in no default directory: {text}"
+            );
         } else {
             assert!(
                 text.contains("not read by the native client"),
@@ -1168,4 +1173,83 @@ fn an_unreadable_token_source_is_named_and_the_other_checks_run() {
             .contains("(configured credential file is missing; source: environment)"),
         "{map:?}"
     );
+    // The file wins while it is set, so the inline alternative names unsetting it.
+    let recovery = map["recovery"].as_str().unwrap();
+    assert!(
+        recovery.contains("unset PSEUDOLIFE_MCP_TOKEN_FILE and set PSEUDOLIFE_MCP_TOKEN"),
+        "{recovery}"
+    );
+    // Following that advice clears the error.
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url)
+        .env("PSEUDOLIFE_MCP_TOKEN", "fixture-token")
+        .output()
+        .unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_ne!(
+        map.get("error"),
+        Some(&json!("CredentialUnavailable")),
+        "{map:?}"
+    );
+    assert!(map["token_sha256_prefix"].is_string());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_token_file_others_can_read_is_named_and_its_contents_never_shown() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let path = home.0.join("shared-token");
+    std::fs::write(&path, b"fixture-shared-file-token\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url)
+        .env("PSEUDOLIFE_MCP_TOKEN_FILE", &path)
+        .output()
+        .unwrap();
+    let map = assert_unusable_credential(
+        &fixture,
+        &output,
+        "CredentialUnavailable",
+        "fixture-shared-file-token",
+    );
+    assert!(
+        map["recovery"]
+            .as_str()
+            .unwrap()
+            .contains("(credential file must be owner-only; source: environment)"),
+        "{map:?}"
+    );
+}
+
+#[test]
+fn a_missing_bearer_beside_an_unread_registration_names_both() {
+    let home = Home::new();
+    std::fs::write(home.0.join(".claude.json"), b"{\"n\": NaN}").unwrap();
+    let auth = json!({"status": "ok", "auth": true, "version": env!("CARGO_PKG_VERSION")});
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(200, auth.to_string())],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .output()
+        .unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_eq!(map["error"], json!("BearerMissing"));
+    assert!(
+        map["registrations"]
+            .as_str()
+            .unwrap()
+            .starts_with("not read by the native client")
+    );
+    let recovery = map["recovery"].as_str().unwrap();
+    assert!(recovery.contains("PSEUDOLIFE_MCP_TOKEN_FILE"), "{recovery}");
+    assert!(
+        recovery.contains("not read by the native client"),
+        "{recovery}"
+    );
+    assert_eq!(output.status.code(), Some(1));
 }

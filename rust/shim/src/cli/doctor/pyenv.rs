@@ -350,7 +350,9 @@ pub(super) fn which(cmd: &str, env: &Env) -> Res<Option<String>> {
     let path = match env.var("PATH")? {
         Some(path) => path,
         None if WINDOWS => ".;C:\\bin".into(),
-        // No PATH: the POSIX default search path (`os.defpath`).
+        // No PATH: the platform's default search path, as CPython's
+        // `os.confstr("CS_PATH")` reports it.
+        None if cfg!(target_os = "macos") => "/usr/bin:/bin:/usr/sbin:/sbin".into(),
         None => "/bin:/usr/bin".into(),
     };
     if path.is_empty() {
