@@ -261,6 +261,9 @@ def test_a_binary_that_cannot_run_here_refuses_before_install(tmp_path):
     {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {LEVEL - 1}"},  # an older protocol
     {"STUB_CAPABILITY": ""},                                          # says nothing
     {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol one"},     # not the documented form
+    {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {LEVEL}\npseudolife-mcp installer-protocol 9"},  # two lines
+    {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol 99999999999999999999"},  # past any level
+    {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol 0{LEVEL}"},  # a leading zero
     {"STUB_CAPABILITY": f"installer: pseudolife-mcp installer-protocol {LEVEL}"},
     {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {LEVEL} "},  # trailing space
 ])
@@ -272,7 +275,10 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     # The true cause and the one fix: which release, from which checkout.
     assert f"the native client {VERSION} predates this installer" in line
     assert "installer --capability" in line and f"installer-protocol {LEVEL} or newer" in line
-    assert "git checkout v" in line and "PSEUDOLIFE_SHIM_ENGINE" in line
+    # The one fix that holds until a release carries this protocol: an
+    # older tag's installer does not know PSEUDOLIFE_SHIM_ENGINE=native.
+    assert "PSEUDOLIFE_NATIVE_ARCHIVE_URL" in line and "release_assets.py package" in line
+    assert "git checkout" not in line
     assert line.endswith("Nothing was changed.")
     calls = _calls(tmp_path)
     assert "installer --capability" in calls

@@ -324,10 +324,22 @@ fn entry_still_needed(link: &Path, layout: &Layout) -> Option<String> {
         .iter()
         .filter(|r| !matches!(r.install_kind(layout, None), "managed" | "legacy"))
         .find(|r| {
-            let command = Path::new(&r.command);
-            runtime::same_path(command, link)
+            let named = Path::new(&r.command);
+            // A bare command is what PATH finds, not a file in this run's
+            // working directory; one PATH here cannot find is assumed to be
+            // the entry when it has the entry's name, since the client's own
+            // PATH may still reach it.
+            let resolved = if named.components().count() == 1 {
+                match crate::cli::program_lookup::find_program_path(&r.command) {
+                    Some(found) => found,
+                    None => return link.file_name() == named.file_name(),
+                }
+            } else {
+                named.to_path_buf()
+            };
+            runtime::same_path(&resolved, link)
                 || target.as_deref().is_some_and(|target| {
-                    std::fs::canonicalize(command).is_ok_and(|c| runtime::same_path(&c, target))
+                    std::fs::canonicalize(&resolved).is_ok_and(|c| runtime::same_path(&c, target))
                 })
         })
         .map(|r| format!("the {} registration still runs it", r.client))

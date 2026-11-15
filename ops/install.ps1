@@ -170,9 +170,18 @@ param(
 # reads). Case-sensitive, as update reads it.
 $clientEngine = "$env:PSEUDOLIFE_SHIM_ENGINE"
 if ($clientEngine -ceq "native") {
+    # Exit as the native installer would run by itself: 0 when it ends
+    # normally (its last native command's code is not its result), its own
+    # code when it exits with one, 1 when it stops on an error.
+    $nativeInstaller = Join-Path $PSScriptRoot "install-native.ps1"
+    if (-not (Test-Path -LiteralPath $nativeInstaller -PathType Leaf)) {
+        [Console]::Error.WriteLine("PSEUDOLIFE_SHIM_ENGINE=native asks for the native client, but this checkout has no $nativeInstaller (it predates the native installer): update the checkout (git pull), or unset PSEUDOLIFE_SHIM_ENGINE for the Python client. Nothing was changed.")
+        exit 1
+    }
     $global:LASTEXITCODE = 0
-    & (Join-Path $PSScriptRoot "install-native.ps1") @PSBoundParameters
-    exit $LASTEXITCODE
+    & $nativeInstaller @PSBoundParameters
+    if ($?) { exit 0 }
+    exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })
 }
 if (($clientEngine -cne "") -and ($clientEngine -cne "python")) {
     [Console]::Error.WriteLine("PSEUDOLIFE_SHIM_ENGINE=$clientEngine is not a client this installer installs: use python (the Python client, the default) or native (the native client), or unset it. Nothing was changed.")

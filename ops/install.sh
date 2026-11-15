@@ -156,7 +156,13 @@ set -euo pipefail
 # for it (the variable pseudolife-mcp update reads).
 case "${PSEUDOLIFE_SHIM_ENGINE:-}" in
     ""|python) ;;
-    native) exec bash "$(cd "$(dirname "$0")" && pwd)/install-native.sh" "$@" ;;
+    native)
+        native_installer="$(cd "$(dirname "$0")" && pwd)/install-native.sh"
+        if [ ! -f "$native_installer" ]; then
+            echo "PSEUDOLIFE_SHIM_ENGINE=native asks for the native client, but this checkout has no $native_installer (it predates the native installer): update the checkout (git pull), or unset PSEUDOLIFE_SHIM_ENGINE for the Python client. Nothing was changed." >&2
+            exit 1
+        fi
+        exec bash "$native_installer" "$@" ;;
     *)
         echo "PSEUDOLIFE_SHIM_ENGINE=${PSEUDOLIFE_SHIM_ENGINE} is not a client this installer installs: use python (the Python client, the default) or native (the native client), or unset it. Nothing was changed." >&2
         exit 2 ;;

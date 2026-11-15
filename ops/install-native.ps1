@@ -2,6 +2,8 @@
 # ^ Windows PowerShell 5.1 (powershell.exe) writes UTF-8 WITH a BOM, which
 #   garbles the first key of ops/.env and can break settings.json parsing —
 #   run this under pwsh 7+ (winget install Microsoft.PowerShell).
+# The native client's installer: ops\install.ps1 runs it, with the same
+# parameters, when PSEUDOLIFE_SHIM_ENGINE=native asks for the native client.
 # Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
 # before changing what this script asks or prints.
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
@@ -178,6 +180,7 @@ if (-not $interactive -or $script:installerRerun) {
     Write-Host "Unattended install: no prompts; documented defaults apply (explicit flags override)."
 }
 # <<< unattended mode <<<
+Write-Host "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set; without it, ops\install.ps1 installs the Python client."
 # >>> client update schedule flag >>>
 if ("$ClientUpdateSchedule" -notmatch '^(ask|yes|no|([01]?[0-9]|2[0-3]):[0-5][0-9])$') {
     Write-Host "invalid -ClientUpdateSchedule '$ClientUpdateSchedule' (ask|yes|no, or a time of day as HH:MM)"
@@ -458,11 +461,12 @@ function Initialize-NativeClient {
     $level = -1
     try {
         $global:LASTEXITCODE = 0
-        $protocol = "$(& $script:nativeStaged installer --capability 2>$null | Select-Object -First 1)".TrimEnd("`r")
-        if (($LASTEXITCODE -eq 0) -and ($protocol -cmatch '^pseudolife-mcp installer-protocol ([0-9]{1,9})$')) { $level = [int]$Matches[1] }
+        $answer = @(& $script:nativeStaged installer --capability 2>$null)
+        # Exactly one line, and a level of 1 to 9 digits with no leading zero.
+        if (($LASTEXITCODE -eq 0) -and ($answer.Count -eq 1) -and ("$($answer[0])".TrimEnd("`r") -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
     } catch { $level = -1 }
     if ($level -lt $NativeInstallerProtocol) {
-        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Run the installer from a release tag's checkout, whose release carries the steps its installer runs (git checkout v<the newest release>), or serve archives built from this checkout with PSEUDOLIFE_NATIVE_ARCHIVE_URL, or unset PSEUDOLIFE_SHIM_ENGINE to install the Python client."
+        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (python rust/ci/release_assets.py package), since no published release carries them yet."
     }
 }
 function Get-NativeLauncherPath {

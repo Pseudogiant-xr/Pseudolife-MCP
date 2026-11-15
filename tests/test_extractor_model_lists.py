@@ -268,3 +268,26 @@ def test_each_menu_number_picks_the_name_it_shows(rel, patterns, start, end, ent
         [pick] = re.findall(enter_pat, block)
         chosen["1"] = pick
     assert offered and offered == chosen, (rel, start, offered, chosen)
+
+
+@pytest.mark.parametrize("default,native", [("ops/install.sh", "ops/install-native.sh"),
+                                            ("ops/install.ps1", "ops/install-native.ps1")])
+def test_the_native_installers_carry_the_same_lists(default, native):
+    # PSEUDOLIFE_SHIM_ENGINE=native runs ops/install-native.*, which carry
+    # their own copy of every list, menu and default the checks above read
+    # from the default installers: a model added to one pair only would be
+    # refused by the other.
+    def lists(rel: str) -> dict[str, object]:
+        text = _read(rel)
+        found = {
+            "sh lists": re.findall(r'(?m)^(CLAUDE_MODELS|OPENAI_MODELS|[A-Z_]*MODES?)="([^"]*)"$', text),
+            "ps lists": re.findall(r"(?ms)^\$(claudeModels|openaiModels|[a-zA-Z]*Modes?) = @\((.*?)\)$", text),
+            "menus": sorted(_menu(text, MODEL)),
+            "menu 1)": re.findall(rf'(?m)^\s*(?:echo|Write-Host) "  1\) ({MODEL})', text),
+            "sh default": re.findall(rf"(?m)^\s*else\n\s*MODEL=({MODEL})\n", text),
+            "ps default": re.findall(rf'\}} else \{{\n\s*\$Model = "({MODEL})"', text),
+        }
+        return found
+    expected, actual = lists(default), lists(native)
+    assert any(expected.values()), f"{default} names no list this check reads"
+    assert actual == expected

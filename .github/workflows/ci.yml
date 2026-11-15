@@ -788,6 +788,7 @@ jobs:
           tests/test_installer_clone_authority.py
           tests/test_installer_lite.py
           tests/test_installer_client_engine.py
+          tests/test_installer_native_client_ps.py
           rust/ci/test_pr_precheck.py
           rust/ci/test_pr_precheck_run.py
           tests/test_tunnel_cli.py
@@ -1090,7 +1091,6 @@ jobs:
           tests/test_register_claude_desktop.py
           tests/test_installer_shim_upgrade.py
           tests/test_installer_native_client.py
-          tests/test_installer_native_client_ps.py
           tests/test_installer_native_goldens.py
           tests/test_installer_sandbox.py
           tests/test_installer_existing_upgrade.py
