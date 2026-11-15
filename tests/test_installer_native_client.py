@@ -633,3 +633,31 @@ def test_a_local_release_file_that_cannot_be_copied_names_the_copy_not_curl(tmp_
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert "curl" not in line
     assert "could not be copied" in line and "release" in line
+
+
+# -- the real client packed as a release ships it (native_client_stub.release_copy)
+
+
+def test_the_packed_client_is_checked_against_the_release_binary_limit(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setattr(native_client_stub, "archive_binary_limit", lambda: 10)
+    built = Path(sys.executable)
+    with pytest.raises(AssertionError, match=r"bytes \(built: \d+ bytes\), past runtime install's 10-byte limit"):
+        native_client_stub.release_copy(built, tmp_path / "packed")
+    assert built.is_file(), "the built binary is never touched"
+
+
+def test_the_release_binary_limit_is_read_from_the_rust_source():
+    limit = native_client_stub.archive_binary_limit()
+    assert isinstance(limit, int) and limit > 0
+
+
+@pytest.mark.parametrize("required, outcome", [("1", pytest.fail.Exception), ("", pytest.skip.Exception)])
+def test_a_missing_strip_fails_a_required_real_client_and_skips_otherwise(tmp_path, monkeypatch, required, outcome):
+    import sys
+    if not sys.platform.startswith("linux"):
+        pytest.skip("only a Linux debug build embeds its debug info, so only Linux strips the packed copy")
+    monkeypatch.setattr(shutil, "which", lambda name, *args, **kwargs: None)
+    monkeypatch.setenv("PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED", required)
+    with pytest.raises(outcome, match="strip"):
+        native_client_stub.release_copy(Path(sys.executable), tmp_path / "packed")
