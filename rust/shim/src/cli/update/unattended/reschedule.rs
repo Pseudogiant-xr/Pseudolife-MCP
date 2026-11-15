@@ -78,9 +78,17 @@ fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>)
                     false,
                 )
                 .0 == 0;
-                systemd_parse(&dir, name, client, &service, &timer, enabled, &|url| {
-                    service_body(name, &expected(url)?, &environment_lines(client, false)?)
-                })
+                let dropin = systemd_dropin(&dir, name);
+                systemd_parse(
+                    &dir,
+                    name,
+                    client,
+                    &service,
+                    &timer,
+                    enabled,
+                    dropin.as_deref(),
+                    &|url| service_body(name, &expected(url)?, &environment_lines(client, false)?),
+                )
             })
         } else {
             None
@@ -88,6 +96,21 @@ fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>)
         found.extend(item);
     }
     found
+}
+
+/// A drop-in directory for the unit or its timer, in the user's unit
+/// directory or systemd's other user unit directories: it can change the
+/// effective command or timer while the base files still match.
+fn systemd_dropin(dir: &Path, name: &str) -> Option<PathBuf> {
+    [
+        dir,
+        Path::new("/etc/systemd/user"),
+        Path::new("/run/systemd/user"),
+        Path::new("/usr/lib/systemd/user"),
+    ]
+    .iter()
+    .flat_map(|root| ["service", "timer"].map(|kind| root.join(format!("{name}.{kind}.d"))))
+    .find(|path| path.exists())
 }
 
 fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -194,6 +217,12 @@ fn windows_parse(
         && triggers.matches("Trigger>").count() == 2
         && triggers.contains("<CalendarTrigger>")
         && triggers.contains("<DaysInterval>1</DaysInterval>")
+        // A trigger `--schedule` never writes: an end date (re-registering
+        // would revive an expired task) or a repetition (it would change
+        // how often the run happens).
+        && !["<EndBoundary>", "<Repetition>", "<RandomDelay>", "<Delay>", "<ExecutionTimeLimit>"]
+            .iter()
+            .any(|element| triggers.contains(element))
         && !xml.contains("<Enabled>false</Enabled>")
         && xml.contains("<LogonType>InteractiveToken</LogonType>");
     let mut why = None;
@@ -235,6 +264,7 @@ fn systemd_parse(
     service: &str,
     timer: &str,
     enabled: bool,
+    dropin: Option<&Path>,
     expected: &dyn Fn(&str) -> Result<String>,
 ) -> Installed {
     let url = service
@@ -249,8 +279,14 @@ fn systemd_parse(
         .as_deref()
         .and_then(|time| at(time).ok())
         .is_some_and(|(hour, minute)| timer == timer_body(name, hour, minute));
-    let mut why = None;
-    let shaped = enabled
+    let mut why = dropin.map(|path| {
+        format!(
+            "the systemd drop-in {} can change its command or timer",
+            path.display()
+        )
+    });
+    let shaped = why.is_none()
+        && enabled
         && timer_shaped
         && match url.as_deref() {
             Some(url) => match expected(url) {
@@ -459,6 +495,33 @@ mod tests {
                 "run whether logged on or not",
                 Box::new(|x: String| x.replace("InteractiveToken", "Password")),
             ),
+            (
+                "an end date",
+                Box::new(|x: String| {
+                    x.replace(
+                        "</StartBoundary>",
+                        "</StartBoundary><EndBoundary>2026-11-20T00:00:00</EndBoundary>",
+                    )
+                }),
+            ),
+            (
+                "an hourly repetition",
+                Box::new(|x: String| {
+                    x.replace(
+                        "</StartBoundary>",
+                        "</StartBoundary><Repetition><Interval>PT1H</Interval></Repetition>",
+                    )
+                }),
+            ),
+            (
+                "a random delay",
+                Box::new(|x: String| {
+                    x.replace(
+                        "</ScheduleByDay>",
+                        "</ScheduleByDay><RandomDelay>PT1H</RandomDelay>",
+                    )
+                }),
+            ),
         ] {
             assert!(!shaped(task_xml(&command, &arguments, edit)), "{what}");
         }
@@ -533,7 +596,7 @@ mod tests {
         let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
         let dir = Path::new("/home/u/.config/systemd/user");
         let parse = |service: &str, timer: &str, enabled: bool| {
-            systemd_parse(dir, NAME, false, service, timer, enabled, &expected)
+            systemd_parse(dir, NAME, false, service, timer, enabled, None, &expected)
         };
         let found = parse(&service, &timer, true);
         assert!(found.shaped);
@@ -564,6 +627,42 @@ mod tests {
         assert_eq!(parse(&service, "", true).time, None);
         assert!(!parse(&service, "", true).shaped);
         assert!(!parse(&service, &timer, false).shaped);
+        // A drop-in beside the matching files: not shaped, and it says why.
+        let dropin = dir.join("pseudolife-update.service.d");
+        let found = systemd_parse(
+            dir,
+            NAME,
+            false,
+            &service,
+            &timer,
+            true,
+            Some(&dropin),
+            &expected,
+        );
+        assert!(!found.shaped);
+        assert!(found.why.unwrap().contains("pseudolife-update.service.d"));
+    }
+
+    #[test]
+    fn a_drop_in_directory_for_the_unit_or_its_timer_is_found() {
+        let name = format!("pseudolife-test-{}", uuid::Uuid::new_v4().simple());
+        let root = std::env::temp_dir().join(&name);
+        fs::create_dir(&root).unwrap();
+        let dir = &root;
+        // Near miss: another unit's drop-in is not this one's.
+        fs::create_dir(dir.as_path().join("pseudolife-other.service.d")).unwrap();
+        assert_eq!(systemd_dropin(dir.as_path(), &name), None);
+        for kind in ["service", "timer"] {
+            let path = dir.as_path().join(format!("{name}.{kind}.d"));
+            fs::create_dir(&path).unwrap();
+            assert_eq!(
+                systemd_dropin(dir.as_path(), &name),
+                Some(path.clone()),
+                "{kind}"
+            );
+            fs::remove_dir(&path).unwrap();
+        }
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -26,6 +26,8 @@ pub(super) struct Found {
 pub(super) struct Plan {
     pub client: bool,
     pub time: String,
+    /// The daemon URL its command named when it was read, as written.
+    pub from: String,
 }
 
 /// Why `--schedule` here would not re-create a schedule.
@@ -202,6 +204,7 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             row.schedule = Some(Plan {
                 client: found.client,
                 time,
+                from: found.url.clone().unwrap_or_default(),
             });
             row
         };
@@ -222,10 +225,34 @@ pub(super) fn apply(
 ) -> (Vec<String>, Vec<String>) {
     let mut notes = Vec::new();
     let mut failures = Vec::new();
+    // Read again just before writing: a schedule removed, disabled or edited
+    // since the plan was shown is left as it now is, never revived or
+    // overwritten.
+    let mut now = None;
     for row in rows.iter().filter(|row| row.state == "change") {
         let Some(plan) = &row.schedule else {
             continue;
         };
+        let now = now.get_or_insert_with(|| backend.found());
+        let unchanged = now.iter().any(|found| {
+            found.client == plan.client
+                && found.shaped
+                && found.why.is_none()
+                && found.time.as_deref() == Some(plan.time.as_str())
+                && found.url.as_deref() == Some(plan.from.as_str())
+        });
+        if !unchanged {
+            failures.push(format!(
+                "{}{} was not re-created: it was removed or changed after connect read it, so connect leaves it as it is; re-run connect to plan it again",
+                if moved {
+                    format!("the client registrations now name {url} (backups above), but ")
+                } else {
+                    String::new()
+                },
+                row.detail,
+            ));
+            continue;
+        }
         match backend.recreate(plan.client, &plan.time, url) {
             Ok(()) => notes.push(format!(
                 "{} now runs against {url}, daily at {}, as `update --schedule` writes it",

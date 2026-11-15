@@ -872,3 +872,51 @@ fn a_schedule_that_cannot_be_re_created_says_what_changed_and_the_command_that_f
         failures[0]
     );
 }
+
+#[test]
+fn a_schedule_removed_or_changed_after_the_plan_is_left_as_it_now_is() {
+    let read: Installed = (true, Some(OLD), Some("04:30"), true, None);
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![read],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "change");
+    // Near miss: the same schedule still installed re-creates.
+    let same = FakeScheduler {
+        installed: vec![read],
+        ..FakeScheduler::default()
+    };
+    let (_, failures) = schedule::apply(&rows, NEW, true, &same);
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(same.made.borrow().len(), 1);
+    for now in [
+        vec![],
+        vec![(true, Some(OLD), Some("04:30"), false, None)],
+        vec![(true, Some(OLD), Some("05:00"), true, None)],
+        vec![(
+            true,
+            Some("http://10.0.0.9:8765"),
+            Some("04:30"),
+            true,
+            None,
+        )],
+        vec![(true, Some(OLD), Some("04:30"), true, Some("unreadable"))],
+        vec![(false, Some(OLD), Some("04:30"), true, None)],
+    ] {
+        let later = FakeScheduler {
+            installed: now.clone(),
+            ..FakeScheduler::default()
+        };
+        let (notes, failures) = schedule::apply(&rows, NEW, true, &later);
+        assert!(later.made.borrow().is_empty(), "{now:?}");
+        assert!(notes.is_empty(), "{now:?}");
+        assert_eq!(
+            failures,
+            vec![format!(
+                "the client registrations now name {NEW} (backups above), but the scheduled task 'client' was not re-created: it was removed or changed after connect read it, so connect leaves it as it is; re-run connect to plan it again"
+            )],
+            "{now:?}"
+        );
+    }
+}

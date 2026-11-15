@@ -1,8 +1,7 @@
 //! `connect_cli.discover`: one row per place a selected client keeps the
 //! daemon URL (the Codex rows come from `codex.rs`, read asynchronously),
 //! plus the environment rows: the shell's own URL and the Windows
-//! User-scope one. An unattended-update schedule defers before discovery
-//! (see `mod.rs`).
+//! User-scope one. The unattended-update schedule rows are `schedule.rs`'s.
 use super::files::{self, Read};
 use super::pyjson::{self, Dict, J};
 use super::{Cred, Defer, paths, url};

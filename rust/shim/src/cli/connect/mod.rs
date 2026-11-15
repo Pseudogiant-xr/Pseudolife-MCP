@@ -1,16 +1,15 @@
 //! `pseudolife-mcp connect`: re-point this machine's existing client
 //! registrations (Claude Code with its settings copy, Codex through its own
 //! app-server, Claude Desktop, Gemini CLI) and a Windows User-scope daemon
-//! URL at a daemon, after an unauthenticated health probe, a plan, and
+//! URL and the unattended-update schedules at a daemon, after an
+//! unauthenticated health probe, a plan, a confirmation at a terminal, and
 //! verification of every credential against the target; writes are all or
 //! nothing with backups beside each file. With `--code` / `--read-code` it
 //! first pairs this machine (the native `pair` transport), only on an
 //! applying run.
 //!
-//! Deferred before any effect: an interactive confirmation, token or code
-//! prompt on a terminal, an unattended-update schedule, and every input
-//! whose Python reading this module cannot reproduce exactly (see `pyjson`,
-//! `url`, `paths`).
+//! Deferred before any effect: every input whose Python reading this module
+//! cannot reproduce exactly (see `pyjson`, `url`, `paths`).
 //!
 //! A refused stdout (a closed pipe) changes only the final status: the
 //! oracle's stdout is block-buffered, so its prints succeed, every step
