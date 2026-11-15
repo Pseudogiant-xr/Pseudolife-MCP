@@ -567,12 +567,25 @@ pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
                 // A Windows DPAPI key needs CryptUnprotectData to prove.
                 Err(_) => json!("not_verified"),
             };
+            // `None` when the path cannot be inspected: not a claim either way.
+            let process_record = occupied(&root.join(format!("{name}.process.json"))).ok();
             let mut next = Vec::new();
             let update = match refresh_status(root, name) {
                 Ok(refresh) => {
                     if refresh.needs_attention() {
+                        // Native `tunnel status` answers unless a process
+                        // record makes it hand the run to Python.
+                        let inspect = if process_record == Some(false) {
+                            format!(
+                                "pseudolife-mcp tunnel status --profile {name} shows the outcome and the key's state"
+                            )
+                        } else {
+                            format!(
+                                "pseudolife-mcp tunnel status --profile {name} shows the outcome, but needs the Python client while a tunnel process record exists"
+                            )
+                        };
                         next.push(format!(
-                            "Last tunnel refresh: {}; needs attention before the next pseudolife-mcp tunnel update for profile {name}.",
+                            "Last tunnel refresh: {}; needs attention: {inspect}.",
                             refresh.state()
                         ));
                     }
@@ -590,8 +603,6 @@ pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
                     "The tunnel key has expired. Renew it privately with pseudolife-mcp tunnel setup --profile {name} --read-key --key-expires-at <ISO timestamp>; the native client does not run tunnel setup yet, so this needs the Python client."
                 ));
             }
-            let process_record =
-                occupied(&root.join(format!("{name}.process.json"))).unwrap_or(true);
             let mut entry = json!({
                 "profile": profile.name,
                 "state": profile.state,

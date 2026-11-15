@@ -769,6 +769,14 @@ fn an_invalid_daemon_url_is_named_without_any_request() {
     );
     assert!(map["wake"].get("claude_code").is_some());
     assert!(map.contains_key("path_resolution"));
+    // No daemon was contacted, so none is called offline.
+    assert_eq!(map["coordination"]["daemon"], json!("not_checked"));
+    assert_eq!(map["coordination"]["authentication"], json!("not_checked"));
+    let next = map["coordination"]["next"][0].as_str().unwrap();
+    assert!(
+        next.starts_with("Correct PSEUDOLIFE_MCP_DAEMON_URL first"),
+        "{next}"
+    );
     assert_eq!(output.status.code(), Some(1));
     assert!(fixture.records.lock().unwrap().is_empty());
 }
@@ -803,12 +811,10 @@ fn client_files_the_native_client_cannot_read_are_named_and_the_rest_runs() {
         let text = String::from_utf8_lossy(&output.stdout);
         if name == "no PATH" {
             // Searched in the platform's default directories instead: no
-            // `unknown (not read ...)` fallback anywhere in the report.
+            // `unknown (not read ...)` fallback anywhere in the report
+            // (whether those directories hold pseudolife-mcp is the host's).
             assert!(!text.contains("not read by the native client"), "{text}");
-            assert!(
-                map["path_resolution"]["on_path"].is_null(),
-                "pseudolife-mcp is in no default directory: {text}"
-            );
+            assert!(map["path_resolution"].get("on_path").is_some(), "{text}");
         } else {
             assert!(
                 text.contains("not read by the native client"),
@@ -879,8 +885,10 @@ fn an_empty_tunnel_directory_keeps_every_ordinary_diagnostic() {
     assert_ordinary(&map, &output);
     assert_handshake_passed(&map, &output);
     assert!(!map.contains_key("tunnels"));
+    let root = home.0.join(".pseudolife-mcp").join("tunnel");
+    assert!(!root.exists(), "doctor created the tunnel directory");
     // An empty, old tunnel directory: still no tunnel section, nothing lost.
-    std::fs::create_dir_all(home.0.join(".pseudolife-mcp").join("tunnel")).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
     // A fresh daemon: the fixture answers its tool list once.
     let fixture = healthy_fixture();
     let output = diagnose(&home, &fixture.url).output().unwrap();
@@ -888,6 +896,7 @@ fn an_empty_tunnel_directory_keeps_every_ordinary_diagnostic() {
     assert_ordinary(&map, &output);
     assert_handshake_passed(&map, &output);
     assert!(!map.contains_key("tunnels"), "{map:?}");
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
 }
 
 #[cfg(unix)]
@@ -973,6 +982,62 @@ mod tunnel_profiles {
             json!({"state": "none", "needs_attention": false})
         );
         assert!(entry.get("next").is_none(), "{entry:?}");
+        assert_eq!(
+            entry["runtime"],
+            json!({"checked": false, "process_record": false})
+        );
+    }
+
+    #[test]
+    fn runtime_refresh_and_verification_records_are_read_and_left_alone() {
+        let home = Home::new();
+        profile(&home, "dot", READY);
+        private(&home, "dot.key", b"PLAIN\0fixture-tunnel-key");
+        private(&home, "dot.process.json", b"{\"pid\": 1}");
+        private(
+            &home,
+            "dot.reload.result.json",
+            b"{\"id\": \"0123456789abcdef0123456789abcdef\", \"state\": \"failed\"}",
+        );
+        let verification = root(&home).join("dot-verification");
+        std::fs::create_dir_all(&verification).unwrap();
+        std::fs::set_permissions(&verification, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(verification.join("challenge.json"), b"{}").unwrap();
+        std::fs::set_permissions(
+            verification.join("challenge.json"),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        // `tunnels` asserts the whole tree is byte- and mtime-identical.
+        let entries = tunnels(&home);
+        let entry = &entries[0];
+        assert_eq!(
+            entry["update"],
+            json!({"state": "failed", "needs_attention": true, "rolled_back": false})
+        );
+        assert_eq!(
+            entry["runtime"],
+            json!({"checked": false, "process_record": true})
+        );
+        let next = entry["next"].as_array().unwrap();
+        assert!(
+            next.iter().any(|line| {
+                let line = line.as_str().unwrap();
+                line.starts_with("Last tunnel refresh: failed; needs attention:")
+                    && line.contains("needs the Python client while a tunnel process record exists")
+            }),
+            "{entry:?}"
+        );
+        // Without the process record, native `tunnel status` is the step.
+        std::fs::remove_file(root(&home).join("dot.process.json")).unwrap();
+        let entries = tunnels(&home);
+        let line = entries[0]["next"][0].as_str().unwrap().to_owned();
+        assert!(
+            line.ends_with(
+                "pseudolife-mcp tunnel status --profile dot shows the outcome and the key's state."
+            ),
+            "{line}"
+        );
     }
 
     #[test]
@@ -1034,55 +1099,109 @@ mod tunnel_profiles {
     }
 }
 
+/// A loopback proxy that answers every request 502 at once: deterministic,
+/// with no reused port or slow closed-port connect.
+fn refusing_proxy() -> RawDaemon {
+    RawDaemon::start(|_| {
+        (
+            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+            0,
+        )
+    })
+}
+
+/// A daemon whose handshake fails on its own (a tool without annotations).
+fn failing_handshake_fixture() -> Fixture {
+    Fixture::start_with(Setup {
+        lists: vec![Reply::Result(json!({"tools": [
+            {"name": "bare", "inputSchema": {"type": "object"}}]}))],
+        ..Setup::default()
+    })
+}
+
+/// A proxy URL with credentials in it, which must never be shown.
+fn secret_proxy(proxy: &RawDaemon) -> String {
+    format!(
+        "http://w11proxyuser:w11proxysecret@{}",
+        proxy.url.trim_start_matches("http://")
+    )
+}
+
+fn assert_no_proxy_secret(output: &Output) {
+    for stream in [&output.stdout, &output.stderr] {
+        let text = String::from_utf8_lossy(stream);
+        assert!(
+            !text.contains("w11proxysecret") && !text.contains("w11proxyuser"),
+            "{text}"
+        );
+    }
+}
+
 #[test]
-fn a_proxy_variable_is_named_and_every_check_still_runs() {
+fn a_proxy_the_shim_uses_is_named_and_every_check_still_runs() {
     let home = Home::new();
     let fixture = healthy_fixture();
-    // A proxy URL may carry credentials: only the variable's name is shown.
-    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let proxy = format!(
-        "http://proxyuser:proxy-secret@{}",
-        closed.local_addr().unwrap()
-    );
-    drop(closed);
+    let proxy = refusing_proxy();
     let output = diagnose(&home, &fixture.url)
-        .env("HTTP_PROXY", &proxy)
-        .args(["--timeout", "5"])
+        .env("HTTP_PROXY", secret_proxy(&proxy))
         .output()
         .unwrap();
-    let text = String::from_utf8_lossy(&output.stdout).into_owned();
-    assert!(
-        !text.contains("proxy-secret") && !text.contains("proxyuser"),
-        "{text}"
-    );
-    assert!(!String::from_utf8_lossy(&output.stderr).contains("proxy-secret"));
+    assert_no_proxy_secret(&output);
     let map = report(&output);
     assert_ordinary(&map, &output);
     let note = map["proxy"].as_str().expect("a proxy note");
     assert!(note.starts_with("HTTP_PROXY set:"), "{note}");
-    assert!(note.contains("NO_PROXY"), "{note}");
-    // The shim honours the proxy, which here refuses: the failure names it.
+    assert!(note.contains("through the proxy"), "{note}");
+    // The shim really went through the proxy, which refused: the failure
+    // names the proxy.
+    assert!(!proxy.paths.lock().unwrap().is_empty());
     assert_eq!(map["ok"], json!(false));
     assert!(
         map["recovery"].as_str().unwrap().contains("NO_PROXY"),
         "{map:?}"
     );
-    // NO_PROXY covering the daemon lets the shim through; doctor still names
-    // the variables it saw.
-    let fixture = healthy_fixture();
-    let output = diagnose(&home, &fixture.url)
-        .env("HTTP_PROXY", &proxy)
-        .env("NO_PROXY", "127.0.0.1")
-        .output()
-        .unwrap();
-    let map = report(&output);
-    assert_ordinary(&map, &output);
-    assert_handshake_passed(&map, &output);
+}
+
+#[test]
+fn a_proxy_the_shim_does_not_use_never_takes_the_blame() {
+    let proxy = refusing_proxy();
+    let proxy_url = secret_proxy(&proxy);
+    // An https proxy only (an http daemon), and an http proxy whose
+    // NO_PROXY names the daemon: the shim connects directly either way.
+    let cases: [&[(&str, &str)]; 2] = [
+        &[("HTTPS_PROXY", proxy_url.as_str())],
+        &[
+            ("HTTP_PROXY", proxy_url.as_str()),
+            ("NO_PROXY", "127.0.0.1"),
+        ],
+    ];
+    for vars in cases {
+        // A passing handshake: nothing goes through the proxy.
+        let home = Home::new();
+        let fixture = healthy_fixture();
+        let mut command = diagnose(&home, &fixture.url);
+        command.envs(vars.iter().copied());
+        let output = command.output().unwrap();
+        assert_no_proxy_secret(&output);
+        let map = report(&output);
+        assert_ordinary(&map, &output);
+        assert_handshake_passed(&map, &output);
+        let note = map["proxy"].as_str().unwrap();
+        assert!(note.contains("not used for this daemon"), "{note}");
+        // A handshake that fails on its own: the recovery does not blame
+        // the proxy.
+        let fixture = failing_handshake_fixture();
+        let mut command = diagnose(&home, &fixture.url);
+        command.envs(vars.iter().copied());
+        let output = command.output().unwrap();
+        let map = report(&output);
+        assert_eq!(map["ok"], json!(false));
+        let recovery = map["recovery"].as_str().unwrap();
+        assert!(!recovery.contains("NO_PROXY"), "{vars:?}: {recovery}");
+    }
     assert!(
-        map["proxy"]
-            .as_str()
-            .unwrap()
-            .starts_with("HTTP_PROXY, NO_PROXY set:")
+        proxy.paths.lock().unwrap().is_empty(),
+        "the shim used a proxy it should not"
     );
 }
 
@@ -1099,21 +1218,52 @@ fn pythons_integer_digit_limit_does_not_apply_to_the_native_client() {
     assert_handshake_passed(&map, &output);
 }
 
-/// A credential the run cannot use: named, never printed, never sent; the
-/// unauthenticated checks still run.
+/// The ASCII marker every secret in these tests starts with: stdout is
+/// ASCII-escaped JSON, so a printed non-ASCII secret would show only this.
+const SECRET_MARK: &str = "w11sec";
+
+/// Every string in a parsed report, keys included.
+fn strings(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) => out.push(text.clone()),
+        Value::Array(items) => items.iter().for_each(|item| strings(item, out)),
+        Value::Object(map) => {
+            for (key, item) in map {
+                out.push(key.clone());
+                strings(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A credential the run cannot use: named, never printed (raw, escaped or
+/// decoded), never sent; the unauthenticated checks still run. `secret` is
+/// the credential's text where the test wrote one.
 fn assert_unusable_credential(
     fixture: &Fixture,
     output: &Output,
     error: &str,
-    secret: &str,
+    secret: Option<&str>,
 ) -> serde_json::Map<String, Value> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stdout.contains(secret) && !stderr.contains(secret),
-        "{stdout}{stderr}"
-    );
+    if let Some(secret) = secret {
+        assert!(secret.starts_with(SECRET_MARK));
+        assert!(
+            !stdout.contains(SECRET_MARK) && !stderr.contains(SECRET_MARK),
+            "{stdout}{stderr}"
+        );
+    }
     let map = report(output);
+    if let Some(secret) = secret {
+        let mut all = Vec::new();
+        strings(&Value::Object(map.clone()), &mut all);
+        assert!(
+            all.iter().all(|text| !text.contains(secret.trim())),
+            "{all:?}"
+        );
+    }
     assert_ordinary(&map, output);
     assert_eq!(map["ok"], json!(false));
     assert_eq!(output.status.code(), Some(1));
@@ -1132,21 +1282,48 @@ fn assert_unusable_credential(
 }
 
 #[test]
-fn a_token_no_client_can_send_is_named_and_the_other_checks_run() {
-    for secret in ["fixture-t\u{f6}k", "token-\u{4e00}", "fixture-\u{7f}"] {
+fn a_token_the_shim_cannot_authenticate_with_is_named_and_the_other_checks_run() {
+    for secret in ["w11sec-t\u{f6}k", "w11sec-\u{4e00}", "w11sec-\u{7f}"] {
         let home = Home::new();
         let fixture = healthy_fixture();
         let output = diagnose(&home, &fixture.url)
             .env("PSEUDOLIFE_MCP_TOKEN", secret)
             .output()
             .unwrap();
-        let map = assert_unusable_credential(&fixture, &output, "BearerUnsendable", secret);
+        let map = assert_unusable_credential(&fixture, &output, "BearerUnsendable", Some(secret));
         assert_eq!(map["credential_source"], json!("environment"));
+        let recovery = map["recovery"].as_str().unwrap();
+        assert!(recovery.contains("printable ASCII"), "{recovery}");
+        assert!(recovery.contains("as UTF-8"), "{recovery}");
+        assert!(recovery.contains("as Latin-1"), "{recovery}");
+        assert!(!recovery.contains("no Pseudolife client"), "{recovery}");
+    }
+}
+
+#[test]
+fn an_inline_token_with_whitespace_is_named_as_the_inline_token() {
+    for secret in ["w11sec-token ", "w11sec-\ttoken", "w11sec-\u{a0}token"] {
+        let home = Home::new();
+        let fixture = healthy_fixture();
+        let output = diagnose(&home, &fixture.url)
+            .env("PSEUDOLIFE_MCP_TOKEN", secret)
+            .output()
+            .unwrap();
+        let map =
+            assert_unusable_credential(&fixture, &output, "CredentialUnavailable", Some(secret));
+        let recovery = map["recovery"].as_str().unwrap();
         assert!(
-            map["recovery"]
-                .as_str()
-                .unwrap()
-                .contains("printable ASCII")
+            recovery.contains("the PSEUDOLIFE_MCP_TOKEN value is empty or contains whitespace"),
+            "{recovery}"
+        );
+        assert!(
+            recovery.contains("Set PSEUDOLIFE_MCP_TOKEN again in this shell without spaces"),
+            "{recovery}"
+        );
+        assert!(!recovery.contains("credential file"), "{recovery}");
+        assert!(
+            !recovery.contains("PSEUDOLIFE_MCP_TOKEN_FILE"),
+            "{recovery}"
         );
     }
 }
@@ -1159,12 +1336,8 @@ fn an_unreadable_token_source_is_named_and_the_other_checks_run() {
         .env("PSEUDOLIFE_MCP_TOKEN_FILE", home.0.join("absent-token"))
         .output()
         .unwrap();
-    let map = assert_unusable_credential(
-        &fixture,
-        &output,
-        "CredentialUnavailable",
-        "absent-token-value",
-    );
+    // No credential exists to print: the file is absent.
+    let map = assert_unusable_credential(&fixture, &output, "CredentialUnavailable", None);
     assert_eq!(map["token_sha256_prefix"], Value::Null);
     assert!(
         map["recovery"]
@@ -1195,13 +1368,44 @@ fn an_unreadable_token_source_is_named_and_the_other_checks_run() {
     assert!(map["token_sha256_prefix"].is_string());
 }
 
+#[test]
+fn a_registration_credential_problem_is_fixed_in_the_registration() {
+    let home = Home::new();
+    let missing = home.0.join("registered-token");
+    let registration = json!({"mcpServers": {"pseudolife-memory": {"env": {
+        "PSEUDOLIFE_MCP_TOKEN_FILE": missing.to_str().unwrap()}}}});
+    std::fs::write(home.0.join(".claude.json"), registration.to_string()).unwrap();
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .output()
+        .unwrap();
+    let map = assert_unusable_credential(&fixture, &output, "CredentialUnavailable", None);
+    assert!(
+        map["credential_source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Claude Code registration (")
+    );
+    let recovery = map["recovery"].as_str().unwrap();
+    assert!(
+        recovery.contains("that registration's env block"),
+        "{recovery}"
+    );
+    assert!(
+        recovery.contains("setting shell variables would only make doctor pass"),
+        "{recovery}"
+    );
+    assert!(!recovery.contains("in this shell"), "{recovery}");
+}
+
 #[cfg(unix)]
 #[test]
 fn a_token_file_others_can_read_is_named_and_its_contents_never_shown() {
     use std::os::unix::fs::PermissionsExt;
     let home = Home::new();
     let path = home.0.join("shared-token");
-    std::fs::write(&path, b"fixture-shared-file-token\n").unwrap();
+    std::fs::write(&path, b"w11sec-shared-file-token\n").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     let fixture = healthy_fixture();
     let output = diagnose(&home, &fixture.url)
@@ -1212,7 +1416,7 @@ fn a_token_file_others_can_read_is_named_and_its_contents_never_shown() {
         &fixture,
         &output,
         "CredentialUnavailable",
-        "fixture-shared-file-token",
+        Some("w11sec-shared-file-token"),
     );
     assert!(
         map["recovery"]

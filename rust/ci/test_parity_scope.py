@@ -383,6 +383,9 @@ def test_a_mapped_shim_entry_reaches_only_its_rows(entry):
     # connect's stdin check is read by restore_cli, whose docker_backup is
     # backup's Docker tier: a connect change reaches update and doctor too.
     ("connect/mod.rs", True),
+    # doctor reads saved tunnel profiles through tunnel's store.
+    ("tunnel/mod.rs", True),
+    ("tunnel/store.rs", True),
     # The near miss: a command no doctor dependency imports.
     ("transfer.rs", False),
 ])

@@ -240,8 +240,11 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   accepts any positive float).
 - Proxies: urllib honours `http_proxy`/`https_proxy` and, without them, the
   Windows registry (WinINet) and macOS `_scproxy` settings. The native probes
-  connect directly; either variable defers, the platform settings are not
-  consulted.
+  connect directly and the platform settings are not consulted. A set proxy
+  variable is reported by name only in `proxy`; whether the shim proxies the
+  daemon URL is decided with the shim's own rules (hyper-util's matcher:
+  scheme-aware, `NO_PROXY` applied), and only then does a handshake failure
+  name `NO_PROXY`.
 - https daemons: TLS trust is the native shim's reqwest/rustls
   configuration, not CPython's default `ssl` context.
 - Closed stdout: the oracle's print raises and CPython exits 120 after a
@@ -265,10 +268,10 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   also advertises and decodes `br` or `zstd`, which the native doctor
   neither sends nor decodes.
 - A maintainer error status whose body fails to read (a timeout, a reset, a
-  truncated chunked body) defers after the read-only GETs: Python's
-  `exc.read(65536)` runs inside `except HTTPError` (doctor_cli.py:396), so
-  the failure escapes and doctor ends in a traceback with exit 1. This is
-  declared residue, as on the other leaves, not an answer.
+  truncated chunked body): Python's `exc.read(65536)` runs inside `except
+  HTTPError` (doctor_cli.py:396), so the failure escapes and doctor ends in
+  a traceback with exit 1. The native doctor reports the probe as
+  `not_checked` and the run continues.
 - `python-httpx/0.28.1` is the oracle environment's httpx; another httpx
   version sends another agent string.
 - Missing Git for Windows (`GitBashMissing`) is not reachable through the
@@ -299,31 +302,48 @@ Doctor shares the update client's Codex hook checks. The parity scope map
 therefore includes this row for update changes and the mapped dependencies
 that update imports, so changes to those helpers also run doctor parity.
 
-## Deferral domain (before the first request unless noted)
+## Deferral domain
 
-noncanonical argv; `--timeout` past
-1,000,000 seconds; an `--agent-state` path with a `..` component, a
-symlinked or junction ancestor of an existing file, or a stat error pathlib
-would raise (a missing file is `missing_registration` whatever its ancestors:
-`exists()` comes first, doctor_cli.py:458); a nonempty `http_proxy` or
-`https_proxy` (any case); `PYTHONINTMAXSTRDIGITS` set; an invalid daemon
-URL; a credential provider error (missing, unsafe or malformed token file,
-invalid static token); a bearer outside printable ASCII (urllib would send
-Latin-1, but the handshake's Python shim and the `--agent-state` check use
-httpx, which cannot); saved tunnels present (`~/.pseudolife-mcp/tunnel`);
-JSON files only Python may read (NaN, Infinity, `\u` escapes, nesting past
-the parser's limit) and every TOML parse failure other than a leading BOM;
-non-UTF-8 environment values read; settings values whose `str()` needs
-Python's repr (floats, non-empty containers); `~` in
-`CODEX_HOME`/`PSEUDOLIFE_CODEX_BIN`; UNC, device and drive-relative paths;
-PATH absent on POSIX (`os.confstr`); stat errors pathlib would raise.
-After a read-only GET (board, maintainer or health) but always before the
-handshake starts the shim: a non-object health body, a
-non-string `status`, a truthy non-string `version`, a Codex-plugin
-`hooks_digest` whose installed copy cannot be verified as `current` or
-`needs-approval`, a health redirect
-to `ftp:` or to a target that is not text (urllib would follow it), a
-maintainer error body that fails to read (Python crashes there), a
-duplicate or non-ASCII `X-PL-Board` header, maintainer `rp_id`/`origin`
-that are not strings or null, response bodies only Python's decoder
-admits.
+Only argument shapes defer the whole command: noncanonical argv (`--help`
+included) and `--timeout` past 1,000,000 seconds, plus an `--agent-state`
+path with a `..` component, a symlinked or junction ancestor of an existing
+file, or a stat error pathlib would raise (a missing file is
+`missing_registration` whatever its ancestors: `exists()` comes first,
+doctor_cli.py:458). With an invalid daemon URL the saved instance is not
+read and nothing defers.
+
+Every other input the native reader does not decide is named in the report
+while the other checks run (these deferred the whole run before #1607):
+
+- `PYTHONINTMAXSTRDIGITS` is ignored (a Python-only setting); an absent PATH
+  on POSIX searches the platform's CS_PATH.
+- A proxy variable: the `proxy` line (above).
+- An invalid daemon URL: `DaemonUrlInvalid`, nothing requested.
+- A credential provider error (missing, unsafe or malformed token file, an
+  invalid inline token, a token variable that is not text):
+  `CredentialUnavailable`, with the reason and recovery chosen by source
+  (file, inline token, client registration).
+- A bearer outside printable ASCII: `BearerUnsendable` (the native shim
+  sends it as UTF-8 and the daemon reads the header as Latin-1).
+- With either credential error the board, maintainer and handshake are not
+  run and the token is never sent.
+- Saved tunnel profiles: the read-only `tunnels` section; an absent or empty
+  `~/.pseudolife-mcp/tunnel` adds nothing, and a profile or store this
+  client cannot read is one `unavailable` entry.
+- Client files and settings the native reader does not parse (JSON only
+  Python may read, TOML parse failures, non-UTF-8 environment values,
+  settings values whose `str()` needs Python's repr, `~` in
+  `CODEX_HOME`/`PSEUDOLIFE_CODEX_BIN`, UNC, device and drive-relative paths,
+  stat errors pathlib would raise): that field reads `unknown (not read by
+  the native client: ...)`, and a registration search that stopped adds
+  `registrations`.
+- After the read-only GETs:
+  - A non-object health body, a non-string `status` or a health redirect
+    urllib would follow off HTTP: `DaemonUnrecognized`.
+  - A non-string `version`: `unknown`.
+  - A health `stall` object: `dreams` names its kind.
+  - A Codex-plugin `hooks_digest` in any file state: `<state>: <detail>`.
+  - A maintainer or board answer the native reader does not decide (a body
+    that fails to read, a duplicate or non-ASCII `X-PL-Board`, a non-string
+    `rp_id`/`origin`, bodies only Python's decoder admits): that probe is
+    `not checked`.

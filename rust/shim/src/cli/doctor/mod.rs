@@ -192,42 +192,54 @@ pub(super) fn truthy(value: &Value) -> bool {
 }
 
 /// The proxy variables this environment sets, by name only (a proxy URL
-/// may carry credentials), and whether any of them routes traffic. Doctor's
-/// own probes connect to the daemon directly; the shim it starts, like every
-/// client's shim, uses reqwest's environment proxy (`HTTP_PROXY`,
-/// `HTTPS_PROXY`, `ALL_PROXY`, with `NO_PROXY` exceptions).
-fn proxy_variables() -> (Vec<String>, bool) {
-    let mut names = Vec::new();
-    let mut routes = false;
-    for (name, value) in std::env::vars_os() {
-        let name = name.to_string_lossy().into_owned();
-        let lower = name.to_ascii_lowercase();
-        if value.is_empty()
-            || !matches!(
-                lower.as_str(),
-                "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy"
-            )
-        {
-            continue;
-        }
-        routes |= lower != "no_proxy";
-        names.push(name);
-    }
+/// may carry credentials). Doctor's own probes connect to the daemon
+/// directly; the shim it starts, like every client's shim, uses reqwest's
+/// proxy, which is hyper-util's `Matcher::from_system()` (this build has no
+/// system-proxy feature, so it is the environment alone: `HTTP_PROXY`,
+/// `HTTPS_PROXY`, `ALL_PROXY` by scheme, `NO_PROXY` exceptions).
+fn proxy_variables() -> Vec<String> {
+    let mut names: Vec<String> = std::env::vars_os()
+        .filter(|(name, value)| {
+            !value.is_empty()
+                && matches!(
+                    name.to_string_lossy().to_ascii_lowercase().as_str(),
+                    "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy"
+                )
+        })
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
     names.sort();
     names.dedup();
-    (names, routes)
+    names
 }
 
-/// The report line for set proxy variables, when one of them routes.
-fn proxy_note(names: &[String]) -> String {
-    format!(
-        "{} set: doctor's own /health, board and maintainer probes connect to the daemon directly, while the shim this doctor starts, like every client's shim, connects through the proxy unless NO_PROXY names the daemon's host.",
-        names.join(", ")
-    )
+/// Whether the shim's own proxy rules send a request for `url` through a
+/// proxy: the same matcher reqwest builds, asked about this daemon URL.
+fn shim_proxies(url: &str) -> bool {
+    url.parse::<http::Uri>().is_ok_and(|uri| {
+        hyper_util::client::proxy::matcher::Matcher::from_system()
+            .intercept(&uri)
+            .is_some()
+    })
 }
 
-/// Appended to a handshake recovery while a proxy variable routes traffic.
-const PROXY_RECOVERY: &str = " A proxy variable is set and the shim connects through it: add the daemon's host to NO_PROXY (or unset the proxy for this client), then retry.";
+/// The report line for set proxy variables (names only).
+fn proxy_note(names: &[String], routes: bool) -> String {
+    let names = names.join(", ");
+    if routes {
+        format!(
+            "{names} set: doctor's own /health, board and maintainer probes connect to the daemon directly, while the shim this doctor starts, like every client's shim, connects to this daemon through the proxy; NO_PROXY naming the daemon's host would make it connect directly."
+        )
+    } else {
+        format!(
+            "{names} set: not used for this daemon (its scheme has no proxy set, or NO_PROXY names its host), so doctor's probes and the shim both connect directly."
+        )
+    }
+}
+
+/// Appended to a handshake recovery while the shim's rules proxy the
+/// daemon URL.
+const PROXY_RECOVERY: &str = " The shim connects to this daemon through the configured proxy: add the daemon's host to NO_PROXY (or unset the proxy for this client), then retry.";
 
 /// A section whose input the native reader does not parse; the rest of
 /// the report is unaffected.
@@ -235,45 +247,90 @@ fn unread(input: &str) -> String {
     format!("unknown (not read by the native client: {input})")
 }
 
-const REGISTRATIONS_UNREAD: &str = "not read by the native client: ~/.claude.json or the Codex config.toml holds syntax it does not parse (Python-only JSON such as NaN, or invalid TOML). Fix that file, or set PSEUDOLIFE_MCP_TOKEN_FILE in this shell to name the credential directly.";
+const REGISTRATIONS_UNREAD: &str = "not read by the native client: the search of the Claude Code (~/.claude.json) and Codex (config.toml) registrations stopped on an input it does not decide, such as Python-only JSON (NaN), invalid TOML, or a CLAUDE_CONFIG_DIR, CODEX_HOME or PSEUDOLIFE_MCP_DAEMON_URL that is not plain text. Fix that input, or set PSEUDOLIFE_MCP_TOKEN_FILE in this shell to name the credential directly.";
+
+/// Where the credential came from, which decides what the user can fix.
+#[derive(Clone, Copy)]
+enum Source {
+    /// `PSEUDOLIFE_MCP_TOKEN_FILE` (from the shell or a registration).
+    File,
+    /// `PSEUDOLIFE_MCP_TOKEN` (from the shell or a registration).
+    Inline,
+    /// A variable that is not valid text.
+    NotText,
+}
 
 /// Why the configured credential cannot be used. Its text never includes
 /// the token or the token file's contents.
 enum BearerProblem {
-    /// The source could not be read or is configured wrongly (the
-    /// credential module's own reason).
-    Unavailable(&'static str),
-    /// The token holds characters an HTTP header cannot carry.
+    /// The source could not be read or is configured wrongly.
+    Unavailable(Source, &'static str),
+    /// The token is outside printable ASCII.
     Unsendable,
 }
 
 impl BearerProblem {
-    fn board_line(&self) -> String {
+    fn reason(&self) -> &'static str {
         match self {
-            Self::Unavailable(reason) => {
-                format!("not checked - the credential is unusable ({reason})")
+            // decode_token's refusal names a file even for an inline token.
+            Self::Unavailable(Source::Inline, _) => {
+                "the PSEUDOLIFE_MCP_TOKEN value is empty or contains whitespace or control characters (a trailing space, tab or newline from a paste counts)"
             }
-            Self::Unsendable => {
-                "not checked - the bearer token contains characters other than printable ASCII"
-                    .into()
+            Self::Unavailable(Source::NotText, _) => {
+                "PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE is not valid text"
             }
+            Self::Unavailable(Source::File, reason) => reason,
+            Self::Unsendable => "the bearer token contains characters other than printable ASCII",
         }
     }
+    fn board_line(&self) -> String {
+        format!(
+            "not checked - the credential is unusable ({})",
+            self.reason()
+        )
+    }
+    /// `source` is the report's `credential_source`: `environment` or a
+    /// client registration's label.
     fn error(&self, source: &str) -> (&'static str, String) {
-        match self {
-            Self::Unavailable(reason) => (
-                "CredentialUnavailable",
-                format!(
-                    "doctor could not use the configured credential ({reason}; source: {source}). Point PSEUDOLIFE_MCP_TOKEN_FILE at an owner-only file holding only the token, or unset PSEUDOLIFE_MCP_TOKEN_FILE and set PSEUDOLIFE_MCP_TOKEN instead (the file wins while it is set), then retry; the checks that need no credential ran."
-                ),
-            ),
+        let reason = self.reason();
+        let registration = source != "environment";
+        let fix = match (self, registration) {
+            (Self::Unavailable(Source::File, _), false) => {
+                "Point PSEUDOLIFE_MCP_TOKEN_FILE at an owner-only file holding only the token, or unset PSEUDOLIFE_MCP_TOKEN_FILE and set PSEUDOLIFE_MCP_TOKEN instead (the file wins while it is set), then retry"
+            }
+            (Self::Unavailable(Source::Inline, _), false) => {
+                "Set PSEUDOLIFE_MCP_TOKEN again in this shell without spaces, tabs or other invisible characters, then retry"
+            }
+            (Self::Unsendable, false) => {
+                "Set PSEUDOLIFE_MCP_TOKEN (or the file PSEUDOLIFE_MCP_TOKEN_FILE names) again from where the token was issued (pseudolife-mcp invite on the daemon host, or the daemon's ops/.env), without extra characters, then retry"
+            }
+            (Self::Unavailable(Source::NotText, _), false) => {
+                "Set the variable again as plain text, then retry"
+            }
+            // Shell variables would only make doctor pass: the client reads
+            // its own registration.
+            (_, true) => {
+                "Fix the credential in that registration's env block (re-run ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set, or point its PSEUDOLIFE_MCP_TOKEN_FILE at an owner-only file holding only the token), then retry; setting shell variables would only make doctor pass while that client stays broken"
+            }
+        };
+        let (error, cause) = match self {
             Self::Unsendable => (
                 "BearerUnsendable",
                 format!(
-                    "The configured bearer token (source: {source}) contains characters other than printable ASCII, which no Pseudolife client can send in an HTTP Authorization header. Copy the token again from where it was issued (pseudolife-mcp invite on the daemon host, or the daemon's ops/.env) without extra characters, then retry; the checks that need no credential ran."
+                    "The configured bearer token (source: {source}) contains characters other than printable ASCII. The native shim sends such a token as UTF-8 while the daemon reads the Authorization header as Latin-1, so MCP calls can never authenticate with it (DEL and other control characters cannot be sent at all)."
                 ),
             ),
-        }
+            Self::Unavailable(..) => (
+                "CredentialUnavailable",
+                format!(
+                    "doctor could not use the configured credential ({reason}; source: {source})."
+                ),
+            ),
+        };
+        (
+            error,
+            format!("{cause} {fix}; the checks that need no credential ran."),
+        )
     }
 }
 
@@ -288,9 +345,11 @@ fn token_hash_prefix(token: &str) -> String {
         .collect()
 }
 
-/// A bearer the native shim can send: printable ASCII, what
-/// `HeaderValue::from_str` admits (`lifecycle.rs` builds its Authorization
-/// header that way; whitespace is already refused by `decode_token`).
+/// A bearer the native shim authenticates with: printable ASCII.
+/// `HeaderValue::from_str` (`lifecycle.rs` builds the shim's Authorization
+/// header that way) refuses only DEL and C0 controls, so a non-ASCII token
+/// is sent, as UTF-8, and the daemon decodes the header as Latin-1: it can
+/// never match. Whitespace is already refused by `decode_token`.
 fn sendable(token: &str) -> bool {
     token.bytes().all(|byte| (0x20..0x7f).contains(&byte))
 }
@@ -574,7 +633,7 @@ async fn diagnose(
     // Everything before the first request: environment and client files.
     // A section whose input the native reader does not parse is named in
     // the report; it never ends the run.
-    let (proxy_names, proxy_routes) = proxy_variables();
+    let proxy_names = proxy_variables();
     let mut env = Env::default();
     for (key, value) in environment.additions() {
         env.set(key, value.clone());
@@ -606,6 +665,12 @@ async fn diagnose(
         env.var("PSEUDOLIFE_MCP_TOKEN"),
     ) {
         (Ok(token_file), Ok(token_value)) => {
+            // The file wins while it is set (`from_lookup`).
+            let source = if token_file.is_some() {
+                Source::File
+            } else {
+                Source::Inline
+            };
             match crate::credentials::CredentialProvider::from_lookup(|key| match key {
                 "PSEUDOLIFE_MCP_TOKEN_FILE" => token_file.clone().map(OsString::from),
                 "PSEUDOLIFE_MCP_TOKEN" => token_value.clone().map(OsString::from),
@@ -613,22 +678,21 @@ async fn diagnose(
             }) {
                 Ok(provider) => Some(provider),
                 Err(error) => {
-                    problem = Some(BearerProblem::Unavailable(error.0));
+                    problem = Some(BearerProblem::Unavailable(source, error.0));
                     None
                 }
             }
         }
         _ => {
-            problem = Some(BearerProblem::Unavailable(
-                "PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE is not valid text",
-            ));
+            problem = Some(BearerProblem::Unavailable(Source::NotText, ""));
             None
         }
     };
     let token = match provider.as_ref().map(|provider| provider.snapshot()) {
         Some(Ok(snapshot)) => snapshot.token().map(str::to_owned),
+        // Only a file is read at snapshot time.
         Some(Err(error)) => {
-            problem = Some(BearerProblem::Unavailable(error.0));
+            problem = Some(BearerProblem::Unavailable(Source::File, error.0));
             None
         }
         None => None,
@@ -702,8 +766,17 @@ async fn diagnose(
             .filter(|token| !token.is_empty())
             .map_or(Value::Null, |token| json!(token_hash_prefix(token))),
     );
-    if proxy_routes {
-        put(&mut report, "proxy", json!(proxy_note(&proxy_names)));
+    // Only a URL that validated can be proxied; nothing is sent otherwise.
+    let proxy_routes = url.as_deref().is_some_and(shim_proxies);
+    if proxy_names
+        .iter()
+        .any(|name| !name.eq_ignore_ascii_case("no_proxy"))
+    {
+        put(
+            &mut report,
+            "proxy",
+            json!(proxy_note(&proxy_names, proxy_routes)),
+        );
     }
     let not_checked = |line: &str| {
         let mut off = Map::new();
@@ -961,7 +1034,7 @@ async fn diagnose(
             },
         }),
     };
-    let snapshot = coordination_snapshot(
+    let mut snapshot = coordination_snapshot(
         health.as_ref(),
         &board_state,
         &wake,
@@ -969,6 +1042,19 @@ async fn diagnose(
         registration,
         tools_present,
     );
+    // With an invalid URL no daemon was contacted: not "offline".
+    if url.is_none() {
+        snapshot["daemon"] = json!("not_checked");
+        snapshot["authentication"] = json!("not_checked");
+        if let Some(first) = snapshot["next"]
+            .as_array_mut()
+            .and_then(|next| next.first_mut())
+        {
+            *first = json!(
+                "Correct PSEUDOLIFE_MCP_DAEMON_URL first (see recovery); doctor contacted no daemon."
+            );
+        }
+    }
     let registered = snapshot.get("registration") == Some(&json!("authenticated"));
     put(&mut report, "wake", Value::Object(wake));
     put(&mut report, "coordination", snapshot);
