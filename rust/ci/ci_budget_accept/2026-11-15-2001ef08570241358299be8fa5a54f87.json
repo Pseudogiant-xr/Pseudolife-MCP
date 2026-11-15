@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "5b4d061c810fb586",
+  "fingerprint": "d59e7d65cccc4a86",
+  "reason": "The lane gains tests/test_installer_client_engine.py, tests/test_installer_native_client.py and the native-installer copies tests/test_codex_hooks_native.py and tests/test_client_install_ux_native.py (74 s together serially in WSL at 543ddcd59); its estimate in ci_budget.json rises from 18.6 to 21.1 minutes for them, and nothing else in the job changed."
+}

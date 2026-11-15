@@ -3651,6 +3651,19 @@ from (on POSIX it also moves the default `~/.local/bin`). A host whose Python ca
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
 
+To install the native `pseudolife-mcp` client instead, run the installer
+with `PSEUDOLIFE_SHIM_ENGINE=native` (`PSEUDOLIFE_SHIM_ENGINE=native
+ops/install.sh ...`, or `$env:PSEUDOLIFE_SHIM_ENGINE = "native"` before
+`.\ops\install.ps1 ...`). The installer then hands its arguments to
+`ops/install-native.sh` / `ops\install-native.ps1`, which download the
+native client from the release the checkout names, verify it against
+that release's `SHA256SUMS`, and move each client's registration to the
+native launcher (`docs/dev/native-runtimes.md`, "Installers"). Without the
+variable, or with `PSEUDOLIFE_SHIM_ENGINE=python`, the installer installs
+the Python client as described above, and a rerun with `python` brings a
+machine on the native client back to it. Any other value is refused
+before anything changes.
+
 ### The native client
 
 The native client is the same shim and `pseudolife-mcp` command as one
