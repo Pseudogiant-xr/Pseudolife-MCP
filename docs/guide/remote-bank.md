@@ -147,7 +147,8 @@ never reported as exposed and never removed. All three take `--port` for a daemo
 that state; 2 usage, declined, or no terminal without `--yes`; 4 refused,
 nothing changed; 5 the result was not the one asked for (undone where the
 forward was this run's, otherwise left alone and named), or could not be
-verified; 130 interrupted at the question. Output from `tailscale` it cannot read is answered
+verified; 130 interrupted (at the question, or a serve that stopped
+with nothing changed). Output from `tailscale` it cannot read is answered
 with `could not read what tailscale ... printed`: exit 4 when nothing was
 changed, exit 5 after a change (`expose off` included), with how to check
 `tailscale serve status` and undo it. Only an ASCII dotted quad counts as
