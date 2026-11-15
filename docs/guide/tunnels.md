@@ -19,6 +19,20 @@ flowchart TD
     H -. changed credentials or connection .-> F
 ```
 
+**With the native client**, tunnels are not available yet. It answers
+`tunnel status` for a profile with no running tunnel, `tunnel update` when
+no saved profile is ready, and the refusals of `tunnel verify` and `tunnel
+setup` before they would change anything. Every other step (setup itself,
+`start`, `run`, `stop`, `doctor`, `service`, the cloud verification and
+`update` of a ready profile) stops with `pseudolife-stdio: mode 'tunnel' is
+deferred in this candidate` and exit 1, having changed nothing. On a host
+that runs a tunnel, keep the Python client, which an update does unless
+you opt in with `PSEUDOLIFE_SHIM_ENGINE=native`. With a running tunnel and
+a ready profile, every native `update` that runs the client steps also ends
+with exit 5, the opting-in run included, because its tunnel step defers (see
+[The native client](configuration.md#the-native-client), which also says how
+to go back).
+
 ## Start or resume
 
 Use an always-on host if you need access while a laptop sleeps. Both its daemon
