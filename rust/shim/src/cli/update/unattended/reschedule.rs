@@ -1740,6 +1740,16 @@ mod tests {
                 .unwrap()
                 .contains("repair that file")
         );
+        // On Windows a failed `schtasks /Query` (this fake exits 1) cannot be
+        // told from a missing task, so discovery leaves it out.
+        let windows = Host {
+            windows: true,
+            linux: false,
+            dir: dir.clone(),
+            home: home.clone(),
+            ..host
+        };
+        assert!(installed_on(&windows, &names, &expected).is_empty());
         let other = Host {
             linux: false,
             ..host
