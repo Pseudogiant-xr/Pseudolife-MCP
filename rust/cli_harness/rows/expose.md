@@ -1,4 +1,4 @@
-# CLI-EXPOSE contract (`expose`, up to the change)
+# CLI-EXPOSE contract (`expose`)
 
 Oracle: `pseudolife_memory/expose_cli.py` (`main`, `_parser`, `_expose`,
 `_off`, `_status`, `_Report`, `_write`, `fetch_health`, `find_tailscale`
@@ -8,7 +8,8 @@ CPython 3.11.9 (Windows).
 Candidate: `rust/shim/src/cli/expose/` (argparse subset in `args.rs`, the
 `tailscale` seams and readers in `tailscale.rs`), reusing `cli/pyjson`
 (Python's `json`, `repr()` and `str()`), `cli/hook_http.rs`
-(`get_bounded`, urllib's GET), `cli/connect` (`sys.stdin.isatty()`) and
+(`get_bounded`, urllib's GET), `cli/connect` (`sys.stdin.isatty()` and the
+y/N question, `connect::terminal::ask`) and
 `cli/move_cli.rs` (argv decoding, colour settings, writes). Harness row:
 `expose` (`rust/cli_harness/rows/expose.py`). Oracle tests:
 `tests/test_expose_cli.py`.
@@ -17,13 +18,16 @@ Candidate: `rust/shim/src/cli/expose/` (argparse subset in `args.rs`, the
 
 `expose` puts this host's daemon on the tailnet with a Tailscale Serve TCP
 forward (`tailscale`), removes that forward (`off`) and reports it
-(`status`). This row ports every shape that changes nothing: all of
-`status`, and `tailscale` / `off` through every check that only reads,
-their refusals, "already exposed" / "not exposed", and the refusal without
-`--yes` when stdin is no terminal. The change itself (`tailscale serve --bg
---tcp=N tcp://127.0.0.1:N`, `tailscale serve --tcp=N off`) and everything
-after it, and the interactive confirmation, defer before the first call
-that changes the serve config.
+(`status`). All three run natively, the change included: after the checks,
+the plan, and consent (`--yes`, or one `[y/N]` question when stdin is a
+terminal), `tailscale` runs `tailscale serve --bg --tcp=N
+tcp://127.0.0.1:N` and `off` runs `tailscale serve --tcp=N off`; each then
+reads `serve status --json` back and reports the state it finds. Only
+argument spellings outside the canonical form defer (below).
+
+The question itself (stdin a terminal) is not cased here: the row's stdin
+is never a terminal. The Rust tests in `rust/shim/src/cli/expose/tests.rs`
+drive it, and every outcome after the change, through a fake host.
 
 ## The stand-in `tailscale` (no case can reach the real one)
 
@@ -67,7 +71,10 @@ change, in the deferral cases) never leaves the machine.
    status --json`, the port's state (Funnel, a background handler that is
    or is not a plain forward to `127.0.0.1:<port>`, a foreground session's
    handler), then `tailscale ip -4` and `Self.TailscaleIPs`.
-6. The answer, the plan, or the confirmation.
+6. The answer, or the plan and consent.
+7. The change, `serve status --json` read back, and the port's state then;
+   after `tailscale`, the advisory `GET <url>/health` through the tailnet
+   address (5 s), which on loopback here reaches the fixture daemon.
 
 ## Exact contract items
 
@@ -82,6 +89,7 @@ change, in the deferral cases) never leaves the machine.
 | Output that is not UTF-8 (`run_tailscale` decodes it), and JSON with more than 100 brackets open at once, read lexically (`_too_deep`), are refused as "could not read what `tailscale ...` printed"; `ip -4`'s counts as a failed `ip -4`; the daemon's `/health` is "something that is not the daemon" | `_text`, `_json`, `_read`, `fetch_health` |
 | A `--port` holding anything but ASCII is no port | `_port` |
 | The plan lines and the `command` list; the no-terminal refusal (exit 2) | `_expose`, `_off`, `_confirm` |
+| After the change: "exposed" with the probe's line and the two notes, "removed", the refused serve or removal (exit 4), a permission refusal with the OS's fix (exit 4), a serve that did not take (exit 5), a result that cannot be read back (exit 5); `probe`, `warnings` and `notes` in the report | `_expose`, `_probe`, `_off`, `_permission_message` |
 | Streams: Python text streams, CRLF on Windows; both write a lone surrogate as `\udXXX` | `_write` |
 
 ## Normalization rules
@@ -94,38 +102,66 @@ change, in the deferral cases) never leaves the machine.
 - `expose-deferral`: a declared deferral before any `tailscale` call, or
   after reads only; the oracle's streams and exit become the deferral line,
   its files and requests stay compared (the candidate made the same reads).
-- `expose-deferral-at-change`: a declared deferral at the change. The
-  oracle's call log keeps every call before the first mutating one, which
-  must be present; that call and everything after it, the stand-in's serve
-  state and any later daemon request are removed; its streams become the
-  deferral line.
+- `expose-native-wording`: lines the native client words differently on
+  purpose, saying that nothing changed or what is still in place (the
+  no-terminal refusal, a refused serve or removal, a permission refusal, a
+  serve that did not take). The oracle's line becomes the native one; its
+  exit code, calls, serve state and requests stay compared. Every case
+  carries it, so live runs and the mutant control compare the rest.
 
-## Deferred before any change (the dispatcher's `mode 'expose' is deferred` line, exit 1)
+## Deferred (the dispatcher's `mode 'expose' is deferred` line, exit 1)
 
-- The change: `--yes` on a shape that would run `serve --bg` or `serve
-  --tcp=N off` (cases `defer-off-yes`, `defer-tailscale-yes`,
-  `defer-tailscale-yes-json`), after the same reads as the oracle.
-- The interactive confirmation: no `--yes` and stdin a terminal (on Windows
-  any character device, `NUL` included, as `_isatty` answers).
-- argparse corners: an option before the action, abbreviations, `--`, a
-  value starting with `-`, any other `-`-led token, `--yes=V` on `status`,
-  a `--port` that `int()` reads but this port does not (a sign, spaces,
-  underscores); help or usage at another width, with
-  colour settings or on a terminal; non-UTF-8 argv.
-- `PYTHONINTMAXSTRDIGITS` set.
-- The lookup: `PATH` or `PATHEXT` not UTF-8; a UNC or device `PATH` entry
-  (two leading separators), or such a Program Files base, that holds the
-  program (pathlib's reading of those is not reproduced); a Program Files
-  base pathlib would respell.
-- Reads: a timed-out read on POSIX, or on Windows one whose stdout is not
-  UTF-8 (the oracle decodes it with `replace`).
+Only argument spellings outside the canonical form, before anything is
+run: an option before the action, abbreviations, `--`, a value starting
+with `-`, any other `-`-led token, `--yes=V` on `status`, a `--port` that
+`int()` reads but this port does not (a sign, spaces, underscores), argv
+that is not text, and non-ASCII argv under a locale that is not UTF-8.
+
+Answered natively since 16 November 2026, where they deferred before: the
+change and the question; help and usage at any width, with colour settings
+or on a terminal (argparse's 80-column text); `PYTHONINTMAXSTRDIGITS` set;
+a `tailscale` found under a `PATH` entry or Program Files value whose
+spelling the oracle's lookup is not reproduced for (named as the OS spells
+it); a timed-out `tailscale` call (killed at 30 s, with what it printed
+kept); a program that does not start without an OS error code.
 
 ## Declared divergences
 
-- A write to stdout or stderr that fails: before any byte, the candidate
-  defers; part-way, it exits 1. Not cased.
-- On Windows, a `tailscale` that times out: both wait for its pipes to
-  close after the kill; not cased (each case would take 30 s per arm).
+Where the oracle's behaviour is a quirk, the native client answers
+differently on purpose (maintainer ruling, 14 November 2026: the system
+has to work, not match Python):
+
+- Wording, cased through `expose-native-wording`: the no-terminal refusal
+  says nothing changed; a refused serve or removal, and a permission
+  refusal, say nothing changed (a removal that did not take also says the
+  forward is still in place); a serve that exited 0 but did not take says
+  nothing changed and to check `tailscale serve status`, then rerun.
+- A question answered with anything but `y` / `yes`, or the end of input,
+  says `not confirmed (only y or yes goes ahead); nothing changed` (the
+  oracle: `declined; nothing changed`); Ctrl-C at the question says
+  `interrupted at the question; nothing changed` and exits 130 (the oracle
+  raises `KeyboardInterrupt`).
+- A serve that failed although its forward appeared is removed again and
+  the state read back once more before the report (the oracle does not
+  re-read). Anything other than this daemon's forward on the port after
+  the serve is named and left alone with exit 5 (the oracle removes it).
+- A serve that did not finish within 30 s names the link it printed
+  (Serve waiting to be enabled on the tailnet) and exits 4 when nothing
+  appeared (the oracle reports `tailscale refused the serve (timed out
+  after 30s)`). On POSIX a timed-out read is answered rather than
+  deferred; on both OSes the pipes are drained for at most 2 s after the
+  kill.
+- `off` whose read-back finds something other than this daemon's forward
+  on the port reports the removal and warns, naming it.
+- From the change on, Ctrl-C is held: the `tailscale` child receives the
+  same interrupt, and the state read back is still reported, with a
+  warning that the run was interrupted.
+- A write to stdout or stderr that fails exits 1 (never the deferral
+  line, which would claim nothing ran). Not cased.
+
+Apart from the wording, these shapes are not cased in this row (they need
+a terminal, a timing, or a stand-in behaviour the oracle reacts to
+differently); the Rust tests in `rust/shim/src/cli/expose/` cover each.
 
 ## Hosted CI and goldens
 
