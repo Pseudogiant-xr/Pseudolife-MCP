@@ -24,7 +24,9 @@ pub(crate) const NAMES: Names<'static> = Names {
 
 #[path = "reschedule.rs"]
 mod reschedule;
-pub(crate) use reschedule::{Installed, Stop, installed, installed_kind, preflight, reschedule};
+pub(crate) use reschedule::{
+    Installed, Stop, TARGET, installed, installed_kind, preflight, reschedule,
+};
 
 const LAYOUT: &[&str] = &[
     "PSEUDOLIFE_SHIM_RUNTIMES",

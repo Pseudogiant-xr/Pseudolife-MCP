@@ -39,6 +39,10 @@ pub(crate) struct Installed {
     pub remove: String,
 }
 
+/// Where a row's repair command names the daemon URL `connect` moves to,
+/// which only `connect` knows: it replaces this with that URL.
+pub(crate) const TARGET: &str = "{the new daemon URL}";
+
 /// What discovery reads the schedules through: the platform, the unit
 /// directory `--schedule` writes to, the environment and home the drop-in
 /// search path is built from, and the commands it runs (`schtasks`,
@@ -265,18 +269,31 @@ fn systemd_installed(
     let not_text = |path: &Path| {
         Ok(Some(unvouched(dir, name, client, &|remove| {
             format!(
-                "{} is not UTF-8 text, so connect cannot compare it with what `update --schedule` writes and leaves the schedule as it is: re-create it with `pseudolife-mcp update --schedule HH:MM` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect",
+                "{} is not UTF-8 text, so connect cannot compare it with what `update --schedule` writes and leaves the schedule as it is: re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect",
                 path.display()
             )
         })))
     };
+    // A unit path that is a directory cannot be read, repaired by
+    // permissions or removed by `rm`, so the row says to replace it.
+    let timer_file = unit.with_extension("timer");
+    for path in [&unit, &timer_file] {
+        if path.is_dir() {
+            return Ok(Some(unvouched(dir, name, client, &|_| {
+                format!(
+                    "{} is a directory, not a unit file, so connect cannot read the schedule and leaves it as it is: remove that directory (`rm -r '{}'`) and run `systemctl --user daemon-reload`, then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
+                    path.display(),
+                    path.display()
+                )
+            })));
+        }
+    }
     let service = match fs::read_to_string(&unit) {
         Ok(service) => service,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) if error.kind() == std::io::ErrorKind::InvalidData => return not_text(&unit),
         Err(error) => return Err(format!("{} cannot be read ({error})", unit.display())),
     };
-    let timer_file = unit.with_extension("timer");
     let timer = match fs::read_to_string(&timer_file) {
         Ok(timer) => timer,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -371,7 +388,7 @@ fn systemd_disagrees(
         }
         _ => {
             return Some(format!(
-                "systemd's user manager has no unit file for {unit} ({} is gone), so the schedule is incomplete and connect leaves it as it is: re-create it with `pseudolife-mcp update --schedule HH:MM` at your time, or remove what is left of it, then re-run connect",
+                "systemd's user manager has no unit file for {unit} ({} is gone), so the schedule is incomplete and connect leaves it as it is: re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, or remove what is left of it, then re-run connect",
                 written.display()
             ));
         }
@@ -696,19 +713,18 @@ fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Un
     Ok(None)
 }
 
-/// The drop-ins systemd applies to the unit and its timer, as its own
-/// lookup finds them (src/shared/dropin.c, v259): for each of `roots` in
-/// priority order, the unit's own `<name>.<kind>.d` and then its dash-prefix
-/// ones, longest first (`pseudolife-update.service.d`,
-/// `pseudolife-.service.d`); then, as a last pass, the top-level
-/// `<kind>.d` under each root. Of `.conf` files sharing a name, only the
-/// first in that order applies (`conf_files_list_strv`), so an empty or
-/// masking file earlier hides a same-named one later; a hidden name
-/// (`.x.conf`) is skipped, as systemd skips it. The files read as applying,
-/// the service's and the timer's apart (each was checked only for its own
-/// unit's keys), or the sentence that leaves the schedule alone: a blocking
-/// key set, or a directory or file that cannot be read or that systemd
-/// rejects.
+/// The drop-ins for the unit and its timer, as connect reads them: every
+/// `.conf` file in the unit's own `<name>.<kind>.d`, its dash-prefix ones
+/// (`pseudolife-update.service.d`, `pseudolife-.service.d`) and the
+/// top-level `<kind>.d`, under each of `roots`. Every file is read and none
+/// hides another: systemd lets a same-named file in an earlier directory
+/// mask a later one (`conf_files_list_strv`), but whether it applies the
+/// one that blocks or the one that does not depends on its loaded state,
+/// so a blocking file blocks wherever it is, and its row says when systemd
+/// may be ignoring it. The files read, the service's and the timer's apart
+/// (each was checked only for its own unit's keys), or the sentence that
+/// leaves the schedule alone: a blocking key set, or a directory or file
+/// that cannot be read or that systemd rejects.
 fn systemd_dropins(
     roots: &[PathBuf],
     name: &str,
@@ -718,7 +734,7 @@ fn systemd_dropins(
         .map(|(at, _)| name[..=at].to_owned())
         .collect();
     stems.push(name.to_owned());
-    let mut applied: [std::collections::BTreeSet<PathBuf>; 2] = Default::default();
+    let mut read: [std::collections::BTreeSet<PathBuf>; 2] = Default::default();
     for (index, kind) in ["service", "timer"].into_iter().enumerate() {
         let specific = roots.iter().flat_map(|root| {
             stems
@@ -727,7 +743,7 @@ fn systemd_dropins(
                 .map(move |stem| root.join(format!("{stem}.{kind}.d")))
         });
         let generic = roots.iter().map(|root| root.join(format!("{kind}.d")));
-        let mut seen = std::collections::BTreeSet::new();
+        let mut files = Vec::new();
         for directory in specific.chain(generic) {
             let entries = match fs::read_dir(&directory) {
                 Ok(entries) => entries,
@@ -739,51 +755,58 @@ fn systemd_dropins(
                     ));
                 }
             };
-            let mut files: Vec<_> = entries
+            let mut found: Vec<_> = entries
                 .flatten()
                 .map(|entry| entry.path())
-                .filter(|file| {
-                    file.extension().is_some_and(|ext| ext == "conf")
-                        && !file
-                            .file_name()
-                            .is_some_and(|n| n.to_string_lossy().starts_with('.'))
-                })
+                .filter(|file| file.extension().is_some_and(|ext| ext == "conf"))
                 .collect();
-            files.sort();
-            for file in files {
-                if !seen.insert(file.file_name().map(|n| n.to_owned())) {
-                    continue;
+            found.sort();
+            files.extend(found);
+        }
+        // A name that appears in more than one directory: systemd applies
+        // only one of them.
+        let shared = |file: &Path| {
+            files
+                .iter()
+                .filter(|other| other.file_name() == file.file_name())
+                .count()
+                > 1
+        };
+        for file in &files {
+            let masked = if shared(file) {
+                " (systemd may be ignoring this file because a same-named one takes precedence; remove it or the override to let connect manage the schedule)"
+            } else {
+                ""
+            };
+            let text = match fs::read_to_string(file) {
+                Ok(text) => text,
+                Err(error) => {
+                    return Err(format!(
+                        "connect cannot read the systemd drop-in {}{masked} ({error}), so it cannot tell whether that file changes the run and leaves the schedule as it is: fix or remove the file, then re-run connect",
+                        file.display()
+                    ));
                 }
-                let text = match fs::read_to_string(&file) {
-                    Ok(text) => text,
-                    Err(error) => {
-                        return Err(format!(
-                            "connect cannot read the systemd drop-in {} ({error}), so it cannot tell whether that file changes the run and leaves the schedule as it is: fix or remove the file, then re-run connect",
-                            file.display()
-                        ));
-                    }
-                };
-                match dropin_sets(kind, &text) {
-                    Ok(None) => {
-                        applied[index].insert(file);
-                    }
-                    Ok(Some(key)) => {
-                        return Err(format!(
-                            "the systemd drop-in {} sets {key}, which takes precedence over the files `update --schedule` writes, so connect cannot tell which daemon the run targets, and re-scheduling would not change it. The schedule stays hand-managed while that drop-in sets it: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or keep it and point it at the new daemon yourself",
-                            file.display()
-                        ));
-                    }
-                    Err(Unreadable::Rejected(line, what)) => {
-                        return Err(format!(
-                            "systemd rejects the drop-in {} (line {line}: {what}), so the unit does not load as `update --schedule` writes it, and connect leaves the schedule as it is: fix or remove that file, run `systemctl --user daemon-reload`, then re-run connect",
-                            file.display()
-                        ));
-                    }
+            };
+            match dropin_sets(kind, &text) {
+                Ok(None) => {
+                    read[index].insert(file.clone());
+                }
+                Ok(Some(key)) => {
+                    return Err(format!(
+                        "the systemd drop-in {}{masked} sets {key}, which takes precedence over the files `update --schedule` writes, so connect cannot tell which daemon the run targets, and re-scheduling would not change it. The schedule stays hand-managed while that drop-in sets it: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or keep it and point it at the new daemon yourself",
+                        file.display()
+                    ));
+                }
+                Err(Unreadable::Rejected(line, what)) => {
+                    return Err(format!(
+                        "systemd rejects the drop-in {}{masked} (line {line}: {what}), so the unit does not load as `update --schedule` writes it, and connect leaves the schedule as it is: fix or remove that file, run `systemctl --user daemon-reload`, then re-run connect",
+                        file.display()
+                    ));
                 }
             }
         }
     }
-    Ok(applied)
+    Ok(read)
 }
 
 fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -1726,36 +1749,89 @@ mod tests {
     }
 
     #[test]
-    fn masking_follows_systemds_root_major_order() {
+    fn every_drop_in_is_read_and_none_hides_another() {
         let (high, low) = (scratch(), scratch());
         let roots = [high.clone(), low.clone()];
         let name = "pseudolife-update";
-        let put = |root: &Path, dir: &str, text: &str| {
+        let put = |root: &Path, dir: &str, file: &str, text: &str| {
             fs::create_dir_all(root.join(dir)).unwrap();
-            fs::write(root.join(dir).join("override.conf"), text).unwrap();
+            fs::write(root.join(dir).join(file), text).unwrap();
+            root.join(dir).join(file)
         };
         let post = "[Service]\nExecStartPost=/x --daemon-url http://OLD\n";
-        // The higher-priority root's prefix directory comes before the lower
-        // root's exact directory, so its file applies and the empty one
-        // below does not hide it.
-        put(&high, "pseudolife-.service.d", post);
-        put(&low, "pseudolife-update.service.d", "");
-        assert!(systemd_override(&roots, name).is_some());
+        let hint = "systemd may be ignoring this file because a same-named one takes precedence; remove it or the override to let connect manage the schedule";
+        // The `cp -p` case: a harmless file in the higher root's prefix
+        // directory shares its name with an old-URL one in the lower root's
+        // exact directory. Which one systemd runs depends on what it loaded,
+        // so the old-URL one blocks, and says it may be masked.
+        put(&high, "pseudolife-.service.d", "override.conf", "");
+        let old = put(&low, "pseudolife-update.service.d", "override.conf", post);
+        assert_eq!(
+            systemd_override(&roots, name),
+            Some(format!(
+                "the systemd drop-in {} ({hint}) sets ExecStartPost=",
+                old.display()
+            ))
+        );
         fs::remove_dir_all(high.join("pseudolife-.service.d")).unwrap();
         fs::remove_dir_all(low.join("pseudolife-update.service.d")).unwrap();
-        // Near miss: within one root the exact directory comes first, so an
-        // empty file there hides the prefix one in the lower root.
-        put(&high, "pseudolife-update.service.d", "");
-        put(&low, "pseudolife-.service.d", post);
-        assert_eq!(systemd_override(&roots, name), None);
+        // The other way round, and a top-level one under an exact-name one:
+        // each blocking file blocks wherever it is.
+        put(&high, "pseudolife-update.service.d", "override.conf", "");
+        let prefix = put(&low, "pseudolife-.service.d", "override.conf", post);
+        assert!(
+            systemd_override(&roots, name)
+                .unwrap()
+                .starts_with(&format!(
+                    "the systemd drop-in {} ({hint})",
+                    prefix.display()
+                ))
+        );
         fs::remove_dir_all(low.join("pseudolife-.service.d")).unwrap();
-        // The top-level `service.d` comes after every root's unit
-        // directories: a lower root's exact-name file hides a higher
-        // root's top-level one.
+        let generic = put(&high, "service.d", "override.conf", post);
+        assert!(
+            systemd_override(&roots, name)
+                .unwrap()
+                .starts_with(&format!(
+                    "the systemd drop-in {} ({hint})",
+                    generic.display()
+                ))
+        );
+        fs::remove_dir_all(high.join("service.d")).unwrap();
         fs::remove_dir_all(high.join("pseudolife-update.service.d")).unwrap();
-        put(&high, "service.d", post);
-        put(&low, "pseudolife-update.service.d", "");
-        assert_eq!(systemd_override(&roots, name), None);
+        // A name no other directory holds: no masking sentence. A same name
+        // in the timer's directories is another unit's set and does not count.
+        put(&high, "pseudolife-update.timer.d", "override.conf", "");
+        let alone = put(&low, "pseudolife-update.service.d", "override.conf", post);
+        assert_eq!(
+            systemd_override(&roots, name),
+            Some(format!(
+                "the systemd drop-in {} sets ExecStartPost=",
+                alone.display()
+            ))
+        );
+        fs::remove_dir_all(low.join("pseudolife-update.service.d")).unwrap();
+        fs::remove_dir_all(high.join("pseudolife-update.timer.d")).unwrap();
+        // A hidden name is read too.
+        let hidden = put(&high, "pseudolife-update.service.d", ".hidden.conf", post);
+        assert!(
+            systemd_override(&roots, name)
+                .unwrap()
+                .starts_with(&format!("the systemd drop-in {}", hidden.display()))
+        );
+        fs::remove_dir_all(high.join("pseudolife-update.service.d")).unwrap();
+        // Near miss: harmless files sharing a name block nothing, and are all
+        // in the set read (each is checked against systemd's report).
+        put(&high, "pseudolife-.service.d", "override.conf", "");
+        put(
+            &low,
+            "pseudolife-update.service.d",
+            "override.conf",
+            "[Service]\nTimeoutStopFailureMode=abort\n",
+        );
+        let [service, timer] = systemd_dropins(&roots, name).unwrap();
+        assert_eq!(service.len(), 2);
+        assert!(timer.is_empty());
         fs::remove_dir_all(&high).unwrap();
         fs::remove_dir_all(&low).unwrap();
     }
@@ -1828,7 +1904,9 @@ mod tests {
             "{gone}"
         );
         assert!(
-            gone.contains("re-create it with `pseudolife-mcp update --schedule HH:MM`"),
+            gone.contains(&format!(
+                "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`"
+            )),
             "{gone}"
         );
         assert!(!gone.contains("remove the other unit file"), "{gone}");
@@ -2006,7 +2084,9 @@ mod tests {
         let said = found.overridden.unwrap();
         assert!(said.contains("is not UTF-8 text"), "{said}");
         assert!(
-            said.contains("re-create it with `pseudolife-mcp update --schedule HH:MM`"),
+            said.contains(&format!(
+                "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`"
+            )),
             "{said}"
         );
         assert!(!said.contains("would fail on the same read"), "{said}");
@@ -2098,7 +2178,7 @@ mod tests {
                 .starts_with("systemd's user manager applies the drop-in /somewhere/else/")
         );
         listed.borrow_mut().clear();
-        // The host's Linux flag decides whether an unreadable timer is shown.
+        // A timer path that is a directory is shown, with its own fix.
         fs::remove_file(dir.join(format!("{NAME}.timer"))).unwrap();
         fs::create_dir(dir.join(format!("{NAME}.timer"))).unwrap();
         let shown = installed_on(&host, &names, &expected);
@@ -2108,7 +2188,7 @@ mod tests {
                 .overridden
                 .as_deref()
                 .unwrap()
-                .contains("repair that file")
+                .contains("is a directory, not a unit file")
         );
         // On Windows a failed `schtasks /Query` (this fake exits 1) cannot be
         // told from a missing task, so discovery leaves it out.
@@ -2136,50 +2216,6 @@ mod tests {
             (cfg!(windows), cfg!(target_os = "linux"))
         );
         assert_eq!(here.dir, systemd_dir());
-    }
-
-    #[test]
-    fn a_drop_in_in_a_higher_priority_root_masks_one_of_the_same_name() {
-        let (high, low) = (scratch(), scratch());
-        let roots = [high.clone(), low.clone()];
-        for root in [&high, &low] {
-            fs::create_dir_all(root.join("pseudolife-update.service.d")).unwrap();
-        }
-        let low_file = low.join("pseudolife-update.service.d/override.conf");
-        fs::write(&low_file, "[Service]\nExecStart=/x\n").unwrap();
-        assert!(systemd_override(&roots, "pseudolife-update").is_some());
-        // An empty file of the same name above it (as a /dev/null mask
-        // reads) masks it.
-        fs::write(high.join("pseudolife-update.service.d/override.conf"), "").unwrap();
-        assert_eq!(systemd_override(&roots, "pseudolife-update"), None);
-        fs::remove_dir_all(&high).unwrap();
-        fs::remove_dir_all(&low).unwrap();
-    }
-
-    #[test]
-    fn a_drop_in_in_a_more_specific_directory_masks_one_of_the_same_name() {
-        let root = scratch();
-        let roots = [root.clone()];
-        let name = "pseudolife-update";
-        fs::create_dir_all(root.join("service.d")).unwrap();
-        fs::write(
-            root.join("service.d/10-default.conf"),
-            "[Service]\nEnvironment=A=1\n",
-        )
-        .unwrap();
-        assert!(systemd_override(&roots, name).is_some());
-        // The unit's own directory holds an empty file of the same name:
-        // systemd reads that one and skips the generic one.
-        fs::create_dir_all(root.join("pseudolife-update.service.d")).unwrap();
-        fs::write(root.join("pseudolife-update.service.d/10-default.conf"), "").unwrap();
-        assert_eq!(systemd_override(&roots, name), None);
-        // A timer drop-in of that name is another unit's file set: it does
-        // not mask the service one.
-        fs::remove_file(root.join("pseudolife-update.service.d/10-default.conf")).unwrap();
-        fs::create_dir_all(root.join("pseudolife-update.timer.d")).unwrap();
-        fs::write(root.join("pseudolife-update.timer.d/10-default.conf"), "").unwrap();
-        assert!(systemd_override(&roots, name).is_some());
-        fs::remove_dir_all(&root).unwrap();
     }
 
     // Linux path semantics: absolute XDG entries begin with '/'.
@@ -2282,22 +2318,35 @@ mod tests {
                 .unwrap()
                 .contains("override.conf sets ExecStart=, which takes precedence")
         );
-        // A timer that exists but cannot be read (here a directory) is a read
-        // failure for the re-read, and stays visible to discovery on Linux
-        // with that cause; on Windows discovery leaves a failed read out.
+        // A timer path that is a directory: neither permissions nor `rm` fix
+        // it, so the row says to remove the directory and re-create the
+        // schedule against the target URL.
         fs::remove_dir_all(dir.join(format!("{NAME}.service.d"))).unwrap();
         fs::remove_file(dir.join(format!("{NAME}.timer"))).unwrap();
         fs::create_dir(dir.join(format!("{NAME}.timer"))).unwrap();
-        let cause = read().err().expect("an unreadable timer is a read failure");
+        let found = read().unwrap().unwrap();
+        assert!(!found.shaped);
+        let said = found.overridden.unwrap();
         assert!(
-            cause.contains(&format!("{NAME}.timer cannot be read")),
-            "{cause}"
+            said.contains(&format!("{NAME}.timer is a directory, not a unit file")),
+            "{said}"
         );
-        let shown = discovered(read(), true, &dir, NAME, false).expect("visible on Linux");
+        assert!(said.contains("remove that directory (`rm -r '"), "{said}");
+        assert!(said.contains(&format!("--daemon-url {TARGET}")), "{said}");
+        assert!(!said.contains("permissions"), "{said}");
+        // A unit or timer that exists but cannot be read stays visible to
+        // discovery on Linux with that cause and the real fix (`--schedule`
+        // would fail on the same read); on Windows a failed read is left out.
+        let unreadable = || {
+            Err::<Option<Installed>, _>(format!("{NAME}.timer cannot be read (permission denied)"))
+        };
+        let shown = discovered(unreadable(), true, &dir, NAME, false).expect("visible on Linux");
         assert!(!shown.shaped);
-        // The real fix: `--schedule` would fail on the same read.
         let said = shown.overridden.unwrap();
-        assert!(said.starts_with(&cause), "{said}");
+        assert!(
+            said.starts_with(&format!("{NAME}.timer cannot be read")),
+            "{said}"
+        );
         assert!(said.contains("repair that file's permissions"), "{said}");
         assert!(!said.contains("update --schedule HH:MM"), "{said}");
         assert!(
@@ -2305,7 +2354,7 @@ mod tests {
                 .remove
                 .starts_with("systemctl --user disable --now pseudolife-update.timer")
         );
-        assert!(discovered(read(), false, &dir, NAME, false).is_none());
+        assert!(discovered(unreadable(), false, &dir, NAME, false).is_none());
         // Near miss: a schedule that is simply not installed is no row.
         assert!(discovered(Ok(None), true, &dir, NAME, false).is_none());
         fs::remove_dir(dir.join(format!("{NAME}.timer"))).unwrap();

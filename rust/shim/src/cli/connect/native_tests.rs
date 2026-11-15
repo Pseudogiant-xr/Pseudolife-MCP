@@ -1044,20 +1044,46 @@ fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_dae
         "{}",
         moved[0].detail
     );
-    assert!(!moved[0].detail.contains(clause), "{}", moved[0].detail);
-    // It does not claim `--unschedule` works whatever a drop-in says: one can
-    // refuse a manual stop.
+    // It does not claim `--unschedule` works whatever was found (a drop-in
+    // can refuse a manual stop): it keeps the real blocker, to deal with first.
     assert!(!moved[0].detail.contains("whatever"), "{}", moved[0].detail);
     assert!(
-        moved[0]
-            .detail
-            .ends_with("remove that drop-in and run `systemctl --user daemon-reload` first"),
+        moved[0].detail.ends_with(&format!(
+            "What connect found here may stop `--unschedule` from removing it, so deal with that first: {clause}"
+        )),
         "{}",
         moved[0].detail
     );
     // Near miss: with the daemon still on this machine, the drop-in row.
     let here = schedule_rows(&fake, LOCAL_NEW, false);
     assert!(here[0].detail.ends_with(clause), "{}", here[0].detail);
+}
+
+#[test]
+fn a_repair_command_names_the_daemon_connect_moves_to() {
+    // Discovery cannot know the target URL, so its repair commands carry a
+    // placeholder that the row replaces.
+    let said = Box::leak(
+        format!(
+            "X is not UTF-8 text, so connect leaves the schedule as it is: re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {}` at your time",
+            crate::cli::update::schedules::TARGET
+        )
+        .into_boxed_str(),
+    );
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, None, None, false, None)],
+        overridden: Some(said),
+        ..FakeScheduler::default()
+    });
+    let detail = &schedule_rows(&fake, NEW, true)[0].detail;
+    assert!(
+        detail.ends_with(&format!("--daemon-url {NEW}` at your time")),
+        "{detail}"
+    );
+    assert!(
+        !detail.contains(crate::cli::update::schedules::TARGET),
+        "{detail}"
+    );
 }
 
 #[test]

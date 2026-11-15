@@ -21,7 +21,7 @@ pub(crate) use seams::{data_dir, fetch_json, home, run_cli};
 /// The unattended-update schedules as `connect` reads and re-creates them.
 pub(crate) mod schedules {
     pub(crate) use super::unattended::{
-        Installed, NAMES, Stop, installed, installed_kind, preflight, reschedule,
+        Installed, NAMES, Stop, TARGET, installed, installed_kind, preflight, reschedule,
     };
 
     /// A command this process ran for them was cancelled by a signal.

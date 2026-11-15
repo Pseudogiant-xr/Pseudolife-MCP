@@ -179,9 +179,14 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             // nor `--schedule` is true. The one exception acts first: the
             // daemon's own schedule after the daemon moved away is removed
             // with `--unschedule` whatever a drop-in says.
+            let overridden = overridden.replace(crate::cli::update::schedules::TARGET, &ctx.url);
+            // The daemon's own schedule after the daemon moved away is
+            // removed with `--unschedule`, but what was found here (a
+            // drop-in that refuses a manual stop, a unit file elsewhere) can
+            // stop that, so the row keeps it.
             let detail = if !found.client && ctx.remote {
                 format!(
-                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host. It also has a systemd file connect cannot vouch for; if `--unschedule` cannot stop it (a drop-in can refuse a manual stop), remove that drop-in and run `systemctl --user daemon-reload` first",
+                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host. What connect found here may stop `--unschedule` from removing it, so deal with that first: {overridden}",
                     found.place
                 )
             } else {
