@@ -4,6 +4,10 @@ The native runtime installer installs a new Rust CLI beside existing runtimes an
 selects it for the next session. This is opt-in work; it does not change the
 daemon engine default or remove the Python oracle or existing Python installs.
 
+[Finish the move to Rust](python-retirement.md) maps the work after the 0.24
+cut: the open installer stack, remaining client workflows, package-deletion
+dependencies and installed acceptance checks.
+
 ## Checkout update wrappers
 
 `ops/update.sh --native`, `ops/update.ps1 -Native`, or

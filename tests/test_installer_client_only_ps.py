@@ -23,7 +23,7 @@ import pytest
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
-from tests.test_installer_existing_upgrade import _between, _fixture_env
+from tests.test_installer_existing_upgrade import _between, _fixture_env, user_path_unchanged
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -969,7 +969,7 @@ $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
 function Get-EnvValue($name) {{ return $null }}
 function global:python {{
     $global:LASTEXITCODE = 1
-    if (($env:FAKE_PY_OK -eq '1') -and ("$args" -match 'sys\.executable')) {{
+    if (($env:FAKE_PY_OK -eq '1') -and ("$args" -match 'sys\\.executable')) {{
         $global:LASTEXITCODE = 0
         return 'fake-codex-python'
     }}
@@ -1142,13 +1142,14 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
                 "PYTHONPATH": str(ROOT), "NO_COLOR": "1", "TERM": "dumb",
                 # The installer's own environment carries an older credential.
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
-    proc = subprocess.run(
-        [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"),
-         "-ClientOnly", "-DaemonUrl", daemon_server, "-TokenFile", str(token),
-         "-Client", "claude,gemini", "-ClaudePlugin", "skip", "-Instructions", "skip",
-         "-NoArt"],
-        capture_output=True, text=True, timeout=300, env=env, check=False,
-        stdin=subprocess.DEVNULL)
+    with user_path_unchanged(ps.home):
+        proc = subprocess.run(
+            [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"),
+             "-ClientOnly", "-DaemonUrl", daemon_server, "-TokenFile", str(token),
+             "-Client", "claude,gemini", "-ClaudePlugin", "skip", "-Instructions", "skip",
+             "-NoArt"],
+            capture_output=True, text=True, timeout=300, env=env, check=False,
+            stdin=subprocess.DEVNULL)
     output = _output(proc)
     assert proc.returncode == 0, output
     logged = ps.logged()

@@ -45,6 +45,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
+# On Windows, console children of a run that has no console open no window
+# on the developer's desktop (tests/windowless_children.py).
+import runpy  # noqa: E402
+runpy.run_path(str(REPO / "tests" / "windowless_children.py"))["install"]()
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(HERE))
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "embedding":

@@ -80,7 +80,7 @@ def _wire_cases() -> list[Case]:
              stdin_json=hook(cwd="{HOME}")))
     add(Case("start-cwd-home-lowercase-drive", start, daemon=daemon(), rules=TITLE,
              stdin_json=hook(cwd="{HOME_LOWER_DRIVE}"), platforms=("windows",),
-             note="VS Code-launched hosts report c:\...; Python compares abspath strings"))
+             note="VS Code-launched hosts report c:\\...; Python compares abspath strings"))
     add(Case("start-cwd-missing", start, daemon=daemon(), rules=TITLE, stdin_json=hook()))
     add(Case("start-cwd-null", start, daemon=daemon(), rules=TITLE,
              stdin_json=hook(cwd=None)))
