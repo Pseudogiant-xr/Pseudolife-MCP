@@ -453,7 +453,18 @@ impl<H: Hosts> Run<'_, H> {
             return Err(stop);
         }
         let request = self.request(Op::Restore);
-        match self.ask(&request, None)? {
+        let asked = match self.ask(&request, None) {
+            Ok(asked) => asked,
+            // Interrupted while the target answered busy: it said the restore
+            // did not run, so the record says so before the rollback reads it.
+            Err(stop) => {
+                self.record.restore_sent = false;
+                self.record.flags.target_restored = plan.resume;
+                let _ = self.save();
+                return Err(stop);
+            }
+        };
+        match asked {
             Ok(answer) if answer.ok => {
                 self.record.restore_dropped = true;
                 self.save()?;
@@ -836,6 +847,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
                 record: run.record,
                 state: last,
                 same_run: true,
+                home: Home::Here,
             };
             back.run(&stop.reason)
         }
@@ -852,6 +864,7 @@ pub(super) fn roll_back<H: Hosts>(hosts: &mut H, record: Record) -> Outcome {
         record,
         state: None,
         same_run: false,
+        home: Home::Here,
     };
     back.run("rolling back by request (move --rollback)")
 }
@@ -975,6 +988,43 @@ struct Back<'a, H: Hosts> {
     /// This rollback runs in the invocation that sent the move's restore,
     /// so its reading follows that restore within the same run.
     same_run: bool,
+    /// For a release: where the user's bank is served.
+    home: Home,
+}
+
+/// Where the user's bank is served while a release runs.
+#[derive(Default)]
+enum Home {
+    /// This host's own daemon.
+    #[default]
+    Here,
+    /// The target of a later move of the same bank, which committed:
+    /// (move id, target, URL).
+    Moved(String, String, String),
+}
+
+impl Home {
+    fn sentence(&self, bank: &str) -> String {
+        match self {
+            Home::Here => {
+                format!("Your bank is this host's ({bank}), which this host's daemon serves")
+            }
+            Home::Moved(id, to, url) => format!(
+                "Your bank ({bank}) lives on {to}, where move {id} took it, and {url} serves it"
+            ),
+        }
+    }
+
+    fn facts(&self, bank: &str) -> String {
+        match self {
+            Home::Here => format!(
+                "  running now: this host's daemon, serving your bank ({bank})\n  served: yes, by this host's daemon\n  data: your bank here"
+            ),
+            Home::Moved(_, to, url) => format!(
+                "  running now: the daemon on {to}, serving your bank ({bank})\n  served: yes, at {url}\n  data: your bank on {to}"
+            ),
+        }
+    }
 }
 
 impl<H: Hosts> Back<'_, H> {
@@ -1499,7 +1549,8 @@ impl<H: Hosts> Back<'_, H> {
             Outcome {
                 code: EXIT_INCOMPLETE,
                 message: format!(
-                    "giving {to} back its own bank did not finish: {step} failed ({why}).\n  running now: this host's daemon, serving your bank ({bank})\n  served: yes, by this host's daemon\n  data: your bank here; on {to}, the moved copy stays stopped behind /data/move.json until its own bank is back\n  next: pseudolife-mcp move --release-target {id} (each step is safe to repeat)"
+                    "giving {to} back its own bank did not finish: {step} failed ({why}).\n{}; on {to}, the moved copy stays stopped behind /data/move.json until its own bank is back\n  next: pseudolife-mcp move --release-target {id} (each step is safe to repeat)",
+                    back.home.facts(&bank)
                 ),
             }
         };
@@ -1548,7 +1599,8 @@ impl<H: Hosts> Back<'_, H> {
             return Outcome {
                 code: EXIT_OK,
                 message: format!(
-                    "released: {to} has its own bank back and is free for a new move. Your bank is this host's ({bank}), which this host's daemon serves. {}",
+                    "released: {to} has its own bank back and is free for a new move. {}. {}",
+                    self.home.sentence(&bank),
                     kept_line(&self.record)
                 ),
             };
@@ -1653,12 +1705,13 @@ impl<H: Hosts> Back<'_, H> {
         Outcome {
             code: EXIT_OK,
             message: format!(
-                "released: {to} has its own bank back{} and is free for a new move. Your bank is this host's ({bank}), which this host's daemon serves. {}",
+                "released: {to} has its own bank back{} and is free for a new move. {}. {}",
                 if self.record.target_was_running {
                     " and runs again"
                 } else {
                     ""
                 },
+                self.home.sentence(&bank),
                 kept_line(&self.record)
             ),
         }
@@ -1695,7 +1748,8 @@ impl<H: Hosts> Back<'_, H> {
         Outcome {
             code: EXIT_OK,
             message: format!(
-                "released: {to} no longer holds anything of move {id}'s copy of this host's bank: it was read and reads {found}. This host's record of the move is closed, so it no longer holds this host, and nothing was changed on {to}. Your bank is this host's ({bank}), which this host's daemon serves.{gate}"
+                "released: {to} no longer holds anything of move {id}'s copy of this host's bank: it was read and reads {found}. This host's record of the move is closed, so it no longer holds this host, and nothing was changed on {to}. {}.{gate}",
+                self.home.sentence(&bank)
             ),
         }
     }
@@ -1739,7 +1793,8 @@ impl<H: Hosts> Back<'_, H> {
         Outcome {
             code: EXIT_REFUSED,
             message: format!(
-                "{to} cannot be given back its own bank: {error}.{done} Your bank is this host's ({bank}), which this host's daemon serves. Fix what {to} names, then rerun pseudolife-mcp move --release-target {id}"
+                "{to} cannot be given back its own bank: {error}.{done} {}. Fix what {to} names, then rerun pseudolife-mcp move --release-target {id}",
+                self.home.sentence(&bank)
             ),
         }
     }
@@ -1916,6 +1971,17 @@ pub(super) fn since_baseline(baseline: Option<&Baseline>, state: &State) -> Vec<
 /// writes and all, ends in the restore's safety backup there, which the
 /// answer names; nothing is deleted.
 pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome {
+    release_target_after(hosts, record, None)
+}
+
+/// `release_target`, with `later` the newest committed move of the same
+/// bank from this host after this one, if any: the bank is then served by
+/// that move's target, not this host.
+pub(super) fn release_target_after<H: Hosts>(
+    hosts: &mut H,
+    record: Record,
+    later: Option<&Record>,
+) -> Outcome {
     let id = record.move_id.clone();
     let to = record.target.clone();
     if record.committed {
@@ -1965,11 +2031,40 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
             ),
         };
     }
-    // The bank the user keeps is this host's: it must be serving, or the
-    // release could leave no bank served anywhere.
-    let serving = hosts.source_running() == Some(true)
-        && hosts.source_healthy(RELEASE_SOURCE_WAIT)
-        && hosts.source_bank().as_deref() == Some(record.source_bank.as_str());
+    // The bank the user keeps is this host's, or the target of a later move
+    // that committed: it must be served, or the release could leave no bank
+    // served anywhere.
+    let home = match later {
+        Some(moved) => {
+            let url = format!("{}/health", moved.target_url);
+            let answer = hosts.target_health(&url);
+            let serves = answer.as_ref().is_some_and(|answer| {
+                answer.get("status").and_then(Value::as_str) == Some("ok")
+                    && answer.get("auth").and_then(Value::as_bool) == Some(true)
+                    && answer.get("bank").and_then(Value::as_str)
+                        == Some(record.source_bank.as_str())
+            });
+            if !serves {
+                return Outcome {
+                    code: EXIT_REFUSED,
+                    message: format!(
+                        "your bank ({}) lives on {}, where move {} took it, and {} does not answer with it now, so {to}'s copy is not released while it may be the only one served. Once {} serves that bank, rerun. Nothing was changed",
+                        record.source_bank, moved.target, moved.move_id, url, moved.target_url
+                    ),
+                };
+            }
+            Home::Moved(
+                moved.move_id.clone(),
+                moved.target.clone(),
+                moved.target_url.clone(),
+            )
+        }
+        None => Home::Here,
+    };
+    let serving = matches!(home, Home::Moved(..))
+        || (hosts.source_running() == Some(true)
+            && hosts.source_healthy(RELEASE_SOURCE_WAIT)
+            && hosts.source_bank().as_deref() == Some(record.source_bank.as_str()));
     if !serving {
         return Outcome {
             code: EXIT_REFUSED,
@@ -1984,6 +2079,7 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
         record,
         state: None,
         same_run: false,
+        home,
     };
     back.release()
 }

@@ -3044,3 +3044,82 @@ fn a_check_reading_that_found_wrong_counts_still_counts_as_the_reading_after_the
     assert!(record.unresolved.is_none(), "{record:?}");
     assert!(record.gated_baseline.is_some(), "{record:?}");
 }
+
+#[test]
+fn a_resume_interrupted_while_its_restore_waited_for_the_lock_stays_resumable() {
+    // The target answered busy, so the restore never ran; the interrupt is
+    // seen while waiting. The kept reading still stands.
+    let (first, plan) = resumable_move();
+    let restore = resume_call_of(&first, &plan, "target restore");
+    let mut model = later(&first);
+    model.busy = vec![("target restore", usize::MAX)];
+    // Raised at the save that marks the restore as sent.
+    model.fault = Some((restore - 1, Fault::Interrupt));
+    let outcome = engine::execute(&mut model, &plan, ID);
+    assert_eq!(outcome.code, 1, "{outcome:?}\n{:#?}", model.log);
+    let record = model.record.clone().unwrap();
+    assert!(!record.restore_sent, "{record:?}");
+    assert!(record.unresolved.is_none(), "{record:?}");
+    assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_some());
+    assert!(model.violations.is_empty(), "{:?}", model.violations);
+}
+
+#[test]
+fn a_given_up_target_that_returns_after_the_bank_moved_elsewhere_is_given_back() {
+    let parked = parked_move();
+    let record = parked.record.clone().unwrap();
+    let mut gone = later(&parked);
+    gone.always = vec![("target state", Fault::LostBefore)];
+    let (given_up, _) = engine::give_up(&mut gone, &record).unwrap();
+    // A later move took the bank to another host and committed: this host's
+    // daemon stays stopped behind its moved.json.
+    let mut moved = record.clone();
+    moved.move_id = "20261114-090000-abcdef02".into();
+    moved.target = "dev@other".into();
+    moved.target_url = "http://100.64.0.3:8765".into();
+    moved.committed = true;
+    moved.phase = Phase::Complete;
+    // The first target returns, and the other host serves the bank.
+    let mut back = later(&parked);
+    back.hosts.source_running = false;
+    back.hosts.moved = true;
+    back.hosts.fenced = true;
+    back.health_lies = true;
+    let outcome = engine::release_target_after(&mut back, given_up.clone(), Some(&moved));
+    assert_eq!(outcome.code, 0, "{outcome:?}\n{:#?}", back.log);
+    assert!(
+        outcome.message.contains("lives on dev@other"),
+        "{}",
+        outcome.message
+    );
+    assert!(
+        !outcome.message.contains("this host's daemon serves"),
+        "{}",
+        outcome.message
+    );
+    let h = &back.hosts;
+    assert!(
+        h.bank == Bank::Empty && h.claim.is_none() && !h.gated,
+        "{h:?}"
+    );
+    assert!(!h.source_running && h.moved, "{h:?}");
+    // The other host does not answer with the bank: refused, naming it, and
+    // never "start this host's daemon".
+    let mut back = later(&parked);
+    back.hosts.source_running = false;
+    back.hosts.moved = true;
+    let before = back.hosts.clone();
+    let outcome = engine::release_target_after(&mut back, given_up, Some(&moved));
+    assert_eq!(outcome.code, 4, "{outcome:?}");
+    assert!(
+        outcome.message.contains("http://100.64.0.3:8765"),
+        "{}",
+        outcome.message
+    );
+    assert!(
+        !outcome.message.contains("docker start"),
+        "{}",
+        outcome.message
+    );
+    assert_eq!(back.hosts, before);
+}

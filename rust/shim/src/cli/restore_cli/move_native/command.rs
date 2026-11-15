@@ -514,7 +514,16 @@ pub(super) fn release(request: &Rollback) -> u8 {
     let id = record.move_id.clone();
     let mut again = Files::under_home(&home);
     let outcome = locked(|| match again.load(&id) {
-        Ok(Some(now)) if now == record => engine::release_target(&mut live, record),
+        Ok(Some(now)) if now == record => {
+            // A later move of the same bank that committed: the bank is
+            // served by its target now, not this host.
+            let later = records(&mut again).ok().and_then(|all| {
+                all.into_iter().find(|r| {
+                    r.committed && r.source_bank == record.source_bank && r.move_id > record.move_id
+                })
+            });
+            engine::release_target_after(&mut live, record, later.as_ref())
+        }
         Ok(_) => engine::Outcome {
             code: engine::EXIT_REFUSED,
             message: format!(
