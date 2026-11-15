@@ -638,13 +638,22 @@ def test_a_local_release_file_that_cannot_be_copied_names_the_copy_not_curl(tmp_
 # -- the real client packed as a release ships it (native_client_stub.release_copy)
 
 
-def test_the_packed_client_is_checked_against_the_release_binary_limit(tmp_path, monkeypatch):
+def _built_copy(tmp_path: Path) -> Path:
+    """A stand-in for the built client (this interpreter's executable)."""
     import sys
+    built = tmp_path / "built" / Path(sys.executable).name
+    built.parent.mkdir()
+    shutil.copyfile(sys.executable, built)
+    return built
+
+
+def test_the_packed_client_is_checked_against_the_release_binary_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(native_client_stub, "archive_binary_limit", lambda: 10)
-    built = Path(sys.executable)
+    built = _built_copy(tmp_path)
+    before = hashlib.sha256(built.read_bytes()).hexdigest()
     with pytest.raises(AssertionError, match=r"bytes \(built: \d+ bytes\), past runtime install's 10-byte limit"):
         native_client_stub.release_copy(built, tmp_path / "packed")
-    assert built.is_file(), "the built binary is never touched"
+    assert hashlib.sha256(built.read_bytes()).hexdigest() == before, "the built binary is never touched"
 
 
 def test_the_release_binary_limit_is_read_from_the_rust_source():
@@ -652,12 +661,44 @@ def test_the_release_binary_limit_is_read_from_the_rust_source():
     assert isinstance(limit, int) and limit > 0
 
 
-@pytest.mark.parametrize("required, outcome", [("1", pytest.fail.Exception), ("", pytest.skip.Exception)])
+@pytest.mark.parametrize("required, outcome", [("1", "failed"), ("", "skipped")])
 def test_a_missing_strip_fails_a_required_real_client_and_skips_otherwise(tmp_path, monkeypatch, required, outcome):
     import sys
     if not sys.platform.startswith("linux"):
         pytest.skip("only a Linux debug build embeds its debug info, so only Linux strips the packed copy")
     monkeypatch.setattr(shutil, "which", lambda name, *args, **kwargs: None)
     monkeypatch.setenv("PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED", required)
-    with pytest.raises(outcome, match="strip"):
-        native_client_stub.release_copy(Path(sys.executable), tmp_path / "packed")
+    # Both outcomes are caught, so a skip where a failure is due is a failure here.
+    with pytest.raises((pytest.fail.Exception, pytest.skip.Exception), match="strip") as raised:
+        native_client_stub.release_copy(_built_copy(tmp_path), tmp_path / "packed")
+    assert raised.type is (pytest.fail.Exception if outcome == "failed" else pytest.skip.Exception)
+
+
+def test_on_linux_the_packed_copy_is_stripped_and_the_built_binary_is_not(tmp_path, monkeypatch):
+    import subprocess as subprocesses
+    import sys
+    if not sys.platform.startswith("linux") or shutil.which("strip") is None:
+        pytest.skip("only Linux strips the packed copy, with binutils' strip")
+    calls = []
+    real_run = subprocesses.run
+
+    def run(argv, *args, **kwargs):
+        calls.append(list(argv))
+        return real_run(argv, *args, **kwargs)
+    monkeypatch.setattr(subprocesses, "run", run)
+    built = _built_copy(tmp_path)
+    before = hashlib.sha256(built.read_bytes()).hexdigest()
+    packed = native_client_stub.release_copy(built, tmp_path / "packed")
+    assert calls == [[shutil.which("strip"), "--strip-debug", str(packed)]]
+    assert packed.parent == tmp_path / "packed" and packed != built
+    assert hashlib.sha256(built.read_bytes()).hexdigest() == before
+
+
+@pytest.mark.skipif(REAL is None, reason="set PSEUDOLIFE_NATIVE_TEST_BINARY to a built native client")
+def test_the_packed_real_client_fits_the_release_limit(tmp_path):
+    import sys
+    packed = native_client_stub.release_copy(REAL, tmp_path / "packed")
+    assert packed.stat().st_size <= native_client_stub.archive_binary_limit()
+    if sys.platform.startswith("linux") and REAL.stat().st_size > native_client_stub.archive_binary_limit():
+        # The hosted lane's debug build: only stripping makes it fit.
+        assert packed.stat().st_size < REAL.stat().st_size
