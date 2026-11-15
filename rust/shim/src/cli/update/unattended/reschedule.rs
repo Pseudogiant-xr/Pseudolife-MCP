@@ -22,50 +22,89 @@ pub(crate) struct Installed {
     /// Why that cannot be told (no launcher to compare with, a description
     /// that cannot be read), when it cannot.
     pub why: Option<String>,
+    /// A systemd drop-in that sets a key the run depends on, or one connect
+    /// cannot read or parse, as a clause ("the systemd drop-in X sets
+    /// ExecStart"). The effective schedule is then not the base files, so
+    /// it is never current and never re-created.
+    pub overridden: Option<String>,
+    /// A task setting `--schedule` never writes, named ("an end date"):
+    /// re-registering the task would drop it.
+    pub differs: Option<String>,
     /// The one command that removes exactly this schedule.
     pub remove: String,
 }
 
-/// The daemon and client schedules installed on this machine.
+/// The daemon and client schedules installed on this machine. One that
+/// cannot be read is left out, as it always was.
 pub(crate) fn installed(names: &Names) -> Vec<Installed> {
     installed_with(names, &|url: &str| command(url))
 }
 
 fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>) -> Vec<Installed> {
-    let mut found = Vec::new();
-    for client in [false, true] {
-        let item = if cfg!(windows) {
-            let task = if client {
-                names.client_task
-            } else {
-                names.task
-            };
-            let (code, xml) = seams::run_cli(
-                &[
-                    "schtasks".into(),
-                    "/Query".into(),
-                    "/TN".into(),
-                    task.into(),
-                    "/XML".into(),
-                ],
-                None,
-                30,
-                false,
-            );
-            (code == 0).then(|| {
-                windows_parse(task, client, &xml, &|url| schedule_windows(&expected(url)?))
-            })
-        } else if cfg!(target_os = "linux") {
-            let name = if client {
-                names.client_unit
-            } else {
-                names.unit
-            };
-            let dir = systemd_dir();
-            let unit = dir.join(format!("{name}.service"));
-            fs::read_to_string(&unit).ok().map(|service| {
-                let timer = fs::read_to_string(unit.with_extension("timer")).unwrap_or_default();
-                let enabled = seams::run_cli(
+    [false, true]
+        .into_iter()
+        .filter_map(|client| installed_kind_with(names, client, expected).ok().flatten())
+        .collect()
+}
+
+/// The schedule of one kind, read again: `None` when it is not installed,
+/// and why when it could not be read (a failed, timed-out or interrupted
+/// query, an unreadable unit).
+pub(crate) fn installed_kind(
+    names: &Names,
+    client: bool,
+) -> std::result::Result<Option<Installed>, String> {
+    installed_kind_with(names, client, &|url: &str| command(url))
+}
+
+fn installed_kind_with(
+    names: &Names,
+    client: bool,
+    expected: &dyn Fn(&str) -> Result<Vec<String>>,
+) -> std::result::Result<Option<Installed>, String> {
+    if cfg!(windows) {
+        let task = if client {
+            names.client_task
+        } else {
+            names.task
+        };
+        let (code, xml) = seams::run_cli(
+            &[
+                "schtasks".into(),
+                "/Query".into(),
+                "/TN".into(),
+                task.into(),
+                "/XML".into(),
+            ],
+            None,
+            30,
+            false,
+        );
+        if code != 0 {
+            // schtasks exits 1 both for a task that is gone and for a query
+            // that failed or timed out, so the cause names all of them.
+            return Err(format!(
+                "Task Scheduler did not return it (`schtasks /Query` exited {code}: it is gone, or the query failed or timed out)"
+            ));
+        }
+        Ok(Some(windows_parse(task, client, &xml, &|url| {
+            schedule_windows(&expected(url)?)
+        })))
+    } else if cfg!(target_os = "linux") {
+        let name = if client {
+            names.client_unit
+        } else {
+            names.unit
+        };
+        let dir = systemd_dir();
+        let roots = systemd_roots(&dir, &|key| std::env::var(key).ok(), &seams::home());
+        systemd_installed(
+            &dir,
+            &roots,
+            name,
+            client,
+            &|| {
+                let code = seams::run_cli(
                     &[
                         "systemctl".into(),
                         "--user".into(),
@@ -77,72 +116,251 @@ fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>)
                     30,
                     false,
                 )
-                .0 == 0;
-                let dropin = systemd_dropin(&systemd_roots(&dir), name);
-                systemd_parse(
-                    &dir,
-                    name,
-                    client,
-                    &service,
-                    &timer,
-                    enabled,
-                    dropin.as_deref(),
-                    &|url| service_body(name, &expected(url)?, &environment_lines(client, false)?),
-                )
-            })
-        } else {
-            None
-        };
-        found.extend(item);
+                .0;
+                if crate::cli::update::schedules::cancelled() {
+                    return Err("interrupted".to_owned());
+                }
+                Ok(code == 0)
+            },
+            &|url| service_body(name, &expected(url)?, &environment_lines(client, false)?),
+        )
+    } else {
+        Ok(None)
     }
-    found
 }
 
-/// The user unit directories systemd reads drop-ins from, the user's own
-/// (`dir`) first.
-fn systemd_roots(dir: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![dir.to_path_buf()];
-    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
-        roots.push(PathBuf::from(runtime).join("systemd/user"));
-    }
-    roots.extend(
-        [
-            "/etc/systemd/user",
-            "/run/systemd/user",
+/// A systemd unit `name` in `dir`, its timer, whether the timer is enabled
+/// and the drop-ins under `roots` that apply to either, read back.
+fn systemd_installed(
+    dir: &Path,
+    roots: &[PathBuf],
+    name: &str,
+    client: bool,
+    enabled: &dyn Fn() -> std::result::Result<bool, String>,
+    expected: &dyn Fn(&str) -> Result<String>,
+) -> std::result::Result<Option<Installed>, String> {
+    let unit = dir.join(format!("{name}.service"));
+    let service = match fs::read_to_string(&unit) {
+        Ok(service) => service,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{} cannot be read ({error})", unit.display())),
+    };
+    let timer = match fs::read_to_string(unit.with_extension("timer")) {
+        Ok(timer) => timer,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(format!(
+                "{} cannot be read ({error})",
+                unit.with_extension("timer").display()
+            ));
+        }
+    };
+    let enabled = enabled()?;
+    let overridden = systemd_override(roots, name);
+    Ok(Some(systemd_parse(
+        dir, name, client, &service, &timer, enabled, overridden, expected,
+    )))
+}
+
+/// The user unit search path of systemd.unit(5) ("User Unit Search Path"),
+/// highest priority first, with its XDG variables read through `env`;
+/// `dir` is `$XDG_CONFIG_HOME/systemd/user`. The XDG lists follow what
+/// `systemd-analyze --user unit-paths` printed (systemd 259, WSL Ubuntu, 15
+/// November 2026): an unset `XDG_CONFIG_DIRS` adds nothing, and a set
+/// `XDG_DATA_DIRS` keeps the vendor share directories after their `lib`
+/// siblings. A relative or empty XDG entry is ignored, and a repeated
+/// directory is listed once.
+fn systemd_roots(dir: &Path, env: &dyn Fn(&str) -> Option<String>, home: &Path) -> Vec<PathBuf> {
+    let absolute = |value: &str| Some(PathBuf::from(value)).filter(|path| path.is_absolute());
+    let set = |key: &str| env(key).filter(|value| !value.is_empty());
+    let list = |value: &str| -> Vec<PathBuf> {
+        value
+            .split(':')
+            .filter_map(absolute)
+            .map(|entry| entry.join("systemd/user"))
+            .collect()
+    };
+    let runtime = set("XDG_RUNTIME_DIR").as_deref().and_then(absolute);
+    let run = |leaf: &str| {
+        runtime
+            .iter()
+            .map(|run| run.join("systemd").join(leaf))
+            .collect::<Vec<_>>()
+    };
+    let data_home = set("XDG_DATA_HOME")
+        .as_deref()
+        .and_then(absolute)
+        .unwrap_or_else(|| home.join(".local/share"));
+    let vendor = |paths: &[&str]| paths.iter().map(PathBuf::from).collect::<Vec<_>>();
+    let mut roots = vec![dir.with_file_name("user.control")];
+    roots.extend(run("user.control"));
+    roots.extend(run("transient"));
+    roots.extend(run("generator.early"));
+    roots.push(dir.to_path_buf());
+    roots.extend(set("XDG_CONFIG_DIRS").as_deref().map(list).unwrap_or_default());
+    roots.push(PathBuf::from("/etc/systemd/user"));
+    roots.extend(run("user"));
+    roots.push(PathBuf::from("/run/systemd/user"));
+    roots.extend(run("generator"));
+    roots.push(data_home.join("systemd/user"));
+    match set("XDG_DATA_DIRS") {
+        Some(value) => {
+            roots.extend(list(&value));
+            roots.extend(vendor(&[
+                "/usr/local/lib/systemd/user",
+                "/usr/local/share/systemd/user",
+                "/usr/lib/systemd/user",
+                "/usr/share/systemd/user",
+            ]));
+        }
+        None => roots.extend(vendor(&[
+            "/usr/local/share/systemd/user",
+            "/usr/share/systemd/user",
             "/usr/local/lib/systemd/user",
             "/usr/lib/systemd/user",
-        ]
-        .map(PathBuf::from),
-    );
+        ])),
+    }
+    roots.extend(run("generator.late"));
+    let mut seen = std::collections::BTreeSet::new();
+    roots.retain(|root| seen.insert(root.clone()));
     roots
 }
 
-/// A drop-in that applies to the unit or its timer: a `.conf` entry in its
-/// `<name>.<kind>.d`, in a dash-prefix one (`pseudolife-.service.d`) or in
-/// the top-level `<kind>.d`, under any of `roots`. It can change the
-/// effective command or timer while the base files still match; a directory
-/// with no `.conf` entry (emptied, or only backups) changes nothing.
-fn systemd_dropin(roots: &[PathBuf], name: &str) -> Option<PathBuf> {
+/// The keys a drop-in may not set for `connect` to vouch for the schedule.
+/// In the service, what the run executes and with which environment: the
+/// command names the daemon URL, and the environment carries the bearer
+/// file and layout variables the base unit's shape check compares. In the
+/// timer, any key: every `[Timer]` key decides when it runs or which unit
+/// it starts, and `connect` reports and keeps that daily time. Any other
+/// key (`Type=`, `TimeoutStopFailureMode=`, `[Unit]`, `[Install]`) changes
+/// neither, and survives a re-creation, which rewrites only the base files.
+fn blocking_key(kind: &str, section: &str, key: &str) -> bool {
+    match (kind, section) {
+        ("service", "Service") => matches!(
+            key,
+            "ExecStart"
+                | "ExecStartPre"
+                | "ExecStartPost"
+                | "Environment"
+                | "EnvironmentFile"
+                | "UnsetEnvironment"
+                | "PassEnvironment"
+        ),
+        ("timer", "Timer") => true,
+        _ => false,
+    }
+}
+
+/// The first blocking key `text`, a drop-in for a unit of `kind`, sets, or
+/// the 1-based line systemd's syntax cannot read.
+fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, usize> {
+    let mut section = String::new();
+    let mut lines = text.lines().enumerate();
+    while let Some((index, raw)) = lines.next() {
+        let mut line = raw.trim().to_owned();
+        // A trailing backslash continues the line.
+        while line.ends_with('\\') {
+            line.pop();
+            match lines.next() {
+                Some((_, next)) => {
+                    line.push(' ');
+                    line.push_str(next.trim());
+                }
+                None => break,
+            }
+        }
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = line
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+        {
+            section = name.to_owned();
+            continue;
+        }
+        let Some((key, _)) = line.split_once('=') else {
+            return Err(index + 1);
+        };
+        let key = key.trim();
+        if blocking_key(kind, &section, key) {
+            return Ok(Some(format!("{key}=")));
+        }
+    }
+    Ok(None)
+}
+
+/// A drop-in for the unit or its timer that sets a blocking key, or that
+/// connect cannot read or parse, as a clause. It looks at every `.conf` in
+/// the unit's own `<name>.<kind>.d`, its dash-prefix ones
+/// (`pseudolife-.service.d`) and the top-level `<kind>.d`, under each of
+/// `roots`; of files sharing a name in one such directory, only the one in
+/// the highest-priority root applies, as systemd reads them.
+fn systemd_override(roots: &[PathBuf], name: &str) -> Option<String> {
     let mut stems: Vec<String> = name
         .match_indices('-')
         .map(|(at, _)| name[..=at].to_owned())
         .collect();
     stems.push(name.to_owned());
-    let stems = &stems;
-    roots
-        .iter()
-        .flat_map(|root| {
-            ["service", "timer"].into_iter().flat_map(move |kind| {
-                stems
-                    .iter()
-                    .map(move |stem| root.join(format!("{stem}.{kind}.d")))
-                    .chain([root.join(format!("{kind}.d"))])
-                    .collect::<Vec<_>>()
-            })
-        })
-        .flat_map(|dir| fs::read_dir(dir).into_iter().flatten().flatten())
-        .map(|entry| entry.path())
-        .find(|path| path.extension().is_some_and(|ext| ext == "conf"))
+    for kind in ["service", "timer"] {
+        let directories = stems
+            .iter()
+            .rev()
+            .map(|stem| format!("{stem}.{kind}.d"))
+            .chain([format!("{kind}.d")]);
+        for directory in directories {
+            let mut seen = std::collections::BTreeSet::new();
+            for root in roots {
+                let path = root.join(&directory);
+                let entries = match fs::read_dir(&path) {
+                    Ok(entries) => entries,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => {
+                        return Some(format!(
+                            "connect cannot read the systemd drop-in directory {} ({error})",
+                            path.display()
+                        ));
+                    }
+                };
+                let mut files: Vec<_> = entries
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|file| file.extension().is_some_and(|ext| ext == "conf"))
+                    .collect();
+                files.sort();
+                for file in files {
+                    if !seen.insert(file.file_name().map(|n| n.to_owned())) {
+                        continue;
+                    }
+                    let text = match fs::read_to_string(&file) {
+                        Ok(text) => text,
+                        Err(error) => {
+                            return Some(format!(
+                                "connect cannot read the systemd drop-in {} ({error})",
+                                file.display()
+                            ));
+                        }
+                    };
+                    match dropin_sets(kind, &text) {
+                        Ok(None) => {}
+                        Ok(Some(key)) => {
+                            return Some(format!(
+                                "the systemd drop-in {} sets {key}",
+                                file.display()
+                            ));
+                        }
+                        Err(line) => {
+                            return Some(format!(
+                                "connect cannot parse the systemd drop-in {} (line {line})",
+                                file.display()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -245,21 +463,41 @@ fn windows_parse(
         .and_then(|(_, time)| clock(time));
     let url = arguments.as_deref().and_then(windows_url);
     let triggers = between(xml, "<Triggers>", "</Triggers>").unwrap_or_default();
-    let as_registered = xml.matches("<Exec>").count() == 1
+    // Settings `--schedule` never writes, which re-registering would drop:
+    // an end date would revive an expired task, a repetition or delay would
+    // change when it runs, and elevation would be lost. `RunLevel` is read
+    // only for `HighestAvailable`: the task `--schedule` registers
+    // (`-RunLevel Limited`) exports no `RunLevel` at all (Windows dev VM,
+    // 15 November 2026), and an absent element means least privilege.
+    let mut found: Vec<&str> = [
+        ("<EndBoundary>", "an end date"),
+        ("<Repetition>", "a repetition"),
+        ("<RandomDelay>", "a random delay"),
+        ("<Delay>", "a start delay"),
+        (
+            "<ExecutionTimeLimit>",
+            "an execution time limit on its trigger",
+        ),
+    ]
+    .iter()
+    .filter(|(element, _)| triggers.contains(element))
+    .map(|(_, setting)| *setting)
+    .collect();
+    if xml.contains("<RunLevel>HighestAvailable</RunLevel>") {
+        found.push("highest privileges");
+    }
+    let differs = match found.as_slice() {
+        [] => None,
+        [one] => Some((*one).to_owned()),
+        [rest @ .., last] => Some(format!("{} and {last}", rest.join(", "))),
+    };
+    let as_registered = differs.is_none()
+        && xml.matches("<Exec>").count() == 1
         && triggers.matches("Trigger>").count() == 2
         && triggers.contains("<CalendarTrigger>")
         && triggers.contains("<DaysInterval>1</DaysInterval>")
-        // A trigger `--schedule` never writes: an end date (re-registering
-        // would revive an expired task) or a repetition (it would change
-        // how often the run happens).
-        && !["<EndBoundary>", "<Repetition>", "<RandomDelay>", "<Delay>", "<ExecutionTimeLimit>"]
-            .iter()
-            .any(|element| triggers.contains(element))
         && !xml.contains("<Enabled>false</Enabled>")
-        && xml.contains("<LogonType>InteractiveToken</LogonType>")
-        // `--schedule` registers it limited; re-registering would drop an
-        // elevation set since.
-        && xml.contains("<RunLevel>LeastPrivilege</RunLevel>");
+        && xml.contains("<LogonType>InteractiveToken</LogonType>");
     let mut why = None;
     // schtasks writes its XML in the console code page; a path outside it
     // arrives as replacement characters and cannot be compared.
@@ -285,6 +523,8 @@ fn windows_parse(
         url,
         shaped,
         why,
+        overridden: None,
+        differs,
         remove: format!("schtasks /Delete /TN \"{task}\" /F"),
     }
 }
@@ -300,7 +540,7 @@ fn systemd_parse(
     service: &str,
     timer: &str,
     enabled: bool,
-    dropin: Option<&Path>,
+    overridden: Option<String>,
     expected: &dyn Fn(&str) -> Result<String>,
 ) -> Installed {
     let url = service
@@ -315,13 +555,8 @@ fn systemd_parse(
         .as_deref()
         .and_then(|time| at(time).ok())
         .is_some_and(|(hour, minute)| timer == timer_body(name, hour, minute));
-    let mut why = dropin.map(|path| {
-        format!(
-            "the systemd drop-in {} can change its command or timer",
-            path.display()
-        )
-    });
-    let shaped = why.is_none()
+    let mut why = None;
+    let shaped = overridden.is_none()
         && enabled
         && timer_shaped
         && match url.as_deref() {
@@ -342,6 +577,8 @@ fn systemd_parse(
         url,
         shaped,
         why,
+        overridden,
+        differs: None,
         remove: format!(
             "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
             file("service"),
@@ -402,19 +639,44 @@ pub(crate) fn preflight(client: bool, url: &str) -> std::result::Result<(), Refu
     Ok(())
 }
 
+/// Why a re-creation stopped.
+pub(crate) enum Stop {
+    /// `check`, run immediately before the write, refused: nothing was
+    /// written.
+    Changed(String),
+    /// `--schedule` itself refused or failed.
+    Failed(String),
+}
+
 /// Re-create the schedule of this kind daily at `when` against `url`
-/// through `--schedule`; the steps it reports, or why it refused.
+/// through `--schedule`, running `check` after its own checks (the machine
+/// kind, the daemon's `/health` for a client) and immediately before it
+/// writes; the steps it reports, or why it stopped.
 pub(crate) fn reschedule(
     names: &Names,
     client: bool,
     when: &str,
     url: &str,
-) -> std::result::Result<Vec<String>, String> {
+    check: &dyn Fn() -> std::result::Result<(), String>,
+) -> std::result::Result<Vec<String>, Stop> {
     let mut update = options(url);
     update.o.schedule = Some(when.to_owned());
-    same_kind(&update, client).map_err(|refusal| refusal.reason)?;
-    schedule_named(&mut update, when, names).map_err(|error| error.message)?;
-    Ok(update.report.steps)
+    same_kind(&update, client).map_err(|refusal| Stop::Failed(refusal.reason))?;
+    let changed = std::cell::RefCell::new(None);
+    let gate = || -> Result<()> {
+        check().map_err(|cause| {
+            let error = UpdateError::usage(cause.clone());
+            *changed.borrow_mut() = Some(cause);
+            error
+        })
+    };
+    match schedule_checked(&mut update, when, names, &gate) {
+        Ok(()) => Ok(update.report.steps),
+        Err(error) => Err(match changed.take() {
+            Some(cause) => Stop::Changed(cause),
+            None => Stop::Failed(error.message),
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -434,11 +696,14 @@ mod tests {
         ])
     }
 
-    /// A task's `/XML` as `--schedule` registers it, with `edit` applied.
+    /// A task's `/XML` as `--schedule` registers it, with `edit` applied:
+    /// the shape `schtasks /Query /XML` exported on the Windows dev VM on 15
+    /// November 2026 for a task registered as `--schedule` registers it (no
+    /// `RunLevel`, no `Enabled` element), its user id redacted.
     fn task_xml(command: &str, arguments: &str, edit: impl Fn(String) -> String) -> String {
         let escape = |text: &str| text.replace('&', "&amp;").replace('"', "&quot;");
         edit(format!(
-            "<Task><Triggers><CalendarTrigger><StartBoundary>2026-11-14T03:07:00</StartBoundary><Enabled>true</Enabled><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers><Principals><Principal id=\"Author\"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><Enabled>true</Enabled></Settings><Actions Context=\"Author\"><Exec><Command>{}</Command><Arguments>{}</Arguments></Exec></Actions></Task>",
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n<Task version=\"1.3\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n  <RegistrationInfo>\n    <URI>\\T</URI>\n  </RegistrationInfo>\n  <Principals>\n    <Principal id=\"Author\">\n      <UserId>S-1-5-21-0-0-0-1001</UserId>\n      <LogonType>InteractiveToken</LogonType>\n    </Principal>\n  </Principals>\n  <Settings>\n    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>\n    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n    <IdleSettings>\n      <Duration>PT10M</Duration>\n      <WaitTimeout>PT1H</WaitTimeout>\n      <StopOnIdleEnd>true</StopOnIdleEnd>\n      <RestartOnIdle>false</RestartOnIdle>\n    </IdleSettings>\n    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>\n  </Settings>\n  <Triggers>\n    <CalendarTrigger>\n      <StartBoundary>2026-11-14T03:07:00+11:00</StartBoundary>\n      <ScheduleByDay>\n        <DaysInterval>1</DaysInterval>\n      </ScheduleByDay>\n    </CalendarTrigger>\n  </Triggers>\n  <Actions Context=\"Author\">\n    <Exec>\n      <Command>{}</Command>\n      <Arguments>{}</Arguments>\n    </Exec>\n  </Actions>\n</Task>\n",
             escape(command),
             escape(arguments)
         ))
@@ -476,8 +741,13 @@ mod tests {
     fn a_task_changed_from_what_schedule_registers_is_not_shaped() {
         let (command, arguments) = windows_expected(URL).unwrap();
         let shaped = |xml: String| windows_parse("T", false, &xml, &windows_expected).shaped;
-        // Near miss: unchanged, it is shaped.
+        // Near misses: unchanged, and with the least-privilege default
+        // written out, it is shaped.
         assert!(shaped(task_xml(&command, &arguments, |x| x)));
+        assert!(shaped(task_xml(&command, &arguments, |x| x.replace(
+            "</LogonType>",
+            "</LogonType>\n      <RunLevel>LeastPrivilege</RunLevel>"
+        ))));
         // The same URL, with an argument added by hand.
         let edited = windows_parse(
             "T",
@@ -506,15 +776,15 @@ mod tests {
             (
                 "disabled",
                 Box::new(|x: String| {
-                    x.replace("<Settings><Enabled>true", "<Settings><Enabled>false")
+                    x.replace("<Settings>", "<Settings>\n    <Enabled>false</Enabled>")
                 }),
             ),
             (
                 "weekly",
                 Box::new(|x: String| {
-                    x.replace(
-                        "<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>",
-                        "<ScheduleByWeek><WeeksInterval>1</WeeksInterval></ScheduleByWeek>",
+                    x.replace("ScheduleByDay>", "ScheduleByWeek>").replace(
+                        "<DaysInterval>1</DaysInterval>",
+                        "<WeeksInterval>1</WeeksInterval>",
                     )
                 }),
             ),
@@ -531,24 +801,40 @@ mod tests {
                 "run whether logged on or not",
                 Box::new(|x: String| x.replace("InteractiveToken", "Password")),
             ),
-            (
-                "run with highest privileges",
-                Box::new(|x: String| x.replace("LeastPrivilege", "HighestAvailable")),
-            ),
+        ] {
+            assert!(!shaped(task_xml(&command, &arguments, edit)), "{what}");
+        }
+    }
+
+    #[test]
+    fn a_task_setting_schedule_never_writes_is_named_and_not_shaped() {
+        let (command, arguments) = windows_expected(URL).unwrap();
+        let read = |edit: &dyn Fn(String) -> String| {
+            windows_parse(
+                "T",
+                false,
+                &task_xml(&command, &arguments, edit),
+                &windows_expected,
+            )
+        };
+        let plain = read(&|x| x);
+        assert!(plain.shaped && plain.differs.is_none());
+        let start = "</StartBoundary>";
+        for (setting, edit) in [
             (
                 "an end date",
-                Box::new(|x: String| {
+                Box::new(move |x: String| {
                     x.replace(
-                        "</StartBoundary>",
+                        start,
                         "</StartBoundary><EndBoundary>2026-11-20T00:00:00</EndBoundary>",
                     )
-                }),
+                }) as Box<dyn Fn(String) -> String>,
             ),
             (
-                "an hourly repetition",
-                Box::new(|x: String| {
+                "a repetition",
+                Box::new(move |x: String| {
                     x.replace(
-                        "</StartBoundary>",
+                        start,
                         "</StartBoundary><Repetition><Interval>PT1H</Interval></Repetition>",
                     )
                 }),
@@ -562,9 +848,57 @@ mod tests {
                     )
                 }),
             ),
+            (
+                "a start delay",
+                Box::new(move |x: String| x.replace(start, "</StartBoundary><Delay>PT5M</Delay>")),
+            ),
+            (
+                "an execution time limit on its trigger",
+                Box::new(move |x: String| {
+                    x.replace(
+                        start,
+                        "</StartBoundary><ExecutionTimeLimit>PT1H</ExecutionTimeLimit>",
+                    )
+                }),
+            ),
+            (
+                "highest privileges",
+                Box::new(|x: String| {
+                    x.replace(
+                        "</LogonType>",
+                        "</LogonType><RunLevel>HighestAvailable</RunLevel>",
+                    )
+                }),
+            ),
         ] {
-            assert!(!shaped(task_xml(&command, &arguments, edit)), "{what}");
+            let found = read(&edit);
+            assert!(!found.shaped, "{setting}");
+            assert_eq!(found.differs.as_deref(), Some(setting));
         }
+        // Several are listed together.
+        let both = read(&|x: String| {
+            x.replace(
+                start,
+                "</StartBoundary><EndBoundary>2026-11-20T00:00:00</EndBoundary><Delay>PT5M</Delay>",
+            )
+            .replace(
+                "</LogonType>",
+                "</LogonType><RunLevel>HighestAvailable</RunLevel>",
+            )
+        });
+        assert_eq!(
+            both.differs.as_deref(),
+            Some("an end date, a start delay and highest privileges")
+        );
+        // Settings' own ExecutionTimeLimit (outside the trigger) is the
+        // default every registration carries, not a trigger setting.
+        let settings_limit = read(&|x: String| {
+            x.replace(
+                "</Settings>",
+                "<ExecutionTimeLimit>PT72H</ExecutionTimeLimit></Settings>",
+            )
+        });
+        assert!(settings_limit.shaped && settings_limit.differs.is_none());
     }
 
     #[test]
@@ -667,8 +1001,7 @@ mod tests {
         assert_eq!(parse(&service, "", true).time, None);
         assert!(!parse(&service, "", true).shaped);
         assert!(!parse(&service, &timer, false).shaped);
-        // A drop-in beside the matching files: not shaped, and it says why.
-        let dropin = dir.join("pseudolife-update.service.d");
+        // An override beside the matching files: not shaped, and carried.
         let found = systemd_parse(
             dir,
             NAME,
@@ -676,47 +1009,265 @@ mod tests {
             &service,
             &timer,
             true,
-            Some(&dropin),
+            Some("the systemd drop-in X sets ExecStart=".to_owned()),
             &expected,
         );
         assert!(!found.shaped);
-        assert!(found.why.unwrap().contains("pseudolife-update.service.d"));
+        assert!(found.why.is_none());
+        assert_eq!(
+            found.overridden.as_deref(),
+            Some("the systemd drop-in X sets ExecStart=")
+        );
+    }
+
+    /// A throwaway directory under the system temp directory.
+    fn scratch() -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("pseudolife-test-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir(&root).unwrap();
+        root
     }
 
     #[test]
-    fn a_drop_in_directory_for_the_unit_or_its_timer_is_found() {
-        let name = format!("pseudolife-test-{}", uuid::Uuid::new_v4().simple());
-        let root = std::env::temp_dir().join(&name);
-        fs::create_dir(&root).unwrap();
+    fn a_drop_in_blocks_only_when_it_sets_a_key_the_run_depends_on() {
+        let root = scratch();
         let roots = [root.clone()];
-        // Near misses: another unit's drop-in, an empty directory, and one
-        // holding only a backup change nothing.
-        let other = root.join("pseudolife-other.service.d");
-        fs::create_dir(&other).unwrap();
-        fs::write(other.join("override.conf"), "[Service]").unwrap();
-        let own = root.join(format!("{name}.service.d"));
-        fs::create_dir(&own).unwrap();
-        assert_eq!(systemd_dropin(&roots, &name), None);
-        fs::write(own.join("override.conf~"), "[Service]").unwrap();
-        fs::write(own.join("override.conf.bak"), "[Service]").unwrap();
-        assert_eq!(systemd_dropin(&roots, &name), None);
-        fs::remove_dir_all(&own).unwrap();
-        for dir in [
-            format!("{name}.service.d"),
-            format!("{name}.timer.d"),
-            "pseudolife-.service.d".to_owned(),
-            "pseudolife-test-.timer.d".to_owned(),
-            "service.d".to_owned(),
-            "timer.d".to_owned(),
+        let name = "pseudolife-update";
+        let put = |dir: &str, file: &str, text: &str| {
+            let path = root.join(dir);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join(file), text).unwrap();
+            path.join(file)
+        };
+        // Near misses: nothing; another unit's override; an empty directory;
+        // backups only; a vendor top-level drop-in that sets an unrelated key
+        // (Fedora's 10-timeout-abort.conf, as reported); a [Unit] key; a
+        // comment and a continuation line.
+        assert_eq!(systemd_override(&roots, name), None);
+        put(
+            "pseudolife-other.service.d",
+            "override.conf",
+            "[Service]\nExecStart=/bin/true\n",
+        );
+        fs::create_dir_all(root.join("pseudolife-update.service.d")).unwrap();
+        put(
+            "pseudolife-update.service.d",
+            "override.conf~",
+            "[Service]\nExecStart=\n",
+        );
+        put(
+            "pseudolife-update.service.d",
+            "override.conf.bak",
+            "[Service]\nExecStart=\n",
+        );
+        put(
+            "service.d",
+            "10-timeout-abort.conf",
+            "[Service]\nTimeoutStopFailureMode=abort\n",
+        );
+        put(
+            "pseudolife-.service.d",
+            "10-unit.conf",
+            "# a comment\n[Unit]\nDescription=x \\\n  continued\n",
+        );
+        assert_eq!(systemd_override(&roots, name), None);
+        // A key the run depends on, in each place systemd reads one.
+        for (dir, text, key) in [
+            (
+                "pseudolife-update.service.d",
+                "[Service]\nExecStart=\nExecStart=/x --daemon-url http://OLD\n",
+                "ExecStart=",
+            ),
+            (
+                "pseudolife-.service.d",
+                "[Service]\nEnvironment=PSEUDOLIFE_MCP_TOKEN_FILE=/x\n",
+                "Environment=",
+            ),
+            (
+                "service.d",
+                "[Service]\n EnvironmentFile = /x\n",
+                "EnvironmentFile=",
+            ),
+            (
+                "pseudolife-update.timer.d",
+                "[Timer]\nOnCalendar=\nOnCalendar=*-*-* 05:00:00\n",
+                "OnCalendar=",
+            ),
+            (
+                "pseudolife-.timer.d",
+                "[Timer]\nUnit=other.service\n",
+                "Unit=",
+            ),
+            ("timer.d", "[Timer]\nOnBootSec=5min\n", "OnBootSec="),
         ] {
-            let path = root.join(&dir);
-            fs::create_dir(&path).unwrap();
-            let conf = path.join("10-url.conf");
-            fs::write(&conf, "[Service]").unwrap();
-            assert_eq!(systemd_dropin(&roots, &name), Some(conf), "{dir}");
-            fs::remove_dir_all(&path).unwrap();
+            let file = put(dir, "50-test.conf", text);
+            assert_eq!(
+                systemd_override(&roots, name),
+                Some(format!("the systemd drop-in {} sets {key}", file.display())),
+                "{dir}"
+            );
+            fs::remove_file(&file).unwrap();
         }
+        // A service key in a timer drop-in, or a timer key in a service one,
+        // is not read by systemd for that unit.
+        let file = put(
+            "pseudolife-update.timer.d",
+            "50-test.conf",
+            "[Service]\nExecStart=/x\n",
+        );
+        assert_eq!(systemd_override(&roots, name), None);
+        fs::remove_file(&file).unwrap();
+        // A line systemd's syntax cannot read blocks, naming the line.
+        let file = put(
+            "pseudolife-update.service.d",
+            "50-test.conf",
+            "[Service]\nnot a key\n",
+        );
+        assert_eq!(
+            systemd_override(&roots, name),
+            Some(format!(
+                "connect cannot parse the systemd drop-in {} (line 2)",
+                file.display()
+            ))
+        );
+        fs::remove_file(&file).unwrap();
+        // A file that is not UTF-8 cannot be read, and blocks.
+        let file = root
+            .join("pseudolife-update.service.d")
+            .join("50-test.conf");
+        fs::write(&file, b"[Service]\n\xff\n").unwrap();
+        assert!(
+            systemd_override(&roots, name)
+                .unwrap()
+                .starts_with(&format!(
+                    "connect cannot read the systemd drop-in {}",
+                    file.display()
+                ))
+        );
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_drop_in_in_a_higher_priority_root_masks_one_of_the_same_name() {
+        let (high, low) = (scratch(), scratch());
+        let roots = [high.clone(), low.clone()];
+        for root in [&high, &low] {
+            fs::create_dir_all(root.join("pseudolife-update.service.d")).unwrap();
+        }
+        let low_file = low.join("pseudolife-update.service.d/override.conf");
+        fs::write(&low_file, "[Service]\nExecStart=/x\n").unwrap();
+        assert!(systemd_override(&roots, "pseudolife-update").is_some());
+        // An empty file of the same name above it (as a /dev/null mask
+        // reads) masks it.
+        fs::write(high.join("pseudolife-update.service.d/override.conf"), "").unwrap();
+        assert_eq!(systemd_override(&roots, "pseudolife-update"), None);
+        fs::remove_dir_all(&high).unwrap();
+        fs::remove_dir_all(&low).unwrap();
+    }
+
+    // Linux path semantics: absolute XDG entries begin with '/'.
+    #[cfg(unix)]
+    #[test]
+    fn the_drop_in_roots_follow_the_user_unit_search_path() {
+        let home = Path::new("/home/u");
+        let dir = Path::new("/home/u/.config/systemd/user");
+        let none = |_: &str| None::<String>;
+        let roots = systemd_roots(dir, &none, home);
+        let want = |paths: &[&str]| paths.iter().map(PathBuf::from).collect::<Vec<_>>();
+        assert_eq!(
+            roots,
+            want(&[
+                "/home/u/.config/systemd/user.control",
+                "/home/u/.config/systemd/user",
+                "/etc/systemd/user",
+                "/run/systemd/user",
+                "/home/u/.local/share/systemd/user",
+                "/usr/local/share/systemd/user",
+                "/usr/share/systemd/user",
+                "/usr/local/lib/systemd/user",
+                "/usr/lib/systemd/user",
+            ])
+        );
+        let set = |key: &str| match key {
+            "XDG_RUNTIME_DIR" => Some("/run/user/1000".to_owned()),
+            "XDG_CONFIG_DIRS" => Some("/opt/a:relative:/opt/b".to_owned()),
+            "XDG_DATA_HOME" => Some("/data".to_owned()),
+            "XDG_DATA_DIRS" => Some("/opt/d:/usr/share".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            systemd_roots(dir, &set, home),
+            want(&[
+                "/home/u/.config/systemd/user.control",
+                "/run/user/1000/systemd/user.control",
+                "/run/user/1000/systemd/transient",
+                "/run/user/1000/systemd/generator.early",
+                "/home/u/.config/systemd/user",
+                "/opt/a/systemd/user",
+                "/opt/b/systemd/user",
+                "/etc/systemd/user",
+                "/run/user/1000/systemd/user",
+                "/run/systemd/user",
+                "/run/user/1000/systemd/generator",
+                "/data/systemd/user",
+                "/opt/d/systemd/user",
+                "/usr/share/systemd/user",
+                "/usr/local/lib/systemd/user",
+                "/usr/local/share/systemd/user",
+                "/usr/lib/systemd/user",
+                "/run/user/1000/systemd/generator.late",
+            ])
+        );
+    }
+
+    #[test]
+    fn a_unit_read_back_carries_its_drop_in_and_reports_a_read_failure() {
+        let dir = scratch();
+        let roots = [dir.clone()];
+        let environment: Vec<String> = Vec::new();
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        let enabled = || Ok(true);
+        let read = || systemd_installed(&dir, &roots, NAME, false, &enabled, &expected);
+        // Not installed: no unit file.
+        assert!(matches!(read(), Ok(None)));
+        fs::write(
+            dir.join(format!("{NAME}.service")),
+            service_body(NAME, &argv(URL).unwrap(), &environment).unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{NAME}.timer")), timer_body(NAME, 3, 7)).unwrap();
+        // Near miss: the files as `--schedule` writes them, no drop-in.
+        let found = read().unwrap().unwrap();
+        assert!(
+            found.shaped && found.overridden.is_none(),
+            "{:?}",
+            found.why
+        );
+        assert_eq!(found.url.as_deref(), Some(URL));
+        // The drop-in under a root is carried into what is read back.
+        fs::create_dir(dir.join(format!("{NAME}.service.d"))).unwrap();
+        fs::write(
+            dir.join(format!("{NAME}.service.d/override.conf")),
+            "[Service]\nExecStart=\nExecStart=/x\n",
+        )
+        .unwrap();
+        let found = read().unwrap().unwrap();
+        assert!(!found.shaped);
+        assert!(
+            found
+                .overridden
+                .unwrap()
+                .ends_with("override.conf sets ExecStart=")
+        );
+        // An enabled-check that was interrupted is a read failure.
+        let interrupted = || Err("interrupted".to_owned());
+        assert_eq!(
+            systemd_installed(&dir, &roots, NAME, false, &interrupted, &expected)
+                .err()
+                .as_deref(),
+            Some("interrupted")
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -818,25 +1369,101 @@ mod real_tests {
             assert!(found[0].shaped, "{} {:?}", found[0].place, found[0].why);
             assert_eq!(found[0].url.as_deref(), Some("http://127.0.0.1:18765"));
             assert_eq!(found[0].time.as_deref(), Some("04:09"));
-            // Re-created against the new URL at the time read back.
+            assert!(found[0].differs.is_none() && found[0].overridden.is_none());
+            if cfg!(windows) {
+                // The shape the real export has, for the record (its user id
+                // is the caller's to redact).
+                let (code, xml) = seams::run_cli(
+                    &[
+                        "schtasks".into(),
+                        "/Query".into(),
+                        "/TN".into(),
+                        task.clone(),
+                        "/XML".into(),
+                    ],
+                    None,
+                    30,
+                    false,
+                );
+                eprintln!("schtasks /Query /XML exit {code}:\n{xml}");
+            }
+            // Re-created against the new URL at the time read back, through
+            // `reschedule` (`--schedule`'s own path) where this machine's kind
+            // is the client one: a client run needs the daemon's /health, so a
+            // listener here answers it.
+            let health = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = health.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                use std::io::{Read, Write};
+                for mut stream in health.incoming().flatten() {
+                    let mut request = [0u8; 2048];
+                    let _ = stream.read(&mut request);
+                    let body = "{\"status\":\"ok\"}";
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+            });
+            let new_url = format!("http://127.0.0.1:{port}");
             let time = found[0].time.clone().unwrap();
-            let (hour, minute) = at(&time).unwrap();
-            write(
-                &mut update,
-                &names,
-                true,
-                hour,
-                minute,
-                &argv("http://127.0.0.1:28765").unwrap(),
-            )
-            .unwrap();
+            // `reschedule` writes the verified launcher: run this test with
+            // PSEUDOLIFE_SHIM_LAUNCHER (this test binary) and PSEUDOLIFE_SHIM_RUNTIMES
+            // set, or it reports why and re-creates through `write`.
+            let refused = reschedule(&names, true, &time, &new_url, &|| {
+                Err("the re-read refused".to_owned())
+            });
+            let ran = match refused {
+                Err(Stop::Changed(cause)) => {
+                    assert_eq!(cause, "the re-read refused");
+                    // Refused immediately before the write: nothing written.
+                    let still: Vec<_> = installed_with(&names, &argv)
+                        .into_iter()
+                        .filter(|i| i.client)
+                        .collect();
+                    assert_eq!(still[0].url.as_deref(), Some("http://127.0.0.1:18765"));
+                    let check = || match installed_kind_with(&names, true, &argv) {
+                        Ok(Some(now))
+                            if now.shaped
+                                && now.url.as_deref() == Some("http://127.0.0.1:18765") =>
+                        {
+                            Ok(())
+                        }
+                        other => Err(format!("changed: {:?}", other.map(|o| o.map(|i| i.url)))),
+                    };
+                    reschedule(&names, true, &time, &new_url, &check)
+                        .map_err(|stop| match stop {
+                            Stop::Changed(cause) | Stop::Failed(cause) => cause,
+                        })
+                        .unwrap();
+                    true
+                }
+                Err(Stop::Failed(reason)) => {
+                    eprintln!("reschedule not run here ({reason}); re-created through write");
+                    false
+                }
+                Ok(_) => panic!("a refusing check let the write happen"),
+            };
+            if !ran {
+                let (hour, minute) = at(&time).unwrap();
+                write(
+                    &mut update,
+                    &names,
+                    true,
+                    hour,
+                    minute,
+                    &argv(&new_url).unwrap(),
+                )
+                .unwrap();
+            }
             let again: Vec<_> = installed_with(&names, &argv)
                 .into_iter()
                 .filter(|i| i.client)
                 .collect();
             assert_eq!(again.len(), 1);
             assert!(again[0].shaped);
-            assert_eq!(again[0].url.as_deref(), Some("http://127.0.0.1:28765"));
+            assert_eq!(again[0].url.as_deref(), Some(new_url.as_str()));
             assert_eq!(again[0].time.as_deref(), Some("04:09"));
         }));
         remove();

@@ -665,8 +665,12 @@ first, and if one write fails the files already written are restored.
     time.
   - **What stays manual:** a schedule `connect` cannot re-create exactly as
     written, or the daemon's schedule after the daemon moved to another
-    machine, is a `manual` row naming the command to run. `connect` never
-    creates or removes a schedule. The Python client re-creates none: it
+    machine, is a `manual` row naming the command to run. So is a scheduled
+    task with a setting `--schedule` would drop (an end date, a repetition,
+    a delay, highest privileges), whose row names it, and a systemd
+    schedule with a drop-in that sets its command, environment or timer,
+    whose row names the drop-in to edit or remove. `connect` never creates
+    or removes a schedule. The Python client re-creates none: it
     reports only the daemon's schedule, and names the `--schedule` command
     to re-run (`--unschedule` once the daemon is on another machine).
 - **Afterwards:** restart the sessions the report lists (and fully quit and
@@ -683,8 +687,8 @@ and `--json` prints one machine-readable report. Exit codes: 0 done or
 already current, 1 a write failed and was rolled back, 2 usage or not
 confirmed, 3 no registration it can write (none found, or only `manual`
 ones), 4 verification refused, 5 applied but the post-apply check failed
-(or, with the native client, a schedule or User-scope change after the
-registrations moved failed), 130 interrupted.
+(or, with the native client, a planned schedule or User-scope change
+failed, whether or not a registration moved), 130 interrupted.
 
 **With the native client**, `connect` asks once at a terminal, as above,
 and reads `--read-token` and `--read-code` there without echo; a run with

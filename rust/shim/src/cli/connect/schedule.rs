@@ -18,6 +18,10 @@ pub(super) struct Found {
     pub url: Option<String>,
     pub shaped: bool,
     pub why: Option<String>,
+    /// A systemd drop-in that overrides the run, as a clause.
+    pub overridden: Option<String>,
+    /// A task setting `--schedule` never writes, named.
+    pub differs: Option<String>,
     pub remove: String,
 }
 
@@ -30,6 +34,14 @@ pub(super) struct Plan {
     pub from: String,
 }
 
+/// Why a re-creation stopped.
+pub(super) enum Stop {
+    /// The re-read immediately before the write refused: nothing written.
+    Changed(String),
+    /// `--schedule` refused or failed.
+    Failed(String),
+}
+
 /// Why `--schedule` here would not re-create a schedule.
 pub(super) struct Refusal {
     /// It would write the other kind of schedule instead.
@@ -40,11 +52,20 @@ pub(super) struct Refusal {
 pub(super) trait Scheduler {
     /// The daemon and client schedules installed on this machine.
     fn found(&self) -> Vec<Found>;
+    /// The schedule of this kind, read again: `None` when it is not
+    /// installed, and why when it could not be read.
+    fn reread(&self, client: bool) -> Result<Option<Found>, String>;
     /// Why `--schedule` here would not re-create this kind for `url`.
     fn preflight(&self, client: bool, url: &str) -> Result<(), Refusal>;
-    /// Re-create this kind daily at `when` against `url`; why not, if it
-    /// refused.
-    fn recreate(&self, client: bool, when: &str, url: &str) -> Result<(), String>;
+    /// Re-create this kind daily at `when` against `url`, running `check`
+    /// immediately before the write; why it stopped, if it did.
+    fn recreate(
+        &self,
+        client: bool,
+        when: &str,
+        url: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), Stop>;
     /// A scheduler command this run started was stopped by Ctrl-C or
     /// another cancelling signal: the run stops too.
     fn cancelled(&self) -> bool;
@@ -53,21 +74,36 @@ pub(super) trait Scheduler {
 /// The native `update --schedule` code.
 struct Native;
 
+fn found(installed: crate::cli::update::schedules::Installed) -> Found {
+    Found {
+        client: installed.client,
+        place: installed.place,
+        time: installed.time,
+        url: installed.url,
+        shaped: installed.shaped,
+        why: installed.why,
+        overridden: installed.overridden,
+        differs: installed.differs,
+        remove: installed.remove,
+    }
+}
+
 impl Scheduler for Native {
     fn found(&self) -> Vec<Found> {
         use crate::cli::update::schedules;
         schedules::installed(&schedules::NAMES)
             .into_iter()
-            .map(|installed| Found {
-                client: installed.client,
-                place: installed.place,
-                time: installed.time,
-                url: installed.url,
-                shaped: installed.shaped,
-                why: installed.why,
-                remove: installed.remove,
-            })
+            .map(found)
             .collect()
+    }
+
+    fn reread(&self, client: bool) -> Result<Option<Found>, String> {
+        use crate::cli::update::schedules;
+        let read = schedules::installed_kind(&schedules::NAMES, client);
+        if schedules::cancelled() {
+            return Err("interrupted".to_owned());
+        }
+        read.map(|installed| installed.map(found))
     }
 
     fn preflight(&self, client: bool, url: &str) -> Result<(), Refusal> {
@@ -77,9 +113,20 @@ impl Scheduler for Native {
         })
     }
 
-    fn recreate(&self, client: bool, when: &str, url: &str) -> Result<(), String> {
+    fn recreate(
+        &self,
+        client: bool,
+        when: &str,
+        url: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), Stop> {
         use crate::cli::update::schedules;
-        schedules::reschedule(&schedules::NAMES, client, when, url).map(|_| ())
+        schedules::reschedule(&schedules::NAMES, client, when, url, check)
+            .map(|_| ())
+            .map_err(|stop| match stop {
+                schedules::Stop::Changed(cause) => Stop::Changed(cause),
+                schedules::Stop::Failed(cause) => Stop::Failed(cause),
+            })
     }
 
     fn cancelled(&self) -> bool {
@@ -123,6 +170,21 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
         };
         // A URL the plan cannot hold (hand-edited) is a manual row, never a
         // deferral of the whole run.
+        if let Some(overridden) = &found.overridden {
+            // The drop-in, not the base unit `--schedule` writes, decides
+            // what runs, so neither "current" nor `--schedule` is true.
+            rows.push(discover::manual(
+                "unattended-update",
+                place,
+                None,
+                None,
+                format!(
+                    "{}: {overridden}, which takes precedence over what `update --schedule` writes, so connect cannot tell which daemon it runs against, and re-scheduling it would not change that; edit or remove that drop-in, run `systemctl --user daemon-reload`, then re-run connect",
+                    found.place
+                ),
+            )?);
+            continue;
+        }
         let target = found
             .url
             .as_deref()
@@ -162,6 +224,11 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
         } else if let Some(why) = &found.why {
             leave(&format!(
                 "connect cannot tell whether it is the one `update --schedule` writes ({why}), so it leaves it as it is; re-schedule it"
+            ))?
+        } else if let Some(differs) = &found.differs {
+            manual(format!(
+                "it has {differs}, which `update --schedule` does not write, so re-scheduling it would drop that, and connect leaves it as it is: to keep it, change the task's `--daemon-url` argument to {} in Task Scheduler; to drop it, re-schedule it: {fix}",
+                ctx.url
             ))?
         } else if found.url.is_none() {
             leave(
@@ -225,50 +292,59 @@ pub(super) fn apply(
 ) -> (Vec<String>, Vec<String>) {
     let mut notes = Vec::new();
     let mut failures = Vec::new();
-    // Read again just before writing: a schedule removed, disabled or edited
-    // since the plan was shown is left as it now is, never revived or
-    // overwritten.
-    let mut now = None;
     for row in rows.iter().filter(|row| row.state == "change") {
         let Some(plan) = &row.schedule else {
             continue;
         };
-        let now = now.get_or_insert_with(|| backend.found());
-        let unchanged = now.iter().any(|found| {
-            found.client == plan.client
-                && found.shaped
-                && found.why.is_none()
-                && found.time.as_deref() == Some(plan.time.as_str())
-                && found.url.as_deref() == Some(plan.from.as_str())
-        });
-        if !unchanged {
-            failures.push(format!(
-                "{}{} was not re-created: it was removed or changed after connect read it, so connect leaves it as it is; re-run connect to plan it again",
-                if moved {
-                    format!("the client registrations now name {url} (backups above), but ")
-                } else {
-                    String::new()
-                },
-                row.detail,
-            ));
-            continue;
-        }
-        match backend.recreate(plan.client, &plan.time, url) {
+        let prefix = if moved {
+            format!("the client registrations now name {url} (backups above), but ")
+        } else {
+            String::new()
+        };
+        // Read again immediately before the write: a schedule removed,
+        // disabled or edited since the plan was shown is left as it now is,
+        // never revived or overwritten.
+        let check = || unchanged(plan, backend.reread(plan.client));
+        match backend.recreate(plan.client, &plan.time, url, &check) {
             Ok(()) => notes.push(format!(
                 "{} now runs against {url}, daily at {}, as `update --schedule` writes it",
                 row.detail, plan.time
             )),
-            Err(cause) => failures.push(format!(
-                "{}{} was not re-created ({cause}); finish it with {}",
-                if moved {
-                    format!("the client registrations now name {url} (backups above), but ")
-                } else {
-                    String::new()
-                },
+            Err(Stop::Changed(cause)) => failures.push(format!(
+                "{prefix}{} was not re-created: {cause}, so connect leaves it as it is; re-run connect to plan it again",
+                row.detail,
+            )),
+            Err(Stop::Failed(cause)) => failures.push(format!(
+                "{prefix}{} was not re-created ({cause}); finish it with {}",
                 row.detail,
                 command(&plan.time, url)
             )),
         }
     }
     (notes, failures)
+}
+
+/// Whether the schedule read again (`read`) is still the one `plan` was
+/// made from; why not, as the cause a failure line states.
+pub(super) fn unchanged(plan: &Plan, read: Result<Option<Found>, String>) -> Result<(), String> {
+    match read {
+        Err(cause) => Err(format!(
+            "connect could not read it again immediately before writing ({cause})"
+        )),
+        Ok(None) => Err("it was removed after connect read it".to_owned()),
+        Ok(Some(found))
+            if found.client == plan.client
+                && found.shaped
+                && found.why.is_none()
+                && found.overridden.is_none()
+                && found.differs.is_none()
+                && found.time.as_deref() == Some(plan.time.as_str())
+                && found.url.as_deref() == Some(plan.from.as_str()) =>
+        {
+            Ok(())
+        }
+        Ok(Some(_)) => Err(
+            "it changed after connect read it (its daemon URL, time, state or shape)".to_owned(),
+        ),
+    }
 }

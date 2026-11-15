@@ -598,6 +598,11 @@ struct FakeScheduler {
     /// (other kind, reason) when `--schedule` here would refuse.
     refuse_here: Option<(bool, String)>,
     refuse_write: Option<String>,
+    /// Set on every schedule installed.
+    overridden: Option<&'static str>,
+    differs: Option<&'static str>,
+    /// Why the re-read before writing fails, when it does.
+    reread_error: Option<String>,
     made: RefCell<Vec<(bool, String, String)>>,
 }
 impl schedule::Scheduler for FakeScheduler {
@@ -613,6 +618,8 @@ impl schedule::Scheduler for FakeScheduler {
                     url: url.map(str::to_owned),
                     shaped: *shaped,
                     why: why.map(str::to_owned),
+                    overridden: self.overridden.map(str::to_owned),
+                    differs: self.differs.map(str::to_owned),
                     remove: format!("schtasks /Delete /TN \"{task}\" /F"),
                 }
             })
@@ -627,10 +634,27 @@ impl schedule::Scheduler for FakeScheduler {
             None => Ok(()),
         }
     }
-    fn recreate(&self, client: bool, when: &str, url: &str) -> Result<(), String> {
-        if let Some(cause) = &self.refuse_write {
+    fn reread(&self, client: bool) -> Result<Option<schedule::Found>, String> {
+        if let Some(cause) = &self.reread_error {
             return Err(cause.clone());
         }
+        Ok(self
+            .found()
+            .into_iter()
+            .find(|found| found.client == client))
+    }
+    fn recreate(
+        &self,
+        client: bool,
+        when: &str,
+        url: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), schedule::Stop> {
+        if let Some(cause) = &self.refuse_write {
+            return Err(schedule::Stop::Failed(cause.clone()));
+        }
+        // As `--schedule` does: its own checks, then `check`, then the write.
+        check().map_err(schedule::Stop::Changed)?;
         self.made
             .borrow_mut()
             .push((client, when.to_owned(), url.to_owned()));
@@ -890,33 +914,138 @@ fn a_schedule_removed_or_changed_after_the_plan_is_left_as_it_now_is() {
     let (_, failures) = schedule::apply(&rows, NEW, true, &same);
     assert!(failures.is_empty(), "{failures:?}");
     assert_eq!(same.made.borrow().len(), 1);
-    for now in [
-        vec![],
-        vec![(true, Some(OLD), Some("04:30"), false, None)],
-        vec![(true, Some(OLD), Some("05:00"), true, None)],
-        vec![(
-            true,
-            Some("http://10.0.0.9:8765"),
-            Some("04:30"),
-            true,
-            None,
-        )],
-        vec![(true, Some(OLD), Some("04:30"), true, Some("unreadable"))],
-        vec![(false, Some(OLD), Some("04:30"), true, None)],
+    let changed = "it changed after connect read it (its daemon URL, time, state or shape)";
+    for (later, cause) in [
+        (
+            FakeScheduler::default(),
+            "it was removed after connect read it",
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(true, Some(OLD), Some("04:30"), false, None)],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(true, Some(OLD), Some("05:00"), true, None)],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(
+                    true,
+                    Some("http://10.0.0.9:8765"),
+                    Some("04:30"),
+                    true,
+                    None,
+                )],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(true, Some(OLD), Some("04:30"), true, Some("unreadable"))],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![read],
+                overridden: Some("the systemd drop-in X sets ExecStart="),
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![read],
+                differs: Some("an end date"),
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(false, Some(OLD), Some("04:30"), true, None)],
+                ..FakeScheduler::default()
+            },
+            "it was removed after connect read it",
+        ),
+        (
+            FakeScheduler {
+                installed: vec![read],
+                reread_error: Some("interrupted".to_owned()),
+                ..FakeScheduler::default()
+            },
+            "connect could not read it again immediately before writing (interrupted)",
+        ),
     ] {
-        let later = FakeScheduler {
-            installed: now.clone(),
-            ..FakeScheduler::default()
-        };
         let (notes, failures) = schedule::apply(&rows, NEW, true, &later);
-        assert!(later.made.borrow().is_empty(), "{now:?}");
-        assert!(notes.is_empty(), "{now:?}");
+        assert!(later.made.borrow().is_empty(), "{cause}");
+        assert!(notes.is_empty(), "{cause}");
         assert_eq!(
             failures,
             vec![format!(
-                "the client registrations now name {NEW} (backups above), but the scheduled task 'client' was not re-created: it was removed or changed after connect read it, so connect leaves it as it is; re-run connect to plan it again"
+                "the client registrations now name {NEW} (backups above), but the scheduled task 'client' was not re-created: {cause}, so connect leaves it as it is; re-run connect to plan it again"
             )],
-            "{now:?}"
         );
     }
+}
+
+#[test]
+fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_daemon() {
+    let clause = "the systemd drop-in /home/u/.config/systemd/user/pseudolife-client-update.service.d/override.conf sets ExecStart=";
+    // The base unit names the new daemon (what following `--schedule` leaves)
+    // and the old one: neither is current or re-created.
+    for base in [NEW, OLD] {
+        let fake = Rc::new(FakeScheduler {
+            installed: vec![(true, Some(base), Some("04:30"), false, None)],
+            overridden: Some(clause),
+            ..FakeScheduler::default()
+        });
+        let rows = schedule_rows(&fake, NEW, true);
+        assert_eq!(rows[0].state, "manual", "{base}");
+        let detail = &rows[0].detail;
+        assert!(detail.contains(clause), "{detail}");
+        assert!(
+            detail.ends_with("edit or remove that drop-in, run `systemctl --user daemon-reload`, then re-run connect"),
+            "{detail}"
+        );
+        assert!(!detail.contains("update --schedule 04:30"), "{detail}");
+        schedule::apply(&rows, NEW, true, fake.as_ref());
+        assert!(fake.made.borrow().is_empty());
+    }
+    // Near miss: the same schedule with no override, naming the daemon, is
+    // current.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), true, None)],
+        ..FakeScheduler::default()
+    });
+    assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "current");
+}
+
+#[test]
+fn a_task_setting_schedule_would_drop_is_named_with_both_ways_on() {
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(OLD), Some("04:30"), false, None)],
+        differs: Some("an end date and highest privileges"),
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "manual");
+    assert!(
+        rows[0].detail.ends_with(&format!(
+            "it has an end date and highest privileges, which `update --schedule` does not write, so re-scheduling it would drop that, and connect leaves it as it is: to keep it, change the task's `--daemon-url` argument to {NEW} in Task Scheduler; to drop it, re-schedule it: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`"
+        )),
+        "{}",
+        rows[0].detail
+    );
+    schedule::apply(&rows, NEW, true, fake.as_ref());
+    assert!(fake.made.borrow().is_empty());
 }

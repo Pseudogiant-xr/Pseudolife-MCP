@@ -24,7 +24,7 @@ pub(crate) const NAMES: Names<'static> = Names {
 
 #[path = "reschedule.rs"]
 mod reschedule;
-pub(crate) use reschedule::{installed, preflight, reschedule};
+pub(crate) use reschedule::{Installed, Stop, installed, installed_kind, preflight, reschedule};
 
 const LAYOUT: &[&str] = &[
     "PSEUDOLIFE_SHIM_RUNTIMES",
@@ -506,6 +506,18 @@ pub(crate) fn schedule(update: &mut Update, when: &str) -> Result<()> {
 }
 
 fn schedule_named(update: &mut Update, when: &str, names: &Names) -> Result<()> {
+    schedule_checked(update, when, names, &|| Ok(()))
+}
+
+/// `--schedule`, with `before_write` run after every check and immediately
+/// before the task or unit is written (`connect` re-reads the schedule
+/// there); `--schedule` itself passes one that always succeeds.
+fn schedule_checked(
+    update: &mut Update,
+    when: &str,
+    names: &Names,
+    before_write: &dyn Fn() -> Result<()>,
+) -> Result<()> {
     let (hour, minute) = at(when)?;
     let client = client_kind(update)?;
     if client && update.daemon_health().is_none() {
@@ -519,6 +531,7 @@ fn schedule_named(update: &mut Update, when: &str, names: &Names) -> Result<()> 
     if !client && !daemon_bearer_resolves() {
         no_bearer(update, cfg!(windows))?;
     }
+    before_write()?;
     write(update, names, client, hour, minute, &argv)?;
     if client {
         update.step(format!("the run moves this machine's clients to the release the daemon at {} runs, never past it; running sessions keep their runtime. The log is {}",update.o.daemon_url,seams::data_dir().join(LOG_NAME).display()));
