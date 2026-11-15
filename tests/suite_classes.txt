@@ -287,6 +287,7 @@ live test_i18n_readme.py
 frozen test_init_retry_model_reuse.py
 live test_installer_bank_question.py
 live test_installer_bank_question_native.py
+live test_installer_bash32.py
 live test_installer_board_token.py
 live test_installer_board_token_native.py
 live test_installer_board_token_ps.py
