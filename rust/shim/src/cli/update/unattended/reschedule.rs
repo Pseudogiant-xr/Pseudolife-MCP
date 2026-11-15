@@ -428,8 +428,8 @@ fn systemd_shadows(dir: &Path, roots: &[PathBuf], name: &str) -> Option<Blocker>
 
 /// Dependency links for the unit or its timer (`<name>.<kind>.wants/`,
 /// `.requires/`, `.upholds/`, their dash-prefix and top-level forms, in any
-/// search root), which start another unit with it: by presence, without
-/// reading the links.
+/// search root): by presence, without reading the links, whatever they are
+/// (a dependency or a mask).
 fn systemd_dependencies(roots: &[PathBuf], name: &str) -> Option<Blocker> {
     let stems = unit_stems(name);
     for kind in ["service", "timer"] {
@@ -448,7 +448,7 @@ fn systemd_dependencies(roots: &[PathBuf], name: &str) -> Option<Blocker> {
                     Err(error) => {
                         return Some(Blocker::new(
                             format!(
-                                "connect cannot read the systemd dependency directory {} ({error}), so it cannot tell whether another unit starts with this one",
+                                "connect cannot read the systemd dependency directory {} ({error}), so it cannot tell whether anything was added there",
                                 directory.display()
                             ),
                             "fix that directory's permissions or remove it, then re-run connect",
@@ -458,7 +458,7 @@ fn systemd_dependencies(roots: &[PathBuf], name: &str) -> Option<Blocker> {
                 if held {
                     return Some(Blocker::new(
                         format!(
-                            "the unit has dependency links in {} (another unit starts with it)",
+                            "{} holds entries for the unit (dependency links, or a mask), additions to the schedule connect does not read",
                             directory.display()
                         ),
                         "remove the links you do not need and run `systemctl --user daemon-reload`, then re-run connect; while they are there, connect leaves this schedule to you",
@@ -989,8 +989,30 @@ fn systemd_dropins(
                                 | "PassEnvironment="
                                 | "UnsetEnvironment="
                         );
+                    // A key that names another unit starts or stops it
+                    // beside the schedule, and connect never reads that one.
+                    let names_unit = matches!(
+                        key.as_str(),
+                        "OnSuccess="
+                            | "OnFailure="
+                            | "Wants="
+                            | "Requires="
+                            | "Requisite="
+                            | "BindsTo="
+                            | "PartOf="
+                            | "Upholds="
+                            | "PropagatesReloadTo="
+                            | "PropagatesStopTo="
+                            | "ReloadPropagatedFrom="
+                            | "StopPropagatedFrom="
+                            | "JoinsNamespaceOf="
+                    );
                     let keep = if names_daemon {
                         "or keep it and point it at the new daemon yourself".to_owned()
+                    } else if names_unit {
+                        format!(
+                            "or keep it and re-schedule the base files yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`; the unit it names is not one connect reads, so check yourself that it does not run against the old daemon"
+                        )
                     } else {
                         format!(
                             "or keep it and re-schedule the base files yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`"
@@ -1200,13 +1222,21 @@ fn windows_parse(
             _ => false,
         };
     // What differs, cheaply: the first thing a task registered by
-    // `--schedule` from this shell would not have.
+    // `--schedule` from this shell would not have. Never the command or its
+    // arguments themselves, which can carry a secret; and a comparison
+    // connect cannot make is not an equality.
     let command_differs = match (&executable, &arguments, &url) {
         (Some(executable), Some(arguments), Some(url)) => match expected(url) {
-            Ok((want, args)) if &want != executable || &args != arguments => Some(format!(
-                "its action runs `{executable} {arguments}` where `update --schedule` from this shell registers `{want} {args}`"
+            Ok((want, args)) => match (&want != executable, &args != arguments) {
+                (true, true) => Some("its action's program and arguments are not the ones `update --schedule` from this shell registers".to_owned()),
+                (true, false) => Some("its action's program is not the one `update --schedule` from this shell registers".to_owned()),
+                (false, true) => Some("its action's arguments are not the ones `update --schedule` from this shell registers".to_owned()),
+                (false, false) => None,
+            },
+            Err(error) => Some(format!(
+                "connect cannot work out the action `update --schedule` from this shell registers, to compare: {}",
+                error.message
             )),
-            _ => None,
         },
         _ => None,
     };
@@ -1247,6 +1277,34 @@ fn windows_parse(
             .as_deref()
             .is_some_and(|arguments| arguments.contains("-EncodedCommand ")),
         remove: format!("schtasks /Delete /TN \"{task}\" /F"),
+    }
+}
+
+/// A unit file line as a report may show it: its key or section, never its
+/// value, which can be a secret.
+fn line_label(line: &str) -> String {
+    let line = line.trim();
+    let plain = |text: &str| {
+        !text.is_empty()
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    };
+    if line.is_empty() {
+        "an empty line".to_owned()
+    } else if line.starts_with('#') || line.starts_with(';') {
+        "a comment line".to_owned()
+    } else if let Some(section) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        if plain(section) {
+            format!("the section header `[{section}]`")
+        } else {
+            "a section header connect does not show".to_owned()
+        }
+    } else {
+        match line.split_once('=') {
+            Some((key, _)) if plain(key.trim()) => format!("a `{}=` line", key.trim()),
+            _ => "a line connect does not show".to_owned(),
+        }
     }
 }
 
@@ -1291,15 +1349,21 @@ fn systemd_parse(
             None => false,
         };
     // What differs, cheaply: the first line that is not what `--schedule`
-    // writes from this shell (its command, environment or timer).
+    // writes from this shell (its command, environment or timer), named by
+    // its key alone, because a value (an `Environment=` token, a command's
+    // arguments) can be a secret.
     let first_difference = |file: &str, have: &str, want: &str| -> Option<String> {
         let (have, want): (Vec<&str>, Vec<&str>) = (have.lines().collect(), want.lines().collect());
         (0..have.len().max(want.len())).find_map(|line| match (have.get(line), want.get(line)) {
             (Some(a), Some(b)) if a == b => None,
+            (Some(a), Some(b)) if line_label(a) == line_label(b) => Some(format!(
+                "its {file} has {} that differs from the one `update --schedule` from this shell writes",
+                line_label(a)
+            )),
             (a, b) => Some(format!(
-                "its {file} has `{}` where `update --schedule` from this shell writes `{}`",
-                a.unwrap_or(&"(nothing)"),
-                b.unwrap_or(&"(nothing)")
+                "its {file} has {} where `update --schedule` from this shell writes {}",
+                a.map_or("nothing".to_owned(), |a| line_label(a)),
+                b.map_or("nothing".to_owned(), |b| line_label(b))
             )),
         })
     };
@@ -1674,6 +1738,38 @@ mod tests {
             found.why.as_deref(),
             Some("no verified stable native launcher")
         );
+        // With a named setting too, a comparison connect cannot make is not
+        // an equality: what differs says so, so no row says "no change".
+        let end_date = task_xml(&command, &arguments, |x| {
+            x.replace(
+                "</StartBoundary>",
+                "</StartBoundary><EndBoundary>2026-11-20T00:00:00</EndBoundary>",
+            )
+        });
+        let found = windows_parse("T", false, &end_date, &no_launcher);
+        assert_eq!(found.differs.as_deref(), Some("an end date"));
+        assert_eq!(
+            found.mismatch.as_deref(),
+            Some(
+                "connect cannot work out the action `update --schedule` from this shell registers, to compare: no verified stable native launcher"
+            )
+        );
+        // What differs never shows the action's program or arguments, which
+        // can carry a secret.
+        let secret = "PSEUDOLIFE_MCP_TOKEN=s3cr3t";
+        let edited = task_xml(&command, &format!("{arguments} {secret}"), |x| x);
+        let found = windows_parse("T", false, &edited, &windows_expected);
+        assert_eq!(
+            found.mismatch.as_deref(),
+            Some(
+                "its action's arguments are not the ones `update --schedule` from this shell registers"
+            )
+        );
+        let edited = task_xml(&format!("{command}{secret}"), &arguments, |x| x);
+        let shown = windows_parse("T", false, &edited, &windows_expected)
+            .mismatch
+            .unwrap();
+        assert!(!shown.contains("s3cr3t"), "{shown}");
         let lossy = task_xml(&command.replace("fixture", "Zo\u{fffd}"), &arguments, |x| x);
         let found = windows_parse("T", false, &lossy, &windows_expected);
         assert!(!found.shaped);
@@ -2932,7 +3028,7 @@ mod tests {
             found.overridden
         );
         // A link in a dependency directory (the service, the timer, a dash
-        // prefix, the top-level type): another unit starts with it.
+        // prefix, the top-level type), whatever it is.
         for leaf in [
             format!("{NAME}.service.wants"),
             format!("{NAME}.timer.requires"),
@@ -2946,7 +3042,7 @@ mod tests {
             assert_eq!(
                 blocker.cause,
                 format!(
-                    "the unit has dependency links in {} (another unit starts with it)",
+                    "{} holds entries for the unit (dependency links, or a mask), additions to the schedule connect does not read",
                     path.display()
                 )
             );
@@ -3024,16 +3120,51 @@ mod tests {
         assert_eq!(
             parse(&added, &timer, true).mismatch.as_deref(),
             Some(
-                "its service has `ExecStartPost=/x` where `update --schedule` from this shell writes `(nothing)`"
+                "its service has a `ExecStartPost=` line where `update --schedule` from this shell writes nothing"
             )
         );
         let edited = timer.replace("Persistent=true", "Persistent=false");
         assert_eq!(
             parse(&service, &edited, true).mismatch.as_deref(),
             Some(
-                "its timer has `Persistent=false` where `update --schedule` from this shell writes `Persistent=true`"
+                "its timer has a `Persistent=` line that differs from the one `update --schedule` from this shell writes"
             )
         );
+        // A line is named by its key, never its value, which can be a
+        // secret (a hand-added token, a command's arguments).
+        let secret = "PSEUDOLIFE_MCP_TOKEN=s3cr3t";
+        let token = service.replacen(
+            "[Service]\n",
+            &format!("[Service]\nEnvironment=\"{secret}\"\n"),
+            1,
+        );
+        assert_ne!(token, service);
+        let shown = parse(&token, &timer, true).mismatch.unwrap();
+        assert!(
+            shown.starts_with("its service has a `Environment=` line where"),
+            "{shown}"
+        );
+        assert!(!shown.contains("s3cr3t"), "{shown}");
+        let exec = service
+            .lines()
+            .find(|line| line.starts_with("ExecStart="))
+            .unwrap();
+        let command = service.replace(exec, &format!("{exec} --token s3cr3t"));
+        let shown = parse(&command, &timer, true).mismatch.unwrap();
+        assert_eq!(
+            shown,
+            "its service has a `ExecStart=` line that differs from the one `update --schedule` from this shell writes"
+        );
+        for (line, label) in [
+            ("", "an empty line"),
+            ("# s3cr3t", "a comment line"),
+            ("[Service]", "the section header `[Service]`"),
+            ("[s3 cr3t]", "a section header connect does not show"),
+            ("s3cr3t", "a line connect does not show"),
+            ("a b=s3cr3t", "a line connect does not show"),
+        ] {
+            assert_eq!(line_label(line), label, "{line}");
+        }
     }
 
     #[test]
@@ -3086,10 +3217,14 @@ mod tests {
             fix("[Service]\nExecStartPost=/x\n")
                 .ends_with("or keep it and point it at the new daemon yourself")
         );
-        // A key that names none: keep it by re-scheduling the base files.
-        let other = fix("[Unit]\nOnSuccess=x.service\n");
+        // A key that names no daemon: keep it by re-scheduling the base files.
+        let other = fix("[Service]\nNice=5\n");
         assert!(other.ends_with(&format!("or keep it and re-schedule the base files yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`")), "{other}");
         assert!(!other.contains("point it at"), "{other}");
+        // A key that names another unit: that unit needs looking at too,
+        // since re-scheduling the base files leaves it as it is.
+        let unit = fix("[Unit]\nOnSuccess=x.service\n");
+        assert!(unit.ends_with("the unit it names is not one connect reads, so check yourself that it does not run against the old daemon"), "{unit}");
         fs::remove_dir_all(&root).unwrap();
     }
 

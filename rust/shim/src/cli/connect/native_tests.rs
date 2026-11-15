@@ -773,7 +773,7 @@ fn a_client_schedule_follows_a_remote_daemon_but_a_daemon_schedule_does_not() {
     assert!(
         rows[0]
             .detail
-            .contains("pseudolife-mcp update --unschedule"),
+            .contains("remove it here with `schtasks /Delete /TN \"daemon\" /F`"),
         "{}",
         rows[0].detail
     );
@@ -1080,7 +1080,7 @@ fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_dae
         ..FakeScheduler::default()
     });
     assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "current");
-    // The daemon's own schedule after the daemon moved away: `--unschedule`
+    // The daemon's own schedule after the daemon moved away: removing it
     // resolves it whatever the drop-in says, so that row comes first.
     let fake = Rc::new(FakeScheduler {
         installed: vec![(false, Some(OLD), Some("04:30"), false, None)],
@@ -1092,7 +1092,7 @@ fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_dae
     assert!(
         moved[0]
             .detail
-            .contains("pseudolife-mcp update --unschedule"),
+            .contains("remove it here with `schtasks /Delete /TN \"daemon\" /F`"),
         "{}",
         moved[0].detail
     );
@@ -1100,7 +1100,7 @@ fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_dae
     // re-creation connect will not make for a daemon that moved away).
     assert!(
         moved[0].detail.ends_with(&format!(
-            "Also found here: {cause}; if `--unschedule` reports an error, deal with that first"
+            "Also found here: {cause}; if that reports an error, deal with that first"
         )),
         "{}",
         moved[0].detail
@@ -1186,7 +1186,8 @@ fn a_schedule_naming_the_daemon_is_current_only_as_schedule_writes_it() {
     );
     assert!(!detail.contains("needs no change"), "{detail}");
     // The daemon's own schedule, already naming the new daemon on another
-    // machine, is not current: its next step is `--unschedule`.
+    // machine, is not current: its next step is removing it, by its own
+    // command, never `--unschedule`, which removes the client schedule too.
     let fake = Rc::new(FakeScheduler {
         installed: vec![(false, Some(NEW), Some("04:30"), true, None)],
         ..FakeScheduler::default()
@@ -1196,7 +1197,12 @@ fn a_schedule_naming_the_daemon_is_current_only_as_schedule_writes_it() {
     assert!(
         rows[0]
             .detail
-            .contains("pseudolife-mcp update --unschedule"),
+            .contains("remove it here with `schtasks /Delete /TN \"daemon\" /F`"),
+        "{}",
+        rows[0].detail
+    );
+    assert!(
+        !rows[0].detail.contains("--unschedule"),
         "{}",
         rows[0].detail
     );

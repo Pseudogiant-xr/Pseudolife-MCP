@@ -182,14 +182,14 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             // `--schedule` writes, decides what runs, so neither "current"
             // nor `--schedule` is true. The daemon's own schedule after the
             // daemon moved away is the exception: its next step is
-            // `--unschedule`, so the row names that, and the cause found
+            // removing it, so the row names its own removal command, and the cause found
             // without the fix (which would promise a re-creation connect will
             // not make there); some causes (a directory at the unit path, an
-            // unreachable user manager) can also make `--unschedule` fail.
+            // unreachable user manager) can also make that removal fail.
             let detail = if !found.client && ctx.remote {
                 format!(
-                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host. Also found here: {}; if `--unschedule` reports an error, deal with that first",
-                    found.place, blocker.cause
+                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `{}`, and schedule it on the daemon's host. Also found here: {}; if that reports an error, deal with that first",
+                    found.place, found.remove, blocker.cause
                 )
             } else {
                 format!(
@@ -245,9 +245,12 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
         };
         let leave = |why: &str| manual(format!("{why}: {fix}"));
         let row = if moved_away {
-            manual(
-                "connect does not re-run the schedule step: the daemon now runs on another machine, and an unattended update only updates a daemon on this one: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host".to_owned(),
-            )?
+            // Its own removal command, not `--unschedule`, which would
+            // remove the client schedule too.
+            manual(format!(
+                "connect does not re-run the schedule step: the daemon now runs on another machine, and an unattended update only updates a daemon on this one: remove it here with `{}`, and schedule it on the daemon's host",
+                found.remove
+            ))?
         } else if let Some(why) = &found.why {
             leave(&format!(
                 "connect cannot tell whether it is the one `update --schedule` writes ({why}), so it leaves it as it is; re-schedule it"
