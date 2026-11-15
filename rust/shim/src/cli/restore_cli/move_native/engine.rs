@@ -52,6 +52,10 @@ const ABORT_LOST_TRIES: u32 = 3;
 const FORWARD_BUSY_WAIT: Duration = Duration::from_secs(30 * 60);
 /// How long `--release-target` gives the source to answer its health check.
 const RELEASE_SOURCE_WAIT: Duration = Duration::from_secs(10);
+/// `--target-gone` asks the target this many times, this far apart, before
+/// it counts as giving no answer: the give-up is final.
+const GIVE_UP_ATTEMPTS: u32 = 3;
+const GIVE_UP_PAUSE: Duration = Duration::from_secs(5);
 
 /// The final dump: where it is, its digest, and each table's row count.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -905,13 +909,7 @@ pub(super) fn answered_by_record(record: &Record) -> Option<Outcome> {
                 ),
             },
         }),
-        Phase::GivenUp => Some(Outcome {
-            code: EXIT_OK,
-            message: format!(
-                "move {id} was rolled back; nothing to roll back. {}",
-                given_up_line(record)
-            ),
-        }),
+        Phase::GivenUp => Some(given_up_answer(record, None, Asked::Rollback)),
         Phase::Releasing => Some(Outcome {
             code: EXIT_REFUSED,
             message: format!(
@@ -975,7 +973,7 @@ fn kept_line(record: &Record) -> String {
 
 /// The unresolved causes, as the record and every answer give them.
 const UNKNOWN_RESTORE_LOST: &str = "this move's restore was sent and its answer never arrived, so it cannot be told whether it ran there";
-const UNKNOWN_RESTORE_UNRECORDED: &str = "this host's record shows this move's restore was sent, or about to be, and no answer to it was recorded (the move process stopped first), so it cannot be told whether it ran there";
+const UNKNOWN_RESTORE_UNRECORDED: &str = "this host's record shows this move's restore was sent, or about to be, and no answer to it is recorded on this host, so it cannot be told whether it ran there";
 const NOT_READ_BACK: &str =
     "the target could not be read after this move's restore, so its bank cannot be shown unchanged";
 
@@ -1264,7 +1262,9 @@ impl<H: Hosts> Back<'_, H> {
                                 }
                                 // No trustworthy reading to compare with: the
                                 // bank is kept, and no writes are claimed.
-                                Err(cause) => unresolved = Some(cause),
+                                Err(cause) => {
+                                    unresolved.get_or_insert(cause);
+                                }
                             }
                             if !found.is_empty() {
                                 let mut all: Vec<String> = parked.iter().cloned().collect();
@@ -1513,10 +1513,15 @@ impl<H: Hosts> Back<'_, H> {
                 detail: why.clone(),
             });
             back.save();
+            let resort = if step == "read the target's state" {
+                String::new()
+            } else {
+                format!("\n  {}", last_resort(&back.record))
+            };
             Outcome {
                 code: EXIT_INCOMPLETE,
                 message: format!(
-                    "giving {to} back its own bank did not finish: {step} failed ({why}).\n  running now: this host's daemon, serving your bank ({bank})\n  served: yes, by this host's daemon\n  data: your bank here; on {to}, the moved copy stays stopped behind /data/move.json until its own bank is back\n  next: pseudolife-mcp move --release-target {id} (each step is safe to repeat)"
+                    "giving {to} back its own bank did not finish: {step} failed ({why}).\n  running now: this host's daemon, serving your bank ({bank})\n  served: yes, by this host's daemon\n  data: your bank here; on {to}, the moved copy stays stopped behind /data/move.json until its own bank is back\n  next: pseudolife-mcp move --release-target {id} (each step is safe to repeat){resort}"
                 ),
             }
         };
@@ -1549,17 +1554,22 @@ impl<H: Hosts> Back<'_, H> {
         // No claim and no bank identity behind a gate: a copy of this move's
         // cut short and another bank cannot be told apart, so nothing is sent.
         if state.claim.is_none() && state.gated == Some(true) && state.bank.is_none() {
-            let mut outcome = unfinished(
-                self,
-                "identify the target's bank",
-                format!(
-                    "{to} reads /data/move.json with no claim and no bank identity behind it, so it cannot be told whether that is this move's copy cut short or another bank; nothing was sent to change it"
-                ),
+            let why = format!(
+                "{to} reads /data/move.json with no claim and no bank identity behind it, so it cannot be told whether that is this move's copy cut short or another bank; nothing was sent to change it"
             );
-            outcome
-                .message
-                .push_str(&format!("\n  {}", last_resort(&self.record)));
-            return outcome;
+            self.record.rollback.push(Undo {
+                step: "identify the target's bank".to_owned(),
+                ok: false,
+                detail: why.clone(),
+            });
+            self.save();
+            return Outcome {
+                code: EXIT_INCOMPLETE,
+                message: format!(
+                    "giving {to} back its own bank did not start: {why}.\n  running now: this host's daemon, serving your bank ({bank})\n  served: yes, by this host's daemon\n  data: your bank here; on {to}, whatever is behind /data/move.json stays as it is\n  next: look at what {to} holds; once its bank can be identified, rerun pseudolife-mcp move --release-target {id}\n  {}",
+                    last_resort(&self.record)
+                ),
+            };
         }
         // Neither this move's claim nor its bank: nothing of this host's bank
         // is there, and nothing there is this move's to change.
@@ -1963,15 +1973,7 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
             };
         }
         // Final on this host: nothing is sent to a target given up.
-        Phase::GivenUp => {
-            return Outcome {
-                code: EXIT_REFUSED,
-                message: format!(
-                    "{to} is not released from this host: {}",
-                    given_up_line(&record)
-                ),
-            };
-        }
+        Phase::GivenUp => return given_up_answer(&record, None, Asked::Release),
         Phase::RolledBack | Phase::Releasing => {}
         _ => {
             return Outcome {
@@ -2034,15 +2036,7 @@ pub(super) fn give_up_refusal(record: &Record) -> Option<Outcome> {
                 message: format!("move {id} is already released; nothing to do"),
             });
         }
-        Phase::GivenUp => {
-            return Some(Outcome {
-                code: EXIT_OK,
-                message: format!(
-                    "{to} is already given up on this host by move {id}; nothing to do. {}",
-                    given_up_line(record)
-                ),
-            });
-        }
+        Phase::GivenUp => return Some(given_up_answer(record, None, Asked::TargetGone)),
         Phase::RolledBack | Phase::Releasing => {}
         _ => {
             return Some(Outcome {
@@ -2098,18 +2092,29 @@ pub(super) fn give_up<H: Hosts>(
         rollback: true,
         op: Op::State { tables: Vec::new() },
     };
-    // Any answer, a refusal included, means the target is there.
-    let why = match hosts.target(&request, None) {
-        Ok(_) => {
-            return Err(Outcome {
-                code: EXIT_REFUSED,
-                message: format!(
-                    "{to} answers as a move target, so it is not gone: give it back its own bank with pseudolife-mcp move --release-target {id}. Nothing was changed"
-                ),
-            });
+    // Any answer, a refusal included, means the target is there. A give-up
+    // is final, so one failed attempt is not enough to conclude.
+    let mut why = String::new();
+    for attempt in 1..=GIVE_UP_ATTEMPTS {
+        match hosts.target(&request, None) {
+            Ok(_) => {
+                return Err(Outcome {
+                    code: EXIT_REFUSED,
+                    message: format!(
+                        "{to} answers as a move target, so it is not given up: give it back its own bank with pseudolife-mcp move --release-target {id}. Nothing was changed"
+                    ),
+                });
+            }
+            Err(failed) => why = failed,
         }
-        Err(why) => why,
-    };
+        if attempt < GIVE_UP_ATTEMPTS {
+            hosts.sleep(GIVE_UP_PAUSE);
+        }
+    }
+    let why = format!(
+        "{GIVE_UP_ATTEMPTS} attempts, {} seconds apart; the last: {why}",
+        GIVE_UP_PAUSE.as_secs()
+    );
     let mut released = record.clone();
     released.phase = Phase::GivenUp;
     released.ending = Some(Ending::GivenUp);
@@ -2129,9 +2134,9 @@ pub(super) fn give_up<H: Hosts>(
     let outcome = Outcome {
         code: EXIT_OK,
         message: format!(
-            "given up: {to} gave no answer as a move target ({why}), so move {id} is closed on this host only, and nothing was asked of or changed on {to}. Your bank is this host's ({}), which this host's daemon serves; writes made on {to} are not in it.{writes} {}",
+            "given up: {to} gave no answer as a move target ({why}), so move {id} is closed on this host only, and nothing was changed on {to}. Your bank is this host's ({}), which this host's daemon serves; writes made on {to} are not in it.{writes} {}",
             record.source_bank,
-            given_up_line(&released)
+            given_up_line(&released, None)
         ),
     };
     Ok((released, outcome))
@@ -2178,8 +2183,9 @@ fn last_resort(record: &Record) -> String {
 
 /// What a given-up record says: final on this host, and what the person who
 /// runs the target can clear there by hand.
-pub(super) fn given_up_line(record: &Record) -> String {
+pub(super) fn given_up_line(record: &Record, newer: Option<&Record>) -> String {
     let to = &record.target;
+    let at = &record.updated_at;
     let folder = remote_folder(record);
     let start = format!("ssh {to} docker start pseudolife-mcp-daemon");
     let claim = format!("ssh {to} rm -f {}", claim_path());
@@ -2195,15 +2201,58 @@ pub(super) fn given_up_line(record: &Record) -> String {
         )
     } else {
         format!(
-            "{to} still holds the move's claim ({}), its gate /data/move.json and the stopped copy of this host's bank behind it. First its own bank, from the safety backup that {folder}/own-bank.json names in {folder}/safety (on {to}: pseudolife-mcp restore --backup-file <that dump> --state-archive <that state archive> --leave-stopped; if own-bank.json is missing, no command restores it, so look in {folder}/safety before anything else); then the gate, never before its own bank is back, or the copy of this host's bank behind it would start there ({}); then the claim ({claim}); then its daemon ({start})",
+            "{to} then held the move's claim ({}), its gate /data/move.json and the stopped copy of this host's bank behind it. Its own bank first, from the safety backup that {folder}/own-bank.json names in {folder}/safety (on {to}: pseudolife-mcp restore --backup-file <that dump> --state-archive <that state archive> --leave-stopped; if own-bank.json is missing, no command restores it, so look in {folder}/safety before anything else); then the gate, never before its own bank is back, or the copy of this host's bank behind it would start there ({}); then the claim ({claim}); then its daemon ({start})",
             claim_path(),
             gate_removal(record)
         )
     };
+    let newer = newer.map_or_else(String::new, |later| {
+        format!(
+            " This host's records show a newer move to {to}, move {} ({}), so {to} may now hold a bank that move put there.",
+            later.move_id,
+            if later.committed {
+                "committed: the bank went there".to_owned()
+            } else {
+                format!("its record says {:?}", later.phase)
+            }
+        )
+    });
     format!(
-        "This host gave {to} up at {} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it. What the move left on {to} is for whoever runs it to clear by hand: {hands}",
-        record.updated_at, record.move_id
+        "This host gave {to} up at {at} (--target-gone), and that is final here: nothing is sent to {to} from this host for move {} again, and --release-target and --resume refuse it.{newer} The steps below describe {to} as it was at {at}, for whoever runs it. Check first: look at what {to} holds now, and if its daemon serves a bank, or a newer move has put one there, do none of this. Otherwise, in this order: {hands}",
+        record.move_id
     )
+}
+
+/// Which command a given-up record answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Asked {
+    Rollback,
+    Release,
+    TargetGone,
+}
+
+/// The answer to a command about a given-up record, from the record and the
+/// newest later move to the same target (`newer`).
+pub(super) fn given_up_answer(record: &Record, newer: Option<&Record>, asked: Asked) -> Outcome {
+    let id = &record.move_id;
+    let to = &record.target;
+    let line = given_up_line(record, newer);
+    match asked {
+        Asked::Rollback => Outcome {
+            code: EXIT_OK,
+            message: format!("move {id} was rolled back; nothing to roll back. {line}"),
+        },
+        Asked::Release => Outcome {
+            code: EXIT_REFUSED,
+            message: format!("{to} is not released from this host: {line}"),
+        },
+        Asked::TargetGone => Outcome {
+            code: EXIT_OK,
+            message: format!(
+                "{to} is already given up on this host by move {id}; nothing to do. {line}"
+            ),
+        },
+    }
 }
 
 /// The commands that undo what the record says was done, in rollback order,

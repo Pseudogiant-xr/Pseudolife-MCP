@@ -761,7 +761,7 @@ fn target_gone_asks_this_hosts_docker_and_the_target_before_it_changes_the_recor
 }
 
 #[test]
-fn a_given_up_target_stops_holding_this_host_and_names_its_way_back() {
+fn a_given_up_target_stops_holding_this_host_and_names_what_is_left_to_clear_by_hand() {
     let home = Home::new("given-up");
     let (socket, url) = listener();
     plant(
@@ -827,6 +827,27 @@ fn a_given_up_target_stops_holding_this_host_and_names_its_way_back() {
         "{stderr}"
     );
     assert!(!stderr.contains("that is final here"), "{stderr}");
+    // A newer committed move to that target: the resume does not name the
+    // given-up one, and the given-up record's steps name the newer move.
+    fs::write(
+        folder.join("record.json"),
+        record("complete", true, r#""moved_written":true"#)
+            .replace(MOVE_ID, newer)
+            .replace("dev@target", "root@box"),
+    )
+    .unwrap();
+    let output = run(&home.0, &url, "80", &resume);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains(&format!("move {MOVE_ID} to")), "{stderr}");
+    let output = rollback(&home.0, &url, &["--release-target", MOVE_ID]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!(
+            "a newer move to root@box, move {newer} (committed"
+        )),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Check first"), "{stderr}");
     fs::remove_dir_all(&folder).unwrap();
     // It no longer holds this host: a move elsewhere goes on to the ssh
     // lookup (which PATH lacks here).

@@ -147,8 +147,9 @@ pub(super) struct Rollback {
     pub json: bool,
     /// `--release-target` rather than `--rollback`.
     pub release: bool,
-    /// `--release-target <id> --target-gone`: the target is gone for good,
-    /// so the move is marked released on this host without asking it.
+    /// `--release-target <id> --target-gone`: the target gives no answer
+    /// as a move target, so this host gives it up for good, changing
+    /// nothing there.
     pub target_gone: bool,
 }
 

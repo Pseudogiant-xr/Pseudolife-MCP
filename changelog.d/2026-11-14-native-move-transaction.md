@@ -43,9 +43,10 @@
   no bank identity behind an unclaimed gate, keeps it. `--json` gives the
   `ending`.
   `--release-target <move id> --target-gone` gives up, on this host only and
-  for good, a target that gives no answer, while this host serves its own
-  bank. Nothing is sent to it for that move again; the output says how to
-  clear it there by hand.
+  for good, a target that gives no answer in three attempts, while this host
+  serves its own bank. Nothing is sent to it for that move again; the output
+  says how to clear it there by hand, as of the give-up, after a check of
+  what it holds now.
 - A gated bank with no reading taken right after the move's restore by the
   same run (or whose restore may or may not have run) is kept and never resumed
   over (exit 6, naming `--release-target`); no writes are claimed for it.

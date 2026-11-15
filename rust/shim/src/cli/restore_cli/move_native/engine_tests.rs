@@ -189,6 +189,8 @@ struct Model {
     /// The target's Docker does not answer: its state reads blank but for
     /// the claim, which is a file.
     docker_silent: bool,
+    /// Target operations, by name, whose link is lost this many times first.
+    lost: Vec<(&'static str, usize)>,
     record: Option<Record>,
     /// A late effect: the call it lands at, and the request.
     pending: Option<(usize, Request)>,
@@ -220,6 +222,7 @@ impl Model {
             hand_write_quiet: false,
             source_grew: 0,
             docker_silent: false,
+            lost: Vec::new(),
             record: None,
             pending: None,
             violations: Vec::new(),
@@ -662,6 +665,16 @@ impl Hosts for Model {
     }
     fn target(&mut self, request: &Request, _payload: Option<&Path>) -> Result<Answer, String> {
         let what = format!("target {}", request.op.name());
+        if let Some((_, left)) = self
+            .lost
+            .iter_mut()
+            .find(|(name, left)| *name == what && *left > 0)
+        {
+            *left -= 1;
+            self.calls += 1;
+            self.log.push(format!("{}: {what} (lost)", self.calls));
+            return Err("ssh lost the link".to_owned());
+        }
         if let Some((_, left)) = self
             .busy
             .iter_mut()
@@ -2013,6 +2026,18 @@ fn a_give_back_cut_short_is_finished_by_a_rerun_with_both_copies_kept() {
         "{}",
         outcome.message
     );
+    // If it keeps failing there, the way out on this host is named.
+    for needle in [
+        "restore the target's own bank failed (the restore was cut short)",
+        "the last resort is on this host: rename",
+        "record.json.closed",
+    ] {
+        assert!(
+            outcome.message.contains(needle),
+            "{needle}: {}",
+            outcome.message
+        );
+    }
     assert_eq!(model.hosts.bank, Bank::Partial);
     let saved = model.record.clone().unwrap();
     assert_eq!(saved.phase, Phase::Releasing);
@@ -2715,9 +2740,11 @@ fn a_restore_that_may_or_may_not_have_run_is_kept_unresolved() {
     let record = after.record.clone().unwrap();
     // A later run cannot know whether the answer was lost or never came.
     assert!(
-        record.unresolved.as_deref().is_some_and(
-            |c| c.contains("no answer to it was recorded") && !c.contains("never arrived")
-        ),
+        record
+            .unresolved
+            .as_deref()
+            .is_some_and(|c| c.contains("no answer to it is recorded on this host")
+                && !c.contains("never arrived")),
         "{record:?}"
     );
     assert!(record.gated_baseline.is_none() && record.parked_writes.is_none());
@@ -2950,7 +2977,7 @@ fn each_way_a_release_ends_is_answered_truly_afterwards() {
 }
 
 #[test]
-fn a_target_is_given_up_only_while_it_does_not_answer_and_comes_back_to_a_real_give_back() {
+fn a_target_is_given_up_only_while_it_gives_no_answer_and_is_then_final() {
     let parked = parked_move();
     let record = parked.record.clone().unwrap();
     // It answers: refused, naming the release that works.
@@ -3124,7 +3151,6 @@ fn a_given_up_record_sends_nothing_to_a_target_that_now_serves_the_bank_moved_th
     h.source_running = false;
     h.fenced = true;
     h.moved = true;
-    model.health_lies = true;
     let before = model.hosts.clone();
     let outcome = engine::release_target(&mut model, given_up);
     assert_eq!(outcome.code, 4, "{outcome:?}\n{:#?}", model.log);
@@ -3135,4 +3161,92 @@ fn a_given_up_record_sends_nothing_to_a_target_that_now_serves_the_bank_moved_th
     );
     assert_eq!(model.hosts, before, "the live bank was touched");
     assert!(model.hosts.target_serves_clone());
+}
+
+#[test]
+fn the_steps_for_a_given_up_target_are_as_of_its_give_up_and_checked_first() {
+    let parked = parked_move();
+    let record = parked.record.clone().unwrap();
+    let mut gone = later(&parked);
+    gone.always = vec![("target state", Fault::LostBefore)];
+    let (given_up, _) = engine::give_up(&mut gone, &record).unwrap();
+    let alone = engine::given_up_answer(&given_up, None, engine::Asked::Release).message;
+    // The check comes before the steps, and the steps are dated.
+    let check = alone
+        .find("Check first: look at what dev@target holds now")
+        .unwrap_or_else(|| panic!("{alone}"));
+    let restore = alone.find("pseudolife-mcp restore --backup-file").unwrap();
+    assert!(check < restore, "{alone}");
+    assert!(
+        alone.contains("as it was at 2026-11-14T08:00:00Z"),
+        "{alone}"
+    );
+    assert!(alone.contains("do none of this"), "{alone}");
+    assert!(!alone.contains("records show a newer move"), "{alone}");
+    // A newer committed move to the same target is named before the steps.
+    let mut newer = record.clone();
+    newer.move_id = "20261114-090000-abcdef02".into();
+    newer.committed = true;
+    newer.phase = Phase::Complete;
+    for asked in [
+        engine::Asked::Release,
+        engine::Asked::Rollback,
+        engine::Asked::TargetGone,
+    ] {
+        let text = engine::given_up_answer(&given_up, Some(&newer), asked).message;
+        let named = text
+            .find("a newer move to dev@target, move 20261114-090000-abcdef02 (committed")
+            .unwrap_or_else(|| panic!("{asked:?}: {text}"));
+        assert!(
+            named < text.find("pseudolife-mcp restore").unwrap(),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_cause_a_rollback_recorded_is_kept_by_a_later_one() {
+    // The restore's answer is lost, the same run reads the bank and records
+    // that cause, and an undo fails; a later --rollback finishes.
+    let mut first = Model::new();
+    first.always = vec![
+        ("target restore", Fault::LostAfter),
+        ("target timer-resume", Fault::Refused),
+    ];
+    run(&mut first);
+    let record = first.record.clone().unwrap();
+    assert_eq!(record.phase, Phase::RollbackIncomplete, "{record:?}");
+    let lost = record.unresolved.clone().unwrap();
+    assert!(lost.contains("its answer never arrived"), "{lost}");
+    let mut after = later(&first);
+    engine::roll_back(&mut after, record);
+    let record = after.record.clone().unwrap();
+    assert_eq!(record.unresolved.as_deref(), Some(lost.as_str()));
+}
+
+#[test]
+fn a_target_is_given_up_only_after_three_attempts_get_no_answer() {
+    let parked = parked_move();
+    let record = parked.record.clone().unwrap();
+    // It answers on the third attempt: not given up.
+    let mut model = later(&parked);
+    model.lost = vec![("target state", 2)];
+    let refusal = engine::give_up(&mut model, &record).unwrap_err();
+    assert_eq!(refusal.code, 4, "{refusal:?}");
+    assert!(
+        refusal.message.contains("answers as a move target"),
+        "{}",
+        refusal.message
+    );
+    // Three attempts with no answer: given up, and the message says so.
+    let mut model = later(&parked);
+    model.lost = vec![("target state", 3)];
+    let (given_up, outcome) = engine::give_up(&mut model, &record).unwrap();
+    assert_eq!(given_up.phase, Phase::GivenUp);
+    assert!(
+        outcome.message.contains("3 attempts, 5 seconds apart"),
+        "{}",
+        outcome.message
+    );
+    assert!(!outcome.message.contains("asked of"), "{}", outcome.message);
 }

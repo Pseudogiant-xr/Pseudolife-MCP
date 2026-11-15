@@ -172,6 +172,14 @@ pub(super) fn resumable<'a>(records: &'a [Record], to: &str) -> Option<&'a Recor
     })
 }
 
+/// The newest move from this host to `record`'s target after it, if any.
+fn newer_move(store: &mut Files, record: &Record) -> Option<Record> {
+    records(store)
+        .ok()?
+        .into_iter()
+        .find(|r| r.target == record.target && r.move_id > record.move_id)
+}
+
 /// Asks the user unless `--yes`; a run without a terminal must say `--yes`.
 fn confirm(yes: bool, question: &str) -> Result<(), String> {
     if yes {
@@ -367,6 +375,11 @@ pub(super) fn rollback(request: &Rollback) -> u8 {
         }
         Err(why) => return refuse(request.json, 4, &format!("{why}. {NOTHING}")),
     };
+    if record.phase == Phase::GivenUp {
+        let newer = newer_move(&mut store, &record);
+        let outcome = engine::given_up_answer(&record, newer.as_ref(), engine::Asked::Rollback);
+        return report(request.json, &record.move_id, &outcome, true);
+    }
     if let Some(outcome) = engine::answered_by_record(&record) {
         // Answered from the record alone: nothing to run.
         return report(request.json, &record.move_id, &outcome, true);
@@ -467,6 +480,16 @@ pub(super) fn release(request: &Rollback) -> u8 {
         }
         Err(why) => return refuse(request.json, 4, &format!("{why}. {NOTHING}")),
     };
+    if record.phase == Phase::GivenUp {
+        let newer = newer_move(&mut store, &record);
+        let asked = if request.target_gone {
+            engine::Asked::TargetGone
+        } else {
+            engine::Asked::Release
+        };
+        let outcome = engine::given_up_answer(&record, newer.as_ref(), asked);
+        return report_release(request.json, &record.move_id, &outcome, &record);
+    }
     if request.target_gone {
         return give_up_target(request, &home, &record);
     }
