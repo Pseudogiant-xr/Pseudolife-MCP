@@ -25,19 +25,25 @@ fn daemon_app(vars: &[(&str, &str)]) -> Arc<App> {
             .map(|(_, v)| (*v).to_string())
     };
     let env = crate::config::DaemonEnv::from_env(&lookup).unwrap();
+    // As `main`: either the config or the environment makes it read-only.
+    let service_env_read_only = crate::config::Config::default().read_only || env.read_only;
     let tokens = auth::EnvTokens::from_lookup(&lookup);
     let auth_configured = tokens.configured();
     // What the startup guard decides for this environment: both
     // configurations start off loopback.
     assert!(
-        auth_configured || env.trust_bind || ["127.0.0.1", "::1", "localhost"].contains(&env.host.as_str()),
+        auth_configured
+            || env.trust_bind
+            || ["127.0.0.1", "::1", "localhost"].contains(&env.host.as_str()),
         "this configuration would not start: {vars:?}"
     );
     let dsn = "postgresql://nobody:nothing@127.0.0.1:9/pl_security_admission_none".to_string();
     let env_principals: Vec<String> = tokens.map.iter().map(|(_, p)| p.clone()).collect();
     let store = Arc::new(auth::PrincipalStore::new_with_shadowed(env_principals));
-    let activity = auth_configured.then(|| Arc::new(crate::principal_activity::Recorder::new()));
-    let sessions = auth_configured.then(|| Arc::new(crate::console_sessions::SessionSnapshot::new()));
+    let activity = (auth_configured && !service_env_read_only)
+        .then(|| Arc::new(crate::principal_activity::Recorder::new()));
+    let sessions =
+        auth_configured.then(|| Arc::new(crate::console_sessions::SessionSnapshot::new()));
     let service = Arc::new(Service::new(
         crate::config::Config::default(),
         env,
@@ -71,7 +77,11 @@ fn without_host(vars: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'s
 /// Content-Length with any body.
 async fn answer(app: &Arc<App>, case: &Case) -> (u16, HeaderMap, Vec<u8>) {
     let mut request = Request::builder().method(case.method).uri(case.path);
-    if !case.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
+    if !case
+        .headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+    {
         request = request.header("host", "127.0.0.1:8765");
     }
     for (name, value) in case.headers {
@@ -94,34 +104,21 @@ async fn answer(app: &Arc<App>, case: &Case) -> (u16, HeaderMap, Vec<u8>) {
     (status, headers, bytes)
 }
 
-/// Every difference between the answers and the table, one line each.
-fn mismatches(case: &Case, (status, headers, body): &(u16, HeaderMap, Vec<u8>)) -> Vec<String> {
-    let e = &case.expect;
-    let header = |name: &str| headers.get(name).map(|v| v.to_str().unwrap_or("<bytes>").to_string());
-    let mut out = Vec::new();
-    if *status != e.status {
-        out.push(format!("status {status}, want {}", e.status));
-    }
-    if body.as_slice() != e.body {
-        out.push(format!("body {:?}, want {:?}", String::from_utf8_lossy(body), String::from_utf8_lossy(e.body)));
-    }
-    if header("content-type").as_deref() != Some(e.content_type) {
-        out.push(format!("content-type {:?}, want {:?}", header("content-type"), e.content_type));
-    }
-    if header("cache-control").as_deref() != e.cache_control {
-        out.push(format!("cache-control {:?}, want {:?}", header("cache-control"), e.cache_control));
-    }
-    if (header("x-content-type-options").as_deref() == Some("nosniff")) != e.nosniff {
-        out.push(format!("x-content-type-options {:?}, want nosniff={}", header("x-content-type-options"), e.nosniff));
-    }
-    out.into_iter().map(|d| format!("{} ({}): {d}", case.name, e.kind)).collect()
-}
-
 async fn run_table(vars: &[(&str, &str)], table: &[Case]) {
     let app = daemon_app(vars);
     let mut failures = Vec::new();
     for case in table {
-        failures.extend(mismatches(case, &answer(&app, case).await));
+        let (status, headers, body) = answer(&app, case).await;
+        let headers: Vec<(String, String)> = headers
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().to_string(),
+                    String::from_utf8_lossy(v.as_bytes()).into_owned(),
+                )
+            })
+            .collect();
+        failures.extend(cases::mismatches(case, status, &headers, &body));
     }
     assert!(failures.is_empty(), "{vars:?}:\n{}", failures.join("\n"));
 }
@@ -153,7 +150,10 @@ async fn a_configured_bearer_still_gates_a_wildcard_bind() {
 fn the_table_matches_the_loopback_security_goldens() {
     for (golden, table) in [
         (include_str!("../harness/goldens/security-open.json"), OPEN),
-        (include_str!("../harness/goldens/security-closed.json"), CLOSED),
+        (
+            include_str!("../harness/goldens/security-closed.json"),
+            CLOSED,
+        ),
     ] {
         let golden: serde_json::Value = serde_json::from_str(golden).unwrap();
         let responses = golden["responses"].as_array().unwrap();
@@ -169,12 +169,22 @@ fn the_table_matches_the_loopback_security_goldens() {
             if e.nosniff {
                 headers.insert("x-content-type-options".into(), "nosniff".into());
             }
-            assert_eq!(recorded["headers"], serde_json::Value::Object(headers), "{}", case.name);
+            assert_eq!(
+                recorded["headers"],
+                serde_json::Value::Object(headers),
+                "{}",
+                case.name
+            );
             if e.content_type.starts_with("application/json") {
                 let body: serde_json::Value = serde_json::from_slice(e.body).unwrap();
                 assert_eq!(recorded["json"], body, "{}", case.name);
             } else {
-                assert_eq!(recorded["bytes"], String::from_utf8(e.body.to_vec()).unwrap(), "{}", case.name);
+                assert_eq!(
+                    recorded["bytes"],
+                    String::from_utf8(e.body.to_vec()).unwrap(),
+                    "{}",
+                    case.name
+                );
             }
         }
     }

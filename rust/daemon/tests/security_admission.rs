@@ -1,22 +1,27 @@
-//! The daemon process really bound on 0.0.0.0 (unix only), answering every
-//! request admission case of `security_admission/cases.rs` over a raw
-//! socket: the open configuration (`PSEUDOLIFE_MCP_TRUST_BIND`) and the
-//! closed one (bearer), each with an unreachable bank, as the harness's
-//! `security-remote-open` and `security-remote-auth` start it.
+//! The daemon process answering every request admission case of
+//! `security_admission/cases.rs` over a raw socket, Linux only, each
+//! configuration with an unreachable bank: the closed one (bearer) really
+//! bound on 0.0.0.0, as `security-remote-auth` configures it, and the open
+//! one (`PSEUDOLIFE_MCP_TRUST_BIND`) on 127.0.0.1.
 //!
-//! Unix only because a wildcard listener on a Windows desktop can raise a
-//! firewall prompt; the same table runs on every OS in process
-//! (`src/http_security_tests.rs`), and the startup decision for both
-//! configurations is `tests/security_startup.rs`'s.
+//! The open configuration never gets a wildcard listener: tokenless, it
+//! would answer any LAN client that names a loopback Host, so the harness
+//! too refuses to start one (`run.py` `loopback_bind_fixture`). Its
+//! configured-0.0.0.0 answers are the in-process test's
+//! (`src/http_security_tests.rs`, every OS), and whether either
+//! configuration starts off loopback is `tests/security_startup.rs`'s. Not
+//! on macOS or Windows, where a wildcard listener can raise a desktop
+//! firewall prompt.
 
 #[path = "security_admission/cases.rs"]
 mod cases;
 
-#[cfg(unix)]
-mod wildcard {
-    use super::cases::{CLOSED, CLOSED_ENV, Case, OPEN, OPEN_ENV};
+#[cfg(target_os = "linux")]
+mod process {
+    use super::cases::{CLOSED, CLOSED_ENV, Case, OPEN, OPEN_ENV, mismatches};
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpStream;
+    use std::os::unix::process::CommandExt;
     use std::path::PathBuf;
     use std::process::{Child, Command, Stdio};
     use std::sync::mpsc;
@@ -36,17 +41,22 @@ mod wildcard {
         }
     }
 
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("0.0.0.0:0")
+    fn free_port(host: &str) -> u16 {
+        std::net::TcpListener::bind((host, 0))
             .unwrap()
             .local_addr()
             .unwrap()
             .port()
     }
 
-    /// Start the daemon on 0.0.0.0 with `vars` and nothing of the caller's
-    /// environment; retry on another port if the chosen one was taken.
-    fn start(name: &str, vars: &[(&str, &str)]) -> Daemon {
+    /// Start the daemon with `vars` (which name its host) and nothing of the
+    /// caller's environment; retry on another port if the chosen one was
+    /// taken. `auth` is the mode its listening line must report.
+    fn start(name: &str, vars: &[(&str, &str)], auth: bool) -> Daemon {
+        let host = vars
+            .iter()
+            .find(|(k, _)| *k == "PSEUDOLIFE_MCP_HOST")
+            .map_or("127.0.0.1", |(_, v)| *v);
         for _ in 0..3 {
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -57,7 +67,7 @@ mod wildcard {
                 std::process::id()
             ));
             std::fs::create_dir_all(home.join("data")).unwrap();
-            let port = free_port();
+            let port = free_port(host);
             let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-daemon"));
             command
                 .env_clear()
@@ -85,6 +95,15 @@ mod wildcard {
             for (key, value) in vars {
                 command.env(key, value);
             }
+            // SAFETY: prctl is async-signal-safe; it only asks the kernel to
+            // kill the daemon if the test thread that started it dies, so a
+            // killed test run leaves no listener behind.
+            unsafe {
+                command.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                    Ok(())
+                });
+            }
             let mut child = command.spawn().expect("spawn the daemon");
             let stderr = child.stderr.take().unwrap();
             let (lines, seen) = mpsc::channel();
@@ -96,30 +115,38 @@ mod wildcard {
                 }
             });
             let mut daemon = Daemon { child, port, home };
-            let deadline = Instant::now() + Duration::from_secs(120);
+            let listening = format!("daemon: listening on {host}:{port} (auth={auth})");
+            let deadline = Instant::now() + Duration::from_secs(50);
             let mut log = Vec::new();
-            let listening = format!("daemon: listening on 0.0.0.0:{port} (auth=");
             loop {
                 match seen.recv_timeout(Duration::from_millis(100)) {
                     Ok(line) => {
-                        let ready = line.starts_with(&listening);
+                        let ready = line == listening;
                         log.push(line);
                         if ready {
                             // Keep draining stderr so the daemon never blocks on it.
                             std::thread::spawn(move || for _ in seen {});
                             return daemon;
                         }
+                        continue;
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    // The reader ends when the daemon's stderr closes.
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
                 }
-                if let Ok(Some(_)) = daemon.child.try_wait() {
-                    break;
-                }
-                assert!(Instant::now() < deadline, "{name}: not listening after 120 s: {log:#?}");
+                assert!(
+                    Instant::now() < deadline,
+                    "{name}: not listening after 50 s: {log:#?}"
+                );
             }
-            let taken = log.iter().any(|l| l.starts_with(&format!("bind 0.0.0.0:{port}:")));
-            assert!(taken, "{name}: the daemon exited before listening: {log:#?}");
+            let _ = daemon.child.wait();
+            let taken = log
+                .iter()
+                .any(|l| l.starts_with(&format!("bind {host}:{port}:")));
+            assert!(
+                taken,
+                "{name}: the daemon exited before listening: {log:#?}"
+            );
             drop(daemon);
         }
         panic!("{name}: no free port after three tries");
@@ -128,9 +155,18 @@ mod wildcard {
     /// One case as the harness's client sends it, on its own connection.
     fn send(port: u16, case: &Case) -> (u16, Vec<(String, String)>, Vec<u8>) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
         let mut head = format!("{} {} HTTP/1.1\r\n", case.method, case.path).into_bytes();
-        if !case.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
+        if !case
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+        {
             head.extend_from_slice(format!("Host: 127.0.0.1:{port}\r\n").as_bytes());
         }
         for (name, value) in case.headers {
@@ -178,41 +214,33 @@ mod wildcard {
         (status, headers, body)
     }
 
-    fn run_table(name: &str, vars: &[(&str, &str)], table: &[Case]) {
-        let daemon = start(name, vars);
+    fn run_table(name: &str, vars: &[(&str, &str)], auth: bool, table: &[Case]) {
+        let daemon = start(name, vars, auth);
         let mut failures = Vec::new();
         for case in table {
             let (status, headers, body) = send(daemon.port, case);
-            let e = &case.expect;
-            let header = |n: &str| headers.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
-            let mut wrong = Vec::new();
-            if status != e.status {
-                wrong.push(format!("status {status}, want {}", e.status));
-            }
-            if body != e.body {
-                wrong.push(format!("body {:?}", String::from_utf8_lossy(&body)));
-            }
-            if header("content-type") != Some(e.content_type) {
-                wrong.push(format!("content-type {:?}", header("content-type")));
-            }
-            if header("cache-control") != e.cache_control {
-                wrong.push(format!("cache-control {:?}", header("cache-control")));
-            }
-            if (header("x-content-type-options") == Some("nosniff")) != e.nosniff {
-                wrong.push(format!("x-content-type-options {:?}", header("x-content-type-options")));
-            }
-            failures.extend(wrong.into_iter().map(|w| format!("{} ({}): {w}", case.name, e.kind)));
+            failures.extend(mismatches(case, status, &headers, &body));
         }
         assert!(failures.is_empty(), "{name}:\n{}", failures.join("\n"));
     }
 
     #[test]
-    fn a_trusted_wildcard_daemon_still_admits_loopback_browsers_only() {
-        run_table("open", OPEN_ENV, OPEN);
+    fn a_trusted_tokenless_daemon_admits_loopback_browsers_only() {
+        let loopback: Vec<(&str, &str)> = OPEN_ENV
+            .iter()
+            .map(|&(k, v)| {
+                if k == "PSEUDOLIFE_MCP_HOST" {
+                    (k, "127.0.0.1")
+                } else {
+                    (k, v)
+                }
+            })
+            .collect();
+        run_table("open", &loopback, false, OPEN);
     }
 
     #[test]
     fn a_wildcard_daemon_with_a_bearer_still_gates_every_path() {
-        run_table("closed", CLOSED_ENV, CLOSED);
+        run_table("closed", CLOSED_ENV, true, CLOSED);
     }
 }
