@@ -3933,6 +3933,59 @@ def test_an_open_listing_just_under_its_limit_builds(world, capsys, monkeypatch)
     assert "merged #10 " in capsys.readouterr().out
 
 
+# --- a release cut over a parent that only waits is still batched alone ---
+
+def _cut_over_a_waiting_parent(world):
+    """#10 (freeze-exception) edits the packaged compose copy; #11, unlabelled,
+    is stacked on it with nothing frozen of its own, so it only waits for
+    #10; #12, a labelled release cut, is stacked on #11; #13 is ordinary."""
+    compose = "pseudolife_memory/compose/docker-compose.yml"
+    world.advance_master({"pyproject.toml": _cut("0.19.0"), compose: "image: x:0.19.0\n"})
+    label = [{"name": "freeze-exception"}]
+    sha10 = world.pr(10, {compose: "image: x:0.19.0-a\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    sha12 = world.pr(12, {"pyproject.toml": _cut("0.19.1"), compose: "image: x:0.19.1\n"}, base="pr-11")
+    sha13 = world.pr(13, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-11-15T00:00:01Z", labels=label)
+    world.gh.add(11, sha11, labeled_at="2026-11-15T00:00:02Z")
+    world.gh.add(12, sha12, labeled_at="2026-11-15T00:00:03Z", labels=label)
+    world.gh.add(13, sha13, labeled_at="2026-11-15T00:00:04Z")
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["build", "dry-run"])
+def test_a_release_cut_carrying_a_waiting_parent_is_still_batched_alone(world, capsys, dry_run):
+    # Codex (W5's run over a range including adcdb1cba): the cut search
+    # skipped a cut whose head carried any refused entry, a waiting one
+    # included, while the merge skips only refused entries that are not
+    # waiting; so the skipped cut merged beside the others.
+    _cut_over_a_waiting_parent(world)
+
+    assert _build(*(["--dry-run"] if dry_run else [])) == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "#12 is a release cut; it is batched alone" in out, out
+    assert "merged #12 " in out
+    for other in (10, 11, 13):
+        assert f"merged #{other} " not in out, out
+
+
+def test_a_cut_that_reaches_the_merge_beside_others_refuses_the_build(world, capsys, monkeypatch):
+    # The backstop: whatever lets a cut through the cut search beside other
+    # members (here the search is bypassed), the build refuses.
+    world.advance_master({"pyproject.toml": _cut("0.19.0")})
+    sha10 = _fold_cut(world, 10, "0.19.1")
+    sha11 = world.pr(11, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, labeled_at="2026-11-15T00:00:01Z")
+    world.gh.add(11, sha11, labeled_at="2026-11-15T00:00:02Z")
+    monkeypatch.setattr(integrate, "_release_cut_alone", lambda plan, members, refused=None: members)
+
+    assert _build() == 2
+
+    err = capsys.readouterr().err
+    assert "release cut #10 merged beside #11" in err and "nothing was built" in err, err
+    assert not world.remote_branches()
+
+
 # --- the dry run names what would refuse a waiting member once it is ready ---
 
 _FAILING = [{"status": "COMPLETED", "conclusion": "FAILURE"}]

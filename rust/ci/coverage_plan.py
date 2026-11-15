@@ -154,6 +154,8 @@ PLATFORM_EXCLUSIONS = {
     'linux': {
         'backup-dotfile-suffix-windows': 'Registered only by the Windows backup source branch.',
         'console-winerror-full-stop': 'Declared Windows-only: only FormatMessageW text ends in a full stop.',
+        'console-exited-counts-as-opened': 'Declared Windows-only: only the Windows launch reads a launcher still running right after its start as opened; POSIX waits for its exit.',
+        'console-generic-launched': 'Declared Windows-only: only the Windows BROWSER reproduction refuses a %s entry without a trailing &.',
         'expose-winerror-full-stop': 'Declared Windows-only: only FormatMessageW text ends in a full stop.',
         'expose-pathext-lowercased': 'Declared Windows-only: only Windows has PATHEXT, whose spelling the lookup reports.',
         'restore-desktop-unmapped': "Declared Windows-only: only Windows maps Docker Desktop's host-mount source paths.",
@@ -176,7 +178,7 @@ PLATFORM_EXCLUSIONS = {
         'backup-raw-member-name': 'Declared Linux-only raw-byte member name witness.',
         'backup-discovery-generic-errno-class': 'Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.',
         'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
-        'console-display-ignored': 'Declared Linux-only: only Linux gates the browser on DISPLAY or WAYLAND_DISPLAY.',
+        'console-running-counts-as-failed': 'Declared Linux-only: only the POSIX launch waits for a launcher to exit before calling it opened.',
     },
 }
 # These two controls have no selected OS witness; global gaps cannot arise

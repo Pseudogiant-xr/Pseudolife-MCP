@@ -351,7 +351,7 @@ async fn run_inner(arguments: &[String]) -> Result<u8, Defer> {
     let (target, bank_directory) = resolve_target(args.token_file.as_deref())?;
     let text = if args.read_code {
         let line = if super::stdin_is_terminal() {
-            match super::prompt::password().await {
+            match super::prompt::password("pairing code: ").await {
                 Ok(line) => line,
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => return Ok(130),
                 Err(_) => return Err(Defer),
