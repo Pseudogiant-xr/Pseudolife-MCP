@@ -1682,3 +1682,8 @@ pub(crate) mod tests {
         assert!(host_part("http://[127.0.0.1]").is_err());
     }
 }
+
+/// The off-loopback admission table (`tests/security_admission/cases.rs`).
+#[cfg(test)]
+#[path = "http_security_tests.rs"]
+mod security_tests;
