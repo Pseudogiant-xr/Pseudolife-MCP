@@ -46,7 +46,16 @@ case "$1" in
         cp "$0" "$PSEUDOLIFE_SHIM_LAUNCHER"; chmod 755 "$PSEUDOLIFE_SHIM_LAUNCHER"
         echo "$PSEUDOLIFE_SHIM_LAUNCHER" ;;
     update) [ "$2" = --native-capability ] && echo "pseudolife-mcp native-update-v1" ;;
-    installer) [ "$2" = migrate-registrations ] && echo "$4 already runs the native client; nothing changed" ;;
+    installer)
+        if [ "$2" = --capability ]; then
+            if [ -n "$STUB_V0240" ]; then
+                printf '%s
+' "installer: expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop" >&2
+                exit 2
+            fi
+            printf '%s
+' "${STUB_CAPABILITY-pseudolife-mcp installer-protocol 1}"
+        elif [ "$2" = migrate-registrations ]; then echo "$4 already runs the native client; nothing changed"; fi ;;
 esac
 '''
 
@@ -76,7 +85,8 @@ def _release(directory: Path, *, digest_override: str | None = None, omit: bool 
     (directory / "SHA256SUMS").write_text("" if omit else f"{digest}  {ASSET}\n", encoding="utf-8")
 
 
-def _run(tmp_path: Path, body: str, *, release: bool = True, **release_kwargs) -> subprocess.CompletedProcess:
+def _run(tmp_path: Path, body: str, *, release: bool = True, extra_env: dict[str, str] | None = None,
+         **release_kwargs) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
@@ -119,6 +129,7 @@ def _run(tmp_path: Path, body: str, *, release: bool = True, **release_kwargs) -
         "PSEUDOLIFE_SHIM_LAUNCHER": str(launcher),
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9",
     })
+    env.update(extra_env or {})
     result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_file)],
                             capture_output=True, text=True, env=env, timeout=180)
     assert not forbidden.exists(), f"the installer ran Python tooling: {forbidden.read_text()}"
@@ -179,6 +190,37 @@ def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case
     assert "STAGED" not in result.stdout
     assert not (tmp_path / "home" / "runtimes").exists()
     assert not (tmp_path / "home" / "bin").exists()
+
+
+@pytest.mark.skipif(WINDOWS, reason="the v0.24.0 stand-in is a shell script; on Windows the fixture is a real client")
+@pytest.mark.parametrize("answer", [
+    {"STUB_V0240": "1"},                                              # v0.24.0: a usage error
+    {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol 0"},       # an older protocol
+    {"STUB_CAPABILITY": ""},                                          # says nothing
+    {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol one"},     # not the documented form
+])
+def test_a_release_older_than_this_installer_is_refused_before_anything_changes(tmp_path, answer):
+    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env=answer)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert f"the native client {VERSION} predates this installer" in line
+    assert "installer --capability" in line and "installer-protocol 1" in line
+    assert "git checkout v" in line and "PSEUDOLIFE_SHIM_ENGINE" in line
+    assert line.endswith("Nothing was changed.")
+    calls = (tmp_path / "native-calls").read_text().splitlines()
+    assert "installer --capability" in calls
+    assert not any(call.startswith(("runtime", "installer expose", "installer migrate")) for call in calls)
+    assert not (tmp_path / "home" / "runtimes").exists()
+    assert not (tmp_path / "home" / "bin").exists()
+
+
+@needs_client
+def test_a_release_with_this_installers_protocol_installs(tmp_path):
+    result = _run(tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }',
+                  extra_env={"STUB_CAPABILITY": "pseudolife-mcp installer-protocol 2"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OK" in result.stdout.splitlines()
 
 
 def test_an_unsupported_platform_refuses(tmp_path):

@@ -68,7 +68,14 @@ case "$1" in
         echo "$PSEUDOLIFE_SHIM_LAUNCHER" ;;
     update) [ "$2" = --native-capability ] && echo "pseudolife-mcp native-update-v1" ;;
     installer)
-        if [ "$2" = migrate-registrations ]; then
+        if [ "$2" = --capability ]; then
+            if [ -n "$STUB_V0240" ]; then
+                # What v0.24.0's client answers: a usage error, exit 2.
+                printf '%s\n' "installer: expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop" >&2
+                exit 2
+            fi
+            printf '%s\n' "${STUB_CAPABILITY-pseudolife-mcp installer-protocol 1}"
+        elif [ "$2" = migrate-registrations ]; then
             case "$STUB_MOVES" in
                 moved) echo "moved $4 to the native client at $PSEUDOLIFE_SHIM_LAUNCHER (each changed file has a private backup)" ;;
                 current) echo "$4 already runs the native client; nothing changed" ;;
@@ -206,6 +213,39 @@ def test_a_binary_that_cannot_run_here_refuses_before_install(tmp_path):
     assert "does not run on this host" in result.stderr
     assert "glibc 2.35" in result.stderr
     assert _calls(tmp_path) == ["version"]
+
+
+@pytest.mark.parametrize("answer", [
+    {"STUB_V0240": "1"},                                              # v0.24.0: a usage error
+    {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol 0"},       # an older protocol
+    {"STUB_CAPABILITY": ""},                                          # says nothing
+    {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol one"},     # not the documented form
+    {"STUB_CAPABILITY": "installer: pseudolife-mcp installer-protocol 1"},
+])
+def test_a_release_older_than_this_installer_is_refused_before_anything_changes(tmp_path, answer):
+    result = _run(tmp_path, 'native_stage; ensure_shim; echo "REACHED"', env=answer)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "REACHED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    # The true cause and the one fix: which release, from which checkout.
+    assert f"the native client {VERSION} predates this installer" in line
+    assert "installer --capability" in line and "installer-protocol 1" in line
+    assert "git checkout v" in line and "PSEUDOLIFE_SHIM_ENGINE" in line
+    assert line.endswith("Nothing was changed.")
+    calls = _calls(tmp_path)
+    assert "installer --capability" in calls
+    assert not any(call.startswith(("runtime", "installer expose", "installer migrate")) for call in calls)
+    assert not (tmp_path / "home/share/pseudolife-mcp/bin/pseudolife-mcp").exists()
+
+
+@pytest.mark.parametrize("level", ["1", "2", "17"])
+def test_a_release_with_this_installers_protocol_or_newer_installs(tmp_path, level):
+    result = _run(tmp_path, 'native_stage; ensure_shim; echo "OK=$SHIM_OK"',
+                  env={"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {level}"})
+    assert result.returncode == 0, result.stderr
+    assert "OK=1" in result.stdout
+    calls = _calls(tmp_path)
+    assert calls.index("installer --capability") < next(i for i, c in enumerate(calls) if c.startswith("runtime install"))
 
 
 @pytest.mark.parametrize("moves, status", [("moved", 0), ("current", 0), ("left", 1)])
