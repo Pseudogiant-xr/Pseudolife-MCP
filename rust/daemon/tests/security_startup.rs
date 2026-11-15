@@ -26,6 +26,11 @@ fn scratch(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
+    // Case labels carry quotes and colons, which a Windows path refuses.
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
     let root = std::env::temp_dir().join(format!(
         "pl-security-startup-{name}-{}-{nanos}",
         std::process::id()
