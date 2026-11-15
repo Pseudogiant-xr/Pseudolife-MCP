@@ -10,7 +10,12 @@ before it starts the process, and ``run`` does both for a direct start.
 ``require`` refuses unless HOME, USERPROFILE, LOCALAPPDATA and APPDATA are all
 set and inside that directory, every XDG_* variable and every other variable
 that redirects writes (``REDIRECTS``) that is set is inside it, and the
-directory itself is inside the system temporary directory. Git Bash paths
+directory itself is inside the system temporary directory. ``run`` (a whole
+installer start) also refuses unless PSEUDOLIFE_SHIM_RUNTIMES and
+PSEUDOLIFE_SHIM_LAUNCHER are both set inside that directory (``layout`` sets
+them): without that override an installer puts its launcher's directory first
+on the Windows user PATH, which lives in HKCU and which no home variable
+redirects. Git Bash paths
 (``/c/...``, ``/tmp/...``) are read as the Windows paths they name. A missing
 LOCALAPPDATA or APPDATA is refused too: on Windows a program that finds it
 unset asks the system for the real folder instead.
@@ -24,6 +29,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 SANDBOXED = ("HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA")
+# A whole installer run needs both: the layout override is what keeps the
+# installer off the real Windows user PATH.
+LAYOUT = ("PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER")
 # Each of these, when set, also sends writes somewhere: it must be inside too.
 REDIRECTS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "PSEUDOLIFE_MCP_DATA_DIR",
              "PSEUDOLIFE_SHIM_LAUNCHER", "PSEUDOLIFE_SHIM_RUNTIMES")
@@ -116,7 +124,25 @@ def require(env: Mapping[str, str], root: Path) -> None:
         raise RealHomeRefused("refusing to start installer code outside a disposable home: " + "; ".join(problems))
 
 
+def layout(env: Mapping[str, str], root: Path) -> dict[str, str]:
+    """``env`` with the shim layout overridden inside ``root``'s home."""
+    home = Path(root) / "home"
+    launcher = "pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp"
+    out = dict(env)
+    out["PSEUDOLIFE_SHIM_RUNTIMES"] = str(home / "shim" / "runtimes")
+    out["PSEUDOLIFE_SHIM_LAUNCHER"] = str(home / "shim" / "bin" / launcher)
+    return out
+
+
 def run(argv, *, env: Mapping[str, str], root: Path, **kwargs) -> subprocess.CompletedProcess:
-    """``subprocess.run(argv, env=env, ...)`` after ``require(env, root)``."""
+    """``subprocess.run(argv, env=env, ...)`` after ``require(env, root)``, and
+    only with both layout overrides set (``LAYOUT``; ``require`` checks they
+    are inside ``root``)."""
     require(env, root)
+    missing = [name for name in LAYOUT if not env.get(name)]
+    if missing:
+        raise RealHomeRefused(
+            "refusing to start a whole installer run without " + " and ".join(missing)
+            + " inside the disposable home: without the layout override the installer puts its"
+            " launcher's directory first on the real Windows user PATH (installer_sandbox.layout sets both)")
     return subprocess.run(argv, env=dict(env), **kwargs)

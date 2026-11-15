@@ -36,7 +36,7 @@ def test_sh_takes_the_flag_and_documents_it(bash, tmp_path):
     env = installer_sandbox.environment(tmp_path, {k: v for k, v in os.environ.items()
                                                    if k in ("PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR")})
     proc = installer_sandbox.run([bash, str(ROOT / "ops" / "install-native.sh"), "--test-login", "--help"],
-                                 env=env, root=tmp_path, capture_output=True, text=True, timeout=60)
+                                 env=installer_sandbox.layout(env, tmp_path), root=tmp_path, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     usage = _text("install-native.sh").split("# <<< usage <<<", 1)[0]
     assert "--test-login" in usage
