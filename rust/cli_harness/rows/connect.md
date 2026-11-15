@@ -18,11 +18,21 @@ connect: the shim only runs it after a first frame with
 | `connect URL --client C --token-file ~/... [--read-token]` | `docs/guide/remote-bank.md` 536-541 |
 | `connect URL --yes [--json]` | `move_cli.py` 1642, 1635, 948 |
 | `connect URL --token-file F` | `move_cli.py` 1708 |
-| `connect URL --code CODE` / `--read-code` | `remote-bank.md` 221 (deferred: pairing) |
+| `connect URL --code CODE` / `--read-code` | `remote-bank.md` 239, 246 |
 
 Native: the URL first, then `--token-file V`, `--client V`, `--read-token`,
-`--dry-run`, `--yes`, `--json`, each at most once, a value never empty and
-never starting with `-`. Everything else defers before any effect.
+`--code V`, `--read-code`, `--dry-run`, `--yes`, `--json`, each at most
+once, a value never empty and never starting with `-`, the URL never empty
+and never starting with `-`, and every argument valid Unicode. Help,
+abbreviations, `--opt=value`, `--` and every other shape defer before any
+effect. Pairing (`--code`, `--read-code`) has been native since #1563, and
+Codex's `config.toml` is read and written through Codex's own app-server.
+#1568 made the terminal native too: a run with changes to apply at a
+terminal without `--yes` asks `Apply these changes? [y/N]` on stderr,
+`--read-token` and `--read-code` at a terminal read without echo, and a run
+for every client plans the unattended-update schedules it finds
+(`schedule.rs`: one exactly as `update --schedule` writes it is re-created
+against the new URL, keeping its kind and time; any other is a manual row).
 
 ## Exact contract items
 
@@ -155,23 +165,40 @@ every apply case of this row.
 
 ## Deferred before any effect
 
-Every deferral below happens before any request, except the last item.
+Nothing is written and no request reaches the daemon before any deferral
+below except the last two items, which follow the unauthenticated
+`GET /health`. Discovery runs first and can itself defer, so by then a
+`--read-code` prompt may have been answered, Codex's app-server may have
+been asked for its configuration and the scheduler queried for the
+unattended-update schedules. The list groups the `Defer` sites in
+`rust/shim/src/cli/connect/`; the last group before the two `/health` items
+is not exhaustive.
 
-- Pairing (`--code`, `--read-code`).
-- A readable Codex `config.toml` with `codex` selected (its app-server owns
-  Codex's config).
+- An argv outside the native shapes above.
 - A target URL with a space, a control character, DEL or any non-ASCII
   character (urllib's lstrip/tab-removal and NFKC netloc check are not
-  reproduced), an IPvFuture or zoned IPv6 host, or userinfo.
-- Environment base directories not already in `str(pathlib.Path(...))`
-  form; a stat error pathlib would raise; a read error other than
-  FileNotFoundError on a file the plan would write.
+  reproduced), or a bracketed host that is neither an IPv6 nor an IPv4
+  address (an IPvFuture or zoned IPv6 host included). The same holds for a
+  daemon URL connect reads and shows: one a registration or Codex's
+  connection file records, `PSEUDOLIFE_MCP_DAEMON_URL` in this shell, or
+  Windows' User- or Machine-scope value.
+- Neither `USERPROFILE` nor `HOME` set; an environment base directory not
+  already in `str(pathlib.Path(...))` form, or a current directory not in
+  that form or unreadable; an environment value, path or file name that is
+  not valid Unicode; a `--token-file` that cannot be made absolute; a stat
+  error pathlib would raise; a read error other than FileNotFoundError on a
+  file the plan would write.
 - JSON the Python reader holds but this one cannot: a lone surrogate,
   nesting past 100, an integer past 4300 digits (CPython raises ValueError).
 - A real run whose credentials hold DEL (urllib sends it; the `http`
   crate's header type refuses it).
-- After the unauthenticated `GET /health` only: a health body with one of
-  the JSON inputs above.
+- Rare shapes of what discovery reads or of the process itself, for example
+  a shim registration whose `command` is not a string, or a runtime or
+  Ctrl-C listener that cannot be set up.
+- After `GET /health`: a health body with one of the JSON inputs above.
+- After `GET /health`: a redirect urllib would follow and this client does
+  not (an `ftp:` target, or a `Location` that is not text or cannot be
+  resolved).
 
 ## Declared divergences
 
