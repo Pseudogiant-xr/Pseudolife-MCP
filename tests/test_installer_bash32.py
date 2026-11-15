@@ -133,13 +133,17 @@ def _comsub(text: str, start: int, found: list) -> int:
     return k
 
 
-_HEREDOC = re.compile(r"<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# A here-document operator (never part of a here-string's <<<) and its
+# delimiter word: <<EOF, <<-EOF, <<'EOF', <<"EOF", <<\EOF, <<END-OF-TEXT.
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)(?P<strip>-?)[ \t]*(?P<escape>\\?)(?P<quote>['\"]?)"
+                      r"(?P<word>[A-Za-z0-9_][^\s'\"\\<>|&;()]*)(?P=quote)")
 
 
-def command_substitutions(text: str) -> list[tuple[int, str]]:
+def command_substitutions(text: str, kinds: "_Kinds | None" = None) -> list[tuple[int, str]]:
     """Every ``$( ... )`` in a shell file as ``(offset, body)``, each body cut
     where bash 3.2 cuts it. Single-quoted text, comments and here-document
-    text outside a substitution are skipped."""
+    text outside a substitution are skipped; given ``kinds``, a ``<<`` is a
+    here-document only where it found one (not a shift inside ``$(( ))``)."""
     found: list[tuple[int, str]] = []
     pending: list[tuple[str, bool]] = []
     k = 0
@@ -171,10 +175,10 @@ def command_substitutions(text: str) -> list[tuple[int, str]]:
             k = len(text) if end < 0 else end
         elif text.startswith("$(", k) and not text.startswith("$((", k):
             k = _comsub(text, k, found)
-        elif text.startswith("<<", k) and not text.startswith("<<<", k):
+        elif text.startswith("<<", k):
             match = _HEREDOC.match(text, k)
-            if match:
-                pending.append((match.group(2), text.startswith("<<-", k)))
+            if match and (kinds is None or k in kinds.heredocs):
+                pending.append((match.group("word"), bool(match.group("strip"))))
                 k = match.end()
             else:
                 k += 2
@@ -188,102 +192,153 @@ CODE, TEXT, COMMENT = 0, 1, 2
 
 class _Kinds:
     """Marks each character of a shell file as code, quoted or here-document
-    text, or a comment, so the checks below decide on code only. Inside
-    double quotes and unquoted here-documents, ``$( )``, ``$name``,
+    text, or a comment, so the checks below decide on code only.
+
+    Inside double quotes and unquoted here-documents, ``$( )``, ``$name``,
     backquotes and a ``${ }``'s name and operator are code; everything else
-    there is text, as is the word in ``${x:-word}`` (its expansions aside)."""
+    there is text, as is the word in ``${x:-word}`` (its expansions aside, and
+    its own quotes followed). A quote, ``${``, backquote, ``$(`` or
+    here-document that never closes is recorded in ``unclosed``: bash would
+    refuse the file, and the checker cannot tell code from text after it."""
 
     def __init__(self, text: str):
         self.text = text
         self.kind = [CODE] * len(text)
-        self.pending: list[tuple[str, bool, bool]] = []   # here-documents: delimiter, <<-, quoted
-        self._code(0, nested=False)
+        self.heredocs: set[int] = set()                    # offsets of here-document operators
+        self.unclosed: list[tuple[int, str]] = []          # (offset, what) never closed
+        self.pending: list[tuple[int, str, bool, bool]] = []   # offset, delimiter, <<-, quoted
+        self._code(0, close="")
+        if self.pending:
+            self._heredocs(len(text))
 
     def _mark(self, start: int, end: int, kind: int) -> None:
+        # Newlines too: a quoted newline does not end a command.
         for k in range(start, min(end, len(self.text))):
-            if self.text[k] != "\n":
-                self.kind[k] = kind
+            self.kind[k] = kind
 
-    def _code(self, k: int, nested: bool) -> int:
-        """Code from ``k``; when ``nested`` (a ``$(`` body), up to and past the
-        ``)`` that balances, as ``_comsub`` finds it. Returns the next index."""
-        text, depth = self.text, 1
+    def _code(self, k: int, close: str) -> int:
+        """Code from ``k`` up to and past ``close``: ``")"`` for a ``$(`` body
+        (the ``)`` that balances, as ``_comsub`` finds it), ``"`"`` for a
+        backquote body, ``""`` for the whole file. Returns the next index."""
+        text, depth, start = self.text, 1, k
         while k < len(text):
             c = text[k]
             if c == "\n" and self.pending:
                 k = self._heredocs(k + 1)
             elif c == "\\":
                 k += 2
-            elif c == "'" or text.startswith("$'", k):
-                k = self._single(k + (c == "$"))
+            elif text.startswith("$'", k):
+                k = self._single(k + 1, ansi=True)
+            elif c == "'":
+                k = self._single(k, ansi=False)
             elif c == '"':
                 k = self._double(k)
             elif text.startswith("${", k):
-                k = self._brace(k)
+                k = self._brace(k, in_double=False)
             elif c == "`":
-                end = text.find("`", k + 1)
-                k = len(text) if end < 0 else end + 1
+                if close == "`":
+                    return k + 1
+                k = self._code(k + 1, close="`")
+            elif text.startswith("$((", k) or (text.startswith("((", k) and _word_start(text, k)):
+                k = self._arithmetic(k + (c == "$"))
             elif c == "#" and _word_start(text, k):
                 end = text.find("\n", k)
                 end = len(text) if end < 0 else end
                 self._mark(k, end, COMMENT)
                 k = end
-            elif text.startswith("<<", k) and not text.startswith("<<<", k):
+            elif text.startswith("<<", k):
                 match = _HEREDOC.match(text, k)
                 if match:
-                    self.pending.append((match.group(2), text.startswith("<<-", k), bool(match.group(1))))
+                    self.heredocs.add(k)
+                    quoted = bool(match.group("escape") or match.group("quote"))
+                    self.pending.append((k, match.group("word"), bool(match.group("strip")), quoted))
                     k = match.end()
                 else:
                     k += 2
             else:
-                if nested and c == "(":
+                if close == ")" and c == "(":
                     depth += 1
-                elif nested and c == ")":
+                elif close == ")" and c == ")":
                     depth -= 1
                     if depth == 0:
                         return k + 1
                 k += 1
+        if close:
+            self.unclosed.append((start - (2 if close == ")" else 1), "$(" if close == ")" else "a backquote"))
         return k
 
-    def _single(self, k: int) -> int:
-        """``text[k]`` is ``'`` (of ``'...'`` or ``$'...'``): text up to its close."""
-        ansi = k > 0 and self.text[k - 1] == "$"
-        end = k + 1
-        while end < len(self.text) and self.text[end] != "'":
-            end += 2 if ansi and self.text[end] == "\\" else 1
-        self._mark(k, end + 1, TEXT)
-        return min(end + 1, len(self.text))
+    def _arithmetic(self, k: int) -> int:
+        """``text[k:]`` opens ``((``: code up to the ``))`` that balances, in
+        which ``<<`` is a shift, not a here-document."""
+        text, depth, start = self.text, 0, k
+        while k < len(text):
+            c = text[k]
+            if text.startswith("$(", k) and not text.startswith("$((", k):
+                k = self._code(k + 2, close=")")
+                continue
+            if text.startswith("${", k):
+                k = self._brace(k, in_double=False)
+                continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    return k + 1
+            k += 1
+        self.unclosed.append((start, "(("))
+        return k
 
-    def _expansions(self, k: int, stop) -> int:
-        """Text from ``k`` with its expansions left as code, until ``stop(k)``
-        holds; returns that index."""
+    def _single(self, k: int, ansi: bool) -> int:
+        """``text[k]`` is the ``'`` of ``'...'`` (or, with ``ansi``, of
+        ``$'...'``, where ``\\'`` does not close it): text up to its close."""
+        text, end = self.text, k + 1
+        while end < len(text) and text[end] != "'":
+            end += 2 if ansi and text[end] == "\\" else 1
+        if end >= len(text):
+            self.unclosed.append((k, "a single quote"))
+        self._mark(k, end + 1, TEXT)
+        return min(end + 1, len(text))
+
+    def _expansions(self, k: int, stop: str, in_double: bool, quotes: bool) -> int:
+        """Text from ``k`` with its expansions left as code, up to the
+        character ``stop`` (``"\\n"`` ends a here-document line); returns that
+        index. With ``quotes`` (a ``${ }`` word), its quotes are followed: a
+        double quote always, a single quote only outside double quotes."""
         text = self.text
-        while k < len(text) and not stop(k):
+        while k < len(text) and text[k] != stop:
             c = text[k]
             if c == "\\":
                 self._mark(k, k + 2, TEXT)
                 k += 2
+            elif quotes and c == '"':
+                k = self._double(k)
+            elif quotes and not in_double and text.startswith("$'", k):
+                k = self._single(k + 1, ansi=True)
+            elif quotes and not in_double and c == "'":
+                k = self._single(k, ansi=False)
+            elif text.startswith("$((", k):
+                k = self._arithmetic(k + 1)
             elif text.startswith("$(", k):
-                k = self._code(k + 2, nested=True)
+                k = self._code(k + 2, close=")")
             elif text.startswith("${", k):
-                k = self._brace(k)
+                k = self._brace(k, in_double=in_double)
             elif c == "$" and k + 1 < len(text) and (text[k + 1].isalnum() or text[k + 1] in "_?#@*!$-"):
                 k += 2
                 while k < len(text) and (text[k].isalnum() or text[k] == "_"):
                     k += 1
             elif c == "`":
-                end = text.find("`", k + 1)
-                k = len(text) if end < 0 else end + 1
+                k = self._code(k + 1, close="`")
             else:
                 self._mark(k, k + 1, TEXT)
                 k += 1
         return k
 
-    def _brace(self, k: int) -> int:
+    def _brace(self, k: int, in_double: bool) -> int:
         """``text[k:]`` opens ``${``: its name, subscript and operator are code,
         the word after the operator (``${x:-word}``) is text with its
         expansions as code. Returns the index after the closing ``}``."""
-        text = self.text
+        text, start = self.text, k
         k += 2
         if k + 1 < len(text) and text[k] in "!#" and text[k + 1] != "}":
             k += 1
@@ -297,13 +352,17 @@ class _Kinds:
             k = len(text) if end < 0 else end + 1
         while k < len(text) and text[k] in ":-=+?#%/^,@":
             k += 1
-        end = self._expansions(k, lambda i: self.text[i] == "}")
+        end = self._expansions(k, "}", in_double=in_double, quotes=True)
+        if end >= len(text):
+            self.unclosed.append((start, "${"))
         return min(end + 1, len(text))
 
     def _double(self, k: int) -> int:
         """``text[k]`` is ``"``: text up to its close, expansions as code."""
         self._mark(k, k + 1, TEXT)
-        end = self._expansions(k + 1, lambda i: self.text[i] == '"')
+        end = self._expansions(k + 1, '"', in_double=True, quotes=False)
+        if end >= len(self.text):
+            self.unclosed.append((k, "a double quote"))
         self._mark(end, end + 1, TEXT)
         return min(end + 1, len(self.text))
 
@@ -312,8 +371,11 @@ class _Kinds:
         texts, each up to its delimiter line."""
         text, pending = self.text, self.pending
         self.pending = []
-        for delimiter, strip_tabs, quoted in pending:
-            while k < len(text):
+        for start, delimiter, strip_tabs, quoted in pending:
+            while True:
+                if k >= len(text):
+                    self.unclosed.append((start, f"a here-document (no {delimiter} line)"))
+                    break
                 end = text.find("\n", k)
                 end = len(text) if end < 0 else end
                 line = text[k:end]
@@ -325,7 +387,7 @@ class _Kinds:
                     self._mark(k, end, TEXT)
                     k = end + 1
                 else:
-                    k = self._expansions(k, lambda i: text[i] == "\n") + 1
+                    k = self._expansions(k, "\n", in_double=True, quotes=False) + 1
         return k
 
     def view(self, *keep: int) -> str:
@@ -341,7 +403,7 @@ def _printf_arguments(kinds: _Kinds, code: str) -> list[tuple[int, int]]:
     for match in re.finditer(r"(?<![\w-])printf\b", code):
         k = match.end()
         while k < len(text):
-            if text[k] == "\n":
+            if text[k] == "\n" and kinds.kind[k] == CODE:
                 if text[k - 1] != "\\" or kinds.kind[k - 1] != CODE:
                     break
             elif text[k] in ";|&" and kinds.kind[k] == CODE:
@@ -361,8 +423,11 @@ def bash32_problems(text: str) -> list[str]:
     comment is not one."""
     problems = []
     kinds = _Kinds(text)
+    for offset, what in kinds.unclosed:
+        problems.append(f"line {text.count(chr(10), 0, offset) + 1}: {what} that never closes: bash "
+                        "refuses the file, and this check cannot tell code from text after it")
     code = kinds.view(CODE)
-    for start, body in command_substitutions(text):
+    for start, body in command_substitutions(text, kinds):
         line = text.count("\n", 0, start) + 1
         # The body bash 3.2 cuts, with only its code left.
         body_code = code[start + 2:start + 2 + len(body)]
@@ -374,14 +439,16 @@ def bash32_problems(text: str) -> list[str]:
                     "the case into a function")
                 break
         for doc in _HEREDOC.finditer(body):
+            if start + 2 + doc.start() not in kinds.heredocs:
+                continue   # quoted text or a shift, not a here-document
             # The document's text, read from the file (bash 3.2's cut may fall
             # inside it), must leave bash 3.2's scan where it began: no quote
             # left open, no parenthesis unbalanced.
-            strip_tabs = body.startswith("<<-", doc.start())
+            strip_tabs = bool(doc.group("strip"))
             newline = text.find("\n", start + 2 + doc.end())
             content = []
             for doc_line in ([] if newline < 0 else text[newline + 1:].split("\n")):
-                if (doc_line.lstrip("\t") if strip_tabs else doc_line) == doc.group(2):
+                if (doc_line.lstrip("\t") if strip_tabs else doc_line) == doc.group("word"):
                     break
                 content.append(doc_line)
             seen: list = []
