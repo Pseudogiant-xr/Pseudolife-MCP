@@ -17,9 +17,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+import re
 import subprocess
 import tarfile
 import zipfile
+
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -48,7 +52,7 @@ needs_client = pytest.mark.skipif(
 STUB = r'''#!/bin/sh
 printf '%s\n' "$*" >>"$NATIVE_CALLS"
 case "$1" in
-    version) echo "pseudolife-mcp 9.8.7" ;;
+    version) [ -z "$STUB_HANG_VERSION" ] || sleep 600; echo "pseudolife-mcp 9.8.7" ;;
     runtime)
         mkdir -p "$(dirname "$PSEUDOLIFE_SHIM_LAUNCHER")"
         cp "$0" "$PSEUDOLIFE_SHIM_LAUNCHER"; chmod 755 "$PSEUDOLIFE_SHIM_LAUNCHER"
@@ -56,6 +60,7 @@ case "$1" in
     update) [ "$2" = --native-capability ] && echo "pseudolife-mcp native-update-v1" ;;
     installer)
         if [ "$2" = --capability ]; then
+            [ -z "$STUB_HANG_CAPABILITY" ] || sleep 600
             if [ -n "$STUB_V0240" ]; then
                 printf '%s\n' "installer: expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop" >&2
                 exit 2
@@ -196,7 +201,8 @@ def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case
     result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=case != "no-release", **kwargs)
     assert result.returncode == 1, result.stdout + result.stderr
     assert expected in result.stderr
-    assert "Nothing was changed." in result.stderr
+    # Nothing on the host; a download already verified is named as kept.
+    assert re.search(r"Nothing (else )?was changed", result.stderr)
     assert "STAGED" not in result.stdout
     assert not (tmp_path / "home" / "runtimes").exists()
     assert not (tmp_path / "home" / "bin").exists()
@@ -219,11 +225,13 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert f"the native client {VERSION} predates this installer" in line
     assert "installer --capability" in line and f"installer-protocol {LEVEL} or newer" in line
-    # The one fix that holds until a release carries this protocol: an
-    # older tag's installer does not know PSEUDOLIFE_SHIM_ENGINE=native.
-    assert "PSEUDOLIFE_NATIVE_ARCHIVE_URL" in line and "release_assets.py package" in line
-    assert "git checkout" not in line
-    assert line.endswith("Nothing was changed.")
+    # The route that works today: the default client, then update moves it.
+    assert "without PSEUDOLIFE_SHIM_ENGINE" in line
+    assert "PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only" in line
+    assert "release_assets" not in line and "PSEUDOLIFE_NATIVE_ARCHIVE_URL" not in line
+    # What a refusal after the download leaves: the verified download only.
+    assert "Nothing else was changed" in line and "kept for a rerun" in line
+    assert ".pseudolife-mcp" in line and "downloads" in line
     calls = (tmp_path / "native-calls").read_text().splitlines()
     assert "installer --capability" in calls
     assert not any(call.startswith(("runtime", "installer expose", "installer migrate")) for call in calls)
@@ -337,3 +345,61 @@ def test_a_download_folder_that_cannot_be_made_is_named_not_the_network(tmp_path
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert ".pseudolife-mcp" in line and "downloads" in line and "network" not in line
     assert line.endswith("Nothing was changed.")
+
+
+class _Status(BaseHTTPRequestHandler):
+    """A release server that answers SHA256SUMS with one status."""
+    status = 404
+
+    def do_GET(self):
+        self.send_response(self.status)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+def _serve(status: int) -> tuple[ThreadingHTTPServer, str]:
+    handler = type("Handler", (_Status,), {"status": status})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+@pytest.mark.parametrize("status", [403, 500])
+def test_a_sums_file_that_cannot_be_fetched_names_the_status_not_a_missing_file(tmp_path, status):
+    server, url = _serve(status)
+    try:
+        result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=False,
+                      extra_env={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": url})
+    finally:
+        server.shutdown()
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert f"HTTP {status}" in line and "could not be fetched" in line and "retry" in line.lower()
+    assert "has no SHA256SUMS" not in line
+
+
+@pytest.mark.skipif(WINDOWS, reason="the hanging stand-in is a shell script; on Windows the fixture is a real client")
+@pytest.mark.parametrize("hang", ["STUB_HANG_VERSION", "STUB_HANG_CAPABILITY"])
+def test_a_staged_client_that_does_not_answer_is_refused_in_time(tmp_path, hang):
+    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED',
+                  extra_env={hang: "1", "PSEUDOLIFE_NATIVE_PROBE_SECONDS": "2"})
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    step = "version" if hang == "STUB_HANG_VERSION" else "installer --capability"
+    assert f"did not answer {step} within 2 s" in line
+
+
+@needs_client
+@pytest.mark.parametrize("ending", ["exit 2", "throw 'boom'"])
+def test_the_staging_folder_is_removed_on_every_exit(tmp_path, ending):
+    # A rerun stages first; a later refusal (exit 2) or an error must not
+    # leave the staged copy behind, as the shell installer's EXIT trap does not.
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    result = _run(tmp_path, f'Initialize-NativeClient; Write-Host STAGED; {ending}',
+                  extra_env={"TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp)})
+    assert "STAGED" in result.stdout, result.stdout + result.stderr
+    assert not list(temp.glob("pseudolife-native-*")), list(temp.iterdir())

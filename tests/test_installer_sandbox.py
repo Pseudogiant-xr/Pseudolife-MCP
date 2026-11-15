@@ -35,7 +35,8 @@ def test_run_refuses_before_anything_starts(tmp_path):
 
 
 def test_a_disposable_home_is_accepted_and_runs(tmp_path):
-    env = installer_sandbox.environment(tmp_path, {k: os.environ[k] for k in ("SystemRoot", "PATH") if k in os.environ})
+    env = installer_sandbox.layout(installer_sandbox.environment(
+        tmp_path, {k: os.environ[k] for k in ("SystemRoot", "PATH") if k in os.environ}), tmp_path)
     env["XDG_CONFIG_HOME"] = str(tmp_path / "home" / "config")
     proc = installer_sandbox.run([sys.executable, "-c", "print('ran')"], env=env, root=tmp_path,
                                  capture_output=True, text=True, check=False)
@@ -169,3 +170,42 @@ def test_a_git_bash_tmp_path_is_refused_when_git_bash_cannot_be_asked(tmp_path, 
     with pytest.raises(installer_sandbox.RealHomeRefused, match="HOME"):
         installer_sandbox.require(env, tmp_path)
 
+
+
+# A whole installer run puts the launcher's directory first on the Windows
+# user PATH (HKCU, which no home variable redirects) unless the layout is
+# overridden, so `run` refuses to start one without both overrides inside
+# the sandbox home; `require` (fragments, which never reach that step) does
+# not ask for them.
+@pytest.mark.parametrize("missing", ["PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER", "both"])
+def test_a_whole_run_without_both_layout_overrides_is_refused(tmp_path, missing):
+    marker = tmp_path / "started"
+    env = installer_sandbox.layout(installer_sandbox.environment(tmp_path), tmp_path)
+    for name in (("PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER") if missing == "both" else (missing,)):
+        del env[name]
+    with pytest.raises(installer_sandbox.RealHomeRefused, match="PSEUDOLIFE_SHIM_"):
+        installer_sandbox.run([sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"],
+                              env=env, root=tmp_path, check=False)
+    assert not marker.exists()
+
+
+def test_a_layout_override_outside_the_home_is_refused(tmp_path):
+    env = installer_sandbox.layout(installer_sandbox.environment(tmp_path), tmp_path)
+    env["PSEUDOLIFE_SHIM_LAUNCHER"] = str(Path.home() / "pseudolife-mcp")
+    with pytest.raises(installer_sandbox.RealHomeRefused, match="PSEUDOLIFE_SHIM_LAUNCHER"):
+        installer_sandbox.run([sys.executable, "-c", "pass"], env=env, root=tmp_path, check=False)
+
+
+def test_a_whole_run_with_both_layout_overrides_inside_starts(tmp_path):
+    env = installer_sandbox.layout(installer_sandbox.environment(
+        tmp_path, {k: os.environ[k] for k in ("SystemRoot", "PATH") if k in os.environ}), tmp_path)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "home" / "config")
+    proc = installer_sandbox.run([sys.executable, "-c", "print('ran')"], env=env, root=tmp_path,
+                                 capture_output=True, text=True, check=False)
+    assert proc.stdout.strip() == "ran"
+
+
+def test_a_fragment_harness_needs_no_layout_overrides(tmp_path):
+    # The near-miss: `require` alone (fragments) still accepts a home
+    # without them.
+    installer_sandbox.require(installer_sandbox.environment(tmp_path), tmp_path)

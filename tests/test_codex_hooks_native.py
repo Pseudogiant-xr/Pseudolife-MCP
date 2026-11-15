@@ -943,7 +943,7 @@ def _install_hooks(shell, client, settings, command):
     env["PSEUDOLIFE_NATIVE_CLI"] = native_stub.native_cli(root / "hook-cli").as_posix()
     if shell == "bash":
         installer_sandbox.run([bash_exe(), str(ROOT / "ops/install-hook-native.sh"), "--client", client,
-                               settings.as_posix(), command], env=env, root=root,
+                               settings.as_posix(), command], env=installer_sandbox.layout(env, root), root=root,
                               capture_output=True, text=True, timeout=HOOK_PROCESS_TIMEOUT, check=True)
     else:
         installer_sandbox.require(env, root)
