@@ -774,7 +774,7 @@ fn systemd_dropins(
         };
         for file in &files {
             let masked = if shared(file) {
-                " (systemd may be ignoring this file because a same-named one takes precedence; remove it or the override to let connect manage the schedule)"
+                " (systemd may be ignoring this file because a same-named one takes precedence, but connect reads it either way; fix or remove this file to let connect manage the schedule)"
             } else {
                 ""
             };
@@ -1759,7 +1759,7 @@ mod tests {
             root.join(dir).join(file)
         };
         let post = "[Service]\nExecStartPost=/x --daemon-url http://OLD\n";
-        let hint = "systemd may be ignoring this file because a same-named one takes precedence; remove it or the override to let connect manage the schedule";
+        let hint = "systemd may be ignoring this file because a same-named one takes precedence, but connect reads it either way; fix or remove this file to let connect manage the schedule";
         // The `cp -p` case: a harmless file in the higher root's prefix
         // directory shares its name with an old-URL one in the lower root's
         // exact directory. Which one systemd runs depends on what it loaded,
