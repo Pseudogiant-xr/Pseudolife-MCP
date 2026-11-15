@@ -10,13 +10,13 @@
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
     "docs/atlas/atlas.json": "c54f7f497961789b0a21f627a6fb6cb1b0ac8d210a9dccf42c6d35d29529843a",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
-    "docs/dev/ci-budget.md": "3fabbbc7041ce27b1eb880d317155914c05c75165dc1c860bc0341cb0b03a5b1",
+    "docs/dev/ci-budget.md": "f0e6018eec46d0811d452a45a346444bea604cef3297f918250ef5b2e9a87b68",
     "docs/dev/dev-machines.md": "0c8e4a571f2700ea5974ca924153f075577d753ff1532658ca84907951dab699",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "e7ebb38826f2c674407eeffe30cb26845d89a8b6a08666efbcca4039faba3305",
+    "docs/dev/merge-batches.md": "0772c00f642c3d4324d26cd4d8900889866a465a34ee622cd4e8266573e408ee",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
-    "docs/dev/native-runtimes.md": "e23eb823e32d025b6571020a6fbdde19bdebc65b8db3eaf6508588b2f793c29e",
+    "docs/dev/native-runtimes.md": "0ea6c761510b92bc74b5869753c4958067065efb11f68b7d4c018c5fc465f650",
     "docs/dev/release-assets.md": "ecabfc6658aba8208b37f4e41c4fa5a060eca3985ba432fba0828b22056aaec5",
     "docs/dev/run-rust-beside-python.md": "12d52aa9774f05ae699cd67277173b04ff1b837b1772c2c96700b2fb0b110b15",
     "docs/dev/worktree-retention.md": "23464a303672be4f546ecbf7c8e357c41c4bd2c684202e05cfebec6df78d7355",
@@ -263,7 +263,7 @@
     "ops/install.sh": "c96916dcf81674b9ee92dbe16ac19c84d729965345ba78c276e6abfc52749a14",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "59daf1abb1d4ded107501c02eed5c3029b0db3584443afc6f98b1921e3dccdb4",
+    "ops/integrate.py": "dc6fae78e16a3ceed6c0313fb1d432724508ed1fd686146c062c5018190c777f",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -430,14 +430,14 @@
     "rust/shim/src/cli/installer/claude_desktop.rs": "57e98c5729fa533b07b8ad4aef2b5ca345ae7c69d8ba39c396c41126c42f97f5",
     "rust/shim/src/cli/installer/codex_config.rs": "3a02fe62ce9c3d829602dec6455bdf06441ae62affe4b990e2fddeea9fbb7f7b",
     "rust/shim/src/cli/installer/codex_hooks/definitions.rs": "990567f0468940de26a0b551533c66854c7f8372665c87e0b649ce10472b7239",
-    "rust/shim/src/cli/installer/codex_hooks/instructions.rs": "efb5b434df30ac5939390667d2733faf4081874c52f0f1ca6638c596e3372c4d",
-    "rust/shim/src/cli/installer/codex_hooks/manual.rs": "1a8adf418a45432789358f7ab9595918838c9662e2dce9df7ad776c239f52b1e",
-    "rust/shim/src/cli/installer/codex_hooks/mod.rs": "a6394aabba9f0b094f64ecbbafbe01b88c190c9d42edf74f4b4576409dc8f10e",
+    "rust/shim/src/cli/installer/codex_hooks/instructions.rs": "bd2c5d4fbf97df63d5b833177e894a8090736b13364b44c636bfcc42325c4d4a",
+    "rust/shim/src/cli/installer/codex_hooks/manual.rs": "2637c2047a7e520f6ee661b40e05d1848c365f677d964f7896554ff48b08fbd8",
+    "rust/shim/src/cli/installer/codex_hooks/mod.rs": "01aea2fecbf835c1dceaf7cad3946667702ecf9f6fb3aff7c98ee66d99bc12bd",
     "rust/shim/src/cli/installer/codex_hooks/plugin.rs": "ef98cce37aa49ac85d7b3e9d0fb03044f81201bab6a73b5da424907e598ee633",
     "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-posix.json": "47062d9732320bce54746c14b58e179b94dc6fa090ac5ecc77071b154ab96f9f",
     "rust/shim/src/cli/installer/codex_hooks/testdata/definitions-windows.json": "db0b6087ee7e5f88ec3e1f14ec0ce4fac7af27bc83de55967d20c240f2aba4b5",
-    "rust/shim/src/cli/installer/codex_hooks/tests.rs": "1a297845937eb6ce523a58d08b35782b96d24c098101f5dcfebc37196538ecfa",
-    "rust/shim/src/cli/installer/codex_hooks/trust.rs": "0748d21422f3a9bdd6ce78fd43c34a4c3911dccd743ad19bde287cb9b0c9f332",
+    "rust/shim/src/cli/installer/codex_hooks/tests.rs": "3f5c51768fcd0c5eaf839efbd260f665f881cbe33d73567917da6ee172a04889",
+    "rust/shim/src/cli/installer/codex_hooks/trust.rs": "0eb7f3f31965f1b6337f831764aa8c4a8138ac0e78f693f3b7bc14b9786b42f0",
     "rust/shim/src/cli/installer/codex_hooks/verify.rs": "8e4c7d5f66f063daed3891ed70e8af516c5ba654d7dcf246e96f33e0d97e98d6",
     "rust/shim/src/cli/installer/fake_codex.rs": "737aafe78fcfb76e6604c1eb38e7398cc8d8f9f60e54ce8a8411fd2cfbdf6c7e",
     "rust/shim/src/cli/installer/mod.rs": "9015b675fb3a5f892cc74ec4c1500c2dea2fe48a957bdcb5926aa8bc5dd22ff0",
@@ -25394,7 +25394,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:571",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:580",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -36290,7 +36290,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:311",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:320",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -43425,7 +43425,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:310",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:319",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46684,7 +46684,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:309",
+          "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:318",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50663,7 +50663,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:314",
+          "location": "docs/dev/merge-batches.md:341",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -50678,7 +50678,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:482",
+          "location": "docs/dev/merge-batches.md:509",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -50708,7 +50708,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:1914",
+          "location": "ops/integrate.py:2189",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -69269,7 +69269,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:499",
+      "location": "docs/dev/merge-batches.md:526",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -69299,6 +69299,20 @@
       "kind": "environment",
       "location": "docs/dev/native-runtimes.md:26",
       "name": "PSEUDOLIFE_NATIVE_CLI",
+      "shape": {
+        "channel": "environment",
+        "complete": false,
+        "expression": "reference",
+        "parameters": {}
+      },
+      "usage": "reference"
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "documented",
+      "kind": "environment",
+      "location": "docs/dev/native-runtimes.md:273",
+      "name": "PSEUDOLIFE_NATIVE_TEST_BINARY",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -80873,6 +80887,22 @@
     {
       "evidence": "documented",
       "kind": "environment",
+      "location": "docs/dev/native-runtimes.md:274",
+      "name": "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
+      "shape": {
+        "channel": "environment",
+        "complete": true,
+        "parameters": {
+          "value": {
+            "literal": "1"
+          }
+        }
+      },
+      "usage": "assignment"
+    },
+    {
+      "evidence": "documented",
+      "kind": "environment",
       "location": "docs/dev/native-runtimes.md:35",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
@@ -83928,13 +83958,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:499",
+      "location": "docs/dev/merge-batches.md:526",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:549",
+      "location": "docs/dev/merge-batches.md:576",
       "reason": "forwarded parameters"
     },
     {
@@ -83971,6 +84001,12 @@
       "location": "docs/dev/native-runtimes.md:27",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/native-runtimes.md:273",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_TEST_BINARY"
     },
     {
       "dynamic": "unresolved",
@@ -106924,19 +106960,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:309",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:318",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:310",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:319",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:311",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:320",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
@@ -106948,7 +106984,7 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:571",
+      "location": "rust/shim/src/cli/installer/codex_hooks/mod.rs:580",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
