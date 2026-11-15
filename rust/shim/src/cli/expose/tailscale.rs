@@ -1,61 +1,101 @@
-//! `expose_cli`'s seams and readers over the `tailscale` CLI: the lookup
-//! (`find_tailscale`: `program_lookup.find_program`, absolute `PATH`
-//! directories only, then the default install locations),
-//! the runner (`run_tailscale`: `subprocess.run(capture_output=True,
-//! stdin=DEVNULL, timeout=30)` decoded by `_text`), and what the oracle
-//! reads from it (`_running`, `_serve_config`, `_tailnet_ipv4`,
-//! `_port_state`).
+//! The `tailscale` CLI as `expose` uses it: the lookup (absolute `PATH`
+//! directories only, never the current directory, then the default install
+//! locations), the runner (stdin closed, both pipes read, 30 s bound), and
+//! what is read from it (`status --json`, `serve status --json`, `ip -4`,
+//! the port's state).
 //!
 //! Values are `pyjson::J`, so `dict.get`, truthiness, `str()` and `repr()`
-//! are Python's. Text is `_text`'s: strict UTF-8 with newlines translated;
-//! output that is not UTF-8 is `unreadable`.
+//! are Python's. Text is strict UTF-8 with newlines translated; output that
+//! is not UTF-8 is `unreadable`.
 use super::super::program_lookup::{self, is_ipv4};
 use super::super::pyjson::{self, Dict, J};
-use super::Fault;
-use std::{process::Stdio, time::Duration};
+use super::Host;
+use std::{
+    path::PathBuf,
+    process::Stdio,
+    sync::{Arc, Mutex, PoisonError},
+    time::Duration,
+};
 
-/// `TAILSCALE_TIMEOUT_S`.
-const TIMEOUT: Duration = Duration::from_secs(30);
+/// `TAILSCALE_TIMEOUT_S`: a design bound, not a measurement; a tailscale
+/// CLI call that takes longer is wedged.
+pub(super) const TIMEOUT: Duration = Duration::from_secs(30);
+/// After a timeout's kill, how long the pipes may stay open (a descendant
+/// that inherited them) before what they gave so far is kept. A design
+/// bound: the kill closes the child's own ends at once.
+const DRAIN: Duration = Duration::from_secs(2);
 /// `JSON_DEPTH_LIMIT`: an answer with more brackets open at once is
-/// refused as unreadable (`_too_deep`), in both arms alike.
+/// refused as unreadable (`_too_deep`).
 pub(super) const DEPTH: usize = pyjson::EXPOSE_DEPTH;
 
-/// `CompletedProcess` as the readers use it. `unreadable`: its output was
-/// not UTF-8, so `out` and `err` are empty (`run_tailscale`'s flag).
+/// The `tailscale` program found: the path to start and how reports name it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Binary {
+    pub(super) path: PathBuf,
+    pub(super) shown: String,
+}
+
+/// One finished `tailscale` call. `unreadable`: its output was not UTF-8,
+/// so `out` and `err` are empty. `timed_out`: it was killed at the bound;
+/// `out` is what it printed before (decoded with replacement), `err` says
+/// so, and `code` is 124.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct Proc {
     pub(super) code: i64,
     pub(super) out: String,
     pub(super) err: String,
     pub(super) unreadable: bool,
+    pub(super) timed_out: bool,
+}
+
+impl Proc {
+    /// It ran to the end and exited 0.
+    pub(super) fn succeeded(&self) -> bool {
+        self.code == 0 && !self.timed_out
+    }
 }
 
 // ── the lookup ───────────────────────────────────────────────────────────────
 
-/// `find_tailscale()` (`program_lookup.find_program`, then the default
-/// install location): `Ok(None)` when it is nowhere, `Err` defers.
-pub(super) fn find() -> Result<Option<String>, ()> {
-    program_lookup::find_tailscale()
+/// `find_tailscale()`: an absolute `PATH` directory's `tailscale`, then the
+/// default install location. Where the oracle's spelling of the path is not
+/// reproduced (an entry that is not text, a share root, an unusual Program
+/// Files value), the program is still found and named as the OS spells it.
+pub(super) fn find() -> Option<Binary> {
+    if let Ok(found) = program_lookup::find_tailscale() {
+        return found.map(|shown| Binary {
+            path: PathBuf::from(&shown),
+            shown,
+        });
+    }
+    program_lookup::find_program_path("tailscale")
+        .or_else(|| program_lookup::tailscale_install_location().ok().flatten())
+        .map(|path| Binary {
+            shown: path.to_string_lossy().into_owned(),
+            path,
+        })
 }
 
 // ── the runner ───────────────────────────────────────────────────────────────
 
-/// `str(exc)` for the `OSError` `subprocess.run` raises when the program
-/// does not start: `[WinError N] message` (trailing spaces and full stops
-/// dropped, as `PyErr_SetFromWindowsErr` does), or `[Errno N] strerror:
-/// 'path'` (POSIX names the executable).
-fn spawn_text(error: &std::io::Error, binary: &str) -> Result<String, ()> {
-    let code = error.raw_os_error().ok_or(())?;
+/// `str(exc)` for the `OSError` a program that does not start raises:
+/// `[WinError N] message` (trailing spaces and full stops dropped, as
+/// `PyErr_SetFromWindowsErr` does), or `[Errno N] strerror: 'path'` (POSIX
+/// names the executable); the error's own text when it has no OS code.
+fn spawn_text(error: &std::io::Error, binary: &str) -> String {
+    let Some(code) = error.raw_os_error() else {
+        return error.to_string();
+    };
     let text = std::io::Error::from_raw_os_error(code).to_string();
-    let message = text
-        .strip_suffix(&format!(" (os error {code})"))
-        .ok_or(())?;
-    Ok(if cfg!(windows) {
+    let Some(message) = text.strip_suffix(&format!(" (os error {code})")) else {
+        return text;
+    };
+    if cfg!(windows) {
         let message = message.trim_end_matches(|c: char| c <= ' ' || c == '.');
         format!("[WinError {code}] {message}")
     } else {
         format!("[Errno {code}] {message}: {}", super::py_repr(binary))
-    })
+    }
 }
 
 /// `returncode`: a POSIX signal as its negative number, a Windows exit code
@@ -75,23 +115,55 @@ fn returncode(status: std::process::ExitStatus) -> i64 {
     }
 }
 
-/// Text mode's decoding: strict UTF-8, then `\r\n` and `\r` as `\n`.
-fn text(bytes: &[u8]) -> Option<String> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    Some(text.replace("\r\n", "\n").replace('\r', "\n"))
+/// Newlines as text mode reads them: `\r\n` and `\r` as `\n`.
+fn newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-/// `run_tailscale(binary, args)`. `Err` defers: output that is not UTF-8
-/// (the oracle raises, or on Windows prints a reader thread's traceback and
-/// goes on with `None`), or a spawn failure without an OS error code.
-pub(super) async fn run(binary: &str, args: &[&str]) -> Result<Proc, ()> {
+/// Text mode's decoding: strict UTF-8, then newlines translated.
+fn text(bytes: &[u8]) -> Option<String> {
+    std::str::from_utf8(bytes).ok().map(newlines)
+}
+
+/// A pipe read to its end in the background, into a buffer that keeps what
+/// arrived even if the read is abandoned.
+fn drain<R>(pipe: Option<R>) -> (Arc<Mutex<Vec<u8>>>, tokio::task::JoinHandle<()>)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    use tokio::io::AsyncReadExt;
+    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&buffer);
+    let task = tokio::spawn(async move {
+        let Some(mut pipe) = pipe else {
+            return;
+        };
+        let mut chunk = [0_u8; 8192];
+        while let Ok(count @ 1..) = pipe.read(&mut chunk).await {
+            sink.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend_from_slice(&chunk[..count]);
+        }
+    });
+    (buffer, task)
+}
+
+fn taken(buffer: &Mutex<Vec<u8>>) -> Vec<u8> {
+    std::mem::take(&mut *buffer.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// `run_tailscale(binary, args)` with [`TIMEOUT`]. Always answers: a
+/// program that does not start is exit 127 with the OS error's text, and
+/// one still running at the bound is killed and reported as timed out with
+/// what it printed so far (a serve waiting for Serve to be enabled prints
+/// the link that does it, then waits).
+pub(super) async fn run(binary: &Binary, args: &[&str]) -> Proc {
     run_within(binary, args, TIMEOUT).await
 }
 
-/// [`run`] with its timeout given (`TAILSCALE_TIMEOUT_S` outside tests).
-async fn run_within(binary: &str, args: &[&str], timeout: Duration) -> Result<Proc, ()> {
-    use tokio::io::AsyncReadExt;
-    let mut command = tokio::process::Command::new(binary);
+/// [`run`] with its timeout given.
+async fn run_within(binary: &Binary, args: &[&str], timeout: Duration) -> Proc {
+    let mut command = tokio::process::Command::new(&binary.path);
     command
         .args(args)
         .stdin(Stdio::null())
@@ -101,87 +173,63 @@ async fn run_within(binary: &str, args: &[&str], timeout: Duration) -> Result<Pr
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
-            return Ok(Proc {
+            return Proc {
                 code: 127,
-                err: spawn_text(&error, binary)?,
+                err: spawn_text(&error, &binary.shown),
                 ..Proc::default()
-            });
+            };
         }
     };
-    let mut stdout = child.stdout.take().ok_or(())?;
-    let mut stderr = child.stderr.take().ok_or(())?;
-    let mut out = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        let _ = stdout.read_to_end(&mut bytes).await;
-        bytes
-    });
-    let mut err = tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        let _ = stderr.read_to_end(&mut bytes).await;
-        bytes
-    });
-    // `communicate(timeout=...)`: both pipes to their end and then the
-    // child, inside the one deadline. A descendant that inherited a pipe
-    // keeps it open after the child has gone, so the reads are bounded too.
-    let (mut read_out, mut read_err) = (None, None);
+    let (out, mut out_task) = drain(child.stdout.take());
+    let (err, mut err_task) = drain(child.stderr.take());
+    // Both pipes to their end and then the child, inside the one deadline:
+    // a descendant that inherited a pipe keeps it open after the child has
+    // gone, so the reads are bounded too.
     let finished = tokio::time::timeout(timeout, async {
-        read_out = Some((&mut out).await);
-        read_err = Some((&mut err).await);
+        let _ = (&mut out_task).await;
+        let _ = (&mut err_task).await;
         child.wait().await
     })
     .await;
     match finished {
-        Ok(status) => {
-            let status = status.map_err(|_| ())?;
-            let out = read_out.ok_or(())?.map_err(|_| ())?;
-            let err = read_err.ok_or(())?.map_err(|_| ())?;
+        Ok(Ok(status)) => {
             let code = returncode(status);
-            Ok(match (text(&out), text(&err)) {
+            match (text(&taken(&out)), text(&taken(&err))) {
                 (Some(out), Some(err)) => Proc {
                     code,
                     out,
                     err,
-                    unreadable: false,
+                    ..Proc::default()
                 },
                 _ => Proc {
                     code,
                     unreadable: true,
                     ..Proc::default()
                 },
-            })
+            }
         }
+        Ok(Err(error)) => Proc {
+            code: 1,
+            err: format!("could not wait for it to finish: {error}"),
+            ..Proc::default()
+        },
         Err(_) => {
-            // `process.kill()`. POSIX then keeps what was read so far;
-            // Windows' `communicate()` reads both pipes to their end. Only
-            // stdout is kept, decoded with "replace": this port answers
-            // when it is UTF-8 and defers otherwise.
             let _ = child.start_kill();
-            let _ = child.wait().await;
-            let out = if cfg!(windows) {
-                let out = match read_out {
-                    Some(done) => done,
-                    None => out.await,
-                }
-                .map_err(|_| ())?;
-                match read_err {
-                    Some(done) => done,
-                    None => err.await,
-                }
-                .map_err(|_| ())?;
-                text(&out).ok_or(())?
-            } else {
-                tokio::task::yield_now().await;
-                out.abort();
-                err.abort();
-                // What arrived before the kill is not reproduced here.
-                return Err(());
-            };
-            Ok(Proc {
+            let _ = tokio::time::timeout(DRAIN, child.wait()).await;
+            let _ = tokio::time::timeout(DRAIN, async {
+                let _ = (&mut out_task).await;
+                let _ = (&mut err_task).await;
+            })
+            .await;
+            out_task.abort();
+            err_task.abort();
+            Proc {
                 code: 124,
-                out,
+                out: newlines(&String::from_utf8_lossy(&taken(&out))),
                 err: format!("timed out after {}s", timeout.as_secs()),
                 unreadable: false,
-            })
+                timed_out: true,
+            }
         }
     }
 }
@@ -238,30 +286,31 @@ fn too_deep(text: &str) -> bool {
 }
 
 /// `_json(text)`: `Ok(Some(value))`, `Ok(None)` for text that is not JSON,
-/// `Err(why)` for text nested past the bound. Under the bound `loads` never
-/// reports `TooDeep`; if it did, that defers.
-pub(super) fn json(text: &str) -> Result<Result<Option<J>, String>, Fault> {
+/// `Err(why)` for text nested past the bound.
+pub(super) fn json(text: &str) -> Result<Option<J>, String> {
+    let nested = || format!("it is nested more than {DEPTH} levels deep");
     if too_deep(text) {
-        return Ok(Err(format!("it is nested more than {DEPTH} levels deep")));
+        return Err(nested());
     }
     match pyjson::loads(text, DEPTH) {
-        Ok(value) => Ok(Ok(Some(value))),
-        Err(pyjson::Refused::NotJson) => Ok(Ok(None)),
-        Err(pyjson::Refused::TooDeep) => Err(Fault::Defer),
+        Ok(value) => Ok(Some(value)),
+        Err(pyjson::Refused::NotJson) => Ok(None),
+        Err(pyjson::Refused::TooDeep) => Err(nested()),
     }
 }
 
 /// `_unreadable(binary, args, why)`'s text.
-fn unreadable(binary: &str, args: &[&str], why: &str) -> Fault {
-    Fault::Refused(format!(
-        "could not read what `tailscale {}` printed ({why}): check that {binary} is Tailscale's own CLI, and reinstall Tailscale if it is",
-        args.join(" ")
-    ))
+fn unreadable(binary: &Binary, args: &[&str], why: &str) -> String {
+    format!(
+        "could not read what `tailscale {}` printed ({why}): check that {} is Tailscale's own CLI, and reinstall Tailscale if it is",
+        args.join(" "),
+        binary.shown
+    )
 }
 
 /// `_read(binary, args)`: output that is not UTF-8 is refused.
-async fn read(binary: &str, args: &[&str]) -> Result<Proc, Fault> {
-    let proc = run(binary, args).await.map_err(|()| Fault::Defer)?;
+async fn read(host: &impl Host, binary: &Binary, args: &[&str]) -> Result<Proc, String> {
+    let proc = host.run(binary, args).await;
     if proc.unreadable {
         return Err(unreadable(binary, args, "it is not UTF-8"));
     }
@@ -269,61 +318,61 @@ async fn read(binary: &str, args: &[&str]) -> Result<Proc, Fault> {
 }
 
 /// `_running(binary)`: the status dict, or the refusal.
-pub(super) async fn running(binary: &str) -> Result<Dict, Fault> {
+pub(super) async fn running(host: &impl Host, binary: &Binary) -> Result<Dict, String> {
     let args = ["status", "--json"];
-    let proc = read(binary, &args).await?;
+    let proc = read(host, binary, &args).await?;
     let status = if pyjson::py_strip(&proc.out).is_empty() {
         None
     } else {
-        json(&proc.out)?.map_err(|why| unreadable(binary, &args, &why))?
+        json(&proc.out).map_err(|why| unreadable(binary, &args, &why))?
     };
     let Some(J::Dict(status)) = status else {
-        return Err(Fault::Refused(format!(
+        return Err(format!(
             "tailscale is not running ({}): start Tailscale and run `tailscale up`",
             detail(&proc)
-        )));
+        ));
     };
     let state = pyjson::get(&status, "BackendState");
     if state.and_then(J::as_str) != Some("Running") {
         let shown = state.map_or_else(|| "None".to_owned(), pyjson::py_value_repr);
-        return Err(Fault::Refused(format!(
+        return Err(format!(
             "tailscale reports BackendState {shown}, not 'Running': run `tailscale up` (and log in) first"
-        )));
+        ));
     }
     Ok(status)
 }
 
 /// `_serve_config(binary)`: an empty or `null` answer is an empty config.
-pub(super) async fn serve_config(binary: &str) -> Result<Dict, Fault> {
+pub(super) async fn serve_config(host: &impl Host, binary: &Binary) -> Result<Dict, String> {
     let args = ["serve", "status", "--json"];
-    let proc = read(binary, &args).await?;
-    if proc.code != 0 {
-        return Err(Fault::Refused(format!(
+    let proc = read(host, binary, &args).await?;
+    if !proc.succeeded() {
+        return Err(format!(
             "could not read `tailscale serve status --json` ({})",
             detail(&proc)
-        )));
+        ));
     }
     let text = pyjson::py_strip(&proc.out);
     if text.is_empty() || text == "null" {
         return Ok(Vec::new());
     }
-    match json(text)?.map_err(|why| unreadable(binary, &args, &why))? {
-        None => Err(Fault::Refused(
-            "`tailscale serve status --json` printed something that is not JSON".into(),
-        )),
+    match json(text).map_err(|why| unreadable(binary, &args, &why))? {
+        None => Err("`tailscale serve status --json` printed something that is not JSON".into()),
         Some(J::Dict(config)) => Ok(config),
-        Some(_) => Err(Fault::Refused(
-            "`tailscale serve status --json` printed an unexpected shape".into(),
-        )),
+        Some(_) => Err("`tailscale serve status --json` printed an unexpected shape".into()),
     }
 }
 
 /// `_tailnet_ipv4(binary, status)`: `tailscale ip -4`'s words (unless it
 /// failed or printed something that is not UTF-8), then the strings of
-/// `Self.TailscaleIPs` when it is a list; the first address. `Err` defers.
-pub(super) async fn tailnet_ipv4(binary: &str, status: &Dict) -> Result<Option<String>, ()> {
-    let proc = run(binary, &["ip", "-4"]).await?;
-    let mut candidates: Vec<Vec<u16>> = if proc.code == 0 && !proc.unreadable {
+/// `Self.TailscaleIPs` when it is a list; the first address.
+pub(super) async fn tailnet_ipv4(
+    host: &impl Host,
+    binary: &Binary,
+    status: &Dict,
+) -> Option<String> {
+    let proc = host.run(binary, &["ip", "-4"]).await;
+    let mut candidates: Vec<Vec<u16>> = if proc.succeeded() && !proc.unreadable {
         split(&proc.out)
             .into_iter()
             .map(|word| word.encode_utf16().collect())
@@ -344,10 +393,10 @@ pub(super) async fn tailnet_ipv4(binary: &str, status: &Dict) -> Result<Option<S
         );
     }
     // A word with a lone surrogate is no address.
-    Ok(candidates
+    candidates
         .into_iter()
         .filter_map(|units| String::from_utf16(&units).ok())
-        .find(|word| is_ipv4(word)))
+        .find(|word| is_ipv4(word))
 }
 
 // ── the port's state ─────────────────────────────────────────────────────────
@@ -470,25 +519,98 @@ pub(super) fn port_state(config: &Dict, port: u16) -> (State, Option<Vec<u16>>) 
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn sh() -> Binary {
+        Binary {
+            path: "sh".into(),
+            shown: "sh".into(),
+        }
+    }
+
     /// A descendant that inherited the pipes keeps them open after the
-    /// direct child has gone. `subprocess.run(timeout=...)` bounds the
-    /// reads too and raises at the timeout, which on POSIX this port defers.
+    /// direct child has gone: the reads are bounded too, and what arrived
+    /// before the timeout is kept.
     #[cfg(unix)]
     #[tokio::test]
     async fn the_timeout_also_bounds_pipes_a_descendant_holds_open() {
         let started = std::time::Instant::now();
         let ran = run_within(
-            "sh",
-            &["-c", "sleep 3 & exit 0"],
+            &sh(),
+            &["-c", "echo waiting; sleep 30 & exit 0"],
             Duration::from_millis(200),
         )
         .await;
-        assert!(ran.is_err());
+        assert!(ran.timed_out, "{ran:?}");
+        assert_eq!(ran.code, 124);
+        assert_eq!(
+            ran.out,
+            "waiting
+"
+        );
+        assert_eq!(ran.err, "timed out after 0s");
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(5),
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// A program still running at the bound is killed; its partial output
+    /// (a serve waiting for Serve to be enabled prints the link) is kept.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_wedged_program_is_killed_and_what_it_printed_is_kept() {
+        let started = std::time::Instant::now();
+        let ran = run_within(
+            &sh(),
+            &[
+                "-c",
+                "printf 'To enable, visit:\n  https://login.example.com/x\n'; exec sleep 30",
+            ],
+            Duration::from_millis(300),
+        )
+        .await;
+        assert!(ran.timed_out, "{ran:?}");
+        assert!(!ran.succeeded());
+        assert_eq!(
+            ran.out,
+            "To enable, visit:
+  https://login.example.com/x
+"
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_finished_program_answers_its_code_and_text() {
+        let ran = run_within(&sh(), &["-c", "echo out; echo err >&2; exit 3"], TIMEOUT).await;
+        assert_eq!(
+            ran,
+            Proc {
+                code: 3,
+                out: "out
+"
+                .into(),
+                err: "err
+"
+                .into(),
+                ..Proc::default()
+            }
+        );
+        let ran = run_within(&sh(), &["-c", r"printf '\377'"], TIMEOUT).await;
+        assert!(ran.unreadable && ran.out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_program_that_does_not_start_is_exit_127_with_the_os_text() {
+        let missing = Binary {
+            path: std::env::temp_dir().join("pseudolife-no-such-program-w15"),
+            shown: "missing".into(),
+        };
+        let ran = run_within(&missing, &[], TIMEOUT).await;
+        assert_eq!(ran.code, 127);
+        assert!(!ran.err.is_empty() && !ran.timed_out);
     }
 
     fn read(text: &str) -> Dict {
@@ -635,13 +757,13 @@ mod tests {
         let nest = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
         assert!(!too_deep(&nest(DEPTH)));
         assert!(too_deep(&nest(DEPTH + 1)));
-        assert!(matches!(json(&nest(DEPTH)), Ok(Ok(Some(_)))));
-        assert!(matches!(json(&nest(DEPTH + 1)), Ok(Err(_))));
+        assert!(matches!(json(&nest(DEPTH)), Ok(Some(_))));
+        assert!(json(&nest(DEPTH + 1)).is_err());
         // Invalid text is counted too; brackets inside strings are not.
         assert!(too_deep(&format!("x{}", "{".repeat(DEPTH + 1))));
         let quoted = format!("[\"{}\\\"{}\"]", "[".repeat(200), "{".repeat(200));
         assert!(!too_deep(&quoted));
-        assert!(matches!(json(&quoted), Ok(Ok(Some(_)))));
+        assert!(matches!(json(&quoted), Ok(Some(_))));
         // Closing brackets below zero are counted as Python counts them.
         assert!(!too_deep(&format!("]]{}", "[".repeat(DEPTH + 1))));
     }
@@ -649,11 +771,13 @@ mod tests {
     #[test]
     fn spawn_failures_read_as_cpython_oserror_text() {
         let error = std::io::Error::from_raw_os_error(if cfg!(windows) { 193 } else { 8 });
-        let text = spawn_text(&error, "/x/it's").unwrap();
+        let text = spawn_text(&error, "/x/it's");
         if cfg!(windows) {
             assert_eq!(text, "[WinError 193] %1 is not a valid Win32 application");
         } else {
             assert_eq!(text, "[Errno 8] Exec format error: \"/x/it's\"");
         }
+        let plain = std::io::Error::other("no code");
+        assert_eq!(spawn_text(&plain, "x"), "no code");
     }
 }

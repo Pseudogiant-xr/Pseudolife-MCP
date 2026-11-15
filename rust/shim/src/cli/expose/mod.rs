@@ -1,45 +1,66 @@
-//! `expose`: `pseudolife-mcp expose {tailscale,off,status}` up to the change.
+//! `expose`: `pseudolife-mcp expose {tailscale,off,status}`.
 //!
-//! Oracle: `pseudolife_memory/expose_cli.py` (`main`, `_expose`, `_off`,
-//! `_status`, `_Report`). Answered natively: help and argparse's errors (at
-//! `COLUMNS=80`), all of `status`, and `tailscale` / `off` through every
-//! check that only reads (the local daemon's `/health`, the `tailscale`
-//! lookup, `status --json`, `serve status --json`, `ip -4`): each refusal,
-//! "already exposed", "not exposed", and the refusal to change anything
-//! without `--yes` when there is no terminal to confirm on. The change itself
-//! (`serve --bg ...` / `serve --tcp=N off`), the interactive confirmation,
-//! and anything outside the reproduced domain defer before any call that
-//! changes the serve config (`rust/cli_harness/rows/expose.md`).
+//! `tailscale` checks the local daemon (`/health` answers `status: ok` and
+//! `"auth": true`), finds the `tailscale` CLI (absolute `PATH` directories
+//! only, then the default install location), reads its state, shows the
+//! plan, asks once at a terminal (or takes `--yes`), runs `tailscale serve
+//! --bg --tcp=N tcp://127.0.0.1:N`, reads the serve state back and reports
+//! what is there: exposed at the tailnet address, or the failure with the
+//! state the host is left in. `off` removes only this daemon's forward the
+//! same way. `status` only reads. Behaviour follows
+//! `pseudolife_memory/expose_cli.py` where it is sensible; the differences
+//! are listed in `rust/cli_harness/rows/expose.md`.
+//!
+//! Every effect goes through [`Host`], so the tests drive the whole flow
+//! with a fake `tailscale`, daemon and terminal.
 mod args;
 mod tailscale;
 
 use super::hook_http;
 use super::pyjson::{self, Dict, J};
 use args::{Action, Args, Parsed};
-use std::{ffi::OsString, io, process::ExitCode, time::Duration};
-use tailscale::State;
+use std::{
+    ffi::OsString,
+    io,
+    process::ExitCode,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+use tailscale::{Binary, Proc, State};
 
-/// Outside the reproduced domain: the dispatcher's deferral line.
+/// An argument spelling outside the canonical form: the dispatcher's
+/// deferral line.
 #[derive(Debug)]
 struct Defer;
 type Res<T> = Result<T, Defer>;
 
-/// Why a reader stopped: the oracle's `_Refused` text, or a deferral.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum Fault {
-    Refused(String),
-    Defer,
-}
-
 const EXIT_OK: u8 = 0;
+const EXIT_FAILED: u8 = 1;
 const EXIT_USAGE: u8 = 2;
 const EXIT_REFUSED: u8 = 4;
+/// Changed, but the result is not the one asked for (undone where that is
+/// safe), or it could not be read back.
+const EXIT_UNDONE: u8 = 5;
+/// Ctrl-C at the question.
+const EXIT_INTERRUPTED: u8 = 130;
 /// `DEFAULT_PORT`.
 pub(super) const DEFAULT_PORT: u16 = 8765;
-/// `LOCAL_HEALTH_TIMEOUT_S`.
+/// `LOCAL_HEALTH_TIMEOUT_S`: a loopback `/health` answers in milliseconds.
 const LOCAL_HEALTH_TIMEOUT: Duration = Duration::from_secs(3);
+/// `TAILNET_HEALTH_TIMEOUT_S`: the advisory probe may cross a relay.
+const TAILNET_HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long after an answer that is not yes a Ctrl-C still counts as the
+/// reason (a console read can end before the interrupt is delivered).
+/// A design bound, far below what a person notices.
+const INTERRUPT_GRACE: Duration = Duration::from_millis(200);
 const INSTALL_FIX: &str =
     "install Tailscale (https://tailscale.com/download), then run `tailscale up`";
+const NO_TERMINAL: &str = "no terminal to confirm on, so nothing changed: rerun with --yes";
+const NOT_CONFIRMED: &str = "not confirmed (only y or yes goes ahead); nothing changed";
+const INTERRUPTED: &str = "interrupted at the question; nothing changed";
 
 /// Python `repr()` of a str.
 pub(super) fn py_repr(text: &str) -> String {
@@ -50,12 +71,8 @@ fn units(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
 }
 
-/// What the oracle's argument handling depends on besides argv.
+/// What the argument handling depends on besides argv.
 struct Context {
-    /// argparse wraps help and usage at `COLUMNS - 2`; only 80 is reproduced.
-    columns_80: bool,
-    colour_stdout: bool,
-    colour_stderr: bool,
     utf8_argv: bool,
 }
 
@@ -68,8 +85,191 @@ struct Out {
     code: u8,
 }
 
-/// `_Report`: the JSON report's fields, and the lines `say` and `fail`
-/// print without `--json`.
+/// Bytes as the streams take them: a lone surrogate escaped, and CRLF on
+/// Windows.
+fn encode(stdout: &[u16], stderr: &str) -> (Vec<u8>, Vec<u8>) {
+    (
+        super::text_bytes(&pyjson::backslashreplace(stdout)),
+        super::text_bytes(stderr),
+    )
+}
+
+// ── what the command reaches ─────────────────────────────────────────────────
+
+/// `fetch_health(url, timeout)`'s kinds.
+#[derive(Debug, Clone)]
+enum Health {
+    Ok(Dict),
+    None,
+    Other,
+}
+
+/// The answer to the confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answer {
+    Yes,
+    No,
+    Interrupted,
+}
+
+/// Everything outside the process: the `tailscale` CLI, the daemon's
+/// `/health`, the terminal and Ctrl-C.
+#[allow(async_fn_in_trait)]
+trait Host {
+    fn find(&self) -> Option<Binary>;
+    async fn run(&self, binary: &Binary, args: &[&str]) -> Proc;
+    async fn health(&self, origin: &str, timeout: Duration) -> Health;
+    /// Whether stdin is a terminal to ask on.
+    fn interactive(&self) -> bool;
+    /// Write what the report printed so far (the plan) before a question;
+    /// `false` when a stream refused it.
+    fn show(&self, stdout: &[u8], stderr: &[u8]) -> bool;
+    async fn ask(&self, question: &str) -> Answer;
+    /// From the change on, Ctrl-C is noted rather than fatal, so the result
+    /// is still read back and reported (the `tailscale` child receives the
+    /// same interrupt and stops on its own).
+    fn hold_interrupts(&self);
+    fn interrupted(&self) -> bool;
+}
+
+/// Ctrl-C (SIGINT on POSIX, the console's Ctrl-C on Windows), listened for
+/// from the moment this is made.
+struct Interrupts(
+    #[cfg(unix)] tokio::signal::unix::Signal,
+    #[cfg(windows)] tokio::signal::windows::CtrlC,
+);
+
+impl Interrupts {
+    fn listen() -> Option<Self> {
+        #[cfg(unix)]
+        {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                .ok()
+                .map(Self)
+        }
+        #[cfg(windows)]
+        {
+            tokio::signal::windows::ctrl_c().ok().map(Self)
+        }
+    }
+
+    async fn recv(&mut self) {
+        if self.0.recv().await.is_none() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+/// This machine.
+#[derive(Default)]
+struct Real {
+    interrupted: Arc<AtomicBool>,
+}
+
+impl Host for Real {
+    fn find(&self) -> Option<Binary> {
+        tailscale::find()
+    }
+
+    async fn run(&self, binary: &Binary, args: &[&str]) -> Proc {
+        tailscale::run(binary, args).await
+    }
+
+    async fn health(&self, origin: &str, timeout: Duration) -> Health {
+        fetch_health(origin, timeout).await
+    }
+
+    fn interactive(&self) -> bool {
+        super::connect::stdin_is_tty()
+    }
+
+    fn show(&self, stdout: &[u8], stderr: &[u8]) -> bool {
+        (stdout.is_empty() || super::move_cli::emit(&mut io::stdout().lock(), stdout).is_ok())
+            && (stderr.is_empty()
+                || super::move_cli::emit(&mut io::stderr().lock(), stderr).is_ok())
+    }
+
+    async fn ask(&self, question: &str) -> Answer {
+        let Some(mut interrupts) = Interrupts::listen() else {
+            return if super::connect::terminal::ask(question).await {
+                Answer::Yes
+            } else {
+                Answer::No
+            };
+        };
+        let said = tokio::select! {
+            biased;
+            () = interrupts.recv() => None,
+            yes = super::connect::terminal::ask(question) => Some(yes),
+        };
+        match said {
+            Some(true) => Answer::Yes,
+            Some(false) => {
+                if tokio::time::timeout(INTERRUPT_GRACE, interrupts.recv())
+                    .await
+                    .is_ok()
+                {
+                    Answer::Interrupted
+                } else {
+                    Answer::No
+                }
+            }
+            None => Answer::Interrupted,
+        }
+    }
+
+    fn hold_interrupts(&self) {
+        if let Some(mut interrupts) = Interrupts::listen() {
+            let flag = Arc::clone(&self.interrupted);
+            tokio::spawn(async move {
+                loop {
+                    interrupts.recv().await;
+                    flag.store(true, Ordering::SeqCst);
+                }
+            });
+        }
+    }
+
+    fn interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::SeqCst)
+    }
+}
+
+/// `fetch_health("<origin>/health", timeout)` over a no-proxy,
+/// no-redirect opener; an answer nested past [`tailscale::DEPTH`] is
+/// "other", as `_json` refuses it.
+async fn fetch_health(origin: &str, timeout: Duration) -> Health {
+    let Some(reply) =
+        hook_http::get_bounded(origin, "/health", None, timeout, false, (None, None)).await
+    else {
+        return Health::None;
+    };
+    if (300..400).contains(&reply.status) {
+        return Health::Other;
+    }
+    if reply.body_failed {
+        // A 2xx body that fails to read is nothing answering; an error's
+        // body failing is "other".
+        return if (200..300).contains(&reply.status) {
+            Health::None
+        } else {
+            Health::Other
+        };
+    }
+    let Ok(text) = std::str::from_utf8(&reply.body) else {
+        return Health::Other;
+    };
+    match tailscale::json(text) {
+        Ok(Some(J::Dict(payload))) => Health::Ok(payload),
+        // Not an object, not JSON, or nested past the bound.
+        _ => Health::Other,
+    }
+}
+
+// ── the report ───────────────────────────────────────────────────────────────
+
+/// `_Report`: the JSON report's fields, and the lines printed without
+/// `--json`.
 struct Report {
     action: Action,
     port: u16,
@@ -80,6 +280,9 @@ struct Report {
     detail: Option<J>,
     command: Option<Vec<String>>,
     daemon: Option<J>,
+    probe: Option<J>,
+    warnings: Vec<Vec<u16>>,
+    notes: Vec<String>,
     error: Option<J>,
     stdout: Vec<u16>,
     stderr: String,
@@ -97,6 +300,9 @@ impl Report {
             detail: None,
             command: None,
             daemon: None,
+            probe: None,
+            warnings: Vec::new(),
+            notes: Vec::new(),
             error: None,
             stdout: Vec::new(),
             stderr: String::new(),
@@ -112,6 +318,33 @@ impl Report {
 
     fn say_text(&mut self, line: &str) {
         self.say(&units(line));
+    }
+
+    /// A warning: on stderr without `--json`, in `warnings` always.
+    fn warn(&mut self, line: &[u16]) {
+        self.warnings.push(line.to_vec());
+        if !self.as_json {
+            self.stderr
+                .push_str(&format!("{}\n", pyjson::backslashreplace(line)));
+        }
+    }
+
+    fn warn_text(&mut self, line: &str) {
+        self.warn(&units(line));
+    }
+
+    /// A next step: printed, and in `notes`.
+    fn note(&mut self, line: String) {
+        self.say_text(&line);
+        self.notes.push(line);
+    }
+
+    /// What is buffered so far, to be written now (before a question).
+    fn take_pending(&mut self) -> (Vec<u16>, String) {
+        (
+            std::mem::take(&mut self.stdout),
+            std::mem::take(&mut self.stderr),
+        )
     }
 
     /// `fail(code, line)`: the line on stderr (`expose: ...`), written with
@@ -146,9 +379,25 @@ impl Report {
                     }),
                 ),
                 (J::from("daemon"), self.daemon.take().unwrap_or(J::Null)),
-                (J::from("probe"), J::Null),
-                (J::from("warnings"), J::List(Vec::new())),
-                (J::from("notes"), J::List(Vec::new())),
+                (J::from("probe"), self.probe.take().unwrap_or(J::Null)),
+                (
+                    J::from("warnings"),
+                    J::List(
+                        std::mem::take(&mut self.warnings)
+                            .into_iter()
+                            .map(pyjson::text)
+                            .collect(),
+                    ),
+                ),
+                (
+                    J::from("notes"),
+                    J::List(
+                        std::mem::take(&mut self.notes)
+                            .into_iter()
+                            .map(J::Str)
+                            .collect(),
+                    ),
+                ),
                 (J::from("error"), self.error.take().unwrap_or(J::Null)),
                 (J::from("exit"), J::Int(code.to_string())),
             ]);
@@ -163,114 +412,405 @@ impl Report {
     }
 }
 
-/// `fetch_health(url, timeout)`'s kinds.
-enum Health {
-    Ok(Dict),
-    None,
-    Other,
-}
-
-/// `fetch_health("http://127.0.0.1:<port>", 3)` over a no-proxy,
-/// no-redirect opener; an answer nested past [`tailscale::DEPTH`] is
-/// "other", as `_json` refuses it.
-async fn fetch_health(port: u16) -> Res<Health> {
-    let reply = hook_http::get_bounded(
-        &format!("http://127.0.0.1:{port}"),
-        "/health",
-        None,
-        LOCAL_HEALTH_TIMEOUT,
-        false,
-        (None, None),
-    )
-    .await;
-    let Some(reply) = reply else {
-        return Ok(Health::None);
-    };
-    if (300..400).contains(&reply.status) {
-        return Ok(Health::Other);
-    }
-    if reply.body_failed {
-        // A 2xx body that fails to read raises out of the `with` block
-        // (nothing answered); an error's `exc.read()` failing is "other".
-        return Ok(if (200..300).contains(&reply.status) {
-            Health::None
-        } else {
-            Health::Other
-        });
-    }
-    let Ok(text) = std::str::from_utf8(&reply.body) else {
-        return Ok(Health::Other);
-    };
-    Ok(match tailscale::json(text).map_err(|_| Defer)? {
-        Ok(Some(J::Dict(payload))) => Health::Ok(payload),
-        // Not an object, not JSON, or nested past the bound.
-        Ok(_) | Err(_) => Health::Other,
-    })
-}
-
 fn field(payload: &Dict, key: &str) -> J {
     pyjson::get(payload, key).cloned().unwrap_or(J::Null)
 }
 
-/// `_confirm`: `--yes` goes on to the change, which defers here; without
-/// it, a terminal would be asked (defers) and no terminal refuses.
-fn confirm(args: &Args, report: Report) -> Res<Out> {
-    if !args.yes {
-        if super::connect::stdin_is_tty() {
-            return Err(Defer);
+// ── consent ──────────────────────────────────────────────────────────────────
+
+/// `_confirm`: `--yes` goes ahead; without it, no terminal refuses and a
+/// terminal is asked once. `Err` is the finished answer: nothing changed.
+async fn consent(
+    host: &impl Host,
+    args: &Args,
+    mut report: Report,
+    question: &str,
+) -> Result<Report, Out> {
+    if args.yes {
+        return Ok(report);
+    }
+    if !host.interactive() {
+        return Err(report.fail_text(EXIT_USAGE, NO_TERMINAL));
+    }
+    let (stdout, stderr) = report.take_pending();
+    let (stdout, stderr) = encode(&stdout, &stderr);
+    if !host.show(&stdout, &stderr) {
+        return Err(report.fail_text(
+            EXIT_FAILED,
+            "could not write the plan to the terminal, so nothing changed",
+        ));
+    }
+    match host.ask(question).await {
+        Answer::Yes => Ok(report),
+        Answer::No => Err(report.fail_text(EXIT_USAGE, NOT_CONFIRMED)),
+        Answer::Interrupted => Err(report.fail_text(EXIT_INTERRUPTED, INTERRUPTED)),
+    }
+}
+
+// ── the change and what it left ──────────────────────────────────────────────
+
+/// `_PERMISSION`: how the CLI words a refusal for this user ("Access
+/// denied: serve config denied" on Linux without root or an operator
+/// grant, and on Windows for a user other than the one logged in to
+/// Tailscale; or a hint naming `--operator`).
+fn permission_refused(proc: &Proc) -> bool {
+    static PERMISSION: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = PERMISSION.get_or_init(|| {
+        regex::RegexBuilder::new(
+            r"access denied|permission denied|not permitted|--operator\b|unauthori[sz]ed|must be (?:root|admin)",
+        )
+        .case_insensitive(true)
+        .build()
+        .expect("a valid pattern")
+    });
+    !proc.succeeded() && !proc.timed_out && pattern.is_match(&proc.err)
+}
+
+/// `_permission_fix()`: what lets this user change the serve config.
+fn permission_fix() -> &'static str {
+    if cfg!(windows) {
+        "run it as the Windows user logged in to Tailscale, or from an elevated (administrator) shell"
+    } else if cfg!(target_os = "macos") {
+        "run it as the macOS user logged in to the Tailscale app"
+    } else {
+        "grant your user operator rights once with `sudo tailscale set --operator=$USER`, or run this as root"
+    }
+}
+
+fn permission_message(proc: &Proc) -> String {
+    format!(
+        "tailscale refused the change for this user ({}); nothing changed: {}",
+        tailscale::first_line(&proc.err),
+        permission_fix()
+    )
+}
+
+/// What a call did, for a message: its first stderr line, `exit N`, or the
+/// timeout.
+fn ran(proc: &Proc) -> String {
+    if proc.timed_out {
+        proc.err.clone()
+    } else {
+        tailscale::detail(proc)
+    }
+}
+
+/// `exit N, <first stderr line>`, or the timeout.
+fn ran_fully(proc: &Proc) -> String {
+    if proc.timed_out {
+        return proc.err.clone();
+    }
+    let line = tailscale::first_line(&proc.err);
+    if line.is_empty() {
+        format!("exit {}", proc.code)
+    } else {
+        format!("exit {}, {line}", proc.code)
+    }
+}
+
+/// The link a wedged serve printed (Serve not enabled for the tailnet
+/// prints the page that enables it, then waits), else its first line.
+fn printed(proc: &Proc) -> Option<String> {
+    let link = proc
+        .out
+        .split(pyjson::py_space)
+        .find(|word| word.starts_with("https://"));
+    match link {
+        Some(link) => Some(link.to_owned()),
+        None => Some(tailscale::first_line(&proc.out)).filter(|line| !line.is_empty()),
+    }
+}
+
+fn words(items: &[String]) -> Vec<&str> {
+    items.iter().map(String::as_str).collect()
+}
+
+fn serve_words(port: u16) -> Vec<String> {
+    vec![
+        "serve".to_owned(),
+        "--bg".to_owned(),
+        format!("--tcp={port}"),
+        format!("tcp://127.0.0.1:{port}"),
+    ]
+}
+
+fn off_words(port: u16) -> Vec<String> {
+    vec![
+        "serve".to_owned(),
+        format!("--tcp={port}"),
+        "off".to_owned(),
+    ]
+}
+
+fn command(words: &[String]) -> Vec<String> {
+    std::iter::once("tailscale".to_owned())
+        .chain(words.iter().cloned())
+        .collect()
+}
+
+/// The port's state read back after a change, or why it could not be.
+async fn read_back(
+    host: &impl Host,
+    binary: &Binary,
+    port: u16,
+) -> Result<(State, Option<Vec<u16>>), String> {
+    tailscale::serve_config(host, binary)
+        .await
+        .map(|config| tailscale::port_state(&config, port))
+}
+
+fn note_interrupt(host: &impl Host, report: &mut Report) {
+    if host.interrupted() {
+        report.warn_text(
+            "interrupted during the change: what follows is the serve state tailscale reports now",
+        );
+    }
+}
+
+/// `serve --bg` on a port that was free, then what the serve state shows.
+async fn serve(
+    host: &impl Host,
+    binary: &Binary,
+    port: u16,
+    url: &str,
+    bank: &J,
+    mut report: Report,
+) -> Out {
+    host.hold_interrupts();
+    let proc = host.run(binary, &words(&serve_words(port))).await;
+    if permission_refused(&proc) {
+        return report.fail_text(EXIT_REFUSED, &permission_message(&proc));
+    }
+    let after = read_back(host, binary, port).await;
+    note_interrupt(host, &mut report);
+    let (state, detail) = match after {
+        Ok(after) => after,
+        Err(why) => {
+            // Nothing to judge an undo by: removing a serve that may have
+            // taken, or reporting an undo that may not have been needed,
+            // would both mislead.
+            return report.fail_text(
+                EXIT_UNDONE,
+                &format!(
+                    "the serve command ran ({}) but could not verify its result: {why}. Check `tailscale serve status`; if port {port} forwards to 127.0.0.1:{port} and you do not want it, run `pseudolife-mcp expose off --port {port}`",
+                    ran_fully(&proc)
+                ),
+            );
         }
-        return Ok(report.fail_text(EXIT_USAGE, "no terminal to confirm on: rerun with --yes"));
+    };
+    match (proc.succeeded(), state) {
+        (true, State::Ours) => {}
+        (_, State::Foreign) => {
+            // Not the forward this run asked for: it may be someone else's,
+            // so it is named and left alone.
+            let line = [
+                units(&format!(
+                    "after `tailscale serve` ({}), tailnet port {port} serves ",
+                    ran(&proc)
+                )),
+                detail.unwrap_or_default(),
+                units(&format!(
+                    ", not the forward this command asked for; left alone. Check `tailscale serve status`, and remove it with `tailscale serve --tcp={port} off` if you do not want it"
+                )),
+            ]
+            .concat();
+            return report.fail(EXIT_UNDONE, &line);
+        }
+        (false, State::None) if proc.timed_out => {
+            let said = printed(&proc).map_or_else(String::new, |said| format!(" ({said})"));
+            return report.fail_text(
+                EXIT_REFUSED,
+                &format!(
+                    "`tailscale serve` did not finish within {}s{said}; nothing changed. If it printed a link, open it to enable Serve for this tailnet, then rerun `pseudolife-mcp expose tailscale --port {port}`",
+                    tailscale::TIMEOUT.as_secs()
+                ),
+            );
+        }
+        (false, State::None) => {
+            return report.fail_text(
+                EXIT_REFUSED,
+                &format!(
+                    "tailscale refused the serve ({}); nothing changed",
+                    ran(&proc)
+                ),
+            );
+        }
+        (true, State::None) => {
+            return report.fail_text(
+                EXIT_UNDONE,
+                "the serve did not take (`tailscale serve` exited 0, but the serve status does not show the forward); nothing changed. Check `tailscale serve status`, then rerun",
+            );
+        }
+        (false, State::Ours) => return undo(host, binary, port, &proc, report).await,
     }
-    Err(Defer)
+    report.state = Some("exposed");
+    report.url = Some(url.to_owned());
+    report.say_text(&format!("exposed: clients use {url}"));
+    probe(host, &mut report, url, bank).await;
+    report.note(format!(
+        "next, for each joining machine: run `pseudolife-mcp invite <machine>` here, then give the code it prints to that machine's installer (option 2), or run `pseudolife-mcp pair {url} <code>` there"
+    ));
+    report.note(format!(
+        "to remove the forward: pseudolife-mcp expose off --port {port}"
+    ));
+    report.finish(EXIT_OK)
 }
 
-/// `find_tailscale()`.
-fn find() -> Res<Option<String>> {
-    tailscale::find().map_err(|()| Defer)
-}
-
-/// A reader's answer: the value, the refusal text, or a deferral.
-fn read<T>(result: Result<T, Fault>) -> Res<Result<T, String>> {
-    match result {
-        Ok(value) => Ok(Ok(value)),
-        Err(Fault::Refused(why)) => Ok(Err(why)),
-        Err(Fault::Defer) => Err(Defer),
+/// The serve reported failure but its forward is in place: the port was
+/// free before, so the forward is this run's; take it back off and check.
+async fn undo(host: &impl Host, binary: &Binary, port: u16, proc: &Proc, report: Report) -> Out {
+    let removal = host.run(binary, &words(&off_words(port))).await;
+    let left = match read_back(host, binary, port).await {
+        Ok((State::None, _)) => None,
+        Ok((_, Some(detail))) => Some(format!(
+            "port {port} still serves {}",
+            String::from_utf16_lossy(&detail)
+        )),
+        Ok((_, None)) => Some(format!("port {port} still forwards to 127.0.0.1:{port}")),
+        Err(why) => Some(why),
+    };
+    match left {
+        None => report.fail_text(
+            EXIT_UNDONE,
+            &format!(
+                "`tailscale serve` failed ({}) although the forward appeared; it was removed again, so nothing changed",
+                ran(proc)
+            ),
+        ),
+        Some(why) => {
+            let why = if removal.succeeded() {
+                why
+            } else {
+                format!("{}; {why}", ran(&removal))
+            };
+            report.fail_text(
+                EXIT_UNDONE,
+                &format!(
+                    "`tailscale serve` failed ({}) although the forward appeared, and removing it again did not finish ({why}): run `tailscale serve --tcp={port} off` yourself",
+                    ran(proc)
+                ),
+            )
+        }
     }
 }
+
+/// `_probe`: the advisory check through the tailnet address. Never rolls
+/// back: a host cannot always reach its own serve address.
+async fn probe(host: &impl Host, report: &mut Report, url: &str, bank: &J) {
+    let Health::Ok(remote) = host.health(url, TAILNET_HEALTH_TIMEOUT).await else {
+        report.probe = Some(J::Dict(vec![
+            (J::from("reachable"), J::Bool(false)),
+            (J::from("same_bank"), J::Null),
+        ]));
+        report.warn_text(&format!(
+            "this host could not reach {url}/health through the tailnet, which is common for a host's own serve address; check from another machine: curl {url}/health"
+        ));
+        return;
+    };
+    let other = field(&remote, "bank");
+    let same = (bank.truthy() && other.truthy()).then(|| other == *bank);
+    report.probe = Some(J::Dict(vec![
+        (J::from("reachable"), J::Bool(true)),
+        (J::from("same_bank"), same.map_or(J::Null, J::Bool)),
+    ]));
+    match same {
+        Some(true) => report.say(
+            &[
+                units(&format!(
+                    "checked: {url}/health answers with the same bank ("
+                )),
+                bank.py_str_units(),
+                units(")"),
+            ]
+            .concat(),
+        ),
+        Some(false) => report.warn(
+            &[
+                units(&format!("{url}/health answers with a different bank (")),
+                other.py_str_units(),
+                units(", this daemon has "),
+                bank.py_str_units(),
+                units("); something else may be serving that address"),
+            ]
+            .concat(),
+        ),
+        None => report.say_text(&format!(
+            "checked: {url}/health answers (bank fingerprint not reported yet)"
+        )),
+    }
+}
+
+/// `serve --tcp=N off` on this daemon's forward, then what the serve state
+/// shows.
+async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report) -> Out {
+    host.hold_interrupts();
+    let proc = host.run(binary, &words(&off_words(port))).await;
+    if permission_refused(&proc) {
+        return report.fail_text(EXIT_REFUSED, &permission_message(&proc));
+    }
+    let after = read_back(host, binary, port).await;
+    note_interrupt(host, &mut report);
+    match after {
+        Err(why) => report.fail_text(
+            EXIT_UNDONE,
+            &format!(
+                "the removal ran ({}) but could not verify its result: {why}. Check `tailscale serve status`; if port {port} still forwards to 127.0.0.1:{port}, run `tailscale serve --tcp={port} off` yourself",
+                ran_fully(&proc)
+            ),
+        ),
+        Ok((State::Ours, _)) => report.fail_text(
+            EXIT_REFUSED,
+            &format!(
+                "tailscale did not remove the forward ({}); it is still in place, so nothing changed",
+                ran(&proc)
+            ),
+        ),
+        Ok((state, detail)) => {
+            report.state = Some("removed");
+            report.say_text(&format!(
+                "removed: tailnet port {port} no longer forwards to this daemon"
+            ));
+            if state == State::Foreign {
+                report.warn(
+                    &[
+                        units(&format!("tailnet port {port} now serves ")),
+                        detail.unwrap_or_default(),
+                        units(", which this command did not create; left alone"),
+                    ]
+                    .concat(),
+                );
+            }
+            report.finish(EXIT_OK)
+        }
+    }
+}
+
+// ── the actions ──────────────────────────────────────────────────────────────
 
 /// `_running` then `_serve_config`, as the actions call them in one `try`.
-async fn running_and_config(binary: &str) -> Res<Result<(Dict, Dict), String>> {
-    let status = match read(tailscale::running(binary).await)? {
-        Ok(status) => status,
-        Err(why) => return Ok(Err(why)),
-    };
-    Ok(read(tailscale::serve_config(binary).await)?.map(|config| (status, config)))
+async fn running_and_config(host: &impl Host, binary: &Binary) -> Result<(Dict, Dict), String> {
+    let status = tailscale::running(host, binary).await?;
+    Ok((status, tailscale::serve_config(host, binary).await?))
 }
 
-async fn tailnet_ipv4(binary: &str, status: &Dict) -> Res<Option<String>> {
-    tailscale::tailnet_ipv4(binary, status)
-        .await
-        .map_err(|()| Defer)
-}
-
-/// `_expose(args, report)` up to the change.
-async fn expose(args: &Args, mut report: Report) -> Res<Out> {
+/// `_expose(args, report)`.
+async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
     let port = args.port;
     let local = format!("http://127.0.0.1:{port}");
-    let health = match fetch_health(port).await? {
+    let health = match host.health(&local, LOCAL_HEALTH_TIMEOUT).await {
         Health::Other => {
-            return Ok(report.fail_text(
+            return report.fail_text(
                 EXIT_REFUSED,
                 &format!(
                     "something that is not the Pseudolife daemon answers on 127.0.0.1:{port} (a redirect or a body that is not its /health JSON); pass --port for the daemon's port"
                 ),
-            ));
+            );
         }
         Health::None => {
-            return Ok(report.fail_text(
+            return report.fail_text(
                 EXIT_REFUSED,
                 &format!("no daemon answers at {local}/health: start it first (or pass --port)"),
-            ));
+            );
         }
         Health::Ok(health) => health,
     };
@@ -282,29 +822,29 @@ async fn expose(args: &Args, mut report: Report) -> Res<Out> {
     let status = pyjson::get(&health, "status");
     if status.and_then(J::as_str) != Some("ok") {
         let shown = status.map_or_else(|| "None".to_owned(), pyjson::py_value_repr);
-        return Ok(report.fail_text(
+        return report.fail_text(
             EXIT_REFUSED,
             &format!("the daemon at {local} reports status {shown}: fix it before exposing it"),
-        ));
+        );
     }
     if pyjson::get(&health, "auth") != Some(&J::Bool(true)) {
-        return Ok(report.fail_text(
+        return report.fail_text(
             EXIT_REFUSED,
             &format!(
                 "the daemon at {local} does not report \"auth\": true, so anyone on the tailnet could read and write the bank. Give it a token first (PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKENS, see docs/guide/remote-bank.md); an unauthenticated bank is never exposed"
             ),
-        ));
+        );
     }
-    let Some(binary) = find()? else {
-        return Ok(report.fail_text(
+    let Some(binary) = host.find() else {
+        return report.fail_text(
             EXIT_REFUSED,
             &format!("the tailscale CLI was not found: {INSTALL_FIX}"),
-        ));
+        );
     };
-    report.tailscale = Some(binary.clone());
-    let (status, config) = match running_and_config(&binary).await? {
+    report.tailscale = Some(binary.shown.clone());
+    let (status, config) = match running_and_config(host, &binary).await {
         Ok(both) => both,
-        Err(why) => return Ok(report.fail_text(EXIT_REFUSED, &why)),
+        Err(why) => return report.fail_text(EXIT_REFUSED, &why),
     };
     let (state, detail) = tailscale::port_state(&config, port);
     if state == State::Foreign {
@@ -314,57 +854,53 @@ async fn expose(args: &Args, mut report: Report) -> Res<Out> {
             units("; expose never replaces another serve. Remove it yourself, or pass --port for the daemon's port if this is not it"),
         ]
         .concat();
-        return Ok(report.fail(EXIT_REFUSED, &line));
+        return report.fail(EXIT_REFUSED, &line);
     }
-    let Some(ip) = tailnet_ipv4(&binary, &status).await? else {
-        return Ok(report.fail_text(
+    let Some(ip) = tailscale::tailnet_ipv4(host, &binary, &status).await else {
+        return report.fail_text(
             EXIT_REFUSED,
             "tailscale reports no tailnet IPv4 address for this host",
-        ));
+        );
     };
     let url = format!("http://{ip}:{port}");
     if state == State::Ours {
         report.state = Some("already_exposed");
         report.url = Some(url.clone());
         report.say_text(&format!("already exposed: clients use {url}"));
-        return Ok(report.finish(EXIT_OK));
+        return report.finish(EXIT_OK);
     }
-    let serve = [
-        "serve".to_owned(),
-        "--bg".to_owned(),
-        format!("--tcp={port}"),
-        format!("tcp://127.0.0.1:{port}"),
-    ];
-    report.command = Some(
-        std::iter::once("tailscale".to_owned())
-            .chain(serve.iter().cloned())
-            .collect(),
-    );
+    let serve_args = serve_words(port);
+    report.command = Some(command(&serve_args));
     report.say_text("plan:");
-    report.say_text(&format!("  run      tailscale {}", serve.join(" ")));
+    report.say_text(&format!("  run      tailscale {}", serve_args.join(" ")));
     report.say_text(&format!("  clients  {url}"));
-    confirm(args, report)
+    let question = format!("expose this daemon on the tailnet at {url}? [y/N] ");
+    let report = match consent(host, args, report, &question).await {
+        Ok(report) => report,
+        Err(out) => return out,
+    };
+    serve(host, &binary, port, &url, &field(&health, "bank"), report).await
 }
 
-/// `_off(args, report)` up to the change.
-async fn off(args: &Args, mut report: Report) -> Res<Out> {
+/// `_off(args, report)`.
+async fn off(host: &impl Host, args: &Args, mut report: Report) -> Out {
     let port = args.port;
-    let Some(binary) = find()? else {
-        return Ok(report.fail_text(
+    let Some(binary) = host.find() else {
+        return report.fail_text(
             EXIT_REFUSED,
             &format!("the tailscale CLI was not found: {INSTALL_FIX}"),
-        ));
+        );
     };
-    report.tailscale = Some(binary.clone());
-    let (_status, config) = match running_and_config(&binary).await? {
+    report.tailscale = Some(binary.shown.clone());
+    let (_status, config) = match running_and_config(host, &binary).await {
         Ok(both) => both,
-        Err(why) => return Ok(report.fail_text(EXIT_REFUSED, &why)),
+        Err(why) => return report.fail_text(EXIT_REFUSED, &why),
     };
     match tailscale::port_state(&config, port) {
         (State::None, _) => {
             report.state = Some("not_exposed");
             report.say_text(&format!("not exposed: nothing serves tailnet port {port}"));
-            Ok(report.finish(EXIT_OK))
+            report.finish(EXIT_OK)
         }
         (State::Foreign, detail) => {
             let detail = detail.unwrap_or_default();
@@ -378,43 +914,40 @@ async fn off(args: &Args, mut report: Report) -> Res<Out> {
                 )),
             ]
             .concat();
-            Ok(report.fail(EXIT_REFUSED, &line))
+            report.fail(EXIT_REFUSED, &line)
         }
         (State::Ours, _) => {
-            let words = [
-                "serve".to_owned(),
-                format!("--tcp={port}"),
-                "off".to_owned(),
-            ];
-            report.command = Some(
-                std::iter::once("tailscale".to_owned())
-                    .chain(words.iter().cloned())
-                    .collect(),
-            );
+            let off_args = off_words(port);
+            report.command = Some(command(&off_args));
             report.say_text("plan:");
-            report.say_text(&format!("  run      tailscale {}", words.join(" ")));
-            confirm(args, report)
+            report.say_text(&format!("  run      tailscale {}", off_args.join(" ")));
+            let question = format!("remove the tailnet forward on port {port}? [y/N] ");
+            let report = match consent(host, args, report, &question).await {
+                Ok(report) => report,
+                Err(out) => return out,
+            };
+            remove(host, &binary, port, report).await
         }
     }
 }
 
 /// `_status(args, report)`: reads only.
-async fn status(args: &Args, mut report: Report) -> Res<Out> {
+async fn status(host: &impl Host, args: &Args, mut report: Report) -> Out {
     let port = args.port;
-    let Some(binary) = find()? else {
+    let Some(binary) = host.find() else {
         report.state = Some("unavailable");
         report.detail = Some(J::from("the tailscale CLI was not found"));
         report.say_text("not exposed: the tailscale CLI was not found");
-        return Ok(report.finish(EXIT_OK));
+        return report.finish(EXIT_OK);
     };
-    report.tailscale = Some(binary.clone());
-    let (status, config) = match running_and_config(&binary).await? {
+    report.tailscale = Some(binary.shown.clone());
+    let (status, config) = match running_and_config(host, &binary).await {
         Ok(both) => both,
         Err(why) => {
             report.state = Some("unavailable");
             report.detail = Some(J::Str(why.clone()));
             report.say_text(&format!("not exposed: {why}"));
-            return Ok(report.finish(EXIT_OK));
+            return report.finish(EXIT_OK);
         }
     };
     match tailscale::port_state(&config, port) {
@@ -429,42 +962,41 @@ async fn status(args: &Args, mut report: Report) -> Res<Out> {
                 ]
                 .concat(),
             );
-            Ok(report.finish(EXIT_OK))
+            report.finish(EXIT_OK)
         }
         (State::None, _) => {
             report.state = Some("not_exposed");
             report.say_text("not exposed");
-            Ok(report.finish(EXIT_OK))
+            report.finish(EXIT_OK)
         }
         (State::Ours, _) => {
-            let Some(ip) = tailnet_ipv4(&binary, &status).await? else {
+            let Some(ip) = tailscale::tailnet_ipv4(host, &binary, &status).await else {
                 report.state = Some("unavailable");
                 report.detail = Some(J::from("no tailnet IPv4 address for this host"));
                 report.say_text(
                     "not exposed: tailscale reports no tailnet IPv4 address for this host",
                 );
-                return Ok(report.finish(EXIT_OK));
+                return report.finish(EXIT_OK);
             };
             let url = format!("http://{ip}:{port}");
             report.state = Some("exposed");
             report.url = Some(url.clone());
             report.say_text(&format!("exposed: clients use {url}"));
-            Ok(report.finish(EXIT_OK))
+            report.finish(EXIT_OK)
         }
     }
 }
 
-/// argparse, then the action.
-fn decide(argv: &[String], context: &Context) -> Res<Out> {
+/// argparse, then the action. `Err` only for an argument spelling outside
+/// the canonical form.
+fn decide(argv: &[String], context: &Context, host: &impl Host) -> Res<Out> {
     if !context.utf8_argv && !argv.iter().all(|argument| argument.is_ascii()) {
         return Err(Defer);
     }
     let args = match args::parse(argv) {
         Parsed::Defer => return Err(Defer),
-        Parsed::MainHelp | Parsed::Help(_) if !context.columns_80 || context.colour_stdout => {
-            return Err(Defer);
-        }
-        Parsed::Error(..) if !context.columns_80 || context.colour_stderr => return Err(Defer),
+        // The help and usage text are argparse's at 80 columns, whatever
+        // the terminal's width.
         Parsed::MainHelp => {
             return Ok(Out {
                 stdout: units(args::MAIN_HELP),
@@ -499,58 +1031,53 @@ fn decide(argv: &[String], context: &Context) -> Res<Out> {
         Parsed::Args(args) => args,
     };
     let report = Report::new(&args);
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|_| Defer)?;
-    runtime.block_on(async {
-        match args.action {
-            Action::Tailscale => expose(&args, report).await,
-            Action::Off => off(&args, report).await,
-            Action::Status => status(&args, report).await,
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return Ok(report.fail_text(
+                EXIT_FAILED,
+                &format!("could not start ({error}); nothing changed"),
+            ));
         }
-    })
+    };
+    let out = runtime.block_on(async {
+        match args.action {
+            Action::Tailscale => expose(host, &args, report).await,
+            Action::Off => off(host, &args, report).await,
+            Action::Status => status(host, &args, report).await,
+        }
+    });
+    // A question's stdin read may still be pending after an interrupt; the
+    // process ends now rather than waiting for its line.
+    runtime.shutdown_background();
+    Ok(out)
 }
 
-/// `None` defers to the dispatcher. Nothing is written before the answer
-/// is complete, so a deferral leaves both streams untouched.
+/// `None` defers to the dispatcher (an argument spelling outside the
+/// canonical form), before anything is written or run.
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
-    use std::io::IsTerminal;
-    // json.loads and int() read integers under this digit limit (4300 unset).
-    if std::env::var_os("PYTHONINTMAXSTRDIGITS").is_some() {
-        return None;
-    }
     let argv = values
         .into_iter()
         .map(OsString::into_string)
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    let colour = super::move_cli::colour_env(|name| std::env::var_os(name).is_some());
     let context = Context {
-        columns_80: std::env::var_os("COLUMNS").is_some_and(|value| value == "80"),
-        colour_stdout: colour || io::stdout().is_terminal(),
-        colour_stderr: colour || io::stderr().is_terminal(),
         utf8_argv: super::move_cli::utf8_argv(),
     };
-    let out = decide(&argv, &context).ok()?;
-    // `_write` escapes a lone surrogate as `\udXXX` on stdout too.
-    let stdout = super::text_bytes(&pyjson::backslashreplace(&out.stdout));
-    let stderr = super::text_bytes(&out.stderr);
-    if !stdout.is_empty() {
-        match super::move_cli::emit(&mut io::stdout().lock(), &stdout) {
-            Ok(()) => {}
-            Err(0) => return None,
-            Err(_) => return Some(ExitCode::FAILURE),
-        }
-    }
-    if !stderr.is_empty() {
-        match super::move_cli::emit(&mut io::stderr().lock(), &stderr) {
-            Ok(()) => {}
-            Err(0) if stdout.is_empty() => return None,
-            Err(_) => return Some(ExitCode::FAILURE),
-        }
-    }
-    Some(ExitCode::from(out.code))
+    let out = decide(&argv, &context, &Real::default()).ok()?;
+    let (stdout, stderr) = encode(&out.stdout, &out.stderr);
+    let wrote_out =
+        stdout.is_empty() || super::move_cli::emit(&mut io::stdout().lock(), &stdout).is_ok();
+    let wrote_err =
+        stderr.is_empty() || super::move_cli::emit(&mut io::stderr().lock(), &stderr).is_ok();
+    Some(if wrote_out && wrote_err {
+        ExitCode::from(out.code)
+    } else {
+        ExitCode::from(EXIT_FAILED)
+    })
 }
 
 #[cfg(test)]

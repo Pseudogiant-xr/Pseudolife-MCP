@@ -38,7 +38,7 @@ mod paths;
 mod procs;
 mod pyjson;
 mod schedule;
-mod terminal;
+pub(super) mod terminal;
 mod url;
 mod user_env;
 
