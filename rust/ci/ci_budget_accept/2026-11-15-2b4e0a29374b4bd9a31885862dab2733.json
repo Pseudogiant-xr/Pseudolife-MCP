@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "c26df800fae3fe6b",
+  "fingerprint": "47f6c83a2ad7e6a2",
+  "reason": "Removes the cli-store shard's 'Daemon security live checks without a Rust test' step and its 'Download debug bind fixture' step (Rust tests now hold all 69 cases); the shared security outcomes upload stays for the golden step. No step added and no other shard changes. Cost falls: on batch run 43708904518 the two steps took 32 s + 5 s (ubuntu-latest cli-store) and 44 s + 2 s (windows-latest cli-store), so the cli-store estimates are now upper bounds until the batch's runs are measured."
+}

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "fixtures",
+  "before": "02c883eba613073a",
+  "fingerprint": "3bd3716aef34c45a",
+  "reason": "Removes the debug bind fixture build (cargo build -p pseudolife-daemon --features mutants) and its artifact upload, whose only consumer was the retired live security step; no step added. Cost falls: on batch run 43708904518 the two steps took 42 s + 9 s (ubuntu-latest) and 80 s + 3 s (windows-latest), so the measured 2.4 / 3.6 minutes are now upper bounds until the batch's runs are measured."
+}

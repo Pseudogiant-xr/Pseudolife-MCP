@@ -604,10 +604,9 @@ jobs:
     # only. It used to wait for the whole Rust job, which still gates
     # through the Parity gate: on batch run 40047950017 (2026-10-24) every
     # shard started at minute 18, when Rust / windows-latest finished,
-    # though Candidate / windows-latest was done at minute 9. It also builds
-    # the loopback bind fixture, the Rust job's override step's mutants dev
-    # build and the only build carrying the debug-only loopback override,
-    # which cli-store's kept live security checks bind on 0.0.0.0 with.
+    # though Candidate / windows-latest was done at minute 9. It built the
+    # loopback bind fixture (the mutants dev build) too until 16 November
+    # 2026, when the live security checks that bound with it left CI.
     needs: scope
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.mode != 'ci' || needs.scope.result == 'success') && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci') && needs.scope.outputs.rust != 'false' && needs.scope.outputs.full != 'false' }}
     name: Fixtures / ${{ matrix.os }}
@@ -616,9 +615,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # Warm, the two builds took 35 s and 78 s on hosted Windows (master run
-    # 40052100399 and batch run 40047950017); a cold dev build of the
-    # daemon's dependencies is a few minutes more.
+    # Warm, its two builds (one of them the bind fixture, since removed)
+    # took 35 s and 78 s on hosted Windows (master run 40052100399 and batch
+    # run 40047950017); a cold dev build of the daemon's dependencies is a
+    # few minutes more.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -670,9 +670,6 @@ jobs:
           workspaces: rust
           shared-key: rust
           save-if: false
-      - name: Build the debug bind fixture
-        working-directory: rust
-        run: cargo +1.94.0 build --locked -p pseudolife-daemon --features mutants -j 4
       - name: Build the daemon storage test executable
         shell: pwsh
         run: |
@@ -682,14 +679,6 @@ jobs:
           $name = if ($IsWindows) { 'pseudolife-daemon-storage-test.exe' } else { 'pseudolife-daemon-storage-test' }
           New-Item -ItemType Directory -Force -Path 'rust/target/storage-test' | Out-Null
           Copy-Item -LiteralPath (Get-Content -LiteralPath $handoff -Raw).Trim() -Destination (Join-Path 'rust/target/storage-test' $name)
-      - name: Retain debug bind fixture
-        uses: actions/upload-artifact@v4
-        with:
-          name: daemon-bind-fixture-${{ runner.os }}
-          path: |
-            rust/target/debug/pseudolife-daemon
-            rust/target/debug/pseudolife-daemon.exe
-          if-no-files-found: error
       - name: Retain daemon storage test executable
         uses: actions/upload-artifact@v4
         with:
@@ -1087,12 +1076,6 @@ jobs:
         with:
           name: rust-shim-harness-${{ runner.os }}
           path: rust/target/release
-      - name: Download debug bind fixture
-        if: matrix.suite == 'cli-store'
-        uses: actions/download-artifact@v4
-        with:
-          name: daemon-bind-fixture-${{ runner.os }}
-          path: rust/target/debug
       - name: Download daemon storage test executable
         if: matrix.suite == 'cli-startup'
         uses: actions/download-artifact@v4
@@ -1318,8 +1301,10 @@ jobs:
       # The live pass and the six release mutants compared with the Python
       # oracle live and left with the freeze: each mutant's witness case is
       # pinned by these goldens at the status it changes (the PR lists them).
-      # The startup refusals and the remote-bind cases have no golden and no
-      # Rust test yet, so they still run live in the next step.
+      # The startup refusals and the 0.0.0.0-configured remote cases have no
+      # golden; Rust tests hold them (rust/daemon/tests/security_startup.rs,
+      # tests/security_admission.rs, src/http_security_tests.rs), which the
+      # Rust job runs.
       - name: Daemon security admission golden
         if: matrix.suite == 'cli-store'
         timeout-minutes: 10
@@ -1337,30 +1322,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/daemon/harness/run.py golden --rust-bin $candidate --only security-open security-closed security-encodings security-encoding-priority security-terminal-byte --out (Join-Path $env:RUNNER_TEMP 'daemon-security-golden.json')
           exit $LASTEXITCODE
-      # The one live comparison kept after the Python freeze, because no
-      # Rust test asserts these security properties yet (rust/ci/inventory.py
-      # LIVE_SECURITY_EXCEPTIONS; replace each with a Rust test, then drop
-      # it): the daemon refuses to start bound off loopback without a token
-      # unless PSEUDOLIFE_MCP_TRUST_BIND is exactly true, and refuses a
-      # reserved or unparsable token map (security-refusals); bound on
-      # 0.0.0.0, tokenless /api still serves loopback browsers only and a
-      # configured bearer still gates it (security-remote-open/-auth).
-      - name: Daemon security live checks without a Rust test
-        if: matrix.suite == 'cli-store'
-        timeout-minutes: 10
-        shell: pwsh
-        env:
-          PL_HARNESS_SLICE: http
-        run: |
-          $defaultName = if ($IsWindows) { 'pseudolife-daemon-static.exe' } else { 'pseudolife-daemon-static' }
-          $mutantName = if ($IsWindows) { 'pseudolife-daemon.exe' } else { 'pseudolife-daemon' }
-          $candidate = (Resolve-Path (Join-Path 'rust/target/release' $defaultName)).Path
-          $bindFixture = (Resolve-Path (Join-Path 'rust/target/debug' $mutantName)).Path
-          if (-not $IsWindows) { chmod +x $bindFixture }
-          python rust/daemon/harness/run.py live --rust-bin $candidate --only security-refusals --out (Join-Path $env:RUNNER_TEMP 'daemon-security-refusals.json')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')
-          exit $LASTEXITCODE
+      # The golden step's daemon-security-golden.json.
       - name: Retain daemon security parity outcomes
         if: always() && matrix.suite == 'cli-store'
         uses: actions/upload-artifact@v4

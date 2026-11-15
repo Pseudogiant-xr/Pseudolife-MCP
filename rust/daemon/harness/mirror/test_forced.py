@@ -663,8 +663,12 @@ def test_the_bind_fixture_scenarios_are_not_forced_and_invoke_nothing(tmp_path, 
         reason = report["not_forced"][f"routes/{name}"]
         for word in ("debug mutants bind fixture", "release image",
                      "conductor under the maintainer's delegation of 2026-11-11",
-                     "run.py live --only security-remote-open security-remote-auth", "issue #1473"):
+                     "run.py live --only security-remote-open security-remote-auth", "issue #1473",
+                     # The live CI step left on 16 November 2026; Rust tests hold the cases.
+                     "no CI run since 16 November 2026", "http_security_tests.rs",
+                     "security_admission.rs"):
             assert word in reason, (name, word)
+        assert "run live in CI" not in reason, name
     # The harness-level entries stay beside them.
     assert set(forced.NOT_FORCED) <= set(report["not_forced"])
 
