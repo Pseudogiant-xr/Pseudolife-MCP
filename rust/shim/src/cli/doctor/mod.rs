@@ -247,7 +247,7 @@ fn unread(input: &str) -> String {
     format!("unknown (not read by the native client: {input})")
 }
 
-const REGISTRATIONS_UNREAD: &str = "not read by the native client: the search of the Claude Code (~/.claude.json) and Codex (config.toml) registrations stopped on an input it does not decide, such as Python-only JSON (NaN), invalid TOML, or a CLAUDE_CONFIG_DIR, CODEX_HOME or PSEUDOLIFE_MCP_DAEMON_URL that is not plain text. Fix that input, or set PSEUDOLIFE_MCP_TOKEN_FILE in this shell to name the credential directly.";
+const REGISTRATIONS_UNREAD: &str = "not read by the native client: the search of the Claude Code (~/.claude.json) and Codex (config.toml) registrations stopped on an input it does not decide, such as Python-only JSON (NaN), invalid TOML, a home directory that cannot be resolved, or a CLAUDE_CONFIG_DIR, CODEX_HOME or PSEUDOLIFE_MCP_DAEMON_URL that is not plain text or starts with `~`. Fix that input, or set PSEUDOLIFE_MCP_TOKEN_FILE in this shell to name the credential directly.";
 
 /// Where the credential came from, which decides what the user can fix.
 #[derive(Clone, Copy)]
@@ -274,7 +274,7 @@ impl BearerProblem {
         match self {
             // decode_token's refusal names a file even for an inline token.
             Self::Unavailable(Source::Inline, _) => {
-                "the PSEUDOLIFE_MCP_TOKEN value is empty or contains whitespace or control characters (a trailing space, tab or newline from a paste counts)"
+                "the PSEUDOLIFE_MCP_TOKEN value is empty, longer than 4096 bytes, or contains whitespace or control characters (a space or tab from a paste counts)"
             }
             Self::Unavailable(Source::NotText, _) => {
                 "PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE is not valid text"
@@ -768,9 +768,10 @@ async fn diagnose(
     );
     // Only a URL that validated can be proxied; nothing is sent otherwise.
     let proxy_routes = url.as_deref().is_some_and(shim_proxies);
-    if proxy_names
-        .iter()
-        .any(|name| !name.eq_ignore_ascii_case("no_proxy"))
+    if url.is_some()
+        && proxy_names
+            .iter()
+            .any(|name| !name.eq_ignore_ascii_case("no_proxy"))
     {
         put(
             &mut report,

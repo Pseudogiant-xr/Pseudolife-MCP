@@ -1041,6 +1041,36 @@ mod tunnel_profiles {
     }
 
     #[test]
+    fn a_key_the_native_client_cannot_prove_never_names_native_tunnel_status() {
+        // Native `tunnel status` proves the key first and hands the run to
+        // Python when it cannot (a FIFO here; every DPAPI key on Windows).
+        let home = Home::new();
+        profile(&home, "dot", READY);
+        private(
+            &home,
+            "dot.reload.result.json",
+            b"{\"id\": \"0123456789abcdef0123456789abcdef\", \"state\": \"failed\"}",
+        );
+        let status = std::process::Command::new("mkfifo")
+            .arg(root(&home).join("dot.key"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // Not `tunnels()`: its snapshot would read the FIFO and block.
+        let fixture = healthy_fixture();
+        let output = diagnose(&home, &fixture.url).output().unwrap();
+        let map = report(&output);
+        assert_ordinary(&map, &output);
+        let entry = &map["tunnels"][0];
+        assert_eq!(entry["private_key_present"], json!("not_verified"));
+        let line = entry["next"][0].as_str().unwrap();
+        assert!(
+            line.ends_with("needs the Python client because the key cannot be checked natively."),
+            "{line}"
+        );
+    }
+
+    #[test]
     fn a_stale_profile_names_its_expired_key_and_the_renewal() {
         let home = Home::new();
         profile(
@@ -1313,7 +1343,7 @@ fn an_inline_token_with_whitespace_is_named_as_the_inline_token() {
             assert_unusable_credential(&fixture, &output, "CredentialUnavailable", Some(secret));
         let recovery = map["recovery"].as_str().unwrap();
         assert!(
-            recovery.contains("the PSEUDOLIFE_MCP_TOKEN value is empty or contains whitespace"),
+            recovery.contains("the PSEUDOLIFE_MCP_TOKEN value is empty, longer than 4096 bytes, or contains whitespace"),
             "{recovery}"
         );
         assert!(

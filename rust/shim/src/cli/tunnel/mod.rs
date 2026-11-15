@@ -562,7 +562,8 @@ pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
                     *instant <= now,
                 ),
             };
-            let key = match store::key_present(root, name) {
+            let key_checked = store::key_present(root, name);
+            let key = match key_checked {
                 Ok(present) => json!(present),
                 // A Windows DPAPI key needs CryptUnprotectData to prove.
                 Err(_) => json!("not_verified"),
@@ -573,16 +574,21 @@ pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
             let update = match refresh_status(root, name) {
                 Ok(refresh) => {
                     if refresh.needs_attention() {
-                        // Native `tunnel status` answers unless a process
-                        // record makes it hand the run to Python.
-                        let inspect = if process_record == Some(false) {
+                        // Native `tunnel status` proves the key first, then
+                        // hands the run to Python on a process record or one
+                        // it cannot inspect.
+                        let python = |why: &str| {
                             format!(
+                                "pseudolife-mcp tunnel status --profile {name} shows the outcome, but needs the Python client {why}"
+                            )
+                        };
+                        let inspect = match (key_checked.is_ok(), process_record) {
+                            (false, _) => python("because the key cannot be checked natively"),
+                            (true, Some(true)) => python("while a tunnel process record exists"),
+                            (true, None) => python("while the process record cannot be checked"),
+                            (true, Some(false)) => format!(
                                 "pseudolife-mcp tunnel status --profile {name} shows the outcome and the key's state"
-                            )
-                        } else {
-                            format!(
-                                "pseudolife-mcp tunnel status --profile {name} shows the outcome, but needs the Python client while a tunnel process record exists"
-                            )
+                            ),
                         };
                         next.push(format!(
                             "Last tunnel refresh: {}; needs attention: {inspect}.",
