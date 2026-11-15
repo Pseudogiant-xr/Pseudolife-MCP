@@ -255,6 +255,20 @@ def test_installer_shell_file_has_no_bash4_construct(path):
     "mapfile -t lines < f\n",
     'echo "${name,,}"\n',
     "case $x in a) echo ;& b) echo ;; esac\n",
+    # Each still found next to the harmless text of the near misses below.
+    'x="$(echo "just in case"; case a in a) echo y;; esac)"\n',
+    "x=$(echo 'just in case'; case a in a) echo y;; esac)\n",
+    "x=$(\n  # in case the lookup fails\n  case a in a) echo y;; esac)\n",
+    # The cut falls after a quoted "esac", which is no esac at all.
+    'x=$(case a in "esac") echo y;; esac)\n',
+    'echo "use mapfile"; mapfile -t lines < f\n',
+    "mapfile -t lines < f  # mapfile\n",
+    "printf '%(%s)T' -1\n",
+    "printf '%s;%(%s)T' -1\n",
+    "printf \\\n  '%(%s)T' -1\n",
+    'x="$(echo "${msg:-in case}"; case a in a) echo y;; esac)"\n',
+    "echo ${name^^}\n",
+    "set -u\n# args=(a)\nargs=()\ncmd \"${args[@]}\"\n",
 ])
 def test_the_check_refuses_what_bash32_misreads(snippet):
     assert bash32_problems(snippet), snippet
@@ -275,6 +289,21 @@ def test_the_check_refuses_what_bash32_misreads(snippet):
     "args=()\ncmd \"${args[@]}\"\n",
     'echo "${x%,}" "${x#^}"\n',
     "# declare -A only in a comment\n",
+    # Only code decides: the same words in quoted text or a comment are text.
+    'x="$(echo "just in case it fails")"\n',
+    "x=$(echo 'just in case it fails')\n",
+    "x=$(\n  # in case the lookup fails\n  echo ok)\n",
+    "x=$(cat <<'E'\njust in case\nE\n)\n",
+    'echo "use mapfile"\n',
+    "echo 'a |& b' \"c &>> d\"\n",
+    "echo ok  # mapfile and declare -A would be bash 4\n",
+    'echo "%(%s)T"\n',
+    "printf a; echo '%(%s)T'\n",
+    'x="$(echo "${msg:-just in case it fails}")"\n',
+    "x=$(echo ${msg:-in case of rain})\n",
+    'echo "${1:-use mapfile}"\n',
+    "cat <<'E'\nmapfile it's\nE\n",
+    "set -u\n# args=()\nargs=(a)\ncmd \"${args[@]}\"\n",
 ])
 def test_the_check_passes_what_bash32_reads_correctly(snippet):
     assert bash32_problems(snippet) == [], snippet
