@@ -441,7 +441,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
     "that stage with a real binary"))
 def test_an_exit_after_the_native_client_is_installed_says_the_run_stopped_part_way(tmp_path, daemon_server):
-    proc, *_ = _whole_client_only_run(tmp_path, daemon_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
+    env, installed, proc, ps, repo, shim, token = _whole_client_only_run(tmp_path, daemon_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
     output = _output(proc)
     assert proc.returncode == 1, output
     assert "could not check this machine's existing registrations" in output

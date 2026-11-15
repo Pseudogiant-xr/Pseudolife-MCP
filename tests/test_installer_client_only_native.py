@@ -396,7 +396,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
 def test_an_exit_after_the_native_client_is_installed_says_the_run_stopped_part_way(bash, tmp_path, board_server):
     # connect's dry run refuses after the native client is installed: that exit
     # must not claim that nothing changed, and says what this run already did.
-    proc, *_ = _whole_client_only_run(bash, tmp_path, board_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
+    installed, proc, repo, shell, token = _whole_client_only_run(bash, tmp_path, board_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
     output = proc.stdout + proc.stderr
     assert proc.returncode == 1, output
     assert "could not check this machine's existing registrations" in output
