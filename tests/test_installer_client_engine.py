@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from tests import installer_sandbox
 from tests.ops_harness import find_bash
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,8 +46,12 @@ def _repo(tmp_path: Path, script: str, stub: str, stub_name: str) -> Path:
 def _env(tmp_path: Path, engine: str | None) -> dict[str, str]:
     base = {key: os.environ[key] for key in ("PATH", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP")
             if key in os.environ}
-    env = installer_sandbox.environment(tmp_path, base)
-    home = Path(env["HOME"])
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    env = dict(base, HOME=str(home), USERPROFILE=str(home), LOCALAPPDATA=str(home / "AppData" / "Local"),
+               APPDATA=str(home / "AppData" / "Roaming"), XDG_CONFIG_HOME=str(home / ".config"),
+               XDG_DATA_HOME=str(home / ".local" / "share"), CODEX_HOME=str(home / ".codex"),
+               CLAUDE_CONFIG_DIR=str(home / ".claude"))
     # Never the real User PATH: a layout override inside the home.
     env["PSEUDOLIFE_SHIM_RUNTIMES"] = str(home / "runtimes")
     env["PSEUDOLIFE_SHIM_LAUNCHER"] = str(home / "bin" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp"))
@@ -67,9 +70,8 @@ def _sh(tmp_path: Path, engine: str | None, *args: str) -> subprocess.CompletedP
         pytest.skip("needs bash")
     repo = _repo(tmp_path, "install.sh", SH_STUB, "install-native.sh")
     env = _env(tmp_path, engine)
-    return installer_sandbox.run([BASH, _bash_path(repo / "ops" / "install.sh"), *args], env=env,
-                                 root=tmp_path, capture_output=True, text=True, timeout=120,
-                                 check=False, stdin=subprocess.DEVNULL)
+    return subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), *args], env=env,
+                          capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
 
 
 def _ps_stub() -> str:
@@ -89,9 +91,9 @@ def _ps(tmp_path: Path, engine: str | None, *args: str) -> subprocess.CompletedP
         pytest.skip("needs pwsh")
     repo = _repo(tmp_path, "install.ps1", _ps_stub(), "install-native.ps1")
     env = _env(tmp_path, engine)
-    return installer_sandbox.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"),
-                                  *args], env=env, root=tmp_path, capture_output=True, text=True,
-                                 timeout=120, check=False, stdin=subprocess.DEVNULL)
+    return subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), *args],
+                          env=env, capture_output=True, text=True, timeout=120, check=False,
+                          stdin=subprocess.DEVNULL)
 
 
 def _native_args(tmp_path: Path) -> list[str] | None:
