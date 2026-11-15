@@ -177,7 +177,8 @@ SURVIVING = re.compile(
     r"""|^\s*(?:from|import)\s+(?:evals|ops)\b"""
     r"""|\btests\.conftest\b|^\s*import conftest\b|\bfrom tests import conftest\b"""
     r"""|\btests\.fake_embedder\b|\bfrom tests import fake_embedder\b|\bpg_fixtures\._[a-z]"""
-    r"""|\btests\.(?:report_redaction|suite_profile_plugin|suite_lock|client_environment)\b"""
+    r"""|\btests\.(?:report_redaction|suite_profile_plugin|suite_lock|client_environment|windowless_children)\b"""
+    r"""|\bfrom tests import windowless_children\b"""
     r"""|["'](?:README\.md|CLAUDE\.md|CHANGELOG\.md|llms(?:-full)?\.txt|server\.json|pyproject\.toml|"""
     r"""Dockerfile[^"']*|docker-compose[^"']*\.yml)["']""", re.M)
 
