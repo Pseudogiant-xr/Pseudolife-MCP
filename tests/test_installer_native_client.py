@@ -535,20 +535,23 @@ def test_a_leading_zero_deadline_still_refuses_with_the_timeout_cause(tmp_path):
     assert "did not answer version within 2 s" in line and "does not run on this host" not in line
 
 
-def _fake_curl(tmp_path: Path, script: str) -> dict[str, str]:
+def _fake_curl(tmp_path: Path, script: str) -> str:
+    """A curl stub, and the script line that puts it first on PATH. It is set
+    inside the script, since a Git Bash login puts its own directories
+    (/ucrt64/bin, /usr/bin) before a PATH it is given."""
     stubs = tmp_path / "curl-stub"
     stubs.mkdir()
     curl = stubs / "curl"
     curl.write_text("#!/bin/sh\n" + script, encoding="utf-8", newline="\n")
     curl.chmod(0o755)
-    return {"PATH": f"{_p(tmp_path / 'bin')}:{_p(stubs)}:/usr/bin:/bin",
-            "PSEUDOLIFE_NATIVE_ARCHIVE_URL": "https://release.example.invalid/v9.8.7"}
+    return f'PATH="{_p(stubs)}:$PATH"; hash -r'
 
 
 def test_a_download_that_cannot_be_written_names_the_write_not_an_http_status(tmp_path):
     # curl's own exit 23 is a write error (a full disk): -w still printed 200.
-    env = _fake_curl(tmp_path, "printf 200\nexit 23\n")
-    result = _run(tmp_path, 'native_stage; echo STAGED', release=False, env=env)
+    first = _fake_curl(tmp_path, "printf 200\nexit 23\n")
+    result = _run(tmp_path, f"{first}; native_stage; echo STAGED", release=False,
+                  env={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": "https://release.example.invalid/v9.8.7"})
     assert result.returncode == 1, result.stdout + result.stderr
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert "HTTP 200" not in line and "proxy" not in line

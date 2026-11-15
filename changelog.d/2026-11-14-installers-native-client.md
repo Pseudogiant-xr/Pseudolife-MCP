@@ -28,6 +28,9 @@
   `PSEUDOLIFE_NATIVE_ARCHIVE_URL` (a mirror or a local directory) and
   `PSEUDOLIFE_NATIVE_TARGET` (one of the five release targets) override the
   download and the detected target.
+- The native installers and `pseudolife-mcp runtime install` take a
+  `SHA256SUMS` record in either standard form: two spaces, or the
+  binary-mode space and asterisk that `sha256sum` writes under Git Bash.
 - `pseudolife-mcp installer --capability` prints
   `pseudolife-mcp installer-protocol <N>`, the level of installer steps the
   binary carries.
