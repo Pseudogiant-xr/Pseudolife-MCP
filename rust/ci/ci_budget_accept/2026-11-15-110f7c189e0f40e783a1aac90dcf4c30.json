@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "53af7849fa66bf99",
+  "fingerprint": "5d7bd74e82c813cb",
+  "reason": "The lane gains, beyond #1541's two files, the native-installer copies of the files it already runs (reruns, engine, claude profile, resources, unattended, py launcher, the client-only fragment and plugin marketplace tests), 21 s together serially in WSL; its estimate in ci_budget.json rises from 17.6 to 18.6 minutes for them, and nothing else in the job changed."
+}

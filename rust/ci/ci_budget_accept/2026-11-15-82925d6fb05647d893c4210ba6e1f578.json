@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "5b4d061c810fb586",
+  "fingerprint": "1b8eefa108c54cb7",
+  "reason": "The lane gains, beyond #1541's files, tests/test_installer_native_goldens.py (4.4 s serially in WSL) and tests/test_installer_sandbox.py (under 0.1 s); its estimate in ci_budget.json rises from 21.1 to 21.3 minutes for them, and nothing else in the job changed."
+}
