@@ -115,13 +115,19 @@ fn report(output: &Output) -> Value {
 /// other output; anything after the flag is a usage error.
 #[test]
 fn the_capability_probe_names_the_installer_protocol_and_nothing_else() {
+    // The level is the one the source declares; the Python tests hold it
+    // equal to the installers' NATIVE_INSTALLER_PROTOCOL.
+    let level = include_str!("../src/cli/installer/mod.rs")
+        .lines()
+        .find_map(|line| line.strip_prefix("pub const INSTALLER_PROTOCOL: u32 = "))
+        .and_then(|rest| rest.strip_suffix(';'))
+        .expect("mod.rs declares INSTALLER_PROTOCOL");
     let home = Home::new();
     let output = home.run(&["--capability"]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "pseudolife-mcp installer-protocol 1
-"
+        format!("pseudolife-mcp installer-protocol {level}\n")
     );
     assert!(output.stderr.is_empty(), "{output:?}");
     let extra = home.run(&["--capability", "--json"]);
