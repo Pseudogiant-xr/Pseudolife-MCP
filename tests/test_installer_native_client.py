@@ -355,3 +355,16 @@ def test_the_installers_and_the_binary_name_one_protocol_level():
     # The level the installers require is the level this checkout's binary
     # answers: raising one without the others refuses every release.
     assert LEVEL == PS_LEVEL == RUST_LEVEL
+
+
+def test_a_download_folder_that_cannot_be_made_is_named_not_the_network(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".pseudolife-mcp").write_text("a file, not a folder\n", encoding="utf-8")
+    result = _run(tmp_path, 'native_stage; echo STAGED')
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "/.pseudolife-mcp/downloads/" in line and "network" not in line
+    assert line.endswith("Nothing was changed.")
+    assert not any(call.startswith(("runtime", "version")) for call in _calls(tmp_path))
