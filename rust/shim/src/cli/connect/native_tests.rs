@@ -1045,6 +1045,16 @@ fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_dae
         moved[0].detail
     );
     assert!(!moved[0].detail.contains(clause), "{}", moved[0].detail);
+    // It does not claim `--unschedule` works whatever a drop-in says: one can
+    // refuse a manual stop.
+    assert!(!moved[0].detail.contains("whatever"), "{}", moved[0].detail);
+    assert!(
+        moved[0]
+            .detail
+            .ends_with("remove that drop-in and run `systemctl --user daemon-reload` first"),
+        "{}",
+        moved[0].detail
+    );
     // Near miss: with the daemon still on this machine, the drop-in row.
     let here = schedule_rows(&fake, LOCAL_NEW, false);
     assert!(here[0].detail.ends_with(clause), "{}", here[0].detail);

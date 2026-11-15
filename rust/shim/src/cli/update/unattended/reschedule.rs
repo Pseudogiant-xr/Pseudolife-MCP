@@ -124,30 +124,35 @@ fn discovered(
 ) -> Option<Installed> {
     match read {
         Ok(found) => found,
-        Err(cause) if linux => {
-            let file =
-                |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
-            let remove = format!(
-                "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
-                file("service"),
-                file("timer")
-            );
-            Some(Installed {
-                client,
-                place: dir.join(format!("{name}.service")).display().to_string(),
-                time: None,
-                url: None,
-                shaped: false,
-                why: None,
-                overridden: Some(format!(
-                    "{cause}, so connect cannot read the schedule and leaves it as it is (`update --schedule` would fail on the same read): repair that file's permissions or contents, or remove the schedule with `{remove}`, then re-run connect"
-                )),
-                differs: None,
-                encoded: false,
-                remove,
-            })
-        }
+        Err(cause) if linux => Some(unvouched(dir, name, client, &|remove| {
+            format!(
+                "{cause}, so connect cannot read the schedule and leaves it as it is (`update --schedule` would fail on the same read): repair that file's permissions, or remove the schedule with `{remove}`, then re-run connect"
+            )
+        })),
         Err(_) => None,
+    }
+}
+
+/// A systemd schedule connect cannot vouch for, shown with `said`, which is
+/// given the command that removes it.
+fn unvouched(dir: &Path, name: &str, client: bool, said: &dyn Fn(&str) -> String) -> Installed {
+    let file = |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
+    let remove = format!(
+        "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
+        file("service"),
+        file("timer")
+    );
+    Installed {
+        client,
+        place: dir.join(format!("{name}.service")).display().to_string(),
+        time: None,
+        url: None,
+        shaped: false,
+        why: None,
+        overridden: Some(said(&remove)),
+        differs: None,
+        encoded: false,
+        remove,
     }
 }
 
@@ -254,19 +259,32 @@ fn systemd_installed(
     expected: &dyn Fn(&str) -> Result<String>,
 ) -> std::result::Result<Option<Installed>, String> {
     let unit = dir.join(format!("{name}.service"));
+    // `--schedule` saves and replaces these files as bytes, so one that is
+    // not UTF-8 text is something it repairs; one that cannot be read at all
+    // is not.
+    let not_text = |path: &Path| {
+        Ok(Some(unvouched(dir, name, client, &|remove| {
+            format!(
+                "{} is not UTF-8 text, so connect cannot compare it with what `update --schedule` writes and leaves the schedule as it is: re-create it with `pseudolife-mcp update --schedule HH:MM` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect",
+                path.display()
+            )
+        })))
+    };
     let service = match fs::read_to_string(&unit) {
         Ok(service) => service,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => return not_text(&unit),
         Err(error) => return Err(format!("{} cannot be read ({error})", unit.display())),
     };
-    let timer = match fs::read_to_string(unit.with_extension("timer")) {
+    let timer_file = unit.with_extension("timer");
+    let timer = match fs::read_to_string(&timer_file) {
         Ok(timer) => timer,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            return not_text(&timer_file);
+        }
         Err(error) => {
-            return Err(format!(
-                "{} cannot be read ({error})",
-                unit.with_extension("timer").display()
-            ));
+            return Err(format!("{} cannot be read ({error})", timer_file.display()));
         }
     };
     let enabled = enabled()?;
@@ -316,7 +334,14 @@ fn systemd_disagrees(
         if let Some(value) = line.strip_prefix("FragmentPath=") {
             fragment = Some(value.trim().to_owned());
         } else if let Some(value) = line.strip_prefix("DropInPaths=") {
-            dropins.extend(value.split_whitespace().map(PathBuf::from));
+            match show_paths(value) {
+                Some(paths) => dropins.extend(paths),
+                None => {
+                    return Some(format!(
+                        "connect cannot decode the drop-in paths systemd's user manager reports for {unit} (`{value}`), so it cannot tell whether one changes the run and leaves the schedule as it is: manage this schedule by hand, or move its drop-ins to a path without unusual characters and run `systemctl --user daemon-reload`"
+                    ));
+                }
+            }
         } else if let Some(value) = line.strip_prefix("NeedDaemonReload=") {
             stale = value.trim() != "no";
         }
@@ -338,6 +363,12 @@ fn systemd_disagrees(
                 written.display()
             ));
         }
+        _ if dir.join(unit).exists() => {
+            return Some(format!(
+                "systemd's user manager does not find {unit} although {} exists, so it searches other directories than this shell's environment names (its `XDG_CONFIG_HOME` differs; `systemctl --user show-environment` shows it), and connect leaves the schedule as it is: re-run connect with the manager's environment, or move the schedule's files to a directory the manager searches and run `systemctl --user daemon-reload`",
+                dir.join(unit).display()
+            ));
+        }
         _ => {
             return Some(format!(
                 "systemd's user manager has no unit file for {unit} ({} is gone), so the schedule is incomplete and connect leaves it as it is: re-create it with `pseudolife-mcp update --schedule HH:MM` at your time, or remove what is left of it, then re-run connect",
@@ -353,6 +384,74 @@ fn systemd_disagrees(
             path.display()
         )
     })
+}
+
+/// A `show` value listing paths, as systemd v259 prints a string array
+/// (`bus-print-properties.c` through `shell_maybe_quote(…, 0)`, escape.c):
+/// space-separated, each either bare or in double quotes with `\`, `"`,
+/// `` ` `` and `$` backslash-escaped and control bytes C-escaped. `None`
+/// for anything else, which the caller treats as unknown.
+fn show_paths(value: &str) -> Option<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    let mut chars = value.trim().chars().peekable();
+    loop {
+        while chars.peek() == Some(&' ') {
+            chars.next();
+        }
+        let Some(first) = chars.next() else {
+            return Some(paths);
+        };
+        let mut path = String::new();
+        if first == '"' {
+            loop {
+                match chars.next()? {
+                    '"' => break,
+                    '\\' => match chars.next()? {
+                        c @ ('\\' | '"' | '`' | '$' | '\'') => path.push(c),
+                        'n' => path.push('\n'),
+                        't' => path.push('\t'),
+                        'r' => path.push('\r'),
+                        'a' => path.push('\u{7}'),
+                        'b' => path.push('\u{8}'),
+                        'f' => path.push('\u{c}'),
+                        'v' => path.push('\u{b}'),
+                        'x' => {
+                            let high = chars.next()?.to_digit(16)?;
+                            let low = chars.next()?.to_digit(16)?;
+                            let byte = (high * 16 + low) as u8;
+                            // A C-escaped byte above 0x7f is part of invalid
+                            // UTF-8, which a Rust path string cannot hold.
+                            if byte > 0x7f {
+                                return None;
+                            }
+                            path.push(byte as char);
+                        }
+                        _ => return None,
+                    },
+                    c => path.push(c),
+                }
+            }
+            if chars.peek().is_some_and(|c| *c != ' ') {
+                return None;
+            }
+        } else {
+            if matches!(first, '\'' | '\\') {
+                return None;
+            }
+            path.push(first);
+            while let Some(c) = chars.peek().copied() {
+                if c == ' ' {
+                    break;
+                }
+                if matches!(c, '"' | '\'' | '\\') {
+                    return None;
+                }
+                path.push(c);
+                chars.next();
+            }
+        }
+        paths.push(PathBuf::from(path));
+    }
 }
 
 /// The user unit search path of systemd.unit(5) ("User Unit Search Path"),
@@ -1365,6 +1464,27 @@ mod tests {
         })
     }
 
+    /// `path` as systemd's `shell_maybe_quote(…, 0)` prints it in a `show`
+    /// path list: bare, or in double quotes with `\`, `"`, `` ` `` and `$`
+    /// escaped when it holds whitespace or a shell-special character (a
+    /// Windows path's backslashes included).
+    fn show_quote(path: &Path) -> String {
+        let text = path.display().to_string();
+        let special = |c: char| c.is_whitespace() || "\"\\`$*?[]'()<>|&;!".contains(c);
+        if !text.chars().any(special) {
+            return text;
+        }
+        let mut quoted = String::from("\"");
+        for c in text.chars() {
+            if matches!(c, '\\' | '"' | '`' | '$') {
+                quoted.push('\\');
+            }
+            quoted.push(c);
+        }
+        quoted.push('"');
+        quoted
+    }
+
     /// A throwaway directory under the system temp directory.
     fn scratch() -> PathBuf {
         let root =
@@ -1656,12 +1776,15 @@ mod tests {
             systemd_disagrees(&dir, unit, &format!("{fragment}\nDropInPaths=\n"), &read),
             None
         );
-        let listed = format!("{fragment}\nDropInPaths={}\n", dir.join("a.conf").display());
+        let listed = format!(
+            "{fragment}\nDropInPaths={}\n",
+            show_quote(&dir.join("a.conf"))
+        );
         assert_eq!(systemd_disagrees(&dir, unit, &listed, &read), None);
         // A drop-in systemd applies that this search did not read.
         let unseen = format!(
             "{fragment}\nDropInPaths={} /opt/x/pseudolife-update.service.d/b.conf\n",
-            dir.join("a.conf").display()
+            show_quote(&dir.join("a.conf"))
         );
         assert!(
             systemd_disagrees(&dir, unit, &unseen, &read)
@@ -1675,8 +1798,24 @@ mod tests {
                 .unwrap()
                 .contains("loads pseudolife-update.service from /run/user/1000/systemd/transient/")
         );
+        // A unit file this search read but the manager does not find: its
+        // search path differs, and re-scheduling into the same place would
+        // not help.
+        let unfound = systemd_disagrees(
+            &dir,
+            unit,
+            "NeedDaemonReload=no\nFragmentPath=\nDropInPaths=\n",
+            &read,
+        )
+        .unwrap();
+        assert!(
+            unfound.contains("does not find pseudolife-update.service although"),
+            "{unfound}"
+        );
+        assert!(!unfound.contains("update --schedule"), "{unfound}");
         // No unit file at all: the cause is that it is gone, and the fix is
         // re-creating it, not removing another file.
+        fs::remove_file(dir.join(unit)).unwrap();
         let gone = systemd_disagrees(
             &dir,
             unit,
@@ -1693,6 +1832,26 @@ mod tests {
             "{gone}"
         );
         assert!(!gone.contains("remove the other unit file"), "{gone}");
+        fs::write(dir.join(unit), "").unwrap();
+        // A drop-in path systemd quotes (it holds a space) is decoded and
+        // matched, not mistaken for one this search did not read.
+        let spaced = dir.join("with space.conf");
+        fs::write(&spaced, "").unwrap();
+        let read_spaced: std::collections::BTreeSet<PathBuf> = [spaced.clone()].into();
+        let quoted = format!("{fragment}\nDropInPaths={}\n", show_quote(&spaced));
+        assert!(quoted.contains("DropInPaths=\""), "{quoted}");
+        assert_eq!(
+            systemd_disagrees(&dir, unit, &quoted, &read_spaced),
+            None,
+            "{quoted}"
+        );
+        // A report this decoder cannot read leaves the schedule alone, saying so.
+        let odd = format!("{fragment}\nDropInPaths=$'x'\n");
+        assert!(
+            systemd_disagrees(&dir, unit, &odd, &read)
+                .unwrap()
+                .starts_with("connect cannot decode the drop-in paths")
+        );
         // Files changed on disk since the user manager loaded them: what runs
         // is the loaded configuration, so it is left alone; a report that
         // does not say is treated the same.
@@ -1757,7 +1916,7 @@ mod tests {
         // Near miss: systemd applies it to the timer only.
         let timer_only = |unit: &str| {
             let dropins = if unit.ends_with(".timer") {
-                file.display().to_string()
+                show_quote(&file)
             } else {
                 String::new()
             };
@@ -1776,7 +1935,7 @@ mod tests {
         );
         // systemd also applies that file to the service (an alias directory
         // linked to the timer's): it was never read as a service drop-in.
-        let to_service = report(file.display().to_string());
+        let to_service = report(show_quote(&file));
         let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &to_service, &expected)
             .unwrap()
             .unwrap();
@@ -1787,6 +1946,70 @@ mod tests {
                 .unwrap()
                 .starts_with("systemd's user manager applies the drop-in")
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_path_list_is_decoded_as_systemd_quotes_it() {
+        let paths = |value: &str| {
+            show_paths(value).map(|paths| {
+                paths
+                    .into_iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(paths(""), Some(vec![]));
+        assert_eq!(
+            paths("/a/b.conf /c/d.conf"),
+            Some(vec!["/a/b.conf".to_owned(), "/c/d.conf".to_owned()])
+        );
+        assert_eq!(
+            paths("\"/home/u x/a.conf\" /c.conf \"/q\\\"\\$\\`\\\\.conf\" \"/t\\tz\\x01.conf\""),
+            Some(vec![
+                "/home/u x/a.conf".to_owned(),
+                "/c.conf".to_owned(),
+                "/q\"$`\\.conf".to_owned(),
+                "/t\tz\u{1}.conf".to_owned()
+            ])
+        );
+        for unknown in [
+            "$'x'",
+            "\"/a\\q.conf\"",
+            "\"/a\"b",
+            "\"/unterminated",
+            "/a'b",
+            "\"/a\\xff\"",
+        ] {
+            assert_eq!(paths(unknown), None, "{unknown}");
+        }
+    }
+
+    #[test]
+    fn a_unit_that_is_not_text_is_left_for_schedule_to_replace() {
+        let dir = scratch();
+        let roots = [dir.clone()];
+        let environment: Vec<String> = Vec::new();
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        let enabled = || Ok(true);
+        let show = |unit: &str| {
+            Ok(format!(
+                "NeedDaemonReload=no\nFragmentPath={}\nDropInPaths=\n",
+                dir.join(unit).display()
+            ))
+        };
+        fs::write(dir.join(format!("{NAME}.service")), b"[Service]\n# \xff\n").unwrap();
+        let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &show, &expected)
+            .unwrap()
+            .unwrap();
+        assert!(!found.shaped);
+        let said = found.overridden.unwrap();
+        assert!(said.contains("is not UTF-8 text"), "{said}");
+        assert!(
+            said.contains("re-create it with `pseudolife-mcp update --schedule HH:MM`"),
+            "{said}"
+        );
+        assert!(!said.contains("would fail on the same read"), "{said}");
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -2075,10 +2298,7 @@ mod tests {
         // The real fix: `--schedule` would fail on the same read.
         let said = shown.overridden.unwrap();
         assert!(said.starts_with(&cause), "{said}");
-        assert!(
-            said.contains("repair that file's permissions or contents"),
-            "{said}"
-        );
+        assert!(said.contains("repair that file's permissions"), "{said}");
         assert!(!said.contains("update --schedule HH:MM"), "{said}");
         assert!(
             shown

@@ -181,7 +181,7 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             // with `--unschedule` whatever a drop-in says.
             let detail = if !found.client && ctx.remote {
                 format!(
-                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule` (which disables it whatever its drop-ins say), and schedule it on the daemon's host",
+                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host. It also has a systemd file connect cannot vouch for; if `--unschedule` cannot stop it (a drop-in can refuse a manual stop), remove that drop-in and run `systemctl --user daemon-reload` first",
                     found.place
                 )
             } else {
