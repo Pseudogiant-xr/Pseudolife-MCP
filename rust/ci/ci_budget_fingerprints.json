@@ -8,7 +8,7 @@
       "scope": "fea2d407b8bf12cd",
       "test": "492e9b9ddbe2b98f",
       "test-lite-macos": "5b4d061c810fb586",
-      "test-lite-windows": "53af7849fa66bf99"
+      "test-lite-windows": "5c5191fe0058ce7b"
     },
     "python-freeze.yml": {
       "python-freeze": "966b18bec375a6a2"
@@ -19,7 +19,7 @@
       "daemon-image": "0c0adfbcb5b53ced",
       "fixtures": "02c883eba613073a",
       "parity": "f8acb83e13126842",
-      "parity-checks": "7739839797b7a2d5",
+      "parity-checks": "c26df800fae3fe6b",
       "parity-pool": "743ed0bdc6621552",
       "rust": "9045b09e5ae957d5",
       "scope": "58e9c623d9cdbae6"

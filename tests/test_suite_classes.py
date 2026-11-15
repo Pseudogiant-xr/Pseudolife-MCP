@@ -95,12 +95,46 @@ def test_the_switch_collects_a_frozen_file():
     assert f"tests/{frozen}::" in result.stdout
 
 
+_NODE = re.compile(r"^tests/(test_[^/\s:]+\.py)::")
+
+
+def _collected_files(stdout: str) -> set[str]:
+    """The test files a --collect-only run printed nodes of. Only node lines
+    (tests/test_x.py::...) count: a warning printed during collection, such as
+    `tests/test_x.py:911: SyntaxWarning: ...`, starts with the same prefix."""
+    return {match[1] for line in stdout.splitlines() if (match := _NODE.match(line))}
+
+
+def test_only_node_lines_count_as_collected_files():
+    stdout = ("tests/test_a.py::test_one\ntests/test_a.py::test_two[x]\n"
+              "tests/test_b.py:911: SyntaxWarning: invalid escape sequence '\\s'\n"
+              "tests/test_c.py::TestClass::test_three\n")
+    assert _collected_files(stdout) == {"test_a.py", "test_c.py"}
+
+
+def test_no_test_file_has_an_invalid_escape():
+    # Python 3.12 prints a SyntaxWarning for each when it compiles the file
+    # (3.11 a DeprecationWarning), and a fresh collection prints it among
+    # the node lines.
+    import warnings
+    bad = []
+    for path in sorted(TESTS.glob("*.py")):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SyntaxWarning)
+            warnings.simplefilter("error", DeprecationWarning)
+            try:
+                compile(path.read_text(encoding="utf-8"), str(path), "exec")
+            except SyntaxError as error:
+                if "escape" in str(error):
+                    bad.append(f"{path.name}:{error.lineno}")
+    assert bad == [], bad
+
+
 def test_a_directory_run_collects_exactly_the_live_files():
     live = {name for name, kind in suite_classes.load().items() if kind == "live"}
     result = _collect("tests")
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
-    collected = {line.split("::", 1)[0].removeprefix("tests/") for line in result.stdout.splitlines()
-                 if line.startswith("tests/test_")}
+    collected = _collected_files(result.stdout)
     # A live file that defines no test (or skips at import) collects nothing.
     assert collected <= live, sorted(collected - live)
     assert len(collected) >= len(live) - 5, sorted(live - collected)
@@ -177,7 +211,8 @@ SURVIVING = re.compile(
     r"""|^\s*(?:from|import)\s+(?:evals|ops)\b"""
     r"""|\btests\.conftest\b|^\s*import conftest\b|\bfrom tests import conftest\b"""
     r"""|\btests\.fake_embedder\b|\bfrom tests import fake_embedder\b|\bpg_fixtures\._[a-z]"""
-    r"""|\btests\.(?:report_redaction|suite_profile_plugin|suite_lock|client_environment)\b"""
+    r"""|\btests\.(?:report_redaction|suite_profile_plugin|suite_lock|client_environment|windowless_children)\b"""
+    r"""|\bfrom tests import windowless_children\b"""
     r"""|["'](?:README\.md|CLAUDE\.md|CHANGELOG\.md|llms(?:-full)?\.txt|server\.json|pyproject\.toml|"""
     r"""Dockerfile[^"']*|docker-compose[^"']*\.yml)["']""", re.M)
 

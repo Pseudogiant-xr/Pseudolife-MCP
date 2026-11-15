@@ -137,6 +137,9 @@ DAEMON = ("cli", "cli-store", "cli-startup", "eval")
 UPDATE_CYCLE = ("update", "doctor", "console", "connect", "expose", "move", "conductor_watch",
                 "restore", "backup", "migrate_flat")
 SHIM_COMMANDS = {
+    # The conservative import scan also sees update's private backup module,
+    # and restore_cli (move's native module among them) imports backup
+    # (UPDATE_CYCLE).
     "backup": UPDATE_CYCLE,
     "backup_help.txt": UPDATE_CYCLE,
     "board_audit": ("audit", "coordination_recovery"),
@@ -154,7 +157,9 @@ SHIM_COMMANDS = {
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
     "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
-    # backup's Docker tier is restore_cli's docker_backup (UPDATE_CYCLE).
+    # backup's Docker tier is restore_cli's docker_backup (UPDATE_CYCLE); its
+    # move_native answers the move row through the cli.rs dispatcher, which
+    # the import scan skips.
     "restore_cli": UPDATE_CYCLE,
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),

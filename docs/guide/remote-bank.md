@@ -725,33 +725,122 @@ no terminal and no `--yes` refuses, having changed nothing.
 installed Docker bank (its daemon and Postgres containers exist), with no
 lost writes. Run it on the bank's current host.
 
-**With the native client**, `move` plans a move but does not perform one
-yet: `pseudolife-mcp move --to <ssh-target> --target-url <url>
---no-keep-tokens --dry-run` checks both hosts without changing anything on
-either and prints what the move would do, and without `--dry-run` it refuses
-and says so (move with pseudolife-mcp 0.23.x for now). The target needs the
-native client installed (an update from 0.23.x, or `update
---clients-only`, with `PSEUDOLIFE_SHIM_ENGINE=native` set moves a host to
-it, see [The native client](configuration.md#the-native-client); or
-`pseudolife-mcp runtime install --archive`), an installed
-Docker bank (one
-compose stack, not a source checkout) that is healthy, empty and at least the
-source's schema and PostgreSQL version, and free space for the move's files
-under `~/.pseudolife-mcp/moves` (or `--target-work-dir`) plus the restore's
-8 GiB margin. A target whose native client is older or speaks a different
-move protocol is refused with the fix, and for a fresh target, which has no
-bank identity yet, the plan says `--target-url` is matched only by release
-and schema. ssh runs with
-`BatchMode=yes` and no option that touches host-key checking: a host key that
-is unknown or has changed fails with ssh's own refusal and the fix (connect
-once with `ssh <target>` and check the fingerprint, or `ssh-keygen -R` after
-confirming a changed key); move never accepts a key itself. `ssh` and
-`docker` are found only in absolute `PATH` directories. Not available in the
-native client yet: `--expose-target` (expose the target yourself and pass
-`--target-url`), carrying the source's tokens (pass `--no-keep-tokens`),
-`--resume`, `--target-env-file`, `--target-compose-file` and checkout targets
-(`--target-checkout`). The rest of this section describes pseudolife-mcp
-0.23.x's move.
+**With the native client** (opt-in, see [The native
+client](configuration.md#the-native-client)), `pseudolife-mcp move --to
+<ssh-target> --target-url <url> --no-keep-tokens` moves the bank, asking
+first (or `--yes`).
+Add `--dry-run` to check both hosts without changing anything and print the
+plan. The target needs:
+- the native client installed: an update with `PSEUDOLIFE_SHIM_ENGINE=native`
+  set moves a host to it (`update --clients-only` for one that already has
+  its daemon), or `pseudolife-mcp runtime install --archive`. A target whose
+  native client is older, or speaks another move protocol, is refused with
+  the fix;
+- an installed Docker bank (one compose stack, not a source checkout) that is
+  healthy, empty, serving with authentication on, with its data directory at
+  `/data` as the installer sets it, and at least the source's schema and
+  PostgreSQL version;
+- free space for the move's files under `~/.pseudolife-mcp/moves` (or
+  `--target-work-dir`), plus the restore's 8 GiB margin.
+
+A fresh target has no bank identity yet, so the plan says `--target-url` is
+matched only by release and schema.
+
+The move, in order:
+1. Claims the target, pauses unattended updates and restart policies on both
+   hosts, and stops the source daemon.
+2. Makes the source's database read-only for new sessions, takes a final
+   backup of it, then fences it (`ALLOW_CONNECTIONS false`), so nothing written
+   between the backup and the fence is lost.
+3. Copies the backup to the target and checks its SHA-256.
+4. Gates the target (`/data/move.json`) and restores it there, then checks the
+   restored bank's identity and row counts.
+5. Starts the target once and waits until `--target-url` serves the moved
+   bank.
+6. Writes `/data/moved.json` into the stopped source: the commit point.
+7. Points this machine's clients at the target.
+
+**Before the commit point**, a failure or an interrupt rolls the move back.
+The target is proved stopped and gated before the source's fence lifts and
+its daemon starts, so two daemons never serve one bank. If the target cannot
+be proved stopped (a lost ssh link, say), the source stays stopped and fenced
+and the move exits 6, printing:
+- which daemon runs;
+- whether the bank is served anywhere;
+- where the data is;
+- the next command.
+
+Writes the target took while it served are named and kept in its gated bank,
+and a later `--resume` never replaces them. These are rows added or removed,
+and rows changed in place, which its write counters show.
+
+Those writes are found by comparing the gated bank with a reading of it taken
+right after the move's restore, by the same run: its check, or that run's own
+rollback. When no such reading exists (the run died first, or the restore's
+answer never arrived, so it cannot be told whether it ran), the gated bank is
+kept the same way, exit 6 says why, and `--release-target` is the way out. No
+writes are claimed, and the bank is never resumed over.
+
+**If the move process itself dies** (a closed console, a power loss), every
+later `move` on this host refuses until you run `pseudolife-mcp move
+--rollback <move id>`. It runs the same rollback from the move's record in
+`~/.pseudolife-mcp/moves/<move id>/`. If the move had already passed its
+commit point, the bank lives on the target. Then `--rollback` lists what the
+move still had to do (exit 5): point the clients at the target, and restore
+the target's restart policy and update timer.
+
+**`--resume`** retries a rolled-back move whose restore ran on the target,
+replacing that move's own restored bank there. It does so only while that
+bank is still as the rollback left it: gated, with the same row counts and
+write counters. Otherwise it refuses before changing anything, because the
+bank may hold writes that exist nowhere else.
+
+**`pseudolife-mcp move --release-target <move id>`** frees a target that
+still holds a rolled-back move's restored bank, writes or not. It:
+1. restores the target's own bank from the safety backup the move's first
+   restore took of it;
+2. starts the target's daemon again if it was running;
+3. releases the target for a new move.
+
+The moved bank, with any writes it took on the target, ends in that restore's
+own safety backup there, and the output (and `--json`) names the files.
+Nothing is deleted. If the move's restore was cut short there, the copy it
+left is replaced the same way. If the restore never ran, nothing is restored:
+the target is only ungated and released.
+
+It refuses when this host's daemon is not serving its bank: your bank is this
+host's after the rollback, so the target's copy is not released while no bank
+is served. It also refuses a target that holds some other bank. Each step is
+safe to repeat. A rerun after an interruption finishes the release, and never
+restores over a bank it has finished giving back.
+
+While such a target holds a copy of this host's bank, no other move starts from this host: only `--resume` of that move, or its `--release-target`, comes first. That way no target is left holding a copy that no command can clear.
+
+A target that no longer holds anything of this host's bank is found so by `--release-target`: neither this move's claim nor its bank. The record is closed and stops holding this host, and nothing is changed there. If the move's gate (`/data/move.json`) is still in front of that other bank, the output names it and the command that removes it, which is for whoever runs that host once they are sure which bank it should serve. A target whose Docker does not answer is never taken for an empty one: the record is kept, and the release says so. So is a gate with no claim and no bank identity behind it, which cannot be told from another bank. If a give-back keeps failing there (for example, the target's move folder was lost, or its own bank cannot be restored), every such failure names the last resort on this host: renaming the move's `record.json`, which closes the record here and leaves the target gated until someone there clears it. With `--json`, `ending` says how a release ended (`given_back`, `nothing_there` or `given_up`), and `released` is true only for a target given back its own bank.
+
+If the target will never answer again, `pseudolife-mcp move --release-target <move id> --target-gone` gives it up on this host only, for good. It does so only while this host's daemon serves its own bank, and only when the target gives no answer as a move target in three attempts, five seconds apart. A target that answers is refused, naming `--release-target`. It asks first, or takes `--yes`; without a terminal and without `--yes` it refuses at once. Nothing is changed on either host. A given-up record is final here: nothing is sent to that target for the move again, and a later `--release-target` or `--resume` of it refuses. The output says what stayed on that host when it was given up, and how whoever runs it clears that by hand. Those steps describe the host as it was then, so they start with a check: if that machine now serves a bank, or a newer move has put one there (the output names a newer move from this host to it), do none of them. Otherwise, in order: its own bank first, from the safety backup that the move folder's `own-bank.json` names (`pseudolife-mcp restore --backup-file … --state-archive … --leave-stopped` there); then the gate, never before, or the copy of this host's bank behind it would start; then the move's claim (`~/.pseudolife-mcp/moves/claim.json`); then its daemon. Writes made there are not in this host's bank.
+
+A rollback that could not reach the target to finish (exit 6, the record still unfinished) is not one `--target-gone` ends; its `--rollback` is rerun once the target answers.
+
+Both hosts keep the move's files (a full copy of the bank) under
+`~/.pseudolife-mcp/moves/<move id>` until you remove them: the report names
+both folders and their sizes.
+
+**ssh and Docker.** ssh runs with `BatchMode=yes` and no option that touches
+host-key checking. A host key that is unknown or has changed fails with ssh's
+own refusal and the fix: connect once with `ssh <target>` and check the
+fingerprint, or `ssh-keygen -R` after confirming a changed key. Move never
+accepts a key itself. `ssh` and `docker` are found only in absolute `PATH`
+directories.
+
+**Not available in the native client yet:**
+- `--expose-target`: expose the target yourself and pass `--target-url`;
+- carrying the source's tokens: pass `--no-keep-tokens`, and the target keeps
+  its own;
+- `--target-env-file` and `--target-compose-file`;
+- checkout targets (`--target-checkout`).
+
+The rest of this section describes the Python client's move.
 
 **Install the destination first**, using the installer or your stack manager,
 then run the move on the source. An owning checkout supplies restore/update;
