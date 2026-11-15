@@ -171,10 +171,16 @@ fn discovered(
     }
 }
 
+/// `path` as one POSIX shell word, so a command a row names works for any
+/// path (an apostrophe in `$XDG_CONFIG_HOME` included).
+fn shell_quoted(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
+}
+
 /// A systemd schedule connect cannot vouch for, shown with `said`, which is
 /// given the command that removes it.
 fn unvouched(dir: &Path, name: &str, client: bool, said: &dyn Fn(&str) -> Blocker) -> Installed {
-    let file = |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
+    let file = |suffix: &str| shell_quoted(&dir.join(format!("{name}.{suffix}")));
     let remove = format!(
         "systemctl --user disable --now {name}.timer; rm -f {} {}; systemctl --user daemon-reload",
         file("service"),
@@ -326,8 +332,8 @@ fn systemd_installed(
                         path.display()
                     ),
                     format!(
-                        "remove that directory (`rm -r '{}'`) and run `systemctl --user daemon-reload`, then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
-                        path.display()
+                        "remove that directory (`rm -r {}`) and run `systemctl --user daemon-reload`, then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
+                        shell_quoted(path)
                     ),
                 )
             })));
@@ -345,8 +351,8 @@ fn systemd_installed(
                         path.display()
                     ),
                     format!(
-                        "replace it with a regular file: remove the link (`rm '{}'`), then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
-                        path.display()
+                        "replace it with a regular file: remove the link (`rm {}`), then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
+                        shell_quoted(path)
                     ),
                 )
             })));
@@ -784,8 +790,8 @@ enum Unreadable {
     Rejected(usize, &'static str),
 }
 
-/// The first key `text`, a drop-in for a unit of `kind`, sets that is not
-/// harmless (`harmless_key`), read exactly as systemd's `config_parse` and
+/// The keys `text`, a drop-in for a unit of `kind`, sets that are not
+/// harmless (`harmless_key`), in order (none: it is harmless), read exactly as systemd's `config_parse` and
 /// `parse_line` read a file
 /// (src/shared/conf-parser.c, v259):
 /// - a line whose first non-whitespace character is `#` or `;` is a
@@ -801,12 +807,16 @@ enum Unreadable {
 ///   the file); a line with no `=`, or an empty key, is ignored, as is a key
 ///   outside any section;
 /// - a continuation still open at the end of the file is a last line.
-fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Unreadable> {
+///
+/// A line systemd rejects ends the reading; it is the cause only when no
+/// key before it was already one connect cannot vouch for.
+fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Vec<String>, Unreadable> {
     let whitespace = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
     let mut section: Option<String> = None;
     let mut continuation: Option<String> = None;
     let mut bom_seen = false;
     let mut line_number = 0;
+    let mut keys = Vec::new();
     let mut handle =
         |line: &str, number: usize| -> std::result::Result<Option<String>, Unreadable> {
             let line = line.trim_matches(whitespace);
@@ -869,14 +879,22 @@ fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Un
             continuation = Some(joined);
             continue;
         }
-        if let Some(key) = handle(&joined, line_number)? {
-            return Ok(Some(key));
+        match handle(&joined, line_number) {
+            Ok(Some(key)) => keys.push(key),
+            Ok(None) => {}
+            Err(_) if !keys.is_empty() => return Ok(keys),
+            Err(error) => return Err(error),
         }
     }
     if let Some(rest) = continuation {
-        return handle(&rest, line_number + 1);
+        match handle(&rest, line_number + 1) {
+            Ok(Some(key)) => keys.push(key),
+            Ok(None) => {}
+            Err(_) if !keys.is_empty() => {}
+            Err(error) => return Err(error),
+        }
     }
-    Ok(None)
+    Ok(keys)
 }
 
 /// The drop-ins for the unit and its timer, as connect reads them: every
@@ -960,10 +978,11 @@ fn systemd_dropins(
                 }
             };
             match dropin_sets(kind, &text) {
-                Ok(None) => {
+                Ok(keys) if keys.is_empty() => {
                     read[index].insert(file.clone());
                 }
-                Ok(Some(key)) if kind == "timer" => {
+                Ok(keys) if kind == "timer" => {
+                    let key = shown_key(&keys[0]);
                     // A timer key can change when the run happens, and one
                     // such as `Unit=` (or a `[Unit]` dependency) can start a
                     // service other than the one `--schedule` writes, so
@@ -977,47 +996,52 @@ fn systemd_dropins(
                         "remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run; the schedule stays hand-managed while the drop-in applies",
                     ));
                 }
-                Ok(Some(key)) => {
+                Ok(keys) => {
                     // Only a command or environment key can name a daemon;
                     // a drop-in setting anything else is kept by
-                    // re-scheduling the base files beside it.
-                    let names_daemon = key.starts_with("Exec")
-                        || matches!(
-                            key.as_str(),
-                            "Environment="
-                                | "EnvironmentFile="
-                                | "PassEnvironment="
-                                | "UnsetEnvironment="
-                        );
+                    // re-scheduling the base files beside it. Every key the
+                    // file sets decides the advice, not only the first.
+                    let key = shown_key(&keys[0]);
+                    let names_daemon = keys.iter().any(|key| {
+                        key.starts_with("Exec")
+                            || matches!(
+                                key.as_str(),
+                                "Environment="
+                                    | "EnvironmentFile="
+                                    | "PassEnvironment="
+                                    | "UnsetEnvironment="
+                            )
+                    });
                     // A key that names another unit starts or stops it
                     // beside the schedule, and connect never reads that one.
-                    let names_unit = matches!(
-                        key.as_str(),
-                        "OnSuccess="
-                            | "OnFailure="
-                            | "Wants="
-                            | "Requires="
-                            | "Requisite="
-                            | "BindsTo="
-                            | "PartOf="
-                            | "Upholds="
-                            | "PropagatesReloadTo="
-                            | "PropagatesStopTo="
-                            | "ReloadPropagatedFrom="
-                            | "StopPropagatedFrom="
-                            | "JoinsNamespaceOf="
-                    );
-                    let keep = if names_daemon {
-                        "or keep it and point it at the new daemon yourself".to_owned()
-                    } else if names_unit {
-                        format!(
-                            "or keep it and re-schedule the base files yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`; the unit it names is not one connect reads, so check yourself that it does not run against the old daemon"
+                    let names_unit = keys.iter().any(|key| {
+                        matches!(
+                            key.as_str(),
+                            "OnSuccess="
+                                | "OnFailure="
+                                | "Wants="
+                                | "Requires="
+                                | "Requisite="
+                                | "BindsTo="
+                                | "PartOf="
+                                | "Upholds="
+                                | "PropagatesReloadTo="
+                                | "PropagatesStopTo="
+                                | "ReloadPropagatedFrom="
+                                | "StopPropagatedFrom="
+                                | "JoinsNamespaceOf="
                         )
+                    });
+                    let mut keep = if names_daemon {
+                        "or keep it and point it at the new daemon yourself".to_owned()
                     } else {
                         format!(
                             "or keep it and re-schedule the base files yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`"
                         )
                     };
+                    if names_unit {
+                        keep.push_str("; the unit it names is not one connect reads, so check yourself that it does not run against the old daemon");
+                    }
                     return Err(Blocker::new(
                         format!(
                             "the systemd drop-in {}{masked} sets {key}, which is not on the short list of keys connect knows cannot change what runs, which daemon it targets or when, and systemd applies it on top of the files `update --schedule` writes",
@@ -1280,16 +1304,28 @@ fn windows_parse(
     }
 }
 
+/// A key or section name a report may show: letters, digits, `_` and `-`
+/// only. systemd reads anything before the first `=` as a key, so a
+/// malformed line's "key" can hold a command and its secret arguments.
+fn plain(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// A drop-in key (`Key=`) as a row shows it.
+fn shown_key(key: &str) -> String {
+    match key.strip_suffix('=') {
+        Some(name) if plain(name) => key.to_owned(),
+        _ => "a key connect does not show (not a plain name)".to_owned(),
+    }
+}
+
 /// A unit file line as a report may show it: its key or section, never its
 /// value, which can be a secret.
 fn line_label(line: &str) -> String {
     let line = line.trim();
-    let plain = |text: &str| {
-        !text.is_empty()
-            && text
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    };
     if line.is_empty() {
         "an empty line".to_owned()
     } else if line.starts_with('#') || line.starts_with(';') {
@@ -1383,7 +1419,7 @@ fn systemd_parse(
             .and_then(|url| expected(url).ok())
             .and_then(|want| first_difference("service", service, &want))
     };
-    let file = |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
+    let file = |suffix: &str| shell_quoted(&dir.join(format!("{name}.{suffix}")));
     Installed {
         client,
         place: dir.join(format!("{name}.service")).display().to_string(),
@@ -2109,7 +2145,7 @@ mod tests {
     #[test]
     fn a_drop_in_is_read_line_by_line_as_systemd_reads_it() {
         let sets = |text: &str| match dropin_sets("service", text) {
-            Ok(key) => key,
+            Ok(keys) => keys.first().cloned(),
             Err(Unreadable::Rejected(line, what)) => Some(format!("rejected {line}: {what}")),
         };
         let post = "ExecStartPost=/x --daemon-url http://OLD";
@@ -3225,7 +3261,80 @@ mod tests {
         // since re-scheduling the base files leaves it as it is.
         let unit = fix("[Unit]\nOnSuccess=x.service\n");
         assert!(unit.ends_with("the unit it names is not one connect reads, so check yourself that it does not run against the old daemon"), "{unit}");
+        // Every key decides the advice, not only the first one named.
+        let later = fix("[Service]\nNice=5\n[Unit]\nOnSuccess=x.service\n");
+        assert!(later.ends_with("the unit it names is not one connect reads, so check yourself that it does not run against the old daemon"), "{later}");
+        let later = fix("[Service]\nNice=5\nExecStartPost=/x\n");
+        assert!(
+            later.ends_with("or keep it and point it at the new daemon yourself"),
+            "{later}"
+        );
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_drop_in_row_never_shows_a_value() {
+        // systemd reads everything before the first `=` as the key, so a
+        // malformed line's "key" holds the command and its arguments: the
+        // row does not show it.
+        let root = scratch();
+        let roots = [root.clone()];
+        fs::create_dir_all(root.join("pseudolife-update.service.d")).unwrap();
+        let file = root.join("pseudolife-update.service.d/override.conf");
+        fs::write(
+            &file,
+            "[Service]\nExecStart /x --token s3cr3t --daemon-url=http://old\n",
+        )
+        .unwrap();
+        let blocker = systemd_dropins(&roots, "pseudolife-update").unwrap_err();
+        assert!(!blocker.cause.contains("s3cr3t"), "{}", blocker.cause);
+        assert!(!blocker.fix.contains("s3cr3t"), "{}", blocker.fix);
+        assert!(
+            blocker
+                .cause
+                .contains("sets a key connect does not show (not a plain name), which is not on the short list"),
+            "{}",
+            blocker.cause
+        );
+        // Near miss: a plain key is named.
+        fs::write(&file, "[Service]\nExecStartPost=/x --token s3cr3t\n").unwrap();
+        let blocker = systemd_dropins(&roots, "pseudolife-update").unwrap_err();
+        assert!(
+            blocker.cause.contains("sets ExecStartPost=, which"),
+            "{}",
+            blocker.cause
+        );
+        assert!(!blocker.cause.contains("s3cr3t"), "{}", blocker.cause);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_removal_command_quotes_any_path() {
+        // An apostrophe in the path (`XDG_CONFIG_HOME=/tmp/config's`) stays
+        // inside one shell word.
+        let environment: Vec<String> = Vec::new();
+        let service = service_body(NAME, &argv(URL).unwrap(), &environment).unwrap();
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        let dir = Path::new("/tmp/config's/systemd/user");
+        let found = systemd_parse(
+            dir,
+            NAME,
+            false,
+            &service,
+            &timer_body(NAME, 3, 7),
+            true,
+            None,
+            &expected,
+        );
+        assert!(
+            found
+                .remove
+                .contains(r"rm -f '/tmp/config'\''s/systemd/user"),
+            "{}",
+            found.remove
+        );
+        assert_eq!(shell_quoted(Path::new("/a'b")), r"'/a'\''b'");
+        assert_eq!(shell_quoted(Path::new("/a b")), "'/a b'");
     }
 
     #[test]
