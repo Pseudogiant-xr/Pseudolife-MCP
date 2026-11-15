@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "4e8423b74765fec3",
+  "fingerprint": "6994367ca5987566",
+  "reason": "Against master 81057402a (batch 7, which landed #1550 and regenerated the baseline): this branch's only change to the lane is the native client build before the tests, estimated at 6.0 minutes in ci_budget.json (18.6 = the measured 12.6 plus 6.0, a cold debug build with no Rust cache on macOS). Re-measure from the first batches that carry it."
+}
