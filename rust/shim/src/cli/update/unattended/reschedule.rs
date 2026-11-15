@@ -35,6 +35,11 @@ pub(crate) struct Installed {
     /// The task's command is `--schedule`'s `-EncodedCommand` layout
     /// wrapper, so Task Scheduler shows its daemon URL only as base64.
     pub encoded: bool,
+    /// What differs from what `--schedule` writes from this shell, when it
+    /// is not shaped and that can be shown cheaply (the first differing
+    /// line, a timer not enabled, a second action). `None` when it is
+    /// shaped, or (a task) when only a named `differs` setting differs.
+    pub mismatch: Option<String>,
     /// The one command that removes exactly this schedule.
     pub remove: String,
 }
@@ -185,6 +190,7 @@ fn unvouched(dir: &Path, name: &str, client: bool, said: &dyn Fn(&str) -> Blocke
         overridden: Some(said(&remove)),
         differs: None,
         encoded: false,
+        mismatch: None,
         remove,
     }
 }
@@ -296,25 +302,15 @@ fn systemd_installed(
     // not UTF-8 text is something it repairs; one that cannot be read at all
     // is not.
     let not_text = |path: &Path| {
-        // `--schedule` replaces a regular file but refuses to write through
-        // a symbolic link (`atomic_unit`), so a link is removed first.
-        let link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
         Ok(Some(unvouched(dir, name, client, &|remove| {
             Blocker::new(
                 format!(
                     "{} is not UTF-8 text, so connect cannot compare it with what `update --schedule` writes",
                     path.display()
                 ),
-                if link {
-                    format!(
-                        "it is a symbolic link, which `update --schedule` will not write through: remove the link (`rm '{}'`), then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
-                        path.display()
-                    )
-                } else {
-                    format!(
-                        "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect"
-                    )
-                },
+                format!(
+                    "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect"
+                ),
             )
         })))
     };
@@ -337,6 +333,25 @@ fn systemd_installed(
             })));
         }
     }
+    // A unit or timer that is a symbolic link: `--schedule` refuses to write
+    // through one (`atomic_unit`), so re-creating it would fail having
+    // written nothing; the row says to replace the link first.
+    for path in [&unit, &timer_file] {
+        if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Ok(Some(unvouched(dir, name, client, &|_| {
+                Blocker::new(
+                    format!(
+                        "{} is a symbolic link, which `update --schedule` will not write through",
+                        path.display()
+                    ),
+                    format!(
+                        "replace it with a regular file: remove the link (`rm '{}'`), then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
+                        path.display()
+                    ),
+                )
+            })));
+        }
+    }
     let service = match fs::read_to_string(&unit) {
         Ok(service) => service,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -353,6 +368,13 @@ fn systemd_installed(
             return Err(format!("{} cannot be read ({error})", timer_file.display()));
         }
     };
+    // By presence, without interpreting them: a same-named unit file in any
+    // other search root, or dependency links for the unit or its timer.
+    if let Some(blocker) =
+        systemd_shadows(dir, roots, name).or_else(|| systemd_dependencies(roots, name))
+    {
+        return Ok(Some(unvouched(dir, name, client, &|_| blocker.clone())));
+    }
     let enabled = enabled()?;
     let overridden = match systemd_dropins(roots, name) {
         Err(blocked) => Some(blocked),
@@ -369,6 +391,83 @@ fn systemd_installed(
     Ok(Some(systemd_parse(
         dir, name, client, &service, &timer, enabled, overridden, expected,
     )))
+}
+
+/// The unit's own name and its dash prefixes, longest first
+/// (`pseudolife-update`, `pseudolife-`), as systemd looks them up.
+fn unit_stems(name: &str) -> Vec<String> {
+    let mut stems: Vec<String> = name
+        .match_indices('-')
+        .map(|(at, _)| name[..=at].to_owned())
+        .collect();
+    stems.push(name.to_owned());
+    stems.reverse();
+    stems
+}
+
+/// A unit or timer file of the same name as the one `--schedule` writes, in
+/// any search root but `dir`, loaded or not, ranking above or below it: by
+/// presence, it can be what systemd runs now or after the next reload.
+fn systemd_shadows(dir: &Path, roots: &[PathBuf], name: &str) -> Option<Blocker> {
+    let own = canonical(dir);
+    roots
+        .iter()
+        .filter(|root| canonical(root) != own)
+        .flat_map(|root| ["service", "timer"].map(|kind| root.join(format!("{name}.{kind}"))))
+        .find(|path| fs::symlink_metadata(path).is_ok())
+        .map(|path| {
+            Blocker::new(
+                format!(
+                    "systemd's search path also holds {}, a unit file of the same name as the one `update --schedule` writes, which systemd can load instead of it, now or at the next reload",
+                    path.display()
+                ),
+                "remove or rename that file and run `systemctl --user daemon-reload`, then re-run connect; while it is there, connect leaves this schedule to you",
+            )
+        })
+}
+
+/// Dependency links for the unit or its timer (`<name>.<kind>.wants/`,
+/// `.requires/`, `.upholds/`, their dash-prefix and top-level forms, in any
+/// search root), which start another unit with it: by presence, without
+/// reading the links.
+fn systemd_dependencies(roots: &[PathBuf], name: &str) -> Option<Blocker> {
+    let stems = unit_stems(name);
+    for kind in ["service", "timer"] {
+        for dependency in ["wants", "requires", "upholds"] {
+            let directories = roots.iter().flat_map(|root| {
+                stems
+                    .iter()
+                    .map(|stem| format!("{stem}.{kind}.{dependency}"))
+                    .chain([format!("{kind}.{dependency}")])
+                    .map(move |leaf| root.join(leaf))
+            });
+            for directory in directories {
+                let held = match fs::read_dir(&directory) {
+                    Ok(mut entries) => entries.next().is_some(),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => {
+                        return Some(Blocker::new(
+                            format!(
+                                "connect cannot read the systemd dependency directory {} ({error}), so it cannot tell whether another unit starts with this one",
+                                directory.display()
+                            ),
+                            "fix that directory's permissions or remove it, then re-run connect",
+                        ));
+                    }
+                };
+                if held {
+                    return Some(Blocker::new(
+                        format!(
+                            "the unit has dependency links in {} (another unit starts with it)",
+                            directory.display()
+                        ),
+                        "remove the links you do not need and run `systemctl --user daemon-reload`, then re-run connect; while they are there, connect leaves this schedule to you",
+                    ));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn unasked(cause: &str) -> Blocker {
@@ -679,9 +778,9 @@ fn systemd_lines(text: &str) -> Vec<&str> {
 
 /// Why a drop-in cannot be read as systemd reads it.
 enum Unreadable {
-    /// systemd itself rejects the line (an unterminated section header, or
-    /// one with characters it refuses), so the unit does not load as
-    /// `--schedule` wrote it.
+    /// systemd cannot parse the line (an unterminated section header, or one
+    /// with characters it refuses): it stops reading that file and loads the
+    /// unit without it.
     Rejected(usize, &'static str),
 }
 
@@ -844,7 +943,7 @@ fn systemd_dropins(
         };
         for file in &files {
             let masked = if shared(file) {
-                " (systemd may be ignoring this file because a same-named one takes precedence, but connect reads it either way; fix or remove this file to let connect manage the schedule)"
+                " (systemd may be ignoring this file because a same-named one takes precedence, but connect reads it either way)"
             } else {
                 ""
             };
@@ -879,12 +978,32 @@ fn systemd_dropins(
                     ));
                 }
                 Ok(Some(key)) => {
+                    // Only a command or environment key can name a daemon;
+                    // a drop-in setting anything else is kept by
+                    // re-scheduling the base files beside it.
+                    let names_daemon = key.starts_with("Exec")
+                        || matches!(
+                            key.as_str(),
+                            "Environment="
+                                | "EnvironmentFile="
+                                | "PassEnvironment="
+                                | "UnsetEnvironment="
+                        );
+                    let keep = if names_daemon {
+                        "or keep it and point it at the new daemon yourself".to_owned()
+                    } else {
+                        format!(
+                            "or keep it and re-schedule the base files yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`"
+                        )
+                    };
                     return Err(Blocker::new(
                         format!(
                             "the systemd drop-in {}{masked} sets {key}, which is not on the short list of keys connect knows cannot change what runs, which daemon it targets or when, and systemd applies it on top of the files `update --schedule` writes",
                             file.display()
                         ),
-                        "the schedule stays hand-managed while that drop-in sets it: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or keep it and point it at the new daemon yourself",
+                        format!(
+                            "the schedule stays hand-managed while that drop-in applies: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, {keep}"
+                        ),
                     ));
                 }
                 Err(Unreadable::Rejected(line, what)) => {
@@ -1030,8 +1149,33 @@ fn windows_parse(
         [one] => Some((*one).to_owned()),
         [rest @ .., last] => Some(format!("{} and {last}", rest.join(", "))),
     };
+    // Every action counts, whatever its attributes (`<Exec id="x">`) or kind
+    // (`ComHandler`, `SendEmail`, `ShowMessage`): the one `--schedule`
+    // registers is a single `Exec`.
+    let actions = between(xml, "<Actions", "</Actions>").unwrap_or_default();
+    let opens = |element: &str| {
+        actions
+            .match_indices(&format!("<{element}"))
+            .filter(|(at, _)| {
+                matches!(
+                    actions.as_bytes().get(at + element.len() + 1),
+                    Some(b'>' | b' ' | b'/' | b'\t' | b'\r' | b'\n')
+                )
+            })
+            .count()
+    };
+    let other_actions: usize = ["ComHandler", "SendEmail", "ShowMessage"]
+        .iter()
+        .map(|element| opens(element))
+        .sum();
+    let one_action = opens("Exec") == 1 && other_actions == 0;
+    let one_trigger = triggers.matches("Trigger>").count() == 2
+        && triggers.contains("<CalendarTrigger>")
+        && triggers.contains("<DaysInterval>1</DaysInterval>");
+    let enabled = !xml.contains("<Enabled>false</Enabled>");
+    let interactive = xml.contains("<LogonType>InteractiveToken</LogonType>");
     let as_registered = differs.is_none()
-        && xml.matches("<Exec>").count() == 1
+        && one_action
         && triggers.matches("Trigger>").count() == 2
         && triggers.contains("<CalendarTrigger>")
         && triggers.contains("<DaysInterval>1</DaysInterval>")
@@ -1055,6 +1199,40 @@ fn windows_parse(
             },
             _ => false,
         };
+    // What differs, cheaply: the first thing a task registered by
+    // `--schedule` from this shell would not have.
+    let command_differs = match (&executable, &arguments, &url) {
+        (Some(executable), Some(arguments), Some(url)) => match expected(url) {
+            Ok((want, args)) if &want != executable || &args != arguments => Some(format!(
+                "its action runs `{executable} {arguments}` where `update --schedule` from this shell registers `{want} {args}`"
+            )),
+            _ => None,
+        },
+        _ => None,
+    };
+    let mismatch = if shaped || why.is_some() {
+        None
+    } else if !one_action {
+        Some(format!(
+            "it has {} actions where `update --schedule` registers one",
+            opens("Exec") + other_actions
+        ))
+    } else if !one_trigger {
+        Some(
+            "its trigger is not the one daily calendar trigger `update --schedule` registers"
+                .to_owned(),
+        )
+    } else if !enabled {
+        Some("it is disabled".to_owned())
+    } else if !interactive {
+        Some(
+            "it does not run as the logged-on user, as `update --schedule` registers it".to_owned(),
+        )
+    } else {
+        // With only a named `differs` setting different, `mismatch` is
+        // `None`, so the row can say nothing else in it differs.
+        command_differs
+    };
     Installed {
         client,
         place: format!("the scheduled task '{task}'"),
@@ -1064,6 +1242,7 @@ fn windows_parse(
         why,
         overridden: None,
         differs,
+        mismatch,
         encoded: arguments
             .as_deref()
             .is_some_and(|arguments| arguments.contains("-EncodedCommand ")),
@@ -1111,6 +1290,35 @@ fn systemd_parse(
             },
             None => false,
         };
+    // What differs, cheaply: the first line that is not what `--schedule`
+    // writes from this shell (its command, environment or timer).
+    let first_difference = |file: &str, have: &str, want: &str| -> Option<String> {
+        let (have, want): (Vec<&str>, Vec<&str>) = (have.lines().collect(), want.lines().collect());
+        (0..have.len().max(want.len())).find_map(|line| match (have.get(line), want.get(line)) {
+            (Some(a), Some(b)) if a == b => None,
+            (a, b) => Some(format!(
+                "its {file} has `{}` where `update --schedule` from this shell writes `{}`",
+                a.unwrap_or(&"(nothing)"),
+                b.unwrap_or(&"(nothing)")
+            )),
+        })
+    };
+    let mismatch = if shaped || why.is_some() || overridden.is_some() {
+        None
+    } else if !enabled {
+        Some("its timer is not enabled".to_owned())
+    } else if !timer_shaped {
+        match time.as_deref().and_then(|time| at(time).ok()) {
+            Some((hour, minute)) => {
+                first_difference("timer", timer, &timer_body(name, hour, minute))
+            }
+            None => Some("its timer has no daily time connect can read".to_owned()),
+        }
+    } else {
+        url.as_deref()
+            .and_then(|url| expected(url).ok())
+            .and_then(|want| first_difference("service", service, &want))
+    };
     let file = |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
     Installed {
         client,
@@ -1122,6 +1330,7 @@ fn systemd_parse(
         overridden,
         differs: None,
         encoded: false,
+        mismatch,
         remove: format!(
             "systemctl --user disable --now {name}.timer; rm -f {} {}; systemctl --user daemon-reload",
             file("service"),
@@ -1624,7 +1833,7 @@ mod tests {
     }
 
     #[test]
-    fn a_drop_in_blocks_only_when_it_sets_a_key_the_run_depends_on() {
+    fn a_drop_in_blocks_unless_every_key_it_sets_is_on_the_list() {
         let root = scratch();
         let roots = [root.clone()];
         let name = "pseudolife-update";
@@ -1924,7 +2133,7 @@ mod tests {
             root.join(dir).join(file)
         };
         let post = "[Service]\nExecStartPost=/x --daemon-url http://OLD\n";
-        let hint = "systemd may be ignoring this file because a same-named one takes precedence, but connect reads it either way; fix or remove this file to let connect manage the schedule";
+        let hint = "systemd may be ignoring this file because a same-named one takes precedence, but connect reads it either way";
         // The `cp -p` case: a harmless file in the higher root's prefix
         // directory shares its name with an old-URL one in the lower root's
         // exact directory. Which one systemd runs depends on what it loaded,
@@ -2652,13 +2861,22 @@ mod tests {
         let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &show, &expected)
             .unwrap()
             .unwrap();
+        // Any link is caught first, whatever its target holds.
         let blocker = found.overridden.unwrap();
         assert!(
-            blocker.cause.contains("is not UTF-8 text"),
+            blocker
+                .cause
+                .ends_with("is a symbolic link, which `update --schedule` will not write through"),
             "{}",
             blocker.cause
         );
-        assert!(blocker.fix.starts_with("it is a symbolic link, which `update --schedule` will not write through: remove the link"), "{}", blocker.fix);
+        assert!(
+            blocker
+                .fix
+                .starts_with("replace it with a regular file: remove the link"),
+            "{}",
+            blocker.fix
+        );
         // Near miss: a regular non-text file is replaced by `--schedule`.
         fs::remove_file(dir.join(format!("{NAME}.service"))).unwrap();
         fs::write(dir.join(format!("{NAME}.service")), b"[Service]\n# \xff\n").unwrap();
@@ -2673,6 +2891,149 @@ mod tests {
                 .starts_with("re-create it with")
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn presence_alone_leaves_the_schedule_alone() {
+        // By presence, without interpreting them: dependency links, and a
+        // same-named unit file in another search root.
+        let home = scratch();
+        let dir = home.join("config/systemd/user");
+        let other = home.join("etc/systemd/user");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let roots = [dir.clone(), other.clone()];
+        let environment: Vec<String> = Vec::new();
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        let enabled = || Ok(true);
+        let show = |unit: &str| {
+            Ok(format!(
+                "NeedDaemonReload=no\nFragmentPath={}\nDropInPaths=\n",
+                dir.join(unit).display()
+            ))
+        };
+        fs::write(
+            dir.join(format!("{NAME}.service")),
+            service_body(NAME, &argv(URL).unwrap(), &environment).unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{NAME}.timer")), timer_body(NAME, 3, 7)).unwrap();
+        let read = || {
+            systemd_installed(&dir, &roots, NAME, false, &enabled, &show, &expected)
+                .unwrap()
+                .unwrap()
+        };
+        // Near miss: a plain schedule, with an empty dependency directory.
+        fs::create_dir_all(dir.join(format!("{NAME}.service.wants"))).unwrap();
+        let found = read();
+        assert!(
+            found.shaped && found.overridden.is_none(),
+            "{:?}",
+            found.overridden
+        );
+        // A link in a dependency directory (the service, the timer, a dash
+        // prefix, the top-level type): another unit starts with it.
+        for leaf in [
+            format!("{NAME}.service.wants"),
+            format!("{NAME}.timer.requires"),
+            "pseudolife-.service.upholds".to_owned(),
+            "timer.wants".to_owned(),
+        ] {
+            let path = other.join(&leaf);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("old-update.service"), "").unwrap();
+            let blocker = read().overridden.expect(&leaf);
+            assert_eq!(
+                blocker.cause,
+                format!(
+                    "the unit has dependency links in {} (another unit starts with it)",
+                    path.display()
+                )
+            );
+            fs::remove_dir_all(&path).unwrap();
+        }
+        // A same-named unit or timer file in any other root, lower or higher.
+        for file in [format!("{NAME}.service"), format!("{NAME}.timer")] {
+            fs::write(other.join(&file), "").unwrap();
+            let found = read();
+            assert!(!found.shaped);
+            assert!(found.overridden.unwrap().cause.starts_with(&format!(
+                "systemd's search path also holds {}, a unit file of the same name",
+                other.join(&file).display()
+            )));
+            fs::remove_file(other.join(&file)).unwrap();
+        }
+        assert!(read().shaped);
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn every_task_action_counts_whatever_its_form() {
+        let (command, arguments) = windows_expected(URL).unwrap();
+        let (_, old) = windows_expected("http://10.0.0.9:8765").unwrap();
+        let escape = |text: &str| text.replace('&', "&amp;").replace('"', "&quot;");
+        let with = |action: String| {
+            task_xml(&command, &arguments, move |x| {
+                x.replace("</Actions>", &format!("{action}</Actions>"))
+            })
+        };
+        for action in [
+            format!(
+                "<Exec id=\"x\"><Command>{}</Command><Arguments>{}</Arguments></Exec>",
+                escape(&command),
+                escape(&old)
+            ),
+            "<ComHandler><ClassId>{00000000-0000-0000-0000-000000000000}</ClassId></ComHandler>"
+                .to_owned(),
+            "<SendEmail><Server>x</Server></SendEmail>".to_owned(),
+            "<ShowMessage><Title>x</Title><Body>y</Body></ShowMessage>".to_owned(),
+        ] {
+            let found = windows_parse("T", true, &with(action.clone()), &windows_expected);
+            assert!(!found.shaped, "{action}");
+            assert_eq!(
+                found.mismatch.as_deref(),
+                Some("it has 2 actions where `update --schedule` registers one"),
+                "{action}"
+            );
+        }
+        // Near miss: the single action as `--schedule` registers it, and the
+        // same with an `id` (one action still).
+        assert!(windows_parse("T", true, &with(String::new()), &windows_expected).shaped);
+        let one_with_id = task_xml(&command, &arguments, |x| {
+            x.replace("<Exec>", "<Exec id=\"Pseudolife\">")
+        });
+        assert!(windows_parse("T", true, &one_with_id, &windows_expected).shaped);
+    }
+
+    #[test]
+    fn what_differs_is_named() {
+        let environment: Vec<String> = Vec::new();
+        let service = service_body(NAME, &argv(URL).unwrap(), &environment).unwrap();
+        let timer = timer_body(NAME, 3, 7);
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        let dir = Path::new("/home/u/.config/systemd/user");
+        let parse = |service: &str, timer: &str, enabled: bool| {
+            systemd_parse(dir, NAME, false, service, timer, enabled, None, &expected)
+        };
+        assert_eq!(parse(&service, &timer, true).mismatch, None);
+        assert_eq!(
+            parse(&service, &timer, false).mismatch.as_deref(),
+            Some("its timer is not enabled")
+        );
+        let added = format!("{service}ExecStartPost=/x\n");
+        assert_eq!(
+            parse(&added, &timer, true).mismatch.as_deref(),
+            Some(
+                "its service has `ExecStartPost=/x` where `update --schedule` from this shell writes `(nothing)`"
+            )
+        );
+        let edited = timer.replace("Persistent=true", "Persistent=false");
+        assert_eq!(
+            parse(&service, &edited, true).mismatch.as_deref(),
+            Some(
+                "its timer has `Persistent=false` where `update --schedule` from this shell writes `Persistent=true`"
+            )
+        );
     }
 
     #[test]
@@ -2706,6 +3067,29 @@ mod tests {
             "{}",
             blocker.fix
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_service_drop_in_is_kept_by_the_fix_that_fits_its_key() {
+        let root = scratch();
+        let roots = [root.clone()];
+        fs::create_dir_all(root.join("pseudolife-update.service.d")).unwrap();
+        let fix = |text: &str| {
+            fs::write(root.join("pseudolife-update.service.d/override.conf"), text).unwrap();
+            systemd_dropins(&roots, "pseudolife-update")
+                .unwrap_err()
+                .fix
+        };
+        // A key that can name a daemon: point it at the new one.
+        assert!(
+            fix("[Service]\nExecStartPost=/x\n")
+                .ends_with("or keep it and point it at the new daemon yourself")
+        );
+        // A key that names none: keep it by re-scheduling the base files.
+        let other = fix("[Unit]\nOnSuccess=x.service\n");
+        assert!(other.ends_with(&format!("or keep it and re-schedule the base files yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}`")), "{other}");
+        assert!(!other.contains("point it at"), "{other}");
         fs::remove_dir_all(&root).unwrap();
     }
 

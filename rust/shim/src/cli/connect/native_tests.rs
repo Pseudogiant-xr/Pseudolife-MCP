@@ -606,6 +606,8 @@ struct FakeScheduler {
     after_overridden: Option<(&'static str, &'static str)>,
     differs: Option<&'static str>,
     encoded: bool,
+    /// Set on every schedule installed.
+    mismatch: Option<&'static str>,
     /// Why the re-read before writing fails, when it does.
     reread_error: Option<String>,
     made: RefCell<Vec<(bool, String, String)>>,
@@ -635,6 +637,7 @@ impl FakeScheduler {
                     overridden: blocker(overridden),
                     differs: self.differs.map(str::to_owned),
                     encoded: self.encoded,
+                    mismatch: self.mismatch.map(str::to_owned),
                     remove: format!("schtasks /Delete /TN \"{task}\" /F"),
                 }
             })
@@ -1125,16 +1128,25 @@ fn a_schedule_naming_the_daemon_is_current_only_as_schedule_writes_it() {
     });
     let rows = schedule_rows(&fake, NEW, true);
     assert_eq!(rows[0].state, "manual");
+    // It names the new daemon first: the row says so, not "runs against",
+    // and does not blame a hand edit (another shell's environment differs
+    // too); the fix makes it one connect manages.
     assert!(
-        rows[0].detail.contains(
-            "it names this daemon but is not exactly the schedule `update --schedule` writes"
-        ),
+        rows[0].detail.starts_with(&format!(
+            "the scheduled task 'client' names {NEW} first, but is not exactly the schedule `update --schedule` writes from this shell, so connect cannot vouch"
+        )),
         "{}",
         rows[0].detail
     );
     assert!(
+        !rows[0].detail.contains("runs against"),
+        "{}",
+        rows[0].detail
+    );
+    assert!(!rows[0].detail.contains("hand edit"), "{}", rows[0].detail);
+    assert!(
         rows[0].detail.ends_with(&format!(
-            "re-schedule it: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`"
+            "makes it one connect manages: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`"
         )),
         "{}",
         rows[0].detail
@@ -1153,10 +1165,47 @@ fn a_schedule_naming_the_daemon_is_current_only_as_schedule_writes_it() {
     assert!(
         rows[0]
             .detail
-            .contains("it names this daemon but has an end date"),
+            .contains(&format!("names {NEW} and differs from what `update --schedule` writes only in an end date, so it needs no change for this move")),
         "{}",
         rows[0].detail
     );
+    // What differs is shown when discovery can name it; and a task with a
+    // named setting that also differs elsewhere is not told "no change".
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), false, None)],
+        differs: Some("an end date"),
+        mismatch: Some("it has 2 actions where `update --schedule` registers one"),
+        ..FakeScheduler::default()
+    });
+    let detail = &schedule_rows(&fake, NEW, true)[0].detail;
+    assert!(
+        detail.contains(
+            "writes from this shell (it has 2 actions where `update --schedule` registers one)"
+        ),
+        "{detail}"
+    );
+    assert!(!detail.contains("needs no change"), "{detail}");
+    // The daemon's own schedule, already naming the new daemon on another
+    // machine, is not current: its next step is `--unschedule`.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(false, Some(NEW), Some("04:30"), true, None)],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "manual");
+    assert!(
+        rows[0]
+            .detail
+            .contains("pseudolife-mcp update --unschedule"),
+        "{}",
+        rows[0].detail
+    );
+    // Near miss: the client schedule naming the remote daemon is current.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), true, None)],
+        ..FakeScheduler::default()
+    });
+    assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "current");
 }
 
 #[test]

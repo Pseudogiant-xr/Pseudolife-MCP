@@ -663,22 +663,41 @@ first, and if one write fails the files already written are restored.
     schedule that `update --schedule` installed here, the daemon's or this
     client machine's, is re-created for the new URL, keeping its daily
     time.
+  - **What `connect` vouches for:** one thing only, the schedule exactly
+    as `update --schedule` writes it from this shell, with nothing added in
+    any place `connect` knows systemd or Task Scheduler looks. If you have
+    customised your schedule, `connect` leaves it to you: whenever it can see
+    that something was added, it changes nothing and shows a `manual` row
+    naming what it found and the step that would let it manage the schedule
+    again.
   - **What stays manual:** a schedule `connect` cannot re-create exactly as
     written, or the daemon's schedule after the daemon moved to another
-    machine, is a `manual` row naming the command to run. So is a scheduled
-    task with a setting `--schedule` would drop (an end date, a repetition,
-    a delay, highest privileges), whose row names it, and a systemd
-    schedule with a drop-in that sets anything not known to be harmless
-    (its command, environment, timer, a `[Unit]` dependency), whose row
-    names the drop-in to edit or remove (the schedule stays hand-managed
-    while a drop-in sets it). A schedule is reported current only when it
-    is exactly what `--schedule` writes, and a re-created one is read back
-    before the move is reported. `connect` also asks systemd's
-    user manager which unit file and drop-ins it applies, and leaves the
-    schedule alone when that differs from what it read. `connect` never creates
-    or removes a schedule. The Python client re-creates none: it
-    reports only the daemon's schedule, and names the `--schedule` command
-    to re-run (`--unschedule` once the daemon is on another machine).
+    machine, is a `manual` row naming the command to run. So is:
+    - a scheduled task with a setting `--schedule` would drop (an end
+      date, a repetition, a delay, highest privileges), or with a second
+      action;
+    - a systemd schedule with a drop-in that sets anything not known to be
+      harmless (its command, environment, timer, a `[Unit]` dependency);
+    - a systemd schedule with dependency links (`.wants/`, `.requires/`,
+      `.upholds/`), a unit file of the same name in another directory
+      systemd searches, or a unit file that is a symbolic link.
+
+    Each row names what it found. A schedule is reported current only when
+    it is exactly what `--schedule` writes, and a re-created one is read back
+    before the move is reported. `connect` also asks systemd's user manager
+    which unit file and drop-ins it applies, and leaves the schedule alone
+    when that differs from what it read. `connect` never creates or removes a
+    schedule. The Python client re-creates none: it reports only the
+    daemon's schedule, and names the `--schedule` command to re-run
+    (`--unschedule` once the daemon is on another machine).
+  - **What `connect` cannot see:**
+    - What systemd has loaded can differ from the files on disk, for
+      example after a drop-in is replaced without a reload, keeping an older
+      timestamp. `connect` reads the files.
+    - Another timer that also starts the update service runs it at other
+      times; those runs use the new daemon too.
+    - A scheduled task's settings (power and idle conditions, wake) and its
+      other fields are not compared; re-creating a task resets them.
 - **Afterwards:** restart the sessions the report lists (and fully quit and
   relaunch Claude Desktop when its entry changed). Each session gets a new
   board address on the new URL.

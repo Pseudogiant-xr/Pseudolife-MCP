@@ -26,6 +26,9 @@ pub(super) struct Found {
     pub differs: Option<String>,
     /// The task's command is the `-EncodedCommand` layout wrapper.
     pub encoded: bool,
+    /// What differs from what `--schedule` writes from this shell, when it
+    /// can be shown.
+    pub mismatch: Option<String>,
     pub remove: String,
 }
 
@@ -89,6 +92,7 @@ fn found(installed: crate::cli::update::schedules::Installed) -> Found {
         overridden: installed.overridden,
         differs: installed.differs,
         encoded: installed.encoded,
+        mismatch: installed.mismatch,
         remove: installed.remove,
     }
 }
@@ -209,11 +213,14 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
         // deferral of the whole run.
         let target = named(found.url.as_deref());
         // "current" needs the schedule to be exactly what `--schedule`
-        // writes: a hand edit that keeps the new URL first can add a second
-        // `--daemon-url` (the run takes the last), an `ExecStartPost=` or a
-        // second task action naming another daemon.
+        // writes: one that names the new URL first can still differ (a second
+        // `--daemon-url`, which the run takes, an `ExecStartPost=`, a second
+        // task action, or an environment written from another shell). The
+        // daemon's own schedule after the daemon moved away is never current:
+        // its next step is `--unschedule`.
         let current = target.as_deref() == Some(ctx.url.as_str());
-        if current && found.shaped {
+        let moved_away = !found.client && ctx.remote;
+        if current && found.shaped && !moved_away {
             let mut row = discover::row("unattended-update", place, None, None, "current")?;
             row.detail = found.place;
             rows.push(row);
@@ -237,7 +244,7 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             )
         };
         let leave = |why: &str| manual(format!("{why}: {fix}"));
-        let row = if !found.client && ctx.remote {
+        let row = if moved_away {
             manual(
                 "connect does not re-run the schedule step: the daemon now runs on another machine, and an unattended update only updates a daemon on this one: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host".to_owned(),
             )?
@@ -245,14 +252,39 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             leave(&format!(
                 "connect cannot tell whether it is the one `update --schedule` writes ({why}), so it leaves it as it is; re-schedule it"
             ))?
-        } else if current && found.differs.is_some() {
-            manual(format!(
-                "it names this daemon but has {}, which `update --schedule` does not write, so connect leaves it as it is: it needs no change for this move if nothing else in it was edited; for connect to manage it, re-schedule it (which drops that): {fix}",
-                found.differs.as_deref().unwrap_or_default()
-            ))?
-        } else if current && found.why.is_none() && found.url.is_some() && !found.shaped {
-            leave(
-                "it names this daemon but is not exactly the schedule `update --schedule` writes (a hand edit can add a second command, `--daemon-url` or task action naming another daemon), so connect cannot vouch that it runs against this daemon and leaves it as it is; re-schedule it",
+        } else if current && found.differs.is_some() && found.mismatch.is_none() {
+            // Only the named setting differs: the rest is what `--schedule`
+            // writes, so nothing needs changing for the move.
+            discover::manual(
+                "unattended-update",
+                place,
+                None,
+                None,
+                format!(
+                    "{} names {} and differs from what `update --schedule` writes only in {}, so it needs no change for this move; connect leaves it as it is, and re-scheduling it would drop that: {fix}",
+                    found.place,
+                    ctx.url,
+                    found.differs.as_deref().unwrap_or_default()
+                ),
+            )?
+        } else if current && !found.shaped {
+            // It names the new daemon first, but is not exactly what
+            // `--schedule` writes from this shell: a hand edit, or a schedule
+            // written from a shell whose environment differs from this one.
+            let shown = found
+                .mismatch
+                .as_deref()
+                .map(|differs| format!(" ({differs})"))
+                .unwrap_or_default();
+            discover::manual(
+                "unattended-update",
+                place,
+                None,
+                None,
+                format!(
+                    "{} names {} first, but is not exactly the schedule `update --schedule` writes from this shell{shown}, so connect cannot vouch that it runs only against that daemon and leaves it as it is; re-creating it with `update --schedule` from this shell makes it one connect manages: {fix}",
+                    found.place, ctx.url
+                ),
             )?
         } else if let Some(differs) = &found.differs {
             // A task registered through the `-EncodedCommand` layout wrapper
@@ -274,9 +306,13 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
                 "its command names no `--daemon-url` connect can read (an older `update --schedule` wrote it that way), so connect leaves it as it is; re-schedule it",
             )?
         } else if !found.shaped {
-            leave(
-                "it is not exactly what `update --schedule` writes (its command, environment, trigger or state differ), so connect leaves it as it is; re-schedule it",
-            )?
+            leave(&format!(
+                "it is not exactly what `update --schedule` writes from this shell ({}), so connect leaves it as it is; re-schedule it",
+                found
+                    .mismatch
+                    .as_deref()
+                    .unwrap_or("its command, environment, trigger or state differ")
+            ))?
         } else if found.time.is_none() {
             leave(
                 "its daily time could not be read, so connect cannot keep it; re-schedule it at your time",
