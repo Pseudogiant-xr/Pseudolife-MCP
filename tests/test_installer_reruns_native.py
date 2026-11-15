@@ -10,8 +10,8 @@ import inspect
 import pytest
 
 from tests.native_client_stub import HELPER_PS, HELPER_SH
-from tests.test_installer_client_only import ROOT, _block
-from tests.test_installer_client_only_native import _Shell
+from tests.test_installer_client_only import ROOT
+from tests.test_installer_client_only_native import _Shell, _block
 from tests.test_installer_client_only_ps import _q, _output
 from tests.test_installer_client_only_ps_native import _PowerShell
 from tests.test_installer_existing_upgrade import _bash_variants

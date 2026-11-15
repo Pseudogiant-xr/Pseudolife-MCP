@@ -325,3 +325,15 @@ def test_the_user_path_helper_keeps_expandable_entries_and_reruns_quietly(tmp_pa
     finally:
         winreg.CloseKey(key)
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, subkey)
+
+
+def test_a_download_folder_that_cannot_be_made_is_named_not_the_network(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    (home / ".pseudolife-mcp").write_text("a file, not a folder\n", encoding="utf-8")
+    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED')
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert ".pseudolife-mcp" in line and "downloads" in line and "network" not in line
+    assert line.endswith("Nothing was changed.")

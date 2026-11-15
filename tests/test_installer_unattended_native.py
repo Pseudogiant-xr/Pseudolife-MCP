@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_installer_client_only import BASH, ROOT, _block
+from tests.test_installer_client_only import BASH, ROOT
 from tests.test_installer_client_only_native import _Shell
 from tests.test_installer_client_only_ps import _q, _output
 from tests.test_installer_client_only_ps_native import _PowerShell
