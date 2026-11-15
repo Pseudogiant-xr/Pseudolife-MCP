@@ -95,7 +95,7 @@ pub(super) fn with_leftovers(message: String, left: &[String]) -> String {
     )
 }
 
-const DUMP: &str = r#"unset PGHOSTADDR PGSERVICE PGSERVICEFILE; exec pg_dump --no-owner --no-acl -h "$1" -p "$2" -U "$3" -d "$4" -Z9"#;
+pub(super) const DUMP: &str = r#"unset PGHOSTADDR PGSERVICE PGSERVICEFILE; exec pg_dump --no-owner --no-acl -h "$1" -p "$2" -U "$3" -d "$4" -Z9"#;
 /// `/data` without a staging directory a killed restore left behind (the
 /// exact name `execute::STAGE_GLOB` matches).
 const ARCHIVE: &str = "tar czf - --anchored '--exclude=./.pseudolife-restore-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' -C /data .";
@@ -107,7 +107,7 @@ fn part(path: &Path) -> PathBuf {
 }
 
 /// Flush a written file's data and metadata to disk.
-fn flush(path: &Path) -> std::io::Result<()> {
+pub(super) fn flush(path: &Path) -> std::io::Result<()> {
     // FlushFileBuffers on Windows needs a writable handle.
     fs::OpenOptions::new()
         .read(true)

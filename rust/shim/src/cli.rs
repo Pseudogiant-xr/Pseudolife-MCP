@@ -207,10 +207,16 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     }
     if mode == "move" {
         let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
+        // `move --rollback <id>` is native only (Python's move has no such
+        // option), so it is read before move_cli's argparse checks.
+        if let Some(code) = restore_cli::move_native::run_rollback(&arguments) {
+            return Some(ExitCode::from(code));
+        }
         if let Some(code) = move_cli::run(arguments.clone()) {
             return Some(ExitCode::from(code));
         }
-        // What move_cli passes on: the native dry run, or its refusals.
+        // What move_cli passes on: the native move, its dry run, or its
+        // refusals.
         if let Some(code) = restore_cli::move_native::run(&arguments) {
             return Some(ExitCode::from(code));
         }

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "0c68fc4d053a291c",
+  "fingerprint": "1b6fab65de72c16e",
+  "reason": "parity_scope.py: restore_cli, backup and backup_help.txt now also list the move row (restore_cli's move_native answers it through the cli.rs dispatcher), on top of master's backup scope change; move shares restore's w1c-connection suite, so the suites a change selects and a full parity run's rows, jobs and minutes are unchanged"
+}

@@ -6,7 +6,7 @@
 //! lines are split on those bytes here. Every comparison is with ASCII text,
 //! which a replacement character never equals, so raw bytes compare the
 //! same; only the COPY pattern's `\S` reads the line as characters.
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use super::{
     Verdict,
@@ -21,6 +21,9 @@ struct Lines {
     carriage_return: bool,
     in_copy: bool,
     complete: bool,
+    /// The table of the COPY section being read, and each table's rows.
+    table: String,
+    counts: BTreeMap<String, i64>,
 }
 
 /// CPython's `str.isspace`, which `\s` in a str pattern follows.
@@ -31,19 +34,18 @@ pub(super) fn python_space(character: char) -> bool {
 /// `re.match(r"^COPY \S+ .*FROM stdin;$", line)`: a run of non-space
 /// characters must end at a plain space, and the rest end the line with
 /// `FROM stdin;` (a line holds no `\n`, which `.` and `$` would treat apart).
-fn copy_start(line: &[u8]) -> bool {
-    let Some(rest) = line.strip_prefix(b"COPY ") else {
-        return false;
-    };
+fn copy_start(line: &[u8]) -> Option<String> {
+    let rest = line.strip_prefix(b"COPY ")?;
     let rest = String::from_utf8_lossy(rest);
     let token = rest
         .char_indices()
         .find(|(_, character)| python_space(*character))
         .map_or(rest.len(), |(at, _)| at);
-    token > 0
+    (token > 0
         && rest[token..]
             .strip_prefix(' ')
-            .is_some_and(|tail| tail.ends_with("FROM stdin;"))
+            .is_some_and(|tail| tail.ends_with("FROM stdin;")))
+    .then(|| rest[..token].to_owned())
 }
 
 impl Lines {
@@ -52,9 +54,13 @@ impl Lines {
         if self.in_copy {
             if line == b"\\." {
                 self.in_copy = false;
+            } else {
+                *self.counts.entry(self.table.clone()).or_default() += 1;
             }
-        } else if copy_start(&line) {
+        } else if let Some(table) = copy_start(&line) {
             self.in_copy = true;
+            self.counts.entry(table.clone()).or_default();
+            self.table = table;
         } else if line == MARKER {
             self.complete = true;
         }
@@ -78,22 +84,30 @@ impl Lines {
 }
 
 pub(super) fn complete(path: &Path) -> Verdict {
+    complete_with_counts(path).0
+}
+
+/// [`complete`], and the rows of each table's COPY section (`schema.table`
+/// as pg_dump names it; Python move's `scan_dump` counts), for checking a
+/// restored copy against the dump.
+pub(super) fn complete_with_counts(path: &Path) -> (Verdict, BTreeMap<String, i64>) {
     let mut lines = Lines::default();
     let read = gzip::stream(path, |chunk| {
         lines.feed(chunk);
         Ok::<(), Stop>(())
     });
     if let Err(stop) = read {
-        return stop.into();
+        return (stop.into(), BTreeMap::new());
     }
     if !lines.line.is_empty() {
         lines.end_line();
     }
-    if lines.complete {
+    let verdict = if lines.complete {
         Verdict::Pass
     } else {
         Verdict::Refuse
-    }
+    };
+    (verdict, lines.counts)
 }
 
 #[cfg(test)]
@@ -108,6 +122,30 @@ mod tests {
         encoder.write_all(text).unwrap();
         let file = Scratch::new(&encoder.finish().unwrap());
         complete(&file.0)
+    }
+
+    #[test]
+    fn each_copy_section_counts_its_rows() {
+        let text = concat!(
+            "SET x;\n",
+            "COPY public.meta (key, value) FROM stdin;\na\t1\nb\t2\n\\.\n",
+            "COPY public.entries (id) FROM stdin;\n\\.\n",
+            "COPY public.facts (id) FROM stdin;\r\n1\r\n\\.\r\n",
+            "-- PostgreSQL database dump complete\n",
+        );
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(text.as_bytes()).unwrap();
+        let file = Scratch::new(&encoder.finish().unwrap());
+        let (verdict, counts) = complete_with_counts(&file.0);
+        assert_eq!(verdict, Verdict::Pass);
+        assert_eq!(
+            counts.into_iter().collect::<Vec<_>>(),
+            [
+                ("public.entries".to_owned(), 0),
+                ("public.facts".to_owned(), 1),
+                ("public.meta".to_owned(), 2)
+            ]
+        );
     }
 
     #[test]
