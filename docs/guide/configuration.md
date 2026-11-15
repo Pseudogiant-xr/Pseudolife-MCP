@@ -1157,20 +1157,50 @@ passkey offer, so the link is for the HTTPS address when you set one up):
 when a browser is signed in already, from the passkey setup or an earlier
 install, it says so in one line and opens nothing. An unattended install
 names the command instead, and a client-only install names it in its
-summary. `console` never hands the link to a terminal browser (lynx, w3m,
-elinks): it prints it instead. It chooses the browser as Python's
-`webbrowser` module does: the first entry of `BROWSER`, else the Windows
-default, the macOS default, or on Linux a desktop browser when `DISPLAY` or
-`WAYLAND_DISPLAY` is set; the link goes to it as one argument. The native
-client does not start every such browser yet: on macOS, and on Linux when
-the desktop's default is a browser Python starts directly (Firefox or
-Chrome, say) rather than through `xdg-open`, it stops with `mode 'console'
-is deferred in this candidate` before minting a code. Use `--no-open` and
-open the printed link yourself, or set `BROWSER` to a command line of the
-form `<program> %s &`; a bare browser name there (`firefox`, say) stops
-the same way. `pseudolife-mcp update` names it when the daemon offers sign-in and
-no browser is signed in yet, and the update that moves the bank to schema
-v59 says, once, which principals are now treated as yours.
+summary. `pseudolife-mcp update` names the command when the daemon offers
+sign-in and no browser is signed in yet, and the update that moves the bank
+to schema v59 says, once, which principals are now treated as yours.
+
+`console` picks the browser before it asks for a code, and the link always
+goes to it as one argument. With `BROWSER` unset (or empty), macOS runs
+`/usr/bin/open`; Linux with a display (`DISPLAY` or `WAYLAND_DISPLAY` set
+and not empty) runs the first of `xdg-open`, `gio open`, `x-www-browser`,
+`firefox`, `google-chrome`, `chromium` and `chromium-browser` it finds on
+`PATH`; Windows opens its default browser. On macOS and Linux a `BROWSER`
+you set decides on its own, with or without a display: its first entry
+(entries are separated by `:`) is a command line, split into words as a
+shell would split it but never run through one (so no `~` or `$VAR`
+expansion), and started in the background. Each `%s` in it becomes the
+link, and the link is added at the end when there is no `%s`, so
+`BROWSER=firefox` works as well as `BROWSER='firefox --new-window %s'`. A
+`BROWSER` naming a terminal browser (`lynx`, `w3m`, `elinks`, `links`,
+`links2`, `browsh`, `www-browser`) prints the link instead, since that
+browser would fight the command for the terminal.
+
+When no browser opens, `console` prints the link and the code just as
+`--no-open` does. On macOS and Linux it also says why on stderr, as
+`pseudolife-mcp console: no browser opened: <cause>` (with `--json`, as the
+`browser_error` field instead): no display and no `BROWSER`, no launcher on
+`PATH`, a `BROWSER` it cannot read or that names a terminal browser, a
+program that cannot be started, or a launcher that exits with an error
+within two seconds (one still running then counts as the browser). On
+Windows a launch that fails prints the link alone.
+
+On Windows the first `BROWSER` entry decides (entries are separated by `;`
+there, and an entry of only spaces anywhere prints the link), and two
+shapes of it still stop with `pseudolife-stdio: mode 'console' is deferred
+in this candidate` before a code is minted: an entry without `%s` whose
+first word is a standard browser name (`firefox`, `chrome`, `lynx`, say),
+and a `<program> %s &` entry whose program is not a drive-absolute `.exe`
+path (a `BROWSER` that is not valid Unicode stops the same way). The value
+is split as a POSIX shell splits it, so an unquoted backslash is dropped:
+write the path with forward slashes (`C:/Tools/browser.exe %s &`) or in
+single quotes (`'C:\Program Files\Mozilla Firefox\firefox.exe' %s &`);
+`C:\Tools\browser.exe %s &` defers. Any other Windows `BROWSER` opens a
+browser only in that `<program> %s &` form, and otherwise prints the link.
+Where it defers, use `--no-open` and open the printed link yourself, or
+unset `BROWSER`: `--no-open` never starts a browser and prints the link and
+the code on every system.
 
 `pseudolife-mcp console --list` shows the signed-in browsers (an operator
 sees all of them, a paired machine its own) and `--revoke <id>` signs one
