@@ -73,6 +73,14 @@ The shipped configuration is deliberately conservative:
   `pseudolife-mcp expose tailscale` refuses a daemon without a token, but
   `/health` stays unauthenticated, so after it every machine on the tailnet
   can read this payload.
+- **Programs are found by absolute path.** The programs Pseudolife looks
+  up and then runs by the path it found (`tailscale` for `expose`, `pg_dump`
+  for `backup`, `codex` for Codex setup) are found only in absolute `PATH`
+  directories or the program's known install location, never in the
+  current directory. A program the Python client starts by its bare name,
+  such as `docker`, still goes through the operating system's own search,
+  which on Windows may include the current directory unless
+  `NoDefaultCurrentDirectoryInExePath` is set.
 - **Postgres is never LAN-exposed.** Remote clients only ever reach the
   daemon.
 
