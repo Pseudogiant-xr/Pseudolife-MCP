@@ -120,6 +120,10 @@ def require(env: Mapping[str, str], root: Path) -> None:
     for name, value in env.items():
         if (name.startswith("XDG_") or name in REDIRECTS) and value and not _inside(_resolved(value), root):
             problems.append(f"{name}={value} is outside {root}")
+        # An installer reads an empty redirect as unset, and so writes the
+        # real default (an empty PSEUDOLIFE_SHIM_LAUNCHER: the real user PATH).
+        if name in REDIRECTS and value == "":
+            problems.append(f"{name} is set but empty, which an installer reads as unset")
     if problems:
         raise RealHomeRefused("refusing to start installer code outside a disposable home: " + "; ".join(problems))
 

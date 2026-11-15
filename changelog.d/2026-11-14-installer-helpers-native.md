@@ -15,9 +15,14 @@
   directory, never from the current directory, a relative `PATH` entry or
   the folders Windows also searches by itself (its system directory among
   them), so a `docker.exe` left in a checkout is never started.
-- A first native install checks its flags before the native client is
-  downloaded, so a mistyped flag is refused at once; a rerun downloads it
-  first, because it reads its recorded choices through it.
+- An unattended first native install checks its flags before the native
+  client is downloaded, so a mistyped flag is refused at once. At a
+  terminal the client is downloaded and checked before the first question,
+  so a release that cannot be used is refused before anything is asked; a
+  flag checked after the questions (`--engine`, the client-only flags) is
+  then refused after the download. Unknown flags are refused at once either
+  way. A rerun downloads it first, because it reads its recorded choices
+  through it.
 - The native installer runs these steps only from a staged release that
   carries them: one whose `installer --capability` answers the installer's
   protocol level.
