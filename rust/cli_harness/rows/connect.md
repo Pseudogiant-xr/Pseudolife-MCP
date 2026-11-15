@@ -18,7 +18,7 @@ connect: the shim only runs it after a first frame with
 | `connect URL --client C --token-file ~/... [--read-token]` | `docs/guide/remote-bank.md` 536-541 |
 | `connect URL --yes [--json]` | `move_cli.py` 1642, 1635, 948 |
 | `connect URL --token-file F` | `move_cli.py` 1708 |
-| `connect URL --code CODE` / `--read-code` | `remote-bank.md` 239, 246 |
+| `connect URL --code CODE` / `--read-code` | `remote-bank.md` 239, 393-394 |
 
 Native: the URL first, then `--token-file V`, `--client V`, `--read-token`,
 `--code V`, `--read-code`, `--dry-run`, `--yes`, `--json`, each at most
@@ -26,13 +26,17 @@ once, a value never empty and never starting with `-`, the URL never empty
 and never starting with `-`, and every argument valid Unicode. Help,
 abbreviations, `--opt=value`, `--` and every other shape defer before any
 effect. Pairing (`--code`, `--read-code`) has been native since #1563, and
-Codex's `config.toml` is read and written through Codex's own app-server.
+Codex's `config.toml` is read and written through Codex's own app-server
+(a file without a shim registration is only read as text, to classify it).
 #1568 made the terminal native too: a run with changes to apply at a
 terminal without `--yes` asks `Apply these changes? [y/N]` on stderr,
 `--read-token` and `--read-code` at a terminal read without echo, and a run
 for every client plans the unattended-update schedules it finds
-(`schedule.rs`: one exactly as `update --schedule` writes it is re-created
-against the new URL, keeping its kind and time; any other is a manual row).
+(`schedule.rs`: one exactly as `update --schedule` writes it, of the kind
+`--schedule` writes on this machine, is re-created against the new URL
+keeping its kind and daily time, or is `current` when it already names that
+URL; the daemon's own schedule when the daemon moves to another machine,
+and any other, is a manual row).
 
 ## Exact contract items
 
@@ -165,7 +169,7 @@ every apply case of this row.
 
 ## Deferred before any effect
 
-Nothing is written and no request reaches the daemon before any deferral
+connect writes nothing and no request reaches the daemon before any deferral
 below except the last two items, which follow the unauthenticated
 `GET /health`. Discovery runs first and can itself defer, so by then a
 `--read-code` prompt may have been answered, Codex's app-server may have
@@ -183,7 +187,8 @@ is not exhaustive.
   connection file records, `PSEUDOLIFE_MCP_DAEMON_URL` in this shell, or
   Windows' User- or Machine-scope value.
 - Neither `USERPROFILE` nor `HOME` set; an environment base directory not
-  already in `str(pathlib.Path(...))` form, or a current directory not in
+  already in `str(pathlib.Path(...))` form (`CODEX_HOME` excepted, which is
+  used as given), or a current directory not in
   that form or unreadable; an environment value, path or file name that is
   not valid Unicode; a `--token-file` that cannot be made absolute; a stat
   error pathlib would raise; a read error other than FileNotFoundError on a
@@ -197,8 +202,8 @@ is not exhaustive.
   Ctrl-C listener that cannot be set up.
 - After `GET /health`: a health body with one of the JSON inputs above.
 - After `GET /health`: a redirect urllib would follow and this client does
-  not (an `ftp:` target, or a `Location` that is not text or cannot be
-  resolved).
+  not (an `ftp:` target, or a `Location` or `URI` header that is not text
+  or cannot be resolved).
 
 ## Declared divergences
 
