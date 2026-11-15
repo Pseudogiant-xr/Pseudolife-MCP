@@ -403,3 +403,149 @@ def test_the_staging_folder_is_removed_on_every_exit(tmp_path, ending):
                   extra_env={"TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp)})
     assert "STAGED" in result.stdout, result.stdout + result.stderr
     assert not list(temp.glob("pseudolife-native-*")), list(temp.iterdir())
+
+
+# -- round 4 ------------------------------------------------------------------
+
+@needs_client
+def test_a_question_after_the_install_does_not_stage_the_release_again(tmp_path):
+    # After Install-ShimOnce the staged copy is gone and the installed client
+    # answers; a later question (the passkey, expose or schedule offer) must
+    # not download SHA256SUMS again, nor refuse a half-finished install.
+    body = "\n".join([
+        'if (-not (Install-ShimOnce)) { Write-Host "INSTALL FAILED"; exit 3 }',
+        f"Remove-Item -LiteralPath '{tmp_path / 'release' / 'SHA256SUMS'}'",
+        "Read-NativeBeforeAsking",
+        'Write-Host "ASKED"',
+    ])
+    result = _run(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ASKED" in result.stdout
+    assert "cannot be installed" not in result.stderr
+
+
+@needs_client
+def test_a_refusal_after_the_install_began_does_not_claim_nothing_changed(tmp_path):
+    body = 'if (-not (Install-ShimOnce)) { Write-Host "INSTALL FAILED"; exit 3 }\nStop-NativeInstall "a cause" "A fix."'
+    result = _run(tmp_path, body)
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "a cause" in text]
+    assert "Nothing" not in line and "was changed" not in line
+    assert "part way" in line and "rerun" in line.lower()
+
+
+def _rewrite_sums(tmp_path: Path, separator: str) -> None:
+    _release(tmp_path / "release")
+    digest = hashlib.sha256((tmp_path / "release" / ASSET).read_bytes()).hexdigest()
+    (tmp_path / "release" / "SHA256SUMS").write_text(f"{digest}{separator}{ASSET}\n", encoding="utf-8")
+
+
+@needs_client
+def test_a_binary_mode_checksum_line_is_accepted(tmp_path):
+    _rewrite_sums(tmp_path, " *")
+    result = _run(tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }', release=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OK" in result.stdout
+
+
+@pytest.mark.parametrize("separator", [" ", "\t", "   ", " * "])
+def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
+    _rewrite_sums(tmp_path, separator)
+    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert f"lists {ASSET} 0 times, not once" in result.stderr
+
+
+@pytest.mark.parametrize("value, used", [
+    ("08", "8"), ("09", "9"), ("010", "10"), ("7", "7"), ("00", "30"), ("0", "30"),
+    ("", "30"), ("abc", "30"), ("1.5", "30"), ("-3", "30"), ("123456", "30"),
+])
+def test_the_probe_deadline_is_read_as_a_decimal_number_of_seconds(tmp_path, value, used):
+    result = _run(tmp_path, 'Write-Host "SECONDS=$NativeProbeSeconds"', extra_env={"PSEUDOLIFE_NATIVE_PROBE_SECONDS": value})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"SECONDS={used}" in result.stdout
+    named = [line for line in (result.stdout + result.stderr).splitlines() if "PSEUDOLIFE_NATIVE_PROBE_SECONDS" in line]
+    if value and used == "30":
+        assert named and f"'{value}'" in named[0] and "30 s" in named[0], result.stdout + result.stderr
+    else:
+        assert not named, result.stdout + result.stderr
+
+
+def test_the_refusal_says_how_to_clear_the_variable_in_powershell(tmp_path):
+    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env={"STUB_V0240": "1"})
+    assert result.returncode == 1
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE" in line
+
+
+def test_a_mismatched_archive_refusal_names_only_what_is_kept(tmp_path):
+    result = _run(tmp_path, "Initialize-NativeClient; Write-Host STAGED", digest_override="f" * 64)
+    assert result.returncode == 1
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "was removed" in line
+    assert "the download in" not in line
+    assert "SHA256SUMS in" in line and "kept for a rerun" in line
+
+
+def _whole_repo(tmp_path: Path) -> Path:
+    """A copy of ops/ with this module's release version, for a whole-installer run."""
+    repo = tmp_path / "whole"
+    shutil.copytree(ROOT / "ops", repo / "ops", ignore=shutil.ignore_patterns(".env", "__pycache__", "*.log"))
+    if (ROOT / "examples").is_dir():
+        shutil.copytree(ROOT / "examples", repo / "examples")
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    (repo / "pyproject.toml").write_text(re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{VERSION}"', text, count=1),
+                                         encoding="utf-8")
+    return repo
+
+
+@needs_client
+def test_the_staging_folder_is_gone_when_the_installer_returns_to_an_open_session(tmp_path):
+    # As a user runs it: `ops\install.ps1` at an open pwsh prompt, which stays
+    # open after the script exits. A client-only run stages, then stops at the
+    # daemon health check (exit 1, not a native refusal); the staged copy must
+    # be gone while the session is still open, after each of two runs.
+    from tests.test_installer_existing_upgrade import user_path_unchanged
+
+    repo = _whole_repo(tmp_path)
+    _release(tmp_path / "release")
+    home = tmp_path / "home"
+    home.mkdir()
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    token = tmp_path / "daemon.token"
+    token.write_text("fixture-token-not-real\n", encoding="utf-8")
+    if not WINDOWS:
+        token.chmod(0o600)
+    installer = repo / "ops" / "install.ps1"
+    run = (f"& '{installer}' -ClientOnly -DaemonUrl http://127.0.0.1:9 -TokenFile '{token}' "
+           "-Client claude -ClaudePlugin skip -Instructions skip -NoArt -ClientUpdateSchedule no")
+    command = "; ".join([
+        run, "Write-Host \"FIRST=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
+        run, "Write-Host \"SECOND=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
+        "Write-Host \"SUBSCRIBERS=$(@(Get-EventSubscriber).Count)\"",
+    ])
+    env = {key: value for key, value in os.environ.items() if not key.startswith("PSEUDOLIFE_")}
+    env.update({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "LOCALAPPDATA": str(home / "Local"), "APPDATA": str(home / "Roaming"),
+        "CODEX_HOME": str(home / "codex"), "CLAUDE_CONFIG_DIR": str(home / "claude"),
+        "XDG_CONFIG_HOME": str(home / "config"), "XDG_DATA_HOME": str(home / "data"),
+        "TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp),
+        "NATIVE_CALLS": str(tmp_path / "native-calls"), "STUB_LEVEL": str(LEVEL),
+        "PSEUDOLIFE_SHIM_ENGINE": "native",
+        "PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(tmp_path / "release"),
+        "PSEUDOLIFE_SHIM_RUNTIMES": str(home / "runtimes"),
+        "PSEUDOLIFE_SHIM_LAUNCHER": str(home / "bin" / ("pseudolife-mcp.exe" if WINDOWS else "pseudolife-mcp")),
+        "NO_COLOR": "1", "TERM": "dumb",
+    })
+    with user_path_unchanged(home):
+        result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", command],
+                                capture_output=True, text=True, env=env, timeout=300, stdin=subprocess.DEVNULL)
+    output = result.stdout + result.stderr
+    assert (home / ".pseudolife-mcp" / "downloads" / VERSION / ASSET).is_file(), output
+    # Either run stops after staging with a non-zero exit of its own.
+    assert re.search(r"FIRST=[1-9][0-9]* LEFT=0", output), output
+    assert re.search(r"SECOND=[1-9][0-9]* LEFT=0", output), output
+    assert "SUBSCRIBERS=0" in output, output
