@@ -23,6 +23,8 @@ The real block is tested in ``test_installer_native_client.py`` and
 """
 from __future__ import annotations
 
+from tests.installer_protocol import LEVEL
+
 # The launcher the stub install writes (POSIX shell).
 LAUNCHER_SH = r'''#!/bin/sh
 printf 'launcher|%s\n' "$*" >>"${CALL_LOG:-/dev/null}"
@@ -122,8 +124,8 @@ case "$1" in
 esac
 if [ "$1" = update ] && [ "$2" = --native-capability ]; then echo "pseudolife-mcp native-update-v1"; exit 0; fi
 # The installers' probe of the staged release (ops/install-native.sh, NATIVE_INSTALLER_PROTOCOL).
-if [ "$1" = installer ] && [ "$2" = --capability ]; then echo "pseudolife-mcp installer-protocol 1"; exit 0; fi
-'''
+if [ "$1" = installer ] && [ "$2" = --capability ]; then echo "pseudolife-mcp installer-protocol ${FAKE_INSTALLER_PROTOCOL:-%LEVEL%}"; exit 0; fi
+'''.replace("%LEVEL%", str(LEVEL))
 
 
 def write_release(directory, version: str, launcher_body: str) -> dict[str, str]:

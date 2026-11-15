@@ -44,7 +44,8 @@ def _repo(tmp_path: Path, script: str, stub: str, stub_name: str) -> Path:
 
 
 def _env(tmp_path: Path, engine: str | None) -> dict[str, str]:
-    base = {key: os.environ[key] for key in ("PATH", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP")
+    # Without PATHEXT, pwsh on Windows starts no native command at all.
+    base = {key: os.environ[key] for key in ("PATH", "PATHEXT", "ComSpec", "SystemRoot", "TEMP", "TMP")
             if key in os.environ}
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
@@ -74,7 +75,7 @@ def _sh(tmp_path: Path, engine: str | None, *args: str) -> subprocess.CompletedP
                           capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
 
 
-def _ps_stub() -> str:
+def _ps_stub(ending: str = "exit 7\n") -> str:
     # A native installer with the real one's parameter block, that logs how
     # it was bound: what reaches it is what the real one would receive.
     text = (ROOT / "ops" / "install-native.ps1").read_text(encoding="utf-8").replace("\r\n", "\n") \
@@ -83,13 +84,13 @@ def _ps_stub() -> str:
     return (params
             + "Set-Content -LiteralPath $env:NATIVE_ARGS -Value 'started'\n"
             + "foreach ($key in ($PSBoundParameters.Keys | Sort-Object)) { Add-Content -LiteralPath $env:NATIVE_ARGS -Value \"$key=$($PSBoundParameters[$key])\" }\n"
-            + "exit 7\n")
+            + ending)
 
 
-def _ps(tmp_path: Path, engine: str | None, *args: str) -> subprocess.CompletedProcess[str]:
+def _ps(tmp_path: Path, engine: str | None, *args: str, ending: str = "exit 7\n") -> subprocess.CompletedProcess[str]:
     if PWSH is None:
         pytest.skip("needs pwsh")
-    repo = _repo(tmp_path, "install.ps1", _ps_stub(), "install-native.ps1")
+    repo = _repo(tmp_path, "install.ps1", _ps_stub(ending), "install-native.ps1")
     env = _env(tmp_path, engine)
     return subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), *args],
                           env=env, capture_output=True, text=True, timeout=120, check=False,
@@ -146,6 +147,48 @@ def test_ps_native_hands_every_parameter_to_the_native_installer(tmp_path):
                                       "NoArt=True", "Yes=True"]
 
 
+# A native command that fails along the way (a probe the native installer
+# expects to fail, such as schtasks /Query for a task that is not there)
+# leaves $LASTEXITCODE non-zero; how the native installer ends decides.
+FAILED_PROBE = ("if ($IsWindows) { & (Join-Path $env:SystemRoot 'System32' 'cmd.exe') /c 'exit 3' } "
+                "else { & /bin/sh -c 'exit 3' }\n")
+
+
+@pytest.mark.parametrize("ending, status", [
+    (FAILED_PROBE + "'installed'\n", 0),          # ends normally: success, as when run itself
+    (FAILED_PROBE + "exit 0\n", 0),
+    (FAILED_PROBE + "exit 5\n", 5),
+    ("$ErrorActionPreference = 'Stop'\nthrow 'boom'\n", 1),
+])
+def test_ps_native_exits_as_the_native_installer_run_itself_would(tmp_path, ending, status):
+    proc = _ps(tmp_path, "native", "-NoArt", ending=ending)
+    assert proc.returncode == status, proc.stdout + proc.stderr
+    assert _native_args(tmp_path) == ["started", "NoArt=True"]
+
+
+def test_ps_native_without_the_native_installer_refuses(tmp_path):
+    if PWSH is None:
+        pytest.skip("needs pwsh")
+    repo = _repo(tmp_path, "install.ps1", _ps_stub(), "install-native.ps1")
+    (repo / "ops" / "install-native.ps1").unlink()
+    proc = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), "-NoArt"],
+                          env=_env(tmp_path, "native"), capture_output=True, text=True, timeout=120, check=False,
+                          stdin=subprocess.DEVNULL)
+    assert proc.returncode == 1
+    assert "install-native.ps1" in proc.stderr and "Nothing was changed" in proc.stderr
+
+
+def test_sh_native_without_the_native_installer_refuses(tmp_path):
+    if BASH is None:
+        pytest.skip("needs bash")
+    repo = _repo(tmp_path, "install.sh", SH_STUB, "install-native.sh")
+    (repo / "ops" / "install-native.sh").unlink()
+    proc = subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), "--yes"], env=_env(tmp_path, "native"),
+                          capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
+    assert proc.returncode == 1
+    assert "install-native.sh" in proc.stderr and "Nothing was changed" in proc.stderr
+
+
 @pytest.mark.parametrize("engine", ["rust", "Native", "pip"])
 def test_ps_any_other_engine_is_refused_before_anything_changes(tmp_path, engine):
     proc = _ps(tmp_path, engine, "-ClientOnly", "-DaemonUrl", "http://pl.example.invalid:8765", "-NoArt")
@@ -176,3 +219,19 @@ def test_the_default_installer_installs_the_python_client_and_moves_nothing_to_n
 def test_the_native_installer_is_the_one_that_moves_registrations(script, native):
     text = (ROOT / "ops" / native).read_text(encoding="utf-8")
     assert "migrate-registrations" in text and "shim_runtime.py" not in text
+
+
+@pytest.mark.parametrize("native,line", [
+    ("install-native.sh", 'echo "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set;'),
+    ("install-native.ps1", 'Write-Host "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set;'),
+])
+def test_the_native_installer_says_a_rerun_needs_the_variable(native, line):
+    # A rerun without the variable takes the Python client's path, so every
+    # native run says how to rerun it, once, near its start, and its usage
+    # names the variable.
+    text = (ROOT / "ops" / native).read_text(encoding="utf-8")
+    assert text.count(line) == 1
+    assert text.index(line) < text.index("# >>> extractor modes >>>")
+    usage = text.split("# >>> usage >>>", 1)[1].split("# <<< usage <<<", 1)[0] if "# >>> usage >>>" in text \
+        else text.split("param(", 1)[0]
+    assert "PSEUDOLIFE_SHIM_ENGINE=native" in usage

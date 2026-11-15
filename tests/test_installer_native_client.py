@@ -18,6 +18,8 @@ import tarfile
 
 import pytest
 
+from tests.installer_protocol import LEVEL, PS_LEVEL, RUST_LEVEL
+
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "9.8.7"
@@ -74,7 +76,7 @@ case "$1" in
                 printf '%s\n' "installer: expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop" >&2
                 exit 2
             fi
-            printf '%s\n' "${STUB_CAPABILITY-pseudolife-mcp installer-protocol 1}"
+            printf '%s\n' "${STUB_CAPABILITY-pseudolife-mcp installer-protocol $STUB_LEVEL}"
         elif [ "$2" = migrate-registrations ]; then
             case "$STUB_MOVES" in
                 moved) echo "moved $4 to the native client at $PSEUDOLIFE_SHIM_LAUNCHER (each changed file has a private backup)" ;;
@@ -136,6 +138,7 @@ def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, releas
         "HOME": _p(home),
         "TMPDIR": _p((tmp_path / "tmp")),
         "NATIVE_CALLS": _p((tmp_path / "native-calls")),
+        "STUB_LEVEL": str(LEVEL),
         "FORBIDDEN_CALLS": _p((tmp_path / "forbidden-calls")),
         "PSEUDOLIFE_NATIVE_ARCHIVE_URL": _p(base),
         "PSEUDOLIFE_SHIM_LAUNCHER": _p(launcher),
@@ -217,10 +220,14 @@ def test_a_binary_that_cannot_run_here_refuses_before_install(tmp_path):
 
 @pytest.mark.parametrize("answer", [
     {"STUB_V0240": "1"},                                              # v0.24.0: a usage error
-    {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol 0"},       # an older protocol
+    {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {LEVEL - 1}"},  # an older protocol
     {"STUB_CAPABILITY": ""},                                          # says nothing
     {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol one"},     # not the documented form
-    {"STUB_CAPABILITY": "installer: pseudolife-mcp installer-protocol 1"},
+    {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {LEVEL}\npseudolife-mcp installer-protocol 9"},  # two lines
+    {"STUB_CAPABILITY": "pseudolife-mcp installer-protocol 99999999999999999999"},  # past any level
+    {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol 0{LEVEL}"},  # a leading zero
+    {"STUB_CAPABILITY": f"installer: pseudolife-mcp installer-protocol {LEVEL}"},
+    {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {LEVEL} "},  # trailing space
 ])
 def test_a_release_older_than_this_installer_is_refused_before_anything_changes(tmp_path, answer):
     result = _run(tmp_path, 'native_stage; ensure_shim; echo "REACHED"', env=answer)
@@ -229,8 +236,11 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     # The true cause and the one fix: which release, from which checkout.
     assert f"the native client {VERSION} predates this installer" in line
-    assert "installer --capability" in line and "installer-protocol 1" in line
-    assert "git checkout v" in line and "PSEUDOLIFE_SHIM_ENGINE" in line
+    assert "installer --capability" in line and f"installer-protocol {LEVEL} or newer" in line
+    # The one fix that holds until a release carries this protocol: an
+    # older tag's installer does not know PSEUDOLIFE_SHIM_ENGINE=native.
+    assert "PSEUDOLIFE_NATIVE_ARCHIVE_URL" in line and "release_assets.py package" in line
+    assert "git checkout" not in line
     assert line.endswith("Nothing was changed.")
     calls = _calls(tmp_path)
     assert "installer --capability" in calls
@@ -238,7 +248,7 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
     assert not (tmp_path / "home/share/pseudolife-mcp/bin/pseudolife-mcp").exists()
 
 
-@pytest.mark.parametrize("level", ["1", "2", "17"])
+@pytest.mark.parametrize("level", [str(LEVEL), str(LEVEL + 1), "17"])
 def test_a_release_with_this_installers_protocol_or_newer_installs(tmp_path, level):
     result = _run(tmp_path, 'native_stage; ensure_shim; echo "OK=$SHIM_OK"',
                   env={"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {level}"})
@@ -313,3 +323,35 @@ def test_an_existing_state_directory_keeps_its_mode(tmp_path):
     assert result.returncode == 0, result.stderr
     assert (state.stat().st_mode & 0o777) == 0o755
     assert ((state / "downloads").stat().st_mode & 0o777) == 0o700
+
+
+def _native_block(name: str) -> str:
+    text = (ROOT / "ops/install-native.sh").read_text(encoding="utf-8")
+    start = text.index(f"{name}() {{")
+    return text[start:text.index("\n}\n", start) + 3]
+
+
+def test_the_native_install_needs_no_pip_to_mint_the_token(tmp_path):
+    # The native client replaces the pip / pipx shim install, so a Python
+    # without pip (or a PEP 668 externally managed one) still runs the token
+    # helper: only the interpreter is needed.
+    python = tmp_path / "bin" / "python3"
+    python.parent.mkdir()
+    python.write_text("#!/bin/sh\n"
+                      "case \"$2\" in *'import pip'*|*'EXTERNALLY-MANAGED'*) exit 1 ;; esac\n"
+                      "exit 0\n", encoding="utf-8", newline="\n")
+    python.chmod(0o755)
+    script = "\n".join([
+        _native_block("installer_python"),
+        _native_block("shim_tooling_ready"),
+        'if shim_tooling_ready; then echo READY; else echo NOT-READY; fi',
+    ])
+    result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, timeout=60,
+                            env={"PATH": f"{_p(python.parent)}:/usr/bin:/bin", "HOME": _p(tmp_path)})
+    assert result.stdout.strip() == "READY", result.stdout + result.stderr
+
+
+def test_the_installers_and_the_binary_name_one_protocol_level():
+    # The level the installers require is the level this checkout's binary
+    # answers: raising one without the others refuses every release.
+    assert LEVEL == PS_LEVEL == RUST_LEVEL
