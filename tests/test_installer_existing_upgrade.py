@@ -56,14 +56,33 @@ def _fixture_env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
+def _inside(entry: str, home: str) -> bool:
+    """Whether a user PATH entry names ``home`` or a path under it, in
+    Windows terms (case-insensitive, either separator, %VARS% expanded)."""
+    import ntpath
+
+    def norm(path: str) -> str:
+        return ntpath.normcase(ntpath.normpath(ntpath.expandvars(path)))
+
+    if not entry.strip():
+        return False
+    entry, home = norm(entry), norm(home)
+    return entry == home or entry.startswith(home.rstrip("\\") + "\\")
+
+
 @contextlib.contextmanager
-def user_path_unchanged(broadcast=None):
-    """On Windows, fail when the block changed the real user PATH
-    (HKCU\\Environment Path), put the value back as it was and announce the
-    change again (WM_SETTINGCHANGE, as the write did), so Explorer and the
-    terminals it starts drop the leaked entry; elsewhere a no-op. A
-    whole-installer test wraps its run in it, because a fixture home does
-    not contain the registry."""
+def user_path_unchanged(fixture_home, broadcast=None):
+    """On Windows, fail when the real user PATH (HKCU\\Environment Path)
+    changed during the block; elsewhere a no-op. A whole-installer test wraps
+    its run in it, because a fixture home does not contain the registry.
+
+    It changes the value back only on the leak's own signature: the new value
+    is the old one plus entries inside ``fixture_home``, none removed. Then it
+    removes exactly those entries from the value as it is now, announces the
+    change (WM_SETTINGCHANGE, as the leaking write did) and fails. Any other
+    difference may be someone else's legitimate change on a shared machine
+    (another session, a real installer run): it is left as it is, and the test
+    fails naming the entries added and removed, so a person can look."""
     if os.name != "nt":
         yield
         return
@@ -71,6 +90,7 @@ def user_path_unchanged(broadcast=None):
 
     if broadcast is None:
         from pseudolife_memory.runtimes import _broadcast_environment_change as broadcast
+    home = str(fixture_home)
 
     def read():
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
@@ -79,20 +99,41 @@ def user_path_unchanged(broadcast=None):
             except FileNotFoundError:
                 return None
 
+    def entries(value):
+        return [] if value is None else str(value[0]).split(";")
+
+    def difference(old, new):
+        remaining = list(old)
+        added = []
+        for entry in new:
+            if entry in remaining:
+                remaining.remove(entry)
+            else:
+                added.append(entry)
+        return added, remaining   # remaining: entries the new value lost
+
     before = read()
     try:
         yield
     finally:
         after = read()
         if after != before:
+            added, removed = difference(entries(before), entries(after))
+            leak = (bool(added) and not removed and all(_inside(entry, home) for entry in added)
+                    and (before is None or after[1] == before[1]))
+            if not leak:
+                raise AssertionError(
+                    "the real user PATH changed during the test in a way this test did not cause "
+                    f"(nothing was changed back): added {added!r}, removed {removed!r}")
+            current = read()   # the value as it is now, which may have moved since
+            kept = [entry for entry in entries(current) if entry not in added]
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
-                if before is None:
+                if before is None and not [entry for entry in kept if entry]:
                     winreg.DeleteValue(key, "Path")
                 else:
-                    winreg.SetValueEx(key, "Path", 0, before[1], before[0])
+                    winreg.SetValueEx(key, "Path", 0, (current or after)[1], ";".join(kept))
             broadcast()
-            raise AssertionError(f"the test changed the real user PATH (restored): {before!r} -> {after!r}")
-
+            raise AssertionError(f"the test put {added!r} on the real user PATH; removed them again")
 
 def _bash_fixture_path(
     bash: str, path: Path, env: dict[str, str],
@@ -882,7 +923,7 @@ def test_the_client_only_whole_installer_harnesses_use_the_fixture_environment()
         assert "self.env = _fixture_env(" in source, name
         start = source.index("def test_a_client_only_install_wires_clients_to_the_remote_daemon(")
         body = source[start:source.find("\ndef ", start + 1)]
-        assert "with user_path_unchanged():" in body, name
+        assert "with user_path_unchanged(" in body, name
 
 
 class _FakeWinreg:
@@ -910,20 +951,85 @@ class _FakeWinreg:
         del self.values[name]
 
 
-@pytest.mark.parametrize("before", [("C:\\fixture;%USERPROFILE%\\x", 2), None], ids=["set", "absent"])
-def test_the_user_path_guard_fails_and_restores_a_changed_path(monkeypatch, before):
-    # Never the real registry: a fake winreg stands in, and os.name reads nt.
+HOME = "C:\\Users\\<user>\\AppData\\Local\\Temp\\pytest-1\\env\\home"
+BEFORE = ("C:\\tools;%USERPROFILE%\\.local\\bin", 2)
+
+
+def _guarded(monkeypatch, before):
+    """A fake winreg (never the real registry), os.name nt, and a recorder
+    of the guard's broadcasts."""
     import sys
     fake = _FakeWinreg(before)
     monkeypatch.setitem(sys.modules, "winreg", fake)
     monkeypatch.setattr(os, "name", "nt")
     announced = []
-    with user_path_unchanged(broadcast=lambda: announced.append(1)):
+    return fake, announced, lambda: user_path_unchanged(HOME, broadcast=lambda: announced.append(1))
+
+
+@pytest.mark.parametrize("before", [BEFORE, None], ids=["set", "absent"])
+def test_the_user_path_guard_takes_back_only_the_tests_own_entries(monkeypatch, before):
+    fake, announced, guard = _guarded(monkeypatch, before)
+    with guard():
         pass
     assert announced == []
-    with pytest.raises(AssertionError, match="changed the real user PATH"):
-        with user_path_unchanged(broadcast=lambda: announced.append(1)):
-            fake.values["Path"] = ("C:\\leaked", 2)
+    leaked = HOME + "\\shim\\bin"
+    with pytest.raises(AssertionError, match="put .* on the real user PATH; removed them again"):
+        with guard():
+            # What ensure_user_path writes: the directory first, the rest kept.
+            fake.values["Path"] = (f"{leaked};{before[0]}" if before else leaked, 2)
     assert fake.values.get("Path") == before
-    # Codex review of faea97a1a: the leak was broadcast, so the restore is too.
+    # Codex review of faea97a1a: the leak was announced, so the restore is too.
     assert announced == [1]
+
+
+def test_the_user_path_guard_leaves_someone_elses_change_alone(monkeypatch):
+    # The conductor's review of d4daf4358: on a shared PC another session or
+    # a real installer may change the user PATH meanwhile. That is not
+    # undone; the test fails naming it.
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = ("C:\\someone-else\\bin;" + BEFORE[0], 2)
+    with pytest.raises(AssertionError, match="in a way this test did not cause") as raised:
+        with guard():
+            fake.values["Path"] = changed
+    assert "C:\\\\someone-else\\\\bin" in str(raised.value)
+    assert fake.values["Path"] == changed and announced == []
+
+
+@pytest.mark.parametrize("change", ["mixed", "removed", "type"])
+def test_the_user_path_guard_touches_nothing_unless_the_change_is_only_the_leak(monkeypatch, change):
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = {"mixed": (HOME + "\\shim\\bin;C:\\someone-else\\bin;" + BEFORE[0], 2),
+               "removed": ("C:\\tools", 2),
+               "type": (BEFORE[0], 1)}[change]
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_the_user_path_guard_keeps_a_later_unrelated_change_when_it_restores(monkeypatch):
+    # The leak, then someone else's entry before the guard rereads: only the
+    # test's own entry goes.
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    leaked = HOME + "\\shim\\bin"
+    real_read = fake.QueryValueEx
+    reads = []
+
+    def query(key, name):
+        reads.append(name)
+        if len(reads) == 3:   # the reread just before the write
+            fake.values["Path"] = ("C:\\later\\bin;" + leaked + ";" + BEFORE[0], 2)
+        return real_read(key, name)
+
+    fake.QueryValueEx = query
+    with pytest.raises(AssertionError, match="removed them again"):
+        with guard():
+            fake.values["Path"] = (leaked + ";" + BEFORE[0], 2)
+    assert fake.values["Path"] == ("C:\\later\\bin;" + BEFORE[0], 2) and announced == [1]
+
+
+def test_entries_inside_the_fixture_home_are_matched_as_windows_paths():
+    assert _inside(HOME.upper() + "/shim/bin", HOME)
+    assert _inside(HOME, HOME)
+    assert not _inside(HOME + "-other\\bin", HOME)
+    assert not _inside("C:\\tools", HOME) and not _inside("", HOME)

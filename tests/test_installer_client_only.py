@@ -1335,7 +1335,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     settings_path.write_text(json.dumps({"env": {
         "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/local/claude-code.token",
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}}), encoding="utf-8")
-    with user_path_unchanged():
+    with user_path_unchanged(shell.home):
         proc = shell.run(
             f"exec '{shell.path(repo / 'ops' / 'install.sh')}' --client-only "
             f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "

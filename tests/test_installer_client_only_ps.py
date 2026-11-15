@@ -1142,7 +1142,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
                 "PYTHONPATH": str(ROOT), "NO_COLOR": "1", "TERM": "dumb",
                 # The installer's own environment carries an older credential.
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
-    with user_path_unchanged():
+    with user_path_unchanged(ps.home):
         proc = subprocess.run(
             [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"),
              "-ClientOnly", "-DaemonUrl", daemon_server, "-TokenFile", str(token),
