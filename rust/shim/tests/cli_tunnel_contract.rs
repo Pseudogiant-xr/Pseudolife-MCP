@@ -387,20 +387,19 @@ mod seeded {
             &[],
             "finish tunnel setup before requesting cloud verification\n",
         );
-        let output = run(&home, &["update", "--profile-dir", &dir], &[]);
-        assert_eq!(output.status.code(), Some(0));
+        // A ready profile is not running with or without its key; only an
+        // unfinished one is pending.
+        let not_running = "{\"state\": \"current\", \"needs_attention\": false, \"detail\": \"2 saved tunnel profiles checked; local client registrations preserved\", \"profiles\": [{\"profile\": \"alpha\", \"state\": \"pending\"}, {\"profile\": \"dot\", \"state\": \"not-running\", \"running\": false}]}\n";
         assert_eq!(
-            String::from_utf8(output.stdout).unwrap(),
-            "{\"state\": \"current\", \"needs_attention\": false, \"detail\": \"2 saved tunnel profiles checked; local client registrations preserved\", \"profiles\": [{\"profile\": \"alpha\", \"state\": \"pending\"}, {\"profile\": \"dot\", \"state\": \"pending\"}]}\n"
+            answered(&home, &["update", "--profile-dir", &dir]),
+            not_running
         );
         private(&home.path("tunnels/dot.key"), b"PLAIN\0fixture-tunnel-key");
         assert_refused(&home, &["verify", "--profile-dir", &dir], &[], UNAVAILABLE);
-        // A ready profile with its key and no record: not running, never a
-        // deferral.
-        let output = answered(&home, &["update", "--profile-dir", &dir]);
+        // With its key and no record: still not running, never a deferral.
         assert_eq!(
-            output,
-            "{\"state\": \"current\", \"needs_attention\": false, \"detail\": \"2 saved tunnel profiles checked; local client registrations preserved\", \"profiles\": [{\"profile\": \"alpha\", \"state\": \"pending\"}, {\"profile\": \"dot\", \"state\": \"not-running\", \"running\": false}]}\n"
+            answered(&home, &["update", "--profile-dir", &dir]),
+            not_running
         );
         private(&home.path("tunnels/dot.process.json"), b"{}");
         assert_deferred(&home, &["verify", "--profile-dir", &dir], &[]);

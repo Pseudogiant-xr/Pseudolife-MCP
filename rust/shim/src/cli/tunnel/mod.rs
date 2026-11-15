@@ -1008,7 +1008,8 @@ mod tests {
     #[test]
     fn update_names_each_profile_it_cannot_read_and_still_answers() {
         let token = |store: &Store| serde_json::to_string(&store.0.join("token")).unwrap();
-        let shapes: Vec<(&str, Box<dyn Fn(&Store) -> Vec<u8>>, &str)> = vec![
+        type Shape = (&'static str, Box<dyn Fn(&Store) -> Vec<u8>>, &'static str);
+        let shapes: Vec<Shape> = vec![
             (
                 "seven-digit fraction",
                 Box::new(|s| {

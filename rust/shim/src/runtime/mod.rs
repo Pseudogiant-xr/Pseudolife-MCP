@@ -21,8 +21,10 @@ pub use install::{install_archive, install_binary, install_source, target_triple
 pub use launch::maybe_launch;
 #[cfg(windows)]
 pub(crate) use launch::windows_job;
+#[cfg(test)]
+pub(crate) use prune::record_keeps_runtime;
+pub(crate) use prune::record_processes;
 pub use prune::{Evidence, Process, collect_evidence, remove_unused};
-pub(crate) use prune::{record_keeps_runtime, record_processes};
 
 pub const MARKER: &str = "runtime.json";
 pub const BINARY: &str = if cfg!(windows) {
