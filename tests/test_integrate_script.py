@@ -3931,3 +3931,154 @@ def test_an_open_listing_just_under_its_limit_builds(world, capsys, monkeypatch)
 
     assert _build() == 0, capsys.readouterr()
     assert "merged #10 " in capsys.readouterr().out
+
+
+# --- the dry run names what would refuse a waiting member once it is ready ---
+
+_FAILING = [{"status": "COMPLETED", "conclusion": "FAILURE"}]
+
+
+def test_a_waiting_member_shows_its_freeze_refusal_too(world, capsys):
+    # The conductor's report: a pending replay printed only "replay
+    # pending" and hid the refusals that followed it for an hour.
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "unruled\n"})
+    world.gh.add(10, sha10, statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "#10 CI on its head is failing" in out, out
+    assert "#10, once ready: Python is frozen since 14 November 2026" in out
+    assert out.count("Python is frozen") == 1      # the own diff and the merge agree: said once
+
+
+def test_a_waiting_member_beside_a_batch_shows_its_budget_refusal(world, capsys, monkeypatch):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    sha12 = world.pr(12, {"d.txt": "d\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+    world.gh.add(12, sha12, statusCheckRollup=_FAILING)
+
+    def budget(base, m):
+        if m.sha == sha12:
+            raise ValueError("ci.yml/test-lite-linux, ci.yml/guards changed without a reviewed "
+                             "cost reason; run ci_budget.py accept for each")
+        return []
+
+    monkeypatch.setattr(integrate, "_budget_member_evidence", budget)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "merged #11 " in out and "merged #12 " not in out, out
+    assert ("#12, once ready: CI budget metadata refused: ci.yml/test-lite-linux, ci.yml/guards "
+            "changed without a reviewed cost reason") in out
+    assert "#10, once ready" not in out and "#11, once ready" not in out
+
+
+def test_a_clean_waiting_member_is_said_to_have_nothing_else(world, capsys):
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    world.gh.add(10, sha10, statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    assert "#10, once ready: nothing else refuses it" in capsys.readouterr().out
+
+
+def test_a_waiting_member_shows_its_conflict_with_master(world, capsys):
+    sha10 = world.pr(10, {"a.txt": "one\nTWO\nthree\n"})
+    world.advance_master({"a.txt": "one\nzwei\nthree\n"})
+    world.gh.add(10, sha10, statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    assert "#10, once ready: its merge onto master conflicts in a.txt" in capsys.readouterr().out
+
+
+def test_a_waiting_member_carrying_a_refused_parent_says_so(world, capsys):
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, statusCheckRollup=_FAILING)
+    world.gh.add(11, sha11, labels=[{"name": "freeze-exception"}], statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "#11, once ready: its head carries #10's change to the frozen Python package" in out, out
+
+
+def test_a_waiting_head_that_moved_is_said_and_the_build_stands(world, capsys, monkeypatch):
+    # Both reviews: the report ran the budget check on a head the checkout
+    # never fetched, and its Refusal ended a valid build with exit 2.
+    sha10 = world.pr(10, {"b.txt": "b\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"})
+    world.gh.add(10, sha10)
+    world.gh.add(11, sha11)
+    world.gh.add(12, "f" * 40, statusCheckRollup=_FAILING)
+
+    def budget(base, m):
+        if m.sha == "f" * 40:
+            raise integrate.Refusal("`git merge-base` failed (128): Not a valid commit name")
+        return []
+
+    monkeypatch.setattr(integrate, "_budget_member_evidence", budget)
+
+    assert _build() == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "merged #10 " in out and "merged #11 " in out, out
+    assert "#12, once ready: its listed head ffffffffffff is not in this checkout" in out
+    assert integrate.Plan.load(f"integrate/{DATE}-batch-1") is not None
+
+
+def test_a_waiting_child_of_a_labelled_parent_is_not_told_to_rewrite_in_rust(world, capsys):
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"c.txt": "c\n"}, base="pr-10")
+    world.gh.add(10, sha10, labels=[{"name": "freeze-exception"}], statusCheckRollup=_FAILING)
+    world.gh.add(11, sha11, statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "#11, once ready: its own change against master holds #10's labelled change" in out, out
+    assert "make the change in Rust" not in out
+    assert "#10, once ready: nothing else refuses it" in out
+
+
+def test_a_waiting_member_carrying_a_refused_parent_and_its_own_change_names_both(world, capsys):
+    sha10 = world.pr(10, {"pseudolife_memory/core.py": "parent\n"})
+    sha11 = world.pr(11, {"pseudolife_memory/other.py": "child\n"}, base="pr-10")
+    world.gh.history.append({"number": 10, "state": "OPEN", "headRefName": "pr-10", "headRefOid": sha10,
+                             "labels": [], "baseRefName": "master"})
+    world.gh.add(11, sha11, statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    line = next(line for line in out.splitlines() if line.startswith("  #11, once ready:"))
+    assert "Python is frozen" in line and "carries #10's change" in line, line
+
+
+def test_a_budget_only_conflict_is_not_reported_as_one(world, capsys):
+    world.advance_master({integrate.CI_BUDGET: '{"a": 1}\n'})
+    sha10 = world.pr(10, {integrate.CI_BUDGET: '{"a": 2}\n'})
+    world.advance_master({integrate.CI_BUDGET: '{"a": 3}\n'})
+    world.gh.add(10, sha10, statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "conflicts in" not in out and "#10, once ready:" in out, out
+
+
+def test_a_waiting_release_cut_shows_its_unfolded_fragments(world, capsys):
+    world.advance_master({"pyproject.toml": _cut("0.19.0")})
+    sha10 = _fold_cut(world, 10, "0.19.1")
+    world.advance_master({FRAGMENT_A: "### Added (a)\n"})
+    world.gh.add(10, sha10, statusCheckRollup=_FAILING)
+
+    assert _build("--dry-run") == 0, capsys.readouterr()
+
+    out = capsys.readouterr().out
+    assert "#10, once ready: it is a release cut, but merging it onto master leaves 1 changelog fragment" in out, out
