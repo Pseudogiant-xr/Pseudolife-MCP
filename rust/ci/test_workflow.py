@@ -51,7 +51,6 @@ PARITY_CHECKS = {
     "Graph store golden harness": "cli-store",
     "Daemon body admission golden": "cli-store",
     "Daemon security admission golden": "cli-store",
-    "Daemon security live checks without a Rust test": "cli-store",
     "Daemon resident startup parity": "cli-startup",
     "Daemon resident startup parity part 2": "cli-startup",
 }
@@ -61,7 +60,9 @@ RETIRED_STEPS = ("Bind the event-selected Python oracle", "Run every eval harnes
                  "CLI differential harness live arms", "Daemon MCP live parity and controls",
                  "Run unchanged candidates and differential judges", "Ported rows and daemon controls",
                  "Prepare selected package metadata for the Rust identity contract",
-                 "Record the Linux test_login golden while it is absent")
+                 "Record the Linux test_login golden while it is absent",
+                 # Left on 16 November 2026, once Rust tests held all 69 cases.
+                 "Daemon security live checks without a Rust test", "Download debug bind fixture")
 RETIRED_JOBS = ("frozen-probes", "parity-live", "body-evidence", "capture-windows")
 # Parity uploads carry the lane prefix: empty on hosted, set by parity-selfhosted.
 ARTIFACT_PREFIX = "${{ env.PARITY_ARTIFACT_PREFIX }}"
@@ -292,14 +293,6 @@ def check_executable_coverage(jobs):
     require_command(security, ("python", "rust/daemon/harness/run.py", "golden"),
                     ("--rust-bin", "$candidate", "--only", "--out") + security_rows, ("--record",))
     assert not any(words[0] == "cargo" for words in security)
-    # The security properties no Rust test asserts yet keep their live
-    # comparison (rust/ci/inventory.py LIVE_SECURITY_EXCEPTIONS).
-    kept = commands(parity["Daemon security live checks without a Rust test"]["run"])
-    require_command(kept, ("python", "rust/daemon/harness/run.py", "live"),
-                    ("--rust-bin", "$candidate", "--only", "security-refusals", "--out"), ("--record", "--no-refusals"))
-    require_command(kept, ("python", "rust/daemon/harness/run.py", "live"),
-                    ("--rust-bin", "$bindFixture", "--only", "security-remote-open", "security-remote-auth", "--out"),
-                    ("--record",))
     override = commands(rust["Daemon override build configurations"]["run"])
     for release in (False, True):
         required = ("--locked", "-p", "pseudolife-daemon", "mutants::tests::loopback_bind_override_is_absent_from_production_build", "--exact")
@@ -395,8 +388,9 @@ def test_shards_cover_both_systems_and_build_once():
                              if step.get("name") == "Daemon override build configurations"))
     require_command(override, ("cargo", "+1.94.0", "build"),
                     ("--locked", "-p", "pseudolife-daemon", "--features", "mutants"), ("--release",))
-    # The fixtures job builds the bind fixture with the override step's
-    # command; the Rust job keeps building it as part of that check.
+    # The Rust job keeps the mutants dev build as part of that check; the
+    # fixtures job's copy of it (the bind fixture) left with the live
+    # security checks, its only consumer.
     uploads = [step for step in rust_steps if step.get("uses") == "actions/upload-artifact@v4"]
     assert len(uploads) == 1
     assert uploads[0]["name"] == "Retain ordinary PR parity precheck case IDs"
@@ -407,19 +401,14 @@ def test_shards_cover_both_systems_and_build_once():
     assert fixtures["strategy"]["fail-fast"] is False
     assert fixtures["name"] == "Fixtures / ${{ matrix.os }}"
     fixture_steps = {step.get("name"): step for step in fixtures["steps"]}
-    require_command(commands(fixture_steps["Build the debug bind fixture"]["run"]), ("cargo", "+1.94.0", "build"),
-                    ("--locked", "-p", "pseudolife-daemon", "--features", "mutants"), ("--release",))
     require_command(commands(fixture_steps["Build the daemon storage test executable"]["run"]),
                     ("python", "rust/daemon/harness/schema_ci.py", "--build-only"), ("--test-bin-out",))
-    produced = fixture_steps["Retain debug bind fixture"]
-    consumed = next(step for step in jobs["parity-checks"]["steps"]
-                    if step.get("name") == "Download debug bind fixture")
-    assert produced["with"]["name"] == consumed["with"]["name"] == "daemon-bind-fixture-${{ runner.os }}"
-    assert produced["with"]["if-no-files-found"] == "error"
-    assert "rust/target/debug/pseudolife-daemon" in produced["with"]["path"].splitlines()
-    # Only the kept live security checks bind with it since the freeze.
-    assert consumed["if"] == "matrix.suite == 'cli-store'"
-    assert consumed["with"]["path"] == "rust/target/debug"
+    # No job builds, keeps or fetches the debug bind fixture any more: no
+    # step names its artifact, and outside the Rust job (whose PR precheck
+    # runs its own debug build) none reads or writes rust/target/debug.
+    assert not [(name, step.get("name")) for name, job in jobs.items() for step in job.get("steps", [])
+                if "daemon-bind-fixture" in json.dumps(step)
+                or ("rust/target/debug" in json.dumps(step) and name != "rust")]
     assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == PARITY_SUITES
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
@@ -1195,9 +1184,6 @@ def test_coverage_contract_allows_additions(monkeypatch, name, old, new):
     ("Daemon security admission golden", "security-terminal-byte", ""),
     ("Daemon security admission golden", "run.py golden", "run.py live"),
     ("Daemon security admission golden", "rust/daemon/harness/test_security_cases.py", ""),
-    ("Daemon security live checks without a Rust test", "security-refusals", ""),
-    ("Daemon security live checks without a Rust test", "security-remote-auth", ""),
-    ("Daemon security live checks without a Rust test", "$bindFixture --only", "$candidate --only"),
     ("Daemon body admission golden", "body-text-window", ""),
     ("Daemon body admission golden", "run.py golden", "run.py mutants"),
     ("Daemon static HTTP golden", "static-root-link", ""),
