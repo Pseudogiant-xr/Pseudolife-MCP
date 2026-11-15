@@ -267,8 +267,8 @@ ask it `installer --capability`. It must answer exactly `pseudolife-mcp
 installer-protocol <N>` with N at least the installer's level
 (`NATIVE_INSTALLER_PROTOCOL`, the binary's `INSTALLER_PROTOCOL`), because the
 installer runs that release's `installer` steps; a release older than the
-installer (0.24.0 answers with a usage error) is refused, naming the release
-tag checkout to use instead.
+installer (0.24.0 answers with a usage error) is refused, naming the fix:
+PSEUDOLIFE_NATIVE_ARCHIVE_URL pointed at archives built from this checkout.
 Any failure refuses with its cause and fix and nothing changed; there is no
 fallback to a Python client. The shim step then runs that staged binary's
 `runtime install` with the verified files and registers every client

@@ -1083,7 +1083,9 @@ function Initialize-NativeClient {
         }
     }
     $downloads = Join-Path (Join-Path (Join-Path $HOME ".pseudolife-mcp") "downloads") $script:nativeVersion
-    New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+    # A folder that could not be made is the cause, not the download after it.
+    try { New-Item -ItemType Directory -Force -Path $downloads -ErrorAction Stop | Out-Null }
+    catch { Stop-NativeInstall "the download folder $downloads could not be made ($($_.Exception.Message))" "Check that $(Join-Path $HOME '.pseudolife-mcp') is a folder you can write (free space, permissions, or a file in its place) and rerun." }
     $script:nativeSums = Join-Path $downloads "SHA256SUMS"
     $script:nativeArchive = Join-Path $downloads $name
     $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums

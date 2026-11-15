@@ -1146,6 +1146,10 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
         [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
     done
+    # A folder that could not be made is the cause, not the download after it.
+    if [ ! -d "$native_dir" ] || [ ! -w "$native_dir" ]; then
+        native_refuse "the download folder $native_dir could not be made or written" "Check that $HOME/.pseudolife-mcp is a folder you can write (free space, permissions, or a file in its place) and rerun."
+    fi
     NATIVE_SUMS="$native_dir/SHA256SUMS"
     NATIVE_ARCHIVE="$native_dir/$native_name"
     native_sums_status=0
