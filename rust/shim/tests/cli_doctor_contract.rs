@@ -557,9 +557,10 @@ impl Drop for RawDaemon {
 }
 
 #[test]
-fn a_maintainer_refusal_whose_body_never_arrives_defers() {
+fn a_maintainer_refusal_whose_body_never_arrives_is_not_checked() {
     // Python's exc.read(65536) runs inside `except HTTPError`: a timeout
-    // there escapes maintainer_probe and doctor ends in a traceback.
+    // there escapes maintainer_probe and doctor ends in a traceback. The
+    // native doctor names the probe and reports the rest.
     let daemon = RawDaemon::start(|path| {
         match path {
         "/api/hook/coordination-start" => (
@@ -585,17 +586,26 @@ fn a_maintainer_refusal_whose_body_never_arrives_defers() {
         .args(["--timeout", "1"])
         .output()
         .unwrap();
-    assert_deferred(&output);
+    let map = report(&output);
+    assert_eq!(map["board"], json!("on - token present, principal allowed"));
+    assert_eq!(
+        map["maintainer_passkeys"],
+        json!({"state": "not_checked",
+               "line": "not checked - the daemon's maintainer answer did not arrive in full"})
+    );
+    // The 404 /health is no health answer: the daemon is unavailable.
+    assert_eq!(map["error"], json!("DaemonUnavailable"));
+    assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         *daemon.paths.lock().unwrap(),
-        ["/api/hook/coordination-start", "/api/maintainer"]
+        ["/api/hook/coordination-start", "/api/maintainer", "/health"]
     );
     assert_eq!(tree(&home.0), before);
 }
 
 #[test]
-fn a_health_redirect_to_ftp_defers() {
-    // urllib would follow it through its FTP handler.
+fn a_health_redirect_to_ftp_is_an_unrecognized_daemon() {
+    // urllib would follow it through its FTP handler; no daemon does.
     let daemon = RawDaemon::start(|_| {
         (
             b"HTTP/1.1 302 Found\r\nLocation: ftp://example.com/health\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -605,7 +615,11 @@ fn a_health_redirect_to_ftp_defers() {
     });
     let home = Home::new();
     let output = diagnose(&home, &daemon.url).output().unwrap();
-    assert_deferred(&output);
+    let map = report(&output);
+    assert_eq!(map["daemon_status"], json!("unrecognized"));
+    assert_eq!(map["error"], json!("DaemonUnrecognized"));
+    assert!(map["wake"].get("codex").is_some());
+    assert_eq!(output.status.code(), Some(1));
     assert_eq!(*daemon.paths.lock().unwrap(), ["/health"]);
 }
 
@@ -623,7 +637,9 @@ type Prepare = fn(&Home, &mut Command);
 
 #[test]
 fn shapes_beyond_the_port_defer_before_any_request() {
-    let cases: [(&str, Prepare); 13] = [
+    // Only argument shapes still defer: an explicit --agent-state path the
+    // native resolver does not decide, and timeouts past the cap.
+    let cases: [(&str, Prepare); 3] = [
         ("saved instance path through ..", |home, command| {
             std::fs::create_dir_all(home.0.join("x")).unwrap();
             std::fs::write(home.0.join("state.json"), b"{}").unwrap();
@@ -631,36 +647,135 @@ fn shapes_beyond_the_port_defer_before_any_request() {
                 .arg("--agent-state")
                 .arg(home.0.join("x").join("..").join("state.json"));
         }),
-        ("saved tunnels", |home, _| {
-            std::fs::create_dir_all(home.0.join(".pseudolife-mcp").join("tunnel")).unwrap();
-        }),
-        ("proxy", |_, command| {
-            command.env("HTTP_PROXY", "http://127.0.0.1:3128");
-        }),
-        ("invalid daemon url", |_, command| {
-            command.env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:1/path");
-        }),
-        ("unusable token file", |home, command| {
-            command.env("PSEUDOLIFE_MCP_TOKEN_FILE", home.0.join("absent-token"));
-        }),
-        ("token outside Latin-1", |_, command| {
-            command.env("PSEUDOLIFE_MCP_TOKEN", "token-\u{4e00}");
-        }),
-        (
-            "Latin-1 token the shim's httpx cannot send",
-            |_, command| {
-                command.env("PSEUDOLIFE_MCP_TOKEN", "fixture-t\u{f6}k");
-            },
-        ),
-        ("Python's int digit limit changed", |_, command| {
-            command.env("PYTHONINTMAXSTRDIGITS", "0");
-        }),
         ("timeout past the cap", |_, command| {
             command.args(["--timeout", "100000000000000000000"]);
         }),
         ("timeout just past the cap", |_, command| {
             command.args(["--timeout", "1000000.5"]);
         }),
+    ];
+    for (name, prepare) in cases {
+        let home = Home::new();
+        let fixture = Fixture::start();
+        let mut command = diagnose(&home, &fixture.url);
+        prepare(&home, &mut command);
+        let before = tree(&home.0);
+        let output = command.output().unwrap();
+        assert_deferred(&output);
+        assert!(
+            fixture.records.lock().unwrap().is_empty(),
+            "{name}: requested"
+        );
+        assert_eq!(tree(&home.0), before, "{name}: home changed");
+    }
+}
+
+#[test]
+fn a_health_answer_that_is_no_daemon_report_is_named_before_the_handshake() {
+    for health in ["[1, 2]".to_owned(), json!({"status": 7}).to_string()] {
+        let home = Home::new();
+        let fixture = Fixture::start_with(Setup {
+            health: vec![Reply::Http(200, health)],
+            ..Setup::default()
+        });
+        let before = tree(&home.0);
+        let output = diagnose(&home, &fixture.url).output().unwrap();
+        let map = report(&output);
+        assert_eq!(map["daemon_status"], json!("unrecognized"));
+        assert_eq!(map["error"], json!("DaemonUnrecognized"));
+        assert!(
+            map["recovery"]
+                .as_str()
+                .unwrap()
+                .contains("PSEUDOLIFE_MCP_DAEMON_URL")
+        );
+        assert!(map["wake"].get("claude_code").is_some());
+        assert!(map.contains_key("path_resolution"));
+        assert_eq!(output.status.code(), Some(1));
+        let records = fixture.records.lock().unwrap().clone();
+        assert_eq!(records.len(), 1, "only doctor's own health probe");
+        assert_eq!(
+            (records[0].verb.as_str(), records[0].path.as_str()),
+            ("GET", "/health")
+        );
+        assert_eq!(tree(&home.0), before);
+    }
+}
+
+#[test]
+fn a_codex_hook_copy_in_any_state_is_reported_and_the_handshake_runs() {
+    // The plugin is enabled but Codex never installed its hook copy.
+    let digest = json!({"status": "ok", "version": env!("CARGO_PKG_VERSION"),
+                        "hooks_digest": "0123456789abcdef"});
+    let plugin = b"[plugins.\"pseudolife-memory@pseudolife-mcp\"]\nenabled = true\n";
+    let home = Home::new();
+    std::fs::create_dir_all(home.0.join("codex")).unwrap();
+    std::fs::write(home.0.join("codex").join("config.toml"), plugin).unwrap();
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(200, digest.to_string())],
+        lists: vec![Reply::Result(json!({"tools": [
+            annotated("memory_search"), annotated("memory_agents"), annotated("memory_message")]}))],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_handshake_passed(&map, &output);
+    let line = map["codex_hooks"].as_str().unwrap();
+    assert!(line.starts_with("plugin-managed: "), "{line}");
+    assert!(line.contains("plugin manager"), "{line}");
+}
+
+#[test]
+fn a_dream_stall_is_reported_and_the_handshake_runs() {
+    let stalled = json!({"status": "ok", "version": env!("CARGO_PKG_VERSION"),
+                         "stall": {"kind": "signed_out"}});
+    let home = Home::new();
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(200, stalled.to_string())],
+        lists: vec![Reply::Result(json!({"tools": [
+            annotated("memory_search"), annotated("memory_agents"), annotated("memory_message")]}))],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_handshake_passed(&map, &output);
+    let line = map["dreams"].as_str().unwrap();
+    assert!(line.starts_with("stalled (signed_out)"), "{line}");
+}
+
+#[test]
+fn an_invalid_daemon_url_is_named_without_any_request() {
+    let home = Home::new();
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url)
+        .env(
+            "PSEUDOLIFE_MCP_DAEMON_URL",
+            "http://user:url-secret@127.0.0.1:1/path",
+        )
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(!text.contains("url-secret"), "{text}");
+    let map = report(&output);
+    assert_eq!(map["error"], json!("DaemonUrlInvalid"));
+    assert_eq!(map["daemon_status"], json!("not_checked"));
+    assert!(
+        map["recovery"]
+            .as_str()
+            .unwrap()
+            .contains("without credentials, a path, query, or fragment")
+    );
+    assert!(map["wake"].get("claude_code").is_some());
+    assert!(map.contains_key("path_resolution"));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(fixture.records.lock().unwrap().is_empty());
+}
+
+#[test]
+fn client_files_the_native_client_cannot_read_are_named_and_the_rest_runs() {
+    let cases: [(&str, Prepare); 3] = [
         ("invalid config.toml", |home, _| {
             std::fs::create_dir_all(home.0.join("codex")).unwrap();
             std::fs::write(home.0.join("codex").join("config.toml"), b"[mcp_servers\n").unwrap();
@@ -678,49 +793,371 @@ fn shapes_beyond_the_port_defer_before_any_request() {
             continue; // Windows has a defined default search path.
         }
         let home = Home::new();
-        let fixture = Fixture::start();
+        let fixture = healthy_fixture();
         let mut command = diagnose(&home, &fixture.url);
         prepare(&home, &mut command);
-        let before = tree(&home.0);
         let output = command.output().unwrap();
-        assert_deferred(&output);
-        assert!(
-            fixture.records.lock().unwrap().is_empty(),
-            "{name}: requested"
+        let map = report(&output);
+        assert_ordinary(&map, &output);
+        assert_handshake_passed(&map, &output);
+        let text = String::from_utf8_lossy(&output.stdout);
+        if name == "no PATH" {
+            // Searched in the platform's default directories instead.
+            assert!(map["path_resolution"].get("on_path").is_some(), "{text}");
+        } else {
+            assert!(
+                text.contains("not read by the native client"),
+                "{name}: {text}"
+            );
+        }
+    }
+}
+
+// --- conditions that once deferred the whole run ---------------------------------
+//
+// Each condition below used to hand the whole command to the Python client
+// (or, with no Python, leave the user with no diagnosis). Each now runs every
+// unrelated check and names its own limitation.
+
+/// A daemon whose MCP surface passes every handshake check.
+fn healthy_fixture() -> Fixture {
+    Fixture::start_with(Setup {
+        lists: vec![Reply::Result(json!({"tools": [
+            annotated("memory_search"), annotated("memory_agents"), annotated("memory_message")]}))],
+        ..Setup::default()
+    })
+}
+
+/// The ordinary daemon, auth and client diagnostics are all present.
+fn assert_ordinary(map: &serde_json::Map<String, Value>, output: &Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("deferred"), "{stderr}");
+    for key in [
+        "interpreter",
+        "credential_source",
+        "token_sha256_prefix",
+        "board",
+        "maintainer_passkeys",
+        "daemon_status",
+        "dreams",
+        "wake",
+        "coordination",
+        "path_resolution",
+    ] {
+        assert!(map.contains_key(key), "{key} missing: {map:?}");
+    }
+    assert_eq!(map["daemon_status"], json!("ok"));
+    assert!(map["wake"].get("claude_code").is_some());
+    assert!(map["wake"].get("codex").is_some());
+}
+
+/// A healthy daemon: the handshake ran, and `ok` follows Git Bash alone.
+fn assert_handshake_passed(map: &serde_json::Map<String, Value>, output: &Output) {
+    assert_eq!(map["daemon_version"], json!(env!("CARGO_PKG_VERSION")));
+    assert_eq!(map["tool_count"], json!(3), "{map:?}");
+    assert_eq!(map["instructions_present"], json!(true));
+    let git_bash_missing = map.get("git_bash") == Some(&Value::Null);
+    assert_eq!(map["ok"], json!(!git_bash_missing), "{map:?}");
+    assert_eq!(
+        output.status.code(),
+        Some(if git_bash_missing { 1 } else { 0 })
+    );
+}
+
+#[test]
+fn an_empty_tunnel_directory_keeps_every_ordinary_diagnostic() {
+    let home = Home::new();
+    let fixture = healthy_fixture();
+    // Absent first: no tunnel section at all.
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_handshake_passed(&map, &output);
+    assert!(!map.contains_key("tunnels"));
+    // An empty, old tunnel directory: still no tunnel section, nothing lost.
+    std::fs::create_dir_all(home.0.join(".pseudolife-mcp").join("tunnel")).unwrap();
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_handshake_passed(&map, &output);
+    assert!(!map.contains_key("tunnels"), "{map:?}");
+}
+
+#[cfg(unix)]
+mod tunnel_profiles {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn root(home: &Home) -> std::path::PathBuf {
+        home.0.join(".pseudolife-mcp").join("tunnel")
+    }
+
+    fn private(home: &Home, name: &str, data: &[u8]) {
+        let root = root(home);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = root.join(name);
+        std::fs::write(&path, data).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    fn profile(home: &Home, name: &str, extra: &str) {
+        let token = home.0.join("tunnel-token");
+        let body = format!(
+            "{{\"name\": \"{name}\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": \"{}\"{extra}}}",
+            token.display()
         );
-        assert_eq!(tree(&home.0), before, "{name}: home changed");
+        private(home, &format!("{name}.profile.json"), body.as_bytes());
+    }
+
+    const READY: &str = ", \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true";
+
+    /// Names, bytes, modes and modification times under the tunnel root.
+    fn snapshot(home: &Home) -> Vec<(String, Option<Vec<u8>>, u32, std::time::SystemTime)> {
+        let root = root(home);
+        let mut entries = vec![(String::new(), None, 0, std::time::UNIX_EPOCH)];
+        let meta = std::fs::metadata(&root).unwrap();
+        entries[0].2 = meta.permissions().mode();
+        entries[0].3 = meta.modified().unwrap();
+        for (rel, bytes) in tree(&root) {
+            let meta = std::fs::symlink_metadata(root.join(&rel)).unwrap();
+            entries.push((rel, bytes, meta.permissions().mode(), meta.modified().unwrap()));
+        }
+        entries
+    }
+
+    fn tunnels(home: &Home) -> Vec<Value> {
+        let fixture = healthy_fixture();
+        let before = snapshot(home);
+        let output = diagnose(home, &fixture.url).output().unwrap();
+        // Doctor only reads tunnel state.
+        assert_eq!(snapshot(home), before);
+        let map = report(&output);
+        assert_ordinary(&map, &output);
+        assert_handshake_passed(&map, &output);
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(!text.contains("fixture-tunnel-key"), "{text}");
+        map["tunnels"].as_array().expect("a tunnel section").clone()
+    }
+
+    #[test]
+    fn a_ready_profile_is_reported_beside_every_ordinary_diagnostic() {
+        let home = Home::new();
+        profile(&home, "dot", READY);
+        private(&home, "dot.key", b"PLAIN\0fixture-tunnel-key");
+        let entries = tunnels(&home);
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        let entry = &entries[0];
+        assert_eq!(entry["profile"], json!("dot"));
+        assert_eq!(entry["state"], json!("ready"));
+        assert_eq!(entry["catalog"], json!("current"));
+        assert_eq!(entry["private_key_present"], json!(true));
+        assert_eq!(
+            entry["key_expiry"],
+            json!({"known": false, "expired": null})
+        );
+        assert_eq!(
+            entry["update"],
+            json!({"state": "none", "needs_attention": false})
+        );
+        assert!(entry.get("next").is_none(), "{entry:?}");
+    }
+
+    #[test]
+    fn a_stale_profile_names_its_expired_key_and_the_renewal() {
+        let home = Home::new();
+        profile(
+            &home,
+            "dot",
+            &format!("{READY}, \"runtime_key_expires_at\": \"2020-01-01T00:00:00+00:00\""),
+        );
+        let entries = tunnels(&home);
+        let entry = &entries[0];
+        assert_eq!(entry["state"], json!("ready"));
+        assert_eq!(entry["private_key_present"], json!(false));
+        assert_eq!(entry["key_expiry"]["expired"], json!(true));
+        let next = entry["next"].as_array().unwrap();
+        assert!(
+            next.iter().any(|line| line
+                .as_str()
+                .unwrap()
+                .contains("pseudolife-mcp tunnel setup --profile dot --read-key")),
+            "{entry:?}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_profile_is_one_named_entry_and_the_others_still_report() {
+        let home = Home::new();
+        private(&home, "bad.profile.json", b"{not json");
+        profile(&home, "dot", "");
+        let entries = tunnels(&home);
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        assert_eq!(entries[0]["profile"], json!("bad"));
+        assert_eq!(entries[0]["state"], json!("unavailable"));
+        assert_eq!(entries[0]["reason"], json!("tunnel profile is invalid"));
+        assert!(
+            entries[0]["recovery"]
+                .as_str()
+                .unwrap()
+                .contains("bad.profile.json")
+        );
+        assert_eq!(entries[1]["profile"], json!("dot"));
+        assert_eq!(entries[1]["state"], json!("pending"));
+    }
+
+    #[test]
+    fn a_shared_tunnel_directory_is_named_without_losing_the_report() {
+        let home = Home::new();
+        profile(&home, "dot", READY);
+        std::fs::set_permissions(root(&home), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let entries = tunnels(&home);
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries[0]["state"], json!("unavailable"));
+        assert_eq!(
+            entries[0]["reason"],
+            json!("tunnel profile directory must be owner-only")
+        );
+        assert!(entries[0].get("recovery").is_some());
     }
 }
 
 #[test]
-fn daemon_answers_beyond_the_port_defer_before_the_handshake() {
-    let digest = json!({"status": "ok", "version": env!("CARGO_PKG_VERSION"),
-                        "hooks_digest": "0123456789abcdef"});
-    let plugin = b"[plugins.\"pseudolife-memory@pseudolife-mcp\"]\nenabled = true\n";
-    let cases: [(Reply, bool); 3] = [
-        (Reply::Http(200, "[1, 2]".into()), false),
-        (Reply::Http(200, json!({"status": 7}).to_string()), false),
-        (Reply::Http(200, digest.to_string()), true),
-    ];
-    for (health, codex_plugin) in cases {
-        let home = Home::new();
-        if codex_plugin {
-            std::fs::create_dir_all(home.0.join("codex")).unwrap();
-            std::fs::write(home.0.join("codex").join("config.toml"), plugin).unwrap();
-        }
-        let fixture = Fixture::start_with(Setup {
-            health: vec![health],
-            ..Setup::default()
-        });
-        let before = tree(&home.0);
-        let output = diagnose(&home, &fixture.url).output().unwrap();
-        assert_deferred(&output);
-        let records = fixture.records.lock().unwrap().clone();
-        assert_eq!(records.len(), 1, "only doctor's own health probe");
-        assert_eq!(
-            (records[0].verb.as_str(), records[0].path.as_str()),
-            ("GET", "/health")
+fn a_proxy_variable_is_named_and_every_check_still_runs() {
+    let home = Home::new();
+    let fixture = healthy_fixture();
+    // A proxy URL may carry credentials: only the variable's name is shown.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy = format!(
+        "http://proxyuser:proxy-secret@{}",
+        closed.local_addr().unwrap()
+    );
+    drop(closed);
+    let output = diagnose(&home, &fixture.url)
+        .env("HTTP_PROXY", &proxy)
+        .args(["--timeout", "5"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        !text.contains("proxy-secret") && !text.contains("proxyuser"),
+        "{text}"
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("proxy-secret"));
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    let note = map["proxy"].as_str().expect("a proxy note");
+    assert!(note.starts_with("HTTP_PROXY set:"), "{note}");
+    assert!(note.contains("NO_PROXY"), "{note}");
+    // The shim honours the proxy, which here refuses: the failure names it.
+    assert_eq!(map["ok"], json!(false));
+    assert!(
+        map["recovery"].as_str().unwrap().contains("NO_PROXY"),
+        "{map:?}"
+    );
+    // NO_PROXY covering the daemon lets the shim through; doctor still names
+    // the variables it saw.
+    let output = diagnose(&home, &fixture.url)
+        .env("HTTP_PROXY", &proxy)
+        .env("NO_PROXY", "127.0.0.1")
+        .output()
+        .unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_handshake_passed(&map, &output);
+    assert!(
+        map["proxy"]
+            .as_str()
+            .unwrap()
+            .starts_with("HTTP_PROXY, NO_PROXY set:")
+    );
+}
+
+#[test]
+fn pythons_integer_digit_limit_does_not_apply_to_the_native_client() {
+    let home = Home::new();
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url)
+        .env("PYTHONINTMAXSTRDIGITS", "0")
+        .output()
+        .unwrap();
+    let map = report(&output);
+    assert_ordinary(&map, &output);
+    assert_handshake_passed(&map, &output);
+}
+
+/// A credential the run cannot use: named, never printed, never sent; the
+/// unauthenticated checks still run.
+fn assert_unusable_credential(
+    fixture: &Fixture,
+    output: &Output,
+    error: &str,
+    secret: &str,
+) -> serde_json::Map<String, Value> {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stdout.contains(secret) && !stderr.contains(secret),
+        "{stdout}{stderr}"
+    );
+    let map = report(output);
+    assert_ordinary(&map, output);
+    assert_eq!(map["ok"], json!(false));
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(map["error"], json!(error), "{map:?}");
+    assert!(map["board"].as_str().unwrap().starts_with("not checked - "));
+    assert_eq!(map["maintainer_passkeys"]["state"], json!("not_checked"));
+    for record in fixture.records.lock().unwrap().iter() {
+        assert!(
+            !record.headers.contains_key("authorization"),
+            "{} {} carried a credential",
+            record.verb,
+            record.path
         );
-        assert_eq!(tree(&home.0), before);
     }
+    map
+}
+
+#[test]
+fn a_token_no_client_can_send_is_named_and_the_other_checks_run() {
+    for secret in ["fixture-t\u{f6}k", "token-\u{4e00}", "fixture-\u{7f}"] {
+        let home = Home::new();
+        let fixture = healthy_fixture();
+        let output = diagnose(&home, &fixture.url)
+            .env("PSEUDOLIFE_MCP_TOKEN", secret)
+            .output()
+            .unwrap();
+        let map = assert_unusable_credential(&fixture, &output, "BearerUnsendable", secret);
+        assert_eq!(map["credential_source"], json!("environment"));
+        assert!(
+            map["recovery"]
+                .as_str()
+                .unwrap()
+                .contains("printable ASCII")
+        );
+    }
+}
+
+#[test]
+fn an_unreadable_token_source_is_named_and_the_other_checks_run() {
+    let home = Home::new();
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url)
+        .env("PSEUDOLIFE_MCP_TOKEN_FILE", home.0.join("absent-token"))
+        .output()
+        .unwrap();
+    let map = assert_unusable_credential(
+        &fixture,
+        &output,
+        "CredentialUnavailable",
+        "absent-token-value",
+    );
+    assert_eq!(map["token_sha256_prefix"], Value::Null);
+    assert!(
+        map["recovery"]
+            .as_str()
+            .unwrap()
+            .contains("configured credential file is unavailable"),
+        "{map:?}"
+    );
 }
