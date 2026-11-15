@@ -18,9 +18,9 @@
 - A first native install checks its flags before the native client is
   downloaded, so a mistyped flag is refused at once; a rerun downloads it
   first, because it reads its recorded choices through it.
-- `pseudolife-mcp installer --capability` now answers
-  `installer-protocol 2`, and the native installer requires it, since it
-  runs these steps.
+- The native installer runs these steps only from a staged release that
+  carries them: one whose `installer --capability` answers the installer's
+  protocol level.
 - The installer preflight (`ops/preflight.sh`, `ops/preflight.ps1`) and the
   Claude Code session-hook writer `ops/install-hook.sh` still need Python
   3.10 or newer until a following change replaces them.
