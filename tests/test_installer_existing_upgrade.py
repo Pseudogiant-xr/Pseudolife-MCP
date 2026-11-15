@@ -57,15 +57,20 @@ def _fixture_env(tmp_path: Path) -> dict[str, str]:
 
 
 @contextlib.contextmanager
-def user_path_unchanged():
+def user_path_unchanged(broadcast=None):
     """On Windows, fail when the block changed the real user PATH
-    (HKCU\\Environment Path), and put the value back as it was; elsewhere a
-    no-op. A whole-installer test wraps its run in it, because a fixture home
-    does not contain the registry."""
+    (HKCU\\Environment Path), put the value back as it was and announce the
+    change again (WM_SETTINGCHANGE, as the write did), so Explorer and the
+    terminals it starts drop the leaked entry; elsewhere a no-op. A
+    whole-installer test wraps its run in it, because a fixture home does
+    not contain the registry."""
     if os.name != "nt":
         yield
         return
     import winreg
+
+    if broadcast is None:
+        from pseudolife_memory.runtimes import _broadcast_environment_change as broadcast
 
     def read():
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
@@ -85,6 +90,7 @@ def user_path_unchanged():
                     winreg.DeleteValue(key, "Path")
                 else:
                     winreg.SetValueEx(key, "Path", 0, before[1], before[0])
+            broadcast()
             raise AssertionError(f"the test changed the real user PATH (restored): {before!r} -> {after!r}")
 
 
@@ -911,9 +917,13 @@ def test_the_user_path_guard_fails_and_restores_a_changed_path(monkeypatch, befo
     fake = _FakeWinreg(before)
     monkeypatch.setitem(sys.modules, "winreg", fake)
     monkeypatch.setattr(os, "name", "nt")
-    with user_path_unchanged():
+    announced = []
+    with user_path_unchanged(broadcast=lambda: announced.append(1)):
         pass
+    assert announced == []
     with pytest.raises(AssertionError, match="changed the real user PATH"):
-        with user_path_unchanged():
+        with user_path_unchanged(broadcast=lambda: announced.append(1)):
             fake.values["Path"] = ("C:\\leaked", 2)
     assert fake.values.get("Path") == before
+    # Codex review of faea97a1a: the leak was broadcast, so the restore is too.
+    assert announced == [1]
