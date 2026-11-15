@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "53af7849fa66bf99",
+  "fingerprint": "04166e1346a4d78d",
+  "reason": "The lane gains tests/test_installer_client_engine.py and tests/test_installer_native_client_ps.py (moved here from test-windows-nightly, which no longer runs it); its estimate in ci_budget.json rises from 14.6 to 17.6 minutes for them, and nothing else in the job changed."
+}

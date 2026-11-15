@@ -204,7 +204,7 @@ fn pipx_copy_root(command: &Path) -> Option<PathBuf> {
     }
     None
 }
-fn owned_console(path: &Path) -> bool {
+pub(crate) fn owned_console(path: &Path) -> bool {
     let Ok(file) = fs::File::open(path) else {
         return false;
     };

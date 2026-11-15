@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "5c5191fe0058ce7b",
+  "fingerprint": "8b97a7efa125071f",
+  "reason": "Master's forward merge joins its tests/test_windowless_children.py (accept record 2026-11-15-db53be4e: thirteen fakes-only cases and one real spawn, under a second) to this branch's tests/test_installer_client_engine.py and tests/test_installer_native_client_ps.py (accept record 2026-11-15-eb98eefc, estimate 17.6 minutes); the two measured changes only add up, with no new job, shard, setup or dependency."
+}

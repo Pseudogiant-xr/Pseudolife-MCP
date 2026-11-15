@@ -148,6 +148,26 @@ fn checksums_require_exact_lowercase_unique_asset_record() {
     assert_eq!(install::checksum(&line, &name).unwrap(), "a".repeat(64));
 }
 #[test]
+fn checksums_take_both_standard_record_forms_and_nothing_looser() {
+    // `sha256sum` under Git Bash writes the binary-mode form, `<digest> *<name>`.
+    let name = install::archive_name("1.2.3").unwrap();
+    let digest = "b".repeat(64);
+    assert_eq!(
+        install::checksum(&format!("{digest} *{name}\n"), &name).unwrap(),
+        digest
+    );
+    assert_eq!(
+        install::checksum(&format!("{digest}  {name}\n"), &name).unwrap(),
+        digest
+    );
+    for separator in [" ", "\t", "   ", " * ", "  *", "**"] {
+        assert!(
+            install::checksum(&format!("{digest}{separator}{name}\n"), &name).is_err(),
+            "{separator:?}"
+        );
+    }
+}
+#[test]
 fn dropped_activation_restores_old_launcher() {
     let f = Fixture::new();
     f.install("1.0.0");
