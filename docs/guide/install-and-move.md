@@ -61,6 +61,22 @@ recreates the daemon once to match. A Rust daemon selected by checkout-mode
 names it. `--engine` applies only to a Docker install, so a client-only
 install refuses it.
 
+## Native client
+
+The installers install the Python client, and `pseudolife-mcp update`
+keeps it: in 0.24.0 the native client (one program, no Python) is opt-in,
+because it does not run everything the Python client does yet. An update
+from 0.23.x, where a native client is built for the platform, says so in
+one line with the command that moves the machine. To move, set
+`PSEUDOLIFE_SHIM_ENGINE=native` for the update (from a machine already on
+this release's Python client: `PSEUDOLIFE_SHIM_ENGINE=native
+pseudolife-mcp update --clients-only`); it moves when the release's archive
+for its platform downloads, matches `SHA256SUMS` and runs, and otherwise
+keeps the Python client and says why. A pip or lite install is upgraded in
+place and is not moved. The native client refuses a lite-tier bank, `serve` and
+`embedded`, each naming the way forward, and some commands are not in it
+yet; see [The native client](configuration.md#the-native-client).
+
 ## Installer refusals
 
 Both Docker installers check before creating volumes or rewriting
