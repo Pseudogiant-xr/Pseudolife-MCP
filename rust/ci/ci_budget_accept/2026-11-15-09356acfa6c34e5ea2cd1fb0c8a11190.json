@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "05800854cafe34cf",
+  "fingerprint": "d34da58d12481bfe",
+  "reason": "The Tree-wide guards step also runs tests/test_installer_bash32.py, an in-process scan of the installer and preflight shell files under ops/ (six of them, eight with the native hook and preflight scripts) for what bash 3.2 misreads, so an ordinary pull request sees it before a batch's macOS lane; no setup, service or install was added and the scan takes under a second, so the job's measured cost holds."
+}
