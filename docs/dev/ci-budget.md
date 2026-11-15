@@ -59,6 +59,14 @@ keeps a job out of the budget.
    `rust/ci/ci_budget_accept/`, binding the generated baseline to the
    changed definition; review and commit that fragment with the change.
    `accept` leaves measured minutes, limits and the shared baseline alone.
+   A job removed from a workflow needs one too (`accept` records it with
+   `"fingerprint": null`), saying what it ran and what removing it saves.
+   The gate is `ops/integrate.py`'s member check, which wants a record for
+   every job whose definition differs from its merge base's, in the
+   workflows of both the head's and the merge base's budget. `check` names
+   the same jobs: the baseline it reads is always the merge base's (the
+   gate refuses a branch that edits it), and every commit on master is a
+   batch's census point, where that baseline matches the workflows.
 
    Ordinary PRs can execute additional steps in an existing job that a
    full batch does not execute, such as early golden replay. Record those

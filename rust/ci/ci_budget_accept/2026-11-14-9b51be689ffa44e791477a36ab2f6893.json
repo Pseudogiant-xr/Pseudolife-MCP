@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "953b718efb3dafdf",
+  "fingerprint": "492e9b9ddbe2b98f",
+  "reason": "Merge of #1550 and #1557 into #1559: the minutes are #1557's 34.0 plus #1559's estimated 1.2 for the native client build (the estimate field); #1550's live-set selection can only lower them. Re-measure from the first two batches that carry all three."
+}

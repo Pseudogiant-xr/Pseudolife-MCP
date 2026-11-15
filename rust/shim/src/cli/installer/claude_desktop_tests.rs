@@ -323,8 +323,10 @@ fn a_change_backs_up_the_displaced_file_privately() {
         "{}",
         backup.display()
     );
+    // Reported as `setup::codex::resolved_path` spells it: ordinary, or
+    // verbatim only where Windows needs it (a deep TEMP's long path).
     assert!(
-        !backup.to_string_lossy().starts_with(r"\\?\"),
+        crate::setup::codex::resolved_path(&backup).is_ok_and(|resolved| resolved == backup),
         "{}",
         backup.display()
     );
