@@ -76,30 +76,37 @@ def _inside(entry: str, home: str) -> bool:
     return entry == home or entry.startswith(home.rstrip("\\") + "\\")
 
 
+def _path_entries(value) -> list[str]:
+    """A (data, type) user PATH value's entries; an absent or empty value has
+    none (ensure_user_path writes just its directory over an empty one)."""
+    return [] if value is None or str(value[0]) == "" else str(value[0]).split(";")
+
+
 def _leaked_entries(before, value, home: str) -> list[str] | None:
-    """The entries ``value`` adds to ``before`` when that is all it does and
-    each lies inside ``home`` (the leak's own signature); None for any other
-    difference, an equal value included. Values are (data, type) or None."""
+    """The entries ``value`` adds to ``before`` when that is all it does: the
+    old entries all kept, in their order, and every added one inside ``home``
+    (the leak's own signature). None for any other difference, an equal
+    value included. Values are (data, type) or None."""
     if value is None or value == before:
         return None
     if before is not None and value[1] != before[1]:
         return None
-    remaining = [] if before is None else str(before[0]).split(";")
-    added = []
-    for entry in str(value[0]).split(";"):
-        if entry in remaining:
-            remaining.remove(entry)
-        else:
+    old, added, kept = _path_entries(before), [], 0
+    for entry in _path_entries(value):
+        if kept < len(old) and entry == old[kept]:
+            kept += 1
+        elif _inside(entry, home):
             added.append(entry)
-    if not added or remaining or not all(_inside(entry, home) for entry in added):
+        else:
+            return None
+    if kept != len(old) or not added:
         return None
     return added
 
 
 def _path_difference(before, value) -> tuple[list[str], list[str]]:
     """(added, removed) entries between two values, for a failure message."""
-    old = [] if before is None else str(before[0]).split(";")
-    new = [] if value is None else str(value[0]).split(";")
+    old, new = _path_entries(before), _path_entries(value)
     remaining, added = list(old), []
     for entry in new:
         if entry in remaining:
@@ -141,8 +148,9 @@ def user_path_unchanged(fixture_home, broadcast=None):
 
     def not_ours(value):
         added, removed = _path_difference(before, value)
+        other = "" if added or removed else " (the same entries, reordered, or the value's type changed)"
         return AssertionError("the real user PATH changed during the test in a way this test did not "
-                              f"cause (nothing was changed back): added {added!r}, removed {removed!r}")
+                              f"cause (nothing was changed back): added {added!r}, removed {removed!r}{other}")
 
     before = read()
     try:
@@ -1106,3 +1114,32 @@ def test_entries_inside_the_fixture_home_are_matched_as_windows_paths(monkeypatc
     assert not _inside("${PL_GUARD_HOME}\\shim\\bin", HOME)
     assert not _inside(HOME + "-other\\bin", HOME)
     assert not _inside("C:\\tools", HOME) and not _inside("", HOME)
+
+
+def test_the_user_path_guard_leaves_a_reorder_alone_even_beside_the_leak(monkeypatch):
+    # Codex review of 4cf7cdec2: someone reordering the old entries changes
+    # which program wins; with a fixture entry added too, nothing is written.
+    fake, announced, guard = _guarded(monkeypatch, ("C:\\a;C:\\b", 2))
+    changed = (HOME + "\\bin;C:\\b;C:\\a", 2)
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_the_user_path_guard_names_a_reorder_on_its_own(monkeypatch):
+    fake, announced, guard = _guarded(monkeypatch, ("C:\\a;C:\\b", 2))
+    with pytest.raises(AssertionError, match="the same entries, reordered"):
+        with guard():
+            fake.values["Path"] = ("C:\\b;C:\\a", 2)
+    assert fake.values["Path"] == ("C:\\b;C:\\a", 2) and announced == []
+
+
+def test_the_user_path_guard_restores_an_empty_original(monkeypatch):
+    # Codex review of 4cf7cdec2: over an empty value ensure_user_path writes
+    # just its directory, with no separator.
+    fake, announced, guard = _guarded(monkeypatch, ("", 2))
+    with pytest.raises(AssertionError, match="removed them again"):
+        with guard():
+            fake.values["Path"] = (HOME + "\\shim\\bin", 2)
+    assert fake.values["Path"] == ("", 2) and announced == [1]
