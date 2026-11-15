@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "0c68fc4d053a291c",
+  "fingerprint": "7739839797b7a2d5",
+  "reason": "parity_scope.py's import scan now lists files with git ls-files --exclude-standard instead of globbing rust/, so ignored build output (rust/target/) no longer counts. A CI checkout has no rust/target/ when scope runs, and the two listings then name the same tracked .py files (451 each on master, checked by the reviewer), so the selected shards and their minutes are unchanged; only the fingerprint, which digests parity_scope.py, moved."
+}
