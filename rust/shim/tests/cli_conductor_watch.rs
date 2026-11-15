@@ -604,6 +604,14 @@ fn a_second_watcher_on_the_same_state_is_refused_and_stop_ends_the_first() {
     let held = record(&state).unwrap();
     assert_eq!(held["pid"], first.id());
     assert_eq!(held["agent_id"], AGENT);
+    // The first poll rewrites the record it read (`mark_ready`), so a
+    // deletion between that read and its write would be undone; nothing
+    // writes the record after it says ready.
+    wait_for(
+        "the first watcher's first poll",
+        Duration::from_secs(45),
+        || record(&state).is_some_and(|held| held["ready"] == true),
+    );
 
     // The pid record answers a second start.
     let args = sandbox.watch_args(&state);
@@ -620,13 +628,19 @@ fn a_second_watcher_on_the_same_state_is_refused_and_stop_ends_the_first() {
     let saved = fs::read(state.with_extension("pid")).unwrap();
     fs::remove_file(state.with_extension("pid")).unwrap();
     let third = sandbox.run(&args);
-    assert_eq!(third.status.code(), Some(0));
+    let answered = format!(
+        "stdout: {:?}; stderr: {:?}",
+        text(&third.stdout),
+        text(&third.stderr)
+    );
+    assert_eq!(third.status.code(), Some(0), "{answered}");
     assert_eq!(
         text(&third.stderr).trim_end(),
         format!(
             "conductor-watch: another watcher holds {}; this one exits",
             state.display()
-        )
+        ),
+        "{answered}"
     );
     assert_eq!(sandbox.board.count("register"), 1);
     fs::write(state.with_extension("pid"), saved).unwrap();
