@@ -732,11 +732,6 @@ show_banner
 # hanging; PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
 NATIVE_PROBE_SECONDS="${PSEUDOLIFE_NATIVE_PROBE_SECONDS:-30}"
 case "$NATIVE_PROBE_SECONDS" in ""|*[!0-9]*|0) NATIVE_PROBE_SECONDS=30 ;; esac
-# How long the staged client may take to answer `version` and
-# `installer --capability` (seconds) before the run refuses instead of
-# hanging; PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
-NATIVE_PROBE_SECONDS="${PSEUDOLIFE_NATIVE_PROBE_SECONDS:-30}"
-case "$NATIVE_PROBE_SECONDS" in ""|*[!0-9]*|0) NATIVE_PROBE_SECONDS=30 ;; esac
 NATIVE_INSTALLER_PROTOCOL=1
 NATIVE_VERSION=""
 NATIVE_TARGET=""
@@ -800,28 +795,6 @@ native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no 
             [ -f "$native_base/$1" ] || return 22
             cp "$native_base/$1" "$2" ;;
     esac
-}
-native_bounded() {  # $1 = both|out, then the command; its output on stdout; status 124 when it does not finish in time
-    native_bound_which="$1"; shift
-    native_bound_out="$(mktemp "${TMPDIR:-/tmp}/pseudolife-native-out.XXXXXX")" || return 125
-    if [ "$native_bound_which" = both ]; then "$@" >"$native_bound_out" 2>&1 & else "$@" >"$native_bound_out" 2>/dev/null & fi
-    native_bound_pid=$!
-    native_bound_ticks=$((NATIVE_PROBE_SECONDS * 10))
-    while kill -0 "$native_bound_pid" 2>/dev/null; do
-        if [ "$native_bound_ticks" -le 0 ]; then
-            kill "$native_bound_pid" 2>/dev/null
-            wait "$native_bound_pid" 2>/dev/null
-            rm -f "$native_bound_out"
-            return 124
-        fi
-        sleep 0.1
-        native_bound_ticks=$((native_bound_ticks - 1))
-    done
-    native_bound_status=0
-    wait "$native_bound_pid" || native_bound_status=$?
-    cat "$native_bound_out"
-    rm -f "$native_bound_out"
-    return "$native_bound_status"
 }
 native_bounded() {  # $1 = both|out, then the command; its output on stdout; status 124 when it does not finish in time
     native_bound_which="$1"; shift
@@ -1036,11 +1009,7 @@ bank_can_ask() {  # status 0 when there is a terminal to ask on
 native_before_asking() {  # the first question waits for the staged, verified and probed release
     [ -n "${NATIVE_STAGED:-}" ] || native_stage
 }
-native_before_asking() {  # the first question waits for the staged, verified and probed release
-    [ -n "${NATIVE_STAGED:-}" ] || native_stage
-}
 bank_read() {  # $1 = the prompt; sets BANK_REPLY; fails at end of input
-    native_before_asking
     native_before_asking
     printf '%s' "$1"
     BANK_REPLY=""
@@ -1315,7 +1284,6 @@ if [ -z "$CLIENT" ]; then
         echo ""
         while [ -z "$CLIENT" ]; do
             printf 'Select one or more - e.g. "1 2" or "1,3" (Enter = 1): '
-            native_before_asking
             read -r selection
             [ -z "$selection" ] && selection=1
             picked=""

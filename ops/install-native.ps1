@@ -671,28 +671,6 @@ function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
     $process.WaitForExit()
     return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
 }
-# How long the staged client may take to answer `version` and
-# `installer --capability` (seconds); PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
-$NativeProbeSeconds = 30
-if ("$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS" -match '^[1-9][0-9]{0,4}$') { $NativeProbeSeconds = [int]$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS }
-function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
-    # The staged client's answer, or TimedOut when it does not finish in time.
-    # Shares this console (no new window, and Ctrl-C still reaches it).
-    $info = [System.Diagnostics.ProcessStartInfo]::new($Exe)
-    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
-    $info.UseShellExecute = $false
-    $info.RedirectStandardOutput = $true
-    $info.RedirectStandardError = $true
-    $process = [System.Diagnostics.Process]::Start($info)
-    $out = $process.StandardOutput.ReadToEndAsync()
-    $err = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($NativeProbeSeconds * 1000)) {
-        try { $process.Kill($true) } catch { }
-        return [pscustomobject]@{ TimedOut = $true; Code = $null; Out = ""; Err = "" }
-    }
-    $process.WaitForExit()
-    return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
-}
 # The installer-protocol level the staged release must answer (Initialize-NativeClient).
 $NativeInstallerProtocol = 1
 # The client side (the stdio MCP shim every agent registers, and the
@@ -744,13 +722,6 @@ function Stop-NativeInstall([string]$Cause, [string]$Fix) {
     }
     [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left")
     exit 1
-}
-# The staging folder goes whatever way the run ends (an exit 1 or 2 from a
-# later refusal, or an error), not only on the paths that call Remove-NativeStage.
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    if ($global:PseudolifeNativeStageDir -and (Test-Path -LiteralPath $global:PseudolifeNativeStageDir)) {
-        Remove-Item -LiteralPath $global:PseudolifeNativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
 }
 # The staging folder goes whatever way the run ends (an exit 1 or 2 from a
 # later refusal, or an error), not only on the paths that call Remove-NativeStage.
