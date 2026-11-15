@@ -19,7 +19,7 @@ use super::{
     argv::{self, Request},
     probe::{self, READ_ONLY},
     remote::{self, Remote},
-    target::{self, Ask, FRAME, PROTOCOL, Place},
+    target::{self, FRAME, PROTOCOL, Place},
     *,
 };
 
@@ -54,7 +54,7 @@ fn daemon_doc(running: bool, project: &str, dir: &str) -> Value {
         "Image": "sha256:0123456789abcdef",
         "State": {"Running": running},
         "Config": {
-            "Env": [format!("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife:{SECRET}@pseudolife-pg:5432/pseudolife_memory"), "PSEUDOLIFE_MCP_TOKEN=tok-secret", "PATH=/bin"],
+            "Env": [format!("PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife:{SECRET}@pseudolife-pg:5432/pseudolife_memory"), "PSEUDOLIFE_MCP_TOKEN=tok-secret", "PSEUDOLIFE_MCP_DATA_DIR=/data", "PATH=/bin"],
             "User": "pseudolife",
             "Image": "ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0",
             "Labels": {"com.docker.compose.project": project, "com.docker.compose.project.working_dir": dir, "com.docker.compose.project.config_files": format!("{dir}/docker-compose.yml")}
@@ -233,6 +233,8 @@ struct Wire {
     helper_exit: i32,
     link: Link,
     runs: Vec<(String, String, Vec<u8>)>,
+    /// What the helper answers a `state` request (a resume's preflight).
+    state: Option<protocol::State>,
 }
 
 impl Remote for Wire {
@@ -257,13 +259,28 @@ impl Remote for Wire {
                 fault: None,
             },
             Link::Helper => {
-                let ask: Ask = serde_json::from_slice(stdin).unwrap();
-                let reply = target::answer(&mut self.far, &ask);
+                let request: protocol::Request = serde_json::from_slice(stdin).unwrap();
+                let answer = match request.op {
+                    protocol::Op::Check { ask } => protocol::Answer {
+                        protocol: protocol::PROTOCOL,
+                        ok: true,
+                        check: Some(target::answer(&mut self.far, &ask)),
+                        ..protocol::Answer::default()
+                    },
+                    // Only a resume's preflight reads the target's state.
+                    protocol::Op::State { .. } => protocol::Answer {
+                        protocol: protocol::PROTOCOL,
+                        ok: true,
+                        state: self.state.clone(),
+                        ..protocol::Answer::default()
+                    },
+                    other => panic!("the preflight changes nothing on the target: {other:?}"),
+                };
                 remote::Ran {
                     code: self.helper_exit,
                     stdout: format!(
                         "motd noise from a login script\n{FRAME}{}\n",
-                        serde_json::to_string(&reply).unwrap()
+                        serde_json::to_string(&answer).unwrap()
                     )
                     .into_bytes(),
                     ..remote::Ran::default()
@@ -325,6 +342,7 @@ fn world() -> Both {
             link: Link::Helper,
             helper_exit: 0,
             runs: Vec::new(),
+            state: None,
         },
         local_health: Some(health(SOURCE_ID, 60)),
         reached: Ok(health(TARGET_ID, 60)),
@@ -396,7 +414,7 @@ fn assert_read_only(world: &Both) {
     for (_, command, _) in &world.wire.runs {
         assert_eq!(
             command,
-            &remote::sh(&script()),
+            &remote::sh(&script(protocol::PROTOCOL)),
             "the only remote command is the helper"
         );
     }
@@ -410,7 +428,12 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
     // The source asked the target about itself, by fingerprint and versions.
     let (to, _, body) = &world.wire.runs[0];
     assert_eq!(to, "u@box");
-    let ask: Ask = serde_json::from_slice(body).unwrap();
+    let request: protocol::Request = serde_json::from_slice(body).unwrap();
+    assert_eq!(request.protocol, protocol::PROTOCOL);
+    assert!(body.ends_with(b"\n"), "the request is one line");
+    let protocol::Op::Check { ask } = request.op else {
+        panic!("the preflight sends check: {request:?}");
+    };
     assert_eq!(ask.protocol, PROTOCOL);
     assert_eq!(ask.source_bank, fp(SOURCE_ID));
     assert_eq!((ask.source_schema, ask.source_pg_version), (60, 180001));
@@ -426,7 +449,7 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
     );
     assert_eq!(world.wire.far.health_gets, ["http://127.0.0.1:8765/health"]);
     assert_eq!(plan.target.work_dir, moves());
-    let text = render(&plan);
+    let text = render(&plan, true);
     // Images by name, not id.
     assert!(
         text.contains("(image ghcr.io/pseudogiant-xr/pseudolife-daemon:0.25.0)"),
@@ -451,9 +474,21 @@ fn a_dry_run_reads_both_hosts_changes_nothing_and_prints_the_plan() {
     }
     assert!(
         text.ends_with(
-            "The native client does not perform the move yet; this run only checked it.\n"
-        )
+            "This run only checked both hosts: run it without --dry-run to move the bank.\n"
+        ),
+        "{text}"
     );
+    // The move itself shows the same plan, saying it is about to run.
+    let real = render(&plan, false);
+    assert!(
+        real.starts_with("Move plan: both hosts checked; nothing is changed until you confirm.\n"),
+        "{real}"
+    );
+    assert!(
+        real.contains("The move will, in this order:\n  1. claim the target for this move"),
+        "{real}"
+    );
+    assert!(!real.contains("--dry-run"), "{real}");
     // No secret reaches the request, the reply, the plan or its document.
     let document = document(&plan).to_string();
     for shown in [
@@ -839,11 +874,20 @@ fn a_missing_old_or_mismatched_target_client_is_named() {
             "the pseudolife-mcp on u@box has no native move helper (it answered: pseudolife-mcp: error: argument mode: invalid choice: 'move-target'); update it there with pseudolife-mcp update",
         ),
         (
+            // A newer client, speaking a protocol this one does not.
             Link::Prints(
-                "PSEUDOLIFE-MOVE-TARGET {\"protocol\":2,\"version\":\"0.30.0\",\"refusals\":[],\"facts\":null,\"work_dir\":\"\",\"free_bytes\":null,\"update_timer\":\"\"}\n",
-                0,
+                "PSEUDOLIFE-MOVE-TARGET {\"protocol\":3,\"version\":\"0.30.0\",\"ok\":false,\"error\":\"\"}\n",
+                3,
             ),
-            "the client on u@box (0.30.0) speaks move protocol 2, and this one",
+            "the client on u@box (0.30.0) speaks move protocol 3, and this one",
+        ),
+        (
+            // An older client that speaks only protocol 1 refuses 2 itself.
+            Link::Prints(
+                "PSEUDOLIFE-MOVE-TARGET {\"protocol\":1,\"version\":\"0.23.0\",\"refusals\":[\"the target's pseudolife-mcp speaks move protocol 1, and the source asked for \\\"2\\\"; update the older client (pseudolife-mcp update) so both match, then retry\"],\"facts\":null,\"work_dir\":\"\",\"free_bytes\":null,\"update_timer\":\"\"}\n",
+                3,
+            ),
+            "the target's pseudolife-mcp speaks move protocol 1, and the source asked for \"2\"; update the older client",
         ),
         (
             Link::Prints("PSEUDOLIFE-MOVE-TARGET {not json\n", 0),
@@ -871,7 +915,7 @@ fn a_fresh_target_without_a_fingerprint_is_accepted_and_its_url_checked_by_what_
     };
     let mut world = fresh();
     let plan = preflight(&mut world, &request()).expect("a fresh target is accepted");
-    let text = render(&plan);
+    let text = render(&plan, true);
     assert!(
         text.contains("an empty bank (no identity yet: a fresh install)"),
         "{text}"
@@ -910,9 +954,10 @@ fn the_target_url_must_reach_the_targets_own_daemon() {
 
 #[test]
 fn the_helper_answers_a_protocol_it_does_not_speak_with_3_never_255() {
-    assert_eq!(target::run(&words(&["2"])), 3);
+    assert_eq!(target::run(&words(&["3"])), 3);
     assert_eq!(target::run(&words(&[])), 3);
     assert_eq!(target::run(&words(&["1", "extra"])), 3);
+    assert_eq!(target::run(&words(&["2", "extra"])), 3);
 }
 
 #[test]
@@ -948,10 +993,9 @@ fn argv_refusals_come_before_any_effect_in_order() {
         assert!(why.starts_with(words), "{items:?}: {why}");
         assert!(why.ends_with(". Nothing was changed"), "{why}");
     };
-    starts(
-        &without("--dry-run"),
-        "the native client plans a move but does not perform one yet: run it with --dry-run",
-    );
+    // The move itself, and resuming one, pass the argv checks.
+    assert_eq!(refused(&without("--dry-run")), None);
+    assert_eq!(refused(&[&base[..], &["--resume"]].concat()), None);
     starts(
         &[&base[..], &["--target-checkout", "/srv/x"]].concat(),
         "--target-checkout is not supported",
@@ -961,12 +1005,8 @@ fn argv_refusals_come_before_any_effect_in_order() {
         "--expose-target is not available in the native client yet: expose the target's daemon yourself",
     );
     starts(
-        &[&base[..], &["--resume"]].concat(),
-        "--resume arrives with the native move itself",
-    );
-    starts(
         &[&base[..], &["--target-env-file", "/x/.env"]].concat(),
-        "--target-env-file and --target-compose-file arrive",
+        "--target-env-file and --target-compose-file are not available in the native client yet",
     );
     starts(&without("--target-url"), "--target-url is required");
     starts(
@@ -1009,10 +1049,10 @@ fn argv_refusals_come_before_any_effect_in_order() {
             "--target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, query or credentials)"
         )
     );
-    // Not dry-run outranks everything else.
+    // Without --dry-run the checks are the same, in the same order.
     starts(
         &["--to", "u@box", "--target-checkout", "/x"],
-        "the native client plans a move",
+        "--target-checkout is not supported",
     );
     // --target-release is the only mode now: accepted.
     assert_eq!(
@@ -1123,12 +1163,12 @@ fn a_host_network_daemon_is_reached_where_it_binds() {
 
 #[test]
 fn remote_commands_are_one_posix_word_after_sh_c() {
-    let command = remote::sh(&script());
+    let command = remote::sh(&script(protocol::PROTOCOL));
     assert!(command.starts_with("sh -c '"), "{command}");
     assert!(command.ends_with('\''), "{command}");
     // The script's own single quotes would end the word: it has none.
-    assert!(!script().contains('\''));
-    assert!(script().contains("exec \"$c\" move-target 1"));
+    assert!(!script(protocol::PROTOCOL).contains('\''));
+    assert!(script(protocol::PROTOCOL).contains("exec \"$c\" move-target 2"));
 }
 
 #[cfg(unix)]
@@ -1158,4 +1198,473 @@ fn an_ssh_timeout_ends_the_run_even_when_a_child_keeps_its_pipes_open() {
         took < Duration::from_secs(10),
         "the run waited {took:?} on the surviving child"
     );
+}
+
+#[test]
+fn a_daemon_the_gate_cannot_stop_and_an_unauthenticated_target_are_refused() {
+    let facts = |dir: &str| Facts {
+        daemon: "pseudolife-mcp-daemon".into(),
+        data_dir: dir.into(),
+        ..Facts::default()
+    };
+    assert_eq!(super::gate_refusal("target", &facts("/data")), None);
+    for dir in ["", "/srv/data", "/data/"] {
+        let why = super::gate_refusal("target", &facts(dir)).unwrap();
+        assert!(why.contains("not /data") && why.contains("gate"), "{why}");
+    }
+    // A target daemon that serves without authentication.
+    let mut world = world();
+    let mut answer = health(TARGET_ID, 60);
+    answer["auth"] = json!(false);
+    world.wire.far.health = Some(answer);
+    let why = preflight(&mut world, &request()).unwrap_err();
+    assert!(why.contains("does not require authentication"), "{why}");
+    // A source database the fence cannot name.
+    let mut source = facts("/data");
+    source.running = true;
+    source.db = "Pseudolife-Memory".into();
+    let why = source_refusal(&source).unwrap();
+    assert!(why.contains("cannot name safely"), "{why}");
+}
+
+/// The target helper's own operations ([`super::ops::perform`]) against the
+/// fake Docker: the daemon's run state and its gate, then the bank.
+struct OpsHost {
+    host: Host,
+    running: bool,
+    gated: bool,
+}
+
+impl Docker for OpsHost {
+    fn run_io(&mut self, args: &[String], t: Duration, i: Input<'_>, o: Output<'_>) -> Ran {
+        let a: Vec<&str> = args.iter().map(String::as_str).collect();
+        match a.as_slice() {
+            ["inspect", "-f", "{{.Image}}", _] => ok("sha256:0123456789abcdef"),
+            ["inspect", "-f", "{{.State.Running}}", _] => {
+                ok(if self.running { "true" } else { "false" })
+            }
+            [.., "-c", "test -e /data/move.json"] => Ran {
+                code: if self.gated { 0 } else { 1 },
+                ..Ran::default()
+            },
+            [.., "-f", "/data/move.json"] => {
+                self.gated = false;
+                ok("")
+            }
+            _ => self.host.run_io(args, t, i, o),
+        }
+    }
+}
+
+/// The target host: a throwaway home, the fake Docker, and a restore that
+/// takes its safety backup and leaves the bank it was given.
+struct OpsSite {
+    home: PathBuf,
+    docker: OpsHost,
+    restores: Vec<Vec<String>>,
+    /// The abort file each restore was told to read under its lock.
+    abort_files: Vec<Option<PathBuf>>,
+    /// Each restore's exit code, in turn (then 0).
+    codes: Vec<i32>,
+    /// A failed restore leaves the bank's database unreadable (dropped),
+    /// until one succeeds.
+    drops: bool,
+}
+
+impl OpsSite {
+    fn new(bank: &str) -> Self {
+        let home =
+            std::env::temp_dir().join(format!("move-give-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&home).unwrap();
+        Self {
+            home,
+            docker: OpsHost {
+                host: Host::new(bank),
+                running: false,
+                gated: true,
+            },
+            restores: Vec::new(),
+            abort_files: Vec::new(),
+            codes: Vec::new(),
+            drops: false,
+        }
+    }
+
+    fn folder(&self) -> PathBuf {
+        self.home.join(".pseudolife-mcp/moves").join(MOVE)
+    }
+
+    fn act(&mut self, op: protocol::Op) -> protocol::Answer {
+        let request = protocol::Request {
+            protocol: protocol::PROTOCOL,
+            move_id: MOVE.into(),
+            work_dir: String::new(),
+            rollback: true,
+            op,
+        };
+        super::ops::perform(self, &request, &mut std::io::empty())
+    }
+
+    /// The move's claim, and the safety backup its first restore took of
+    /// the target's own bank.
+    fn claimed_with_own_backup(&mut self) {
+        let claim = protocol::Op::Claim {
+            source_bank: fp(SOURCE_ID),
+            resume: false,
+        };
+        assert!(self.act(claim).ok);
+        let safety = self.folder().join("safety");
+        std::fs::create_dir_all(&safety).unwrap();
+        let gz = |bytes: &[u8]| {
+            use std::io::Write;
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(bytes).unwrap();
+            encoder.finish().unwrap()
+        };
+        let dump = safety.join("pseudolife_safety_memory-20261114-000000-aaaaaaaa.sql.gz");
+        let state = safety.join("pseudolife_safety_state-20261114-000000-aaaaaaaa.tgz");
+        std::fs::write(&dump, gz(b"-- own bank")).unwrap();
+        std::fs::write(&state, gz(b"own state")).unwrap();
+        let own = json!({"dump": dump, "state": state, "taken_at": "t"});
+        std::fs::write(self.folder().join("own-bank.json"), own.to_string()).unwrap();
+    }
+}
+
+impl Drop for OpsSite {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.home);
+    }
+}
+
+impl super::ops::Site for OpsSite {
+    type D = OpsHost;
+    fn docker(&mut self) -> Result<&mut OpsHost, String> {
+        Ok(&mut self.docker)
+    }
+    fn home(&self) -> Option<PathBuf> {
+        Some(self.home.clone())
+    }
+    fn now(&self) -> String {
+        "2026-11-15T00:00:00Z".into()
+    }
+    fn systemctl(&mut self, _: &[&str]) -> Result<String, String> {
+        Ok("enabled".into())
+    }
+    fn restore(&mut self, args: &[String], abort: Option<&Path>) -> (i32, String) {
+        self.restores.push(args.to_vec());
+        self.abort_files.push(abort.map(Path::to_path_buf));
+        let code = if self.codes.is_empty() {
+            0
+        } else {
+            self.codes.remove(0)
+        };
+        // Every run takes its safety backup of what is there first.
+        let dir = args
+            .iter()
+            .position(|a| a == "--safety-dir")
+            .map(|i| PathBuf::from(&args[i + 1]))
+            .unwrap();
+        let stamp = format!("20261115-00000{}-bbbbbbbb", self.restores.len());
+        std::fs::write(
+            dir.join(format!("pseudolife_safety_memory-{stamp}.sql.gz")),
+            b"x",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(format!("pseudolife_safety_state-{stamp}.tgz")),
+            b"x",
+        )
+        .unwrap();
+        if code == 0 {
+            self.docker.host.meta = format!("\"{TARGET_ID}\"");
+            self.docker.host.docs.insert(
+                "pseudolife-mcp-postgres".to_owned(),
+                pg_doc("pseudolife-stack"),
+            );
+        } else if self.drops {
+            // The database was dropped: nothing reads the bank now.
+            self.docker.host.docs.remove("pseudolife-mcp-postgres");
+        }
+        let said = if code == 0 {
+            "Restore complete"
+        } else {
+            "killed"
+        };
+        (code, said.to_owned())
+    }
+}
+
+const MOVE: &str = "20261114-080000-abcdef01";
+
+#[test]
+fn the_gate_never_lifts_while_the_target_reads_the_moved_bank() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    let answer = site.act(protocol::Op::Ungate);
+    assert!(!answer.ok, "{answer:?}");
+    assert!(site.docker.gated);
+    // The near miss: the target's own bank lifts its gate.
+    site.docker.host.meta = format!("\"{TARGET_ID}\"");
+    let answer = site.act(protocol::Op::Ungate);
+    assert!(answer.ok, "{answer:?}");
+    assert!(!site.docker.gated);
+}
+
+#[test]
+fn give_back_restores_the_targets_own_bank_once_and_names_what_keeps_the_moved_one() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(answer.ok, "{answer:?}");
+    assert_eq!(site.restores.len(), 1);
+    let args = site.restores[0].clone();
+    let at = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+    assert!(
+        at("--backup-file").ends_with("20261114-000000-aaaaaaaa.sql.gz"),
+        "{args:?}"
+    );
+    assert!(
+        at("--state-archive").ends_with("20261114-000000-aaaaaaaa.tgz"),
+        "{args:?}"
+    );
+    assert!(args.iter().any(|a| a == "--leave-stopped"));
+    // The moved bank's copy is the restore's new safety backup, named.
+    assert_eq!(answer.kept.len(), 2, "{answer:?}");
+    assert!(
+        answer
+            .kept
+            .iter()
+            .all(|f| f.contains("20261115-") && Path::new(f).is_file())
+    );
+    // Rerun after the target's own bank started and took writes: no
+    // second restore, the same files.
+    site.docker.running = true;
+    site.docker.gated = false;
+    let again = site.act(protocol::Op::GiveBack);
+    assert!(again.ok, "{again:?}");
+    assert_eq!(again.kept, answer.kept);
+    assert_eq!(site.restores.len(), 1);
+}
+
+#[test]
+fn a_give_back_cut_short_restores_again_and_keeps_the_first_copy_named() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    site.codes = vec![1];
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(!answer.ok && answer.restore_dropped, "{answer:?}");
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(answer.ok, "{answer:?}");
+    assert_eq!(site.restores.len(), 2);
+    // The cut-short run's safety backup was of the moved bank: kept too.
+    assert!(
+        answer.kept.iter().any(|f| f.contains("20261115-000001-")),
+        "{answer:?}"
+    );
+}
+
+#[test]
+fn give_back_refuses_without_the_targets_own_backup_or_this_moves_bank() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    std::fs::remove_file(site.folder().join("own-bank.json")).unwrap();
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(!answer.ok && !answer.restore_dropped, "{answer:?}");
+    assert!(answer.error.contains("own-bank.json"), "{}", answer.error);
+    // A bank that is not the moved one is never replaced.
+    let mut site = OpsSite::new(TARGET_ID);
+    site.claimed_with_own_backup();
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(!answer.ok && !answer.restore_dropped, "{answer:?}");
+    assert!(
+        answer.error.contains("not this move's moved bank"),
+        "{}",
+        answer.error
+    );
+    assert!(site.restores.is_empty());
+}
+
+#[test]
+fn a_resume_is_refused_before_any_change_when_the_gated_bank_took_writes() {
+    let baseline = super::record::Baseline {
+        user_counts: [("public.entries".to_owned(), 3)].into(),
+        mutations: [("entries".to_owned(), 3)].into(),
+    };
+    let reading = |mutations: i64, gated: bool| protocol::State {
+        gated: Some(gated),
+        user_counts: [("public.entries".to_owned(), 3)].into(),
+        mutations: Some([("entries".to_owned(), mutations)].into()),
+        ..protocol::State::default()
+    };
+    let mut request = request();
+    request.resume_move = MOVE.into();
+    request.resume_baseline = Some(baseline);
+    // As the rollback left it: the resume goes ahead.
+    let mut both = world();
+    both.wire.state = Some(reading(3, true));
+    assert_eq!(resume_check(&mut both, &request), Ok(()));
+    // A write in place since, or the gate gone: refused, naming the way out.
+    for state in [reading(4, true), reading(3, false)] {
+        let mut both = world();
+        both.wire.state = Some(state.clone());
+        let why = resume_check(&mut both, &request).unwrap_err();
+        assert!(
+            why.contains(&format!("pseudolife-mcp move --release-target {MOVE}")),
+            "{state:?}: {why}"
+        );
+    }
+    // No reading kept at the rollback: writes cannot be ruled out.
+    request.resume_baseline = None;
+    let mut both = world();
+    both.wire.state = Some(reading(3, true));
+    assert!(resume_check(&mut both, &request).is_err());
+}
+
+#[test]
+fn a_resumes_preflight_reads_the_gated_bank_before_it_plans_anything() {
+    // The target holds this move's restored bank, stopped behind its gate,
+    // and the move's claim.
+    let home = std::env::temp_dir().join(format!("move-resume-{}", uuid::Uuid::new_v4().simple()));
+    let moves = home.join(".pseudolife-mcp").join("moves");
+    std::fs::create_dir_all(&moves).unwrap();
+    let claim = json!({"move_id": MOVE, "source_bank": fp(SOURCE_ID), "at": "t"});
+    std::fs::write(moves.join("claim.json"), claim.to_string()).unwrap();
+    let both = || {
+        let mut both = world();
+        both.wire.far.home = Some(home.clone());
+        both.wire.far.nearest = Some((home.clone(), home.clone(), Some(100 << 30)));
+        both.wire.far.docker = Host::new(SOURCE_ID);
+        both.wire.far.docker.docs.insert(
+            "pseudolife-mcp-daemon".to_owned(),
+            daemon_doc(false, "pseudolife-stack", "/home/u/pseudolife-stack"),
+        );
+        both
+    };
+    let mut request = request();
+    request.resume_move = MOVE.into();
+    request.resume_baseline = Some(super::record::Baseline {
+        user_counts: [("public.entries".to_owned(), 3)].into(),
+        mutations: [("entries".to_owned(), 3)].into(),
+    });
+    let reading = |mutations: i64| protocol::State {
+        gated: Some(true),
+        user_counts: [("public.entries".to_owned(), 3)].into(),
+        mutations: Some([("entries".to_owned(), mutations)].into()),
+        ..protocol::State::default()
+    };
+    // As the rollback left it: planned.
+    let mut world = both();
+    world.wire.state = Some(reading(3));
+    let plan = preflight(&mut world, &request);
+    assert!(plan.is_ok(), "{plan:?}");
+    // A write in place since: refused by the preflight itself.
+    let mut world = both();
+    world.wire.state = Some(reading(4));
+    let why = preflight(&mut world, &request).unwrap_err();
+    assert!(
+        why.contains(&format!("pseudolife-mcp move --release-target {MOVE}")),
+        "{why}"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_give_back_cut_short_after_its_drop_restores_into_the_containers_it_named() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    site.codes = vec![1];
+    site.drops = true;
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(!answer.ok && answer.restore_dropped, "{answer:?}");
+    // Nothing reads the bank now; the rerun still restores.
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(answer.ok, "{answer:?}");
+    assert_eq!(site.restores.len(), 2);
+    assert_eq!(site.restores[0], site.restores[1]);
+}
+
+#[test]
+fn once_given_back_a_late_restore_of_the_same_give_back_refuses_under_its_lock() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(answer.ok, "{answer:?}");
+    // The restore reads this file under its own update lock and refuses
+    // while it exists (restore_cli's aborted_move): it now does.
+    let done = site.folder().join("give-back-done");
+    assert_eq!(site.abort_files, vec![Some(done.clone())]);
+    assert!(done.is_file());
+}
+
+#[test]
+fn the_targets_own_backup_is_found_when_the_helper_died_before_naming_it() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    // The helper died after the first restore, before own-bank.json: the
+    // pending record written before that restore names what was there.
+    std::fs::remove_file(site.folder().join("own-bank.json")).unwrap();
+    std::fs::write(
+        site.folder().join("own-bank-pending.json"),
+        json!({"before": [], "fingerprint": null}).to_string(),
+    )
+    .unwrap();
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(answer.ok, "{answer:?}");
+    let args = &site.restores[0];
+    let file = &args[args.iter().position(|a| a == "--backup-file").unwrap() + 1];
+    assert!(
+        file.ends_with("20261114-000000-aaaaaaaa.sql.gz"),
+        "{args:?}"
+    );
+}
+
+#[test]
+fn only_the_first_restore_records_the_targets_own_bank() {
+    let mut site = OpsSite::new(TARGET_ID);
+    let claim = protocol::Op::Claim {
+        source_bank: fp(SOURCE_ID),
+        resume: false,
+    };
+    assert!(site.act(claim).ok);
+    let folder = site.folder();
+    std::fs::create_dir_all(folder.join("safety")).unwrap();
+    for name in ["pseudolife_memory.sql.gz", "pseudolife_state.tgz"] {
+        std::fs::write(folder.join(name), b"x").unwrap();
+    }
+    std::fs::write(
+        folder.join("manifest.json"),
+        json!({"dump": "pseudolife_memory.sql.gz", "state": "pseudolife_state.tgz"}).to_string(),
+    )
+    .unwrap();
+    // The first restore, over the target's own bank: recorded before it
+    // began, then named.
+    assert!(site.act(protocol::Op::Restore).ok);
+    let pending: Value =
+        serde_json::from_slice(&std::fs::read(folder.join("own-bank-pending.json")).unwrap())
+            .unwrap();
+    assert_eq!(pending["fingerprint"], json!(fp(TARGET_ID)));
+    // The helper died before own-bank.json: a later restore (a resume) over
+    // a bank with no identity is not the target's own, and records nothing.
+    std::fs::remove_file(folder.join("own-bank.json")).unwrap();
+    site.docker.host.meta = "null".into();
+    assert!(site.act(protocol::Op::Restore).ok);
+    assert!(!folder.join("own-bank.json").exists());
+}
+
+#[test]
+fn a_named_own_backup_that_is_gone_is_refused_as_missing() {
+    let mut site = OpsSite::new(SOURCE_ID);
+    site.claimed_with_own_backup();
+    let own = site.folder().join("own-bank.json");
+    let named: Value = serde_json::from_slice(&std::fs::read(&own).unwrap()).unwrap();
+    std::fs::remove_file(named["dump"].as_str().unwrap()).unwrap();
+    let answer = site.act(protocol::Op::GiveBack);
+    assert!(!answer.ok && !answer.restore_dropped, "{answer:?}");
+    assert!(
+        answer.error.contains("own database") && answer.error.contains("is missing"),
+        "{}",
+        answer.error
+    );
+    assert!(site.restores.is_empty());
 }
