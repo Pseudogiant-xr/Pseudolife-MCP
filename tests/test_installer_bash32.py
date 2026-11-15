@@ -35,8 +35,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_SHELL_FILES = sorted({*ROOT.glob("ops/install*.sh"), *ROOT.glob("ops/preflight*.sh")})
 
-# Syntax and builtins bash 3.2 does not have; each a regex over code lines
-# (comment lines dropped) and what it is.
+# Syntax and builtins bash 3.2 does not have; each a regex and what it is.
+# A match counts only where it starts in code (``bash32_problems``).
 BASH4_ONLY = [
     (r"(?:declare|local|typeset)\s+-[a-zA-Z]*A", "an associative array (declare -A)"),
     (r"(?:declare|local|typeset)\s+-[a-zA-Z]*n\b", "a name reference (declare -n)"),
@@ -50,11 +50,16 @@ BASH4_ONLY = [
     (r"\|&", "|& (pipe both streams)"),
     (r";;&|(?<!;);&", "a case fall-through terminator (;& / ;;&)"),
     (r"\bwait\s+-n\b", "wait -n"),
-    (r"%\([^)]*\)T", "printf %(...)T"),
     (r"\bexec\s+\{[A-Za-z_]", "exec {fd}> (an allocated descriptor)"),
     (r"\[\[\s+-v\b|\btest\s+-v\b|\[\s+-v\b", "-v (is the variable set)"),
     (r"\$\{?(?:BASHPID|EPOCHSECONDS|EPOCHREALTIME)\b", "a bash 4+ variable"),
     (r"\bshopt\s+-s\s+(?:globstar|lastpipe|autocd|direxpand)\b", "a bash 4+ shell option"),
+]
+
+# A printf format bash 3.2 does not have. It is quoted text by nature, so it
+# counts inside the arguments of a printf command (``_printf_arguments``).
+PRINTF_ONLY = [
+    (r"%\([^)]*\)T", "printf %(...)T"),
 ]
 
 
@@ -178,17 +183,191 @@ def command_substitutions(text: str) -> list[tuple[int, str]]:
     return sorted(found)
 
 
+CODE, TEXT, COMMENT = 0, 1, 2
+
+
+class _Kinds:
+    """Marks each character of a shell file as code, quoted or here-document
+    text, or a comment, so the checks below decide on code only. Inside
+    double quotes and unquoted here-documents, ``$( )``, ``$name``,
+    backquotes and a ``${ }``'s name and operator are code; everything else
+    there is text, as is the word in ``${x:-word}`` (its expansions aside)."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.kind = [CODE] * len(text)
+        self.pending: list[tuple[str, bool, bool]] = []   # here-documents: delimiter, <<-, quoted
+        self._code(0, nested=False)
+
+    def _mark(self, start: int, end: int, kind: int) -> None:
+        for k in range(start, min(end, len(self.text))):
+            if self.text[k] != "\n":
+                self.kind[k] = kind
+
+    def _code(self, k: int, nested: bool) -> int:
+        """Code from ``k``; when ``nested`` (a ``$(`` body), up to and past the
+        ``)`` that balances, as ``_comsub`` finds it. Returns the next index."""
+        text, depth = self.text, 1
+        while k < len(text):
+            c = text[k]
+            if c == "\n" and self.pending:
+                k = self._heredocs(k + 1)
+            elif c == "\\":
+                k += 2
+            elif c == "'" or text.startswith("$'", k):
+                k = self._single(k + (c == "$"))
+            elif c == '"':
+                k = self._double(k)
+            elif text.startswith("${", k):
+                k = self._brace(k)
+            elif c == "`":
+                end = text.find("`", k + 1)
+                k = len(text) if end < 0 else end + 1
+            elif c == "#" and _word_start(text, k):
+                end = text.find("\n", k)
+                end = len(text) if end < 0 else end
+                self._mark(k, end, COMMENT)
+                k = end
+            elif text.startswith("<<", k) and not text.startswith("<<<", k):
+                match = _HEREDOC.match(text, k)
+                if match:
+                    self.pending.append((match.group(2), text.startswith("<<-", k), bool(match.group(1))))
+                    k = match.end()
+                else:
+                    k += 2
+            else:
+                if nested and c == "(":
+                    depth += 1
+                elif nested and c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        return k + 1
+                k += 1
+        return k
+
+    def _single(self, k: int) -> int:
+        """``text[k]`` is ``'`` (of ``'...'`` or ``$'...'``): text up to its close."""
+        ansi = k > 0 and self.text[k - 1] == "$"
+        end = k + 1
+        while end < len(self.text) and self.text[end] != "'":
+            end += 2 if ansi and self.text[end] == "\\" else 1
+        self._mark(k, end + 1, TEXT)
+        return min(end + 1, len(self.text))
+
+    def _expansions(self, k: int, stop) -> int:
+        """Text from ``k`` with its expansions left as code, until ``stop(k)``
+        holds; returns that index."""
+        text = self.text
+        while k < len(text) and not stop(k):
+            c = text[k]
+            if c == "\\":
+                self._mark(k, k + 2, TEXT)
+                k += 2
+            elif text.startswith("$(", k):
+                k = self._code(k + 2, nested=True)
+            elif text.startswith("${", k):
+                k = self._brace(k)
+            elif c == "$" and k + 1 < len(text) and (text[k + 1].isalnum() or text[k + 1] in "_?#@*!$-"):
+                k += 2
+                while k < len(text) and (text[k].isalnum() or text[k] == "_"):
+                    k += 1
+            elif c == "`":
+                end = text.find("`", k + 1)
+                k = len(text) if end < 0 else end + 1
+            else:
+                self._mark(k, k + 1, TEXT)
+                k += 1
+        return k
+
+    def _brace(self, k: int) -> int:
+        """``text[k:]`` opens ``${``: its name, subscript and operator are code,
+        the word after the operator (``${x:-word}``) is text with its
+        expansions as code. Returns the index after the closing ``}``."""
+        text = self.text
+        k += 2
+        if k + 1 < len(text) and text[k] in "!#" and text[k + 1] != "}":
+            k += 1
+        if k < len(text) and (text[k].isalnum() or text[k] == "_"):
+            while k < len(text) and (text[k].isalnum() or text[k] == "_"):
+                k += 1
+        elif k < len(text) and text[k] in "@*#?$!-":
+            k += 1
+        if k < len(text) and text[k] == "[":
+            end = text.find("]", k)
+            k = len(text) if end < 0 else end + 1
+        while k < len(text) and text[k] in ":-=+?#%/^,@":
+            k += 1
+        end = self._expansions(k, lambda i: self.text[i] == "}")
+        return min(end + 1, len(text))
+
+    def _double(self, k: int) -> int:
+        """``text[k]`` is ``"``: text up to its close, expansions as code."""
+        self._mark(k, k + 1, TEXT)
+        end = self._expansions(k + 1, lambda i: self.text[i] == '"')
+        self._mark(end, end + 1, TEXT)
+        return min(end + 1, len(self.text))
+
+    def _heredocs(self, k: int) -> int:
+        """``k`` starts the line after one or more ``<<`` operators: their
+        texts, each up to its delimiter line."""
+        text, pending = self.text, self.pending
+        self.pending = []
+        for delimiter, strip_tabs, quoted in pending:
+            while k < len(text):
+                end = text.find("\n", k)
+                end = len(text) if end < 0 else end
+                line = text[k:end]
+                if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                    self._mark(k, end, TEXT)
+                    k = end + 1
+                    break
+                if quoted:
+                    self._mark(k, end, TEXT)
+                    k = end + 1
+                else:
+                    k = self._expansions(k, lambda i: text[i] == "\n") + 1
+        return k
+
+    def view(self, *keep: int) -> str:
+        """The file with every character not of a kind in ``keep`` blanked,
+        offsets and newlines unchanged."""
+        return "".join(c if c == "\n" or kind in keep else " " for c, kind in zip(self.text, self.kind))
+
+
+def _printf_arguments(kinds: _Kinds, code: str) -> list[tuple[int, int]]:
+    """The extent of each printf command in code: from the word to the first
+    unquoted ``;``, ``|`` or ``&``, or the first newline not escaped."""
+    text, spans = kinds.text, []
+    for match in re.finditer(r"(?<![\w-])printf\b", code):
+        k = match.end()
+        while k < len(text):
+            if text[k] == "\n":
+                if text[k - 1] != "\\" or kinds.kind[k - 1] != CODE:
+                    break
+            elif text[k] in ";|&" and kinds.kind[k] == CODE:
+                break
+            k += 1
+        spans.append((match.start(), k))
+    return spans
+
+
 _CASE = re.compile(r"(?:^|[\s;&|(])case\s")
 _ESAC = re.compile(r"(?:^|[\s;&|])esac\b")
 
 
 def bash32_problems(text: str) -> list[str]:
-    """What in a shell file bash 3.2 would misread or refuse, one line each."""
+    """What in a shell file bash 3.2 would misread or refuse, one line each.
+    Only code counts: a keyword in quoted text, here-document text or a
+    comment is not one."""
     problems = []
+    kinds = _Kinds(text)
+    code = kinds.view(CODE)
     for start, body in command_substitutions(text):
         line = text.count("\n", 0, start) + 1
-        for case in _CASE.finditer(body):
-            if not _ESAC.search(body, case.end()):
+        # The body bash 3.2 cuts, with only its code left.
+        body_code = code[start + 2:start + 2 + len(body)]
+        for case in _CASE.finditer(body_code):
+            if not _ESAC.search(body_code, case.end()):
                 problems.append(
                     f"line {line}: a case inside $( ) whose pattern has no leading '(': bash 3.2 ends "
                     "the substitution at the pattern's ')'; write each pattern as (pattern), or move "
@@ -211,16 +390,26 @@ def bash32_problems(text: str) -> list[str]:
                 problems.append(
                     f"line {line}: a here-document inside $( ) holds an unbalanced quote or parenthesis, "
                     "which bash 3.2 reads as code; build the text outside the substitution")
-    code_lines = [(n, raw) for n, raw in enumerate(text.splitlines(), 1)
-                  if not raw.lstrip().startswith("#")]
+    # A construct counts where it starts in code; it may run on into quoted
+    # text, never into a comment.
+    uncommented = kinds.view(CODE, TEXT)
     for pattern, what in BASH4_ONLY:
-        for n, raw in code_lines:
-            if re.search(pattern, raw):
+        for match in re.finditer(pattern, uncommented):
+            if kinds.kind[match.start()] == CODE:
+                n = text.count("\n", 0, match.start()) + 1
                 problems.append(f"line {n}: {what} is bash 4 or later")
-    if re.search(r"(?m)^\s*set\s+-[a-z]*u", text):
-        empty = set(re.findall(r"(?m)(?:^|[\s;])(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)=\(\)", text))
+    spans = _printf_arguments(kinds, code)
+    for pattern, what in PRINTF_ONLY:
+        for match in re.finditer(pattern, uncommented):
+            if any(start <= match.start() < end for start, end in spans):
+                n = text.count("\n", 0, match.start()) + 1
+                problems.append(f"line {n}: {what} is bash 4 or later")
+    if re.search(r"(?m)^\s*set\s+-[a-z]*u", code):
+        empty = set(re.findall(r"(?m)(?:^|[\s;])(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)=\(\)", code))
         for name in sorted(empty):
-            for match in re.finditer(r"\$\{" + name + r"\[[@*]\]\}", text):
+            for match in re.finditer(r"\$\{" + name + r"\[[@*]\]\}", uncommented):
+                if kinds.kind[match.start()] != CODE:
+                    continue
                 guard = "${" + name + "[@]+"
                 before = text[max(0, match.start() - len(guard) - 1):match.start()]
                 if guard not in before:
