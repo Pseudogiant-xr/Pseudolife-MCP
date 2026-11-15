@@ -92,10 +92,10 @@ def docker_outside_path() -> Path | None:
 def run_case(case: dict) -> dict:
     """The case run against the Python helpers: each step's exit, stdout and
     stderr, and the files it names afterwards, placeholdered."""
-    # Resolved: the helpers print resolved paths and refuse a credential path
-    # with a symlinked ancestor, and mkdtemp() is not resolved. On macOS it
-    # sits under /var, a symlink to /private/var, as it does anywhere TMPDIR
-    # goes through a symlink.
+    # Resolved, because mkdtemp() is not: the helpers make a relative path
+    # absolute against getcwd(), which reports the physical path, and refuse
+    # a credential path with a symlinked ancestor. macOS's mkdtemp() is under
+    # /var, a symlink to /private/var; so is any TMPDIR reached by a symlink.
     home = Path(tempfile.mkdtemp(prefix="installer-goldens-")).resolve()
     try:
         if os.name != "nt":
