@@ -267,9 +267,10 @@ native-client block, before anything on the host changes: they download that ver
 `~/.pseudolife-mcp/downloads/<version>/` (kept for a rerun), refuse unless
 the sums name it exactly once and its digest matches, extract the one
 binary into a private temporary directory, run its `version` command, and
-ask it `installer --capability`, each with a deadline (30 s,
-`PSEUDOLIFE_NATIVE_PROBE_SECONDS`), so a client that hangs is refused rather
-than stalling an unattended run. It must answer exactly `pseudolife-mcp
+ask it `installer --capability`, each with a deadline (30 s;
+`PSEUDOLIFE_NATIVE_PROBE_SECONDS` sets a whole number of seconds from 1 to
+99999, read as decimal, and a value it cannot use is named and 30 kept), so a
+client that hangs is refused rather than stalling an unattended run. It must answer exactly `pseudolife-mcp
 installer-protocol <N>` with N at least the installer's level
 (`NATIVE_INSTALLER_PROTOCOL`, the binary's `INSTALLER_PROTOCOL`), because the
 installer runs that release's `installer` steps. A release older than the
@@ -281,9 +282,14 @@ native installer itself works from a checkout of a release that carries it. An
 interactive first install stages, verifies and probes the release before its
 first question, so a refusal costs no answers; an unattended one stages after
 the flag checks. Any failure refuses with its cause and fix; a refusal after
-the download names the download it keeps for a rerun, and nothing else
-changed. A `SHA256SUMS` the server does not have (404) and one it could not
-serve (another HTTP status, with the status) are told apart. There is no
+the download names what it keeps for a rerun (the download, or only
+`SHA256SUMS`), and nothing else changed. A `SHA256SUMS` the server does not
+have (404) and one it could not serve (another HTTP status, with the status)
+are told apart, and the shell installer also tells a file it could not write
+(curl's write error) and a missing curl from a network failure. The staged
+copy is removed however the run ends, also when the PowerShell installer
+returns to an open pwsh session, and once the client is installed no later
+question stages the release again. There is no
 fallback to a Python client. The shim step then runs that staged binary's
 `runtime install` with the verified files and registers every client
 against the stable launcher; `installer migrate-registrations --client X`
@@ -300,12 +306,22 @@ A contributor who wants the native installer from a checkout no release
 carries yet serves it archives built from that checkout: build the client
 (`cargo build --release --locked -p pseudolife-stdio` in `rust/`), package it
 (`python rust/ci/release_assets.py package --target <target> --binary
-<the built pseudolife-stdio> --out <dir>`), write its `SHA256SUMS` in the
-release's own form, lowercase hex, two spaces and the name, with LF line
-endings (`(cd <dir> && sha256sum pseudolife-mcp-*.tar.gz pseudolife-mcp-*.zip
-2>/dev/null > SHA256SUMS)`, or `shasum -a 256` on macOS), and run the installer
-with `PSEUDOLIFE_SHIM_ENGINE=native PSEUDOLIFE_NATIVE_ARCHIVE_URL=<dir>`. The
+<the built pseudolife-stdio> --out <dir>`), write its `SHA256SUMS` (one line
+per archive: the lowercase hex digest, two spaces or a space and an asterisk,
+then the name, with LF line endings), and run the installer with
+`PSEUDOLIFE_SHIM_ENGINE=native PSEUDOLIFE_NATIVE_ARCHIVE_URL=<dir>`. The
 version in the archive's name is the checkout's `pyproject.toml` version.
+
+- **Linux, and Git Bash on Windows:** `(cd <dir> && sha256sum
+  pseudolife-mcp-*.tar.gz pseudolife-mcp-*.zip 2>/dev/null > SHA256SUMS)`.
+  Git Bash's `sha256sum` writes the binary-mode form (`<digest> *<name>`),
+  which the installers accept as well.
+- **macOS:** `(cd <dir> && shasum -a 256 pseudolife-mcp-*.tar.gz > SHA256SUMS)`.
+- **PowerShell:** set the two variables with `$env:PSEUDOLIFE_SHIM_ENGINE =
+  'native'` and `$env:PSEUDOLIFE_NATIVE_ARCHIVE_URL = '<dir>'` before
+  `ops\install.ps1`, and clear them after with `Remove-Item
+  Env:PSEUDOLIFE_SHIM_ENGINE, Env:PSEUDOLIFE_NATIVE_ARCHIVE_URL`, since they
+  stay set in that session.
 
 ## Recovery and validation
 

@@ -11,6 +11,8 @@ import subprocess
 
 import pytest
 
+from tests.test_installer_existing_upgrade import user_path_unchanged
+
 from tests import installer_sandbox
 from tests.test_installer_client_only import BASH, REMOTE, ROOT, _mode, _stub
 from tests.test_installer_client_only_native import _Shell
@@ -35,8 +37,9 @@ def _block(name: str, script: str) -> str:
 def test_sh_takes_the_flag_and_documents_it(bash, tmp_path):
     env = installer_sandbox.environment(tmp_path, {k: v for k, v in os.environ.items()
                                                    if k in ("PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR")})
-    proc = installer_sandbox.run([bash, str(ROOT / "ops" / "install-native.sh"), "--test-login", "--help"],
-                                 env=installer_sandbox.layout(env, tmp_path), root=tmp_path, capture_output=True, text=True, timeout=60)
+    with user_path_unchanged((tmp_path / "home")):
+        proc = installer_sandbox.run([bash, str(ROOT / "ops" / "install-native.sh"), "--test-login", "--help"],
+                                     env=installer_sandbox.layout(env, tmp_path), root=tmp_path, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     usage = _text("install-native.sh").split("# <<< usage <<<", 1)[0]
     assert "--test-login" in usage

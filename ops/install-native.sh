@@ -401,8 +401,18 @@ ENV_END="# <<< pseudolife-mcp install <<<"
 # How long the staged client may take to answer `version` and
 # `installer --capability` (seconds) before the run refuses instead of
 # hanging; PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
-NATIVE_PROBE_SECONDS="${PSEUDOLIFE_NATIVE_PROBE_SECONDS:-30}"
-case "$NATIVE_PROBE_SECONDS" in ""|*[!0-9]*|0) NATIVE_PROBE_SECONDS=30 ;; esac
+# The setting is read as a decimal whole number (a leading zero is not octal);
+# anything else is named and the probe keeps 30.
+NATIVE_PROBE_SECONDS=30
+native_probe_setting="${PSEUDOLIFE_NATIVE_PROBE_SECONDS:-}"
+if [ -n "$native_probe_setting" ]; then
+    native_probe_digits="${native_probe_setting#"${native_probe_setting%%[!0]*}"}"
+    case "$native_probe_setting" in *[!0-9]*) native_probe_digits="" ;; esac
+    case "$native_probe_digits" in
+        [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9]) NATIVE_PROBE_SECONDS="$native_probe_digits" ;;
+        *) echo "PSEUDOLIFE_NATIVE_PROBE_SECONDS='$native_probe_setting' is not a whole number of seconds from 1 to 99999; the probe waits 30 s." >&2 ;;
+    esac
+fi
 NATIVE_INSTALLER_PROTOCOL=2
 NATIVE_VERSION=""
 NATIVE_TARGET=""
@@ -444,27 +454,45 @@ native_sha256() {  # $1 = file; echoes its lowercase SHA-256
         return 1
     fi
 }
-native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no such file there) or another failure
+# native_download's status, kept apart from curl's own exit codes (curl's 22
+# and 23 mean other things): 0 fetched; 2 no such file there (an HTTP 404 or
+# an absent local file); 3 another HTTP status (NATIVE_HTTP_STATUS); 4 the
+# file could not be written (curl exit 23); 5 no curl; 6 another curl failure
+# (NATIVE_CURL_EXIT: network, proxy or TLS).
+native_download() {  # $1 = asset name, $2 = destination file
     case "$native_base" in
         http://*|https://*)
+            command -v curl >/dev/null 2>&1 || return 5
             # A stalled transfer gives up instead of hanging an unattended run.
-            # 22 only for a 404 (no such file there); another HTTP error sets
-            # NATIVE_HTTP_STATUS and returns 23.
-            native_curl=0
+            NATIVE_CURL_EXIT=0
             NATIVE_HTTP_STATUS="$(curl -sSL --retry 2 --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 \
-                -w '%{http_code}' -o "$2.part" "$native_base/$1")" || native_curl=$?
-            if [ "$native_curl" = 0 ]; then
+                -w '%{http_code}' -o "$2.part" "$native_base/$1")" || NATIVE_CURL_EXIT=$?
+            if [ "$NATIVE_CURL_EXIT" = 0 ]; then
                 case "$NATIVE_HTTP_STATUS" in
-                    2??) mv -f "$2.part" "$2"; return 0 ;;
-                    404) native_curl=22 ;;
-                    *) native_curl=23 ;;
+                    2??) mv -f "$2.part" "$2" || { rm -f "$2.part"; return 4; }; return 0 ;;
+                    404) rm -f "$2.part"; return 2 ;;
+                    *) rm -f "$2.part"; return 3 ;;
                 esac
             fi
             rm -f "$2.part"
-            return "$native_curl" ;;
+            [ "$NATIVE_CURL_EXIT" != 23 ] || return 4
+            return 6 ;;
         *)
-            [ -f "$native_base/$1" ] || return 22
-            cp "$native_base/$1" "$2" ;;
+            [ -f "$native_base/$1" ] || return 2
+            cp "$native_base/$1" "$2" || return 4 ;;
+    esac
+}
+native_fetch_refuse() {  # $1 = what was fetched (SHA256SUMS or the archive name), $2 = native_download's status
+    case "$2" in
+        2)
+            if [ "$1" = SHA256SUMS ]; then
+                native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
+            fi
+            native_refuse "release v$NATIVE_VERSION has no $1 at $native_base, although its SHA256SUMS lists it" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
+        3) native_refuse "$1 could not be fetched from $native_base (HTTP $NATIVE_HTTP_STATUS)" "Retry in a few minutes; if it persists, check a proxy or firewall in between (or PSEUDOLIFE_NATIVE_ARCHIVE_URL)." ;;
+        4) native_refuse "$1 could not be written to $native_dir (curl exit 23, a write error)" "Free space there or make the folder writable, and rerun." ;;
+        5) native_refuse "curl, which downloads the native client, is not installed" "Install curl (apt install curl, dnf install curl, or your system's package) and rerun, or point PSEUDOLIFE_NATIVE_ARCHIVE_URL at a local folder holding the release's files." ;;
+        *) native_refuse "$1 could not be fetched from $native_base (curl exit ${NATIVE_CURL_EXIT:-?}: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry." ;;
     esac
 }
 native_bounded() {  # $1 = both|out, then the command; its output on stdout; status 124 when it does not finish in time
@@ -497,7 +525,13 @@ native_refuse() {  # $1 = cause, $2 = fix
     # A download already made is kept for a rerun, and the refusal says where.
     native_left=" Nothing was changed."
     if [ -n "${native_dir:-}" ] && [ -d "$native_dir" ] && [ -n "$(ls -A "$native_dir" 2>/dev/null)" ]; then
-        native_left=" Nothing else was changed: the download in $native_dir is kept for a rerun (delete it to free the space)."
+        # Name what is there: the download, or only the release's SHA256SUMS
+        # when the archive was never fetched or was removed.
+        native_kept="the download"
+        if [ -n "${native_name:-}" ] && [ ! -f "$native_dir/$native_name" ] && [ -f "$native_dir/SHA256SUMS" ]; then
+            native_kept="SHA256SUMS"
+        fi
+        native_left=" Nothing else was changed: $native_kept in $native_dir is kept for a rerun (delete it to free the space)."
     fi
     echo "The native pseudolife-mcp client cannot be installed: $1. $2$native_left" >&2
     exit 1
@@ -536,26 +570,24 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     NATIVE_ARCHIVE="$native_dir/$native_name"
     native_sums_status=0
     native_download SHA256SUMS "$NATIVE_SUMS" || native_sums_status=$?
-    case "$native_sums_status" in
-        0) ;;
-        22) native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun." ;;
-        23) native_refuse "SHA256SUMS could not be fetched from $native_base (HTTP $NATIVE_HTTP_STATUS)" "Retry in a few minutes; if it persists, check a proxy or firewall in between (or PSEUDOLIFE_NATIVE_ARCHIVE_URL)." ;;
-        *) native_refuse "SHA256SUMS could not be fetched from $native_base (curl exit $native_sums_status: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry." ;;
-    esac
-    native_expected="$(grep -E "^[0-9a-f]{64}  $(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
+    [ "$native_sums_status" = 0 ] || native_fetch_refuse SHA256SUMS "$native_sums_status"
+    # Either standard form of a checksum line: two spaces, or space-asterisk
+    # (binary mode, as sha256sum writes under Git Bash); nothing looser.
+    native_expected="$(grep -E "^[0-9a-f]{64} [ *]$(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
     case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
         1) ;;
         *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
     esac
     if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
-        native_download "$native_name" "$NATIVE_ARCHIVE" ||
-            native_refuse "the download of $native_name from $native_base failed" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+        native_archive_status=0
+        native_download "$native_name" "$NATIVE_ARCHIVE" || native_archive_status=$?
+        [ "$native_archive_status" = 0 ] || native_fetch_refuse "$native_name" "$native_archive_status"
     fi
     native_actual="$(native_sha256 "$NATIVE_ARCHIVE")" ||
         native_refuse "neither sha256sum nor shasum is installed to verify the download" "Install coreutils (sha256sum) and rerun."
     if [ "$native_actual" != "$native_expected" ]; then
         rm -f "$NATIVE_ARCHIVE"
-        native_refuse "$native_name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+        native_refuse "$native_name does not match the release's SHA256SUMS (the downloaded archive was removed)" "Rerun to download it again."
     fi
     native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
         chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."

@@ -11,6 +11,8 @@ import subprocess
 
 import pytest
 
+from tests.test_installer_existing_upgrade import user_path_unchanged
+
 from tests import native_client_stub as native_stub
 from tests.test_installer_client_only import BASH, ROOT, _q, _stub
 from tests.test_installer_client_only_native import _Shell
@@ -34,10 +36,11 @@ def _release_env(shell: _Shell) -> dict[str, str]:
 @BASH
 def test_client_only_refuses_an_extractor_url(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install-native.sh')}' "
-                     "--daemon-url http://100.64.0.2:8765 "
-                     "--extractor-url http://pl.example.invalid:1234/v1 --no-art\n",
-                     extra_env=_release_env(shell))
+    with user_path_unchanged(shell.home):
+        proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install-native.sh')}' "
+                         "--daemon-url http://100.64.0.2:8765 "
+                         "--extractor-url http://pl.example.invalid:1234/v1 --no-art\n",
+                         extra_env=_release_env(shell))
     assert proc.returncode == 2
     # The client-only refusal itself, not an unknown-flag usage exit.
     [line] = [line for line in proc.stderr.splitlines() if "client-only install" in line]
