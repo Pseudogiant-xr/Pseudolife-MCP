@@ -23,6 +23,12 @@ pub(super) struct Request {
     pub json: bool,
     pub expose_target: bool,
     pub target_release: bool,
+    /// For `--resume`: the earlier move found in this host's records.
+    pub resume_move: String,
+    /// For `--resume`: the gated bank as that move's rollback read it.
+    pub resume_baseline: Option<super::record::Baseline>,
+    /// For `--resume`: whether the target daemon ran before that move began.
+    pub resume_target_was_running: bool,
 }
 
 /// The canonical argv, or `None` (the dispatcher defers it).
@@ -96,20 +102,14 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
             "--to takes an ssh target such as root@box or a ~/.ssh/config alias".to_owned(),
         );
     }
-    let text = if !request.dry_run {
-        "the native client plans a move but does not perform one yet: run it with --dry-run to check both hosts and print the plan; the move itself needs the Python client's move for now (pseudolife-mcp 0.23.x installed with pip or pipx)"
-            .to_owned()
-    } else if request.target_checkout.is_some() {
+    let text = if request.target_checkout.is_some() {
         "--target-checkout is not supported: move goes to an installed (release) Docker bank on the target, with the native pseudolife-mcp client there; drop --target-checkout"
             .to_owned()
     } else if request.expose_target {
         "--expose-target is not available in the native client yet: expose the target's daemon yourself (for example with Tailscale serve) and name the URL clients will use with --target-url <url>"
             .to_owned()
-    } else if request.resume {
-        "--resume arrives with the native move itself; a dry run has nothing to resume, so drop --resume"
-            .to_owned()
     } else if request.target_env_file.is_some() || !request.target_compose_files.is_empty() {
-        "--target-env-file and --target-compose-file arrive with the native move itself; a dry run reads the target's containers as they are, so drop them"
+        "--target-env-file and --target-compose-file are not available in the native client yet (they serve carried tokens): move reads the target's containers as they are, so drop them"
             .to_owned()
     } else if request.target_url.is_none() {
         "--target-url is required: name the URL clients will use to reach the target's daemon, such as http://100.64.0.2:8765"
@@ -133,6 +133,54 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
         return None;
     };
     Some(format!("{text}. {NOTHING}"))
+}
+
+/// `move --rollback <id> [--yes] [--json]`, the rollback of a move this host
+/// left unfinished, and `move --release-target <id> [--yes] [--json]`,
+/// which gives a rolled-back move's target back its own bank. Native only:
+/// Python's move has neither option, so the dispatcher reads these shapes
+/// before `move_cli`'s argparse checks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Rollback {
+    pub id: String,
+    pub yes: bool,
+    pub json: bool,
+    /// `--release-target` rather than `--rollback`.
+    pub release: bool,
+    /// `--release-target <id> --target-gone`: the target gives no answer
+    /// as a move target, so this host gives it up for good, changing
+    /// nothing there.
+    pub target_gone: bool,
+}
+
+pub(super) fn parse_rollback(arguments: &[OsString]) -> Option<Rollback> {
+    let words: Vec<&str> = arguments
+        .iter()
+        .map(|a| a.to_str())
+        .collect::<Option<_>>()?;
+    let mut rollback = Rollback::default();
+    let mut id = None;
+    let mut index = 0;
+    while index < words.len() {
+        match words[index] {
+            flag @ ("--rollback" | "--release-target") if id.is_none() => {
+                rollback.release = flag == "--release-target";
+                index += 1;
+                id = Some((*words.get(index)?).to_owned());
+            }
+            "--yes" if !rollback.yes => rollback.yes = true,
+            "--target-gone" if !rollback.target_gone => rollback.target_gone = true,
+            "--json" if !rollback.json => rollback.json = true,
+            _ => return None,
+        }
+        index += 1;
+    }
+    rollback.id = id?;
+    // Only a release has a target to give up on.
+    if rollback.target_gone && !rollback.release {
+        return None;
+    }
+    Some(rollback)
 }
 
 /// An `http(s)://host[:port][/]` origin, its host bracketed when IPv6.

@@ -50,6 +50,18 @@ def test_a_mapped_doctor_source_reaches_its_row():
     assert precheck.rows_for("rust/cli_harness/goldens/doctor.windows.json", {}) == ("doctor",)
 
 
+@pytest.mark.parametrize("path, move", [
+    # restore_cli's move_native answers the move row through the cli.rs
+    # dispatcher, a link the import scan never sees.
+    ("rust/shim/src/cli/restore_cli/move_native/mod.rs", True),
+    ("rust/shim/src/cli/restore_cli/move_native/target.rs", True),
+    # The near miss: a command that never reaches move.
+    ("rust/shim/src/cli/transfer.rs", False),
+])
+def test_the_native_move_source_reaches_the_move_row(path, move):
+    assert ("move" in precheck.rows_for(path, {})) is move
+
+
 @pytest.mark.parametrize("path", ["README.md", "docs/guide/install.md", "changelog.d/2026-11-05-example.md"])
 def test_document_changes_need_no_replay(path):
     assert precheck.rows_for(path, {}) == ()
