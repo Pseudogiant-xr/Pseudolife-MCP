@@ -3,7 +3,7 @@
 Canonical argv: ``expose -h``, ``expose {tailscale,off,status} -h``,
 argparse's errors, ``expose status [--port N] [--json]``, ``expose off
 [--port N] [--yes] [--json]`` and ``expose tailscale --port N [--yes]
-[--json]`` up to the change. The ``tailscale`` program on every case's
+[--json]``, the change included. The ``tailscale`` program on every case's
 ``PATH`` is a scripted stand-in (``_STAND_IN``): it answers ``status
 --json``, ``ip -4`` and ``serve status --json`` from the case's scenario,
 applies ``serve --bg`` and ``serve --tcp=N off`` to its own state file, and
@@ -217,41 +217,38 @@ def expose_port(obs: dict) -> None:
 normalize.RECORD_RULES.add("expose-port")
 
 
-def _mutating(argv: list) -> bool:
-    """``serve --bg ...`` or ``serve --tcp=N off``: the calls that change
-    the serve config."""
-    return argv[:2] == ["serve", "--bg"] or (
-        len(argv) == 3 and argv[0] == "serve" and argv[1].startswith("--tcp=")
-        and argv[2] == "off")
+# The native client's wording where it says more than the oracle (that
+# nothing changed, or what is still in place): the oracle's line, then the
+# native one. Applied to the oracle's streams only, so a live run and the
+# mutant control still compare everything else byte for byte.
+NATIVE_WORDING = [
+    (re.compile(rb"no terminal to confirm on: rerun with --yes"),
+     b"no terminal to confirm on, so nothing changed: rerun with --yes"),
+    (re.compile(rb"(tailscale refused the change for this user \([^\r\n\"]*\)): "),
+     rb"\1; nothing changed: "),
+    (re.compile(rb"(tailscale refused the serve \([^\r\n\"]*\))(?=[\r\n\"])"),
+     rb"\1; nothing changed"),
+    (re.compile(rb"the serve did not take \(the serve status does not show the forward\); "
+                rb"nothing to undo"),
+     b"the serve did not take (`tailscale serve` exited 0, but the serve status does not "
+     b"show the forward); nothing changed. Check `tailscale serve status`, then rerun"),
+    (re.compile(rb"(tailscale did not remove the forward \([^\r\n\"]*\))(?=[\r\n\"])"),
+     rb"\1; it is still in place, so nothing changed"),
+]
 
 
-@normalize.rule("expose-deferral-at-change")
-def expose_deferral_at_change(obs: dict) -> None:
-    """A declared deferral at the change: the candidate stops, printing the
-    dispatcher's deferral line (exit 1), right before the first ``tailscale``
-    call that changes the serve config, after the same reads. The oracle
-    goes on to make the change. Its observation keeps every call up to that
-    first mutating one; the mutating call and everything after it (later
-    calls, the stand-in's serve state, any later daemon request) are
-    removed only once validated as present, and its streams become that
-    expectation. The candidate's observation is untouched."""
+@normalize.rule("expose-native-wording")
+def expose_native_wording(obs: dict) -> None:
+    """The oracle's lines that the native client words differently on
+    purpose (``NATIVE_WORDING``) become the native lines; the oracle's
+    exit code, calls, serve state and requests stay compared."""
     if obs.get("arm") != "python":
         return
-    log = normalize._file(obs, "ts/calls.jsonl")
-    if log is None:
-        return
-    lines = log.splitlines(keepends=True)
-    cut = next((i for i, line in enumerate(lines) if _mutating(json.loads(line))), None)
-    if cut is None:
-        return
-    normalize._set_file(obs, "ts/calls.jsonl", b"".join(lines[:cut]))
-    obs["files"].pop("ts/serve.json", None)
-    obs.get("modes", {}).pop("ts/serve.json", None)
-    if obs.get("requests"):
-        obs["requests"] = obs["requests"][:1]
-    obs["exit"] = 1
-    normalize._put(obs, "stdout", b"")
-    normalize._put(obs, "stderr", _native(DEFERRAL))
+    for field in ("stdout", "stderr"):
+        data = normalize._get(obs, field)
+        for pattern, native in NATIVE_WORDING:
+            data = pattern.sub(native, data)
+        normalize._put(obs, field, data)
 
 
 @normalize.rule("expose-deferral")
@@ -324,6 +321,7 @@ def case(case_id: str, argv: list[str], *, scenario_=None, daemon=None, port=Non
         raise AssertionError(f"{case_id}: a tailscale case must name its port")
     if full[1:2] == ["tailscale"] and scenario_ is not None and not _loopback_only(scenario_):
         raise AssertionError(f"{case_id}: a tailscale case reports only loopback addresses")
+    rules = ("expose-native-wording", *rules)
     if daemon is not None:
         rules = ("expose-port", *rules)
     return Case(case_id, full, env={**ENV, **(env or {})}, rules=rules,
@@ -382,9 +380,10 @@ def cases() -> list[Case]:
         # No stand-in: the candidate defers before any lookup, so the oracle
         # arm must make no tailscale call either.
         add(case(case_id, argv, rules=("expose-deferral",)))
-    add(case("defer-help-width", ["-h"], env={"COLUMNS": "100"}, rules=("expose-deferral",)))
-    add(case("defer-int-digits", ["status"], env={"PYTHONINTMAXSTRDIGITS": "640"},
-             rules=("expose-deferral",)))
+    # Help is argparse's 80-column text at any width.
+    add(case("help-width", ["-h"], env={"COLUMNS": "100"}))
+    # Python's integer digit limit means nothing to the native client.
+    add(case("int-digits", ["status"], env={"PYTHONINTMAXSTRDIGITS": "640"}))
 
     # status: no tailscale CLI.
     add(case("status-not-installed", ["status"]))
@@ -533,8 +532,19 @@ def cases() -> list[Case]:
     add(case("off-no-terminal", ["off"], scenario_=s(serve=OURS)))
     add(case("off-no-terminal-json", ["off", "--json", "--port", "8443"], port="8443",
              scenario_=s(serve=OURS)))
-    add(case("defer-off-yes", ["off", "--yes"], scenario_=s(serve=OURS),
-             rules=("expose-deferral-at-change",)))
+    # off: the change, read back.
+    add(case("off-yes", ["off", "--yes"], scenario_=s(serve=OURS)))
+    add(case("off-yes-json", ["off", "--yes", "--json"], scenario_=s(serve=json.dumps(
+        {"TCP": {"{PORT}": {"TCPForward": "127.0.0.1:{PORT}"}, "443": {"HTTPS": True}}}))))
+    add(case("off-yes-not-removed", ["off", "--yes"], scenario_=s(serve=OURS,
+                                                                 off={"effect": "none"})))
+    add(case("off-yes-fails-removed", ["off", "--yes"], scenario_=s(
+        serve=OURS, off={"code": 1, "err": "warning: something\n"})))
+    add(case("off-yes-permission", ["off", "--yes", "--json"], scenario_=s(
+        serve=OURS, off={"effect": "none", "code": 1,
+                         "err": "Access denied: serve config denied\n"})))
+    add(case("off-yes-unverifiable", ["off", "--yes"], scenario_=s(
+        serve=OURS, reads=[{}, {"code": 1, "err": "boom\n"}])))
 
     # tailscale: the local daemon.
     add(case("tailscale-no-daemon", ["tailscale", *at(DEAD_PORT)], scenario_=s()))
@@ -599,10 +609,22 @@ def cases() -> list[Case]:
         scenario_=s()))
     add(case("tailscale-no-terminal-bankless", ["tailscale", *at(), "--json"],
              daemon=_health({"status": "ok", "auth": True}), scenario_=s()))
-    add(case("defer-tailscale-yes", ["tailscale", *at(), "--yes"], daemon=healthy,
-             scenario_=s(), rules=("expose-deferral-at-change",)))
-    add(case("defer-tailscale-yes-json", ["tailscale", *at(), "--yes", "--json"],
-             daemon=healthy, scenario_=s(), rules=("expose-deferral-at-change",)))
+    # tailscale: the change, read back, and the probe through the address
+    # (loopback here, so it reaches the fixture daemon: the same bank).
+    add(case("tailscale-yes", ["tailscale", *at(), "--yes"], daemon=healthy, scenario_=s()))
+    add(case("tailscale-yes-json", ["tailscale", *at(), "--yes", "--json"],
+             daemon=healthy, scenario_=s()))
+    add(case("tailscale-yes-bankless", ["tailscale", *at(), "--yes"],
+             daemon=_health({"status": "ok", "auth": True}), scenario_=s()))
+    add(case("tailscale-yes-refused", ["tailscale", *at(), "--yes"], daemon=healthy,
+             scenario_=s(bg={"effect": "none", "code": 1, "err": "serve: listener failed\n"})))
+    add(case("tailscale-yes-permission", ["tailscale", *at(), "--yes"], daemon=healthy,
+             scenario_=s(bg={"effect": "none", "code": 1,
+                             "err": "Access denied: serve config denied\n"})))
+    add(case("tailscale-yes-not-taken", ["tailscale", *at(), "--yes", "--json"],
+             daemon=healthy, scenario_=s(bg={"effect": "none"})))
+    add(case("tailscale-yes-unverifiable", ["tailscale", *at(), "--yes"], daemon=healthy,
+             scenario_=s(reads=[{}, {"code": 1, "err": "boom\n"}])))
     return c
 
 
@@ -612,7 +634,7 @@ MUTANTS = [
     Mutant("expose-relative-path-searched", "expose", LOOKUP_FILE,
            "if known == Some(false) {", "if known.is_none() {", ("status-relative-path-skipped",)),
     Mutant("expose-yes-skips-tty-check", "expose", FILE,
-           "if !args.yes {", "if false {", ("off-no-terminal",)),
+           "if !host.interactive() {", "if false {", ("off-no-terminal",)),
     Mutant("expose-first-line-unstripped", "expose", TS_FILE,
            ".find(|line| !pyjson::py_strip(line).is_empty())",
            ".find(|line| !line.is_empty())", ("status-not-running-blank-line",)),
