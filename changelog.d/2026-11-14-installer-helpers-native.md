@@ -26,6 +26,3 @@
 - The native installer runs these steps only from a staged release that
   carries them: one whose `installer --capability` answers the installer's
   protocol level.
-- The installer preflight (`ops/preflight.sh`, `ops/preflight.ps1`) and the
-  Claude Code session-hook writer `ops/install-hook.sh` still need Python
-  3.10 or newer until a following change replaces them.

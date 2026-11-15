@@ -332,7 +332,7 @@ function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
     return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
 }
 # The installer-protocol level the staged release must answer (Initialize-NativeClient).
-$NativeInstallerProtocol = 2
+$NativeInstallerProtocol = 3
 # The client side (the stdio MCP shim every agent registers, and the
 # pseudolife-mcp CLI) is the native binary published with this checkout's
 # release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
@@ -1465,7 +1465,14 @@ if ($ClientOnly) {
     # `&` on a .ps1 only refreshes $LASTEXITCODE when the script exits explicitly;
     # clear the stale value a prior native command may have left.
     $global:LASTEXITCODE = 0
-    & (Join-Path $PSScriptRoot "preflight.ps1") -Client $clientList
+    # Its Docker ownership check is a step of this run's verified client.
+    $savedNativeCli = $env:PSEUDOLIFE_NATIVE_CLI
+    $env:PSEUDOLIFE_NATIVE_CLI = if ($script:nativeStaged) { $script:nativeStaged } else { $script:nativeHelper }
+    try {
+        & (Join-Path $PSScriptRoot "preflight-native.ps1") -Client $clientList
+    } finally {
+        $env:PSEUDOLIFE_NATIVE_CLI = $savedNativeCli
+    }
     if ($LASTEXITCODE -ne 0) { throw "Preflight failed - fix the line(s) above and re-run." }
 }
 
@@ -1649,7 +1656,7 @@ function Get-EnvValue($name) {
 }
 if (-not $ClientOnly) {
     $resolvedVolumes = @(Invoke-NativeHelper volume-names --repo $repo --env-file $envFile)
-    if ($LASTEXITCODE -ne 0 -or $resolvedVolumes.Count -ne 2) { throw "Could not resolve Docker volumes; check ops/.env with ops/preflight.ps1 and rerun." }
+    if ($LASTEXITCODE -ne 0 -or $resolvedVolumes.Count -ne 2) { throw "Could not resolve Docker volumes; check ops/.env with ops/preflight-native.ps1 and rerun." }
     $bankVol, $stateVol = $resolvedVolumes
     $existingVolumes = @(docker volume ls --format '{{.Name}}')
     if ($LASTEXITCODE -ne 0) { throw "Could not list Docker volumes; check docker info and rerun." }
@@ -1967,7 +1974,7 @@ if (-not $ClientOnly) {
         }
         if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
     } else {
-        throw "Cannot determine the Docker startup step; rerun ops/preflight.ps1."
+        throw "Cannot determine the Docker startup step; rerun ops/preflight-native.ps1."
     }
     $composeSnapshotJson = $composeSnapshotJson | Invoke-InstallerState started --expected-stdin --repo $repo --env-file $envFile --override $overrideFile @engineStateArgs
 }

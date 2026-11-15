@@ -312,12 +312,14 @@ live test_installer_extractor_modes_native.py
 live test_installer_extractor_modes_ps.py
 live test_installer_extractor_modes_ps_native.py
 live test_installer_legacy_hooks.py
+live test_installer_legacy_hooks_native.py
 live test_installer_lite.py
 live test_installer_maintainer_setup.py
 live test_installer_native_ask_order.py
 live test_installer_native_client.py
 live test_installer_native_client_ps.py
 live test_installer_native_goldens.py
+live test_installer_no_python.py
 live test_installer_plugin.py
 live test_installer_plugin_native.py
 live test_installer_py_launcher_ps.py
