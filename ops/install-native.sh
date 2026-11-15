@@ -536,7 +536,7 @@ native_exit() {  # the EXIT trap: the staged copy goes, and an exit after the fi
     if [ "$native_exit_status" != 0 ] && [ -n "$NATIVE_HOST_CHANGING" ] && [ -z "$NATIVE_PART_WAY_SAID" ]; then
         native_part="The install stopped part way: what the lines marked ==> above report stays as it is"
         [ -z "$NATIVE_INSTALLED_AT" ] || native_part="$native_part, the native client among it (installed at $NATIVE_INSTALLED_AT)"
-        echo "$native_part. Rerun the installer to finish, once the cause shown above is fixed." >&2
+        echo "$native_part. Rerun the installer to finish, once the cause this run reports is fixed." >&2
     fi
 }
 native_refuse() {  # $1 = cause, $2 = fix
@@ -598,10 +598,12 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     # (binary mode, as sha256sum writes under Git Bash); nothing looser.
     # The name is compared as a string, not a regex: a version may hold `+`
     # (a PEP 440 local version), which a pattern would read as a quantifier.
+    # The pattern keeps its leading "(": bash 3.2 (macOS's /bin/bash) ends a
+    # $( ) at the first ")" that balances, so a bare pattern would cut it short.
     native_expected="$(grep -E '^[0-9a-f]{64} [ *]' "$NATIVE_SUMS" | while IFS= read -r native_line || [ -n "$native_line" ]; do
         native_digest="${native_line%% *}"
         case "${native_line#"$native_digest"}" in
-            "  $native_name"|" *$native_name") printf '%s\n' "$native_digest" ;;
+            ("  $native_name"|" *$native_name") printf '%s\n' "$native_digest" ;;
         esac
     done)" || native_expected=""
     case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in

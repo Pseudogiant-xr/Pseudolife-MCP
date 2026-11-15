@@ -3954,6 +3954,6 @@ Write-Host "Done. First session: tell your coding agent to remember something."
     if ($script:nativeHostChanging -and -not $script:nativeRunDone -and -not $script:nativePartWaySaid) {
         $part = "The install stopped part way: what the lines marked ==> above report stays as it is"
         if ($script:nativeInstalledAt) { $part += ", the native client among it (installed at $($script:nativeInstalledAt))" }
-        [Console]::Error.WriteLine("$part. Rerun the installer to finish, once the cause shown above is fixed.")
+        [Console]::Error.WriteLine("$part. Rerun the installer to finish, once the cause this run reports is fixed.")
     }
 }
