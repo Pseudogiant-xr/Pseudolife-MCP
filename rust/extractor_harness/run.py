@@ -28,6 +28,10 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
+# On Windows, console children of a run that has no console open no window
+# on the developer's desktop (tests/windowless_children.py).
+import runpy  # noqa: E402
+runpy.run_path(str(ROOT / "tests" / "windowless_children.py"))["install"]()
 # The recorders' shared vocabulary, loaded by file: rust/daemon/harness has
 # its own run.py and other names this harness must not resolve to.
 _record_spec = importlib.util.spec_from_file_location(

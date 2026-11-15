@@ -37,6 +37,11 @@ sys.path.insert(0, str(ROOT))
 # before anything can import torch; the lock is taken in pytest_configure.
 from tests import suite_lock  # noqa: E402
 from tests import suite_classes  # noqa: E402
+from tests import windowless_children  # noqa: E402
+
+# On Windows, console children (pwsh, cmd, python) of a run that has no
+# console open no window on the developer's desktop (tests/windowless_children.py).
+windowless_children.install()
 
 # The frozen package's test files (tests/suite_classes.py): left out of a
 # run unless --include-frozen; a malformed list stops the session here.
