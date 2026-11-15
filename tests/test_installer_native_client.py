@@ -144,12 +144,12 @@ def _release(directory: Path, *, sums_override: str | None = None, extra_line: b
 
 
 def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, release: bool = True,
-         **release_kwargs) -> subprocess.CompletedProcess:
+         version: str = VERSION, **release_kwargs) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
-    (repo / "pyproject.toml").write_text(f'[project]\nname = "x"\nversion = "{VERSION}"\n', encoding="utf-8")
+    (repo / "pyproject.toml").write_text(f'[project]\nname = "x"\nversion = "{version}"\n', encoding="utf-8")
     base = tmp_path / "release"
     if release:
         _release(base, **release_kwargs)
@@ -587,3 +587,35 @@ def test_a_mismatched_archive_refusal_names_only_what_is_kept(tmp_path):
     # The archive is gone; only SHA256SUMS stays, and the refusal says so.
     assert "the download in" not in line
     assert "SHA256SUMS in" in line and "kept for a rerun" in line
+
+
+# The archive name is matched literally: a version may carry regex
+# metacharacters (a PEP 440 local version, `9.8.7+meta`), and `+` read as a
+# quantifier both refused the real line and let another name's line apply.
+LOCAL = "9.8.7+meta"
+
+
+def _local_release(tmp_path: Path, named: str) -> None:
+    """A release for LOCAL whose SHA256SUMS lists the archive's digest under ``named``."""
+    _release(tmp_path / "release")
+    data = (tmp_path / "release" / ASSET).read_bytes()
+    (tmp_path / "release" / ASSET).unlink()
+    real = f"pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz"
+    (tmp_path / "release" / real).write_bytes(data)
+    (tmp_path / "release" / "SHA256SUMS").write_text(f"{hashlib.sha256(data).hexdigest()}  {named}\n", encoding="utf-8")
+
+
+def test_a_version_with_a_plus_sign_matches_its_own_line(tmp_path):
+    _local_release(tmp_path, f"pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz")
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False, version=LOCAL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STAGED" in result.stdout
+
+
+def test_another_names_line_never_supplies_the_digest(tmp_path):
+    # `9[.]8[.]7+meta` as a regex matches `9.8.77meta`: that line must not count.
+    _local_release(tmp_path, f"pseudolife-mcp-9.8.77meta-{TARGET}.tar.gz")
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False, version=LOCAL)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert f"lists pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz 0 times, not once" in result.stderr

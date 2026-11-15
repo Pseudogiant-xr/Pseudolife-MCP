@@ -573,7 +573,14 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     [ "$native_sums_status" = 0 ] || native_fetch_refuse SHA256SUMS "$native_sums_status"
     # Either standard form of a checksum line: two spaces, or space-asterisk
     # (binary mode, as sha256sum writes under Git Bash); nothing looser.
-    native_expected="$(grep -E "^[0-9a-f]{64} [ *]$(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
+    # The name is compared as a string, not a regex: a version may hold `+`
+    # (a PEP 440 local version), which a pattern would read as a quantifier.
+    native_expected="$(grep -E '^[0-9a-f]{64} [ *]' "$NATIVE_SUMS" | while IFS= read -r native_line || [ -n "$native_line" ]; do
+        native_digest="${native_line%% *}"
+        case "${native_line#"$native_digest"}" in
+            "  $native_name"|" *$native_name") printf '%s\n' "$native_digest" ;;
+        esac
+    done)" || native_expected=""
     case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
         1) ;;
         *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
