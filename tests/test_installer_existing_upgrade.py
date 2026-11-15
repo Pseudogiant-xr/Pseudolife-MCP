@@ -63,18 +63,23 @@ def _inside(entry: str, home: str) -> bool:
     import ntpath
     import re
 
-    def norm(path: str) -> str:
+    def expand(path: str) -> str:
         path = path.strip()
         if len(path) >= 2 and path[0] == path[-1] == '"':
             path = path[1:-1]
-        path = re.sub(r"%([^%]+)%", lambda match: os.environ.get(match[1], match[0]), path)
+        return re.sub(r"%([^%]+)%", lambda match: os.environ.get(match[1], match[0]), path)
+
+    def norm(path: str) -> str:
         return ntpath.normcase(ntpath.normpath(path))
 
     if not entry.strip():
         return False
-    entry, home = norm(entry), norm(home)
-    if ";" in entry:   # a %VAR% that expands to several entries is not one entry inside home
+    entry = expand(entry)
+    # A %VAR% that expands to several entries is not one entry inside home.
+    # Checked before normpath, which can fold "home\bin;C:\.." back to home.
+    if ";" in entry:
         return False
+    entry, home = norm(entry), norm(expand(home))
     return entry == home or entry.startswith(home.rstrip("\\") + "\\")
 
 
@@ -110,24 +115,30 @@ def _path_difference(before, value) -> str:
     """What differs between two user PATH values, for a failure message: the
     entries added and removed, and whether the entries both keep changed
     order or the value's registry type changed."""
+    import difflib
+
     old, new = _path_entries(before), _path_entries(value)
-    remaining, added, common = list(old), [], []
-    for entry in new:
-        if entry in remaining:
-            remaining.remove(entry)
-            common.append(entry)
-        else:
-            added.append(entry)
-    unmatched, kept_in_old_order = list(remaining), []
-    for entry in old:
-        if entry in unmatched:
-            unmatched.remove(entry)
-        else:
-            kept_in_old_order.append(entry)
-    parts = [f"added {added!r}", f"removed {remaining!r}"]
-    if common != kept_in_old_order:
-        parts.append("the entries both values have are in a different order")
-    if before is not None and value is not None and value[1] != before[1]:
+    # An order-keeping alignment: what it leaves out of old was deleted, what
+    # it leaves out of new was inserted, and a value in both moved.
+    deleted, inserted = [], []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag != "equal":
+            deleted.extend(old[i1:i2])
+            inserted.extend(new[j1:j2])
+    moved = []
+    for entry in list(inserted):
+        if entry in deleted:
+            deleted.remove(entry)
+            inserted.remove(entry)
+            moved.append(entry)
+    parts = [f"added {inserted!r}", f"removed {deleted!r}"]
+    if moved:
+        parts.append(f"the entries both values have are in a different order ({moved!r} moved)")
+    if before is None and value is not None:
+        parts.append("the value was created")
+    elif before is not None and value is None:
+        parts.append("the value was deleted")
+    elif before is not None and value[1] != before[1]:
         parts.append(f"the registry type changed from {before[1]} to {value[1]}")
     return ", ".join(parts)
 
@@ -1180,3 +1191,26 @@ def test_the_user_path_guard_restores_an_empty_original(monkeypatch):
         with guard():
             fake.values["Path"] = (HOME + "\\shim\\bin", 2)
     assert fake.values["Path"] == ("", 2) and announced == [1]
+
+
+def test_a_variable_folded_back_by_normpath_is_not_inside_the_home(monkeypatch):
+    # Codex review of 38aafbdce: "home\bin;C:\.." normalises to home itself,
+    # so the separator check comes before normpath.
+    monkeypatch.setenv("PL_GUARD_FOLD", HOME + "\\bin;C:\\..")
+    assert not _inside("%PL_GUARD_FOLD%", HOME)
+
+
+@pytest.mark.parametrize(("old", "new", "names", "not_named"), [
+    # Codex review of 38aafbdce: a removed trailing duplicate is a removal, not a reorder.
+    ("C:\\a;C:\\b;C:\\a", "C:\\a;C:\\b", "removed ['C:\\\\a']", "different order"),
+    ("C:\\a;C:\\b;C:\\a", "C:\\b;C:\\a", "removed ['C:\\\\a']", "different order"),
+    ("C:\\a;C:\\b", "C:\\b;C:\\a", "different order", "removed ['C:"),
+])
+def test_the_failure_names_removals_and_moves_apart(old, new, names, not_named):
+    message = _path_difference((old, 2), (new, 2))
+    assert names in message and not_named not in message, message
+
+
+def test_the_failure_names_a_created_or_deleted_value():
+    assert "the value was created" in _path_difference(None, ("", 2))
+    assert "the value was deleted" in _path_difference(("", 2), None)
