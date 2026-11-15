@@ -18,8 +18,9 @@ signed-in browsers and signs one out. The first slice (2026-11-12) ported
 every shape that opens no browser; this one ports the sign-in that opens a
 browser (with or without `--to` and `--json`) and `--unless-signed-in` (the
 session-list read, then that sign-in). Which browser `open_browser` would
-start is decided before the code is minted, so a launcher this port does not
-reproduce defers before any effect but `--unless-signed-in`'s read; once the
+start is decided before the code is minted, so on Windows a launcher this
+port does not reproduce defers before any effect but `--unless-signed-in`'s
+read (macOS and Linux never defer on the browser); once the
 daemon answers the sign-in with a 200 object the candidate answers every
 branch itself. Since issue #1497's fixes the oracle refuses each malformed
 answer it used to die on (a traceback, exit 1), so no case is a declared
@@ -73,54 +74,66 @@ crash any more.
 ## The browser (`open_browser`, `has_display`, `webbrowser.get()`)
 
 Decided natively before the POST (`browser.rs`), read only from the
-environment and the file system (and, with a display on POSIX, the
-`xdg-settings get default-web-browser` call `register_standard_browsers`
-makes):
+environment and the file system:
 
-- `has_display`: always on Windows and macOS; on Linux a non-empty
-  `DISPLAY` or `WAYLAND_DISPLAY`, else the link is printed and no browser
-  is consulted.
-- `register_standard_browsers`: macOS's AppleScript entries first; Windows'
-  `windows-default` first; on POSIX, with a display, `xdg-settings`' answer
-  (FileNotFoundError, PermissionError, NotADirectoryError and a non-zero exit
-  caught; any other error, or output that is not UTF-8, makes
-  `webbrowser.get()` raise, so the link is printed) and the X list in
-  CPython's order (`which` as `shutil.which` does it; `gvfs-open` only with
-  `GNOME_DESKTOP_SESSION_ID`, `kfmclient` only with `KDE_FULL_SESSION`;
-  a name inside xdg-settings' answer goes first); with `TERM`, the console
-  browsers, every one refused (`open_browser` refuses Elinks, a
-  `UnixBrowser` that falls back to the terminal, by name).
-- `BROWSER`, split on `os.pathsep`: every non-empty entry goes to the front,
-  the first one first; an entry that is only whitespace raises IndexError in
-  `_synthesize` (printed). The first entry decides: with `%s`, `shlex.split`
-  (POSIX mode, reproduced; its ValueError prints) and a last word `&` give a
-  `BackgroundBrowser` (launched), any other a `GenericBrowser` (refused,
-  printed); without `%s`, a `GenericBrowser` (printed) unless the first
-  word's basename is a standard browser name, which `_synthesize` may clone
-  (deferred).
-- No usable `BROWSER`: the first standard controller. `WindowsDefault`
-  (`os.startfile`), a `BackgroundBrowser` (`xdg-open`, `gio open --`,
-  `gvfs-open`, `x-www-browser`, `skipstone`, `mosaic`), a terminal
-  `GenericBrowser` (printed) or none (`webbrowser.Error`, printed).
+- `has_display` (the oracle): always on Windows and macOS; on Linux a
+  non-empty `DISPLAY` or `WAYLAND_DISPLAY`, else the link is printed and no
+  browser is consulted. The native candidate reads the display only for
+  the Linux default launchers below: a set `BROWSER` decides without one.
+- Windows reproduces `webbrowser.get()`: `BROWSER`, split on `;`, every
+  non-empty entry to the front, the first one first; an entry that is only
+  whitespace raises IndexError in `_synthesize` (printed). The first entry
+  decides: with `%s`, `shlex.split` (POSIX mode, reproduced; its ValueError
+  prints) and a last word `&` give a `BackgroundBrowser` (launched), any
+  other a `GenericBrowser` (refused, printed); without `%s`, a
+  `GenericBrowser` (printed) unless the first word's basename is a standard
+  browser name, which `_synthesize` may clone (deferred). No usable
+  `BROWSER`: `WindowsDefault` (`os.startfile`).
+- macOS and Linux follow the native rules since 16 November 2026, not
+  `webbrowser`'s (the maintainer's ruling of 14 November: the systems work,
+  not match Python). The first non-empty `BROWSER` entry (split on `:`)
+  decides alone, with or without `%s` or `&` and with or without a display
+  (a remote terminal names its own opener there; an empty `BROWSER`, or
+  only `:`, is no `BROWSER`): `shlex.split` words, each `%s`
+  the URL, the URL appended when no word holds `%s`, a last word `&`
+  dropped, started in the background. A terminal browser (`www-browser`,
+  `links`, `links2`, `elinks`, `lynx`, `w3m`, `browsh` by basename), a
+  `shlex` error, an entry naming no program and a value that is not UTF-8
+  print the link with the cause. Without `BROWSER`, macOS runs
+  `/usr/bin/open URL`; Linux with no display prints the link with that
+  cause, and with one runs the first of `xdg-open`, `gio open --`,
+  `x-www-browser`, `firefox`, `google-chrome`, `chromium`,
+  `chromium-browser` that `PATH` holds (`xdg-settings` is no longer read:
+  `xdg-open` follows the default browser itself), and none prints the link
+  with the names it looked for.
 
 The launch (`launch.rs`), after `link_is_safe` passed and before anything
 prints:
 
-- `BackgroundBrowser.open`: `[program] + [arg.replace("%s", url) ...]`, then
-  `p.poll() is None`. POSIX: stdin, stdout and stderr inherited, every other
-  descriptor closed (`close_fds=True`; marked close-on-exec here), `setsid`,
-  then `_posixsubprocess`'s `execve` over the program as given (it holds a
-  slash) or joined to each `os.get_exec_path()` entry, the first error that
-  is not ENOENT/ENOTDIR reported; never execvp's `/bin/sh` fallback.
-  Windows: std's `CreateProcess` with nothing redirected, so the browser
-  gets this command's own standard handles, as CPython's child does
-  (Windows copies a parent's redirected standard handles to a child started
-  with none named). In both, a pipe this command writes to stays open until
-  the browser exits.
+- A background start: `[program] + [arg.replace("%s", url) ...]`. POSIX:
+  stdin, stdout and stderr are `/dev/null` (a browser left running holds no
+  pipe of the caller's and writes nothing into this terminal), every other
+  descriptor closed
+  (marked close-on-exec here), `setsid`, then `execve` over the program as
+  given (it holds a slash) or joined to each `PATH` entry, the first error
+  that is not ENOENT/ENOTDIR reported; never execvp's `/bin/sh` fallback.
+  The launcher then has two seconds to exit: a zero exit, or a program
+  still running (the browser itself), is opened; a non-zero exit or a start
+  that fails prints the link with the cause (a launcher the caller's
+  ignored SIGCHLD reaps before its status is read counts as opened).
+  Windows: std's `CreateProcess`
+  with nothing redirected, so the browser gets this command's own standard
+  handles, as CPython's child does (Windows copies a parent's redirected
+  standard handles to a child started with none named), and opened when it
+  is still running right after the start (`p.poll() is None`); there a
+  pipe this command writes to stays open until the browser exits.
 - `WindowsDefault.open`: `ShellExecuteW(NULL, NULL, url, NULL, NULL,
   SW_SHOWNORMAL)`, the default verb `os.startfile` uses; True unless it
   returns 32 or less; a URL past 32767 UTF-16 units is `path_converter`'s
   ValueError (False).
+- A test build of the candidate starts nothing but a stub its own test
+  registered (`launch::intercept`, #1509): any other launch, and every
+  `ShellExecuteW`, panics before the call.
 
 Safety against a hostile answer: the URL handed to any launcher has passed
 `link_is_safe`, which matches it whole: the answer's own normalized
@@ -161,17 +174,16 @@ legitimate `&to=<page>` still splits the command line.
 
 ## Deferred before any request (the dispatcher's `mode 'console' is deferred` line, exit 1)
 
-- A launcher this port does not start (`browser.rs`): the `UnixBrowser`
-  family but Elinks (Mozilla, Netscape, Galeon, Chrome, Opera), Konqueror,
-  Grail and the macOS AppleScript launchers (`MacOSXOSAScript`, the macOS
-  default) as the first controller; a `BROWSER` entry without `%s` whose
-  first word's basename is a standard browser name (`_synthesize` may clone
-  that controller); on Windows a `BackgroundBrowser` whose program is not a
-  drive-absolute `.exe` path without a quote (`CreateProcess(NULL, ...)`
-  searches the interpreter's own directory and the current directory for a
-  bare name, where std does not; a batch file runs through `cmd.exe`); a
-  `BROWSER` value that is not valid Unicode. With `--unless-signed-in` the
-  session read comes first (a read; case `defer-browser-unless`).
+- On Windows only, a launcher this port does not start (`browser.rs`): a
+  `BROWSER` entry without `%s` whose first word's basename is a standard
+  browser name (`_synthesize` may clone that controller); a
+  `BackgroundBrowser` whose program is not a drive-absolute `.exe` path
+  without a quote (`CreateProcess(NULL, ...)` searches the interpreter's
+  own directory and the current directory for a bare name, where std does
+  not; a batch file runs through `cmd.exe`); a `BROWSER` value that is not
+  valid Unicode. With `--unless-signed-in` the session read comes first (a
+  read; case `defer-browser-unless`). macOS and Linux never defer on the
+  browser.
 - argparse corners: abbreviations, `--`, a value starting with `-`, any
   other token starting with `-`, `--help=x`; help or usage at a width other
   than `COLUMNS=80` or with `FORCE_COLOR` / `PYTHON_COLORS` / `NO_COLOR` set
@@ -204,24 +216,24 @@ its deferral line (exit 1) after sending the same request. None is cased.
 
 ## Implemented, not compared by the harness
 
-- The default launchers: `WindowsDefault` (`ShellExecuteW`) and the POSIX
-  standard list (`xdg-open` and the other `BackgroundBrowser`s), and the
-  `xdg-settings` call. Comparing them would open a real browser in one or
-  both arms, so every harness case makes them impossible: it sets a
-  `BROWSER` whose first entry decides, a `PATH` holding only the home's
-  `bin` (checked when the row loads, and by `check_programs` before each
-  arm for the names `webbrowser` looks up) and no `WAYLAND_DISPLAY`
-  (`DISPLAY` only where a case needs `has_display`). Their decision logic
-  is covered by the unit tests in `browser_tests.rs` against a fake
-  machine (the try order, the preferred name, the probe's outcomes, `which`
-  and `os.get_exec_path` against a temporary directory), none of which
-  starts a program.
-- Elinks as the first standard controller (refused, printed): a case needs
-  no `BROWSER` for it, which the row forbids; `browser_tests.rs` and
-  `tests/test_console_cli.py` cover it. A `BROWSER` naming `elinks` is a
-  clone `_synthesize` makes, which still defers.
-- macOS: the `BROWSER` path is the POSIX code (compiled for macOS by the
-  release build only; no CI lane runs it); the macOS default defers.
+- The default launchers: `WindowsDefault` (`ShellExecuteW`), macOS's
+  `/usr/bin/open` and the Linux list (`xdg-open` and the rest). Comparing
+  them would open a real browser in one or both arms, so every harness case
+  makes them impossible: a case that reaches the browser sets a `BROWSER`
+  whose first entry decides, a `PATH` holding only the home's `bin`
+  (checked when the row loads, and by `check_programs` before each arm for
+  the names a launcher lookup reads) and no `WAYLAND_DISPLAY` (`DISPLAY`
+  only where a case needs `has_display`); every other case runs with
+  `BROWSER` naming no program (`NO_BROWSER`), so a candidate that wrongly
+  signs in prints the link (#1509). Their decision logic is covered by the
+  unit tests in `browser_tests.rs` against a fake machine (the order, each
+  refusal's cause, `which` and the `PATH` candidates against a temporary
+  directory), and the POSIX start, exit status and settle time by
+  `launch_tests.rs` against `/bin/sh` stubs.
+- macOS: the `BROWSER` path and the default are the POSIX code, with
+  `/usr/bin/open` as the default launcher (compiled for macOS by the release
+  build, and by the `test-lite-macos` lane when it runs; no CI lane runs the Rust
+  tests or a launch there). Real macOS launch: not yet run.
 
 ## Declared divergences
 
@@ -231,9 +243,14 @@ its deferral line (exit 1) after sending the same request. None is cased.
   stdout that refuses its first byte); the dispatcher's Python then asks
   for a second code. The candidate is not installed as `pseudolife-mcp`,
   so this is the candidate's answer only.
-- On POSIX, `xdg-settings` runs before the sign-in request rather than after
-  it, and also when the answer turns out to be no safe link (the oracle then
-  never calls `webbrowser.get()`); it only reads.
+- On macOS and Linux the browser follows the native rules above, not
+  `webbrowser`'s: a `BROWSER` without `%s` or `&` starts in the background
+  where the oracle prints the link or defers; a terminal browser prints the
+  link where the oracle may defer; a failed launch prints its cause (stderr,
+  or `browser_error` in the JSON) where the oracle prints none; and the
+  Linux defaults are the native list, so `xdg-settings` is never read.
+  Cases recorded from the candidate: `browser-*`, and the `open-*` cases
+  whose answer moved (listed in the pull request that moved them).
 - On Windows std starts a program with handle inheritance on, so a handle
   this command itself inherited as inheritable, other than its three
   standard ones, reaches the browser; CPython's child gets the standard
@@ -282,3 +299,14 @@ against master's deferring binary on Windows: 37 of the new and changed
 cases differed, and the five that matched are the four declared pre-mint
 deferrals and a `--no-open --json` answer the first slice already gave.
 Hosted runs are CI's.
+
+Evidence of 16 November 2026 (the native macOS and Linux browser rules):
+WSL Ubuntu, `--golden` 167/167 against the Linux golden re-recorded from
+the candidate (`--record-candidate --write`; three Windows-only cases keep
+orphaned Linux entries, which the recorder does not remove). The row's 16
+mutants now split by OS: Linux runs 13 (`console-exited-counts-as-opened`,
+`console-generic-launched` and `console-winerror-full-stop` are
+Windows-only), Windows runs 15 (`console-running-counts-as-failed` is
+Linux-only); `console-display-ignored` was removed, since its case now
+differs from the oracle on purpose and so could not catch it. The mutants
+were not run in that change.
