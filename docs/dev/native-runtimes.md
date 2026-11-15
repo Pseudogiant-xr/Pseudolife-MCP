@@ -252,13 +252,23 @@ old client left on disk. A rerun that changes nothing prints one line.
 
 ## Installers
 
-`ops/install.sh` and `ops/install.ps1` install the client from the release
-their checkout names (`pyproject.toml`'s version) in their native-client
-block, before anything on the host changes: they download that version's
+`ops/install.sh` and `ops/install.ps1` install the Python client unless
+`PSEUDOLIFE_SHIM_ENGINE=native` asks for the native one (`python`, the
+default, also brings a native machine back; any other value is refused
+before anything changes). Asked for native, they hand their arguments to
+`ops/install-native.sh` / `ops/install-native.ps1`, which install the client
+from the release their checkout names (`pyproject.toml`'s version) in their
+native-client block, before anything on the host changes: they download that version's
 `SHA256SUMS` and the archive for the host target into
 `~/.pseudolife-mcp/downloads/<version>/` (kept for a rerun), refuse unless
 the sums name it exactly once and its digest matches, extract the one
-binary into a private temporary directory and run its `version` command.
+binary into a private temporary directory, run its `version` command, and
+ask it `installer --capability`. It must answer exactly `pseudolife-mcp
+installer-protocol <N>` with N at least the installer's level
+(`NATIVE_INSTALLER_PROTOCOL`, the binary's `INSTALLER_PROTOCOL`), because the
+installer runs that release's `installer` steps; a release older than the
+installer (0.24.0 answers with a usage error) is refused, naming the release
+tag checkout to use instead.
 Any failure refuses with its cause and fix and nothing changed; there is no
 fallback to a Python client. The shim step then runs that staged binary's
 `runtime install` with the verified files and registers every client
@@ -289,3 +299,16 @@ The source includes isolated unit tests under `runtime::tests`, plus the
 exercises two installed native sessions while updating side by side, Unicode
 stdio and exit propagation. Build/execution evidence must be recorded separately;
 formatting success does not prove these tests have run.
+
+CI prepares a real client for the installers' Python tests:
+`PSEUDOLIFE_NATIVE_TEST_BINARY` names a native `pseudolife-stdio` built from
+the same commit, and `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1` asks a test
+that needs it to fail instead of skip. CI's Python lanes that run installer
+tests (`test`, `test-lite-windows`, `test-lite-macos`, the Windows nightly)
+build one before their tests, smoke-run its `version` and set both
+(`tests/test_ci_native_client.py` pins it, and runs the binary in the `test`
+lane); on macOS that smoke run is the native client's only CI execution.
+The installer tests that will run it are being added with the native
+installer work; today only `tests/test_ci_native_client.py` reads the
+variable. Locally, set them to a `cargo build -p pseudolife-stdio` output
+to run the same path.

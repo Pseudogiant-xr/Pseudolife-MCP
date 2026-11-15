@@ -1,6 +1,6 @@
 """The installer harnesses refuse to start outside a disposable home.
 
-On 14 November 2026 a test-fixing session started ``ops/install.ps1``
+On 14 November 2026 a test-fixing session started ``ops/install-native.ps1``
 directly from its own shell, with the developer's environment; it stopped
 only because that release carried no native archives. Every shared harness
 that runs installer code now checks its environment with
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from tests import installer_sandbox
-from tests.test_installer_existing_upgrade import _fixture_env
+from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
 def test_the_developers_own_environment_is_refused(tmp_path):

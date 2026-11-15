@@ -15,7 +15,6 @@ import threading
 
 import pytest
 
-from tests import installer_sandbox
 from tests.test_installer_client_only_ps import ROOT, _PowerShell, _output, _q
 
 INSTALL = "ops/install.ps1"
@@ -104,10 +103,10 @@ def test_a_blank_model_is_refused(tmp_path, model):
 
 def test_an_empty_model_parameter_is_refused(tmp_path):
     ps = _PowerShell(tmp_path)
-    proc = installer_sandbox.run(
+    proc = subprocess.run(
         [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
          "-Extractor", "claude-only", "-Model", "", "-NoArt"],
-        capture_output=True, text=True, timeout=120, env=ps.env, root=tmp_path, check=False,
+        capture_output=True, text=True, timeout=120, env=ps.env, check=False,
         stdin=subprocess.DEVNULL)
     assert proc.returncode == 2
     assert "-Model" in _output(proc)
@@ -249,10 +248,10 @@ def test_endpoint_preflight_refuses_an_unreachable_server(tmp_path):
 
 def test_the_script_refuses_an_endpoint_mode_without_its_url(tmp_path):
     ps = _PowerShell(tmp_path)
-    proc = installer_sandbox.run(
+    proc = subprocess.run(
         [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
          "-Extractor", "endpoint", "-Model", "m", "-NoArt"],
-        capture_output=True, text=True, timeout=120, env=ps.env, root=tmp_path, check=False,
+        capture_output=True, text=True, timeout=120, env=ps.env, check=False,
         stdin=subprocess.DEVNULL)
     assert proc.returncode == 2
     assert "-ExtractorUrl" in _output(proc)
@@ -260,11 +259,11 @@ def test_the_script_refuses_an_endpoint_mode_without_its_url(tmp_path):
 
 def test_client_only_refuses_an_extractor_url(tmp_path):
     ps = _PowerShell(tmp_path)
-    proc = installer_sandbox.run(
+    proc = subprocess.run(
         [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
          "-DaemonUrl", "http://100.64.0.2:8765",
          "-ExtractorUrl", "http://pl.example.invalid:1234/v1", "-NoArt"],
-        capture_output=True, text=True, timeout=120, env=ps.env, root=tmp_path, check=False,
+        capture_output=True, text=True, timeout=120, env=ps.env, check=False,
         stdin=subprocess.DEVNULL)
     assert proc.returncode == 2
     # The client-only refusal itself, not a binding error.
