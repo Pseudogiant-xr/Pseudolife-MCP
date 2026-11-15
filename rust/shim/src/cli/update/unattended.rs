@@ -12,7 +12,10 @@ use std::{
 
 #[path = "unattended/schedule.rs"]
 mod schedule;
-pub(crate) use schedule::{schedule, unschedule};
+pub(crate) use schedule::{
+    Blocker, Installed, NAMES, Stop, TARGET, installed, installed_kind, preflight, reschedule,
+    schedule, unschedule,
+};
 
 pub(crate) const LOG_NAME: &str = "unattended-update.log";
 const BOARD_LABEL: &str = "unattended update";
