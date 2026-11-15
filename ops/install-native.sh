@@ -748,6 +748,13 @@ NATIVE_TARGET=""
 NATIVE_ARCHIVE=""
 NATIVE_SUMS=""
 NATIVE_STAGED=""
+# Set at this run's first change to the host (a write or a container); from
+# then on an exit is told as a run that stopped part way, never "nothing
+# changed" (native_exit). NATIVE_INSTALLED_AT names the native client once
+# it is installed.
+NATIVE_HOST_CHANGING=""
+NATIVE_INSTALLED_AT=""
+NATIVE_PART_WAY_SAID=""
 native_target() {  # echoes this host's release target triple, or nothing
     # PSEUDOLIFE_NATIVE_TARGET picks one of the five release targets instead
     # (an emulated one, or a test's).
@@ -787,7 +794,8 @@ native_sha256() {  # $1 = file; echoes its lowercase SHA-256
 # and 23 mean other things): 0 fetched; 2 no such file there (an HTTP 404 or
 # an absent local file); 3 another HTTP status (NATIVE_HTTP_STATUS); 4 the
 # file could not be written (curl exit 23); 5 no curl; 6 another curl failure
-# (NATIVE_CURL_EXIT: network, proxy or TLS).
+# (NATIVE_CURL_EXIT: network, proxy or TLS); 7 a local file that could not be
+# copied (PSEUDOLIFE_NATIVE_ARCHIVE_URL naming a folder).
 native_download() {  # $1 = asset name, $2 = destination file
     case "$native_base" in
         http://*|https://*)
@@ -808,7 +816,7 @@ native_download() {  # $1 = asset name, $2 = destination file
             return 6 ;;
         *)
             [ -f "$native_base/$1" ] || return 2
-            cp "$native_base/$1" "$2" || return 4 ;;
+            cp "$native_base/$1" "$2" || return 7 ;;
     esac
 }
 native_fetch_refuse() {  # $1 = what was fetched (SHA256SUMS or the archive name), $2 = native_download's status
@@ -820,6 +828,7 @@ native_fetch_refuse() {  # $1 = what was fetched (SHA256SUMS or the archive name
             native_refuse "release v$NATIVE_VERSION has no $1 at $native_base, although its SHA256SUMS lists it" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
         3) native_refuse "$1 could not be fetched from $native_base (HTTP $NATIVE_HTTP_STATUS)" "Retry in a few minutes; if it persists, check a proxy or firewall in between (or PSEUDOLIFE_NATIVE_ARCHIVE_URL)." ;;
         4) native_refuse "$1 could not be written to $native_dir (curl exit 23, a write error)" "Free space there or make the folder writable, and rerun." ;;
+        7) native_refuse "$1 could not be copied from $native_base to $native_dir" "Check that the file there is readable and that $native_dir is writable, then rerun." ;;
         5) native_refuse "curl, which downloads the native client, is not installed" "Install curl (apt install curl, dnf install curl, or your system's package) and rerun, or point PSEUDOLIFE_NATIVE_ARCHIVE_URL at a local folder holding the release's files." ;;
         *) native_refuse "$1 could not be fetched from $native_base (curl exit ${NATIVE_CURL_EXIT:-?}: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry." ;;
     esac
@@ -850,7 +859,21 @@ native_unstage() {  # removes this run's staging directory
     if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
     native_stage_dir=""
 }
+native_exit() {  # the EXIT trap: the staged copy goes, and an exit after the first host change says so
+    native_exit_status=$?
+    native_unstage
+    if [ "$native_exit_status" != 0 ] && [ -n "$NATIVE_HOST_CHANGING" ] && [ -z "$NATIVE_PART_WAY_SAID" ]; then
+        native_part="The install stopped part way: what the lines marked ==> above report stays as it is"
+        [ -z "$NATIVE_INSTALLED_AT" ] || native_part="$native_part, the native client among it (installed at $NATIVE_INSTALLED_AT)"
+        echo "$native_part. Rerun the installer to finish, once the cause shown above is fixed." >&2
+    fi
+}
 native_refuse() {  # $1 = cause, $2 = fix
+    if [ -n "$NATIVE_HOST_CHANGING" ]; then
+        NATIVE_PART_WAY_SAID=1
+        echo "The install stopped part way: $1. $2 Then rerun the installer to finish; the steps it already completed are kept." >&2
+        exit 1
+    fi
     # A download already made is kept for a rerun, and the refusal says where.
     native_left=" Nothing was changed."
     if [ -n "${native_dir:-}" ] && [ -d "$native_dir" ] && [ -n "$(ls -A "$native_dir" 2>/dev/null)" ]; then
@@ -928,7 +951,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
         chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."
     # The staged copy is only for this run; the verified download is kept.
-    trap native_unstage EXIT
+    trap native_exit EXIT
     case "$native_name" in
         *.zip)
             if command -v unzip >/dev/null 2>&1; then
@@ -976,6 +999,7 @@ native_install() {
     native_launcher_before="$(native_installed_launcher)"
     native_sum_before=""
     [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
+    NATIVE_HOST_CHANGING=1
     native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
     native_launcher="${native_launcher%$'\r'}"
     if command -v cygpath >/dev/null 2>&1; then
@@ -983,6 +1007,7 @@ native_install() {
     fi
     [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
     SHIM_PATH="$native_launcher"
+    NATIVE_INSTALLED_AT="$SHIM_PATH"
     if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
         step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
     else
@@ -1450,6 +1475,7 @@ client_only_preflight() {
             token_value=""
             step "That is a pairing code: the token file $TOKEN_FILE is created by pairing, once the shim is installed."
         else
+            NATIVE_HOST_CHANGING=1
             token_report=$(printf '%s\n' "$token_value" |
                 "$token_py" "$repo/ops/client_credentials.py" write-token-file --path "$TOKEN_FILE") || true
             token_value=""
@@ -1714,6 +1740,7 @@ normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
 }
 [ -n "$CLIENT_ONLY" ] || normalize_env_line_endings "$env_file"
 # <<< env line endings <<<
+[ -z "${env_backup:-}" ] || NATIVE_HOST_CHANGING=1  # the rewrite above changed ops/.env
 
 # ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
 resolve_installer_volumes() {
@@ -1812,6 +1839,7 @@ fi
 if [ -z "$CLIENT_ONLY" ]; then
     for volume in "$bank_vol" "$state_vol"; do
         if ! printf '%s\n' "$existing_volumes" | grep -Fxq -- "$volume"; then
+            NATIVE_HOST_CHANGING=1
             docker volume create "$volume" >/dev/null
             volumes_changed=1
         fi
@@ -1898,6 +1926,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         echo "PSEUDOLIFE_INSTALL_NO_TOKEN=${NO_TOKEN:-0}"
         echo "$ENV_END"
     })"
+    NATIVE_HOST_CHANGING=1
     managed_status="$(printf '%s\n' "$managed_block" | installer_state write-env --env-file "$env_file" --template "$repo/ops/.env.example")" || exit 1
     if [ "$managed_status" = unchanged ]; then step "Managed configuration unchanged: ops/.env"
     else step "Wrote managed block in ops/.env"; fi
@@ -1935,6 +1964,7 @@ elif [ "$TRANSPORT" != shim ]; then
 elif ! shim_tooling_ready; then
     TOKEN_STATE=no-shim
 else
+    NATIVE_HOST_CHANGING=1
     mint_output=$("$token_py" "$repo/ops/client_credentials.py" mint --env-file "$env_file") || true
     case "$mint_output" in
         *'"minted"'*)
@@ -1985,6 +2015,7 @@ services:
     profiles: ["disabled"]
 EOF
 )"
+        NATIVE_HOST_CHANGING=1
         override_status="$(printf '%s\n' "$override_contents" | "$(installer_python)" "$repo/ops/installer_state.py" write-file --path "$override_file")" || exit 1
         if [ "$override_status" = unchanged ]; then step "Sidecar override unchanged (disabled)."
         else step "Sidecar disabled via ops/docker-compose.override.yml"; fi
@@ -2004,11 +2035,13 @@ EOF
     extractor_owner="$(docker inspect -f '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}}' pseudolife-mcp-extractor 2>/dev/null || true)"
     if [[ "$extractor_owner" =~ ^([a-f0-9]+)\ pseudolife-mcp$ ]]; then
         # Remove the verified ID, never a name another stack could acquire.
+        NATIVE_HOST_CHANGING=1
         docker rm -f "${BASH_REMATCH[1]}" >/dev/null
         step "Removed the running extractor container"
     fi
 else
     if installer_owns_override; then
+        NATIVE_HOST_CHANGING=1
         rm "$override_file"
         step "Removed installer-managed override (sidecar re-enabled)"
     else
@@ -2033,9 +2066,11 @@ if [ -z "$CLIENT_ONLY" ]; then
         unchanged) step "Docker stack unchanged; no Compose up or build needed." ;;
         start)
             step "Starting Docker stack with existing images (no build)..."
+            NATIVE_HOST_CHANGING=1
             docker compose "${compose[@]}" up -d --no-build ;;
         build)
             step "docker compose up -d --build (checkout or images changed)..."
+            NATIVE_HOST_CHANGING=1
             docker compose "${compose[@]}" up -d --build ;;
         *) echo "Cannot determine the Docker startup step; rerun ops/preflight.sh." >&2; exit 1 ;;
     esac
@@ -2043,6 +2078,9 @@ if [ -z "$CLIENT_ONLY" ]; then
 fi
 
 # ── 8b. Claude Code plugin (hooks + commands layer) ────────────────────────
+# From here on every mode changes client configuration (plugin, hooks,
+# instructions, registrations).
+NATIVE_HOST_CHANGING=1
 # >>> claude plugin >>>
 # The plugin is the third install beside the daemon and the shim, and the
 # only one that needed two commands typed inside Claude Code. Installing it
@@ -2400,7 +2438,7 @@ connect_existing_registrations() {
         *)
             # Under --json the reason is only in the report.
             connect_error=$(printf '%s' "$connect_report" | connect_report_lines error) || connect_error=""
-            echo "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $connect_rc${connect_error:+: $connect_error}). Nothing was changed; fix that, then re-run" >&2
+            echo "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $connect_rc${connect_error:+: $connect_error}). Fix that, then re-run" >&2
             exit 1 ;;
     esac
     step "Existing registrations: pseudolife-mcp connect points them at $DAEMON_URL:"

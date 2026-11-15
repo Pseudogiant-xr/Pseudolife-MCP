@@ -702,9 +702,14 @@ $script:nativeStageDir = $null
 # Set once the release is staged, verified and probed; it stays set after the
 # install removes the staged copy, so nothing stages a second time.
 $script:nativeProbed = $false
-# Set once this run starts changing the host: a later refusal must not say
-# that nothing changed.
+# Set at this run's first change to the host (a write or a container): from
+# then on an exit is told as a run that stopped part way, never "nothing
+# changed" (the try/finally at the end). nativeInstalledAt names the native
+# client once it is installed.
 $script:nativeHostChanging = $false
+$script:nativeInstalledAt = $null
+$script:nativePartWaySaid = $false
+$script:nativeRunDone = $false
 function Get-NativeTarget {
     # This host's release target triple, or $null. PSEUDOLIFE_NATIVE_TARGET
     # picks one of the five release targets instead (an emulated one, or a
@@ -732,6 +737,7 @@ function Get-NativeTarget {
 function Stop-NativeInstall([string]$Cause, [string]$Fix) {
     Remove-NativeStage
     if ($script:nativeHostChanging) {
+        $script:nativePartWaySaid = $true
         [Console]::Error.WriteLine("The install stopped part way: $Cause. $Fix Then rerun the installer to finish; the steps it already completed are kept.")
         exit 1
     }
@@ -942,6 +948,7 @@ function Install-NativeClient {
     if (($installExit -ne 0) -or (-not $launcher)) { return $null }
     $launcher = "$launcher".Trim()
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
+    $script:nativeInstalledAt = $launcher
     if ($before -and ($before -eq (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash)) {
         Step "Native client $($script:nativeVersion) already installed at $launcher; nothing changed"
     } else {
@@ -1306,8 +1313,6 @@ Invoke-BankTokenQuestion
 # Fetched and verified before anything here changes: a refusal leaves the
 # host as it was.
 if (-not $script:nativeProbed) { Initialize-NativeClient }
-# From here on the run changes the host.
-$script:nativeHostChanging = $true
 # <<< native client stage <<<
 
 # The status field of an ops/client_credentials.py JSON report, or $null.
@@ -1391,6 +1396,7 @@ function Invoke-ClientOnlyPreflight {
             $tokenValue = $null
             Step "That is a pairing code: the token file $($script:TokenFile) is created by pairing, once the shim is installed."
         } else {
+            $script:nativeHostChanging = $true
             $tokenReport = "$tokenValue" | & $tokenPython $helper write-token-file --path $script:TokenFile
             $tokenValue = $null
             if ("$(Get-HelperStatus $tokenReport)" -ne "written") {
@@ -1730,6 +1736,7 @@ if (-not $ClientOnly) {
 if (-not $ClientOnly) {
     foreach ($volume in @($bankVol, $stateVol)) {
         if ($existingVolumes -notcontains $volume) {
+            $script:nativeHostChanging = $true
             docker volume create $volume | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Could not create volume $volume; fix Docker access and rerun." }
             $volumesChanged = $true
@@ -1821,6 +1828,7 @@ if (-not $ClientOnly) {
     $block.Add("PSEUDOLIFE_INSTALL_TRANSPORT=$Transport")
     $block.Add("PSEUDOLIFE_INSTALL_NO_TOKEN=$(if ($NoToken) { '1' } else { '0' })")
     $block.Add($EnvEnd)
+    $script:nativeHostChanging = $true
     $managedStatus = $block | Invoke-InstallerState write-env --env-file $envFile --template (Join-Path $repo "ops/.env.example")
     if ($managedStatus -eq 'unchanged') { Step "Managed configuration unchanged: ops/.env" }
     else { Step "Wrote managed block in ops/.env" }
@@ -1859,6 +1867,7 @@ if ($ClientOnly) {
 } elseif (-not (Test-ShimToolingReady ($tokenPython = Get-InstallerPython))) {
     $tokenState = "no-shim"
 } else {
+    $script:nativeHostChanging = $true
     $mintOutput = & $tokenPython (Join-Path $repo "ops/client_credentials.py") mint --env-file $envFile
     switch ("$(Get-HelperStatus $mintOutput)") {
         "minted" {
@@ -1907,6 +1916,7 @@ if ($ClientOnly) {
             "  pseudolife-extractor:"
             "    profiles: [`"disabled`"]"
         ) -join "`n")
+        $script:nativeHostChanging = $true
         $overrideStatus = $wantedOverride | & (Get-InstallerPython) (Join-Path $repo "ops/installer_state.py") write-file --path $overrideFile
         if ($LASTEXITCODE -ne 0) { throw "Could not write this install's override; fix the line above and rerun." }
         if ($overrideStatus -eq 'unchanged') { Step "Sidecar override unchanged (disabled)." }
@@ -1927,11 +1937,13 @@ if ($ClientOnly) {
     $extractorOwner = docker inspect -f '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}}' pseudolife-mcp-extractor 2>$null
     if ($LASTEXITCODE -eq 0 -and "$extractorOwner" -match '^([a-f0-9]+) pseudolife-mcp$') {
         # Remove the verified ID, never a name another stack could acquire.
+        $script:nativeHostChanging = $true
         docker rm -f $Matches[1] | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not remove this install's extractor; check docker info and rerun." }
         Step "Removed the running extractor container"
     }
 } elseif (InstallerOwnsOverride) {
+    $script:nativeHostChanging = $true
     Remove-Item $overrideFile
     Step "Removed installer-managed override (sidecar re-enabled)"
 } else {
@@ -1956,9 +1968,11 @@ if (-not $ClientOnly) {
     } elseif ($composePlan -in 'start', 'build') {
         if ($composePlan -eq 'start') {
             Step "Starting Docker stack with existing images (no build)..."
+            $script:nativeHostChanging = $true
             docker compose @compose up -d --no-build
         } else {
             Step "docker compose up -d --build (checkout or images changed)..."
+            $script:nativeHostChanging = $true
             docker compose @compose up -d --build
         }
         if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
@@ -1969,6 +1983,9 @@ if (-not $ClientOnly) {
 }
 
 # -- 8b. Claude Code plugin (hooks + commands layer) ------------------------------
+# From here on every mode changes client configuration (plugin, hooks,
+# instructions, registrations).
+$script:nativeHostChanging = $true
 # >>> claude plugin >>>
 # The plugin is the third install beside the daemon and the shim, and the
 # only one that needed two commands typed inside Claude Code. Installing it
@@ -2344,7 +2361,7 @@ function Invoke-ClientOnlyConnect {
     if ($planExit -ne 0) {
         # Under --json the reason is only in the report.
         $reason = if ($report.PSObject.Properties.Name -contains "error" -and $report.error) { ": $($report.error)" } else { "" }
-        Write-Host "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $planExit$reason). Nothing was changed; fix that, then re-run"
+        Write-Host "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $planExit$reason). Fix that, then re-run"
         exit 1
     }
     Step "Existing registrations: pseudolife-mcp connect points them at $($DaemonUrl):"
@@ -3991,7 +4008,15 @@ if ($Tunnel -and -not $interactive) {
     Write-Host "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
 }
 Remove-NativeStage
+$script:nativeRunDone = $true
 Write-Host "Done. First session: tell your coding agent to remember something."
 } finally {
     Remove-NativeStage
+    # An exit after the run's first change to the host (an exit, an error or
+    # Ctrl-C) says the run stopped part way; nothing is undone.
+    if ($script:nativeHostChanging -and -not $script:nativeRunDone -and -not $script:nativePartWaySaid) {
+        $part = "The install stopped part way: what the lines marked ==> above report stays as it is"
+        if ($script:nativeInstalledAt) { $part += ", the native client among it (installed at $($script:nativeInstalledAt))" }
+        [Console]::Error.WriteLine("$part. Rerun the installer to finish, once the cause shown above is fixed.")
+    }
 }
