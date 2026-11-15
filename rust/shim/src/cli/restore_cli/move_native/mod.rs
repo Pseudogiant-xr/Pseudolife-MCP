@@ -677,17 +677,19 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                     request.resume_target_was_running = earlier.target_was_running;
                 }
                 None => {
-                    let parked = records.iter().find(|r| {
+                    // The newest move to that target that explains the
+                    // refusal: one parked there, or one given up.
+                    let newest = records.iter().find(|r| {
                         !r.committed
-                            && r.phase == record::Phase::RolledBack
-                            && r.flags.target_restored
-                            && (r.parked_writes.is_some() || r.unresolved.is_some())
                             && r.target == request.to
+                            && (r.phase == record::Phase::GivenUp
+                                || (r.phase == record::Phase::RolledBack
+                                    && r.flags.target_restored
+                                    && (r.parked_writes.is_some() || r.unresolved.is_some())))
                     });
+                    let parked = newest.filter(|r| r.phase == record::Phase::RolledBack);
                     // Given up on this host: final, whatever the target holds.
-                    if let Some(given_up) = records.iter().find(|r| {
-                        !r.committed && r.phase == record::Phase::GivenUp && r.target == request.to
-                    }) {
+                    if let Some(given_up) = newest.filter(|r| r.phase == record::Phase::GivenUp) {
                         return Some(finish(
                             &request,
                             Err(format!(

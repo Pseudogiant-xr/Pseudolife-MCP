@@ -809,6 +809,25 @@ fn a_given_up_target_stops_holding_this_host_and_names_its_way_back() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("is not resumed"), "{stderr}");
     assert!(stderr.contains("that is final here"), "{stderr}");
+    // A newer move to that target, parked after the target was rebuilt, is
+    // the one a resume names.
+    let newer = "20261114-090000-abcdef02";
+    let folder = home.0.join(".pseudolife-mcp").join("moves").join(newer);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join("record.json"),
+        rolled_back_to_box(r#","parked_writes":"public.entries: 4 on the target, 3 in the dump""#)
+            .replace(MOVE_ID, newer),
+    )
+    .unwrap();
+    let output = run(&home.0, &url, "80", &resume);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!("move --release-target {newer}")),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("that is final here"), "{stderr}");
+    fs::remove_dir_all(&folder).unwrap();
     // It no longer holds this host: a move elsewhere goes on to the ssh
     // lookup (which PATH lacks here).
     let other: Vec<&str> = DRY
