@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "7ca301033cdff008",
+  "fingerprint": "530fda07f0bc6a1c",
+  "reason": "Doctor reads saved tunnel profiles through tunnel's store, so parity_scope.py maps tunnel's sources to the doctor and console rows too; the parity-checks job runs only the rows its diff reaches, with no new job, shard or setup cost."
+}
