@@ -263,7 +263,7 @@ def test_a_rerun_over_a_python_client_keeps_the_old_client_readable(tmp_path):
     home = tmp_path / "home"
     old = home / "runtimes" / "000001"
     (old / "Scripts").mkdir(parents=True)
-    (old / "pyvenv.cfg").write_text("home = C:\Python312\n", encoding="utf-8")
+    (old / "pyvenv.cfg").write_text("home = C:\\Python312\n", encoding="utf-8")
     (old / "Scripts" / "pseudolife-mcp.exe").write_bytes(b"python console script")
     (home / "bin").mkdir(parents=True)
     old_launcher = home / "bin" / "pseudolife-mcp.json"
