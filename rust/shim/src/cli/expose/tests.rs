@@ -61,6 +61,8 @@ struct Fake {
     tailnet: Health,
     terminal: bool,
     answer: Answer,
+    /// The serve state someone else leaves while the question waits.
+    meanwhile: Option<Value>,
     interrupt_during_change: bool,
     holding: Cell<bool>,
     interrupted: Cell<bool>,
@@ -96,6 +98,7 @@ impl Fake {
             tailnet: healthy(),
             terminal: false,
             answer: Answer::No,
+            meanwhile: None,
             interrupt_during_change: false,
             holding: Cell::new(false),
             interrupted: Cell::new(false),
@@ -238,6 +241,9 @@ impl Host for Fake {
             self.calls()
         );
         self.asked.borrow_mut().push(question.to_owned());
+        if let Some(serve) = &self.meanwhile {
+            *self.serve.borrow_mut() = serve.clone();
+        }
         self.answer
     }
 
@@ -396,6 +402,51 @@ fn at_a_terminal_it_shows_the_plan_asks_once_and_goes_ahead_only_on_yes() {
     );
     assert!(stdout.starts_with(&format!("exposed: clients use {URL}\n")));
     assert_eq!(fake.mutations(), vec![words(&SERVE)]);
+    // The port is read again after the answer, before the change.
+    assert_eq!(
+        fake.calls()[3..5],
+        [words(&["serve", "status", "--json"]), words(&SERVE)]
+    );
+}
+
+#[test]
+fn a_port_taken_while_the_question_waits_is_never_replaced() {
+    let mut fake = Fake::free().at_terminal(Answer::Yes);
+    let theirs = json!({"TCP": {PORT: {"HTTPS": true}}});
+    fake.meanwhile = Some(theirs.clone());
+    let (_, stderr, code) = drive(&fake, &["tailscale", "--port", PORT]);
+    assert_eq!(code, EXIT_REFUSED);
+    assert_eq!(
+        stderr,
+        "expose: tailnet port 8443 changed while the question waited: it now serves HTTPS; nothing changed. Rerun to see the plan for it now\n"
+    );
+    assert!(fake.mutations().is_empty());
+    assert_eq!(fake.serve_state(), theirs);
+}
+
+#[test]
+fn a_forward_replaced_while_off_asks_is_never_removed() {
+    let mut fake = Fake::ours().at_terminal(Answer::Yes);
+    let theirs = json!({"TCP": {PORT: {"TCPForward": "127.0.0.1:1"}}});
+    fake.meanwhile = Some(theirs.clone());
+    let (_, stderr, code) = drive(&fake, &["off", "--port", PORT]);
+    assert_eq!(code, EXIT_REFUSED);
+    assert!(
+        stderr.contains("it now serves a TCP forward to 127.0.0.1:1; nothing changed"),
+        "{stderr}"
+    );
+    assert!(fake.mutations().is_empty());
+    assert_eq!(fake.serve_state(), theirs);
+    // Removed by someone else meanwhile: nothing to do, and nothing done.
+    let mut fake = Fake::ours().at_terminal(Answer::Yes);
+    fake.meanwhile = Some(json!({}));
+    let (_, stderr, code) = drive(&fake, &["off", "--port", PORT]);
+    assert_eq!(code, EXIT_REFUSED);
+    assert!(
+        stderr.contains("it now serves nothing; nothing changed"),
+        "{stderr}"
+    );
+    assert!(fake.mutations().is_empty());
 }
 
 #[test]

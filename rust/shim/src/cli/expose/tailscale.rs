@@ -216,9 +216,15 @@ async fn run_within(binary: &Binary, args: &[&str], timeout: Duration) -> Proc {
         Err(_) => {
             let _ = child.start_kill();
             let _ = tokio::time::timeout(DRAIN, child.wait()).await;
+            // A handle the first wait already saw finish must not be
+            // polled again (Tokio panics on that).
             let _ = tokio::time::timeout(DRAIN, async {
-                let _ = (&mut out_task).await;
-                let _ = (&mut err_task).await;
+                if !out_task.is_finished() {
+                    let _ = (&mut out_task).await;
+                }
+                if !err_task.is_finished() {
+                    let _ = (&mut err_task).await;
+                }
             })
             .await;
             out_task.abort();
@@ -553,6 +559,21 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// Stdout reaches its end before the bound while stderr and the child
+    /// stay open: the timeout is still reported, never a panic.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_pipe_that_closed_before_the_timeout_is_not_awaited_again() {
+        let ran = run_within(
+            &sh(),
+            &["-c", "echo early; exec 1>&-; exec sleep 30"],
+            Duration::from_millis(300),
+        )
+        .await;
+        assert!(ran.timed_out, "{ran:?}");
+        assert_eq!(ran.out, "early\n");
     }
 
     /// A program still running at the bound is killed; its partial output

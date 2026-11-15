@@ -420,11 +420,14 @@ fn field(payload: &Dict, key: &str) -> J {
 
 /// `_confirm`: `--yes` goes ahead; without it, no terminal refuses and a
 /// terminal is asked once. `Err` is the finished answer: nothing changed.
+/// After a question (which may have waited a long time) the port must
+/// still be as the plan found it (`expected`), or nothing is changed.
 async fn consent(
     host: &impl Host,
     args: &Args,
     mut report: Report,
     question: &str,
+    (binary, expected): (&Binary, State),
 ) -> Result<Report, Out> {
     if args.yes {
         return Ok(report);
@@ -441,10 +444,50 @@ async fn consent(
         ));
     }
     match host.ask(question).await {
-        Answer::Yes => Ok(report),
+        Answer::Yes => unchanged(host, binary, args.port, expected, report).await,
         Answer::No => Err(report.fail_text(EXIT_USAGE, NOT_CONFIRMED)),
         Answer::Interrupted => Err(report.fail_text(EXIT_INTERRUPTED, INTERRUPTED)),
     }
+}
+
+/// The port read again after the question: unchanged goes ahead; anything
+/// else (another serve put there meanwhile, or this one removed) is named
+/// and nothing is changed.
+async fn unchanged(
+    host: &impl Host,
+    binary: &Binary,
+    port: u16,
+    expected: State,
+    report: Report,
+) -> Result<Report, Out> {
+    let (state, detail) = match read_back(host, binary, port).await {
+        Ok(now) => now,
+        Err(why) => {
+            return Err(report.fail_text(
+                EXIT_REFUSED,
+                &format!(
+                    "could not read the serve state again after the answer ({why}); nothing changed"
+                ),
+            ));
+        }
+    };
+    if state == expected {
+        return Ok(report);
+    }
+    let now = match state {
+        State::None => units("nothing"),
+        State::Ours => units(&format!("this daemon's forward to 127.0.0.1:{port}")),
+        State::Foreign => detail.unwrap_or_default(),
+    };
+    let line = [
+        units(&format!(
+            "tailnet port {port} changed while the question waited: it now serves "
+        )),
+        now,
+        units("; nothing changed. Rerun to see the plan for it now"),
+    ]
+    .concat();
+    Err(report.fail(EXIT_REFUSED, &line))
 }
 
 // ── the change and what it left ──────────────────────────────────────────────
@@ -875,7 +918,7 @@ async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
     report.say_text(&format!("  run      tailscale {}", serve_args.join(" ")));
     report.say_text(&format!("  clients  {url}"));
     let question = format!("expose this daemon on the tailnet at {url}? [y/N] ");
-    let report = match consent(host, args, report, &question).await {
+    let report = match consent(host, args, report, &question, (&binary, State::None)).await {
         Ok(report) => report,
         Err(out) => return out,
     };
@@ -922,7 +965,8 @@ async fn off(host: &impl Host, args: &Args, mut report: Report) -> Out {
             report.say_text("plan:");
             report.say_text(&format!("  run      tailscale {}", off_args.join(" ")));
             let question = format!("remove the tailnet forward on port {port}? [y/N] ");
-            let report = match consent(host, args, report, &question).await {
+            let report = match consent(host, args, report, &question, (&binary, State::Ours)).await
+            {
                 Ok(report) => report,
                 Err(out) => return out,
             };
