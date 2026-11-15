@@ -296,15 +296,25 @@ fn systemd_installed(
     // not UTF-8 text is something it repairs; one that cannot be read at all
     // is not.
     let not_text = |path: &Path| {
+        // `--schedule` replaces a regular file but refuses to write through
+        // a symbolic link (`atomic_unit`), so a link is removed first.
+        let link = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
         Ok(Some(unvouched(dir, name, client, &|remove| {
             Blocker::new(
                 format!(
                     "{} is not UTF-8 text, so connect cannot compare it with what `update --schedule` writes",
                     path.display()
                 ),
-                format!(
-                    "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect"
-                ),
+                if link {
+                    format!(
+                        "it is a symbolic link, which `update --schedule` will not write through: remove the link (`rm '{}'`), then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
+                        path.display()
+                    )
+                } else {
+                    format!(
+                        "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect"
+                    )
+                },
             )
         })))
     };
@@ -855,24 +865,23 @@ fn systemd_dropins(
                     read[index].insert(file.clone());
                 }
                 Ok(Some(key)) if kind == "timer" => {
-                    // A timer drop-in does not change which daemon the
-                    // service targets: it changes when the run happens, which
-                    // unit it starts or what runs with it, while connect keeps
-                    // and reports the daily time `--schedule` writes.
+                    // A timer key can change when the run happens, and one
+                    // such as `Unit=` (or a `[Unit]` dependency) can start a
+                    // service other than the one `--schedule` writes, so
+                    // keeping the drop-in beside a re-created schedule is not
+                    // a fix that works: the row offers removal only.
                     return Err(Blocker::new(
                         format!(
-                            "the systemd drop-in {}{masked} sets {key}, which can change when the run happens, which unit the timer starts or what runs with it, while connect keeps and reports the daily time `update --schedule` writes",
+                            "the systemd drop-in {}{masked} sets {key}, which is not on the short list of keys connect knows cannot change what runs, which daemon it targets or when",
                             file.display()
                         ),
-                        format!(
-                            "remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or re-schedule it yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` and keep the drop-in"
-                        ),
+                        "remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run; the schedule stays hand-managed while the drop-in applies",
                     ));
                 }
                 Ok(Some(key)) => {
                     return Err(Blocker::new(
                         format!(
-                            "the systemd drop-in {}{masked} sets {key}, which takes precedence over the files `update --schedule` writes and can change what the run executes or which daemon it targets",
+                            "the systemd drop-in {}{masked} sets {key}, which is not on the short list of keys connect knows cannot change what runs, which daemon it targets or when, and systemd applies it on top of the files `update --schedule` writes",
                             file.display()
                         ),
                         "the schedule stays hand-managed while that drop-in sets it: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or keep it and point it at the new daemon yourself",
@@ -2504,7 +2513,7 @@ mod tests {
                 .as_ref()
                 .map(Blocker::sentence)
                 .unwrap()
-                .contains("override.conf sets ExecStart=, which takes precedence")
+                .contains("override.conf sets ExecStart=, which is not on the short list")
         );
         // A timer path that is a directory: neither permissions nor `rm` fix
         // it, so the row says to remove the directory and re-create the
@@ -2614,6 +2623,50 @@ mod tests {
         assert!(!found.shaped);
     }
 
+    // A symbolic link is made without extra privilege only on Unix.
+    #[cfg(unix)]
+    #[test]
+    fn a_unit_that_is_a_link_to_non_text_says_to_remove_the_link() {
+        let dir = scratch();
+        let roots = [dir.clone()];
+        let environment: Vec<String> = Vec::new();
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        let enabled = || Ok(true);
+        let show = |unit: &str| {
+            Ok(format!(
+                "NeedDaemonReload=no\nFragmentPath={}\nDropInPaths=\n",
+                dir.join(unit).display()
+            ))
+        };
+        let target = dir.join("elsewhere.service");
+        fs::write(&target, b"[Service]\n# \xff\n").unwrap();
+        std::os::unix::fs::symlink(&target, dir.join(format!("{NAME}.service"))).unwrap();
+        let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &show, &expected)
+            .unwrap()
+            .unwrap();
+        let blocker = found.overridden.unwrap();
+        assert!(
+            blocker.cause.contains("is not UTF-8 text"),
+            "{}",
+            blocker.cause
+        );
+        assert!(blocker.fix.starts_with("it is a symbolic link, which `update --schedule` will not write through: remove the link"), "{}", blocker.fix);
+        // Near miss: a regular non-text file is replaced by `--schedule`.
+        fs::remove_file(dir.join(format!("{NAME}.service"))).unwrap();
+        fs::write(dir.join(format!("{NAME}.service")), b"[Service]\n# \xff\n").unwrap();
+        let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &show, &expected)
+            .unwrap()
+            .unwrap();
+        assert!(
+            found
+                .overridden
+                .unwrap()
+                .fix
+                .starts_with("re-create it with")
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn a_timer_drop_in_says_what_it_changes_and_the_fix_that_works() {
         let root = scratch();
@@ -2626,20 +2679,20 @@ mod tests {
         .unwrap();
         let blocker = systemd_dropins(&roots, "pseudolife-update").unwrap_err();
         assert!(
-            blocker
-                .cause
-                .contains("sets RandomizedDelaySec=, which can change when the run happens"),
+            blocker.cause.contains("pseudolife-update.timer.d") && blocker.cause.contains("sets RandomizedDelaySec=, which is not on the short list of keys connect knows cannot change what runs, which daemon it targets or when"),
             "{}",
             blocker.cause
         );
-        assert!(!blocker.cause.contains("which daemon"), "{}", blocker.cause);
+        // Keeping the drop-in beside a re-created schedule does not work for
+        // one that redirects the timer (`Unit=`): removal is the fix.
         assert!(
-            blocker.fix.contains(&format!(
-                "update --schedule HH:MM --daemon-url {TARGET}` and keep the drop-in"
-            )),
+            blocker
+                .fix
+                .starts_with("remove the drop-in and run `systemctl --user daemon-reload`"),
             "{}",
             blocker.fix
         );
+        assert!(!blocker.fix.contains("keep the drop-in"), "{}", blocker.fix);
         assert!(
             !blocker.fix.contains("point it at the new daemon"),
             "{}",
