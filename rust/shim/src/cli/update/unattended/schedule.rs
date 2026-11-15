@@ -518,8 +518,23 @@ fn schedule_checked(
     names: &Names,
     before_write: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
-    let (hour, minute) = at(when)?;
+    at(when)?;
     let client = client_kind(update)?;
+    schedule_for(update, when, names, client, &command, before_write)
+}
+
+/// `--schedule` past its machine-kind check: the daemon's `/health` for a
+/// client, the command (`argv_for`), the bearer for the daemon's run, then
+/// `before_write`, then the write.
+fn schedule_for(
+    update: &mut Update,
+    when: &str,
+    names: &Names,
+    client: bool,
+    argv_for: &dyn Fn(&str) -> Result<Vec<String>>,
+    before_write: &dyn Fn() -> Result<()>,
+) -> Result<()> {
+    let (hour, minute) = at(when)?;
     if client && update.daemon_health().is_none() {
         return Err(UpdateError::usage(format!(
             "this is a client machine, and the daemon at {} did not answer /health; the scheduled run follows that daemon's release. Check that the daemon is up. Nothing was installed. {}",
@@ -527,7 +542,7 @@ fn schedule_checked(
             super::client_rearm_hint(&format!("{hour:02}:{minute:02}"))
         )));
     }
-    let argv = command(&update.o.daemon_url)?;
+    let argv = argv_for(&update.o.daemon_url)?;
     if !client && !daemon_bearer_resolves() {
         no_bearer(update, cfg!(windows))?;
     }
@@ -739,6 +754,99 @@ pub(crate) fn unschedule(update: &mut Update) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A loopback `/health` that answers `{"status":"ok"}`; its URL.
+    fn health_listener() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for mut stream in listener.incoming().flatten() {
+                let mut request = [0u8; 2048];
+                let _ = stream.read(&mut request);
+                let body = "{\"status\":\"ok\"}";
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+{body}",
+                    body.len()
+                );
+            }
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    #[test]
+    fn the_check_before_the_write_runs_after_the_health_probe_and_the_command() {
+        let names = Names {
+            task: "unused",
+            client_task: "unused",
+            unit: "unused",
+            client_unit: "unused",
+        };
+        let argv = |url: &str| -> Result<Vec<String>> {
+            Ok(vec![
+                "/fixture/pseudolife-mcp".into(),
+                "update".into(),
+                "--unattended".into(),
+                "--daemon-url".into(),
+                url.into(),
+            ])
+        };
+        let calls = std::cell::Cell::new(0);
+        let refuse = || -> Result<()> {
+            calls.set(calls.get() + 1);
+            Err(UpdateError::usage("refused before the write"))
+        };
+        // A client whose daemon does not answer /health stops there: the
+        // check is not reached.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", closed.local_addr().unwrap().port());
+        drop(closed);
+        let mut update = Update::new(crate::cli::update::Options {
+            daemon_url: url,
+            ..crate::cli::update::Options::default()
+        });
+        let error = schedule_for(&mut update, "04:30", &names, true, &argv, &refuse).unwrap_err();
+        assert!(
+            error.message.contains("did not answer /health"),
+            "{}",
+            error.message
+        );
+        assert_eq!(calls.get(), 0);
+        // A command that cannot be built stops before it too.
+        let healthy = health_listener();
+        let mut update = Update::new(crate::cli::update::Options {
+            daemon_url: healthy.clone(),
+            ..crate::cli::update::Options::default()
+        });
+        let no_argv = |_: &str| -> Result<Vec<String>> { Err(UpdateError::usage("no launcher")) };
+        assert_eq!(
+            schedule_for(&mut update, "04:30", &names, true, &no_argv, &refuse)
+                .unwrap_err()
+                .message,
+            "no launcher"
+        );
+        assert_eq!(calls.get(), 0);
+        // Past both, the check runs, and its refusal is the result: nothing
+        // is written (the write would need a real scheduler).
+        let mut update = Update::new(crate::cli::update::Options {
+            daemon_url: healthy,
+            ..crate::cli::update::Options::default()
+        });
+        assert_eq!(
+            schedule_for(&mut update, "04:30", &names, true, &argv, &refuse)
+                .unwrap_err()
+                .message,
+            "refused before the write"
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(update.report.steps.is_empty());
+    }
     #[test]
     fn client_rearm_hint_uses_the_chosen_time_or_an_explicit_placeholder() {
         let known = super::super::client_rearm_hint("07:05");

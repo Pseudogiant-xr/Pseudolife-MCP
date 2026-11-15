@@ -197,7 +197,12 @@ fn systemd_roots(dir: &Path, env: &dyn Fn(&str) -> Option<String>, home: &Path) 
     roots.extend(run("transient"));
     roots.extend(run("generator.early"));
     roots.push(dir.to_path_buf());
-    roots.extend(set("XDG_CONFIG_DIRS").as_deref().map(list).unwrap_or_default());
+    roots.extend(
+        set("XDG_CONFIG_DIRS")
+            .as_deref()
+            .map(list)
+            .unwrap_or_default(),
+    );
     roots.push(PathBuf::from("/etc/systemd/user"));
     roots.extend(run("user"));
     roots.push(PathBuf::from("/run/systemd/user"));
@@ -253,24 +258,34 @@ fn blocking_key(kind: &str, section: &str, key: &str) -> bool {
 
 /// The first blocking key `text`, a drop-in for a unit of `kind`, sets, or
 /// the 1-based line systemd's syntax cannot read.
+/// As systemd.syntax(7) reads a file: a line starting with `#` or `;` is a
+/// comment, skipped whole (a trailing backslash on it continues nothing),
+/// also inside a continued line; a trailing backslash on any other line
+/// continues it onto the next.
 fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, usize> {
+    let comment = |line: &str| line.starts_with('#') || line.starts_with(';');
     let mut section = String::new();
     let mut lines = text.lines().enumerate();
     while let Some((index, raw)) = lines.next() {
         let mut line = raw.trim().to_owned();
-        // A trailing backslash continues the line.
+        if line.is_empty() || comment(&line) {
+            continue;
+        }
         while line.ends_with('\\') {
             line.pop();
-            match lines.next() {
+            let next = loop {
+                match lines.next() {
+                    Some((_, next)) if comment(next.trim()) => continue,
+                    other => break other,
+                }
+            };
+            match next {
                 Some((_, next)) => {
                     line.push(' ');
                     line.push_str(next.trim());
                 }
                 None => break,
             }
-        }
-        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
-            continue;
         }
         if let Some(name) = line
             .strip_prefix('[')
@@ -294,8 +309,10 @@ fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, us
 /// connect cannot read or parse, as a clause. It looks at every `.conf` in
 /// the unit's own `<name>.<kind>.d`, its dash-prefix ones
 /// (`pseudolife-.service.d`) and the top-level `<kind>.d`, under each of
-/// `roots`; of files sharing a name in one such directory, only the one in
-/// the highest-priority root applies, as systemd reads them.
+/// `roots`. Of files sharing a name, only the first applies in systemd's
+/// order (`unit_file_find_dirs`, then `conf_files_list_strv`): the most
+/// specific directory first, and within it the highest-priority root, so an
+/// empty or masking file there hides a same-named one anywhere after it.
 fn systemd_override(roots: &[PathBuf], name: &str) -> Option<String> {
     let mut stems: Vec<String> = name
         .match_indices('-')
@@ -308,8 +325,8 @@ fn systemd_override(roots: &[PathBuf], name: &str) -> Option<String> {
             .rev()
             .map(|stem| format!("{stem}.{kind}.d"))
             .chain([format!("{kind}.d")]);
+        let mut seen = std::collections::BTreeSet::new();
         for directory in directories {
-            let mut seen = std::collections::BTreeSet::new();
             for root in roots {
                 let path = root.join(&directory);
                 let entries = match fs::read_dir(&path) {
@@ -1071,6 +1088,31 @@ mod tests {
             "# a comment\n[Unit]\nDescription=x \\\n  continued\n",
         );
         assert_eq!(systemd_override(&roots, name), None);
+        // A comment ending in a backslash continues nothing: the key after
+        // it is read (the comment inside a continuation is skipped too).
+        let file = put(
+            "pseudolife-update.timer.d",
+            "60-comment.conf",
+            "[Timer]\n# note \\\nUnit=other.service\n",
+        );
+        assert_eq!(
+            systemd_override(&roots, name),
+            Some(format!("the systemd drop-in {} sets Unit=", file.display()))
+        );
+        fs::remove_file(&file).unwrap();
+        let file = put(
+            "pseudolife-update.service.d",
+            "60-comment.conf",
+            "[Service]\nDescription=a \\\n# skipped\n  b\nExecStart=/x\n",
+        );
+        assert_eq!(
+            systemd_override(&roots, name),
+            Some(format!(
+                "the systemd drop-in {} sets ExecStart=",
+                file.display()
+            ))
+        );
+        fs::remove_file(&file).unwrap();
         // A key the run depends on, in each place systemd reads one.
         for (dir, text, key) in [
             (
@@ -1163,6 +1205,32 @@ mod tests {
         assert_eq!(systemd_override(&roots, "pseudolife-update"), None);
         fs::remove_dir_all(&high).unwrap();
         fs::remove_dir_all(&low).unwrap();
+    }
+
+    #[test]
+    fn a_drop_in_in_a_more_specific_directory_masks_one_of_the_same_name() {
+        let root = scratch();
+        let roots = [root.clone()];
+        let name = "pseudolife-update";
+        fs::create_dir_all(root.join("service.d")).unwrap();
+        fs::write(
+            root.join("service.d/10-default.conf"),
+            "[Service]\nEnvironment=A=1\n",
+        )
+        .unwrap();
+        assert!(systemd_override(&roots, name).is_some());
+        // The unit's own directory holds an empty file of the same name:
+        // systemd reads that one and skips the generic one.
+        fs::create_dir_all(root.join("pseudolife-update.service.d")).unwrap();
+        fs::write(root.join("pseudolife-update.service.d/10-default.conf"), "").unwrap();
+        assert_eq!(systemd_override(&roots, name), None);
+        // A timer drop-in of that name is another unit's file set: it does
+        // not mask the service one.
+        fs::remove_file(root.join("pseudolife-update.service.d/10-default.conf")).unwrap();
+        fs::create_dir_all(root.join("pseudolife-update.timer.d")).unwrap();
+        fs::write(root.join("pseudolife-update.timer.d/10-default.conf"), "").unwrap();
+        assert!(systemd_override(&roots, name).is_some());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     // Linux path semantics: absolute XDG entries begin with '/'.
