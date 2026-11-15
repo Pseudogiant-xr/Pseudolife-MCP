@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "05800854cafe34cf",
+  "fingerprint": "fbe94705e49e4978",
+  "reason": "tests/test_installer_legacy_hooks_native.py and tests/test_client_install_ux_native.py (the native copies that read rust/ files) join only the step for live tests that read rust/ files, which runs on a Rust-only change: an ordinary pull request's guards run skips that step, so its cost is unchanged; the Rust-only run's cost is the 9.3-minute estimate in ci_budget.json (legacy hooks 26 cases in 30.9 s serially in WSL; the static copy under a second)."
+}

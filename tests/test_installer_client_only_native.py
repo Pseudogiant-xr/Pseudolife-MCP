@@ -1213,7 +1213,7 @@ def test_preflight_run_by_hand_before_an_install_warns_and_carries_on(bash, tmp_
     proc = shell.run("set -- --client generic\n" + script,
                      extra_env={"PSEUDOLIFE_NATIVE_CLI": shell.path(tmp_path / "absent" / "pseudolife-mcp")})
     assert "the Docker ownership check needs the native pseudolife-mcp client" in proc.stdout
-    assert "ops/install-native.sh downloads and verifies it" in proc.stdout
+    assert "PSEUDOLIFE_SHIM_ENGINE=native ops/install.sh downloads and verifies it" in proc.stdout
     assert re.search(r"OK\S*\s+git", proc.stdout), proc.stdout
     assert proc.returncode == 0, proc.stdout
 
