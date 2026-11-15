@@ -3728,7 +3728,6 @@ picks the release as an update would.
 `pseudolife-stdio: mode '<mode>' is deferred in this candidate` and exit 1,
 having changed nothing. Among them: the change step of `expose tailscale`
 and `expose off` ([Remote bank](remote-bank.md#expose-the-daemon-with-one-command)),
-`connect`'s questions and prompts ([Moving a client to a new daemon](remote-bank.md#moving-a-client-to-a-new-daemon)),
 most of `tunnel` ([tunnels](tunnels.md)), `doctor` when a tunnel
 directory (`~/.pseudolife-mcp/tunnel`) exists or `http_proxy` /
 `https_proxy` is set, and `console` opening a browser on macOS and for some

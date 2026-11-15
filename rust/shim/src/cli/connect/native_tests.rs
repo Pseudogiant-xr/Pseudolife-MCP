@@ -6,7 +6,7 @@ use super::user_env::{self, Backend, Value};
 use super::*;
 use serde_json::{Value as Json, json};
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 const NEW: &str = "http://10.0.0.7:8765";
@@ -180,6 +180,12 @@ fn claude_change_row() -> discover::Row {
         Some(OLD.to_owned()),
         Some(NEW.to_owned()),
     )];
+    // A registration this run rewrites, as discovery plans one.
+    row.json = Some(discover::JsonSpec {
+        path: PathBuf::from("fixture/.claude.json"),
+        pointer: vec!["mcpServers".into(), SERVER.into()],
+        edits: vec![(URL_KEY.to_owned(), Some(NEW.to_owned()))],
+    });
     row
 }
 
@@ -222,6 +228,9 @@ fn a_failed_user_scope_write_says_what_changed_and_the_command_that_finishes_it(
         error.contains(&format!("the client registrations now name {NEW}")),
         "{error}"
     );
+    // With only the User-scope value to change, it never claims they moved.
+    let alone = apply_user_env(&[user_row()], NEW, &fake).unwrap_err();
+    assert!(alone.starts_with("the Windows User-scope"), "{alone}");
     assert!(
         error.contains("was not changed (Access is denied.)"),
         "{error}"
@@ -570,4 +579,750 @@ fn a_codex_configuration_changed_after_the_plan_is_refused_untouched() {
     assert!(steps.is_empty());
     let env = fake.config.borrow()["config"]["mcp_servers"]["pseudolife-memory"]["env"].clone();
     assert_eq!(env[URL_KEY], OLD);
+}
+
+// ---- the unattended-update schedules, through a fake scheduler ----
+
+/// (client, url, time, shaped, why) for one schedule installed.
+type Installed = (
+    bool,
+    Option<&'static str>,
+    Option<&'static str>,
+    bool,
+    Option<&'static str>,
+);
+
+#[derive(Default)]
+struct FakeScheduler {
+    installed: Vec<Installed>,
+    /// (other kind, reason) when `--schedule` here would refuse.
+    refuse_here: Option<(bool, String)>,
+    refuse_write: Option<String>,
+    /// Set on every schedule installed: (cause, fix).
+    overridden: Option<(&'static str, &'static str)>,
+    /// What a re-read after a write returns instead of what was written.
+    after_write: Option<Vec<Installed>>,
+    /// Set on what a re-read after a write returns: (cause, fix).
+    after_overridden: Option<(&'static str, &'static str)>,
+    differs: Option<&'static str>,
+    encoded: bool,
+    /// Set on every schedule installed.
+    mismatch: Option<&'static str>,
+    /// Why the re-read before writing fails, when it does.
+    reread_error: Option<String>,
+    made: RefCell<Vec<(bool, String, String)>>,
+}
+fn blocker(
+    pair: Option<(&'static str, &'static str)>,
+) -> Option<crate::cli::update::schedules::Blocker> {
+    pair.map(|(cause, fix)| crate::cli::update::schedules::Blocker::new(cause, fix))
+}
+
+impl FakeScheduler {
+    fn listed(
+        &self,
+        list: &[Installed],
+        overridden: Option<(&'static str, &'static str)>,
+    ) -> Vec<schedule::Found> {
+        list.iter()
+            .map(|(client, url, time, shaped, why)| {
+                let task = if *client { "client" } else { "daemon" };
+                schedule::Found {
+                    client: *client,
+                    place: format!("the scheduled task '{task}'"),
+                    time: time.map(str::to_owned),
+                    url: url.map(str::to_owned),
+                    shaped: *shaped,
+                    why: why.map(str::to_owned),
+                    overridden: blocker(overridden),
+                    differs: self.differs.map(str::to_owned),
+                    encoded: self.encoded,
+                    mismatch: self.mismatch.map(str::to_owned),
+                    remove: format!("schtasks /Delete /TN \"{task}\" /F"),
+                }
+            })
+            .collect()
+    }
+}
+
+impl schedule::Scheduler for FakeScheduler {
+    fn found(&self) -> Vec<schedule::Found> {
+        self.listed(&self.installed, self.overridden)
+    }
+    fn preflight(&self, _client: bool, _url: &str) -> Result<(), schedule::Refusal> {
+        match &self.refuse_here {
+            Some((other_kind, reason)) => Err(schedule::Refusal {
+                other_kind: *other_kind,
+                reason: reason.clone(),
+            }),
+            None => Ok(()),
+        }
+    }
+    fn reread(&self, client: bool) -> Result<Option<schedule::Found>, String> {
+        if let Some(cause) = &self.reread_error {
+            return Err(cause.clone());
+        }
+        // After a write, what was written (as `--schedule` writes it), or what
+        // the test says the read back shows.
+        let made = self
+            .made
+            .borrow()
+            .iter()
+            .rev()
+            .find(|made| made.0 == client)
+            .cloned();
+        if let Some((_, when, url)) = made {
+            if let Some(after) = &self.after_write {
+                return Ok(self
+                    .listed(after, self.after_overridden)
+                    .into_iter()
+                    .find(|found| found.client == client));
+            }
+            let written: Installed = (
+                client,
+                Some(Box::leak(url.into_boxed_str())),
+                Some(Box::leak(when.into_boxed_str())),
+                true,
+                None,
+            );
+            return Ok(self
+                .listed(&[written], self.after_overridden)
+                .into_iter()
+                .next());
+        }
+        Ok(self
+            .found()
+            .into_iter()
+            .find(|found| found.client == client))
+    }
+    fn recreate(
+        &self,
+        client: bool,
+        when: &str,
+        url: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), schedule::Stop> {
+        if let Some(cause) = &self.refuse_write {
+            return Err(schedule::Stop::Failed(cause.clone()));
+        }
+        // As `--schedule` does: its own checks, then `check`, then the write.
+        check().map_err(schedule::Stop::Changed)?;
+        self.made
+            .borrow_mut()
+            .push((client, when.to_owned(), url.to_owned()));
+        Ok(())
+    }
+    fn cancelled(&self) -> bool {
+        false
+    }
+}
+
+const LOCAL_OLD: &str = "http://127.0.0.1:8765";
+const LOCAL_NEW: &str = "http://127.0.0.1:8766";
+
+fn schedule_rows(fake: &Rc<FakeScheduler>, url: &str, remote: bool) -> Vec<discover::Row> {
+    let mut context = ctx(CLIENTS.to_vec(), url);
+    context.remote = remote;
+    schedule::with_backend(fake.clone(), || schedule::rows(&context).ok().unwrap())
+}
+
+#[test]
+fn a_local_daemon_schedule_naming_another_daemon_is_re_created_keeping_its_time() {
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(false, Some(LOCAL_OLD), Some("03:07"), true, None)],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, LOCAL_NEW, false);
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(
+        (row.client, row.place, row.state),
+        ("unattended-update", "schedule", "change")
+    );
+    assert_eq!(
+        row.changes,
+        vec![(
+            "--daemon-url".to_owned(),
+            Some(LOCAL_OLD.to_owned()),
+            Some(LOCAL_NEW.to_owned())
+        )]
+    );
+    let (notes, failures) = schedule::apply(&rows, LOCAL_NEW, true, fake.as_ref());
+    assert!(failures.is_empty());
+    assert_eq!(
+        *fake.made.borrow(),
+        vec![(false, "03:07".to_owned(), LOCAL_NEW.to_owned())]
+    );
+    assert!(notes[0].contains("daily at 03:07"), "{notes:?}");
+}
+
+#[test]
+fn a_client_schedule_follows_a_remote_daemon_but_a_daemon_schedule_does_not() {
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![
+            (false, Some(OLD), Some("03:07"), true, None),
+            (true, Some(OLD), Some("04:30"), true, None),
+        ],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows.len(), 2);
+    // The daemon's schedule updates a daemon on this machine, which is no
+    // longer the one in use: a manual row, as the oracle words it.
+    assert_eq!(rows[0].state, "manual");
+    assert!(
+        rows[0]
+            .detail
+            .contains("remove it here with `schtasks /Delete /TN \"daemon\" /F`"),
+        "{}",
+        rows[0].detail
+    );
+    // The client schedule names the daemon it follows: re-created.
+    assert_eq!(
+        (rows[1].place, rows[1].state),
+        ("client-schedule", "change")
+    );
+    schedule::apply(&rows, NEW, true, fake.as_ref());
+    assert_eq!(
+        *fake.made.borrow(),
+        vec![(true, "04:30".to_owned(), NEW.to_owned())]
+    );
+}
+
+#[test]
+fn a_schedule_already_naming_the_daemon_is_current_and_none_is_ever_created() {
+    let current = Rc::new(FakeScheduler {
+        installed: vec![(
+            true,
+            Some("http://10.0.0.7:8765/"),
+            Some("04:30"),
+            true,
+            None,
+        )],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&current, NEW, true);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].state, "current");
+    schedule::apply(&rows, NEW, true, current.as_ref());
+    // With no schedule installed there is no row, and nothing is written.
+    let none = Rc::new(FakeScheduler::default());
+    let rows = schedule_rows(&none, NEW, true);
+    assert!(rows.is_empty());
+    schedule::apply(&rows, NEW, true, none.as_ref());
+    assert!(current.made.borrow().is_empty() && none.made.borrow().is_empty());
+}
+
+#[test]
+fn a_schedule_connect_cannot_re_create_as_written_is_left_with_the_command() {
+    // Near miss beside each guard: the same schedule shaped as `--schedule`
+    // writes it, with a URL and time, of the kind written here, re-creates.
+    let shaped: Installed = (true, Some(OLD), Some("04:30"), true, None);
+    for (installed, refuse_here, says) in [
+        (
+            (true, Some(OLD), Some("04:30"), false, None),
+            None,
+            "it is not exactly what `update --schedule` writes",
+        ),
+        (
+            (true, None, Some("04:30"), false, None),
+            None,
+            "names no `--daemon-url` connect can read",
+        ),
+        (
+            (
+                true,
+                Some(OLD),
+                Some("04:30"),
+                false,
+                Some("no verified stable native launcher"),
+            ),
+            None,
+            "cannot tell whether it is the one `update --schedule` writes (no verified stable native launcher)",
+        ),
+        (
+            (true, Some(OLD), None, true, None),
+            None,
+            "its daily time could not be read",
+        ),
+        (
+            shaped,
+            Some((false, "no bearer resolves for the scheduled run".to_owned())),
+            "connect cannot re-create it here (no bearer resolves for the scheduled run); fix that",
+        ),
+    ] {
+        let fake = Rc::new(FakeScheduler {
+            installed: vec![installed],
+            refuse_here: refuse_here.clone(),
+            ..FakeScheduler::default()
+        });
+        let rows = schedule_rows(&fake, NEW, true);
+        assert_eq!(rows[0].state, "manual", "{says}");
+        assert!(rows[0].detail.contains(says), "{}", rows[0].detail);
+        let when = installed.2.unwrap_or("HH:MM");
+        assert!(
+            rows[0].detail.ends_with(&format!(
+                "`pseudolife-mcp update --schedule {when} --daemon-url {NEW}`"
+            )),
+            "{}",
+            rows[0].detail
+        );
+        schedule::apply(&rows, NEW, true, fake.as_ref());
+        assert!(fake.made.borrow().is_empty());
+    }
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![shaped],
+        ..FakeScheduler::default()
+    });
+    assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "change");
+}
+
+#[test]
+fn a_schedule_of_the_other_kind_names_its_removal_before_any_schedule_step() {
+    // `--schedule` here would write the daemon's schedule beside this client
+    // one: the fix removes exactly this one first, never adds a second.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(OLD), Some("04:30"), true, None)],
+        refuse_here: Some((
+            true,
+            "this machine runs the daemon container, so `update --schedule` here writes the daemon's schedule instead".to_owned(),
+        )),
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "manual");
+    let detail = &rows[0].detail;
+    let remove = detail
+        .find("remove this one with `schtasks /Delete /TN \"client\" /F`")
+        .expect(detail);
+    let schedule = detail
+        .find("pseudolife-mcp update --schedule")
+        .expect(detail);
+    assert!(remove < schedule, "{detail}");
+    assert!(
+        detail.contains("writes the daemon's schedule instead"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_hand_edited_url_is_a_manual_row_not_a_deferral() {
+    // URLs the oracle's urlsplit would treat in ways the native port defers
+    // on: an IPvFuture host, a character outside printable ASCII.
+    for url in ["http://[v1.fe]:8765", "http://10.0.0.5:8765\u{e9}"] {
+        let fake = Rc::new(FakeScheduler {
+            installed: vec![(true, Some(url), Some("04:30"), false, None)],
+            ..FakeScheduler::default()
+        });
+        let rows = schedule_rows(&fake, NEW, true);
+        assert_eq!(rows[0].state, "manual", "{url}");
+        assert!(
+            rows[0].detail.contains("a daemon URL connect cannot show"),
+            "{}",
+            rows[0].detail
+        );
+    }
+}
+
+#[test]
+fn a_schedule_that_cannot_be_re_created_says_what_changed_and_the_command_that_finishes_it() {
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(OLD), Some("04:30"), true, None)],
+        refuse_write: Some("Task Scheduler registration failed".to_owned()),
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    let (notes, failures) = schedule::apply(&rows, NEW, true, fake.as_ref());
+    assert!(notes.is_empty());
+    assert_eq!(
+        failures,
+        vec![format!(
+            "the client registrations now name {NEW} (backups above), but the scheduled task 'client' was not re-created (Task Scheduler registration failed); finish it with `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`"
+        )]
+    );
+    // With no client file re-pointed, it never claims the registrations moved.
+    let (_, failures) = schedule::apply(&rows, NEW, false, fake.as_ref());
+    assert!(
+        failures[0].starts_with("the scheduled task 'client' was not re-created"),
+        "{}",
+        failures[0]
+    );
+}
+
+#[test]
+fn a_schedule_removed_or_changed_after_the_plan_is_left_as_it_now_is() {
+    let read: Installed = (true, Some(OLD), Some("04:30"), true, None);
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![read],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "change");
+    // Near miss: the same schedule still installed re-creates.
+    let same = FakeScheduler {
+        installed: vec![read],
+        ..FakeScheduler::default()
+    };
+    let (_, failures) = schedule::apply(&rows, NEW, true, &same);
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(same.made.borrow().len(), 1);
+    let changed = "it changed after connect read it (its daemon URL, time, state or shape)";
+    for (later, cause) in [
+        (
+            FakeScheduler::default(),
+            "it was removed after connect read it",
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(true, Some(OLD), Some("04:30"), false, None)],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(true, Some(OLD), Some("05:00"), true, None)],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(
+                    true,
+                    Some("http://10.0.0.9:8765"),
+                    Some("04:30"),
+                    true,
+                    None,
+                )],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(true, Some(OLD), Some("04:30"), true, Some("unreadable"))],
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![read],
+                overridden: Some(("the systemd drop-in X sets ExecStart=", "remove it")),
+                ..FakeScheduler::default()
+            },
+            "the systemd drop-in X sets ExecStart= (found when connect read it again immediately before writing)",
+        ),
+        (
+            FakeScheduler {
+                installed: vec![read],
+                differs: Some("an end date"),
+                ..FakeScheduler::default()
+            },
+            changed,
+        ),
+        (
+            FakeScheduler {
+                installed: vec![(false, Some(OLD), Some("04:30"), true, None)],
+                ..FakeScheduler::default()
+            },
+            "it was removed after connect read it",
+        ),
+        (
+            FakeScheduler {
+                installed: vec![read],
+                reread_error: Some("interrupted".to_owned()),
+                ..FakeScheduler::default()
+            },
+            "connect could not read it again immediately before writing (interrupted)",
+        ),
+    ] {
+        let (notes, failures) = schedule::apply(&rows, NEW, true, &later);
+        assert!(later.made.borrow().is_empty(), "{cause}");
+        assert!(notes.is_empty(), "{cause}");
+        assert_eq!(
+            failures,
+            vec![format!(
+                "the client registrations now name {NEW} (backups above), but the scheduled task 'client' was not re-created: {cause}, so connect leaves it as it is; re-run connect to plan it again"
+            )],
+        );
+    }
+}
+
+#[test]
+fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_daemon() {
+    let cause = "the systemd drop-in /home/u/.config/systemd/user/pseudolife-client-update.service.d/override.conf sets ExecStart=, which takes precedence over the files `update --schedule` writes";
+    let fix = "remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run";
+    let clause = format!("{cause}, so connect cannot vouch for it and leaves it as it is: {fix}");
+    // The base unit names the new daemon (what following `--schedule` leaves)
+    // and the old one: neither is current or re-created.
+    for base in [NEW, OLD] {
+        let fake = Rc::new(FakeScheduler {
+            installed: vec![(true, Some(base), Some("04:30"), false, None)],
+            overridden: Some((cause, fix)),
+            ..FakeScheduler::default()
+        });
+        let rows = schedule_rows(&fake, NEW, true);
+        assert_eq!(rows[0].state, "manual", "{base}");
+        // The row is the place and the sentence discovery built, cause and
+        // next step, with no `--schedule` (which rewrites only the base files).
+        let detail = &rows[0].detail;
+        assert_eq!(detail, &format!("the scheduled task 'client': {clause}"));
+        assert!(!detail.contains("update --schedule 04:30"), "{detail}");
+        schedule::apply(&rows, NEW, true, fake.as_ref());
+        assert!(fake.made.borrow().is_empty());
+    }
+    // Near miss: the same schedule with no override, naming the daemon, is
+    // current.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), true, None)],
+        ..FakeScheduler::default()
+    });
+    assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "current");
+    // The daemon's own schedule after the daemon moved away: removing it
+    // resolves it whatever the drop-in says, so that row comes first.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(false, Some(OLD), Some("04:30"), false, None)],
+        overridden: Some((cause, fix)),
+        ..FakeScheduler::default()
+    });
+    let moved = schedule_rows(&fake, NEW, true);
+    assert_eq!(moved[0].state, "manual");
+    assert!(
+        moved[0]
+            .detail
+            .contains("remove it here with `schtasks /Delete /TN \"daemon\" /F`"),
+        "{}",
+        moved[0].detail
+    );
+    // It names the cause found, without the fix (which promises a
+    // re-creation connect will not make for a daemon that moved away).
+    assert!(
+        moved[0].detail.ends_with(&format!(
+            "Also found here: {cause}; if that reports an error, deal with that first"
+        )),
+        "{}",
+        moved[0].detail
+    );
+    assert!(!moved[0].detail.contains(fix), "{}", moved[0].detail);
+    // Near miss: with the daemon still on this machine, the drop-in row.
+    let here = schedule_rows(&fake, LOCAL_NEW, false);
+    assert!(here[0].detail.ends_with(&clause), "{}", here[0].detail);
+}
+
+#[test]
+fn a_schedule_naming_the_daemon_is_current_only_as_schedule_writes_it() {
+    // Near miss: as `--schedule` writes it, naming the daemon: current.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), true, None)],
+        ..FakeScheduler::default()
+    });
+    assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "current");
+    // The first `--daemon-url` names the daemon, but a hand edit (a second
+    // `--daemon-url`, an added `ExecStartPost=`, a second task action) is not
+    // what `--schedule` writes: never current, never re-created.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), false, None)],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "manual");
+    // It names the new daemon first: the row says so, not "runs against",
+    // and does not blame a hand edit (another shell's environment differs
+    // too); the fix makes it one connect manages.
+    assert!(
+        rows[0].detail.starts_with(&format!(
+            "the scheduled task 'client' names {NEW} first, but is not exactly the schedule `update --schedule` writes from this shell, so connect cannot vouch"
+        )),
+        "{}",
+        rows[0].detail
+    );
+    assert!(
+        !rows[0].detail.contains("runs against"),
+        "{}",
+        rows[0].detail
+    );
+    assert!(!rows[0].detail.contains("hand edit"), "{}", rows[0].detail);
+    assert!(
+        rows[0].detail.ends_with(&format!(
+            "makes it one connect manages: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`"
+        )),
+        "{}",
+        rows[0].detail
+    );
+    schedule::apply(&rows, NEW, true, fake.as_ref());
+    assert!(fake.made.borrow().is_empty());
+    // A task naming the daemon with a setting `--schedule` does not write:
+    // nothing to change for the move, said so, never called current.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), false, None)],
+        differs: Some("an end date"),
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "manual");
+    assert!(
+        rows[0]
+            .detail
+            .contains(&format!("names {NEW} and differs from what `update --schedule` writes only in an end date, so it needs no change for this move")),
+        "{}",
+        rows[0].detail
+    );
+    // What differs is shown when discovery can name it; and a task with a
+    // named setting that also differs elsewhere is not told "no change".
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), false, None)],
+        differs: Some("an end date"),
+        mismatch: Some("it has 2 actions where `update --schedule` registers one"),
+        ..FakeScheduler::default()
+    });
+    let detail = &schedule_rows(&fake, NEW, true)[0].detail;
+    assert!(
+        detail.contains(
+            "writes from this shell (it has 2 actions where `update --schedule` registers one)"
+        ),
+        "{detail}"
+    );
+    assert!(!detail.contains("needs no change"), "{detail}");
+    // The daemon's own schedule, already naming the new daemon on another
+    // machine, is not current: its next step is removing it, by its own
+    // command, never `--unschedule`, which removes the client schedule too.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(false, Some(NEW), Some("04:30"), true, None)],
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "manual");
+    assert!(
+        rows[0]
+            .detail
+            .contains("remove it here with `schtasks /Delete /TN \"daemon\" /F`"),
+        "{}",
+        rows[0].detail
+    );
+    assert!(
+        !rows[0].detail.contains("--unschedule"),
+        "{}",
+        rows[0].detail
+    );
+    // Near miss: the client schedule naming the remote daemon is current.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(NEW), Some("04:30"), true, None)],
+        ..FakeScheduler::default()
+    });
+    assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "current");
+}
+
+#[test]
+fn a_write_is_reported_only_when_it_reads_back_as_written() {
+    let read: Installed = (true, Some(OLD), Some("04:30"), true, None);
+    let plan = |fake: &Rc<FakeScheduler>| schedule_rows(fake, NEW, true);
+    // Near miss: it reads back as written: the note.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![read],
+        ..FakeScheduler::default()
+    });
+    let (notes, failures) = schedule::apply(&plan(&fake), NEW, true, fake.as_ref());
+    assert!(failures.is_empty(), "{failures:?}");
+    assert!(
+        notes[0].contains(&format!("now runs against {NEW}")),
+        "{notes:?}"
+    );
+    // The write's own daemon-reload loaded a unit file from elsewhere: it was
+    // written, but connect does not say it runs against the new daemon.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![read],
+        after_overridden: Some((
+            "systemd's user manager loads pseudolife-client-update.service from /home/u/.config/systemd/user.control/pseudolife-client-update.service, not from the file `update --schedule` writes",
+            "remove the other unit file and run `systemctl --user daemon-reload`, or manage this schedule by hand",
+        )),
+        ..FakeScheduler::default()
+    });
+    let (notes, failures) = schedule::apply(&plan(&fake), NEW, true, fake.as_ref());
+    assert_eq!(fake.made.borrow().len(), 1);
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(
+        failures,
+        vec![format!(
+            "the client registrations now name {NEW} (backups above), but the scheduled task 'client' was re-created for {NEW}, but when connect reads it back, systemd's user manager loads pseudolife-client-update.service from /home/u/.config/systemd/user.control/pseudolife-client-update.service, not from the file `update --schedule` writes, so connect cannot confirm the run uses the new daemon: remove the other unit file and run `systemctl --user daemon-reload`, or manage this schedule by hand"
+        )]
+    );
+    // It reads back naming another daemon, or not shaped.
+    for after in [
+        (true, Some(OLD), Some("04:30"), true, None),
+        (true, Some(NEW), Some("04:30"), false, None),
+        (true, Some(NEW), Some("05:00"), true, None),
+    ] {
+        let fake = Rc::new(FakeScheduler {
+            installed: vec![read],
+            after_write: Some(vec![after]),
+            ..FakeScheduler::default()
+        });
+        let (notes, failures) = schedule::apply(&plan(&fake), NEW, true, fake.as_ref());
+        assert!(notes.is_empty(), "{after:?}");
+        assert!(
+            failures[0].contains("does not read back as what `update --schedule` writes"),
+            "{failures:?}"
+        );
+    }
+}
+
+#[test]
+fn a_repair_command_names_the_daemon_connect_moves_to() {
+    // Discovery cannot know the target URL, so its repair commands carry a
+    // placeholder that the row replaces.
+    let fix = Box::leak(
+        format!(
+            "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {}` at your time",
+            crate::cli::update::schedules::TARGET
+        )
+        .into_boxed_str(),
+    );
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, None, None, false, None)],
+        overridden: Some(("X is not UTF-8 text", fix)),
+        ..FakeScheduler::default()
+    });
+    let detail = &schedule_rows(&fake, NEW, true)[0].detail;
+    assert!(
+        detail.ends_with(&format!("--daemon-url {NEW}` at your time")),
+        "{detail}"
+    );
+    assert!(
+        !detail.contains(crate::cli::update::schedules::TARGET),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_task_setting_schedule_would_drop_is_named_with_both_ways_on() {
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(OLD), Some("04:30"), false, None)],
+        differs: Some("an end date and highest privileges"),
+        ..FakeScheduler::default()
+    });
+    let rows = schedule_rows(&fake, NEW, true);
+    assert_eq!(rows[0].state, "manual");
+    assert!(
+        rows[0].detail.ends_with(&format!(
+            "it has an end date and highest privileges, which `update --schedule` does not write, so re-scheduling it would drop that, and connect leaves it as it is: to keep it, change the task's `--daemon-url` argument to {NEW} in Task Scheduler; to drop it, re-schedule it: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`"
+        )),
+        "{}",
+        rows[0].detail
+    );
+    schedule::apply(&rows, NEW, true, fake.as_ref());
+    assert!(fake.made.borrow().is_empty());
+    // A task registered through the `-EncodedCommand` layout wrapper has no
+    // `--daemon-url` argument to edit, so the row says how it can be kept.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(OLD), Some("04:30"), false, None)],
+        differs: Some("an end date"),
+        encoded: true,
+        ..FakeScheduler::default()
+    });
+    let detail = &schedule_rows(&fake, NEW, true)[0].detail;
+    assert!(detail.contains("re-register the task by hand with the new daemon URL (its URL is inside the task's `-EncodedCommand` script"), "{detail}");
+    assert!(!detail.contains("argument to"), "{detail}");
+    assert!(detail.ends_with(&format!("to drop it, re-schedule it: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`")), "{detail}");
 }

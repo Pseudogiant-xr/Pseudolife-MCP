@@ -649,16 +649,55 @@ first, and if one write fails the files already written are restored.
   `~/.claude.json`, a `.mcp.json`), a project's `.claude/settings*.json`,
   non-stdio registrations, Claude Desktop's old `pseudolife-memory` entry
   name (the installer's Desktop step migrates it), Codex settings that come
-  from another Codex config layer, a `PSEUDOLIFE_MCP_DAEMON_URL` in your
-  shell environment, and a scheduled unattended update (the report names
-  the `--schedule` command to re-run). Edit those by hand. On Windows the
-  native client re-points a User-scope `PSEUDOLIFE_MCP_DAEMON_URL` that
-  names another daemon, as a `change` row under the same confirmation
-  (programs already running keep the old value until they restart); it
-  never creates one and never writes Machine scope, so a Machine-scope value
-  that no User-scope value overrides is a `manual` row with the command to
-  run. The Python client writes
-  neither scope.
+  from another Codex config layer, and a `PSEUDOLIFE_MCP_DAEMON_URL` in your
+  shell environment. Edit those by hand.
+- **Also re-pointed by the native client:**
+  - **The Windows User-scope environment:** on Windows, a User-scope
+    `PSEUDOLIFE_MCP_DAEMON_URL` that names another daemon is a `change` row
+    under the same confirmation (programs already running keep the old value
+    until they restart). The native client never creates one and never
+    writes Machine scope, so a Machine-scope value that no User-scope value
+    overrides is a `manual` row with the command to run. The Python client
+    writes neither scope.
+  - **The unattended-update schedules:** with every client selected, a
+    schedule that `update --schedule` installed here, the daemon's or this
+    client machine's, is re-created for the new URL, keeping its daily
+    time.
+  - **What `connect` vouches for:** one thing only, the schedule exactly
+    as `update --schedule` writes it from this shell, with nothing added in
+    any place `connect` knows systemd or Task Scheduler looks. If you have
+    customised your schedule, `connect` leaves it to you: whenever it can see
+    that something was added, it changes nothing and shows a `manual` row
+    naming what it found and the step that would let it manage the schedule
+    again.
+  - **What stays manual:** a schedule `connect` cannot re-create exactly as
+    written, or the daemon's schedule after the daemon moved to another
+    machine, is a `manual` row naming the command to run. So is:
+    - a scheduled task with a setting `--schedule` would drop (an end
+      date, a repetition, a delay, highest privileges), or with a second
+      action;
+    - a systemd schedule with a drop-in that sets anything not known to be
+      harmless (its command, environment, timer, a `[Unit]` dependency);
+    - a systemd schedule with dependency links (`.wants/`, `.requires/`,
+      `.upholds/`), a unit file of the same name in another directory
+      systemd searches, or a unit file that is a symbolic link.
+
+    Each row names what it found. A schedule is reported current only when
+    it is exactly what `--schedule` writes, and a re-created one is read back
+    before the move is reported. `connect` also asks systemd's user manager
+    which unit file and drop-ins it applies, and leaves the schedule alone
+    when that differs from what it read. `connect` never creates or removes a
+    schedule. The Python client re-creates none: it reports only the
+    daemon's schedule, and names the `--schedule` command to re-run
+    (`--unschedule` once the daemon is on another machine).
+  - **What `connect` cannot see:**
+    - What systemd has loaded can differ from the files on disk, for
+      example after a drop-in is replaced without a reload, keeping an older
+      timestamp. `connect` reads the files.
+    - Another timer that also starts the update service runs it at other
+      times; those runs use the new daemon too.
+    - A scheduled task's settings (power and idle conditions, wake) and its
+      other fields are not compared; re-creating a task resets them.
 - **Afterwards:** restart the sessions the report lists (and fully quit and
   relaunch Claude Desktop when its entry changed). Each session gets a new
   board address on the new URL.
@@ -672,15 +711,13 @@ first, and if one write fails the files already written are restored.
 and `--json` prints one machine-readable report. Exit codes: 0 done or
 already current, 1 a write failed and was rolled back, 2 usage or not
 confirmed, 3 no registration it can write (none found, or only `manual`
-ones), 4 verification refused, 5 applied but the post-apply check failed.
+ones), 4 verification refused, 5 applied but the post-apply check failed
+(or, with the native client, a planned schedule or User-scope change
+failed, whether or not a registration moved), 130 interrupted.
 
-**With the native client**, `connect` does not ask questions yet: review
-the plan with `--dry-run`, then apply it with `--yes`. At a terminal, an
-applying run without `--yes`, or one with `--read-token` or `--read-code`, stops with
-`pseudolife-stdio: mode 'connect' is deferred in this candidate` and exit
-1, having changed nothing (a `--dry-run` is not affected); give the code with `--code`, or pipe the token
-or code in. So does a run for every client on a machine with an
-unattended-update schedule; select the clients with `--client` instead.
+**With the native client**, `connect` asks once at a terminal, as above,
+and reads `--read-token` and `--read-code` there without echo; a run with
+no terminal and no `--yes` refuses, having changed nothing.
 
 ## Moving a bank
 
