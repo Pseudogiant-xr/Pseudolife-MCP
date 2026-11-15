@@ -203,6 +203,30 @@ def test_the_ask_order_check_sees_a_question_that_comes_first(tmp_path, shell):
 ])
 def test_every_question_before_the_stage_waits_for_the_staged_release(script, hook, reader, pattern):
     text = (ROOT / "ops" / script).read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert not _unguarded(text, script, hook, reader, pattern)
+
+
+def _before_the_late_stage(text: str) -> str:
+    """The script up to the stage every first install reaches before changing
+    anything (a rerun may stage earlier, at its own marker)."""
+    late = "# >>> native client late stage >>>"
+    return text[:text.index(late if late in text else "# >>> native client stage >>>")]
+
+
+@pytest.mark.parametrize("script, hook, reader, pattern, question", [
+    ("install-native.sh", "native_before_asking", "bank_read()", r"(?<![\w-])read -r", '    read -r moved_question'),
+    ("install-native.ps1", "Read-NativeBeforeAsking", "function Read-BankAnswer", r"Read-Host\b", '    $moved = Read-Host "Moved question"'),
+])
+def test_the_ordering_check_catches_a_question_moved_before_the_stage(script, hook, reader, pattern, question):
+    # Control: a question placed just before the late stage, with no hook near
+    # it, must be reported, so the check above cannot pass by examining nothing.
+    text = (ROOT / "ops" / script).read_text(encoding="utf-8").replace("\r\n", "\n")
+    cut = len(_before_the_late_stage(text))
+    moved = text[:cut] + "\n" * 25 + question + "\n" + "\n" * 25 + text[cut:]
+    assert _unguarded(moved, script, hook, reader, pattern), "the check missed a question before the stage"
+
+
+def _unguarded(text: str, script: str, hook: str, reader: str, pattern: str) -> list[str]:
     lines = text[:text.index("# >>> native client stage >>>")].splitlines()
     unguarded = []
     for number, line in enumerate(lines):
@@ -214,4 +238,4 @@ def test_every_question_before_the_stage_waits_for_the_staged_release(script, ho
         in_reader = reader in "\n".join(lines[max(0, number - 6):number])
         if hook not in window and not in_reader:
             unguarded.append(f"{script}:{number + 1}: {line.strip()}")
-    assert not unguarded, unguarded
+    return unguarded
