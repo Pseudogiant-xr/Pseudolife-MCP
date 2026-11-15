@@ -11,20 +11,26 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 
 import pytest
 
 from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
-from tests.test_installer_existing_upgrade import _between, _fixture_env
+from tests.test_installer_existing_upgrade import _between
+from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 INSTALL = "ops/install-native.ps1"
+
+
+def _block(name: str) -> str:
+    text = (ROOT / "ops" / "install-native.ps1").read_text(encoding="utf-8")
+    assert f"# >>> {name} >>>\n" in text, f"install-native.ps1 has no '{name}' marker block"
+    return text.split(f"# >>> {name} >>>\n", 1)[1].split(f"# <<< {name} <<<", 1)[0]
 
 
 def _function(name: str) -> str:
@@ -52,8 +58,8 @@ class _PowerShell:
         prelude = (
             "$ErrorActionPreference = 'Stop'\n"
             f"$repo = '{_q(ROOT)}'\n"
-            f"function Get-InstallerPython {{ '{_q(sys.executable)}' }}\n"
-            "function Step($message) { Write-Output \"STEP: $message\" }\n"
+            + native_stub.HELPER_PS
+            + "function Step($message) { Write-Output \"STEP: $message\" }\n"
             + _function("Get-HelperStatus($output)") + "\n"
         )
         script = self.tmp / "run.ps1"
@@ -67,6 +73,166 @@ class _PowerShell:
 
 def _output(proc: subprocess.CompletedProcess[str]) -> str:
     return proc.stdout + proc.stderr
+
+
+def _mint(ps: _PowerShell, env_file: Path, *, no_token: bool = False,
+          transport: str = "shim", helper: str = ""):
+    """``helper``: a test-local ``Invoke-NativeHelper`` that replaces the
+    stand-in, for a native mint step that fails."""
+    stub = helper + _function("Get-EnvValue($name)") + "\n"
+    return ps.run(
+        f"$envFile = '{_q(env_file)}'\n"
+        f"$NoToken = [switch]${'true' if no_token else 'false'}\n"
+        f"$Transport = '{transport}'\n"
+        + stub + _block("mint token")
+        + "\nWrite-Output \"TOKEN_STATE=$tokenState\"\n")
+
+
+def _minted(env_file: Path) -> list[str]:
+    return re.findall(r"(?m)^PSEUDOLIFE_MCP_TOKEN=(\S+)\r?$",
+                      env_file.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("no_token,transport", [
+    (False, "http"),
+    (False, "shim"),
+    (True, "shim"),
+])
+def test_an_existing_token_is_reported_present_whatever_else_holds(tmp_path, no_token,
+                                                                   transport):
+    """The daemon is gated by a token already in ops/.env whether or not
+    this run could have minted one (final review, 2026-09-28)."""
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-existing\n", encoding="utf-8")
+    proc = _mint(ps, env_file, no_token=no_token, transport=transport)
+    assert proc.returncode == 0, _output(proc)
+    assert "TOKEN_STATE=present" in proc.stdout
+    assert "fixture-existing" not in _output(proc)
+
+
+def test_default_install_mints_a_token_and_never_prints_it(tmp_path):
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
+    proc = _mint(ps, env_file)
+    assert proc.returncode == 0, _output(proc)
+    [token] = _minted(env_file)
+    assert "TOKEN_STATE=minted" in proc.stdout
+    assert "Minted a bearer token" in proc.stdout
+    assert token not in _output(proc)
+    again = _mint(ps, env_file)
+    assert again.returncode == 0, _output(again)
+    assert "TOKEN_STATE=present" in again.stdout
+    assert _minted(env_file) == [token]
+
+
+@pytest.mark.parametrize("no_token,transport,state", [
+    (True, "shim", "opted-out"),
+    (False, "http", "http"),
+])
+def test_open_loopback_installs_mint_nothing(tmp_path, no_token, transport, state):
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
+    proc = _mint(ps, env_file, no_token=no_token, transport=transport)
+    assert proc.returncode == 0, _output(proc)
+    assert f"TOKEN_STATE={state}" in proc.stdout
+    assert _minted(env_file) == []
+
+
+def test_a_failed_mint_step_leaves_the_board_off_and_says_so(tmp_path):
+    # The native mint step answers without a status: nothing is minted, and
+    # the warning names the manual fix.
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
+    proc = _mint(ps, env_file, helper=(
+        "function Invoke-NativeHelper { $global:LASTEXITCODE = 1; 'mint failed' }\n"))
+    assert proc.returncode == 0, _output(proc)
+    assert _minted(env_file) == []
+    assert "TOKEN_STATE=failed" in proc.stdout
+    assert "Could not mint a bearer token" in _output(proc)
+
+
+def _client_files(ps: _PowerShell, env_file: Path, clients: list[str], *, hook: str = "",
+                  extra_env: dict[str, str] | None = None):
+    getters = "\n".join(_function(name) for name in (
+        "Get-EnvValue($name)", "Get-DesktopTokenSource", "Get-DesktopTokensSource"))
+    client_list = ", ".join(f"'{client}'" for client in clients)
+    return ps.run(
+        f"$envFile = '{_q(env_file)}'\n$clients = @({client_list})\n$Transport = 'shim'\n"
+        f"$hookState = @{{ claude = '{hook}' }}\n" + getters + "\n"
+        + _block("client token files")
+        + "\nWrite-Output \"CLAUDE=$claudeTokenFile\"\nWrite-Output \"GEMINI=$geminiTokenFile\"\n"
+        + "Write-Output \"LEFT=$env:PSEUDOLIFE_INSTALLER_TOKEN$env:PSEUDOLIFE_INSTALLER_TOKENS\"\n",
+        extra_env=extra_env)
+
+
+def test_claude_and_gemini_get_owner_only_token_files(tmp_path):
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-singular\n", encoding="utf-8")
+    proc = _client_files(ps, env_file, ["claude", "gemini"])
+    assert proc.returncode == 0, _output(proc)
+    assert "fixture-singular" not in _output(proc)
+    assert re.search(r"(?m)^LEFT=\r?$", proc.stdout)
+    for principal in ("claude-code", "gemini"):
+        target = ps.home / ".pseudolife-mcp" / f"{principal}.token"
+        assert CredentialProvider(path=target).snapshot().token == "fixture-singular"
+        assert f"{'CLAUDE' if principal == 'claude-code' else 'GEMINI'}={target}" in proc.stdout
+
+
+def test_token_map_entry_wins_for_its_principal(tmp_path):
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-singular\n"
+                        "PSEUDOLIFE_MCP_TOKENS=fixture-mapped:claude-code\n", encoding="utf-8")
+    proc = _client_files(ps, env_file, ["claude"])
+    assert proc.returncode == 0, _output(proc)
+    assert "fixture-mapped" not in _output(proc)
+    target = ps.home / ".pseudolife-mcp" / "claude-code.token"
+    assert CredentialProvider(path=target).snapshot().token == "fixture-mapped"
+
+
+def test_tokenless_install_writes_no_client_files(tmp_path):
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
+    proc = _client_files(ps, env_file, ["claude", "gemini"], hook="plugin")
+    assert proc.returncode == 0, _output(proc)
+    assert re.search(r"(?m)^CLAUDE=\r?$", proc.stdout)
+    assert re.search(r"(?m)^GEMINI=\r?$", proc.stdout)
+    assert not (ps.home / ".pseudolife-mcp").exists()
+    assert not (ps.home / ".claude" / "settings.json").exists()
+
+
+def test_plugin_hooks_get_the_token_file_through_claude_settings(tmp_path):
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-singular\n", encoding="utf-8")
+    settings = ps.home / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"enabledPlugins": {"x": True}}), encoding="utf-8")
+    proc = _client_files(ps, env_file, ["claude"], hook="plugin")
+    assert proc.returncode == 0, _output(proc)
+    assert "Claude Code plugin hook settings:" in proc.stdout
+    assert "hook authentication not verified" in proc.stdout
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["enabledPlugins"] == {"x": True}
+    assert Path(data["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"]) == (
+        ps.home / ".pseudolife-mcp" / "claude-code.token")
+    assert data["env"]["PSEUDOLIFE_MCP_DAEMON_URL"] == "http://127.0.0.1:8765"
+
+
+def test_plugin_hooks_keep_a_token_the_user_environment_supplies(tmp_path):
+    ps = _PowerShell(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-singular\n", encoding="utf-8")
+    proc = _client_files(ps, env_file, ["claude"], hook="plugin",
+                         extra_env={"PSEUDOLIFE_MCP_TOKEN": "fixture-singular"})
+    assert proc.returncode == 0, _output(proc)
+    assert not (ps.home / ".claude" / "settings.json").exists()
 
 
 def _wire(ps: _PowerShell, client: str, *, token_file: str, existing: str | None = None,
@@ -260,3 +426,27 @@ def test_tokenless_existing_gemini_registration_gets_no_token_warning(tmp_path):
                         existing="pseudolife-memory: pseudolife-mcp (stdio) - Connected")
     assert proc.returncode == 0, _output(proc)
     assert "Edit it in place in ~/.gemini/settings.json" not in _output(proc)
+
+
+def _board(ps: _PowerShell, *, token_state: str, mcp_state: str = "@{}"):
+    return ps.run(
+        "$claudeTokenFile = $null; $geminiTokenFile = $null; $codexCredentialFile = $null\n"
+        f"$clientDaemonUrl = 'http://127.0.0.1:1'; $tokenState = '{token_state}'\n"
+        f"$mcpState = {mcp_state}\n"
+        "function Get-DesktopTokenSource { $null }\n" + _block("board line"))
+
+
+def test_final_ladder_prints_one_board_line(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _board(ps, token_state="opted-out")
+    assert proc.returncode == 0, _output(proc)
+    [line] = [line for line in proc.stdout.splitlines() if "Agent board" in line]
+    assert re.fullmatch(r"\s*\[!\] Agent board\s+off - no bearer token.*-NoToken.*", line)
+    assert "HTTP registration" not in _output(proc)
+
+
+def test_board_line_warns_when_a_gated_daemon_got_an_http_registration(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _board(ps, token_state="minted", mcp_state="@{ claude = 'http' }")
+    assert proc.returncode == 0, _output(proc)
+    assert "HTTP registration sends no bearer token" in _output(proc)

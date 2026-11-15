@@ -29,14 +29,20 @@ import pytest
 
 from tests.installer_protocol import LEVEL
 
+from tests import installer_sandbox
+from tests import native_client_stub
+
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "9.8.7"
 PWSH = shutil.which("pwsh")
 pytestmark = pytest.mark.skipif(PWSH is None, reason="needs pwsh")
 WINDOWS = os.name == "nt"
-REAL = os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY", "")
-TARGET = "x86_64-pc-windows-msvc" if WINDOWS else "x86_64-unknown-linux-gnu"
+_REAL = native_client_stub.real_binary()
+REAL = str(_REAL) if _REAL else ""
+# A real client runs only on its own target; the stub is the Linux one.
+TARGET = ("x86_64-pc-windows-msvc" if WINDOWS
+          else native_client_stub.host_target() if REAL else "x86_64-unknown-linux-gnu")
 ASSET = f"pseudolife-mcp-{VERSION}-{TARGET}." + ("zip" if WINDOWS else "tar.gz")
 needs_client = pytest.mark.skipif(
     WINDOWS and not (REAL and Path(REAL).is_file()),
@@ -79,7 +85,7 @@ def _release(directory: Path, *, digest_override: str | None = None, omit: bool 
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("pseudolife-mcp.exe", data)
     else:
-        data = STUB.encode()
+        data = Path(REAL).read_bytes() if REAL else STUB.encode()
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             info = tarfile.TarInfo("pseudolife-mcp")
             info.size = len(data)
@@ -122,7 +128,8 @@ def _run(tmp_path: Path, body: str, *, release: bool = True, extra_env: dict[str
     ])
     script_file = tmp_path / "run.ps1"
     script_file.write_text(script, encoding="utf-8")
-    env = {key: value for key, value in os.environ.items() if not key.startswith("PSEUDOLIFE_")}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("PSEUDOLIFE_", "XDG_"))}
     env.update({
         "PATH": os.pathsep.join([str(stubs), os.environ.get("PATH", "")]),
         "HOME": str(home), "USERPROFILE": str(home),
@@ -136,8 +143,8 @@ def _run(tmp_path: Path, body: str, *, release: bool = True, extra_env: dict[str
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9",
     })
     env.update(extra_env or {})
-    result = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_file)],
-                            capture_output=True, text=True, env=env, timeout=180)
+    result = installer_sandbox.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_file)],
+                                   env=env, root=tmp_path, capture_output=True, text=True, timeout=180)
     assert not forbidden.exists(), f"the installer ran Python tooling: {forbidden.read_text()}"
     return result
 
@@ -161,7 +168,9 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
 @needs_client
 def test_a_python_client_registration_moves_to_the_native_launcher(tmp_path):
     if not WINDOWS:
-        pytest.skip("the move itself is the native binary's (cli_installer_contract.rs); the stub only reports")
+        # The fixture is a Windows pipx layout; the move itself is the native
+        # binary's (cli_installer_contract.rs), and the stub only reports.
+        pytest.skip("a Windows pipx layout")
     venv = tmp_path / "home" / "pipx-venv"
     (venv / "Scripts").mkdir(parents=True)
     (venv / "Lib" / "site-packages" / "pseudolife_mcp-0.23.1.dist-info").mkdir(parents=True)
@@ -324,15 +333,6 @@ def test_the_user_path_helper_keeps_expandable_entries_and_reruns_quietly(tmp_pa
     finally:
         winreg.CloseKey(key)
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, subkey)
-
-
-def test_the_native_install_needs_no_pip_to_mint_the_token():
-    # As in the shell installer: only an interpreter for the token helper.
-    text = (ROOT / "ops/install-native.ps1").read_text(encoding="utf-8").replace("\r\n", "\n")
-    start = text.index("function Test-ShimToolingReady(")
-    body = text[start:text.index("\n}\n", start)]
-    assert "pip" not in body and "pipx" not in body and "EXTERNALLY-MANAGED" not in body
-    assert "$python" in body
 
 
 def test_a_download_folder_that_cannot_be_made_is_named_not_the_network(tmp_path):

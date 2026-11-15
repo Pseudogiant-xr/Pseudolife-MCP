@@ -745,9 +745,13 @@ jobs:
           tests/test_schema_version.py
           tests/test_doctor_cli.py
           tests/test_installer_claude_profile.py
+          tests/test_installer_claude_profile_native.py
           tests/test_installer_client_only.py::test_shell_fragment_transport_is_utf8_with_a_cp1252_parent
+          tests/test_installer_client_only_native.py::test_shell_fragment_transport_is_utf8_with_a_cp1252_parent
           tests/test_installer_client_only_ps.py::test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent
+          tests/test_installer_client_only_ps_native.py::test_powershell_fragment_transport_is_utf8_with_a_cp1252_parent
           tests/test_installer_client_only_ps.py::test_powershell_fixture_roundtrips_unicode_stdio
+          tests/test_installer_client_only_ps_native.py::test_powershell_fixture_roundtrips_unicode_stdio
           tests/test_shim_python.py
           tests/test_shim_cutover.py
           tests/test_shim_autostart_refs.py
@@ -775,12 +779,17 @@ jobs:
           tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit
           tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred
           tests/test_installer_reruns.py
+          tests/test_installer_reruns_native.py
           tests/test_installer_engine.py
+          tests/test_installer_engine_native.py
           tests/test_installer_py_launcher_ps.py
+          tests/test_installer_py_launcher_ps_native.py
           tests/test_shim_runtime_reuse.py
           tests/test_installer_unattended.py
+          tests/test_installer_unattended_native.py
           tests/test_installer_client_update_schedule.py
           tests/test_installer_resources.py
+          tests/test_installer_resources_native.py
           tests/test_installer_clone_authority.py
           tests/test_installer_lite.py
           tests/test_installer_client_engine.py
@@ -819,6 +828,7 @@ jobs:
           tests/test_client_install_ux.py::test_install_ps1_update_line_names_the_launcher_until_path_finds_it
           tests/test_client_install_ux.py::test_installers_support_codex_hook_on_windows
           tests/test_installer_plugin.py::test_fresh_machine_gets_marketplace_and_plugin
+          tests/test_installer_plugin_native.py::test_fresh_machine_gets_marketplace_and_plugin
           tests/test_codex_hooks.py::test_native_hook_rejects_broadened_managed_connection_acl
           tests/test_codex_hooks.py::test_plugin_native_windows_prompt_context
           tests/test_codex_hooks.py::test_native_session_start_sends_the_plugin_version
@@ -939,7 +949,7 @@ jobs:
         # process listing. Only live files run (tests/suite_classes.txt).
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_client_install_ux_native.py tests/test_codex_hooks.py tests/test_codex_hooks_native.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_installer_client_engine.py tests/test_installer_native_client.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_cli.py tests/test_prune_worktrees.py tests/test_update_bridge.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
+        run: python -m pytest tests/test_conductor_watch.py tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_client_install_ux_native.py tests/test_codex_hooks.py tests/test_codex_hooks_native.py tests/test_subagent_board_guard.py tests/test_codex_hook_setup_edges.py tests/test_installer_lite.py tests/test_installer_legacy_hooks.py tests/test_installer_client_update_schedule.py tests/test_installer_client_engine.py tests/test_installer_native_client.py tests/test_installer_native_goldens.py tests/test_installer_sandbox.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_cli.py tests/test_prune_worktrees.py tests/test_update_bridge.py tests/test_move_cli.py::test_signal_during_target_expose_undoes_serve tests/test_move_cli.py::test_postcommit_signal_records_followups_without_rollback tests/test_move_cli.py::test_signal_after_confirmed_moved_marker_never_rolls_back_the_commit tests/test_move_cli.py::test_signal_between_confirmed_marker_and_commit_record_is_deferred -q -rs
 
   test-windows-nightly:
     # Not a merge gate, and never run for a pull request or merge group: the
@@ -1086,6 +1096,8 @@ jobs:
           tests/test_register_claude_desktop.py
           tests/test_installer_shim_upgrade.py
           tests/test_installer_native_client.py
+          tests/test_installer_native_goldens.py
+          tests/test_installer_sandbox.py
           tests/test_installer_existing_upgrade.py
           tests/test_installer_existing_upgrade_native.py
           tests/test_codex_hooks.py
@@ -1099,7 +1111,9 @@ jobs:
           --deselect tests/test_client_install_ux.py::test_install_ps1_update_line_names_the_launcher_until_path_finds_it
           --deselect tests/test_client_install_ux.py::test_installers_support_codex_hook_on_windows
           tests/test_installer_plugin.py
+          tests/test_installer_plugin_native.py
           --deselect tests/test_installer_plugin.py::test_fresh_machine_gets_marketplace_and_plugin
+          --deselect tests/test_installer_plugin_native.py::test_fresh_machine_gets_marketplace_and_plugin
           tests/test_shim.py
           --deselect tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations
           --deselect tests/test_shim.py::test_spawn_daemon_never_allocates_a_console_window

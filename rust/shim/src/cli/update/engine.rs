@@ -1,12 +1,12 @@
 use super::*;
 
-pub(super) const SELECTION: &str = "data/update-engine/docker-compose.engine.json";
-pub(super) const PYTHON_ACCEPTED: &str = "data/update-engine/docker-compose.python-accepted.json";
-pub(super) const ENGINE_LABEL: &str = "org.pseudolife.engine";
-pub(super) const CHECKOUT_LABEL: &str = "org.pseudolife.checkout";
-pub(super) const ACTIVATION_LABEL: &str = "org.pseudolife.activation";
-pub(super) const RELEASE_LABEL: &str = "org.pseudolife.release";
-pub(super) fn release_accepted() -> PathBuf {
+pub(crate) const SELECTION: &str = "data/update-engine/docker-compose.engine.json";
+pub(crate) const PYTHON_ACCEPTED: &str = "data/update-engine/docker-compose.python-accepted.json";
+pub(crate) const ENGINE_LABEL: &str = "org.pseudolife.engine";
+pub(crate) const CHECKOUT_LABEL: &str = "org.pseudolife.checkout";
+pub(crate) const ACTIVATION_LABEL: &str = "org.pseudolife.activation";
+pub(crate) const RELEASE_LABEL: &str = "org.pseudolife.release";
+pub(crate) fn release_accepted() -> PathBuf {
     data_dir().join("update-engine/docker-compose.release-accepted.json")
 }
 /// An explicit engine choice that left no activation (installer
@@ -29,7 +29,7 @@ pub(super) fn recorded_choice() -> std::result::Result<Option<String>, String> {
         _ => Err("not an engine choice".to_owned()),
     }
 }
-pub(super) fn record_choice(engine: &str) -> Result<()> {
+pub(crate) fn record_choice(engine: &str) -> Result<()> {
     let path = choice_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -37,7 +37,7 @@ pub(super) fn record_choice(engine: &str) -> Result<()> {
     seams::write_atomic(&path, format!("{{\"engine\": \"{engine}\"}}\n").as_bytes())?;
     Ok(())
 }
-pub(super) fn selection(path: &Path) -> Result<Option<Value>> {
+pub(crate) fn selection(path: &Path) -> Result<Option<Value>> {
     match fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
@@ -166,7 +166,7 @@ pub(super) fn selected_checkout(u: &mut Update) -> Result<Option<PathBuf>> {
     }
     Ok(labels[CHECKOUT_LABEL].as_str().map(PathBuf::from))
 }
-pub(super) fn write_overlay(path: &Path, service: &Value) -> Result<()> {
+pub(crate) fn write_overlay(path: &Path, service: &Value) -> Result<()> {
     let body =
         serde_json::to_vec_pretty(&json!({"services":{DAEMON_SERVICE:service}})).expect("overlay");
     // Python-created overlays can be readable by other users. Replace their

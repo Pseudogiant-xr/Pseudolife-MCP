@@ -19,6 +19,122 @@ def _read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+def _marker_block(text: str, name: str) -> list[str]:
+    """Lines strictly between ``# >>> <name> >>>`` and ``# <<< <name> <<<``."""
+    lines = text.splitlines()
+    return lines[lines.index(f"# >>> {name} >>>") + 1:
+                 lines.index(f"# <<< {name} <<<")]
+
+
+def _heredoc_payload(block: list[str]) -> list[str]:
+    """The literal payload inside a marker block: a bash quoted heredoc
+    (``cat <<'TAG'`` ... ``TAG``) or a PowerShell literal here-string
+    (``@'`` ... ``'@``). Both terminators must sit at column 0."""
+    for i, line in enumerate(block):
+        stripped = line.strip()
+        if stripped.endswith("@'"):
+            term = "'@"
+        elif "<<'" in stripped:
+            term = stripped.split("<<'", 1)[1].split("'", 1)[0]
+        else:
+            continue
+        for j in range(i + 1, len(block)):
+            if block[j].rstrip() == term:
+                return block[i + 1:j]
+    raise AssertionError("no heredoc/here-string payload in marker block")
+
+
+def test_installers_wire_codex_via_shim_by_default() -> None:
+    """Shim transport applies to BOTH clients (2026-07-19): a Codex session
+    spawns its own shim process and gets tier-1 per-session identity instead
+    of inheriting the Claude hook's machine-scoped tier-3 pointer
+    (configuration.md#session-identity, cross-client paragraph). The HTTP
+    one-liner stays for --transport http and as the fallback when the
+    native client cannot be installed."""
+    ps = _read("ops/install-native.ps1")
+    sh = _read("ops/install-native.sh")
+    for text in (ps, sh):
+        assert any("codex mcp add pseudolife-memory" in line
+                   and "PSEUDOLIFE_MCP_NO_SPAWN=1" in line
+                   for line in text.splitlines())
+        assert "codex mcp add pseudolife-memory --url" in text
+
+
+def test_installers_offer_dreamer_model_choice() -> None:
+    """Claude-shim installs prompt for the dreamer model (2026-08-04): all
+    current Anthropic tiers are offered, Opus is the recommended default
+    (dreamer-choice-verdict.json; Opus 5.5 since 2026-09-29, on
+    ladder-opus55-paired-verdict-threshold.json), and the choice reaches the
+    autostart script instead of being hardcoded there."""
+    ps = _read("ops/install-native.ps1")
+    sh = _read("ops/install-native.sh")
+    for text in (ps, sh):
+        for model in ("claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5",
+                      "claude-sonnet-5", "claude-haiku-5-5", "claude-haiku-4-5",
+                      "claude-fable-5-1", "claude-fable-5"):
+            assert model in text, f"missing model option: {model}"
+    assert '"--model", $Model' in ps     # choice forwarded to autostart
+    assert '--model "$MODEL"' in sh
+
+
+def test_installer_env_block_covers_codex_modes() -> None:
+    """openai-fallback / openai-only write the same env-triple shapes as the
+    claude pair (fallback => auto + sidecar pair; only => primary), and the
+    installer-managed override marker keeps recognizing files written by
+    earlier installs (the '(sonnet-only)' and '(shim-only extractor)' texts)
+    while writing the generalized marker."""
+    ps = _read("ops/install-native.ps1")
+    sh = _read("ops/install-native.sh")
+    for text in (ps, sh):
+        assert "managed override (sidecar disabled)" in text
+        assert "managed override (shim-only extractor)" in text  # legacy accepted
+        assert "managed override (sonnet-only)" in text     # legacy accepted
+    # codex modes reach the autostart stage with the codex script, not the
+    # claude one.
+    assert '@("extractor-shim", "install-autostart", $shimAutostartFamily' in ps
+    assert '(extractor-shim install-autostart "$shim_autostart_family"' in sh
+    assert "shim_autostart_family=codex" in sh and 'elseif ($codexShimMode) { "codex" }' in ps
+
+
+def test_the_shim_autostart_runs_the_stable_launcher() -> None:
+    """The launcher re-executes the newest numbered runtime, so without
+    --native-exe the service would record that runtime and keep running it
+    after an update (or fail once it is pruned)."""
+    assert '"${shim_autostart_args[@]}" --native-exe "$SHIM_PATH"' in _read("ops/install-native.sh")
+    assert '$autostartArgs += @("--native-exe", $script:shimInstallPath)' in _read("ops/install-native.ps1")
+
+
+def test_codex_installers_bootstrap_and_register_rotatable_credentials() -> None:
+    for rel in ("ops/install-native.sh", "ops/install-native.ps1"):
+        text = _read(rel)
+        # The native client's codex-credentials step (what
+        # ops/setup-codex-coordination.py --credentials did).
+        assert "codex-credentials" in text, rel
+        assert "setup-codex-coordination.py" not in text, rel
+        assert "PSEUDOLIFE_MCP_TOKEN_FILE" in text, rel
+
+
+def test_codex_installers_apply_runtime_defaults_only_after_fresh_registration() -> None:
+    sh = _read("ops/install-native.sh")
+    ps = _read("ops/install-native.ps1")
+    for rel, text in (("ops/install-native.sh", sh), ("ops/install-native.ps1", ps)):
+        # The native client's step for setup-codex-coordination.py --runtime-defaults.
+        assert "codex-runtime-defaults" in text, rel
+        assert "startup_timeout_sec = 240" not in text, rel
+        assert "tool_timeout_sec = 180" not in text, rel
+        assert "runtime defaults were not confirmed" in text, rel
+    assert sh.count("configure_codex_runtime_defaults") == 3
+    assert ps.count("Set-CodexRuntimeDefaults") == 3
+    assert "configure_codex_runtime_defaults" not in sh.split(
+        'if existing_codex=$(codex mcp get pseudolife-memory', 1)[1].split(
+            'elif [ "$TRANSPORT" = "shim" ]', 1)[0]
+    assert "Set-CodexRuntimeDefaults" not in ps.split(
+        '$existingCodex = codex mcp get pseudolife-memory', 1)[1].split(
+            '} elseif (($Transport -eq "shim")', 1)[0]
+    assert "MCP_CODEX=failed" in sh
+    assert '$mcpState["codex"] = "failed"' in ps
+
+
 def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
     """A failed shim install must leave SHIM_OK unset so the HTTP fallback
     fires, not kill the run via errexit (issue #176). The native client
@@ -32,6 +148,70 @@ def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
     install = install[:install.index("\n}\n")]
     assert '--version "$NATIVE_VERSION" | tail -1)" || return 1' in install
     assert "|| return 1" in install.split("SHIM_PATH=", 1)[0]
+
+
+def test_installers_register_the_shim_autostart_after_installing_the_shim() -> None:
+    """The MCP shim install (pipx, or pip --user) is what puts the package
+    where an interpreter imports it on a host without a checkout venv, so the
+    autostart registration must run after it, or the picker builds a venv of
+    its own that the installer then duplicates a few steps later."""
+    sh = _read("ops/install-native.sh")
+    ps = _read("ops/install-native.ps1")
+    assert sh.index("ensure_shim() {") < sh.index("CLI shim autostart (Claude / Codex modes)")
+    assert ps.index("function Install-ShimOnce") < ps.index("CLI shim autostart (Claude / Codex modes)")
+    # And it sits OUTSIDE every stage range the installer tests execute
+    # (stages 9 through the '12. health' header, and stage 11's loop up to
+    # that header): a test that reached it would call the real systemctl
+    # or Task Scheduler and could disable a live shim on the machine running
+    # the suite. Before the health wait, so an unhealthy daemon still leaves
+    # the autostart registered.
+    for text, health, wait in (
+            (sh, "\n# ── 12. health", 'step "Waiting for the daemon to report healthy..."'),
+            (ps, "\n# -- 12. health", 'Step "Waiting for the daemon to report healthy..."')):
+        start = text.index("# >>> shim autostart >>>")
+        assert text.count("# >>> shim autostart >>>") == 1
+        assert text.index(health) < start < text.index("# <<< shim autostart <<<") < text.index(wait)
+    # The failure hint names the interpreter refusal beside the systemd one.
+    assert "extractor-shim install-autostart" in sh.split("CLI shim autostart (Claude / Codex modes)", 1)[1]
+
+
+def test_installers_wire_claude_desktop_through_the_shared_register_script() -> None:
+    """Claude Desktop has no `mcp add` CLI and launches MCP servers with a
+    sanitized environment (no PATH extras, no user env vars), so its entry
+    is merged into claude_desktop_config.json by the native client's
+    claude-desktop step (ops/register_claude_desktop.py's logic) — one
+    implementation both installers call — with the shim's ABSOLUTE
+    path and, for a token-gated daemon, a token FILE path: never a token
+    value, never a reliance on the OS environment (2026-09-19 incident:
+    four days of 401s behind "unhandled errors in a TaskGroup")."""
+    sh = _read("ops/install-native.sh")
+    ps = _read("ops/install-native.ps1")
+    for text, rel, call in ((sh, "install-native.sh", "native_helper claude-desktop"),
+                            (ps, "install-native.ps1", "Invoke-NativeHelper claude-desktop")):
+        assert call in text, rel
+        assert "--writer-id" in text and "--token-file" in text, rel
+        assert "Claude Desktop" in text, rel          # menu + ladder
+        assert "fully quit" in text, rel              # the relaunch step
+        assert "sanitized environment" in text, rel   # the why, in the script
+        # The token VALUE reaches the registrar only by env-var NAME, so it
+        # never appears on a command line or in the config file.
+        assert "--token-from-env PSEUDOLIFE_DESKTOP_TOKEN_SOURCE" in text.replace(
+            '", "', " ").replace('"', ""), rel
+        assert "--token " not in text and '"--token"' not in text, rel
+        assert "PSEUDOLIFE_MCP_TOKEN=" not in text.split("claude-desktop", 1)[1].split(
+            "generic", 1)[0].replace("PSEUDOLIFE_MCP_TOKEN=<token>", ""), rel
+    # Provider validation admits it, in both spellings of the list.
+    assert 'claude|claude-desktop|codex|gemini|generic) expanded="$expanded $tok"' in sh
+    assert '{ $_ -in "claude", "claude-desktop", "codex", "gemini", "generic" }' in ps
+    # Preflight accepts it (install.* passes the list straight through).
+    for rel in ("ops/preflight.sh", "ops/preflight.ps1"):
+        assert "claude-desktop" in _read(rel), rel
+    # The synced capability matrix names it.
+    matrix = "\n".join(_heredoc_payload(_marker_block(sh, "capability-matrix")))
+    assert "Claude Desktop" in matrix
+    # A single-client Desktop install gets its own daemon-side writer id.
+    assert "claude-desktop) WRITER_ID=claude-desktop" in sh
+    assert '"claude-desktop" { "claude-desktop" }' in ps
 
 
 def test_install_ps1_puts_the_launcher_on_the_user_path_and_says_so_in_the_summary() -> None:

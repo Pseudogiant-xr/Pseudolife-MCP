@@ -5,6 +5,9 @@ shim helpers in a throwaway home, against a fake release directory
 (``PSEUDOLIFE_NATIVE_ARCHIVE_URL``) whose archive holds a stub
 ``pseudolife-mcp``. ``python``, ``python3``, ``py``, ``pip`` and ``pipx`` on
 PATH are stubs that record any call, and every test asserts none was made.
+With ``PSEUDOLIFE_NATIVE_TEST_BINARY`` set (a built native client from the
+same commit), ``test_the_real_client_installs_and_answers_the_installer_steps``
+runs the real one instead of the stub.
 """
 from __future__ import annotations
 
@@ -23,6 +26,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from tests.installer_protocol import LEVEL, PS_LEVEL, RUST_LEVEL
+
+from tests import installer_sandbox
+from tests import native_client_stub
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,7 +88,11 @@ case "$1" in
                 exit 2
             fi
             printf '%s\n' "${STUB_CAPABILITY-pseudolife-mcp installer-protocol $STUB_LEVEL}"
-        elif [ "$2" = migrate-registrations ]; then
+        fi
+        if [ "$2" = expose ] && [ -n "${STUB_EXPOSE:-}" ]; then printf '%s\n' "$STUB_EXPOSE"; fi
+        # A flat JSON object's string field, as the real step reads it.
+        if [ "$2" = json-field ]; then sed -n "s/.*\"$3\": \"\([^\"]*\)\".*/\1/p"; fi
+        if [ "$2" = migrate-registrations ]; then
             case "$STUB_MOVES" in
                 moved) echo "moved $4 to the native client at $PSEUDOLIFE_SHIM_LAUNCHER (each changed file has a private backup)" ;;
                 current) echo "$4 already runs the native client; nothing changed" ;;
@@ -93,21 +103,42 @@ esac
 '''
 
 
+REAL = native_client_stub.real_binary()
+
+
 def _release(directory: Path, *, sums_override: str | None = None, extra_line: bool = False,
-             omit: bool = False) -> None:
+             omit: bool = False, real: bool = False) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    data = STUB.encode()
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-        info = tarfile.TarInfo("pseudolife-mcp")
-        info.size = len(data)
-        info.mode = 0o755
-        archive.addfile(info, io.BytesIO(data))
-    (directory / ASSET).write_bytes(buffer.getvalue())
+    asset = ASSET
+    if real:
+        # The built client, packed as the release packs it for this host.
+        target = native_client_stub.host_target()
+        if target and target.endswith("windows-msvc"):
+            asset = f"pseudolife-mcp-{VERSION}-{target}.zip"
+            import zipfile
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("pseudolife-mcp.exe", REAL.read_bytes())
+        else:
+            asset = f"pseudolife-mcp-{VERSION}-{target}.tar.gz"
+            with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+                info = tarfile.TarInfo("pseudolife-mcp")
+                data = REAL.read_bytes()
+                info.size = len(data)
+                info.mode = 0o755
+                archive.addfile(info, io.BytesIO(data))
+    else:
+        data = STUB.encode()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            info = tarfile.TarInfo("pseudolife-mcp")
+            info.size = len(data)
+            info.mode = 0o755
+            archive.addfile(info, io.BytesIO(data))
+    (directory / asset).write_bytes(buffer.getvalue())
     digest = hashlib.sha256(buffer.getvalue()).hexdigest()
-    lines = [] if omit else [f"{sums_override or digest}  {ASSET}"]
+    lines = [] if omit else [f"{sums_override or digest}  {asset}"]
     if extra_line:
-        lines.append(f"{digest}  {ASSET}")
+        lines.append(f"{digest}  {asset}")
     lines.append(f"{'0' * 64}  pseudolife-compose-{VERSION}.tar.gz")
     (directory / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -133,26 +164,33 @@ def _run(tmp_path: Path, body: str, *, env: dict[str, str] | None = None, releas
         'step() { echo "==> $*"; }',
         f"repo='{_p(repo)}'",
         _between("# >>> native client >>>", "# <<< native client <<<"),
-        f"native_target() {{ echo {TARGET}; }}",
+        f"native_target() {{ echo {native_client_stub.host_target() if release_kwargs.get('real') else TARGET}; }}",
         _between('SHIM_TRIED=""\nSHIM_OK=""', "\ncli_env_flag() {").removesuffix("\ncli_env_flag() {"),
         body,
     ])
-    launcher = home / "share" / "pseudolife-mcp" / "bin" / "pseudolife-mcp"
+    launcher = home / "share" / "pseudolife-mcp" / "bin" / (
+        "pseudolife-mcp.exe" if release_kwargs.get("real") and os.name == "nt" else "pseudolife-mcp")
     run_env = {
         "PATH": f"{_p(forbidden)}:/usr/bin:/bin",
         "HOME": _p(home),
+        # Set inside the throwaway home: a Windows client finding these unset
+        # would ask the system for the real folders.
+        "USERPROFILE": str(home), "LOCALAPPDATA": str(home / "Local"), "APPDATA": str(home / "Roaming"),
         "TMPDIR": _p((tmp_path / "tmp")),
         "NATIVE_CALLS": _p((tmp_path / "native-calls")),
         "STUB_LEVEL": str(LEVEL),
         "FORBIDDEN_CALLS": _p((tmp_path / "forbidden-calls")),
         "PSEUDOLIFE_NATIVE_ARCHIVE_URL": _p(base),
         "PSEUDOLIFE_SHIM_LAUNCHER": _p(launcher),
+        # The real client takes both layout overrides or neither.
+        "PSEUDOLIFE_SHIM_RUNTIMES": _p(home / "share" / "pseudolife-mcp" / "runtimes"),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
     }
     (tmp_path / "tmp").mkdir(exist_ok=True)
     run_env.update(env or {})
     script_file = tmp_path / "run.sh"
     script_file.write_text(script + "\n", encoding="utf-8", newline="\n")
+    installer_sandbox.require(run_env, tmp_path)
     result = subprocess.run([BASH, _p(script_file)], capture_output=True, text=True, env=run_env, timeout=120)
     forbidden_log = tmp_path / "forbidden-calls"
     assert not forbidden_log.exists(), f"the installer ran Python tooling: {forbidden_log.read_text()}"
@@ -176,7 +214,7 @@ def test_fresh_install_verifies_the_archive_and_installs_it_natively(tmp_path):
     downloads = tmp_path / "home/.pseudolife-mcp/downloads" / VERSION
     assert install == (f"runtime install --archive {_p(downloads / ASSET)} "
                        f"--sha256sums {_p(downloads / 'SHA256SUMS')} --version {VERSION}")
-    assert "installer expose" in calls
+    assert "installer expose --json" in calls
 
 
 def test_rerun_on_a_native_host_says_nothing_changed(tmp_path):
@@ -333,30 +371,46 @@ def test_an_existing_state_directory_keeps_its_mode(tmp_path):
     assert ((state / "downloads").stat().st_mode & 0o777) == 0o700
 
 
-def _native_block(name: str) -> str:
-    text = (ROOT / "ops/install-native.sh").read_text(encoding="utf-8")
-    start = text.index(f"{name}() {{")
-    return text[start:text.index("\n}\n", start) + 3]
+@pytest.mark.skipif(REAL is None, reason="set PSEUDOLIFE_NATIVE_TEST_BINARY to a built native client")
+def test_the_real_client_installs_and_answers_the_installer_steps(tmp_path):
+    # The installer's own steps run the staged client: the client's loopback
+    # rule (10 = this machine) and a JSON field read, then the install.
+    body = (
+        "native_stage\n"
+        "rc=0; native_helper is-loopback 'http://[::ffff:127.0.0.1]:8765' || rc=$?; echo \"LOOPBACK=$rc\"\n"
+        "rc=0; native_helper is-loopback http://127.0.0.01:8765 || rc=$?; echo \"LEADING_ZERO=$rc\"\n"
+        "echo \"FIELD=$(printf '%s' '{\"action\": \"start\"}' | native_helper json-field action)\"\n"
+        "ensure_shim; echo \"OK=$SHIM_OK\"\n"
+    )
+    result = _run(tmp_path, body, real=True)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "LOOPBACK=10" in result.stdout, result.stdout
+    # As Python's ipaddress reads it: a leading zero is not this machine.
+    assert "LEADING_ZERO=11" in result.stdout, result.stdout
+    assert "FIELD=start" in result.stdout, result.stdout
+    assert "OK=1" in result.stdout, result.stdout
+    assert f"Native client {VERSION} installed at" in result.stdout
 
 
-def test_the_native_install_needs_no_pip_to_mint_the_token(tmp_path):
-    # The native client replaces the pip / pipx shim install, so a Python
-    # without pip (or a PEP 668 externally managed one) still runs the token
-    # helper: only the interpreter is needed.
-    python = tmp_path / "bin" / "python3"
-    python.parent.mkdir()
-    python.write_text("#!/bin/sh\n"
-                      "case \"$2\" in *'import pip'*|*'EXTERNALLY-MANAGED'*) exit 1 ;; esac\n"
-                      "exit 0\n", encoding="utf-8", newline="\n")
-    python.chmod(0o755)
-    script = "\n".join([
-        _native_block("installer_python"),
-        _native_block("shim_tooling_ready"),
-        'if shim_tooling_ready; then echo READY; else echo NOT-READY; fi',
-    ])
-    result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, timeout=60,
-                            env={"PATH": f"{_p(python.parent)}:/usr/bin:/bin", "HOME": _p(tmp_path)})
-    assert result.stdout.strip() == "READY", result.stdout + result.stderr
+@pytest.mark.parametrize("report, shown", [
+    ('{"state": "left", "detail": "user bin entry is already occupied; run the stable launcher by its full path"}',
+     "pseudolife-mcp on PATH: user bin entry is already occupied; run the stable launcher by its full path"),
+    ('{"state": "failed", "detail": "could not create the user bin link; run the stable launcher by its full path"}',
+     "pseudolife-mcp on PATH: could not create the user bin link"),
+    ('{"state": "linked", "detail": "linked user bin to the stable launcher", "hint": "/x is not on PATH: add it"}',
+     "pseudolife-mcp on PATH: /x is not on PATH: add it"),
+    ('{"state": "linked", "detail": "linked user bin to the stable launcher"}', None),
+    ('{"state": "current", "detail": "user bin already reaches the stable launcher"}', None),
+])
+def test_the_launcher_exposure_is_said_unless_it_simply_worked(tmp_path, report, shown):
+    # The installer steps of the stub client read JSON as the real one does.
+    result = _run(tmp_path, "native_stage; ensure_shim", env={"STUB_EXPOSE": report})
+    assert result.returncode == 0, result.stderr
+    exposure = [line for line in result.stdout.splitlines() if "pseudolife-mcp on PATH" in line]
+    if shown is None:
+        assert exposure == [], result.stdout
+    else:
+        assert len(exposure) == 1 and shown in exposure[0], result.stdout
 
 
 def test_the_installers_and_the_binary_name_one_protocol_level():
