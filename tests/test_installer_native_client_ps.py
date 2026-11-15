@@ -515,15 +515,17 @@ def test_the_staging_folder_is_gone_when_the_installer_returns_to_an_open_sessio
     temp = tmp_path / "temp"
     temp.mkdir()
     installer = repo / "ops" / "install.ps1"
-    # A pairing code: the token file is made only after the daemon answers,
-    # so the run reaches the health check (port 9 answers nothing). A throw
-    # is caught, so the check after it still runs in the same session.
-    run = (f"try {{ & '{installer}' -ClientOnly -DaemonUrl http://127.0.0.1:9 -PairingCode ABCD-EFGH-JKMN "
-           "-Client claude -ClaudePlugin skip -Instructions skip -NoArt -ClientUpdateSchedule no } "
-           "catch { Write-Host \"THREW: $_\" }")
+    # A pairing code: the token file is made only after the daemon answers.
+    # The first run stops on a thrown error (no claude CLI on PATH); the
+    # second reaches the health check and exits 1 (port 9 answers nothing).
+    # A throw is caught, so the check after it runs in the same session.
+    def run(client: str) -> str:
+        return (f"try {{ & '{installer}' -ClientOnly -DaemonUrl http://127.0.0.1:9 -PairingCode ABCD-EFGH-JKMN "
+                f"-Client {client} -ClaudePlugin skip -Instructions skip -NoArt -ClientUpdateSchedule no }} "
+                "catch { Write-Host \"THREW: $_\" }")
     command = "; ".join([
-        run, "Write-Host \"FIRST=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
-        run, "Write-Host \"SECOND=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
+        run("claude"), "Write-Host \"FIRST=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
+        run("generic"), "Write-Host \"SECOND=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
         "Write-Host \"SUBSCRIBERS=$(@(Get-EventSubscriber).Count)\"",
     ])
     env = {key: value for key, value in os.environ.items() if not key.startswith("PSEUDOLIFE_")}
@@ -545,7 +547,8 @@ def test_the_staging_folder_is_gone_when_the_installer_returns_to_an_open_sessio
                                 capture_output=True, text=True, env=env, timeout=300, stdin=subprocess.DEVNULL)
     output = result.stdout + result.stderr
     assert (home / ".pseudolife-mcp" / "downloads" / VERSION / ASSET).is_file(), output
-    # Either run stops after staging with a non-zero exit of its own.
-    assert re.search(r"FIRST=[1-9][0-9]* LEFT=0", output), output
+    # Each run stops after staging (an exit or a thrown error, not a native
+    # refusal), and the session it returns to holds no staged copy.
+    assert "THREW" in output and re.search(r"FIRST=[0-9]+ LEFT=0", output), output
     assert re.search(r"SECOND=[1-9][0-9]* LEFT=0", output), output
     assert "SUBSCRIBERS=0" in output, output
