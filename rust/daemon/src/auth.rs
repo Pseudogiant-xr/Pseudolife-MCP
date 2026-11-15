@@ -19,10 +19,14 @@ pub struct EnvTokens {
 
 impl EnvTokens {
     pub fn from_env() -> Self {
-        let single = std::env::var("PSEUDOLIFE_MCP_TOKEN")
-            .ok()
-            .filter(|t| !t.is_empty());
-        let map = std::env::var("PSEUDOLIFE_MCP_TOKENS")
+        Self::from_lookup(&|name| std::env::var(name).ok())
+    }
+
+    /// `from_env` over any lookup, so a test builds the tokens a daemon
+    /// started with a given environment holds.
+    pub fn from_lookup(env: &dyn Fn(&str) -> Option<String>) -> Self {
+        let single = env("PSEUDOLIFE_MCP_TOKEN").filter(|t| !t.is_empty());
+        let map = env("PSEUDOLIFE_MCP_TOKENS")
             .map(|raw| parse_token_map(&raw))
             .unwrap_or_default();
         EnvTokens { map, single }
