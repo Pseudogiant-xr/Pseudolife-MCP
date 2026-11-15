@@ -73,7 +73,7 @@ def test_install_does_nothing_off_windows(monkeypatch):
     assert fake.Popen.__init__ is original
 
 
-def test_both_conftests_install_it():
+def test_the_suite_conftest_installs_it():
+    # rust/conftest.py installs it too: rust/ci/test_windowless_conftest.py
+    # checks that, beside the file it reads.
     assert "windowless_children.install()" in (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
-    rust = (ROOT / "rust" / "conftest.py").read_text(encoding="utf-8")
-    assert '"windowless_children.py"' in rust and "module.install()" in rust
