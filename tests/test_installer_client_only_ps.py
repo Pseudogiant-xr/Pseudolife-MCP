@@ -969,7 +969,7 @@ $ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
 function Get-EnvValue($name) {{ return $null }}
 function global:python {{
     $global:LASTEXITCODE = 1
-    if (($env:FAKE_PY_OK -eq '1') -and ("$args" -match 'sys\.executable')) {{
+    if (($env:FAKE_PY_OK -eq '1') -and ("$args" -match 'sys\\.executable')) {{
         $global:LASTEXITCODE = 0
         return 'fake-codex-python'
     }}
