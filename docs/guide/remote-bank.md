@@ -127,6 +127,14 @@ the checks around it:
   failed probe says to check from another machine with
   `curl <url>/health` and leaves the forward in place.
 
+**With the native client**, `expose status` and every check above work,
+but `expose tailscale` and `expose off` do not make the change yet: once
+the checks pass, the change step (with or without `--yes`, and the question
+at a terminal) stops with `pseudolife-stdio: mode 'expose' is deferred in
+this candidate` and exit 1, having changed nothing. Run the `tailscale
+serve` command from [Tailscale Serve, TCP mode](#1-tailscale-serve-tcp-mode)
+yourself instead.
+
 `pseudolife-mcp expose status` prints the client URL, or why there is none;
 `pseudolife-mcp expose off` removes the forward, and only a forward to
 `127.0.0.1:8765`. A port open to Funnel is never reported as exposed and
@@ -134,7 +142,13 @@ never removed. All three take `--port` for a daemon on another port and
 `--json` for a machine-readable report. Exit codes: 0 done or already in
 that state; 2 usage, declined, or no terminal without `--yes`; 4 refused
 before any change; 5 the serve did not take and was undone, or its result
-could not be verified.
+could not be verified. Output from `tailscale` it cannot read is answered
+with `could not read what tailscale ... printed`: exit 4 when nothing was
+changed, exit 5 after a change (`expose off` included), with how to check
+`tailscale serve status` and undo it. Only an ASCII dotted quad counts as
+the tailnet address, and `--port` takes ASCII digits only. `tailscale` is
+found only in absolute `PATH` directories (and its usual install
+location), never in the current directory.
 
 `/health` reports the bank fingerprint as `bank`: the first 16 hex
 characters of the SHA-256 of the bank's coordination identity. It is not a
@@ -636,19 +650,24 @@ first, and if one write fails the files already written are restored.
   non-stdio registrations, Claude Desktop's old `pseudolife-memory` entry
   name (the installer's Desktop step migrates it), Codex settings that come
   from another Codex config layer, and a `PSEUDOLIFE_MCP_DAEMON_URL` in your
-  shell or the Windows Machine-scope environment. Edit those by hand.
-- **Also re-pointed:**
-  - **The Windows User-scope environment:** a `PSEUDOLIFE_MCP_DAEMON_URL`
-    there that names another daemon (programs already running keep the old
-    value until they restart).
+  shell environment. Edit those by hand.
+- **Also re-pointed by the native client:**
+  - **The Windows User-scope environment:** on Windows, a User-scope
+    `PSEUDOLIFE_MCP_DAEMON_URL` that names another daemon is a `change` row
+    under the same confirmation (programs already running keep the old value
+    until they restart). The native client never creates one and never
+    writes Machine scope, so a Machine-scope value that no User-scope value
+    overrides is a `manual` row with the command to run. The Python client
+    writes neither scope.
   - **The unattended-update schedules:** with every client selected, a
     schedule that `update --schedule` installed here, the daemon's or this
-    client machine's. It is re-created for the new URL, keeping its daily
+    client machine's, is re-created for the new URL, keeping its daily
     time.
   - **What stays manual:** a schedule `connect` cannot re-create exactly as
     written, or the daemon's schedule after the daemon moved to another
     machine, is a `manual` row naming the command to run. `connect` never
-    creates or removes a schedule.
+    creates or removes a schedule. The Python client re-creates none and
+    names the `--schedule` command to re-run.
 - **Afterwards:** restart the sessions the report lists (and fully quit and
   relaunch Claude Desktop when its entry changed). Each session gets a new
   board address on the new URL.
@@ -664,6 +683,10 @@ already current, 1 a write failed and was rolled back, 2 usage or not
 confirmed, 3 no registration it can write (none found, or only `manual`
 ones), 4 verification refused, 5 applied but the post-apply check failed.
 
+**With the native client**, `connect` asks once at a terminal, as above,
+and reads `--read-token` and `--read-code` there without echo; a run with
+no terminal and no `--yes` refuses, having changed nothing.
+
 ## Moving a bank
 
 `pseudolife-mcp move` moves a Docker-tier bank to another host with an
@@ -675,10 +698,18 @@ yet: `pseudolife-mcp move --to <ssh-target> --target-url <url>
 --no-keep-tokens --dry-run` checks both hosts without changing anything on
 either and prints what the move would do, and without `--dry-run` it refuses
 and says so (move with pseudolife-mcp 0.23.x for now). The target needs the
-native client installed (its installer), an installed Docker bank (one
+native client installed (an update from 0.23.x, or `update
+--clients-only`, with `PSEUDOLIFE_SHIM_ENGINE=native` set moves a host to
+it, see [The native client](configuration.md#the-native-client); or
+`pseudolife-mcp runtime install --archive`), an installed
+Docker bank (one
 compose stack, not a source checkout) that is healthy, empty and at least the
 source's schema and PostgreSQL version, and free space for the move's files
-under `~/.pseudolife-mcp/moves` (or `--target-work-dir`). ssh runs with
+under `~/.pseudolife-mcp/moves` (or `--target-work-dir`) plus the restore's
+8 GiB margin. A target whose native client is older or speaks a different
+move protocol is refused with the fix, and for a fresh target, which has no
+bank identity yet, the plan says `--target-url` is matched only by release
+and schema. ssh runs with
 `BatchMode=yes` and no option that touches host-key checking: a host key that
 is unknown or has changed fails with ssh's own refusal and the fix (connect
 once with `ssh <target>` and check the fingerprint, or `ssh-keygen -R` after
