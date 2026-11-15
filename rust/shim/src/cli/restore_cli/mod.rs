@@ -22,6 +22,7 @@ use super::lease::lock as os_lock;
 mod args;
 mod bank;
 mod conn;
+mod console;
 mod docker;
 pub(super) mod docker_backup;
 mod dump;

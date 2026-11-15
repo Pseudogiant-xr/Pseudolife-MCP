@@ -25,7 +25,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::protocol::{Answer, Op, PROTOCOL, Request, State};
-use super::record::{Baseline, Flags, Phase, RECORD_VERSION, Record, Undo};
+use super::record::{Baseline, Ending, Flags, Phase, RECORD_VERSION, Record, Undo};
 
 pub(super) const EXIT_OK: u8 = 0;
 pub(super) const EXIT_ROLLED_BACK: u8 = 1;
@@ -443,7 +443,15 @@ impl<H: Hosts> Run<'_, H> {
         self.mark(|f| f.gate_written = true)?;
         self.target(Op::Gate, None)?;
         self.step("restore the target from the copied backup")?;
-        self.mark(|f| f.target_restored = true)?;
+        // Written before the send: a record that says the restore was sent
+        // and not whether it dropped cannot tell what the target holds.
+        self.record.restore_sent = true;
+        if let Err(stop) = self.mark(|f| f.target_restored = true) {
+            // Not written, so not sent: the record stays as it was.
+            self.record.restore_sent = false;
+            self.record.flags.target_restored = plan.resume;
+            return Err(stop);
+        }
         let request = self.request(Op::Restore);
         match self.ask(&request, None)? {
             Ok(answer) if answer.ok => {
@@ -453,14 +461,15 @@ impl<H: Hosts> Run<'_, H> {
             Ok(answer) => {
                 if answer.restore_dropped {
                     self.record.restore_dropped = true;
-                    self.save()?;
+                } else {
+                    // Refused before its destructive step: nothing changed.
+                    // A resumed target still holds its earlier restored bank.
+                    self.record.restore_sent = false;
+                    if !plan.resume {
+                        self.record.flags.target_restored = false;
+                    }
                 }
-                // Refused before its destructive step: nothing changed. A
-                // resumed target still holds its earlier restored bank.
-                if !answer.restore_dropped && !plan.resume {
-                    self.record.flags.target_restored = false;
-                    self.save()?;
-                }
+                self.save()?;
                 return Err(Stop::new(format!(
                     "the target's restore failed: {}",
                     answer.error
@@ -482,6 +491,11 @@ impl<H: Hosts> Run<'_, H> {
                 state.bank, plan.source_bank
             )));
         }
+        // The bank as this restore left it, kept before anything is judged
+        // of it: a rollback compares the gated bank with this reading.
+        self.record.restored_counts = state.user_counts.clone();
+        self.record.restored_mutations = state.mutations.clone();
+        self.save()?;
         let differs = differing(&self.record.dump_counts, &state.counts);
         if !differs.is_empty() {
             return Err(Stop::new(format!(
@@ -489,16 +503,13 @@ impl<H: Hosts> Run<'_, H> {
                 differs.join(", ")
             )));
         }
-        self.record.restored_counts = state.user_counts.clone();
         // What would show a write in place: without it, writes the target
         // takes while it serves could not be ruled out, so it never starts.
-        let Some(mutations) = state.mutations.clone() else {
+        if self.record.restored_mutations.is_none() {
             return Err(Stop::new(
                 "the restored target's write counters (pg_stat_user_tables) cannot be read, so writes it took while it served could not be found; the target was not started",
             ));
-        };
-        self.record.restored_mutations = Some(mutations);
-        self.save()?;
+        }
         self.step("lift the target's gate and start it once")?;
         self.mark(|f| f.gate_lifting = true)?;
         self.target(Op::StartGated, None)?;
@@ -824,6 +835,7 @@ pub(super) fn execute<H: Hosts>(hosts: &mut H, plan: &Plan, id: &str) -> Outcome
                 hosts: run.hosts,
                 record: run.record,
                 state: last,
+                same_run: true,
             };
             back.run(&stop.reason)
         }
@@ -839,6 +851,7 @@ pub(super) fn roll_back<H: Hosts>(hosts: &mut H, record: Record) -> Outcome {
         hosts,
         record,
         state: None,
+        same_run: false,
     };
     back.run("rolling back by request (move --rollback)")
 }
@@ -870,9 +883,20 @@ pub(super) fn answered_by_record(record: &Record) -> Option<Outcome> {
     match record.phase {
         Phase::Released => Some(Outcome {
             code: EXIT_OK,
+            message: match ending(record) {
+                Ending::NothingThere => format!(
+                    "move {id} was rolled back, and its release found {to} holding nothing of it, so nothing was changed there; nothing to do"
+                ),
+                _ => format!(
+                    "move {id} was rolled back, and {to} was given back its own bank; nothing to do. {}",
+                    kept_line(record)
+                ),
+            },
+        }),
+        Phase::GivenUp => Some(Outcome {
+            code: EXIT_OK,
             message: format!(
-                "move {id} was rolled back, and {to} was given back its own bank; nothing to do. {}",
-                kept_line(record)
+                "move {id} was rolled back, and {to} was given up on this host while it could not be reached: it was not given back its own bank, and whatever the move left there stays. Nothing to roll back; if {to} comes back, give it back its own bank with pseudolife-mcp move --release-target {id}"
             ),
         }),
         Phase::Releasing => Some(Outcome {
@@ -883,24 +907,43 @@ pub(super) fn answered_by_record(record: &Record) -> Option<Outcome> {
         }),
         Phase::RolledBack => Some(Outcome {
             code: EXIT_OK,
-            message: match (&record.parked_writes, record.flags.target_restored) {
-                (Some(tables), _) => format!(
+            message: match (
+                &record.parked_writes,
+                &record.unresolved,
+                record.flags.target_restored,
+            ) {
+                (Some(tables), _, _) => format!(
                     "move {id} was already rolled back; nothing to do. The target {to} keeps writes it took while it served ({tables}) in its gated bank. To free that target, keeping those writes in a backup there: pseudolife-mcp move --release-target {id}"
                 ),
-                (None, true) => format!(
+                (None, Some(cause), _) => format!(
+                    "move {id} was already rolled back; nothing to do. The target {to} keeps the bank behind its gate, but {cause}, so it is not resumed over. To free that target, keeping that bank in a backup there: pseudolife-mcp move --release-target {id}"
+                ),
+                (None, None, true) => format!(
                     "move {id} was already rolled back; nothing to do. The target {to} keeps the restored bank behind its gate: finish the move with pseudolife-mcp move --resume, or give {to} back its own bank with pseudolife-mcp move --release-target {id}"
                 ),
-                (None, false) => format!("move {id} was already rolled back; nothing to do"),
+                (None, None, false) => format!("move {id} was already rolled back; nothing to do"),
             },
         }),
         _ => None,
     }
 }
 
-/// Where the moved bank's copy is, after a release.
+/// How a released move ended (a record from before `ending` was kept says
+/// it only through its give-back).
+fn ending(record: &Record) -> Ending {
+    record
+        .ending
+        .unwrap_or(if record.given_back || !record.kept.is_empty() {
+            Ending::GivenBack
+        } else {
+            Ending::NothingThere
+        })
+}
+
+/// Where the moved bank's copy is, after a give-back.
 fn kept_line(record: &Record) -> String {
     if record.kept.is_empty() {
-        return if record.phase == Phase::Released {
+        return if record.phase == Phase::Released && ending(record) == Ending::GivenBack {
             format!(
                 "The move's restore never replaced {}'s bank, so there was nothing of it to keep there",
                 record.target
@@ -917,12 +960,21 @@ fn kept_line(record: &Record) -> String {
     )
 }
 
+/// The unresolved causes, as the record and every answer give them.
+const UNKNOWN_RESTORE: &str =
+    "it cannot be told whether this move's restore ran there (its answer never arrived)";
+const NOT_READ_BACK: &str =
+    "the target could not be read after this move's restore, so its bank cannot be shown unchanged";
+
 /// The rollback: R1 to R16 in order, every undo attempted, I2 checked on a
 /// fresh reading before the fence lifts.
 struct Back<'a, H: Hosts> {
     hosts: &'a mut H,
     record: Record,
     state: Option<State>,
+    /// This rollback runs in the invocation that sent the move's restore,
+    /// so its reading follows that restore within the same run.
+    same_run: bool,
 }
 
 impl<H: Hosts> Back<'_, H> {
@@ -1018,6 +1070,35 @@ impl<H: Hosts> Back<'_, H> {
         }
     }
 
+    /// What the gated bank must still match: the first reading after this
+    /// move's restore, taken by the invocation that ran it, or the reading
+    /// the last rollback kept when this move sent no restore. `Ok(None)`:
+    /// this is that invocation and `state` is its first reading. `Err`: no
+    /// trustworthy reading exists, and why.
+    fn reference(&self, state: &State) -> Result<Option<Baseline>, String> {
+        let record = &self.record;
+        if record.restore_sent {
+            if !record.restore_dropped {
+                return Err(UNKNOWN_RESTORE.to_owned());
+            }
+            if let Some(mutations) = &record.restored_mutations {
+                return Ok(Some(Baseline {
+                    user_counts: record.restored_counts.clone(),
+                    mutations: mutations.clone(),
+                }));
+            }
+            if self.same_run && state.mutations.is_some() {
+                return Ok(None);
+            }
+            return Err(NOT_READ_BACK.to_owned());
+        }
+        record
+            .gated_baseline
+            .clone()
+            .map(Some)
+            .ok_or_else(|| NOT_READ_BACK.to_owned())
+    }
+
     /// A fresh reading of the target, counting the dump's tables when the
     /// target may have served.
     fn read(&mut self) -> Result<State, String> {
@@ -1103,6 +1184,8 @@ impl<H: Hosts> Back<'_, H> {
         let mut proved = !needs_proof;
         // Writes a resume found in the gated bank before it would replace it.
         let mut parked: Option<String> = self.record.parked_writes.clone();
+        // Why the gated bank cannot be shown unchanged, once found so.
+        let mut unresolved: Option<String> = self.record.unresolved.clone();
         let served = flags.gate_lifting || flags.target_started;
         // What a bank this move never served shows of someone else's writes.
         let mut found: Vec<String> = Vec::new();
@@ -1112,8 +1195,21 @@ impl<H: Hosts> Back<'_, H> {
                 self.attempt("stop the target daemon", result);
             }
             for _ in 0..3 {
-                match self.read() {
-                    Ok(state) if state.running == Some(true) => {
+                let state = match self.read() {
+                    Ok(state) => state,
+                    Err(why) => {
+                        self.attempt("read the target's state", Err(why));
+                        continue;
+                    }
+                };
+                // Whatever else it shows, a reading that finds the moved bank
+                // there means the full proof, the record's word aside.
+                if !restored && state.bank.as_deref() == Some(self.record.source_bank.as_str()) {
+                    restored = true;
+                    self.record.flags.target_restored = true;
+                }
+                match state.running {
+                    Some(true) => {
                         if restored && !served {
                             found.push(
                                 "the gated bank was found running, so it may have served writes"
@@ -1123,7 +1219,7 @@ impl<H: Hosts> Back<'_, H> {
                         let result = self.op(Op::Stop).map(|_| ());
                         self.attempt("stop the target daemon again", result);
                     }
-                    Ok(state) if state.running == Some(false) => {
+                    Some(false) => {
                         if state.gated != Some(true) {
                             if restored && !served {
                                 found.push(
@@ -1136,37 +1232,20 @@ impl<H: Hosts> Back<'_, H> {
                             continue;
                         }
                         proved = true;
-                        if !restored
-                            && state.bank.as_deref() == Some(self.record.source_bank.as_str())
-                        {
-                            restored = true;
-                            self.record.flags.target_restored = true;
-                        }
                         if restored && !served {
-                            // This run's own restore, if it got that far, or
-                            // the reading the last rollback kept.
-                            let reference = if flags.gate_written {
-                                self.record
-                                    .restored_mutations
-                                    .clone()
-                                    .map(|mutations| Baseline {
-                                        user_counts: self.record.restored_counts.clone(),
-                                        mutations,
-                                    })
-                                    // This run's restore never dropped (it was
-                                    // never sent, was refused first, or its answer
-                                    // was lost): the bank may still be the one the
-                                    // last rollback read.
-                                    .or_else(|| {
-                                        (!self.record.restore_dropped)
-                                            .then(|| self.record.gated_baseline.clone())
-                                            .flatten()
-                                    })
-                            } else {
-                                self.record.gated_baseline.clone()
-                            };
-                            if let Some(reference) = reference {
-                                found.extend(since_baseline(Some(&reference), &state));
+                            match self.reference(&state) {
+                                Ok(Some(reference)) => {
+                                    found.extend(since_baseline(Some(&reference), &state));
+                                }
+                                // This run's own first reading after its
+                                // restore: it is the reference from now on.
+                                Ok(None) => {
+                                    self.record.restored_counts = state.user_counts.clone();
+                                    self.record.restored_mutations = state.mutations.clone();
+                                }
+                                // No trustworthy reading to compare with: the
+                                // bank is kept, and no writes are claimed.
+                                Err(cause) => unresolved = Some(cause),
                             }
                             if !found.is_empty() {
                                 let mut all: Vec<String> = parked.iter().cloned().collect();
@@ -1192,8 +1271,9 @@ impl<H: Hosts> Back<'_, H> {
                             }
                         }
                         // The gated bank as this rollback leaves it: what a
-                        // resume must still find before it replaces it.
-                        if restored && parked.is_none() {
+                        // resume must still find before it replaces it. Never
+                        // a reading that could not be compared with one.
+                        if restored && parked.is_none() && unresolved.is_none() {
                             self.record.gated_baseline =
                                 state.mutations.clone().map(|mutations| Baseline {
                                     user_counts: state.user_counts.clone(),
@@ -1202,10 +1282,7 @@ impl<H: Hosts> Back<'_, H> {
                         }
                         break;
                     }
-                    Ok(_) => {}
-                    Err(why) => {
-                        self.attempt("read the target's state", Err(why));
-                    }
+                    None => {}
                 }
             }
         }
@@ -1324,7 +1401,10 @@ impl<H: Hosts> Back<'_, H> {
         if let Some(tables) = &parked {
             self.record.parked_writes = Some(tables.clone());
         }
-        if complete && parked.is_none() {
+        if let Some(cause) = &unresolved {
+            self.record.unresolved = Some(cause.clone());
+        }
+        if complete && parked.is_none() && unresolved.is_none() {
             self.record.phase = Phase::RolledBack;
             self.save();
             let note = if restored {
@@ -1358,14 +1438,29 @@ impl<H: Hosts> Back<'_, H> {
             );
             return self.incomplete(reason, &why, true);
         }
+        if complete && let Some(cause) = &unresolved {
+            // Finished, but the bank the target keeps cannot be shown to be
+            // this host's as it stands: no resume replaces it unseen.
+            self.record.phase = Phase::RolledBack;
+            self.save();
+            let why = format!(
+                "{cause}; that bank stays stopped behind /data/move.json on {}, it is not resumed over, and nothing was deleted",
+                self.record.target
+            );
+            return self.incomplete(reason, &why, true);
+        }
         self.record.phase = Phase::RollbackIncomplete;
         self.save();
-        let why = match &parked {
-            Some(tables) => format!(
+        let why = match (&parked, &unresolved) {
+            (Some(tables), _) => format!(
                 "some undo steps failed, and the target took writes while it served, which are not in the source ({tables}); they are in the stopped, gated target bank on {}, and nothing was deleted",
                 self.record.target
             ),
-            None => {
+            (None, Some(cause)) => format!(
+                "some undo steps failed, and {cause}; that bank stays stopped behind /data/move.json on {}, and nothing was deleted",
+                self.record.target
+            ),
+            (None, None) => {
                 let failed: Vec<String> = self
                     .record
                     .rollback
@@ -1392,8 +1487,8 @@ impl<H: Hosts> Back<'_, H> {
         let id = self.record.move_id.clone();
         let to = self.record.target.clone();
         let bank = self.record.source_bank.clone();
-        self.record.phase = Phase::Releasing;
-        self.save();
+        // The phase the record had: kept while nothing changed on the target.
+        let before = self.record.phase;
         let unfinished = |back: &mut Self, step: &str, why: String| {
             back.record.rollback.push(Undo {
                 step: step.to_owned(),
@@ -1413,41 +1508,42 @@ impl<H: Hosts> Back<'_, H> {
             Err(why) => {
                 let mut outcome = unfinished(self, "read the target's state", why);
                 outcome.message.push_str(&format!(
-                    "\n  if {to} is gone for good: pseudolife-mcp move --release-target {id} --target-gone (marks this move released on this host only)"
+                    "\n  if {to} is gone for good: pseudolife-mcp move --release-target {id} --target-gone (it gives {to} up on this host only, once {to} cannot be reached)"
                 ));
                 return outcome;
             }
         };
+        // Only a reading Docker answered tells what the target holds: a blank
+        // one is no proof that nothing of the move is there.
+        let positive = state.running.is_some()
+            && state.gated.is_some()
+            && (state.bank.is_some() || state.empty.is_some());
+        if !positive {
+            return unfinished(
+                self,
+                "read the target's state",
+                format!(
+                    "{to} answered, but its Docker did not say whether the daemon runs, whether /data/move.json is there, or which bank it holds; once docker answers there (ssh {to} docker ps), rerun"
+                ),
+            );
+        }
         let ours = state.claim.as_deref() == Some(id.as_str());
         let holds_bank = state.bank.as_deref() == Some(bank.as_str());
+        let other_bank = state.bank.as_deref().is_some_and(|other| other != bank);
         // A gate with no claim on it is this move's, left behind.
         let unclaimed_gate = state.claim.is_none() && state.gated == Some(true);
+        let given_back = self.record.given_back || !self.record.kept.is_empty();
+        // No claim, and another bank (behind this move's gate or not): nothing
+        // of this host's bank is there, and nothing there is this move's to
+        // change.
+        if (state.claim.is_none() && other_bank && !given_back)
+            || (!ours && !holds_bank && !unclaimed_gate && !given_back)
+        {
+            return self.nothing_there(&state);
+        }
         if !ours && !holds_bank && !unclaimed_gate {
-            if self.record.kept.is_empty() && !self.record.given_back {
-                // Nothing of this move's is there: the target was reset or
-                // given back by hand. The move holds nothing, so its record
-                // stops holding this host.
-                let found = format!(
-                    "{}, {}",
-                    state.claim.as_deref().map_or_else(
-                        || "no claim".to_owned(),
-                        |other| format!("move {other}'s claim")
-                    ),
-                    state.bank.as_deref().map_or_else(
-                        || "no bank identity".to_owned(),
-                        |other| format!("bank {other}")
-                    )
-                );
-                self.record.phase = Phase::Released;
-                self.save();
-                return Outcome {
-                    code: EXIT_OK,
-                    message: format!(
-                        "released: {to} no longer holds anything of move {id} (it reads {found}): it was reset or given back by hand. This host's record of the move is marked released, so it no longer holds this host. Your bank is this host's ({bank}), which this host's daemon serves. Nothing was changed on {to}"
-                    ),
-                };
-            }
             self.record.phase = Phase::Released;
+            self.record.ending = Some(Ending::GivenBack);
             self.save();
             return Outcome {
                 code: EXIT_OK,
@@ -1457,9 +1553,15 @@ impl<H: Hosts> Back<'_, H> {
                 ),
             };
         }
+        self.record.phase = Phase::Releasing;
+        self.save();
+        // What this run changed on the target before its give-back, for an
+        // answer that refuses after them.
+        let mut took: Vec<&str> = Vec::new();
         // The claim is gone (removed by hand) while the target still holds
         // this move's bank: taken again, which only an unclaimed target allows.
-        if state.claim.is_none() && (holds_bank || unclaimed_gate) {
+        let reclaim = state.claim.is_none() && (holds_bank || unclaimed_gate);
+        if reclaim {
             let claim = Op::Claim {
                 source_bank: bank.clone(),
                 resume: false,
@@ -1467,17 +1569,24 @@ impl<H: Hosts> Back<'_, H> {
             if let Err(why) = self.op(claim) {
                 return unfinished(self, "claim the target for this release again", why);
             }
+            took.push("claimed it again for this move (its claim had been removed)");
         }
         if state.bank.as_deref() == Some(bank.as_str()) {
-            if state.running != Some(false)
-                && let Err(why) = self.op(Op::Stop)
-            {
-                return unfinished(self, "stop the target daemon", why);
+            if state.running != Some(false) {
+                if let Err(why) = self.op(Op::Stop) {
+                    return unfinished(self, "stop the target daemon", why);
+                }
+                took.push("stopped its daemon, which held the moved copy");
             }
-            if state.gated != Some(true)
-                && let Err(why) = self.op(Op::Gate)
-            {
-                return unfinished(self, "keep the target from starting (/data/move.json)", why);
+            if state.gated != Some(true) {
+                if let Err(why) = self.op(Op::Gate) {
+                    return unfinished(
+                        self,
+                        "keep the target from starting (/data/move.json)",
+                        why,
+                    );
+                }
+                took.push("put /data/move.json in front of the moved copy");
             }
         }
         self.hosts
@@ -1506,18 +1615,9 @@ impl<H: Hosts> Back<'_, H> {
         };
         let kept = match result {
             Ok(answer) if answer.ok => answer.kept,
-            // Refused before its restore began: nothing changed there, and
-            // the move stays as its rollback left it.
+            // Refused before its restore began: the bank there is as it was.
             Ok(answer) if !answer.restore_dropped => {
-                self.record.phase = Phase::RolledBack;
-                self.save();
-                return Outcome {
-                    code: EXIT_REFUSED,
-                    message: format!(
-                        "{to} cannot be given back its own bank: {}. Your bank is this host's ({bank}), which this host's daemon serves; {to} still holds move {id}'s copy behind /data/move.json",
-                        answer.error
-                    ),
-                };
+                return self.refused_give_back(&answer.error, &took, reclaim, before);
             }
             Ok(answer) => return unfinished(self, "restore the target's own bank", answer.error),
             Err(lost) => {
@@ -1548,6 +1648,7 @@ impl<H: Hosts> Back<'_, H> {
             return unfinished(self, "release the target's claim", why);
         }
         self.record.phase = Phase::Released;
+        self.record.ending = Some(Ending::GivenBack);
         self.save();
         Outcome {
             code: EXIT_OK,
@@ -1559,6 +1660,86 @@ impl<H: Hosts> Back<'_, H> {
                     ""
                 },
                 kept_line(&self.record)
+            ),
+        }
+    }
+
+    /// The release read the target, positively, and it holds nothing of
+    /// this host's bank: the record closes, and nothing there changes.
+    fn nothing_there(&mut self, state: &State) -> Outcome {
+        let id = self.record.move_id.clone();
+        let to = self.record.target.clone();
+        let bank = self.record.source_bank.clone();
+        let found = format!(
+            "{}, {}",
+            state.claim.as_deref().map_or_else(
+                || "no claim".to_owned(),
+                |other| format!("move {other}'s claim")
+            ),
+            state.bank.as_deref().map_or_else(
+                || "no bank identity".to_owned(),
+                |other| format!("bank {other}")
+            )
+        );
+        let gate = if state.gated == Some(true) {
+            format!(
+                " This move's gate, /data/move.json, is still there, so {to}'s daemon does not start; removing it is for whoever runs {to}, once they are sure that bank is the one it should serve: ssh {to} docker run --rm --entrypoint rm --volumes-from pseudolife-mcp-daemon {} -f /data/move.json",
+                self.record.target_image
+            )
+        } else {
+            String::new()
+        };
+        self.record.phase = Phase::Released;
+        self.record.ending = Some(Ending::NothingThere);
+        self.save();
+        Outcome {
+            code: EXIT_OK,
+            message: format!(
+                "released: {to} no longer holds anything of move {id}'s copy of this host's bank: it was read and reads {found}. This host's record of the move is closed, so it no longer holds this host, and nothing was changed on {to}. Your bank is this host's ({bank}), which this host's daemon serves.{gate}"
+            ),
+        }
+    }
+
+    /// The give-back refused before its restore began: what this run took
+    /// on the target is said, and the claim it took is given up again.
+    fn refused_give_back(
+        &mut self,
+        error: &str,
+        took: &[&str],
+        reclaimed: bool,
+        before: Phase,
+    ) -> Outcome {
+        let id = self.record.move_id.clone();
+        let to = self.record.target.clone();
+        let bank = self.record.source_bank.clone();
+        let mut done = String::new();
+        if took.is_empty() {
+            done.push_str(" Nothing was changed there.");
+        } else {
+            done.push_str(&format!(" This release {}", took.join(", ")));
+            if reclaimed {
+                match self.op(Op::Release) {
+                    Ok(_) => done.push_str("; it has released that claim again."),
+                    Err(why) => done.push_str(&format!(
+                        "; that claim ({}) could not be released again ({why}), and stays until a rerun of this release finishes, or until it is removed by hand: ssh {to} rm -f {}.",
+                        claim_path(),
+                        claim_path()
+                    )),
+                }
+            } else {
+                done.push('.');
+            }
+        }
+        self.record.phase = if before == Phase::GivenUp {
+            Phase::GivenUp
+        } else {
+            Phase::RolledBack
+        };
+        self.save();
+        Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "{to} cannot be given back its own bank: {error}.{done} Your bank is this host's ({bank}), which this host's daemon serves. Fix what {to} names, then rerun pseudolife-mcp move --release-target {id}"
             ),
         }
     }
@@ -1640,7 +1821,12 @@ impl<H: Hosts> Back<'_, H> {
             },
             self.record.target
         ));
-        let next = if finished {
+        let next = if finished && self.record.parked_writes.is_none() {
+            format!(
+                "pseudolife-mcp move --release-target {} gives {} back its own bank and keeps the gated bank, whatever it holds, in a backup there that it names",
+                self.record.move_id, self.record.target
+            )
+        } else if finished {
             format!(
                 "decide about those writes: pseudolife-mcp move --release-target {} gives {} back its own bank and keeps the gated bank, writes and all, in a backup there that it names",
                 self.record.move_id, self.record.target
@@ -1741,6 +1927,14 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
         };
     }
     match record.phase {
+        Phase::Released if ending(&record) == Ending::NothingThere => {
+            return Outcome {
+                code: EXIT_OK,
+                message: format!(
+                    "move {id} is already released: its release found {to} holding nothing of it, and changed nothing there; nothing to do"
+                ),
+            };
+        }
         Phase::Released => {
             return Outcome {
                 code: EXIT_OK,
@@ -1750,7 +1944,9 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
                 ),
             };
         }
-        Phase::RolledBack | Phase::Releasing => {}
+        // Given up while it could not be reached: a target that came back
+        // is given back its own bank now.
+        Phase::RolledBack | Phase::Releasing | Phase::GivenUp => {}
         _ => {
             return Outcome {
                 code: EXIT_REFUSED,
@@ -1787,49 +1983,158 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
         hosts,
         record,
         state: None,
+        same_run: false,
     };
     back.release()
 }
 
-/// `move --release-target <id> --target-gone`: the target is gone for
-/// good, so nothing there can be given back or asked. The record is marked
-/// released on this host, so it stops holding this host; nothing else
-/// changes. `None` with a refusal when the record is not one a release can
-/// end.
-pub(super) fn target_gone(record: &Record) -> Result<Record, Outcome> {
+/// Why `--target-gone` cannot end this record, from the record alone, or
+/// `None` when it can be tried.
+pub(super) fn give_up_refusal(record: &Record) -> Option<Outcome> {
     let id = &record.move_id;
     let to = &record.target;
     if record.committed {
-        return Err(Outcome {
+        return Some(Outcome {
             code: EXIT_REFUSED,
             message: format!(
                 "move {id} passed its commit point: the bank lives on {to}, which is not given up. Nothing was changed"
             ),
         });
     }
-    if record.phase == Phase::Released {
-        return Err(Outcome {
-            code: EXIT_OK,
-            message: format!("move {id} is already released; nothing to do"),
-        });
+    match record.phase {
+        Phase::Released => {
+            return Some(Outcome {
+                code: EXIT_OK,
+                message: format!("move {id} is already released; nothing to do"),
+            });
+        }
+        Phase::GivenUp => {
+            return Some(Outcome {
+                code: EXIT_OK,
+                message: format!(
+                    "{to} is already given up on this host by move {id}; nothing to do. If it comes back, give it back its own bank with pseudolife-mcp move --release-target {id}"
+                ),
+            });
+        }
+        Phase::RolledBack | Phase::Releasing => {}
+        _ => {
+            return Some(Outcome {
+                code: EXIT_REFUSED,
+                message: format!(
+                    "move {id} is not rolled back (its record says {:?}); roll it back first with pseudolife-mcp move --rollback {id}. Nothing was changed",
+                    record.phase
+                ),
+            });
+        }
     }
-    if !matches!(record.phase, Phase::RolledBack | Phase::Releasing) {
-        return Err(Outcome {
+    if !record.flags.target_restored {
+        return Some(Outcome {
             code: EXIT_REFUSED,
             message: format!(
-                "move {id} is not rolled back (its record says {:?}); roll it back first with pseudolife-mcp move --rollback {id}. Nothing was changed",
-                record.phase
+                "move {id} never restored into {to}, so {to} keeps its own bank and this host is not held by it; there is nothing to give up. Nothing was changed"
             ),
         });
     }
-    let mut record = record.clone();
-    record.phase = Phase::Released;
-    record.rollback.push(Undo {
-        step: format!("give up {to}: gone for good (--target-gone)"),
+    None
+}
+
+/// `move --release-target <id> --target-gone`: gives up a target that
+/// does not answer, on this host only. It ends only a record whose source
+/// already serves its own bank, never starts a fenced source, and changes
+/// nothing on the target: a target that answers is given back instead.
+/// The given-up record and what to say, or a refusal.
+pub(super) fn give_up<H: Hosts>(
+    hosts: &mut H,
+    record: &Record,
+) -> Result<(Record, Outcome), Outcome> {
+    if let Some(refusal) = give_up_refusal(record) {
+        return Err(refusal);
+    }
+    let id = record.move_id.clone();
+    let to = record.target.clone();
+    let serving = hosts.source_running() == Some(true)
+        && hosts.source_healthy(RELEASE_SOURCE_WAIT)
+        && hosts.source_bank().as_deref() == Some(record.source_bank.as_str());
+    if !serving {
+        return Err(Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "this host's daemon is not serving its bank, so {to} is not given up: your bank is this host's ({}), and the other copy is not given up while nothing serves it. Start this host's daemon (docker start {}) and check that its /health names that bank, then rerun. Nothing was changed",
+                record.source_bank, record.source.daemon
+            ),
+        });
+    }
+    let request = Request {
+        protocol: PROTOCOL,
+        move_id: id.clone(),
+        work_dir: record.work_dir.clone(),
+        rollback: true,
+        op: Op::State { tables: Vec::new() },
+    };
+    // Any answer, a refusal included, means the target is there.
+    let why = match hosts.target(&request, None) {
+        Ok(_) => {
+            return Err(Outcome {
+                code: EXIT_REFUSED,
+                message: format!(
+                    "{to} answers as a move target, so it is not gone: give it back its own bank with pseudolife-mcp move --release-target {id}. Nothing was changed"
+                ),
+            });
+        }
+        Err(why) => why,
+    };
+    let mut released = record.clone();
+    released.phase = Phase::GivenUp;
+    released.ending = Some(Ending::GivenUp);
+    released.rollback.push(Undo {
+        step: format!("give up {to}: it does not answer (--target-gone)"),
         ok: true,
-        detail: String::new(),
+        detail: why.clone(),
     });
-    Ok(record)
+    let folder = if record.remote_folder.is_empty() {
+        format!(
+            "{}/{}",
+            if record.work_dir.is_empty() {
+                "~/.pseudolife-mcp/moves"
+            } else {
+                &record.work_dir
+            },
+            id
+        )
+    } else {
+        record.remote_folder.clone()
+    };
+    let left = if record.given_back || !record.kept.is_empty() {
+        format!(
+            "its own bank, already given back; the move's claim ({}) and /data/move.json, if the release had not removed them yet; and the moved bank in {}",
+            claim_path(),
+            if record.kept.is_empty() {
+                format!("the safety backups in {folder}/safety")
+            } else {
+                record.kept.join(" and ")
+            }
+        )
+    } else {
+        format!(
+            "the move's claim ({}), its gate /data/move.json, the stopped copy of this host's bank behind that gate, and {to}'s own bank in the safety backup in {folder}/safety (named by {folder}/own-bank.json)",
+            claim_path()
+        )
+    };
+    let writes = match (&record.parked_writes, &record.unresolved) {
+        (Some(tables), _) => {
+            format!("; that copy took writes there that are not in this host's bank ({tables})")
+        }
+        (None, Some(cause)) => format!("; of that copy, {cause}"),
+        (None, None) => String::new(),
+    };
+    let outcome = Outcome {
+        code: EXIT_OK,
+        message: format!(
+            "given up: {to} does not answer as a move target ({why}), so move {id} is closed on this host only, and nothing was asked of or changed on {to}. Your bank is this host's ({}), which this host's daemon serves; writes made on {to} are not in it. If {to} comes back, it still holds {left}{writes}. Then give it back its own bank with pseudolife-mcp move --release-target {id}",
+            record.source_bank
+        ),
+    };
+    Ok((released, outcome))
 }
 
 /// The commands that undo what the record says was done, in rollback order,

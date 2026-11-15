@@ -36,9 +36,27 @@ pub(super) enum Phase {
     RollbackIncomplete,
     /// `move --release-target` began giving the target back its own bank.
     Releasing,
-    /// The target has its own bank back and is free; the moved bank is kept
-    /// in the files `kept` names.
+    /// The release ended: the target holds nothing of the move any more
+    /// (`ending` says whether it was given back or found so).
     Released,
+    /// `--release-target --target-gone`: this host gave the target up while
+    /// it could not be reached. Whatever the move left there stays; a later
+    /// `--release-target` gives it back if the target returns.
+    GivenUp,
+}
+
+/// How a release ended, which every later answer repeats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Ending {
+    /// The target was given back its own bank (`kept` names where the moved
+    /// bank went, when a restore replaced it).
+    GivenBack,
+    /// The target was read and held none of the move's claim, bank or gate:
+    /// nothing was changed there.
+    NothingThere,
+    /// The target could not be reached and was given up on this host only.
+    GivenUp,
 }
 
 /// The gated target bank as a finished rollback read it, stopped behind its
@@ -162,6 +180,20 @@ pub(super) struct Record {
     /// not the one the last rollback read.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub restore_dropped: bool,
+    /// This run sent its restore, written before the send and cleared when
+    /// the restore answered that it refused before its drop: set with
+    /// `restore_dropped` unset, it cannot be told whether the restore ran.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub restore_sent: bool,
+    /// Why the gated bank on the target cannot be shown unchanged since this
+    /// move last read it (no reading after its restore, or no knowing
+    /// whether that restore ran): it is kept, never resumed over, and only
+    /// `--release-target` frees it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved: Option<String>,
+    /// How `--release-target` ended.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ending: Option<Ending>,
     /// `--release-target`'s give-back finished on the target (with or
     /// without a restore: a target this move never restored over keeps no
     /// copy).

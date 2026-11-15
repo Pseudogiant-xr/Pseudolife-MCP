@@ -138,6 +138,11 @@ pub(super) fn held_refusal(records: &[Record], to: &str, resume: bool) -> Option
             "it took writes there that are not in this host's bank, so it cannot be resumed: give {target} back its own bank, keeping those writes in a backup there, with {release}",
             target = held.target
         )
+    } else if let Some(cause) = &held.unresolved {
+        format!(
+            "{cause}, so it cannot be resumed: give {target} back its own bank, keeping that bank in a backup there, with {release}",
+            target = held.target
+        )
     } else {
         format!(
             "first finish it with pseudolife-mcp move --to {target} --target-url {url} --no-keep-tokens --resume, or give {target} back its own bank with {release}",
@@ -162,6 +167,7 @@ pub(super) fn resumable<'a>(records: &'a [Record], to: &str) -> Option<&'a Recor
             && r.phase == Phase::RolledBack
             && r.flags.target_restored
             && r.parked_writes.is_none()
+            && r.unresolved.is_none()
             && r.target == to
     })
 }
@@ -467,7 +473,10 @@ pub(super) fn release(request: &Rollback) -> u8 {
     // What the record alone answers (committed, released, not rolled back,
     // never restored there) needs no host.
     let runs = !record.committed
-        && matches!(record.phase, Phase::RolledBack | Phase::Releasing)
+        && matches!(
+            record.phase,
+            Phase::RolledBack | Phase::Releasing | Phase::GivenUp
+        )
         && record.flags.target_restored;
     if !runs {
         let mut none = NoHosts;
@@ -531,53 +540,83 @@ pub(super) fn release(request: &Rollback) -> u8 {
     }
 }
 
-/// `move --release-target <id> --target-gone`: marks the move released on
-/// this host, asking nothing of its target, which is gone for good.
+/// `move --release-target <id> --target-gone`: gives the target up on this
+/// host, only while it does not answer and this host serves its own bank.
 fn give_up_target(request: &Rollback, home: &std::path::Path, record: &Record) -> u8 {
-    if let Err(outcome) = engine::target_gone(record) {
+    if let Some(outcome) = engine::give_up_refusal(record) {
         return report_release(request.json, &record.move_id, &outcome, &record.kept);
     }
-    if let Err(why) = confirm(
-        request.yes,
-        &format!(
-            "Give up {} for good? Move {}'s copy there, if the host ever returns, is not given back by this command.",
-            record.target, record.move_id
-        ),
-    ) {
+    // Unattended without --yes: refused before anything is asked of a host.
+    if !request.yes && !std::io::stdin().is_terminal() {
+        return refuse(
+            request.json,
+            2,
+            &format!("this run is not interactive: re-run with --yes. {NOTHING}"),
+        );
+    }
+    let cannot = |why: String| {
+        let outcome = engine::Outcome {
+            code: engine::EXIT_REFUSED,
+            message: format!("{why}. {NOTHING}"),
+        };
+        report_release(request.json, &record.move_id, &outcome, &record.kept)
+    };
+    let docker = match super::docker_program() {
+        Ok(program) => super::super::docker::Real {
+            program,
+            interruptible: false,
+        },
+        Err(why) => return cannot(why),
+    };
+    let ssh = match super::remote::Ssh::find() {
+        Ok(ssh) => ssh,
+        Err(why) => return cannot(why),
+    };
+    let mut live = super::source::Live {
+        docker,
+        ssh,
+        source: record.source.clone(),
+        to: record.target.clone(),
+        store: Files::under_home(home),
+    };
+    // The source serves and the target does not answer, or nothing is asked.
+    let (given_up, outcome) = match engine::give_up(&mut live, record) {
+        Ok(found) => found,
+        Err(outcome) => {
+            return report_release(request.json, &record.move_id, &outcome, &record.kept);
+        }
+    };
+    let mut question = format!(
+        "{} does not answer. Give it up on this host only? Move {}'s claim, its gate and its stopped copy of this host's bank stay there if it comes back, and its own bank is not given back.",
+        record.target, record.move_id
+    );
+    if record.parked_writes.is_some() {
+        question.push_str(" That copy took writes that are not in this host's bank.");
+    }
+    if let Err(why) = confirm(request.yes, &question) {
         return refuse(request.json, 2, &why);
     }
     let id = record.move_id.clone();
-    let to = record.target.clone();
     let mut store = Files::under_home(home);
-    let outcome = locked(|| match store.load(&id) {
-        Ok(Some(now)) if now == *record => match engine::target_gone(&now) {
-            Ok(released) => match store.save(&released) {
-                Ok(()) => engine::Outcome {
-                    code: engine::EXIT_OK,
-                    message: format!(
-                        "released: move {id} is marked released on this host, and {to} is given up for good; nothing was asked of {to}. If {to} ever comes back holding the move's copy, it stays stopped behind /data/move.json, with its claim, until its own bank is restored by hand"
-                    ),
-                },
-                Err(why) => engine::Outcome {
-                    code: engine::EXIT_REFUSED,
-                    message: format!("{why}. {NOTHING}"),
-                },
-            },
-            Err(outcome) => outcome,
+    let refused = |message: String| engine::Outcome {
+        code: engine::EXIT_REFUSED,
+        message,
+    };
+    let saved = locked(|| match store.load(&id) {
+        Ok(Some(now)) if now == *record => match store.save(&given_up) {
+            Ok(()) => outcome.clone(),
+            Err(why) => refused(format!("{why}. {NOTHING}")),
         },
-        Ok(_) => engine::Outcome {
-            code: engine::EXIT_REFUSED,
-            message: format!(
-                "the record of move {id} changed while you confirmed; run the command again to act on what it says now. {NOTHING}"
-            ),
-        },
-        Err(why) => engine::Outcome {
-            code: engine::EXIT_REFUSED,
-            message: format!("{why}. {NOTHING}"),
-        },
+        Ok(_) => refused(format!(
+            "the record of move {id} changed while you confirmed; run the command again to act on what it says now. {NOTHING}"
+        )),
+        Err(why) => refused(format!("{why}. {NOTHING}")),
     });
-    match outcome {
-        Ok(outcome) => report_release(request.json, &id, &outcome, &[]),
+    match saved {
+        Ok(answer) if answer.code == engine::EXIT_OK => {
+            report_release(request.json, &id, &answer, &given_up.kept)
+        }
+        Ok(answer) => report_release(request.json, &id, &answer, &record.kept),
         Err(why) => refuse(request.json, 4, &why),
     }
 }

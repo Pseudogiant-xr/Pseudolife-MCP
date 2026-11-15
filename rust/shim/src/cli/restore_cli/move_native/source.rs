@@ -660,15 +660,14 @@ mod tests {
     }
 }
 
-/// A console child on Windows opens no window of its own (its output is
-/// captured): a parent with no console would otherwise give it one, which
-/// takes the user's foreground.
+/// A console child on Windows opens no window of its own when this process
+/// has no console (a parent with none would give it one, which takes the
+/// user's foreground); at a terminal it shares the terminal's console.
 pub(super) fn no_window(command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        command.creation_flags(super::super::console::child_window_flag());
     }
     #[cfg(not(windows))]
     let _ = command;

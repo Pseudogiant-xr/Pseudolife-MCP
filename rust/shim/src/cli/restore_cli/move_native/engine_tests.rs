@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use super::engine::{self, Artifact, Dump, Hosts, Marker, Plan};
 use super::protocol::{Answer, Op, Request, State};
-use super::record::{Phase, Record};
+use super::record::{Ending, Phase, Record};
 
 const ID: &str = "20261114-080000-abcdef01";
 const BANK: &str = "75d0c7a836eb6af5";
@@ -186,6 +186,9 @@ struct Model {
     /// Rows the source took since the last rollback: a new restore brings
     /// them, so its copy no longer matches the reading that rollback kept.
     source_grew: i64,
+    /// The target's Docker does not answer: its state reads blank but for
+    /// the claim, which is a file.
+    docker_silent: bool,
     record: Option<Record>,
     /// A late effect: the call it lands at, and the request.
     pending: Option<(usize, Request)>,
@@ -216,6 +219,7 @@ impl Model {
             hand_write_at: None,
             hand_write_quiet: false,
             source_grew: 0,
+            docker_silent: false,
             record: None,
             pending: None,
             violations: Vec::new(),
@@ -321,6 +325,14 @@ impl Model {
 
     fn state(&self) -> State {
         let h = &self.hosts;
+        if self.docker_silent {
+            return State {
+                folder: format!("/home/dev/.pseudolife-mcp/moves/{ID}"),
+                claim: h.claim.clone(),
+                update_timer: "enabled".into(),
+                ..State::default()
+            };
+        }
         let counts = match h.bank {
             Bank::Clone { extra, warmups, .. } => BTreeMap::from([
                 ("public.entries".to_owned(), 3 + extra),
@@ -830,7 +842,23 @@ fn judge(model: &Model, outcome: &engine::Outcome, label: &str) {
             assert!(at("running now:") < at("served:"), "{label}");
             assert!(at("served:") < at("data:"), "{label}");
             assert!(at("data:") < at("next:"), "{label}");
-            assert!(outcome.message.contains("move --rollback"), "{label}");
+            let kept = model.record.as_ref().is_some_and(|r| {
+                r.phase == Phase::RolledBack
+                    && (r.unresolved.is_some() || r.parked_writes.is_some())
+            });
+            if kept {
+                // Finished: the source serves, and the gated bank waits for
+                // a release.
+                assert!(h.source_running && !h.fenced, "{label}: {h:?}");
+                assert!(!h.target_may_start_clone(), "{label}: {h:?}");
+                assert!(
+                    outcome.message.contains("move --release-target"),
+                    "{label}: {}",
+                    outcome.message
+                );
+            } else {
+                assert!(outcome.message.contains("move --rollback"), "{label}");
+            }
         }
         code => panic!("{label}: unexpected exit {code}: {outcome:?}"),
     }
@@ -914,8 +942,12 @@ fn after_a_kill_at_any_call_move_rollback_from_the_record_restores_service() {
             );
             continue;
         }
+        let unresolved = after
+            .record
+            .as_ref()
+            .is_some_and(|r| r.phase == Phase::RolledBack && r.unresolved.is_some());
         assert!(
-            matches!(outcome.code, 0 | 1),
+            matches!(outcome.code, 0 | 1) || (outcome.code == 6 && unresolved),
             "{label}: {outcome:?}\n{:#?}",
             after.log
         );
@@ -1912,7 +1944,9 @@ fn a_target_whose_restore_never_began_is_freed_without_a_restore() {
     let mut first = Model::new();
     first.always = vec![("target restore", Fault::LostBefore)];
     let outcome = run(&mut first);
-    assert_eq!(outcome.code, 1, "{outcome:?}");
+    // Whether the restore ran cannot be told: kept unresolved, released.
+    assert_eq!(outcome.code, 6, "{outcome:?}");
+    assert!(first.record.as_ref().unwrap().unresolved.is_some());
     assert_eq!(first.hosts.bank, Bank::Empty);
     assert!(first.hosts.gated && first.hosts.claim.is_some());
     let record = first.record.clone().unwrap();
@@ -2244,7 +2278,7 @@ fn every_way_a_resume_can_fail_leaves_a_command_that_works() {
 }
 
 #[test]
-fn a_quiet_write_while_a_resumes_restore_was_lost_is_found_against_the_kept_reading() {
+fn a_quiet_write_while_a_resumes_restore_was_lost_is_never_resumed_over() {
     let (first, plan) = resumable_move();
     let baseline = plan.resume_baseline.clone();
     let mut model = later(&first);
@@ -2255,7 +2289,16 @@ fn a_quiet_write_while_a_resumes_restore_was_lost_is_found_against_the_kept_read
     let outcome = engine::execute(&mut model, &plan, ID);
     assert_eq!(outcome.code, 6, "{outcome:?}\n{:#?}", model.log);
     let record = model.record.clone().unwrap();
-    assert!(record.parked_writes.is_some(), "{record:?}");
+    // Whether the restore ran cannot be told, so the difference is no proof
+    // of writes: the bank is kept unresolved, never resumed over.
+    assert!(record.parked_writes.is_none(), "{record:?}");
+    assert!(
+        record
+            .unresolved
+            .as_deref()
+            .is_some_and(|c| c.contains("whether this move's restore ran")),
+        "{record:?}"
+    );
     assert_eq!(record.gated_baseline, baseline);
     assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_none());
 }
@@ -2266,8 +2309,10 @@ fn a_release_that_needed_no_restore_finishes_on_a_rerun_after_its_claim_was_rele
     // own bank, gated and claimed.
     let mut first = Model::new();
     first.always = vec![("target restore", Fault::LostBefore)];
-    assert_eq!(run(&mut first).code, 1);
+    // Whether the restore ran cannot be told: kept unresolved, released.
+    assert_eq!(run(&mut first).code, 6);
     let record = first.record.clone().unwrap();
+    assert!(record.unresolved.is_some(), "{record:?}");
     let mut probe = later(&first);
     engine::release_target(&mut probe, record.clone());
     let released = probe
@@ -2290,7 +2335,20 @@ fn a_release_that_needed_no_restore_finishes_on_a_rerun_after_its_claim_was_rele
     let mut rerun = later(&model);
     let outcome = engine::release_target(&mut rerun, saved);
     assert_eq!(outcome.code, 0, "{outcome:?}");
-    assert_eq!(rerun.record.unwrap().phase, Phase::Released);
+    // It was given back, not found reset by hand.
+    assert!(
+        outcome.message.contains("has its own bank back"),
+        "{}",
+        outcome.message
+    );
+    assert!(
+        !outcome.message.contains("no longer holds anything"),
+        "{}",
+        outcome.message
+    );
+    let released = rerun.record.unwrap();
+    assert_eq!(released.phase, Phase::Released);
+    assert_eq!(released.ending, Some(Ending::GivenBack));
 }
 
 #[test]
@@ -2450,40 +2508,6 @@ fn a_release_that_finds_nothing_of_the_move_on_the_target_stops_holding_this_hos
 }
 
 #[test]
-fn a_target_gone_for_good_is_named_and_given_up_on_this_host_only() {
-    let parked = parked_move();
-    let record = parked.record.clone().unwrap();
-    let mut model = later(&parked);
-    model.always = vec![("target state", Fault::LostBefore)];
-    let outcome = engine::release_target(&mut model, record);
-    assert_eq!(outcome.code, 6, "{outcome:?}");
-    let id = &model.record.as_ref().unwrap().move_id;
-    assert!(
-        outcome
-            .message
-            .contains(&format!("move --release-target {id} --target-gone")),
-        "{}",
-        outcome.message
-    );
-    let releasing = model.record.clone().unwrap();
-    assert_eq!(releasing.phase, Phase::Releasing);
-    let released = engine::target_gone(&releasing).unwrap();
-    assert_eq!(released.phase, Phase::Released);
-    assert!(!super::command::unfinished(&released));
-    assert_eq!(
-        super::command::held_refusal(std::slice::from_ref(&released), "dev@other", false),
-        None
-    );
-    // Never for a move that committed or is still to be rolled back.
-    let mut committed = releasing.clone();
-    committed.committed = true;
-    assert_eq!(engine::target_gone(&committed).unwrap_err().code, 4);
-    let mut moving = releasing.clone();
-    moving.phase = Phase::Moving;
-    assert_eq!(engine::target_gone(&moving).unwrap_err().code, 4);
-}
-
-#[test]
 fn the_held_refusal_names_only_commands_that_work_for_that_move() {
     let (first, _) = resumable_move();
     let record = first.record.clone().unwrap();
@@ -2553,4 +2577,470 @@ fn a_resume_whose_own_restore_ran_is_not_compared_with_the_bank_it_replaced() {
     let record = model.record.clone().unwrap();
     assert!(record.parked_writes.is_none(), "{record:?}");
     assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_some());
+}
+
+#[test]
+fn a_rollback_reading_in_the_run_that_restored_keeps_the_move_resumable() {
+    // Interrupted at "check the restored bank" (live proof run 6): the same
+    // run's rollback reads the bank stopped and gated, right after its own
+    // restore, and that reading is the one a resume compares with.
+    let mut model = Model::new();
+    let restore = call_of("target restore");
+    model.fault = Some((restore + 1, Fault::Interrupt));
+    let outcome = run(&mut model);
+    assert_eq!(outcome.code, 1, "{outcome:?}\n{:#?}", model.log);
+    let record = model.record.clone().unwrap();
+    assert_eq!(record.phase, Phase::RolledBack);
+    assert!(record.unresolved.is_none(), "{record:?}");
+    assert!(record.restored_mutations.is_some(), "{record:?}");
+    assert!(record.gated_baseline.is_some(), "{record:?}");
+    assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_some());
+}
+
+#[test]
+fn a_bank_first_read_by_a_later_run_after_the_restore_is_never_a_baseline() {
+    let restore = call_of("target restore");
+    for (label, setup) in [
+        (
+            "the check and every rollback reading lost",
+            (|m: &mut Model, restore: usize| {
+                m.always = vec![
+                    ("target state", Fault::LostBefore),
+                    ("target stop", Fault::LostBefore),
+                    ("target gate", Fault::LostBefore),
+                ];
+                m.always_from = restore + 1;
+            }) as fn(&mut Model, usize),
+        ),
+        ("killed at the check reading", |m: &mut Model, restore| {
+            m.fault = Some((restore + 2, Fault::Killed));
+        }),
+    ] {
+        let mut first = Model::new();
+        setup(&mut first, restore);
+        run(&mut first);
+        let record = first.record.clone().unwrap();
+        assert!(
+            record.restore_sent && record.restore_dropped,
+            "{label}: {record:?}"
+        );
+        assert!(record.restored_mutations.is_none(), "{label}: {record:?}");
+        assert_ne!(record.phase, Phase::RolledBack, "{label}: {record:?}");
+        // A later --rollback reads the bank fine, but long after the restore.
+        let mut after = later(&first);
+        let outcome = engine::roll_back(&mut after, record);
+        assert_eq!(outcome.code, 6, "{label}: {outcome:?}\n{:#?}", after.log);
+        let record = after.record.clone().unwrap();
+        assert_eq!(record.phase, Phase::RolledBack, "{label}");
+        assert!(
+            record
+                .unresolved
+                .as_deref()
+                .is_some_and(|c| c.contains("could not be read after this move's restore")),
+            "{label}: {record:?}"
+        );
+        assert!(
+            record.parked_writes.is_none(),
+            "{label}: no writes are claimed"
+        );
+        assert!(record.gated_baseline.is_none(), "{label}: {record:?}");
+        assert!(
+            !outcome.message.contains("took writes"),
+            "{label}: {}",
+            outcome.message
+        );
+        assert!(
+            super::command::resumable(std::slice::from_ref(&record), &record.target).is_none(),
+            "{label}"
+        );
+        let why = super::command::held_refusal(std::slice::from_ref(&record), "dev@other", false)
+            .unwrap();
+        assert!(!why.contains("--resume"), "{label}: {why}");
+        assert!(why.contains("could not be read after"), "{label}: {why}");
+        assert!(
+            why.contains(&format!("move --release-target {ID}")),
+            "{label}: {why}"
+        );
+        let h = &after.hosts;
+        assert!(h.source_running && !h.fenced, "{label}: {h:?}");
+        assert!(
+            after.violations.is_empty(),
+            "{label}: {:?}",
+            after.violations
+        );
+        let mut release = later(&after);
+        assert_eq!(
+            engine::release_target(&mut release, record).code,
+            0,
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn a_restore_that_may_or_may_not_have_run_is_kept_unresolved() {
+    // Killed between the restore's answer and the save that records its
+    // drop: the record says sent, and not whether it dropped.
+    let restore = call_of("target restore");
+    let mut first = Model::new();
+    first.fault = Some((restore + 1, Fault::Killed));
+    run(&mut first);
+    let record = first.record.clone().unwrap();
+    assert!(record.restore_sent && !record.restore_dropped, "{record:?}");
+    let mut after = later(&first);
+    let outcome = engine::roll_back(&mut after, record);
+    assert_eq!(outcome.code, 6, "{outcome:?}\n{:#?}", after.log);
+    let record = after.record.clone().unwrap();
+    assert!(
+        record
+            .unresolved
+            .as_deref()
+            .is_some_and(|c| c.contains("whether this move's restore ran")),
+        "{record:?}"
+    );
+    assert!(record.gated_baseline.is_none() && record.parked_writes.is_none());
+    // A resume whose restore's answer was lost, over a source that took rows
+    // since: the new copy differs from the kept reading, which is no write.
+    let (first, plan) = resumable_move();
+    let mut model = later(&first);
+    model.source_grew = 2;
+    model.always = vec![("target restore", Fault::LostAfter)];
+    let outcome = engine::execute(&mut model, &plan, ID);
+    assert_eq!(outcome.code, 6, "{outcome:?}\n{:#?}", model.log);
+    let record = model.record.clone().unwrap();
+    assert!(record.parked_writes.is_none(), "{record:?}");
+    assert!(record.unresolved.is_some(), "{record:?}");
+    assert!(
+        !outcome.message.contains("took writes"),
+        "{}",
+        outcome.message
+    );
+    assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_none());
+    assert!(model.violations.is_empty(), "{:?}", model.violations);
+}
+
+#[test]
+fn a_reading_that_finds_the_moved_bank_running_keeps_the_source_fenced_whatever_the_record_said() {
+    // A wrong record: it says the restore never ran, but the target runs the
+    // moved bank ungated; the link drops right after that reading.
+    let (first, _) = resumable_move();
+    let mut record = first.record.clone().unwrap();
+    record.flags.target_restored = false;
+    record.flags.gate_lifting = false;
+    record.flags.target_started = false;
+    record.restore_sent = false;
+    record.restore_dropped = false;
+    record.phase = Phase::Moving;
+    for (label, gated) in [("running", false), ("ungated and stopped", false)] {
+        let mut model = later(&first);
+        model.hosts.source_running = false;
+        model.hosts.fenced = true;
+        model.hosts.gated = gated;
+        model.hosts.target_running = label == "running";
+        model.always = vec![
+            ("target stop", Fault::LostBefore),
+            ("target state", Fault::LostBefore),
+            ("target gate", Fault::LostBefore),
+        ];
+        // The abort and its save, then the one reading that lands.
+        model.always_from = 4;
+        let outcome = engine::roll_back(&mut model, record.clone());
+        assert!(
+            model.violations.is_empty(),
+            "{label}: {:?}\n{:#?}",
+            model.violations,
+            model.log
+        );
+        let h = &model.hosts;
+        assert!(!h.source_running && h.fenced, "{label}: {h:?}");
+        assert_eq!(outcome.code, 6, "{label}: {outcome:?}");
+        let after = model.record.clone().unwrap();
+        assert_eq!(after.phase, Phase::RollbackIncomplete, "{label}");
+        assert!(after.flags.target_restored, "{label}");
+    }
+}
+
+#[test]
+fn a_release_never_takes_a_blank_reading_for_a_target_that_holds_nothing() {
+    let (first, _) = resumable_move();
+    let record = first.record.clone().unwrap();
+    let mut model = later(&first);
+    // The claim was removed by hand, and Docker there does not answer.
+    model.hosts.claim = None;
+    model.docker_silent = true;
+    let before = model.hosts.clone();
+    let outcome = engine::release_target(&mut model, record.clone());
+    assert_eq!(outcome.code, 6, "{outcome:?}\n{:#?}", model.log);
+    assert!(
+        outcome.message.contains("its Docker did not say"),
+        "{}",
+        outcome.message
+    );
+    assert!(
+        !outcome.message.contains("no longer holds"),
+        "{}",
+        outcome.message
+    );
+    assert_eq!(model.hosts, before);
+    let kept = model.record.clone().unwrap();
+    assert_eq!(
+        kept.phase,
+        Phase::RolledBack,
+        "the record is kept as it was"
+    );
+    assert_eq!(kept.ending, None);
+    assert!(
+        super::command::held_refusal(std::slice::from_ref(&kept), "dev@other", false).is_some()
+    );
+}
+
+#[test]
+fn a_release_over_another_bank_closes_the_record_and_changes_nothing_there() {
+    let (first, _) = resumable_move();
+    let record = first.record.clone().unwrap();
+    // Someone restored another backup by hand behind this move's gate, and
+    // removed the claim: nothing of this host's bank is there.
+    let mut model = later(&first);
+    model.hosts.claim = None;
+    model.hosts.bank = Bank::Other;
+    model.hosts.gated = true;
+    model.hosts.target_running = false;
+    let before = model.hosts.clone();
+    let outcome = engine::release_target(&mut model, record.clone());
+    assert_eq!(outcome.code, 0, "{outcome:?}\n{:#?}", model.log);
+    assert_eq!(model.hosts, before, "nothing was changed on the target");
+    assert!(
+        !model
+            .log
+            .iter()
+            .any(|l| l.ends_with("target claim") || l.ends_with("target give-back")),
+        "{:#?}",
+        model.log
+    );
+    for needle in [
+        "bank 0123456789abcdef",
+        "/data/move.json, is still there",
+        "--entrypoint rm --volumes-from pseudolife-mcp-daemon pseudolife-daemon:test -f /data/move.json",
+        "record of the move is closed",
+    ] {
+        assert!(
+            outcome.message.contains(needle),
+            "{needle}: {}",
+            outcome.message
+        );
+    }
+    let closed = model.record.clone().unwrap();
+    assert_eq!(closed.phase, Phase::Released);
+    assert_eq!(closed.ending, Some(Ending::NothingThere));
+    assert_eq!(
+        super::command::held_refusal(std::slice::from_ref(&closed), "dev@other", false),
+        None
+    );
+    // The near miss: this move's bank under the same gate is given back.
+    let mut model = later(&first);
+    model.hosts.claim = None;
+    model.hosts.target_running = false;
+    let outcome = engine::release_target(&mut model, record);
+    assert_eq!(outcome.code, 0, "{outcome:?}");
+    assert_eq!(model.hosts.bank, Bank::Empty);
+    assert_eq!(model.record.unwrap().ending, Some(Ending::GivenBack));
+}
+
+#[test]
+fn a_give_back_refused_after_a_reclaim_gives_the_claim_up_and_says_so() {
+    let (first, _) = resumable_move();
+    let record = first.record.clone().unwrap();
+    let mut model = later(&first);
+    model.hosts.claim = None;
+    model.always = vec![("target give-back", Fault::Refused)];
+    let outcome = engine::release_target(&mut model, record);
+    assert_eq!(outcome.code, 4, "{outcome:?}\n{:#?}", model.log);
+    assert!(model.hosts.claim.is_none(), "{:?}", model.hosts);
+    for needle in [
+        "claimed it again for this move",
+        "has released that claim again",
+        "Fix what dev@target names, then rerun pseudolife-mcp move --release-target",
+    ] {
+        assert!(
+            outcome.message.contains(needle),
+            "{needle}: {}",
+            outcome.message
+        );
+    }
+    assert!(
+        !outcome.message.contains("Nothing was changed"),
+        "{}",
+        outcome.message
+    );
+    assert_eq!(model.record.unwrap().phase, Phase::RolledBack);
+    // Nothing taken, nothing to undo: said so.
+    let (first, _) = resumable_move();
+    let mut model = later(&first);
+    model.always = vec![("target give-back", Fault::Refused)];
+    let outcome = engine::release_target(&mut model, first.record.clone().unwrap());
+    assert_eq!(outcome.code, 4, "{outcome:?}");
+    assert!(
+        outcome.message.contains("Nothing was changed there"),
+        "{}",
+        outcome.message
+    );
+    assert_eq!(model.hosts.claim.as_deref(), Some(ID));
+}
+
+#[test]
+fn each_way_a_release_ends_is_answered_truly_afterwards() {
+    let (first, _) = resumable_move();
+    let record = first.record.clone().unwrap();
+    // Found holding nothing.
+    let mut model = later(&first);
+    model.hosts.claim = None;
+    model.hosts.bank = Bank::Other;
+    engine::release_target(&mut model, record.clone());
+    let nothing = model.record.clone().unwrap();
+    assert_eq!(nothing.ending, Some(Ending::NothingThere));
+    let answers = [
+        engine::answered_by_record(&nothing).unwrap().message,
+        engine::release_target(&mut Model::new(), nothing.clone()).message,
+    ];
+    for answer in &answers {
+        assert!(answer.contains("holding nothing"), "{answer}");
+        assert!(!answer.contains("given back its own bank"), "{answer}");
+    }
+    // Given back.
+    let mut model = later(&first);
+    engine::release_target(&mut model, record.clone());
+    let back = model.record.clone().unwrap();
+    assert_eq!(back.ending, Some(Ending::GivenBack));
+    let answer = engine::answered_by_record(&back).unwrap().message;
+    assert!(answer.contains("was given back its own bank"), "{answer}");
+    // Given up.
+    let mut model = later(&first);
+    model.always = vec![("target state", Fault::LostBefore)];
+    let (given_up, _) = engine::give_up(&mut model, &record).unwrap();
+    let answer = engine::answered_by_record(&given_up).unwrap().message;
+    assert!(answer.contains("given up"), "{answer}");
+    assert!(!answer.contains("was given back"), "{answer}");
+    assert!(
+        answer.contains(&format!("move --release-target {ID}")),
+        "{answer}"
+    );
+}
+
+#[test]
+fn a_target_is_given_up_only_while_it_does_not_answer_and_comes_back_to_a_real_give_back() {
+    let parked = parked_move();
+    let record = parked.record.clone().unwrap();
+    // It answers: refused, naming the release that works.
+    let mut model = later(&parked);
+    let before = model.hosts.clone();
+    let refusal = engine::give_up(&mut model, &record).unwrap_err();
+    assert_eq!(refusal.code, 4, "{refusal:?}");
+    assert!(
+        refusal
+            .message
+            .contains(&format!("pseudolife-mcp move --release-target {ID}.")),
+        "{}",
+        refusal.message
+    );
+    assert_eq!(model.hosts, before);
+    assert!(model.record.is_none(), "nothing was saved");
+    // A refusal is an answer too.
+    let mut model = later(&parked);
+    model.always = vec![("target state", Fault::Refused)];
+    assert_eq!(engine::give_up(&mut model, &record).unwrap_err().code, 4);
+    // This host does not serve its bank: refused, and nothing starts.
+    let mut model = later(&parked);
+    model.hosts.source_running = false;
+    model.always = vec![("target state", Fault::LostBefore)];
+    let refusal = engine::give_up(&mut model, &record).unwrap_err();
+    assert!(
+        refusal.message.contains("not serving"),
+        "{}",
+        refusal.message
+    );
+    assert!(!model.hosts.source_running);
+    // It does not answer: given up on this host only.
+    let mut model = later(&parked);
+    model.always = vec![("target state", Fault::LostBefore)];
+    let before = model.hosts.clone();
+    let (given_up, outcome) = engine::give_up(&mut model, &record).unwrap();
+    assert_eq!(model.hosts, before);
+    assert_eq!(given_up.phase, Phase::GivenUp);
+    assert_eq!(given_up.ending, Some(Ending::GivenUp));
+    for needle in [
+        "~/.pseudolife-mcp/moves/claim.json",
+        "its gate /data/move.json",
+        "the stopped copy of this host's bank",
+        "own-bank.json",
+        "writes made on dev@target are not in it",
+        "took writes there that are not in this host's bank",
+        &format!("pseudolife-mcp move --release-target {ID}"),
+    ] {
+        assert!(
+            outcome.message.contains(needle),
+            "{needle}: {}",
+            outcome.message
+        );
+    }
+    assert!(!super::command::unfinished(&given_up));
+    assert_eq!(
+        super::command::held_refusal(std::slice::from_ref(&given_up), "dev@other", false),
+        None
+    );
+    // Still gone: a release says so and leaves it given up.
+    let mut gone = later(&parked);
+    gone.always = vec![("target state", Fault::LostBefore)];
+    assert_eq!(engine::release_target(&mut gone, given_up.clone()).code, 6);
+    let still = gone.record.clone().unwrap();
+    assert_eq!(still.phase, Phase::GivenUp);
+    assert!(!super::command::unfinished(&still));
+    // It came back: the release gives it back its own bank for real.
+    let mut back = later(&parked);
+    let outcome = engine::release_target(&mut back, given_up.clone());
+    assert_eq!(outcome.code, 0, "{outcome:?}\n{:#?}", back.log);
+    assert!(
+        outcome.message.contains("has its own bank back"),
+        "{}",
+        outcome.message
+    );
+    let h = &back.hosts;
+    assert!(
+        h.bank == Bank::Empty && h.claim.is_none() && !h.gated,
+        "{h:?}"
+    );
+    assert_eq!(back.record.unwrap().ending, Some(Ending::GivenBack));
+    // Never for a move that committed or is still to be rolled back.
+    let mut committed = record.clone();
+    committed.committed = true;
+    assert_eq!(engine::give_up_refusal(&committed).unwrap().code, 4);
+    let mut moving = record.clone();
+    moving.phase = Phase::Moving;
+    assert_eq!(engine::give_up_refusal(&moving).unwrap().code, 4);
+    // Nor for the dead end this does not reach: an incomplete rollback.
+    moving.phase = Phase::RollbackIncomplete;
+    assert_eq!(engine::give_up_refusal(&moving).unwrap().code, 4);
+}
+
+#[test]
+fn a_check_reading_that_found_wrong_counts_still_counts_as_the_reading_after_the_restore() {
+    // The source took a row the dump missed, so the check finds the counts
+    // differ; the run dies as its rollback begins. The check's reading was
+    // taken in the run that restored, so a later --rollback compares with it.
+    let restore = call_of("target restore");
+    let mut first = Model::new();
+    first.source_grew = 1;
+    first.fault = Some((restore + 4, Fault::Killed));
+    run(&mut first);
+    let record = first.record.clone().unwrap();
+    assert!(
+        record.restored_mutations.is_some(),
+        "{record:?}\n{:#?}",
+        first.log
+    );
+    let mut after = later(&first);
+    let outcome = engine::roll_back(&mut after, record);
+    assert_eq!(outcome.code, 1, "{outcome:?}\n{:#?}", after.log);
+    let record = after.record.clone().unwrap();
+    assert!(record.unresolved.is_none(), "{record:?}");
+    assert!(record.gated_baseline.is_some(), "{record:?}");
 }

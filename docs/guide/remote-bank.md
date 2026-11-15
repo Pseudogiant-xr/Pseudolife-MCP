@@ -737,6 +737,13 @@ Writes the target took while it served are named and kept in its gated bank,
 and a later `--resume` never replaces them. These are rows added or removed,
 and rows changed in place, which its write counters show.
 
+Those writes are found by comparing the gated bank with a reading of it taken
+right after the move's restore, by the same run: its check, or that run's own
+rollback. When no such reading exists (the run died first, or the restore's
+answer never arrived, so it cannot be told whether it ran), the gated bank is
+kept the same way, exit 6 says why, and `--release-target` is the way out. No
+writes are claimed, and the bank is never resumed over.
+
 **If the move process itself dies** (a closed console, a power loss), every
 later `move` on this host refuses until you run `pseudolife-mcp move
 --rollback <move id>`. It runs the same rollback from the move's record in
@@ -772,9 +779,11 @@ restores over a bank it has finished giving back.
 
 While such a target holds a copy of this host's bank, no other move starts from this host: only `--resume` of that move, or its `--release-target`, comes first. That way no target is left holding a copy that no command can clear.
 
-A target that no longer holds anything of the move (reset or given back by hand) is found so by `--release-target`. The record is marked released and stops holding this host; nothing is changed there.
+A target that no longer holds anything of this host's bank is found so by `--release-target`: no claim of the move and another bank, or no bank, claim or gate of the move at all. The record is closed and stops holding this host, and nothing is changed there. If the move's gate (`/data/move.json`) is still in front of that other bank, the output names it and the command that removes it, which is for whoever runs that host once they are sure which bank it should serve. A target whose Docker does not answer is never taken for an empty one: the record is kept, and the release says so.
 
-If the target is gone for good, `pseudolife-mcp move --release-target <move id> --target-gone` marks the move released on this host only, without asking the target. It asks first, or takes `--yes`. If that host ever comes back holding the copy, the copy stays stopped behind `/data/move.json` until its own bank is restored there by hand.
+If the target is gone for good, `pseudolife-mcp move --release-target <move id> --target-gone` gives it up on this host only. It does so only while this host's daemon serves its own bank, and only when the target does not answer. A target that answers is refused, naming `--release-target`. It asks first, or takes `--yes`; without a terminal and without `--yes` it refuses at once. Nothing is changed on either host. The output lists what stays on that host if it comes back: the move's claim (`~/.pseudolife-mcp/moves/claim.json`), its gate, the stopped copy of this host's bank, and the target's own bank in the safety backup in the move's folder there. Writes made there are not in this host's bank. If it comes back, `--release-target <move id>` then gives it back its own bank as usual.
+
+A rollback that could not reach the target to finish (exit 6, the record still unfinished) is not one `--target-gone` ends; its `--rollback` is rerun once the target answers.
 
 Both hosts keep the move's files (a full copy of the bank) under
 `~/.pseudolife-mcp/moves/<move id>` until you remove them: the report names

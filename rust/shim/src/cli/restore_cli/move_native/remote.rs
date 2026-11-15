@@ -78,9 +78,11 @@ fn own_group(command: &mut Command) {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        // ssh needs no console of its own: its input and output are pipes.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        // No window of its own only when this process has no console: at a
+        // terminal, ssh shares it, so a prompt BatchMode does not cover stays
+        // visible.
+        command
+            .creation_flags(CREATE_NEW_PROCESS_GROUP | super::super::console::child_window_flag());
     }
 }
 

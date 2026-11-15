@@ -713,25 +713,15 @@ fn giving_up_a_target_for_good_asks_first() {
     assert_quiet(&socket);
 }
 
-// The record is rewritten, and the store replaces only an owner-only file:
-// seeded as the client writes it (Unix modes; as cli_tunnel_contract does).
-#[cfg(unix)]
 #[test]
-fn a_target_gone_for_good_is_given_up_on_this_host_and_stops_holding_it() {
-    use std::os::unix::fs::PermissionsExt;
+fn target_gone_asks_this_hosts_docker_and_the_target_before_it_changes_the_record() {
     let home = Home::new("gone");
     let (socket, url) = listener();
-    plant(
-        &home.0,
-        &rolled_back_to_box("").replace("rolled_back", "releasing"),
-    );
-    let folder = home.0.join(".pseudolife-mcp/moves").join(MOVE_ID);
-    fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
-    fs::set_permissions(
-        folder.join("record.json"),
-        fs::Permissions::from_mode(0o600),
-    )
-    .unwrap();
+    let body = rolled_back_to_box(r#","kept":["/home/dev/k/a.sql.gz"]"#)
+        .replace("rolled_back", "releasing");
+    plant(&home.0, &body);
+    // With --yes it must still find this host's daemon serving and the
+    // target silent: no docker here, so it refuses and keeps the record.
     let output = rollback(
         &home.0,
         &url,
@@ -743,19 +733,64 @@ fn a_target_gone_for_good_is_given_up_on_this_host_and_stops_holding_it() {
             "--json",
         ],
     );
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["released"], false);
+    assert_eq!(report["kept"], serde_json::json!(["/home/dev/k/a.sql.gz"]));
+    assert!(
+        report["message"].as_str().unwrap().contains("docker"),
+        "{report}"
+    );
+    let folder = home.0.join(".pseudolife-mcp/moves").join(MOVE_ID);
+    assert_eq!(
+        fs::read_to_string(folder.join("record.json")).unwrap(),
+        body
+    );
+    assert_quiet(&socket);
+}
+
+#[test]
+fn a_given_up_target_stops_holding_this_host_and_names_its_way_back() {
+    let home = Home::new("given-up");
+    let (socket, url) = listener();
+    plant(
+        &home.0,
+        &rolled_back_to_box(r#","kept":["/home/dev/k/a.sql.gz"],"ending":"given_up""#)
+            .replace("rolled_back", "given_up"),
+    );
+    // Its answers say it was given up, never given back, and name the
+    // release that gives it back if it returns.
+    let output = rollback(&home.0, &url, &["--rollback", MOVE_ID]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("given up"), "{stdout}");
+    assert!(!stdout.contains("was given back"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("move --release-target {MOVE_ID}")),
+        "{stdout}"
+    );
+    let output = rollback(
+        &home.0,
+        &url,
+        &["--release-target", MOVE_ID, "--target-gone", "--json"],
+    );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["released"], true);
+    assert_eq!(report["kept"], serde_json::json!(["/home/dev/k/a.sql.gz"]));
     assert!(
         report["message"]
             .as_str()
             .unwrap()
-            .contains("given up for good"),
+            .contains("already given up"),
         "{report}"
     );
-    let record: serde_json::Value =
-        serde_json::from_slice(&fs::read(folder.join("record.json")).unwrap()).unwrap();
-    assert_eq!(record["phase"], "released");
+    // A release of it is a real give-back again: it asks first.
+    let output = rollback(&home.0, &url, &["--release-target", MOVE_ID]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("re-run with --yes"),
+        "{output:?}"
+    );
     // It no longer holds this host: a move elsewhere goes on to the ssh
     // lookup (which PATH lacks here).
     let other: Vec<&str> = DRY

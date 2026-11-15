@@ -681,19 +681,24 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                         !r.committed
                             && r.phase == record::Phase::RolledBack
                             && r.flags.target_restored
-                            && r.parked_writes.is_some()
+                            && (r.parked_writes.is_some() || r.unresolved.is_some())
                             && r.target == request.to
                     });
                     if let Some(parked) = parked {
+                        let why = match (&parked.parked_writes, &parked.unresolved) {
+                            (Some(tables), _) => format!(
+                                "its target's gated bank took writes that are not in this host's bank ({tables}), and a resume would replace them"
+                            ),
+                            (None, cause) => format!(
+                                "{}, and a resume would replace it unseen",
+                                cause.clone().unwrap_or_default()
+                            ),
+                        };
                         return Some(finish(
                             &request,
                             Err(format!(
-                                "move {} to {} is not resumed: its target's gated bank took writes that are not in this host's bank ({}), and a resume would replace them. Give {} back its own bank, keeping that bank in a backup there, with pseudolife-mcp move --release-target {}; then run a new move",
-                                parked.move_id,
-                                parked.target,
-                                parked.parked_writes.clone().unwrap_or_default(),
-                                parked.target,
-                                parked.move_id
+                                "move {} to {} is not resumed: {why}. Give {} back its own bank, keeping that bank in a backup there, with pseudolife-mcp move --release-target {}; then run a new move",
+                                parked.move_id, parked.target, parked.target, parked.move_id
                             )),
                         ));
                     }
