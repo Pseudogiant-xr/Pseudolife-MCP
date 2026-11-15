@@ -345,11 +345,12 @@ def test_a_pairing_code_with_a_remote_daemon_url_is_client_only(tmp_path):
 
 def test_the_script_itself_refuses_client_only_without_a_url(tmp_path):
     ps = _PowerShell(tmp_path)
-    proc = installer_sandbox.run(
-        [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
-         "-ClientOnly", "-NoArt"],
-        capture_output=True, text=True, timeout=120, env=installer_sandbox.layout(ps.env, tmp_path), root=tmp_path, check=False,
-        stdin=subprocess.DEVNULL)
+    with user_path_unchanged(ps.home):
+        proc = installer_sandbox.run(
+            [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
+             "-ClientOnly", "-NoArt"],
+            capture_output=True, text=True, timeout=120, env=installer_sandbox.layout(ps.env, tmp_path), root=tmp_path, check=False,
+            stdin=subprocess.DEVNULL)
     assert proc.returncode == 2
     assert "-ClientOnly needs" in _output(proc)
 
