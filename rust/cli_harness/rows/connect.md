@@ -26,9 +26,9 @@ once, a value never empty and never starting with `-`, the URL never empty
 and never starting with `-`, and every argument valid Unicode. Help,
 abbreviations, `--opt=value`, `--` and every other shape defer before any
 effect. Pairing (`--code`, `--read-code`) has been native since #1563, and
-Codex's `config.toml` is read and written through Codex's own app-server
-(a file without a shim registration is only read as text, to classify it).
-#1568 made the terminal native too: a run with changes to apply at a
+Codex's `config.toml` is parsed as text only to find the shim's
+registration (and to classify a file without one); the env plan is read
+from, and the write made through, Codex's own app-server. #1568 made the terminal native too: a run with changes to apply at a
 terminal without `--yes` asks `Apply these changes? [y/N]` on stderr,
 `--read-token` and `--read-code` at a terminal read without echo, and a run
 for every client plans the unattended-update schedules it finds
@@ -169,8 +169,8 @@ every apply case of this row.
 
 ## Deferred before any effect
 
-connect writes nothing and no request reaches the daemon before any deferral
-below except the last two items, which follow the unauthenticated
+`connect` writes nothing and no request reaches the daemon before any
+deferral below except the last two items, which follow the unauthenticated
 `GET /health`. Discovery runs first and can itself defer, so by then a
 `--read-code` prompt may have been answered, Codex's app-server may have
 been asked for its configuration and the scheduler queried for the
@@ -188,11 +188,11 @@ is not exhaustive.
   Windows' User- or Machine-scope value.
 - Neither `USERPROFILE` nor `HOME` set; an environment base directory not
   already in `str(pathlib.Path(...))` form (`CODEX_HOME` excepted, which is
-  used as given), or a current directory not in
-  that form or unreadable; an environment value, path or file name that is
-  not valid Unicode; a `--token-file` that cannot be made absolute; a stat
-  error pathlib would raise; a read error other than FileNotFoundError on a
-  file the plan would write.
+  used as given), or a current directory not in that form or unreadable; an
+  environment value, path or file name that is not valid Unicode; a
+  `--token-file` that cannot be made absolute; a stat error pathlib would
+  raise; a read error other than FileNotFoundError on a file the plan would
+  write.
 - JSON the Python reader holds but this one cannot: a lone surrogate,
   nesting past 100, an integer past 4300 digits (CPython raises ValueError).
 - A real run whose credentials hold DEL (urllib sends it; the `http`

@@ -1183,22 +1183,24 @@ When no browser opens, `console` prints the link and the code just as
 `browser_error` field instead): no display and no `BROWSER`, no launcher on
 `PATH`, a `BROWSER` it cannot read or that names a terminal browser, a
 program that cannot be started, or a launcher that exits with an error
-within two seconds (one still running then counts as the browser). On Windows a launch that fails prints the link
-alone. On Windows only the first `BROWSER` entry counts (entries are
-separated by `;` there), and two shapes of it still stop with
-`pseudolife-stdio: mode 'console' is deferred in this candidate` before a
-code is minted: an entry without `%s` whose first word is a standard browser
-name (`firefox`, `chrome`, `lynx`, say), and a `<program> %s &` entry whose
-program is not a drive-absolute `.exe` path (a `BROWSER` that is not valid
-Unicode stops the same way). The value is split as a POSIX shell splits it,
-so an unquoted backslash is dropped: write the path with forward slashes
-(`C:/Tools/browser.exe %s &`) or in single quotes
-(`'C:\Program Files\Mozilla Firefox\firefox.exe' %s &`);
-`C:\Tools\browser.exe %s &` defers. Any other Windows `BROWSER` opens a browser only in that
-`<program> %s &` form, and otherwise prints the link. Where it defers, use
-`--no-open` and open the printed link yourself, or unset `BROWSER`:
-`--no-open` never starts a browser and prints the link and the code on every
-system.
+within two seconds (one still running then counts as the browser). On
+Windows a launch that fails prints the link alone.
+
+On Windows the first `BROWSER` entry decides (entries are separated by `;`
+there, and an entry of only spaces anywhere prints the link), and two
+shapes of it still stop with `pseudolife-stdio: mode 'console' is deferred
+in this candidate` before a code is minted: an entry without `%s` whose
+first word is a standard browser name (`firefox`, `chrome`, `lynx`, say),
+and a `<program> %s &` entry whose program is not a drive-absolute `.exe`
+path (a `BROWSER` that is not valid Unicode stops the same way). The value
+is split as a POSIX shell splits it, so an unquoted backslash is dropped:
+write the path with forward slashes (`C:/Tools/browser.exe %s &`) or in
+single quotes (`'C:\Program Files\Mozilla Firefox\firefox.exe' %s &`);
+`C:\Tools\browser.exe %s &` defers. Any other Windows `BROWSER` opens a
+browser only in that `<program> %s &` form, and otherwise prints the link.
+Where it defers, use `--no-open` and open the printed link yourself, or
+unset `BROWSER`: `--no-open` never starts a browser and prints the link and
+the code on every system.
 
 `pseudolife-mcp console --list` shows the signed-in browsers (an operator
 sees all of them, a paired machine its own) and `--revoke <id>` signs one
