@@ -26,7 +26,7 @@ import pytest
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_client_install_ux import _heredoc_payload, _marker_block
 from tests.test_installer_existing_upgrade import (
-    _bash_fixture_path, _bash_variants, _between, _fixture_env,
+    _bash_fixture_path, _bash_variants, _between, _fixture_env, user_path_unchanged,
 )
 
 
@@ -1335,15 +1335,16 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     settings_path.write_text(json.dumps({"env": {
         "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/local/claude-code.token",
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}}), encoding="utf-8")
-    proc = shell.run(
-        f"exec '{shell.path(repo / 'ops' / 'install.sh')}' --client-only "
-        f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
-        "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
-        extra_env={"FAKE_HEALTH": HEALTH_ON,
-                   "FAKE_INSTALL_BIN": _bash_fixture_path(bash, installed, shell.env),
-                   "PYTHONPATH": str(ROOT),
-                   # The installer's own environment carries an older credential.
-                   "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
+    with user_path_unchanged(shell.home):
+        proc = shell.run(
+            f"exec '{shell.path(repo / 'ops' / 'install.sh')}' --client-only "
+            f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
+            "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
+            extra_env={"FAKE_HEALTH": HEALTH_ON,
+                       "FAKE_INSTALL_BIN": _bash_fixture_path(bash, installed, shell.env),
+                       "PYTHONPATH": str(ROOT),
+                       # The installer's own environment carries an older credential.
+                       "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     assert proc.returncode == 0, proc.stdout + proc.stderr
     calls = shell.logged()
     assert not any(call.startswith("docker|") for call in calls)
