@@ -908,7 +908,7 @@ def test_install_ps1_puts_the_launcher_on_the_user_path_and_says_so_in_the_summa
     ps = _read("ops/install.ps1")
     install_shim = ps[ps.index("function Install-ShimOnce"):]
     install_shim = install_shim[:install_shim.index("\nfunction ")]
-    assert '(Join-Path $repo "ops\shim_runtime.py") --json expose' in install_shim
+    assert '(Join-Path $repo "ops\\shim_runtime.py") --json expose' in install_shim
     assert install_shim.index("--json expose") < install_shim.index("$script:shimInstallResult = $true")
     summary = ps[ps.index('if ($script:shimPathNotes.Count -gt 0) {'):]
     assert summary.index("Launcher on PATH") < summary.index("# >>> board line >>>")
