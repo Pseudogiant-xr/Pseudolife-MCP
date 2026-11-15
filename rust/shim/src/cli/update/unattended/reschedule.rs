@@ -221,8 +221,11 @@ fn installed_kind_on(
             client,
             &|| Ok(systemctl(&["is-enabled", "--quiet", &format!("{name}.timer")])?.0 == 0),
             &|unit| {
-                let (code, out) =
-                    systemctl(&["show", "--property=FragmentPath,DropInPaths", unit])?;
+                let (code, out) = systemctl(&[
+                    "show",
+                    "--property=FragmentPath,DropInPaths,NeedDaemonReload",
+                    unit,
+                ])?;
                 if code != 0 {
                     return Err(format!("`systemctl --user show {unit}` exited {code}"));
                 }
@@ -269,13 +272,15 @@ fn systemd_installed(
     let enabled = enabled()?;
     let overridden = match systemd_dropins(roots, name) {
         Err(blocked) => Some(blocked),
-        Ok(read) => ["service", "timer"].into_iter().find_map(|kind| {
-            let unit = format!("{name}.{kind}");
-            match show(&unit) {
-                Err(cause) => Some(unasked(&cause)),
-                Ok(out) => systemd_disagrees(dir, &unit, &out, &read),
-            }
-        }),
+        Ok([service_read, timer_read]) => [("service", service_read), ("timer", timer_read)]
+            .into_iter()
+            .find_map(|(kind, read)| {
+                let unit = format!("{name}.{kind}");
+                match show(&unit) {
+                    Err(cause) => Some(unasked(&cause)),
+                    Ok(out) => systemd_disagrees(dir, &unit, &out, &read),
+                }
+            }),
     };
     Ok(Some(systemd_parse(
         dir, name, client, &service, &timer, enabled, overridden, expected,
@@ -306,20 +311,36 @@ fn systemd_disagrees(
 ) -> Option<String> {
     let mut fragment = None;
     let mut dropins = Vec::new();
+    let mut stale = true;
     for line in out.lines() {
         if let Some(value) = line.strip_prefix("FragmentPath=") {
             fragment = Some(value.trim().to_owned());
         } else if let Some(value) = line.strip_prefix("DropInPaths=") {
             dropins.extend(value.split_whitespace().map(PathBuf::from));
+        } else if let Some(value) = line.strip_prefix("NeedDaemonReload=") {
+            stale = value.trim() != "no";
         }
+    }
+    // What runs is what the user manager loaded: a file changed on disk
+    // since then (or a report that does not say) is not yet in force, so
+    // what connect read is not what runs.
+    if stale {
+        return Some(format!(
+            "systemd's user manager has not loaded {unit}'s files as they are on disk (it reports NeedDaemonReload), so what runs may differ from what connect reads and it leaves the schedule as it is: run `systemctl --user daemon-reload`, then re-run connect"
+        ));
     }
     let written = canonical(&dir.join(unit));
     match fragment.as_deref() {
         Some(path) if !path.is_empty() && canonical(Path::new(path)) == written => {}
-        other => {
-            let loaded = other.filter(|path| !path.is_empty()).unwrap_or("nowhere");
+        Some(path) if !path.is_empty() => {
             return Some(format!(
-                "systemd's user manager loads {unit} from {loaded}, not from {} that `update --schedule` writes, so connect leaves the schedule as it is: remove the other unit file and run `systemctl --user daemon-reload`, or manage this schedule by hand",
+                "systemd's user manager loads {unit} from {path}, not from {} that `update --schedule` writes, so connect leaves the schedule as it is: remove the other unit file and run `systemctl --user daemon-reload`, or manage this schedule by hand",
+                written.display()
+            ));
+        }
+        _ => {
+            return Some(format!(
+                "systemd's user manager has no unit file for {unit} ({} is gone), so the schedule is incomplete and connect leaves it as it is: re-create it with `pseudolife-mcp update --schedule HH:MM` at your time, or remove what is left of it, then re-run connect",
                 written.display()
             ));
         }
@@ -517,11 +538,12 @@ fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Un
                         "an unterminated section header",
                     ));
                 };
-                // systemd's string_is_safe: no control characters, quotes or
-                // backslashes in a section name.
+                // systemd's string_is_safe (src/basic/string-util.c, v259),
+                // byte for byte: no ASCII control byte, DEL, quote or
+                // backslash; bytes above 0x7f (a signed char) pass.
                 if name
-                    .chars()
-                    .any(|c| c.is_control() || matches!(c, '"' | '\'' | '\\'))
+                    .bytes()
+                    .any(|b| (1..b' ').contains(&b) || matches!(b, b'"' | b'\'' | b'\\' | 0x7f))
                 {
                     return Err(Unreadable::Rejected(
                         number,
@@ -584,19 +606,21 @@ fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Un
 /// first in that order applies (`conf_files_list_strv`), so an empty or
 /// masking file earlier hides a same-named one later; a hidden name
 /// (`.x.conf`) is skipped, as systemd skips it. The files read as applying,
-/// or the sentence that leaves the schedule alone: a blocking key set, or
-/// a directory or file that cannot be read or that systemd rejects.
+/// the service's and the timer's apart (each was checked only for its own
+/// unit's keys), or the sentence that leaves the schedule alone: a blocking
+/// key set, or a directory or file that cannot be read or that systemd
+/// rejects.
 fn systemd_dropins(
     roots: &[PathBuf],
     name: &str,
-) -> std::result::Result<std::collections::BTreeSet<PathBuf>, String> {
+) -> std::result::Result<[std::collections::BTreeSet<PathBuf>; 2], String> {
     let mut stems: Vec<String> = name
         .match_indices('-')
         .map(|(at, _)| name[..=at].to_owned())
         .collect();
     stems.push(name.to_owned());
-    let mut applied = std::collections::BTreeSet::new();
-    for kind in ["service", "timer"] {
+    let mut applied: [std::collections::BTreeSet<PathBuf>; 2] = Default::default();
+    for (index, kind) in ["service", "timer"].into_iter().enumerate() {
         let specific = roots.iter().flat_map(|root| {
             stems
                 .iter()
@@ -642,7 +666,7 @@ fn systemd_dropins(
                 };
                 match dropin_sets(kind, &text) {
                     Ok(None) => {
-                        applied.insert(file);
+                        applied[index].insert(file);
                     }
                     Ok(Some(key)) => {
                         return Err(format!(
@@ -1563,6 +1587,19 @@ mod tests {
             sets("[Service]\nExecStart=/x \\").as_deref(),
             Some("ExecStart=")
         );
+        // A section name with a non-ASCII control character (U+0085) is safe
+        // to systemd; one with an ASCII control byte or a quote is not.
+        assert_eq!(
+            sets(&format!("[X-\u{85}]\nNice=5\n[Service]\n{post}\n")).as_deref(),
+            Some("ExecStartPost=")
+        );
+        assert_eq!(sets("[X-\u{85}]\nNice=5\n"), None);
+        assert!(
+            sets("[X-\u{1}]\nNice=5\n")
+                .unwrap()
+                .starts_with("rejected 1")
+        );
+        assert!(sets("[X-\"q]\nNice=5\n").unwrap().starts_with("rejected 1"));
         // A key before any section, or in another section, is not the
         // service's.
         assert_eq!(sets(&format!("{post}\n[Unit]\n{post}\n")), None);
@@ -1608,7 +1645,10 @@ mod tests {
         let dir = scratch();
         let unit = "pseudolife-update.service";
         fs::write(dir.join(unit), "").unwrap();
-        let fragment = format!("FragmentPath={}", dir.join(unit).display());
+        let fragment = format!(
+            "NeedDaemonReload=no\nFragmentPath={}",
+            dir.join(unit).display()
+        );
         let read: std::collections::BTreeSet<PathBuf> = [dir.join("a.conf")].into();
         fs::write(dir.join("a.conf"), "").unwrap();
         // Near miss: the unit from `dir`, and only drop-ins this search read.
@@ -1629,16 +1669,123 @@ mod tests {
                 .starts_with("systemd's user manager applies the drop-in /opt/x/pseudolife-update.service.d/b.conf")
         );
         // The unit loaded from another file, or from nowhere.
-        let shadowed = "FragmentPath=/run/user/1000/systemd/transient/pseudolife-update.service\nDropInPaths=\n";
+        let shadowed = "NeedDaemonReload=no\nFragmentPath=/run/user/1000/systemd/transient/pseudolife-update.service\nDropInPaths=\n";
         assert!(
             systemd_disagrees(&dir, unit, shadowed, &read)
                 .unwrap()
                 .contains("loads pseudolife-update.service from /run/user/1000/systemd/transient/")
         );
+        // No unit file at all: the cause is that it is gone, and the fix is
+        // re-creating it, not removing another file.
+        let gone = systemd_disagrees(
+            &dir,
+            unit,
+            "NeedDaemonReload=no\nFragmentPath=\nDropInPaths=\n",
+            &read,
+        )
+        .unwrap();
         assert!(
-            systemd_disagrees(&dir, unit, "FragmentPath=\nDropInPaths=\n", &read)
+            gone.contains("has no unit file for pseudolife-update.service"),
+            "{gone}"
+        );
+        assert!(
+            gone.contains("re-create it with `pseudolife-mcp update --schedule HH:MM`"),
+            "{gone}"
+        );
+        assert!(!gone.contains("remove the other unit file"), "{gone}");
+        // Files changed on disk since the user manager loaded them: what runs
+        // is the loaded configuration, so it is left alone; a report that
+        // does not say is treated the same.
+        for report in [
+            format!(
+                "NeedDaemonReload=yes\n{}\nDropInPaths=\n",
+                &fragment["NeedDaemonReload=no\n".len()..]
+            ),
+            format!(
+                "{}\nDropInPaths=\n",
+                &fragment["NeedDaemonReload=no\n".len()..]
+            ),
+        ] {
+            assert!(
+                systemd_disagrees(&dir, unit, &report, &read)
+                    .unwrap()
+                    .contains(
+                        "has not loaded pseudolife-update.service's files as they are on disk"
+                    ),
+                "{report}"
+            );
+        }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn each_unit_is_checked_against_the_drop_ins_read_for_it() {
+        let dir = scratch();
+        let roots = [dir.clone()];
+        let environment: Vec<String> = Vec::new();
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        fs::write(
+            dir.join(format!("{NAME}.service")),
+            service_body(NAME, &argv(URL).unwrap(), &environment).unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{NAME}.timer")), timer_body(NAME, 3, 7)).unwrap();
+        // A timer drop-in with a `[Service]` key is harmless for the timer.
+        let timer_dropins = dir.join(format!("{NAME}.timer.d"));
+        fs::create_dir(&timer_dropins).unwrap();
+        let file = timer_dropins.join("override.conf");
+        fs::write(
+            &file,
+            "\u{feff}[Service]\nExecStart=\nExecStart=/x --daemon-url http://OLD\n",
+        )
+        .unwrap();
+        let report = |listed: String| {
+            let dir = dir.clone();
+            move |unit: &str| {
+                let dropins = if unit.ends_with(".service") {
+                    listed.clone()
+                } else {
+                    String::new()
+                };
+                Ok(format!(
+                    "NeedDaemonReload=no\nFragmentPath={}\nDropInPaths={dropins}\n",
+                    dir.join(unit).display()
+                ))
+            }
+        };
+        let enabled = || Ok(true);
+        // Near miss: systemd applies it to the timer only.
+        let timer_only = |unit: &str| {
+            let dropins = if unit.ends_with(".timer") {
+                file.display().to_string()
+            } else {
+                String::new()
+            };
+            Ok(format!(
+                "NeedDaemonReload=no\nFragmentPath={}\nDropInPaths={dropins}\n",
+                dir.join(unit).display()
+            ))
+        };
+        let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &timer_only, &expected)
+            .unwrap()
+            .unwrap();
+        assert!(
+            found.shaped && found.overridden.is_none(),
+            "{:?}",
+            found.overridden
+        );
+        // systemd also applies that file to the service (an alias directory
+        // linked to the timer's): it was never read as a service drop-in.
+        let to_service = report(file.display().to_string());
+        let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &to_service, &expected)
+            .unwrap()
+            .unwrap();
+        assert!(!found.shaped);
+        assert!(
+            found
+                .overridden
                 .unwrap()
-                .contains("from nowhere")
+                .starts_with("systemd's user manager applies the drop-in")
         );
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -1659,7 +1806,7 @@ mod tests {
                     (
                         0,
                         format!(
-                            "FragmentPath={}\nDropInPaths={}\n",
+                            "NeedDaemonReload=no\nFragmentPath={}\nDropInPaths={}\n",
                             dir.join(unit).display(),
                             listed.borrow()
                         ),
@@ -1876,7 +2023,7 @@ mod tests {
         let enabled = || Ok(true);
         let show = |unit: &str| {
             Ok(format!(
-                "FragmentPath={}\nDropInPaths=\n",
+                "NeedDaemonReload=no\nFragmentPath={}\nDropInPaths=\n",
                 dir.join(unit).display()
             ))
         };
