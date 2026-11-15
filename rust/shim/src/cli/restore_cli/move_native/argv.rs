@@ -147,6 +147,9 @@ pub(super) struct Rollback {
     pub json: bool,
     /// `--release-target` rather than `--rollback`.
     pub release: bool,
+    /// `--release-target <id> --target-gone`: the target is gone for good,
+    /// so the move is marked released on this host without asking it.
+    pub target_gone: bool,
 }
 
 pub(super) fn parse_rollback(arguments: &[OsString]) -> Option<Rollback> {
@@ -165,12 +168,17 @@ pub(super) fn parse_rollback(arguments: &[OsString]) -> Option<Rollback> {
                 id = Some((*words.get(index)?).to_owned());
             }
             "--yes" if !rollback.yes => rollback.yes = true,
+            "--target-gone" if !rollback.target_gone => rollback.target_gone = true,
             "--json" if !rollback.json => rollback.json = true,
             _ => return None,
         }
         index += 1;
     }
     rollback.id = id?;
+    // Only a release has a target to give up on.
+    if rollback.target_gone && !rollback.release {
+        return None;
+    }
     Some(rollback)
 }
 

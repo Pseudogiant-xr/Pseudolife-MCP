@@ -664,7 +664,7 @@ fn no_other_move_starts_while_an_earlier_moves_target_holds_this_hosts_bank() {
     let (socket, url) = listener();
     plant(&home.0, &rolled_back_to_box(""));
     let want = format!(
-        "move: move {MOVE_ID} left root@box holding a copy of this host's bank behind its gate (it was rolled back after its restore ran there). First finish it with pseudolife-mcp move --to root@box --resume, or give root@box back its own bank with pseudolife-mcp move --release-target {MOVE_ID}. Nothing was changed
+        "move: move {MOVE_ID} left root@box holding a copy of this host's bank behind its gate (it was rolled back after its restore ran there); first finish it with pseudolife-mcp move --to root@box --target-url http://100.64.0.2:8765 --no-keep-tokens --resume, or give root@box back its own bank with pseudolife-mcp move --release-target {MOVE_ID}. Nothing was changed
 "
     );
     // Another target, and this one without --resume, meet it before
@@ -680,6 +680,93 @@ fn no_other_move_starts_while_an_earlier_moves_target_holds_this_hosts_bank() {
     assert!(
         !String::from_utf8_lossy(&output.stderr).contains("holding a copy"),
         "{output:?}"
+    );
+    assert_quiet(&socket);
+}
+
+#[test]
+fn giving_up_a_target_for_good_asks_first() {
+    let home = Home::new("gone-ask");
+    let (socket, url) = listener();
+    plant(
+        &home.0,
+        &rolled_back_to_box("").replace("rolled_back", "releasing"),
+    );
+    // Without a terminal it asks for --yes: it gives up a host for good.
+    let output = rollback(
+        &home.0,
+        &url,
+        &["--release-target", MOVE_ID, "--target-gone"],
+    );
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("re-run with --yes"),
+        "{output:?}"
+    );
+    // --target-gone belongs to --release-target only.
+    let output = rollback(
+        &home.0,
+        &url,
+        &["--rollback", MOVE_ID, "--target-gone", "--yes"],
+    );
+    assert_ne!(output.status.code(), Some(0), "{output:?}");
+    assert_quiet(&socket);
+}
+
+// The record is rewritten, and the store replaces only an owner-only file:
+// seeded as the client writes it (Unix modes; as cli_tunnel_contract does).
+#[cfg(unix)]
+#[test]
+fn a_target_gone_for_good_is_given_up_on_this_host_and_stops_holding_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new("gone");
+    let (socket, url) = listener();
+    plant(
+        &home.0,
+        &rolled_back_to_box("").replace("rolled_back", "releasing"),
+    );
+    let folder = home.0.join(".pseudolife-mcp/moves").join(MOVE_ID);
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(
+        folder.join("record.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let output = rollback(
+        &home.0,
+        &url,
+        &[
+            "--release-target",
+            MOVE_ID,
+            "--target-gone",
+            "--yes",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["released"], true);
+    assert!(
+        report["message"]
+            .as_str()
+            .unwrap()
+            .contains("given up for good"),
+        "{report}"
+    );
+    let record: serde_json::Value =
+        serde_json::from_slice(&fs::read(folder.join("record.json")).unwrap()).unwrap();
+    assert_eq!(record["phase"], "released");
+    // It no longer holds this host: a move elsewhere goes on to the ssh
+    // lookup (which PATH lacks here).
+    let other: Vec<&str> = DRY
+        .iter()
+        .map(|w| if *w == "root@box" { "u@elsewhere" } else { w })
+        .collect();
+    let output = run(&home.0, &url, "80", &other);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("holding a copy") && !stderr.contains("did not finish"),
+        "{stderr}"
     );
     assert_quiet(&socket);
 }

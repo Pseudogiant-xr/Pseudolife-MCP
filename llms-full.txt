@@ -13212,6 +13212,10 @@ restores over a bank it has finished giving back.
 
 While such a target holds a copy of this host's bank, no other move starts from this host: only `--resume` of that move, or its `--release-target`, comes first. That way no target is left holding a copy that no command can clear.
 
+A target that no longer holds anything of the move (reset or given back by hand) is found so by `--release-target`. The record is marked released and stops holding this host; nothing is changed there.
+
+If the target is gone for good, `pseudolife-mcp move --release-target <move id> --target-gone` marks the move released on this host only, without asking the target. It asks first, or takes `--yes`. If that host ever comes back holding the copy, the copy stays stopped behind `/data/move.json` until its own bank is restored there by hand.
+
 Both hosts keep the move's files (a full copy of the bank) under
 `~/.pseudolife-mcp/moves/<move id>` until you remove them: the report names
 both folders and their sizes.

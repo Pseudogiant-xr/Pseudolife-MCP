@@ -40,10 +40,12 @@ pub(super) fn schedule() -> Schedule {
         let Some(schtasks) = crate::cli::program_lookup::find_program_path("schtasks") else {
             return Schedule::default();
         };
-        let output = std::process::Command::new(schtasks)
+        let mut query = std::process::Command::new(schtasks);
+        query
             .args(["/Query", "/TN", TASK, "/XML"])
-            .stdin(std::process::Stdio::null())
-            .output();
+            .stdin(std::process::Stdio::null());
+        no_window(&mut query);
+        let output = query.output();
         let enabled = output.is_ok_and(|o| {
             o.status.success()
                 && !task_text(&o.stdout)
@@ -299,11 +301,10 @@ impl Hosts for Live {
         };
         let found = crate::cli::program_lookup::find_program_path(program)
             .ok_or_else(|| format!("no {program} on PATH"))?;
-        let output = std::process::Command::new(found)
-            .args(&args)
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map_err(|error| error.to_string())?;
+        let mut command = std::process::Command::new(found);
+        command.args(&args).stdin(std::process::Stdio::null());
+        no_window(&mut command);
+        let output = command.output().map_err(|error| error.to_string())?;
         if output.status.success() {
             Ok(())
         } else {
@@ -578,9 +579,12 @@ impl Hosts for Live {
 
     fn repoint(&mut self, url: &str) -> Result<(), String> {
         let program = std::env::current_exe().map_err(|e| e.to_string())?;
-        let output = std::process::Command::new(program)
+        let mut command = std::process::Command::new(program);
+        command
             .args(["connect", url, "--yes"])
-            .stdin(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null());
+        no_window(&mut command);
+        let output = command
             .output()
             .map_err(|error| format!("connect could not be started: {error}"))?;
         match output.status.code() {
@@ -654,6 +658,20 @@ mod tests {
             assert!(!valid_database(name), "{name:?}");
         }
     }
+}
+
+/// A console child on Windows opens no window of its own (its output is
+/// captured): a parent with no console would otherwise give it one, which
+/// takes the user's foreground.
+pub(super) fn no_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
 }
 
 /// Ends the database's other sessions and waits until none is left (up to

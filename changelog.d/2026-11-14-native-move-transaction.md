@@ -37,7 +37,10 @@
   name. It refuses while this host's daemon is not serving, and each of its
   steps is safe to repeat.
   While such a target holds a copy of this host's bank, no other move starts
-  from this host; the refusal names `--resume` and `--release-target`.
+  from this host; the refusal names the commands that work for that move. A
+  target that no longer holds anything of the move is found so and released.
+  `--release-target <move id> --target-gone` gives up a target that is gone
+  for good, on this host only.
 - The target's half runs in its native client (move protocol 2): each
   operation is safe to repeat and is journalled on the target. Each change is
   refused unless the target's claim names the move, so a second move into the

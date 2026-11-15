@@ -157,6 +157,11 @@ pub(super) struct Record {
     /// bank as it stood there, with any writes it took.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub kept: Vec<String>,
+    /// This run's restore is known to have reached its drop (it answered
+    /// done, or failed after its drop): the target then holds this run's copy,
+    /// not the one the last rollback read.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub restore_dropped: bool,
     /// `--release-target`'s give-back finished on the target (with or
     /// without a restore: a target this move never restored over keeps no
     /// copy).

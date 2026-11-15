@@ -446,8 +446,15 @@ impl<H: Hosts> Run<'_, H> {
         self.mark(|f| f.target_restored = true)?;
         let request = self.request(Op::Restore);
         match self.ask(&request, None)? {
-            Ok(answer) if answer.ok => {}
+            Ok(answer) if answer.ok => {
+                self.record.restore_dropped = true;
+                self.save()?;
+            }
             Ok(answer) => {
+                if answer.restore_dropped {
+                    self.record.restore_dropped = true;
+                    self.save()?;
+                }
                 // Refused before its destructive step: nothing changed. A
                 // resumed target still holds its earlier restored bank.
                 if !answer.restore_dropped && !plan.resume {
@@ -1075,10 +1082,13 @@ impl<H: Hosts> Back<'_, H> {
         let mut can_start = true;
         // The target may hold, or may soon hold, the moved bank: it must be
         // proved stopped and gated before the source comes back (I2).
-        let needs_proof = flags.target_restored
-            || flags.gate_lifting
-            || flags.target_started
-            || flags.gate_written;
+        // The target holds, or may soon hold, the moved bank: proved stopped
+        // and gated before the source comes back. A gate alone (the restore
+        // never sent, or refused before its drop) leaves the target its own
+        // bank: it is read when it can be, to find a copy the record missed,
+        // but an unreadable target does not keep the source down.
+        let strict = flags.target_restored || flags.gate_lifting || flags.target_started;
+        let needs_proof = strict || flags.gate_written;
         // Whether the target holds the moved bank: the record's word, or a
         // reading that finds it there although the record says it never got
         // that far.
@@ -1143,7 +1153,15 @@ impl<H: Hosts> Back<'_, H> {
                                         user_counts: self.record.restored_counts.clone(),
                                         mutations,
                                     })
-                                    .or_else(|| self.record.gated_baseline.clone())
+                                    // This run's restore never dropped (it was
+                                    // never sent, was refused first, or its answer
+                                    // was lost): the bank may still be the one the
+                                    // last rollback read.
+                                    .or_else(|| {
+                                        (!self.record.restore_dropped)
+                                            .then(|| self.record.gated_baseline.clone())
+                                            .flatten()
+                                    })
                             } else {
                                 self.record.gated_baseline.clone()
                             };
@@ -1193,8 +1211,12 @@ impl<H: Hosts> Back<'_, H> {
         }
         // Without the abort, a step still on its way could start the target
         // after this reading.
-        if needs_proof && !aborted {
+        if (strict || restored) && !aborted {
             proved = false;
+        }
+        // Only a gate, and no reading found the moved bank: nothing to prove.
+        if !strict && !restored {
+            proved = true;
         }
         if !proved {
             self.record.phase = Phase::RollbackIncomplete;
@@ -1388,20 +1410,40 @@ impl<H: Hosts> Back<'_, H> {
         };
         let state = match self.read() {
             Ok(state) => state,
-            Err(why) => return unfinished(self, "read the target's state", why),
+            Err(why) => {
+                let mut outcome = unfinished(self, "read the target's state", why);
+                outcome.message.push_str(&format!(
+                    "\n  if {to} is gone for good: pseudolife-mcp move --release-target {id} --target-gone (marks this move released on this host only)"
+                ));
+                return outcome;
+            }
         };
-        // Neither this move's claim nor its bank is there any more: a run
-        // killed after the release's last step finished it.
-        if state.claim.as_deref() != Some(id.as_str())
-            && state.bank.as_deref() != Some(bank.as_str())
-        {
+        let ours = state.claim.as_deref() == Some(id.as_str());
+        let holds_bank = state.bank.as_deref() == Some(bank.as_str());
+        // A gate with no claim on it is this move's, left behind.
+        let unclaimed_gate = state.claim.is_none() && state.gated == Some(true);
+        if !ours && !holds_bank && !unclaimed_gate {
             if self.record.kept.is_empty() && !self.record.given_back {
-                self.record.phase = Phase::RolledBack;
+                // Nothing of this move's is there: the target was reset or
+                // given back by hand. The move holds nothing, so its record
+                // stops holding this host.
+                let found = format!(
+                    "{}, {}",
+                    state.claim.as_deref().map_or_else(
+                        || "no claim".to_owned(),
+                        |other| format!("move {other}'s claim")
+                    ),
+                    state.bank.as_deref().map_or_else(
+                        || "no bank identity".to_owned(),
+                        |other| format!("bank {other}")
+                    )
+                );
+                self.record.phase = Phase::Released;
                 self.save();
                 return Outcome {
-                    code: EXIT_REFUSED,
+                    code: EXIT_OK,
                     message: format!(
-                        "{to} holds neither move {id}'s claim nor its bank, so there is nothing of this move's to give back. Your bank is this host's ({bank}), which this host's daemon serves. Nothing was changed"
+                        "released: {to} no longer holds anything of move {id} (it reads {found}): it was reset or given back by hand. This host's record of the move is marked released, so it no longer holds this host. Your bank is this host's ({bank}), which this host's daemon serves. Nothing was changed on {to}"
                     ),
                 };
             }
@@ -1417,7 +1459,7 @@ impl<H: Hosts> Back<'_, H> {
         }
         // The claim is gone (removed by hand) while the target still holds
         // this move's bank: taken again, which only an unclaimed target allows.
-        if state.claim.is_none() && state.bank.as_deref() == Some(bank.as_str()) {
+        if state.claim.is_none() && (holds_bank || unclaimed_gate) {
             let claim = Op::Claim {
                 source_bank: bank.clone(),
                 resume: false,
@@ -1747,6 +1789,47 @@ pub(super) fn release_target<H: Hosts>(hosts: &mut H, record: Record) -> Outcome
         state: None,
     };
     back.release()
+}
+
+/// `move --release-target <id> --target-gone`: the target is gone for
+/// good, so nothing there can be given back or asked. The record is marked
+/// released on this host, so it stops holding this host; nothing else
+/// changes. `None` with a refusal when the record is not one a release can
+/// end.
+pub(super) fn target_gone(record: &Record) -> Result<Record, Outcome> {
+    let id = &record.move_id;
+    let to = &record.target;
+    if record.committed {
+        return Err(Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "move {id} passed its commit point: the bank lives on {to}, which is not given up. Nothing was changed"
+            ),
+        });
+    }
+    if record.phase == Phase::Released {
+        return Err(Outcome {
+            code: EXIT_OK,
+            message: format!("move {id} is already released; nothing to do"),
+        });
+    }
+    if !matches!(record.phase, Phase::RolledBack | Phase::Releasing) {
+        return Err(Outcome {
+            code: EXIT_REFUSED,
+            message: format!(
+                "move {id} is not rolled back (its record says {:?}); roll it back first with pseudolife-mcp move --rollback {id}. Nothing was changed",
+                record.phase
+            ),
+        });
+    }
+    let mut record = record.clone();
+    record.phase = Phase::Released;
+    record.rollback.push(Undo {
+        step: format!("give up {to}: gone for good (--target-gone)"),
+        ok: true,
+        detail: String::new(),
+    });
+    Ok(record)
 }
 
 /// The commands that undo what the record says was done, in rollback order,

@@ -183,6 +183,9 @@ struct Model {
     hand_write_at: Option<usize>,
     /// ...and then stops it and puts its gate back: only the counters show it.
     hand_write_quiet: bool,
+    /// Rows the source took since the last rollback: a new restore brings
+    /// them, so its copy no longer matches the reading that rollback kept.
+    source_grew: i64,
     record: Option<Record>,
     /// A late effect: the call it lands at, and the request.
     pending: Option<(usize, Request)>,
@@ -212,6 +215,7 @@ impl Model {
             give_back_cut_short: false,
             hand_write_at: None,
             hand_write_quiet: false,
+            source_grew: 0,
             record: None,
             pending: None,
             violations: Vec::new(),
@@ -502,9 +506,9 @@ impl Model {
                     answer.error = "restore exited 1: the disk filled".into();
                 } else {
                     h.bank = Bank::Clone {
-                        extra: 0,
+                        extra: self.source_grew,
                         warmups: 0,
-                        in_place: 0,
+                        in_place: self.source_grew,
                     }
                 }
             }
@@ -2382,4 +2386,171 @@ fn a_rollback_that_finds_the_moved_bank_keeps_it_whatever_the_record_said() {
     );
     let mut release = later(&model);
     assert_eq!(engine::release_target(&mut release, after).code, 0);
+}
+
+#[test]
+fn a_release_that_finds_nothing_of_the_move_on_the_target_stops_holding_this_host() {
+    let (first, _) = resumable_move();
+    let record = first.record.clone().unwrap();
+    for (label, claim, bank) in [
+        ("reset by hand", None, Bank::Other),
+        ("rebuilt fresh", None, Bank::Empty),
+        (
+            "taken by another move",
+            Some("20261114-100000-00000002"),
+            Bank::Other,
+        ),
+    ] {
+        let mut model = later(&first);
+        model.hosts.claim = claim.map(str::to_owned);
+        model.hosts.bank = bank.clone();
+        model.hosts.gated = false;
+        let before = model.hosts.clone();
+        let outcome = engine::release_target(&mut model, record.clone());
+        assert_eq!(outcome.code, 0, "{label}: {outcome:?}\n{:#?}", model.log);
+        assert!(
+            outcome.message.contains("no longer holds anything"),
+            "{label}: {}",
+            outcome.message
+        );
+        // Nothing changed there, and this host is no longer held.
+        assert_eq!(model.hosts, before, "{label}");
+        let released = model.record.clone().unwrap();
+        assert_eq!(released.phase, Phase::Released, "{label}");
+        assert_eq!(
+            super::command::held_refusal(std::slice::from_ref(&released), "dev@other", false),
+            None
+        );
+    }
+    // The near miss: a target that still holds the moved bank keeps holding
+    // this host until it is given back.
+    let mut model = later(&first);
+    model.hosts.claim = None;
+    assert!(
+        super::command::held_refusal(std::slice::from_ref(&record), "dev@other", false).is_some()
+    );
+    let outcome = engine::release_target(&mut model, record.clone());
+    assert_eq!(outcome.code, 0, "{outcome:?}");
+    assert!(
+        model
+            .hosts
+            .kept
+            .iter()
+            .any(|b| matches!(b, Bank::Clone { .. })),
+        "the copy was given back, not dropped"
+    );
+    // An unclaimed gate over a copy cut short is this move's: given back.
+    let mut model = later(&first);
+    model.hosts.claim = None;
+    model.hosts.bank = Bank::Partial;
+    let outcome = engine::release_target(&mut model, record);
+    assert_eq!(outcome.code, 0, "{outcome:?}\n{:#?}", model.log);
+    assert_eq!(model.hosts.bank, Bank::Empty);
+    assert!(model.hosts.kept.contains(&Bank::Partial));
+}
+
+#[test]
+fn a_target_gone_for_good_is_named_and_given_up_on_this_host_only() {
+    let parked = parked_move();
+    let record = parked.record.clone().unwrap();
+    let mut model = later(&parked);
+    model.always = vec![("target state", Fault::LostBefore)];
+    let outcome = engine::release_target(&mut model, record);
+    assert_eq!(outcome.code, 6, "{outcome:?}");
+    let id = &model.record.as_ref().unwrap().move_id;
+    assert!(
+        outcome
+            .message
+            .contains(&format!("move --release-target {id} --target-gone")),
+        "{}",
+        outcome.message
+    );
+    let releasing = model.record.clone().unwrap();
+    assert_eq!(releasing.phase, Phase::Releasing);
+    let released = engine::target_gone(&releasing).unwrap();
+    assert_eq!(released.phase, Phase::Released);
+    assert!(!super::command::unfinished(&released));
+    assert_eq!(
+        super::command::held_refusal(std::slice::from_ref(&released), "dev@other", false),
+        None
+    );
+    // Never for a move that committed or is still to be rolled back.
+    let mut committed = releasing.clone();
+    committed.committed = true;
+    assert_eq!(engine::target_gone(&committed).unwrap_err().code, 4);
+    let mut moving = releasing.clone();
+    moving.phase = Phase::Moving;
+    assert_eq!(engine::target_gone(&moving).unwrap_err().code, 4);
+}
+
+#[test]
+fn the_held_refusal_names_only_commands_that_work_for_that_move() {
+    let (first, _) = resumable_move();
+    let record = first.record.clone().unwrap();
+    let why =
+        super::command::held_refusal(std::slice::from_ref(&record), "dev@other", false).unwrap();
+    assert!(
+        why.contains("pseudolife-mcp move --to dev@target --target-url http://100.64.0.2:8765 --no-keep-tokens --resume"),
+        "{why}"
+    );
+    let parked = parked_move().record.unwrap();
+    let why =
+        super::command::held_refusal(std::slice::from_ref(&parked), "dev@other", false).unwrap();
+    assert!(!why.contains("--resume"), "{why}");
+    assert!(
+        why.contains(&format!("move --release-target {}", parked.move_id)),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_fresh_move_that_lost_its_link_after_its_gate_mark_brings_the_source_back() {
+    // The restore was never sent: the target holds only its own bank.
+    let mut model = Model::new();
+    model.always = [
+        "target gate",
+        "target restore",
+        "target abort",
+        "target state",
+        "target stop",
+        "target ungate",
+        "target start",
+        "target release",
+        "target timer-resume",
+        "target policy-set",
+    ]
+    .into_iter()
+    .map(|name| (name, Fault::LostBefore))
+    .collect();
+    model.always_from = call_of("target gate");
+    let outcome = run(&mut model);
+    let h = &model.hosts;
+    assert!(
+        h.source_running && !h.fenced && !h.read_only,
+        "{outcome:?}\n{h:?}"
+    );
+    assert!(
+        !outcome
+            .message
+            .contains("two daemons must never serve one bank"),
+        "{}",
+        outcome.message
+    );
+    assert!(model.violations.is_empty(), "{:?}", model.violations);
+}
+
+#[test]
+fn a_resume_whose_own_restore_ran_is_not_compared_with_the_bank_it_replaced() {
+    // The source took rows since the last rollback; the resume restores
+    // them, and the check right after its restore fails.
+    let (first, plan) = resumable_move();
+    let mut model = later(&first);
+    model.source_grew = 2;
+    let restore = resume_call_of(&first, &plan, "target restore");
+    model.fault = Some((restore + 2, Fault::Refused));
+    let outcome = engine::execute(&mut model, &plan, ID);
+    assert_eq!(outcome.code, 1, "{outcome:?}\n{:#?}", model.log);
+    let record = model.record.clone().unwrap();
+    assert!(record.parked_writes.is_none(), "{record:?}");
+    assert!(super::command::resumable(std::slice::from_ref(&record), &record.target).is_some());
 }

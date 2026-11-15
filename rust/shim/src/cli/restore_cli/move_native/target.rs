@@ -442,6 +442,7 @@ impl super::ops::Site for Site2 {
         };
         let mut command = std::process::Command::new(program);
         command.args(args).stdin(std::process::Stdio::null());
+        super::source::no_window(&mut command);
         match abort_file {
             Some(file) => command.env(crate::cli::restore_cli::MOVE_ABORT_ENV, file),
             None => command.env_remove(crate::cli::restore_cli::MOVE_ABORT_ENV),
