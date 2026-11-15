@@ -63,7 +63,7 @@
       },
       "Parity checks / ubuntu-latest / cli-store": {
         "minutes": 8.0,
-        "estimate": "The measured 6.0 plus what moved from cli-live with the Python freeze (2026-11-14): the body and security golden replays and the kept live security checks (startup refusals, two remote-bind scenarios), parts of cli-live's measured Linux body 0.7 and security 4.0 min (batch runs 43449162029, 43418298157) whose live passes and six mutants left; about 2 min added."
+        "estimate": "The measured 6.0 plus what moved from cli-live with the Python freeze (2026-11-14): the body and security golden replays and the kept live security checks (startup refusals, two remote-bind scenarios), parts of cli-live's measured Linux body 0.7 and security 4.0 min (batch runs 43449162029, 43418298157) whose live passes and six mutants left; about 2 min added. 2026-11-16 (#1611): the kept live security checks and their fixture download left (32 s + 5 s on batch run 43708904518), so 8.0 is an upper bound until a batch is measured."
       },
       "Parity checks / ubuntu-latest / w1c-doctor": {
         "minutes": 10.8
@@ -85,7 +85,7 @@
       },
       "Parity checks / windows-latest / cli-store": {
         "minutes": 15.0,
-        "estimate": "The measured 11.8 plus what moved from cli-live with the Python freeze (2026-11-14): the body and security golden replays and the kept live security checks, parts of hosted Windows' body 2.5 and security 8.6 min (parity_scope.py's batch measurement) whose live passes and six mutants left; about 3 min added."
+        "estimate": "The measured 11.8 plus what moved from cli-live with the Python freeze (2026-11-14): the body and security golden replays and the kept live security checks, parts of hosted Windows' body 2.5 and security 8.6 min (parity_scope.py's batch measurement) whose live passes and six mutants left; about 3 min added. 2026-11-16 (#1611): the kept live security checks and their fixture download left (44 s + 2 s on batch run 43708904518), so 15.0 is an upper bound until a batch is measured."
       },
       "Parity checks / windows-latest / w1c-doctor": {
         "minutes": 14.1
