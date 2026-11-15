@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test",
+  "before": "5d0f63c18413566d",
+  "fingerprint": "492e9b9ddbe2b98f",
+  "reason": "Against master 81057402a (batch 7, which landed #1550 and regenerated the baseline): this branch's only change to the lane is the native client build before the tests (toolchain, the weekly cache, a debug cargo build of pseudolife-stdio and a version smoke), whose 1.2 minutes are the estimate in ci_budget.json (35.2 = #1557's measured 34.0 plus 1.2); #1550's live-set selection can only lower the measured part. Re-measure from the first two batches that carry it."
+}

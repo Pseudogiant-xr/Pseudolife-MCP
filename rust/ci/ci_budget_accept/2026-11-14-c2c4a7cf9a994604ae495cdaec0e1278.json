@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "guards",
+  "before": "92b7929dcce188df",
+  "fingerprint": "d7520d414db3cab5",
+  "reason": "Adds tests/test_ci_native_client.py (workflow pins, seconds) to the Rust-readers step; within the 9.0-minute estimate."
+}
