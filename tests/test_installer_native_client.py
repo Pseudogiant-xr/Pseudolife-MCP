@@ -1,6 +1,6 @@
 """The bash installer installs the native client from the release, never Python.
 
-These run the installer's native-client block (``ops/install.sh``) and its
+These run the installer's native-client block (``ops/install-native.sh``) and its
 shim helpers in a throwaway home, against a fake release directory
 (``PSEUDOLIFE_NATIVE_ARCHIVE_URL``) whose archive holds a stub
 ``pseudolife-mcp``. ``python``, ``python3``, ``py``, ``pip`` and ``pipx`` on
@@ -50,7 +50,7 @@ def _p(path: Path) -> str:
 
 
 def _between(start: str, end: str) -> str:
-    text = (ROOT / "ops/install.sh").read_text(encoding="utf-8")
+    text = (ROOT / "ops/install-native.sh").read_text(encoding="utf-8")
     assert text.count(start) == 1, start
     return start + text.split(start, 1)[1].split(end, 1)[0] + end
 
@@ -269,7 +269,7 @@ def test_resolve_installed_shim_accepts_only_a_native_launcher(tmp_path):
 
 
 def test_the_installer_no_longer_installs_a_python_client():
-    lines = (ROOT / "ops/install.sh").read_text(encoding="utf-8").splitlines()
+    lines = (ROOT / "ops/install-native.sh").read_text(encoding="utf-8").splitlines()
     text = "\n".join(line for line in lines if not line.lstrip().startswith("#"))
     for gone in ("pipx install", "pip install --user", "ops/shim_runtime.py", "shim_runtime_python"):
         assert gone not in text, gone

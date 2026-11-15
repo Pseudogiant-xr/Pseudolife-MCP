@@ -18,8 +18,6 @@ import sys
 
 import pytest
 
-from tests import native_client_stub as native_stub
-
 from pseudolife_memory.credentials import CredentialProvider
 from tests.test_installer_existing_upgrade import _between, _fixture_env
 
@@ -302,8 +300,6 @@ def _wire(ps: _PowerShell, client: str, *, token_file: str, existing: str | None
     config = ("pseudolife-memory\n" + existing) if existing else ""
     body = f"""$env:PATH = '{_q(installed_bin)}' + [IO.Path]::PathSeparator + $env:PATH
 $env:FAKE_CONFIG = '{_q(config)}'
-$env:FAKE_LAUNCHER = '{_q(shim)}'
-$env:FAKE_KEEP_LAUNCHER = '1'
 $clients = @('{client}')
 $Transport = 'shim'
 $codexCredentialBootstrapFailed = $false
@@ -322,8 +318,15 @@ $claudeAgentStateDir = '{_q(state_dir)}'
 $claudeJson = '{_q(claude_json) if claude_json else ""}'
 function Set-CodexRuntimeDefaults {{ $script:codexRuntimeDefaults = 'preserved' }}
 {chr(10).join(fakes)}
+function global:pipx {{
+    $callArgs = @($args)
+    Add-Content -LiteralPath '{_q(call_log)}' -Value ('pipx|' + ($callArgs -join ' '))
+    if ($callArgs[0] -eq 'environment') {{ Write-Output '{_q(installed_bin)}' }}
+    $global:LASTEXITCODE = 0
+}}
 {helper}
-{native_stub.POWERSHELL}
+function Get-ShimProcessTable {{ $null }}
+function Get-ShimRuntimePython {{ $null }}
 {_function("Register-Result($provider, $okState, $okMessage)")}
 {loop}
 Write-Output ("STATE=" + $mcpState['{client}'])

@@ -18,10 +18,17 @@ use std::{
 
 const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]
        pseudolife-mcp installer expose [--json]
+       pseudolife-mcp installer --capability
        pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]
        pseudolife-mcp installer codex-runtime-defaults
        pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]
        pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
+/// The installer steps this binary carries, as a level the installers probe
+/// before running any of them (`installer --capability`;
+/// ops/install-native.sh `NATIVE_INSTALLER_PROTOCOL`). Raise it when a step the
+/// installers call is added or changes meaning, and raise the installers'
+/// required level with it.
+pub const INSTALLER_PROTOCOL: u32 = 1;
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
 /// Arguments follow `installer`. Exit 0 when every selected registration
@@ -51,6 +58,10 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         Some("codex-runtime-defaults") => codex_config::run_runtime_defaults(&arguments[1..]),
         Some("codex-hooks") => codex_hooks::run(&arguments[1..]),
         Some("claude-desktop") => claude_desktop::run(&arguments[1..]),
+        Some("--capability") => match &arguments[1..] {
+            [] => emit(&format!("pseudolife-mcp installer-protocol {INSTALLER_PROTOCOL}")),
+            _ => usage("--capability takes no arguments"),
+        },
         Some("--help" | "-h") => emit(USAGE),
         _ => usage(
             "expected an installer step: migrate-registrations, expose, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop",

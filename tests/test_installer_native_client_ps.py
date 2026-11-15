@@ -1,7 +1,7 @@
 """The PowerShell installer installs the native client from the release.
 
 These dot-source the installer's native-client block and shim helpers
-(``ops/install.ps1``) in ``pwsh`` with a throwaway home and a fake release
+(``ops/install-native.ps1``) in ``pwsh`` with a throwaway home and a fake release
 directory (``PSEUDOLIFE_NATIVE_ARCHIVE_URL``). The refusal tests run
 everywhere. The install tests need an executable client: off Windows a
 shell stub; on Windows a real native ``pseudolife-mcp.exe`` named by
@@ -61,7 +61,7 @@ esac
 
 
 def _block(start: str, end: str) -> str:
-    text = (ROOT / "ops/install.ps1").read_text(encoding="utf-8").replace("\r\n", "\n")
+    text = (ROOT / "ops/install-native.ps1").read_text(encoding="utf-8").replace("\r\n", "\n")
     assert text.count(start) == 1, start
     return start + text.split(start, 1)[1].split(end, 1)[0]
 
@@ -232,7 +232,7 @@ def test_an_unsupported_platform_refuses(tmp_path):
 
 
 def test_the_installer_no_longer_installs_a_python_client():
-    lines = (ROOT / "ops/install.ps1").read_text(encoding="utf-8").splitlines()
+    lines = (ROOT / "ops/install-native.ps1").read_text(encoding="utf-8").splitlines()
     text = "\n".join(line for line in lines if not line.lstrip().startswith("#"))
     for gone in ("pipx install", "pip install --user", "shim_runtime.py", "Get-ShimRuntimePython"):
         assert gone not in text, gone

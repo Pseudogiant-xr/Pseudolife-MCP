@@ -110,6 +110,25 @@ fn report(output: &Output) -> Value {
     })
 }
 
+/// The installers' one probe of a staged release (ops/install-native.sh,
+/// NATIVE_INSTALLER_PROTOCOL): exactly this line on stdout, exit 0, and no
+/// other output; anything after the flag is a usage error.
+#[test]
+fn the_capability_probe_names_the_installer_protocol_and_nothing_else() {
+    let home = Home::new();
+    let output = home.run(&["--capability"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "pseudolife-mcp installer-protocol 1
+"
+    );
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let extra = home.run(&["--capability", "--json"]);
+    assert_eq!(extra.status.code(), Some(2), "{extra:?}");
+    assert!(extra.stdout.is_empty());
+}
+
 #[test]
 fn refuses_without_the_native_client_and_changes_nothing() {
     let home = Home::new();

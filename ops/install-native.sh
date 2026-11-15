@@ -1,0 +1,4073 @@
+#!/usr/bin/env bash
+# Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
+# before changing what this script asks or prints.
+# >>> usage >>>
+# One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
+# tier 2). Everything downstream of Docker: provider selection -> preflight ->
+# extractor choice -> compose up -> client hooks -> standing instructions ->
+# MCP registration -> health. Re-running is safe; re-running with a different
+# --extractor is the supported way to switch modes.
+#
+#   ops/install.sh                                  # interactive
+#   ops/install.sh --extractor sidecar --client codex
+#   ops/install.sh --extractor claude-only --client claude,gemini
+#   ops/install.sh --extractor claude-fallback --instructions append
+#   ops/install.sh --extractor openai-fallback --client codex
+#   ops/install.sh --extractor endpoint --extractor-url http://127.0.0.1:1234/v1 \
+#       --model qwen3.6-27b --client claude
+#   ops/install.sh --daemon-url http://100.64.0.2:8765 \
+#       --pairing-code ABCD-EFGH-JKMN --client claude
+#   ops/install.sh --daemon-url http://100.64.0.2:8765 \
+#       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
+#
+# Providers (--client, comma- or space-separated list):
+#   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
+#   claude-desktop  Claude Desktop - MCP via claude_desktop_config.json (no hooks)
+#   codex     OpenAI Codex   - MCP + hooks selected with --codex-hooks
+#   gemini    Gemini CLI     - MCP + standing instructions (no hook system)
+#   generic   any MCP agent  - prints paste-ready config + standing block
+#   both = claude,codex      all = claude,codex,gemini
+#
+# Other flags:
+#   --yes                         no prompts; take documented defaults (not broad consent)
+#   PSEUDOLIFE_UNATTENDED=1        the same explicit signal for agents under a pty
+#                                  (also enabled when stdin is not a terminal)
+#   Omitted --client detects installed CLIs; omitted --extractor uses sidecar.
+#   --codex-hooks auto|manual|plugin|skip  hook owner (default: auto)
+#   --codex-hook-trust ask|yes|no     approve PseudoLife hooks and the memory_message
+#                                    tool (default: ask)
+#   --claude-plugin auto|skip        install the Claude Code plugin (hooks +
+#                                    commands) when claude is a client (default: auto)
+#   --claude-legacy-hooks ask|remove|keep  with the plugin installed, remove the
+#                                    hooks an earlier install wrote to
+#                                    ~/.claude/settings.json (default: ask -
+#                                    prompts; unattended runs keep them)
+#   --firewall-rule ask|yes|no       CLI shim modes on Linux, when ufw drops the
+#                                    daemon container's traffic to the shim: add
+#                                    the one ufw rule that lets only the
+#                                    daemon's network reach the shim's port
+#                                    (default: ask; the prompt defaults to no;
+#                                    unattended runs skip it and print the
+#                                    command)
+#   --instructions append|skip|auto  standing memory block (default: auto -
+#                                    prompts only where no briefing hook exists)
+#   --claude-md append|skip          compatibility alias for --instructions
+#   --agents-file <path>             standing-file target for generic agents
+#   --no-art                         plain output (no banner, no color)
+#   --no-token                       open-loopback install: mint no bearer
+#   --engine rust|python             the Docker daemon: rust pulls the release's
+#                                    published Rust image; a rerun keeps the
+#                                    engine installed (default for a new
+#                                    install: rust, or python without a bearer
+#                                    or a published image); naming the other engine
+#                                    switches it through pseudolife-mcp update
+#   --tunnel                         enter optional guided ChatGPT Secure MCP
+#                                    Tunnel setup after local installation
+#                                    token, so the agent board stays off
+#   --test-login                     also give the test suite its own Postgres
+#                                    login, which cannot open the bank
+#                                    (`pseudolife-mcp test-login create`): for
+#                                    contributors who run the suite against
+#                                    this server; off by default
+#   --model <name>                   the dreamer model: one the CLI shim modes
+#                                    list (docs/guide/dreaming.md), or any
+#                                    name an endpoint mode's server serves
+#   --extractor-url <url>            endpoint modes: the server's
+#                                    OpenAI-compatible base URL (where /models
+#                                    and /chat/completions live, usually /v1)
+#   --shim-port / --transport        as before
+#
+# Client-only install (this machine runs no daemon; one runs elsewhere,
+# typically reached over a tailnet): no Docker, volumes, ops/.env, token
+# minting or local daemon. Shim, registrations, plugin, hooks and standing
+# instructions are set up as usual, aimed at the remote daemon. An
+# interactive run that names no daemon asks first where the bank lives:
+# answering "another machine" is this mode, with the URL and token asked for.
+#   --daemon-url <url>               the daemon's URL (default: the
+#                                    PSEUDOLIFE_MCP_DAEMON_URL environment
+#                                    variable). A host other than 127.0.0.1,
+#                                    localhost or ::1 implies --client-only
+#   --token-file <path>              client-only: an owner-only file (chmod
+#                                    600) holding the daemon's bearer token
+#                                    (default: PSEUDOLIFE_MCP_TOKEN_FILE);
+#                                    the installer never mints one here.
+#                                    The fallback: prefer --pairing-code
+#   --client-only                    wire clients to --daemon-url only; with
+#                                    a loopback URL, for an SSH tunnel
+#   --read-token                     client-only: create the --token-file (it
+#                                    must not exist yet) from the token typed,
+#                                    unechoed, or piped on stdin (the
+#                                    fallback: prefer --pairing-code)
+#   --pairing-code <code>            client-only, recommended: a pairing code
+#                                    from pseudolife-mcp invite <name> on the
+#                                    daemon's host, instead of a token, so
+#                                    this machine gets its own principal. If
+#                                    two machines use one token, rotating it
+#                                    breaks both and neither can be revoked
+#                                    alone. The installed
+#                                    shim's pair creates the --token-file
+#                                    (default ~/.pseudolife-mcp/<client>.token;
+#                                    it must not exist yet). An interactive
+#                                    run also takes a code pasted where it
+#                                    asks for the token, which keeps it off
+#                                    the command line (and shell history)
+#   --client-update-schedule ask|yes|no|HH:MM
+#                                    client-only, Linux: keep this machine's
+#                                    clients on the daemon's release with a
+#                                    daily systemd --user timer
+#                                    (pseudolife-mcp update --schedule): ask
+#                                    (default) prompts once, default no, and
+#                                    unattended runs skip it and print the
+#                                    command; yes sets it up at 04:30, HH:MM
+#                                    at that time; no skips it. A job already
+#                                    in place is left alone
+# One token file is one principal: every client a run wires shares it. For
+# per-client attribution on the board, run the installer once per client,
+# each run with that client's own token file.
+#
+# Extractor modes (spec: docs/superpowers/specs/
+# 2026-07-14-installer-extractor-choice-design.md; the modes and models:
+# docs/guide/dreaming.md, "Extractor modes and dreamer models"):
+#   claude-only      Claude CLI shim only — the ~11.8 GB sidecar image is never
+#                    built or pulled; dreams pause while the shim is down
+#   claude-fallback  Claude CLI shim primary, sidecar as automatic fallback
+#                    (needs a logged-in Max-plan CLI)
+#   openai-only      Codex CLI (ChatGPT-plan) shim only — sidecar never built
+#   openai-fallback  Codex CLI shim primary, sidecar as automatic fallback
+#   endpoint         any OpenAI-compatible server you name (--extractor-url,
+#                    --model) — sidecar never built
+#   endpoint-fallback  that server primary, sidecar as automatic fallback
+#   sidecar          bundled local CPU extractor only (stock default; no
+#                    plan or server needed)
+# The earlier spellings sonnet-only, sonnet-fallback, codex-only and
+# codex-fallback still work, as deprecated aliases of the claude-* and
+# openai-* modes.
+# <<< usage <<<
+set -euo pipefail
+
+EXTRACTOR=""
+EXTRACTOR_URL=""
+MODEL=""
+MODEL_SET=""
+CLIENT=""
+EXPLICIT_ARGS=""
+CODEX_HOOKS=auto
+CODEX_HOOK_TRUST=ask
+CLAUDE_PLUGIN=auto
+CLAUDE_LEGACY_HOOKS=ask
+FIREWALL_RULE=ask
+CLAUDE_MD=""
+INSTRUCTIONS=""
+AGENTS_FILE=""
+# 0 = auto: 8082 for the Claude shim modes, 8086 for the Codex ones.
+SHIM_PORT=0
+TRANSPORT=shim
+NO_ART=""
+YES=""
+NO_TOKEN=""
+TUNNEL=""
+TEST_LOGIN=""
+DAEMON_URL=""
+TOKEN_FILE=""
+CLIENT_ONLY=""
+READ_TOKEN=""
+PAIRING_CODE=""
+CLIENT_UPDATE_SCHEDULE=ask
+ENGINE=""
+
+usage() {
+    sed -n '/^# >>> usage >>>$/,/^# <<< usage <<<$/p' "$0" \
+        | sed '1d;$d' | sed 's/^# \{0,1\}//'
+    exit "${1:-2}"
+}
+
+while [ $# -gt 0 ]; do
+    EXPLICIT_ARGS="$EXPLICIT_ARGS $1"
+    case "$1" in
+        --extractor) EXTRACTOR="$2"; shift 2 ;;
+        --extractor-url) EXTRACTOR_URL="$2"; shift 2 ;;
+        --model) MODEL="$2"; MODEL_SET=1; shift 2 ;;
+        --client) CLIENT="$2"; shift 2 ;;
+        --codex-hooks) CODEX_HOOKS="$2"; shift 2 ;;
+        --codex-hook-trust) CODEX_HOOK_TRUST="$2"; shift 2 ;;
+        --claude-plugin) CLAUDE_PLUGIN="$2"; shift 2 ;;
+        --claude-legacy-hooks) CLAUDE_LEGACY_HOOKS="$2"; shift 2 ;;
+        --firewall-rule) FIREWALL_RULE="$2"; shift 2 ;;
+        --claude-md) CLAUDE_MD="$2"; shift 2 ;;
+        --instructions) INSTRUCTIONS="$2"; shift 2 ;;
+        --agents-file) AGENTS_FILE="$2"; shift 2 ;;
+        --shim-port) SHIM_PORT="$2"; shift 2 ;;
+        --transport) TRANSPORT="$2"; shift 2 ;;
+        --yes) YES=1; shift ;;
+        --no-art) NO_ART=1; shift ;;
+        --no-token) NO_TOKEN=1; shift ;;
+        --tunnel) TUNNEL=1; shift ;;
+        --test-login) TEST_LOGIN=1; shift ;;
+        --daemon-url) DAEMON_URL="$2"; shift 2 ;;
+        --token-file) TOKEN_FILE="$2"; shift 2 ;;
+        --client-only) CLIENT_ONLY=1; shift ;;
+        --engine) ENGINE="$2"; shift 2 ;;
+        --read-token) READ_TOKEN=1; shift ;;
+        --pairing-code) PAIRING_CODE="$2"; shift 2 ;;
+        --client-update-schedule) CLIENT_UPDATE_SCHEDULE="$2"; shift 2 ;;
+        -h|--help)   usage 0 ;;
+        *) echo "unknown argument: $1" >&2; usage ;;
+    esac
+done
+# >>> unattended mode >>>
+# A pty cannot tell a person from an agent. Agents explicitly opt out of
+# questions with --yes or PSEUDOLIFE_UNATTENDED=1; redirected stdin also does.
+INSTALLER_UNATTENDED=""
+if [ -n "$YES" ] || [ "${PSEUDOLIFE_UNATTENDED:-}" = 1 ] || [ ! -t 0 ]; then
+    INSTALLER_UNATTENDED=1
+    echo "Unattended install: no prompts; documented defaults apply (explicit flags override)."
+fi
+# <<< unattended mode <<<
+# >>> extractor modes >>>
+# The dream extractor modes, named for the extractor family, and the models
+# the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
+# lists identical to install.ps1's, the Claude shim autostart scripts',
+# docs/guide/dreaming.md's and the Console's. The model lists are the menu,
+# not a gate: a CLI shim mode passes an id it does not list to the shim
+# unchanged, so a model release is usable the day it ships.
+EXTRACTOR_MODES="sidecar claude-only claude-fallback openai-only openai-fallback endpoint endpoint-fallback"
+CLAUDE_MODELS="claude-opus-5-5 claude-opus-5 claude-sonnet-5-5 claude-sonnet-5 claude-haiku-5-5 claude-haiku-4-5 claude-fable-5-1 claude-fable-5"
+OPENAI_MODELS="gpt-5.6-terra gpt-5.6-sol gpt-5.6-luna gpt-6-sol gpt-6-luna gpt-6.1-sol"
+# The model-era names (2026-07-14 to 2026-09-28) stay accepted.
+extractor_alias=""
+case "$EXTRACTOR" in
+    sonnet-only) extractor_alias=claude-only ;;
+    sonnet-fallback) extractor_alias=claude-fallback ;;
+    codex-only) extractor_alias=openai-only ;;
+    codex-fallback) extractor_alias=openai-fallback ;;
+esac
+if [ -n "$extractor_alias" ]; then
+    echo "note: --extractor $EXTRACTOR is a deprecated spelling of --extractor $extractor_alias, which this run uses." >&2
+    EXTRACTOR="$extractor_alias"
+fi
+EXTRACTOR_URL="${EXTRACTOR_URL%/}"
+extractor_disables_sidecar() {  # status 0 for the single-extractor modes
+    case "$EXTRACTOR" in claude-only|openai-only|endpoint) return 0 ;; *) return 1 ;; esac
+}
+model_is_blank() {  # status 0 for a --model given empty or all whitespace
+    { [ -n "${MODEL_SET:-}" ] || [ -n "$MODEL" ]; } &&
+        [ -z "$(printf '%s' "$MODEL" | tr -d '[:space:]')" ]
+}
+# What may reach ops/.env (compose expands $ and reads " #" as a comment),
+# a systemd ExecStart line and a Windows task's command line unquoted: model
+# ids and endpoint URLs are held to these characters. Brackets are allowed
+# in a URL only, for an IPv6 host.
+SAFE_ID_PATTERN='^[A-Za-z0-9._:/@+-]+$'
+SAFE_URL_PATTERN='^[][A-Za-z0-9._:/@+-]+$'
+check_extractor_args() {  # the mode, its model and its URL, together
+    if model_is_blank; then
+        echo "--model needs a model id (it was empty)" >&2
+        exit 2
+    fi
+    if [ -n "$MODEL" ] && ! printf '%s' "$MODEL" | grep -Eq "$SAFE_ID_PATTERN"; then
+        echo "--model '$MODEL' holds characters the installer cannot write safely; use letters, digits and . _ : / @ + -" >&2
+        exit 2
+    fi
+    case " $EXTRACTOR_MODES " in *" $EXTRACTOR "*) ;; *)
+        echo "invalid --extractor '$EXTRACTOR' ($(printf '%s' "$EXTRACTOR_MODES" | tr ' ' '|'))" >&2
+        exit 2 ;;
+    esac
+    case "$EXTRACTOR" in
+        endpoint|endpoint-fallback)
+            # Any server's own model names: none is listed here.
+            if [ -z "$EXTRACTOR_URL" ] || [ -z "$MODEL" ]; then
+                echo "--extractor $EXTRACTOR needs --extractor-url <the server's OpenAI-compatible base URL, e.g. http://127.0.0.1:1234/v1> and --model <a model name that server serves>" >&2
+                exit 2
+            fi
+            # Checked before any other message, which never echoes the URL.
+            url_authority="${EXTRACTOR_URL#*://}"
+            case "${url_authority%%/*}" in *@*)
+                echo "--extractor-url must not carry credentials (user:password@host); a key the server wants goes in PSEUDOLIFE_DREAM_API_KEY in ops/.env" >&2
+                exit 2 ;;
+            esac
+            case "$EXTRACTOR_URL" in http://?*|https://?*) ;; *)
+                echo "invalid --extractor-url: expected the server's http(s) base URL, e.g. http://127.0.0.1:1234/v1" >&2
+                exit 2 ;;
+            esac
+            if ! printf '%s' "$EXTRACTOR_URL" | grep -Eq "$SAFE_URL_PATTERN"; then
+                echo "invalid --extractor-url: it holds characters the installer cannot write safely; use letters, digits and . _ : / @ + - (and [ ] around an IPv6 host)" >&2
+                exit 2
+            fi ;;
+        *)
+            if [ -n "$EXTRACTOR_URL" ]; then
+                echo "--extractor-url applies only to --extractor endpoint or endpoint-fallback" >&2
+                exit 2
+            fi
+            # One family rule, the same in install.ps1, before any note: a
+            # shim only honours its own family's ids per request.
+            if [ -n "$MODEL" ]; then
+                case "$EXTRACTOR:$MODEL" in
+                    sidecar:*|claude-only:claude-?*|claude-fallback:claude-?*) ;;
+                    openai-only:gpt-?*|openai-only:codex-?*) ;;
+                    openai-fallback:gpt-?*|openai-fallback:codex-?*) ;;
+                    *)
+                        echo "--model '$MODEL' does not match extractor mode $EXTRACTOR: a claude-* mode takes a claude-* id, an openai-* mode a gpt-* or codex-* id" >&2
+                        exit 2 ;;
+                esac
+            fi
+            case " $CLAUDE_MODELS $OPENAI_MODELS " in *" $MODEL "*) ;; *)
+                if [ -n "$MODEL" ] && [ "$EXTRACTOR" = sidecar ]; then
+                    echo "--model '$MODEL' is not one this installer knows, and --extractor sidecar serves only its bundled model; --model picks a CLI shim or endpoint mode's model" >&2
+                    exit 2
+                elif [ -n "$MODEL" ]; then
+                    echo "model $MODEL is not in this installer's known list; passing it to the shim unchanged (add it to the lists when it is a real release)" >&2
+                fi ;;
+            esac ;;
+    esac
+}
+if model_is_blank; then
+    echo "--model needs a model id (it was empty)" >&2
+    exit 2
+fi
+[ -z "$EXTRACTOR" ] || check_extractor_args
+# <<< extractor modes <<<
+case "$CLAUDE_MD" in ""|append|skip) ;; *)
+    echo "invalid --claude-md '$CLAUDE_MD' (append|skip)" >&2; exit 2 ;;
+esac
+case "$INSTRUCTIONS" in ""|append|skip|auto) ;; *)
+    echo "invalid --instructions '$INSTRUCTIONS' (append|skip|auto)" >&2; exit 2 ;;
+esac
+case "$TRANSPORT" in shim|http) ;; *)
+    echo "invalid --transport '$TRANSPORT' (shim|http)" >&2; exit 2 ;;
+esac
+case "$CODEX_HOOKS" in auto|manual|plugin|skip) ;; *)
+    echo "invalid --codex-hooks '$CODEX_HOOKS' (auto|manual|plugin|skip)" >&2; exit 2 ;;
+esac
+case "$CODEX_HOOK_TRUST" in ask|yes|no) ;; *)
+    echo "invalid --codex-hook-trust '$CODEX_HOOK_TRUST' (ask|yes|no)" >&2; exit 2 ;;
+esac
+case "$CLAUDE_PLUGIN" in auto|skip) ;; *)
+    echo "invalid --claude-plugin '$CLAUDE_PLUGIN' (auto|skip)" >&2; exit 2 ;;
+esac
+case "$CLAUDE_LEGACY_HOOKS" in ask|remove|keep) ;; *)
+    echo "invalid --claude-legacy-hooks '$CLAUDE_LEGACY_HOOKS' (ask|remove|keep)" >&2; exit 2 ;;
+esac
+case "$FIREWALL_RULE" in ask|yes|no) ;; *)
+    echo "invalid --firewall-rule '$FIREWALL_RULE' (ask|yes|no)" >&2; exit 2 ;;
+esac
+# >>> client update schedule flag >>>
+CLIENT_UPDATE_SCHEDULE="$(printf '%s' "$CLIENT_UPDATE_SCHEDULE" | tr '[:upper:]' '[:lower:]')"
+case "$CLIENT_UPDATE_SCHEDULE" in
+    ask|yes|no) ;;
+    *)
+        if ! [[ $CLIENT_UPDATE_SCHEDULE =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+            echo "invalid --client-update-schedule '$CLIENT_UPDATE_SCHEDULE' (ask|yes|no, or a time of day as HH:MM)" >&2
+            exit 2
+        fi ;;
+esac
+# <<< client update schedule flag <<<
+
+# Both are needed from here on: the client-only mode block asks this
+# checkout's shim code whether a daemon URL is loopback.
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+installer_python() {  # echoes an interpreter >= 3.10, or nothing
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 0
+}
+
+compose_file="$repo/ops/docker-compose.yml"
+env_file="$repo/ops/.env"
+override_file="$repo/ops/docker-compose.override.yml"
+OVERRIDE_MARKER="# pseudolife-mcp install: managed override (sidecar disabled) — do not edit; installer rewrites/removes this file"
+# Pre-codex installs wrote the mode-specific text; keep recognizing it so a
+# mode switch still removes/rewrites their override file.
+LEGACY_OVERRIDE_MARKER="# pseudolife-mcp install: managed override (sonnet-only) — do not edit; installer rewrites/removes this file"
+# ... and the text between the codex modes (2026-08-31) and the endpoint modes.
+LEGACY_SHIM_OVERRIDE_MARKER="# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
+ENV_BEGIN="# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
+ENV_END="# <<< pseudolife-mcp install <<<"
+
+# >>> recorded choices >>>
+installer_state() {
+    local state_python
+    state_python="$(installer_python)"
+    [ -n "$state_python" ] || { echo "Python >= 3.10 is needed to read recorded installer choices; install it and rerun." >&2; return 1; }
+    "$state_python" "$repo/ops/installer_state.py" "$@"
+}
+INSTALLER_RERUN=""
+RECORDED_BANK_LOCATION=""
+RECORDED_INSTRUCTIONS_GEMINI=""
+RECORDED_INSTRUCTIONS_GENERIC=""
+restored_extractor=""
+if [ -z "${CLIENT_ONLY:-}${DAEMON_URL:-}${PSEUDOLIFE_MCP_DAEMON_URL:-}" ] && [ -f "$env_file" ]; then
+    recorded_choices="$(installer_state choices --env-file "$env_file")" || exit 2
+    while IFS='=' read -r choice_key choice_value; do
+        case "$choice_key" in
+            EXTRACTOR)
+                if [ -z "$EXTRACTOR" ]; then EXTRACTOR="$choice_value"; restored_extractor=1; fi ;;
+            MODEL) [ -z "$restored_extractor" ] || [ -n "$MODEL" ] || MODEL="$choice_value" ;;
+            EXTRACTOR_URL) [ -z "$restored_extractor" ] || [ -n "$EXTRACTOR_URL" ] || EXTRACTOR_URL="$choice_value" ;;
+            SHIM_PORT) case " $EXPLICIT_ARGS " in *" --shim-port "*) ;; *) [ -z "$restored_extractor" ] || [ "$SHIM_PORT" != 0 ] || SHIM_PORT="$choice_value" ;; esac ;;
+            CLIENT) [ -n "$CLIENT" ] || CLIENT="$choice_value" ;;
+            BANK_LOCATION) RECORDED_BANK_LOCATION="$choice_value"; INSTALLER_RERUN=1 ;;
+            INSTRUCTIONS_GEMINI) RECORDED_INSTRUCTIONS_GEMINI="$choice_value" ;;
+            INSTRUCTIONS_GENERIC) RECORDED_INSTRUCTIONS_GENERIC="$choice_value" ;;
+            GENERIC_TARGET_JSON)
+                case " $EXPLICIT_ARGS " in *" --agents-file "*) ;; *)
+                    AGENTS_FILE="$(printf '%s' "$choice_value" | "$(installer_python)" -c 'import json,sys; sys.stdout.buffer.write(json.load(sys.stdin).encode("utf-8"))')"
+                    if command -v cygpath >/dev/null 2>&1; then AGENTS_FILE="$(cygpath -u "$AGENTS_FILE")"; fi ;;
+                esac ;;
+            INSTRUCTIONS) case " $EXPLICIT_ARGS " in *" --instructions "*|*" --claude-md "*) ;; *) INSTRUCTIONS="$choice_value" ;; esac ;;
+            CODEX_HOOKS) case " $EXPLICIT_ARGS " in *" --codex-hooks "*) ;; *) CODEX_HOOKS="$choice_value" ;; esac ;;
+            CLAUDE_PLUGIN) case " $EXPLICIT_ARGS " in *" --claude-plugin "*) ;; *) CLAUDE_PLUGIN="$choice_value" ;; esac ;;
+            CLAUDE_LEGACY_HOOKS) case " $EXPLICIT_ARGS " in *" --claude-legacy-hooks "*) ;; *) CLAUDE_LEGACY_HOOKS="$choice_value" ;; esac ;;
+            TRANSPORT) case " $EXPLICIT_ARGS " in *" --transport "*) ;; *) TRANSPORT="$choice_value" ;; esac ;;
+            NO_TOKEN) case " $EXPLICIT_ARGS " in *" --no-token "*) ;; *) [ "$choice_value" != 1 ] || NO_TOKEN=1 ;; esac ;;
+        esac
+    done <<< "$recorded_choices"
+    [ -z "$restored_extractor" ] || check_extractor_args
+fi
+# <<< recorded choices <<<
+
+# ── presentation helpers ───────────────────────────────────────────────────
+# Art and color are interactive sugar only: a real TTY, NO_COLOR unset,
+# TERM not dumb, and no --no-art. Escapes are generated (\033), never raw
+# ESC bytes — the tracked-tree control-byte guard bans those.
+art_ok() {
+    [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ] \
+        && [ -z "$NO_ART" ]
+}
+step() {
+    if art_ok; then printf '\033[1;36m==>\033[0m %s\n' "$*"
+    else echo "==> $*"; fi
+}
+
+# >>> banner >>>
+show_banner() {
+    art_ok || return 0
+    printf '\033[36m'
+    cat <<'PL_BANNER'
+                        :=-:--:=====             -=:
+                   ==: #%##@%-*@@@*#%:                :==
+                :*@*:=-#%+**%+*:+#+*%+                   @*:
+             :+#*@%#%%=*+++%#%%#+--*%*.                     #+:
+            +@%%+#%**#%%#*#@@+***%*+%*                       %@+
+         -*@#%*%%@*#*=%@+=**@@*+#@@:%%=                []       @*-
+        =%*+#*%#*+@@=+@*:-*@%*+**@%#**@                 |        *%=
+        @%-*%##*%:%%--#@#@#%#-*=*%*#%%*          []     |        -%@
+      :*#@*#%%@@%=+%*@##%*#===***-+#@*   .--o     |     |    []    #*:
+     :%+*****%++*%-#%%%##%#=+=+%*#==@%:           |     |     |     +%:
+    =#*%%***+***+*%%%++=-#%@==--@%:-#%@           |     |     |    []*#=
+   =%@+%*#%%#@%*#@@%*%%: +%%:-*%%%=+#%@   o--.    |     |     |     | @%=
+  .@%###=+#%%@@.+*+*@@%: *@%#+= :+%#%@*           |     |     |     |  %@.
+  ##%=%@%%%==%*%+=::=*@#%+=-+#%@@+:+%%%        .---------------.       %##
+ .%%*###%@@*==+***%%*..*@@=--.*#%++:#*@ o------|  .---------.  |-----o  %%.
+ **%#=:+#@@##*#@*:-#@= *=% :#*.%##:-%@%        |  | # # # # |  |        %**
+ %+@%-#%%===**#%*--%@+:*%- .@@=.%#==%%= o------|  | # # # # |  |-----o  @+%
+ @%%%#*#%%*#::=#%#*+#%**+=*%@%*@%#-:%@@        |  '---------'  |        %%@
+ *%%%*+=:#@%#--%@@%##******=::*@@+:=%@+ o------|  o   o   o  o |-----o  %%*
+:@@##==**@@*%*%%#.=%*%%%%*##*######%*@.        '---------------'         @@:
+%#%+##%%%%=%=*#%%..:*@%@%%*+*%%%%#%%*%            |     |     |     |    %#%
+-%###%***+%#=:#%@#*+*#***%###%*+-:=+%%            |     |     |     |    #%-
+ %%%*%=**:*%@@#*=********=**-=%*%+:.%%-           |     |     |     |   %%%
+ =%@#%#**#*#@@%#*%%#**###%@%=.=@@%=:%%%   o--[]--.|     |     |    []   @%=
+  +%###%#*@%%*+#*#*++*#**#%@##*%%###%@%           |     |     |        #%+
+    *%*#*#:#**#****+*@%%%@+:*@%***=*#%.          [] .---|     |      *%*
+    =%*=+%%##=**#%+==***@%#-:%%%+=:*%#                  |    []      *%=
+     %#***:-**+#%%*%%@%:==-=#@@%#++=@@+                []           *#%
+     :*%+*##=@@###+++#%*+#+%@**=%#@-*%@                             %*:
+       :#%%%#**#-*#%*+*%**=%%***%#*.+@@                           %#:
+         :=###*==+#*#%+**%#*%+=+*+::%@%                         #=:
+            +@%==***==****=:+****=:*@*:                      %@+
+             .=*%@%*+-==*+*++===++=*%=                      *=.
+                   =*@@%%%@@@#+#**%@*                 @*=
+                       =====+***+==.              ===
+
+                         P S E U D O L I F E   M C P
+PL_BANNER
+    printf '\033[0m\n'
+}
+# <<< banner <<<
+
+# >>> capability-matrix >>>
+show_matrix() {
+    cat <<'PL_MATRIX'
+  Agent           MCP          Briefing        Per-turn  Standing file
+  --------------  -----------  --------------  --------  ---------------------
+  Claude Code     shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
+  Claude Desktop  shim         none            no        none
+  OpenAI Codex    shim / HTTP  hook (see *)    yes       ~/.codex/AGENTS.md
+  Gemini CLI      shim / HTTP  none            no        ~/.gemini/GEMINI.md
+  Other agent     stdio/HTTP   none            no        AGENTS.md (your path)
+
+  Every agent also gets, with no files touched: the memory tools, and the
+  MCP server `instructions` field - the memory loop delivered by the
+  protocol itself.
+
+  * Current Codex runtimes enable hooks by default, including Windows.
+    Review and trust new or changed hooks in /hooks before they run.
+    Support depends on the runtime and policy, not the selected model.
+    Use a standing AGENTS.md block if hooks are disabled or unavailable.
+PL_MATRIX
+}
+# <<< capability-matrix <<<
+
+# >>> generic-snippets >>>
+show_generic_snippets() {
+    cat <<'PL_SNIPPETS'
+  Add pseudolife-memory to your agent's MCP config. Two ready-to-paste
+  shapes (pick ONE):
+
+  stdio shim (recommended - per-session identity; needs
+  `pip install pseudolife-mcp` or pipx):
+    { "mcpServers": { "pseudolife-memory": {
+        "command": "pseudolife-mcp",
+        "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client",
+                 "PSEUDOLIFE_MCP_NO_SPAWN": "1" } } } }
+
+  HTTP (no local install; concurrent sessions share one identity):
+    { "mcpServers": { "pseudolife-memory": {
+        "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
+
+  Common config homes: Cursor ~/.cursor/mcp.json - Windsurf
+  ~/.codeium/windsurf/mcp_config.json - Zed settings.json
+  (context_servers) - Copilot CLI / others: see the tool's MCP docs.
+PL_SNIPPETS
+}
+# <<< generic-snippets <<<
+
+# >>> client-only notes >>>
+show_client_only_notes() {
+    cat <<'PL_CLIENT_ONLY'
+  This machine is a client only: the daemon, its bank and its dream
+  extractor run on the other host, and nothing here starts, stops or
+  upgrades them.
+  - Its token revoked or replaced there: a machine paired with invite
+    pairs again (pseudolife-mcp invite <name> --replace on the daemon
+    host, then connect <url> --read-code here, run as the update command
+    below is), which also re-points Codex. Only a client using a token
+    from the daemon's environment writes the new token into its
+    token file here (the shims and the Claude Code hooks read it on
+    every call), and into Codex's own copy in ~/.codex/pseudolife/token.
+  - A daemon upgrade there: the daily client update job (offered
+    below, on Linux and Windows) moves the shim to the daemon's
+    release; without it, run the update command below with
+    --clients-only here, so the shim matches the daemon.
+  - Open the Console signed in: pseudolife-mcp console (run as the update
+    command below is). From this machine it needs the Console's HTTPS
+    address (maintainer setup on the daemon host); until then, run it there.
+PL_CLIENT_ONLY
+}
+# <<< client-only notes <<<
+
+# >>> shared bank notes >>>
+show_shared_bank_notes() {
+    cat <<'PL_SHARED_BANK'
+  Other machines will use this bank: two commands here, then the
+  installer on each of them.
+  1. Put the daemon on the tailnet. It checks first that the daemon
+     requires a bearer token, and shows its plan before it changes
+     anything:
+       pseudolife-mcp expose tailscale
+  2. For each machine that will join, make a one-time pairing code:
+       pseudolife-mcp invite <machine>
+  On that machine, run the installer, answer 2, give it the daemon's URL
+  that expose printed, and paste the code where it asks for the token
+  (or run pseudolife-mcp pair <url> <code> there). The steps by hand,
+  and the other ways to expose the daemon: docs/guide/remote-bank.md.
+PL_SHARED_BANK
+}
+# Step 1 changes this machine's tailnet serve, so it is only offered, at a
+# terminal, with no as the default; expose then shows its own plan and asks
+# again before it changes anything. A failure is reported, not fatal: the
+# install itself is complete.
+offer_shared_bank_expose() {
+    if [ -n "${INSTALLER_RERUN:-}" ]; then
+        echo "Shared-bank exposure unchanged; run pseudolife-mcp expose tailscale to change it."
+        return 0
+    fi
+    bank_can_ask || return 0
+    bank_read "Run pseudolife-mcp expose tailscale now? It changes this machine's tailnet serve [y/N]: " ||
+        BANK_REPLY=""
+    case "$(bank_trimmed "$BANK_REPLY")" in
+        y|Y|yes|Yes|YES) ;;
+        *) echo "  Not run: run pseudolife-mcp expose tailscale when you are ready."; return 0 ;;
+    esac
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so expose did not run: run pseudolife-mcp expose tailscale once it is installed." >&2
+        return 0
+    fi
+    expose_rc=0
+    "$SHIM_PATH" expose tailscale || expose_rc=$?
+    if [ "$expose_rc" -ne 0 ]; then
+        echo "WARNING: pseudolife-mcp expose tailscale exited $expose_rc (see its message above). The install itself is complete: run it again once that is fixed." >&2
+    fi
+}
+# <<< shared bank notes <<<
+
+# >>> maintainer setup offer >>>
+# The maintainer's passkeys (signed Console messages and roles) on a daemon
+# host: `pseudolife-mcp maintainer setup` does every host step and asks
+# before each change; only the passkey itself needs the maintainer. A
+# tokenless daemon refuses passkeys, so a tokenless install is not asked.
+offer_maintainer_setup() {
+    case "${TOKEN_STATE:-}" in minted|present) ;; *) return 0 ;; esac
+    ensure_shim
+    # A re-run on a host where they are set up asks nothing.
+    if [ -n "$SHIM_OK" ] && [ -n "$SHIM_PATH" ] &&
+            "$SHIM_PATH" maintainer setup --check >/dev/null 2>&1; then
+        echo "Maintainer passkeys: in place."
+        return 0
+    fi
+    if [ -n "${INSTALLER_RERUN:-}" ] || ! bank_can_ask; then
+        echo "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
+        return 0
+    fi
+    # One question for the feature and its host changes, default no (it can
+    # put the daemon on the tailnet); --yes carries the answer, and setup
+    # still asks the passkey check itself.
+    bank_read "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve (devices on your tailnet can reach it at https://<this machine>:8443), sets its config and restarts it. [y/N]: " ||
+        BANK_REPLY=""
+    case "$(bank_trimmed "$BANK_REPLY")" in
+        y|Y|yes|Yes|YES) ;;
+        *) echo "  Not now: run pseudolife-mcp maintainer setup when you want them."; return 0 ;;
+    esac
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so the passkey setup did not run: run pseudolife-mcp maintainer setup once it is installed." >&2
+        return 0
+    fi
+    setup_rc=0
+    if [ -n "${board_file:-}" ]; then
+        PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" maintainer setup --yes || setup_rc=$?
+    else
+        "$SHIM_PATH" maintainer setup --yes || setup_rc=$?
+    fi
+    if [ "$setup_rc" -ne 0 ]; then
+        echo "WARNING: pseudolife-mcp maintainer setup exited $setup_rc (see its message above). The install itself is complete: run it again once that is fixed." >&2
+    fi
+}
+# <<< maintainer setup offer <<<
+
+# >>> console sign-in >>>
+# A daemon host with a bearer token ends the install with the Console open in
+# the browser, signed in: `pseudolife-mcp console` asks the daemon for a
+# one-time sign-in link with this machine's token and opens it, and the
+# browser asks the person to confirm once. Opening a browser changes nothing
+# persistent, so nothing is asked; without a terminal one line names the
+# command. It runs after the passkey offer, so a link made after that setup
+# names the Console's HTTPS address. --unless-signed-in makes it one line and
+# no new tab when a browser is signed in already (a passkey setup above, or
+# an earlier install). A tokenless daemon needs no sign-in.
+open_console_signin() {
+    case "${TOKEN_STATE:-}" in minted|present) ;; *) return 0 ;; esac
+    ensure_shim
+    if ! bank_can_ask; then
+        echo "Open the Console signed in: pseudolife-mcp console"
+        return 0
+    fi
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so the Console was not opened: run pseudolife-mcp console once it is installed." >&2
+        return 0
+    fi
+    console_rc=0
+    if [ -n "${board_file:-}" ]; then
+        PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" console --unless-signed-in || console_rc=$?
+    else
+        "$SHIM_PATH" console --unless-signed-in || console_rc=$?
+    fi
+    if [ "$console_rc" -ne 0 ]; then
+        echo "WARNING: pseudolife-mcp console exited $console_rc (see its message above). The install itself is complete: run pseudolife-mcp console to open the Console signed in." >&2
+    fi
+}
+# <<< console sign-in <<<
+
+# Expand aliases, validate, dedupe, and emit the canonical provider order.
+normalize_clients() {
+    raw="$(printf '%s' "$1" | tr ',' ' ')"
+    expanded=""
+    for tok in $raw; do
+        case "$tok" in
+            both) expanded="$expanded claude codex" ;;
+            all) expanded="$expanded claude codex gemini" ;;
+            claude|claude-desktop|codex|gemini|generic) expanded="$expanded $tok" ;;
+            *) echo "invalid --client '$tok' (claude|claude-desktop|codex|gemini|generic|both|all)" >&2
+               exit 2 ;;
+        esac
+    done
+    canon=""
+    for tok in claude claude-desktop codex gemini generic; do
+        case " $expanded " in *" $tok "*) canon="$canon $tok" ;; esac
+    done
+    printf '%s' "${canon# }"
+}
+
+show_banner
+
+# >>> bank location >>>
+# The installer's first question, for an interactive run that does not name
+# the daemon already (--daemon-url, --client-only, or PSEUDOLIFE_MCP_DAEMON_URL
+# in the environment): where the memory bank lives. "Another machine" is the
+# client-only install, with the daemon's URL asked for here and its token
+# after the agents are chosen; "shared" is a local install that ends with the
+# steps to expose it. --token-file, --read-token or --pairing-code already
+# mean another machine, so with any of them only the URL is asked. The mode block below then
+# resolves and checks the answer exactly as it does the flags. Without a
+# terminal nothing is asked; end of input at one is no answer (exit 2).
+BANK_LOCATION="${RECORDED_BANK_LOCATION:-local}"
+show_bank_location_question() {
+    cat <<'PL_BANK_LOCATION'
+
+Where does the memory bank live?
+  1) On this machine (default)
+  2) On another machine that already runs it
+  3) On this machine, and other machines will connect to it
+PL_BANK_LOCATION
+}
+bank_can_ask() {  # status 0 when there is a terminal to ask on
+    [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]
+}
+bank_read() {  # $1 = the prompt; sets BANK_REPLY; fails at end of input
+    printf '%s' "$1"
+    BANK_REPLY=""
+    IFS= read -r BANK_REPLY || [ -n "$BANK_REPLY" ] || return 1
+}
+bank_trimmed() {  # $1 = a reply; echoes it without surrounding whitespace or one pair of quotes
+    bank_value="$(printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    # A path pasted from a file manager, or a URL copied with its quotes.
+    case "$bank_value" in
+        \"*\") bank_value="${bank_value#\"}"; bank_value="${bank_value%\"}" ;;
+        \'*\') bank_value="${bank_value#\'}"; bank_value="${bank_value%\'}" ;;
+    esac
+    printf '%s' "$bank_value"
+}
+choose_bank_location() {
+    if [ -n "${RECORDED_BANK_LOCATION:-}" ]; then
+        step "Bank location unchanged: $BANK_LOCATION"
+        return 0
+    fi
+    if [ -n "$DAEMON_URL" ] || [ -n "$CLIENT_ONLY" ] || [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
+        return 0
+    fi
+    if ! bank_can_ask; then
+        echo "Unattended default: bank on this machine (local Docker)."
+        return 0
+    fi
+    if [ -z "$TOKEN_FILE" ] && [ -z "$READ_TOKEN" ] && [ -z "${PAIRING_CODE:-}" ]; then
+        show_bank_location_question
+        while :; do
+            if ! bank_read "Choose 1-3 (Enter = 1): "; then
+                echo "no answer was given: re-run and answer, or pass --daemon-url <url> to use a daemon on another machine" >&2
+                exit 2
+            fi
+            case "$(bank_trimmed "$BANK_REPLY")" in
+                ""|1) return 0 ;;
+                2) break ;;
+                3)
+                    if [ -n "$NO_TOKEN" ]; then
+                        echo "--no-token installs a bank without a bearer token, and an unauthenticated bank must never be exposed to other machines (docs/guide/remote-bank.md). Drop --no-token, or answer 1" >&2
+                        exit 2
+                    fi
+                    BANK_LOCATION=shared; return 0 ;;
+                *) echo "  please answer 1, 2 or 3" ;;
+            esac
+        done
+    fi
+    BANK_LOCATION=remote
+    CLIENT_ONLY=1
+    while [ -z "$DAEMON_URL" ]; do
+        if ! bank_read "The daemon's URL (for example http://100.64.0.2:8765): "; then
+            echo "no daemon URL was given: re-run and answer, or pass --daemon-url <url>" >&2
+            exit 2
+        fi
+        DAEMON_URL="$(bank_trimmed "$BANK_REPLY")"
+    done
+}
+bank_token_name() {  # the new token file's name: one per principal
+    # Named for the one client this run wires, as docs/guide/remote-bank.md
+    # recommends, else shared.
+    case "$CLIENTS" in
+        claude) printf '%s' claude-code ;;
+        claude-desktop|codex|gemini) printf '%s' "$CLIENTS" ;;
+        generic) printf '%s' mcp-client ;;
+        *) printf '%s' shared ;;
+    esac
+}
+choose_bank_token() {  # the other machine's token file: an existing one, or a new one from a pasted token or a pairing code
+    [ "$BANK_LOCATION" = remote ] || return 0
+    [ -z "$TOKEN_FILE" ] || return 0
+    # A token or pairing code to come always goes to a new file.
+    bank_new_file=""
+    if [ -n "$READ_TOKEN" ] || [ -n "${PAIRING_CODE:-}" ]; then bank_new_file=1; fi
+    if [ -z "$bank_new_file" ] && [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+        step "Token file: $PSEUDOLIFE_MCP_TOKEN_FILE (PSEUDOLIFE_MCP_TOKEN_FILE in the environment)."
+        return 0
+    fi
+    bank_token_name="$(bank_token_name)"
+    if [ -z "$bank_new_file" ]; then
+        echo ""
+        echo "The daemon's bearer token, or a pairing code from pseudolife-mcp invite:"
+        echo "  1) Paste it now: it makes a new owner-only token file (default)"
+        echo "  2) The token is already in a token file on this machine"
+        while :; do
+            if ! bank_read "Choose 1-2 (Enter = 1): "; then
+                echo "no answer was given: re-run and answer, or pass --token-file <path>" >&2
+                exit 2
+            fi
+            case "$(bank_trimmed "$BANK_REPLY")" in
+                ""|1) READ_TOKEN=1; bank_new_file=1; break ;;
+                2) break ;;
+                *) echo "  please answer 1 or 2" ;;
+            esac
+        done
+    fi
+    while [ -z "$TOKEN_FILE" ]; do
+        if [ -n "$bank_new_file" ]; then
+            bank_prompt="The token file to write (Enter = ~/.pseudolife-mcp/$bank_token_name.token): "
+        else
+            bank_prompt="The token file: "
+        fi
+        if ! bank_read "$bank_prompt"; then
+            echo "no token file was given: re-run and answer, or pass --token-file <path>" >&2
+            exit 2
+        fi
+        TOKEN_FILE="$(bank_trimmed "$BANK_REPLY")"
+        if [ -z "$TOKEN_FILE" ] && [ -n "$bank_new_file" ]; then
+            TOKEN_FILE="~/.pseudolife-mcp/$bank_token_name.token"
+        fi
+        case "$TOKEN_FILE" in
+            "~") TOKEN_FILE="$HOME" ;;
+            "~/"*) TOKEN_FILE="$HOME/${TOKEN_FILE#"~/"}" ;;
+        esac
+        # A pasted token or a pairing code only ever goes to a new file.
+        if [ -n "$bank_new_file" ] && { [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; }; then
+            echo "  $TOKEN_FILE exists already: name another file, or re-run and answer 2 to use it"
+            TOKEN_FILE=""
+        fi
+    done
+}
+# <<< bank location <<<
+choose_bank_location
+
+# >>> client-only mode >>>
+# A client-only install wires this machine's clients to a daemon that runs
+# elsewhere (typically over a tailnet). The URL comes from --daemon-url,
+# else from PSEUDOLIFE_MCP_DAEMON_URL in the environment; a host other than
+# loopback implies --client-only, since no local daemon answers there.
+daemon_url_host() {  # $1 = URL; echoes its host, lowercased, without brackets
+    url_authority="${1#*://}"
+    url_authority="${url_authority%%/*}"
+    url_authority="${url_authority##*@}"
+    case "$url_authority" in
+        \[*) url_host="${url_authority#\[}"; url_host="${url_host%%]*}" ;;
+        *) url_host="${url_authority%%:*}" ;;
+    esac
+    printf '%s' "$url_host" | tr '[:upper:]' '[:lower:]'
+}
+is_loopback_url() {  # $1 = URL; status 0 when it names this machine
+    # The shim's own answer (daemon_url._is_loopback_url), so the installer
+    # and the shim never disagree on a form such as 127.0.0.01 or
+    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
+    # an import that failed) falls back to the host rule below.
+    loopback_py="$(installer_python)"
+    if [ -n "$loopback_py" ]; then
+        loopback_rc=0
+        "$loopback_py" -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from pseudolife_memory.daemon_url import _is_loopback_url
+sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)' "$repo" "$1" 2>/dev/null || loopback_rc=$?
+        case "$loopback_rc" in 10) return 0 ;; 11) return 1 ;; esac
+    fi
+    loopback_host="$(daemon_url_host "$1")"
+    case "$loopback_host" in localhost|::1) return 0 ;; esac
+    # 127.0.0.0/8 as Python's ipaddress reads it: no leading zeros, <= 255.
+    printf '%s' "$loopback_host" |
+        grep -Eq '^127(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$'
+}
+CLIENT_ONLY_VIA=""
+daemon_url_from_env=""
+if [ -z "$DAEMON_URL" ] && [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
+    DAEMON_URL="$PSEUDOLIFE_MCP_DAEMON_URL"
+    daemon_url_from_env=1
+fi
+DAEMON_URL="${DAEMON_URL%/}"
+if [ -n "$DAEMON_URL" ]; then
+    # An origin only, as the shim requires (daemon_url._validated_daemon_url):
+    # http(s), a host and an optional numeric port; no credentials, path,
+    # query, fragment or whitespace. The URL is not echoed: it may hold a
+    # password.
+    url_authority="${DAEMON_URL#*://}"
+    url_port=""
+    case "$url_authority" in
+        \[*\]:*) url_port="${url_authority##*]:}" ;;
+        \[*) ;;
+        *:*) url_port="${url_authority#*:}" ;;
+    esac
+    url_ok=1
+    case "$DAEMON_URL" in http://?*|https://?*) ;; *) url_ok="" ;; esac
+    case "$url_authority" in *[/?#@[:space:]]*) url_ok="" ;; esac
+    case "$url_port" in *[!0-9]*) url_ok="" ;; esac
+    [ -n "$(daemon_url_host "$DAEMON_URL")" ] || url_ok=""
+    if [ -z "$url_ok" ]; then
+        echo "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)" >&2
+        exit 2
+    fi
+    if [ -z "$CLIENT_ONLY" ] && ! is_loopback_url "$DAEMON_URL"; then
+        CLIENT_ONLY=1
+        [ -z "$daemon_url_from_env" ] || CLIENT_ONLY_VIA=" (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
+    fi
+fi
+if [ -n "$CLIENT_ONLY" ]; then
+    if [ -z "$DAEMON_URL" ]; then
+        echo "--client-only needs the daemon's URL: pass --daemon-url http://<host>:8765, or set PSEUDOLIFE_MCP_DAEMON_URL" >&2
+        exit 2
+    fi
+    local_flags=""
+    [ -z "$EXTRACTOR" ] || local_flags="$local_flags --extractor"
+    [ -z "${EXTRACTOR_URL:-}" ] || local_flags="$local_flags --extractor-url"
+    [ -z "$MODEL" ] || local_flags="$local_flags --model"
+    [ "$SHIM_PORT" = 0 ] || local_flags="$local_flags --shim-port"
+    [ -z "$NO_TOKEN" ] || local_flags="$local_flags --no-token"
+    [ -z "${TEST_LOGIN:-}" ] || local_flags="$local_flags --test-login"
+    [ "$TRANSPORT" = shim ] || local_flags="$local_flags --transport http"
+    if [ -n "$local_flags" ]; then
+        echo "client-only install: the daemon runs elsewhere, so these flags do not apply:$local_flags (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$CLIENT_ONLY_VIA" >&2
+        exit 2
+    fi
+    if [ -n "${PAIRING_CODE:-}" ] && [ -n "$READ_TOKEN" ]; then
+        echo "client-only install: --pairing-code and --read-token both say where the token comes from: pass one of them" >&2
+        exit 2
+    fi
+elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ] || [ -n "${PAIRING_CODE:-}" ]; then
+    echo "client-only install: --token-file, --read-token and --pairing-code name a remote daemon's credential, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop them" >&2
+    exit 2
+fi
+# The client update job follows a daemon on another machine; a daemon host
+# keeps its own job (pseudolife-mcp update --schedule there).
+case "${CLIENT_UPDATE_SCHEDULE:-ask}" in ask|no) ;; *)
+    if [ -z "$CLIENT_ONLY" ]; then
+        echo "--client-update-schedule ${CLIENT_UPDATE_SCHEDULE} asks for the client update job, which only a client-only install (the daemon runs elsewhere) gets; on the daemon's host, pseudolife-mcp update --schedule HH:MM installs the daemon's own job. Drop it, or add --client-only --daemon-url <url>" >&2
+        exit 2
+    fi ;;
+esac
+# <<< client-only mode <<<
+
+# >>> engine flag >>>
+# After every client-only inference (--daemon-url, the environment, the
+# bank question), so an implied client-only install refuses it too.
+case "$ENGINE" in
+    ""|rust|python) ;;
+    *) echo "--engine must be rust or python; nothing was changed." >&2; exit 2 ;;
+esac
+if [ -n "$ENGINE" ] && [ -n "$CLIENT_ONLY" ]; then
+    echo "--engine selects this host's Docker daemon, and a client-only install runs none; drop --engine, or run the installer on the daemon's host. Nothing was changed." >&2
+    exit 2
+fi
+# Rust needs a bearer: --no-token mints none, and neither does --transport
+# http unless ops/.env already sets one.
+RUST_BEARER=1
+if [ -n "$NO_TOKEN" ] || { [ "$TRANSPORT" = http ] && [ -z "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] \
+        && ! { [ -f "$env_file" ] && grep -Eq '^PSEUDOLIFE_MCP_TOKENS?=[^[:space:]]' "$env_file"; }; }; then
+    RUST_BEARER=""
+fi
+if [ "$ENGINE" = rust ] && [ -z "$RUST_BEARER" ]; then
+    echo "--engine rust needs the daemon's bearer token: pseudolife-mcp update verifies the Rust daemon with an authenticated read, and this install would mint none (--no-token, or --transport http with no token in ops/.env). Drop that option or use --engine python. Nothing was changed." >&2
+    exit 2
+fi
+# <<< engine flag <<<
+# ── 1. provider selection (before preflight, so it checks what you picked) ─
+if [ -z "$CLIENT" ]; then
+    if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then
+        CLIENT=""
+        for detected_client in claude codex gemini; do
+            if command -v "$detected_client" >/dev/null 2>&1; then
+                CLIENT="${CLIENT:+$CLIENT,}$detected_client"
+            fi
+        done
+        CLIENT="${CLIENT:-generic}"
+        echo "Unattended default: clients=$CLIENT (installed CLIs; generic when none are found)."
+    else
+        echo ""
+        echo "Which coding agents should this install wire up?"
+        echo ""
+        echo "  1) Claude Code    full parity: MCP + SessionStart briefing + per-turn discipline"
+        echo "  2) OpenAI Codex   MCP + session and per-turn hooks (trust review)"
+        echo "  3) Gemini CLI     MCP + standing instructions (Gemini CLI has no hook system)"
+        echo "  4) Other MCP agent  Cursor / Windsurf / Zed / Copilot CLI / anything else:"
+        echo "                      prints ready-to-paste config, offers the standing block"
+        echo "  5) Claude Desktop   MCP entry written to claude_desktop_config.json (no hook system)"
+        echo ""
+        while [ -z "$CLIENT" ]; do
+            printf 'Select one or more - e.g. "1 2" or "1,3" (Enter = 1): '
+            read -r selection
+            [ -z "$selection" ] && selection=1
+            picked=""
+            bad=""
+            for tok in $(printf '%s' "$selection" | tr ',' ' '); do
+                case "$tok" in
+                    1) picked="$picked claude" ;;
+                    2) picked="$picked codex" ;;
+                    3) picked="$picked gemini" ;;
+                    4) picked="$picked generic" ;;
+                    5) picked="$picked claude-desktop" ;;
+                    *) bad=1 ;;
+                esac
+            done
+            if [ -n "$bad" ] || [ -z "$picked" ]; then
+                echo "  please answer with numbers 1-5 (e.g. \"1 3\")"
+            else
+                CLIENT="$(printf '%s' "$picked" | tr ' ' ',')"
+            fi
+        done
+    fi
+fi
+CLIENTS="$(normalize_clients "$CLIENT")"
+CLIENT_LIST="$(printf '%s' "$CLIENTS" | tr ' ' ',')"
+step "Providers: $CLIENTS"
+if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ] && [ -t 1 ]; then
+    echo ""
+    echo "What each agent gets:"
+    echo ""
+    show_matrix
+    echo ""
+fi
+choose_bank_token
+
+# ── 2. preflight ───────────────────────────────────────────────────────────
+# >>> native client >>>
+# The client side (the stdio MCP shim every agent registers, and the
+# pseudolife-mcp CLI) is the native binary published with this checkout's
+# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
+# docs/dev/release-assets.md). It is fetched, verified against the release's
+# SHA256SUMS and run once from a private staging directory before anything on
+# this host changes; ensure_shim then installs that exact archive with the
+# native runtime installer, which keeps every older runtime a running session
+# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
+# another URL or a local directory holding the archive and SHA256SUMS, and
+# PSEUDOLIFE_NATIVE_TARGET names the release target to install.
+# The installer steps this script runs (`pseudolife-mcp installer <step>`)
+# belong to the staged release, so it must carry them: it answers
+# `installer --capability` with exactly `pseudolife-mcp installer-protocol
+# <N>`, and N must be at least this level
+# (rust/shim/src/cli/installer/mod.rs, INSTALLER_PROTOCOL). Anything else,
+# such as an older release's usage error, means the release predates this
+# installer and is refused before anything changes.
+NATIVE_INSTALLER_PROTOCOL=1
+NATIVE_VERSION=""
+NATIVE_TARGET=""
+NATIVE_ARCHIVE=""
+NATIVE_SUMS=""
+NATIVE_STAGED=""
+native_target() {  # echoes this host's release target triple, or nothing
+    # PSEUDOLIFE_NATIVE_TARGET picks one of the five release targets instead
+    # (an emulated one, or a test's).
+    case "${PSEUDOLIFE_NATIVE_TARGET:-}" in
+        x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|x86_64-pc-windows-msvc)
+            echo "$PSEUDOLIFE_NATIVE_TARGET"; return 0 ;;
+        "") ;;
+        *) return 0 ;;
+    esac
+    case "$(uname -s 2>/dev/null)" in
+        Linux)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-unknown-linux-gnu ;;
+                aarch64|arm64) echo aarch64-unknown-linux-gnu ;;
+            esac ;;
+        Darwin)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64) echo x86_64-apple-darwin ;;
+                arm64|aarch64) echo aarch64-apple-darwin ;;
+            esac ;;
+        MINGW*|MSYS*|CYGWIN*)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-pc-windows-msvc ;;
+            esac ;;
+    esac
+}
+native_sha256() {  # $1 = file; echoes its lowercase SHA-256
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        return 1
+    fi
+}
+native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no such file there) or another failure
+    case "$native_base" in
+        http://*|https://*)
+            # A stalled transfer gives up instead of hanging an unattended run.
+            native_curl=0
+            curl -fsSL --retry 2 --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 \
+                -o "$2.part" "$native_base/$1" || native_curl=$?
+            if [ "$native_curl" = 0 ]; then mv -f "$2.part" "$2"; else rm -f "$2.part"; fi
+            return "$native_curl" ;;
+        *)
+            [ -f "$native_base/$1" ] || return 22
+            cp "$native_base/$1" "$2" ;;
+    esac
+}
+native_unstage() {  # removes this run's staging directory
+    if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
+    native_stage_dir=""
+}
+native_refuse() {  # $1 = cause, $2 = fix
+    echo "The native pseudolife-mcp client cannot be installed: $1. $2 Nothing was changed." >&2
+    exit 1
+}
+native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
+    NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
+    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    NATIVE_TARGET="$(native_target)"
+    if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
+        native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
+    fi
+    [ -n "$NATIVE_TARGET" ] || native_refuse "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only)."
+    case "$NATIVE_TARGET" in
+        *windows*) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.zip"; native_binary=pseudolife-mcp.exe ;;
+        *) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.tar.gz"; native_binary=pseudolife-mcp ;;
+    esac
+    native_base="${PSEUDOLIFE_NATIVE_ARCHIVE_URL:-https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$NATIVE_VERSION}"
+    native_base="${native_base%/}"
+    case "$native_base" in
+        http://*|https://*)
+            native_authority="${native_base#*://}"; native_authority="${native_authority%%/*}"
+            case "$native_authority" in
+                *@*) native_refuse "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL." ;;
+            esac ;;
+    esac
+    native_dir="$HOME/.pseudolife-mcp/downloads/$NATIVE_VERSION"
+    # Owner-only, but only for the directories this run creates.
+    for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
+        [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
+    done
+    NATIVE_SUMS="$native_dir/SHA256SUMS"
+    NATIVE_ARCHIVE="$native_dir/$native_name"
+    native_sums_status=0
+    native_download SHA256SUMS "$NATIVE_SUMS" || native_sums_status=$?
+    case "$native_sums_status" in
+        0) ;;
+        22) native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun." ;;
+        *) native_refuse "SHA256SUMS could not be downloaded from $native_base (curl exit $native_sums_status: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun." ;;
+    esac
+    native_expected="$(grep -E "^[0-9a-f]{64}  $(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
+    case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
+        1) ;;
+        *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
+    esac
+    if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
+        native_download "$native_name" "$NATIVE_ARCHIVE" ||
+            native_refuse "the download of $native_name from $native_base failed" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+    fi
+    native_actual="$(native_sha256 "$NATIVE_ARCHIVE")" ||
+        native_refuse "neither sha256sum nor shasum is installed to verify the download" "Install coreutils (sha256sum) and rerun."
+    if [ "$native_actual" != "$native_expected" ]; then
+        rm -f "$NATIVE_ARCHIVE"
+        native_refuse "$native_name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+    fi
+    native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
+        chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."
+    # The staged copy is only for this run; the verified download is kept.
+    trap native_unstage EXIT
+    case "$native_name" in
+        *.zip)
+            if command -v unzip >/dev/null 2>&1; then
+                unzip -q -o "$NATIVE_ARCHIVE" "$native_binary" -d "$native_stage_dir"
+            else
+                powershell.exe -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '$(cygpath -w "$NATIVE_ARCHIVE")' -DestinationPath '$(cygpath -w "$native_stage_dir")' -Force"
+            fi ;;
+        *) tar -xzf "$NATIVE_ARCHIVE" -C "$native_stage_dir" "$native_binary" ;;
+    esac || native_refuse "$native_name could not be unpacked" "Rerun; the verified archive is kept in $native_dir."
+    NATIVE_STAGED="$native_stage_dir/$native_binary"
+    chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
+    if ! native_says="$("$NATIVE_STAGED" version 2>&1)"; then
+        case "$NATIVE_TARGET" in
+            *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
+            *apple*) native_run_fix="The macOS client needs macOS 11 or newer." ;;
+            *) native_run_fix="Check that nothing (an antivirus or an execution policy) blocks it, and rerun." ;;
+        esac
+        native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
+    fi
+    native_protocol="$("$NATIVE_STAGED" installer --capability 2>/dev/null)" || native_protocol=""
+    native_protocol="${native_protocol%$''}"
+    native_level=""
+    case "$native_protocol" in
+        "pseudolife-mcp installer-protocol "*) native_level="${native_protocol#pseudolife-mcp installer-protocol }" ;;
+    esac
+    case "$native_level" in ""|*[!0-9]*) native_level=-1 ;; esac
+    if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
+        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Run the installer from a release tag's checkout, whose release carries the steps its installer runs (git checkout v<the newest release>), or serve archives built from this checkout with PSEUDOLIFE_NATIVE_ARCHIVE_URL, or unset PSEUDOLIFE_SHIM_ENGINE to install the Python client."
+    fi
+}
+# ensure_shim's install: the verified archive into a new side-by-side runtime
+# behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
+native_install() {
+    [ -n "$NATIVE_STAGED" ] || native_stage
+    native_launcher_before="$(native_installed_launcher)"
+    native_sum_before=""
+    [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
+    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
+    native_launcher="${native_launcher%$'\r'}"
+    if command -v cygpath >/dev/null 2>&1; then
+        case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
+    fi
+    [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
+    SHIM_PATH="$native_launcher"
+    if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
+        step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
+    else
+        step "Native client $NATIVE_VERSION installed at $SHIM_PATH (running sessions keep the client they started with)"
+    fi
+    native_expose_line="$("$SHIM_PATH" installer expose 2>/dev/null)" || true
+    case "$native_expose_line" in *"not on PATH"*|*"kept as"*|*"left as it is"*) echo "  $native_expose_line" ;; esac
+    native_user_path
+    return 0
+}
+native_user_path() {  # Git Bash on Windows: the launcher's directory first on the user PATH, as install.ps1 does
+    case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
+    # A test's or a custom layout never touches PATH.
+    [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] || return 0
+    native_path_dir="$(cygpath -w "$(dirname "$SHIM_PATH")" 2>/dev/null)" || return 0
+    native_path_state="$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$repo/ops/add-user-path.ps1")" -Dir "$native_path_dir" 2>/dev/null | tr -d '\r')" || native_path_state=failed
+    case "$native_path_state" in
+        current) ;;
+        changed) echo "  shim: $native_path_dir is now first on your user PATH; new terminals run pseudolife-mcp from there" ;;
+        *) echo "  shim: the user PATH could not be updated; run $SHIM_PATH by its full path" ;;
+    esac
+    # This run's later steps find the launcher by name too.
+    PATH="$(dirname "$SHIM_PATH"):$PATH"
+    export PATH
+}
+native_installed_launcher() {  # echoes the stable launcher when it is the native client
+    native_candidate="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*)
+            if [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] && [ -n "${LOCALAPPDATA:-}" ]; then
+                native_candidate="$(cygpath -u "$LOCALAPPDATA")/pseudolife-mcp/bin/pseudolife-mcp.exe"
+            fi ;;
+    esac
+    [ -f "$native_candidate" ] || return 0
+    native_capability="$("$native_candidate" update --native-capability 2>/dev/null)" || return 0
+    [ "${native_capability%$'\r'}" = "pseudolife-mcp native-update-v1" ] || return 0
+    printf '%s\n' "$native_candidate"
+}
+# <<< native client <<<
+# >>> native client stage >>>
+# Fetched and verified before anything here changes: a refusal leaves the
+# host as it was.
+native_stage
+# <<< native client stage <<<
+
+# >>> client-only preflight >>>
+# Nothing Docker-shaped to check: a client-only install depends on the
+# token file and on the remote daemon answering. The token is never read
+# into output. With a pairing code (--pairing-code, or one pasted where the
+# token is asked for) the token file does not exist yet: the installed
+# shim's pair creates it after the shim is installed (the client-only pair
+# block), so here it must not exist, and only the daemon is checked.
+is_pairing_code() {  # the value on stdin; status 0 when it is a pairing code
+    # The shim's own rule (principals.normalize_pairing_code), asked with the
+    # value on stdin, never in an argument list. Exit 10/11 are its answers;
+    # anything else falls back to the same rule written here: 12 Crockford
+    # base32 characters once case, dashes and surrounding whitespace are
+    # ignored, O read as 0, and I and L as 1.
+    code_value=""
+    IFS= read -r code_value || true
+    code_py="$(installer_python)"
+    if [ -n "$code_py" ]; then
+        code_rc=0
+        printf '%s\n' "$code_value" | "$code_py" -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from pseudolife_memory.principals import normalize_pairing_code
+line = sys.stdin.buffer.readline().decode("utf-8", "replace").rstrip("\r\n")
+sys.exit(10 if normalize_pairing_code(line) else 11)' "$repo" 2>/dev/null || code_rc=$?
+        case "$code_rc" in 10) code_value=""; return 0 ;; 11) code_value=""; return 1 ;; esac
+    fi
+    code_value="$(printf '%s' "$code_value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/-//g' |
+        tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' | tr 'OIL' '011')"
+    case "$code_value" in
+        ????????????) case "$code_value" in *[!0123456789ABCDEFGHJKMNPQRSTVWXYZ]*) code_value=""; return 1 ;; esac ;;
+        *) code_value=""; return 1 ;;
+    esac
+    code_value=""
+    return 0
+}
+check_client_token_file() {  # the shim's own check of TOKEN_FILE; exits when it cannot use it
+    # On every OS: an owner-only regular file (mode bits on POSIX, the ACL
+    # on Windows), no link, one well-formed token.
+    token_report=$("$(installer_python)" "$repo/ops/client_credentials.py" check-token-file --path "$TOKEN_FILE") || true
+    case "$token_report" in *'"ready"'*) ;; *)
+        token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
+        echo "client-only install: the shim cannot use the token file (${token_problem:-no result}): $TOKEN_FILE. It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with --read-token to create it again" >&2
+        exit 1 ;;
+    esac
+}
+client_only_preflight() {
+    step "Client-only install${CLIENT_ONLY_VIA:-}: this machine's clients will use the daemon at $DAEMON_URL (no Docker, volumes or local daemon here)."
+    if [ -z "$TOKEN_FILE" ] && [ -n "${PAIRING_CODE:-}" ]; then
+        # The file the paste path offers: nothing asked where the token goes.
+        TOKEN_FILE="$HOME/.pseudolife-mcp/$(bank_token_name).token"
+    fi
+    [ -n "$TOKEN_FILE" ] || TOKEN_FILE="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
+    if [ -z "$TOKEN_FILE" ]; then
+        echo "client-only install: pass --pairing-code <code> (from pseudolife-mcp invite <name> on the daemon's host) to pair this machine, or, as the fallback, --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, with --read-token to create it. The installer never mints one for a remote daemon${CLIENT_ONLY_VIA:-}" >&2
+        exit 2
+    fi
+    token_py="$(installer_python)"
+    if [ -z "$token_py" ]; then
+        echo "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run" >&2
+        exit 1
+    fi
+    if [ -n "${PAIRING_CODE:-}" ]; then
+        # pair never replaces a file: refused here, before any code is spent.
+        if [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; then
+            echo "client-only install: pairing creates the token file, and it already exists: $TOKEN_FILE. Pass --token-file with a new path, or remove it first" >&2
+            exit 1
+        fi
+    elif [ -n "${READ_TOKEN:-}" ]; then
+        if [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; then
+            echo "client-only install: --read-token creates the token file, and it already exists: $TOKEN_FILE. Drop --read-token to use it, or remove it first" >&2
+            exit 1
+        fi
+        if [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
+            echo "Unattended --read-token needs redirected stdin; pipe the credential, or use --token-file with an existing file. Nothing changed." >&2
+            exit 2
+        fi
+        # Read unechoed, and handed to the helper on stdin through a shell
+        # builtin: the token never reaches an argument list or the output.
+        { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; } || printf "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown), then Enter: " >&2
+        token_value=""
+        IFS= read -rs token_value || true
+        { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; } || echo "" >&2
+        if printf '%s\n' "$token_value" | is_pairing_code; then
+            PAIRING_CODE="$token_value"
+            token_value=""
+            step "That is a pairing code: the token file $TOKEN_FILE is created by pairing, once the shim is installed."
+        else
+            token_report=$(printf '%s\n' "$token_value" |
+                "$token_py" "$repo/ops/client_credentials.py" write-token-file --path "$TOKEN_FILE") || true
+            token_value=""
+            case "$token_report" in
+                *'"written"'*) step "Wrote the token file $TOKEN_FILE (owner-only; the token is not shown)." ;;
+                *)
+                    token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
+                    echo "client-only install: could not write the token file (${token_problem:-no result}): $TOKEN_FILE" >&2
+                    exit 1 ;;
+            esac
+        fi
+    fi
+    if [ -n "${PAIRING_CODE:-}" ]; then
+        # Its directory, owner-only when it is new, so the path can be made
+        # absolute now and pair can create the file in it.
+        if ! (umask 077 && mkdir -p "$(dirname "$TOKEN_FILE")"); then
+            echo "client-only install: could not create the token file's directory: $(dirname "$TOKEN_FILE")" >&2
+            exit 1
+        fi
+    else
+        if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
+            echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Pair this machine instead: remove it if it is empty, then re-run with --pairing-code <code> from pseudolife-mcp invite <name> on the daemon's host; or, as the fallback, create it with --read-token or write the daemon's token into it owner-only, then re-run" >&2
+            exit 1
+        fi
+        check_client_token_file
+    fi
+    TOKEN_FILE="$(cd "$(dirname "$TOKEN_FILE")" && pwd)/$(basename "$TOKEN_FILE")"
+    for selected_client in $CLIENTS; do
+        case "$selected_client" in claude|codex|gemini)
+            command -v "$selected_client" >/dev/null 2>&1 || {
+                echo "client-only install: the $selected_client CLI is not on PATH. Install it, or drop it from --client, then re-run" >&2
+                exit 1; } ;;
+        esac
+    done
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl is needed to check the daemon at $DAEMON_URL; install it, then re-run." >&2
+        exit 1
+    fi
+    daemon_health=""
+    if ! daemon_health="$(curl -fsS --max-time 5 "$DAEMON_URL/health" 2>/dev/null)" ||
+            ! printf '%s' "$daemon_health" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+        echo "client-only install: no healthy daemon answered at $DAEMON_URL/health.${CLIENT_ONLY_VIA:-}" >&2
+        echo "  The daemon must be exposed to this machine, for example through the tailnet: check the host and port, that the daemon listens beyond loopback on its host, and that this machine reaches it (curl $DAEMON_URL/health)." >&2
+        exit 1
+    fi
+    if ! is_loopback_url "$DAEMON_URL"; then
+        if printf '%s' "$daemon_health" | grep -q '"auth"[[:space:]]*:[[:space:]]*false'; then
+            echo "client-only install: the daemon runs without a bearer token (auth: false) at $DAEMON_URL. An unauthenticated bank must never be reached over a network: set PSEUDOLIFE_MCP_TOKEN for the daemon on its host, restart it, and re-run" >&2
+            exit 1
+        fi
+        case "$DAEMON_URL" in http://*)
+            echo "WARNING: $DAEMON_URL is plain HTTP: the link itself is unencrypted, so it must be a private network such as a tailnet, or a TLS reverse proxy must front the daemon." >&2 ;;
+        esac
+    fi
+    step "Daemon answered at $DAEMON_URL/health."
+    # A raw token against another machine's daemon may be one another machine
+    # also holds (docs/guide/remote-bank.md): the update line names pairing at
+    # the end of the run, with the installed shim's path. Not for a pairing
+    # code, nor on loopback (the daemon's own host, or an SSH tunnel).
+    PAIRING_HINT_URL=""
+    if [ -z "${PAIRING_CODE:-}" ] && ! is_loopback_url "$DAEMON_URL"; then
+        PAIRING_HINT_URL="$DAEMON_URL"
+    fi
+}
+# <<< client-only preflight <<<
+step "Preflight..."
+if [ -n "$CLIENT_ONLY" ]; then
+    client_only_preflight
+else
+    "$repo/ops/preflight.sh" --client "$CLIENT_LIST" || {
+        echo "Preflight failed — fix the line(s) above and re-run." >&2; exit 1; }
+fi
+
+# ── 3. extractor choice (explicit, no default) ─────────────────────────────
+# A client-only install has none: the remote daemon runs its own extractor.
+if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
+    if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then
+        if [ -f "${env_file:-}" ] && awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
+            { sub(/\r$/, "") }
+            $0 == b { inside=1; next } $0 == e { inside=0; next }
+            inside && /^PSEUDOLIFE_DREAM_BASE_URL=.+/ { found=1 }
+            END { exit !found }' "$env_file"; then
+            echo "The original extractor family is not recorded; rerun with --extractor endpoint --extractor-url <url> --model extractor, --extractor claude-only, or --extractor openai-only (use the corresponding -fallback mode if configured), and nothing has been changed." >&2
+            exit 2
+        fi
+        EXTRACTOR=sidecar
+        echo "Unattended default: extractor=sidecar (local CPU; no CLI login required)."
+    else
+        echo ""
+        echo "Which dream extractor should consolidate memories?"
+        echo "  1) claude-only       — lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
+        echo "  2) claude-fallback   — Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
+        echo "  3) sidecar           — bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
+        echo "  4) openai-fallback   — Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling — see docs/guide/dreaming.md)"
+        echo "  5) openai-only       — Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
+        echo "  6) endpoint          — any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
+        echo "  7) endpoint-fallback — that server primary, sidecar auto-fallback (~11.8 GB image)"
+        while [ -z "$EXTRACTOR" ]; do
+            printf "Choose 1-7 (Enter = 3, sidecar): "
+            read -r choice
+            case "$choice" in
+                1) EXTRACTOR=claude-only ;;
+                2) EXTRACTOR=claude-fallback ;;
+                ""|3) EXTRACTOR=sidecar ;;
+                4) EXTRACTOR=openai-fallback ;;
+                5) EXTRACTOR=openai-only ;;
+                6) EXTRACTOR=endpoint ;;
+                7) EXTRACTOR=endpoint-fallback ;;
+                *) echo "  please answer 1-7" ;;
+            esac
+        done
+        case "$EXTRACTOR" in endpoint|endpoint-fallback)
+            while [ -z "$EXTRACTOR_URL" ]; do
+                printf "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1): "
+                read -r EXTRACTOR_URL
+                EXTRACTOR_URL="${EXTRACTOR_URL%/}"
+            done
+            while [ -z "$MODEL" ]; do
+                printf "The model name that server serves: "
+                read -r MODEL
+            done ;;
+        esac
+    fi
+    check_extractor_args
+fi
+[ -n "$CLIENT_ONLY" ] || step "Extractor mode: $EXTRACTOR"
+claude_shim_mode=""; codex_shim_mode=""
+case "$EXTRACTOR" in claude-only|claude-fallback) claude_shim_mode=1 ;; esac
+case "$EXTRACTOR" in openai-only|openai-fallback) codex_shim_mode=1 ;; esac
+if [ "$SHIM_PORT" = 0 ]; then
+    if [ -n "$codex_shim_mode" ]; then SHIM_PORT=8086; else SHIM_PORT=8082; fi
+fi
+# A model from the wrong family would silently serve the shim's launch
+# default: check_extractor_args (the extractor modes block) refuses it.
+# Fail fast on a missing shim CLI: preflight only knows --client, so e.g.
+# --extractor openai-fallback --client claude would otherwise sail through
+# and die at the autostart stage with the stack already up.
+if [ -n "$claude_shim_mode" ] && ! command -v claude >/dev/null 2>&1; then
+    echo "claude CLI not found (needed by extractor mode $EXTRACTOR) —" >&2
+    echo "  npm install -g @anthropic-ai/claude-code, then log in" >&2
+    exit 1
+fi
+if [ -n "$codex_shim_mode" ] && ! command -v codex >/dev/null 2>&1; then
+    echo "codex CLI not found (needed by extractor mode $EXTRACTOR) —" >&2
+    echo "  install Codex and run \`codex login\`: https://developers.openai.com/codex/cli/" >&2
+    exit 1
+fi
+# >>> endpoint preflight >>>
+# An endpoint mode's server must answer before the stack is configured to
+# depend on it. Any HTTP answer from <url>/models counts: a server may list
+# no models, and a key it wants (PSEUDOLIFE_DREAM_API_KEY) is never taken on
+# the command line, so a 401 is a warning, not a refusal.
+endpoint_preflight() {
+    command -v curl >/dev/null 2>&1 || {
+        echo "curl is needed to check the extractor endpoint; install it, then re-run." >&2
+        exit 1; }
+    endpoint_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$EXTRACTOR_URL/models" 2>/dev/null)" || true
+    case "$endpoint_code" in
+        2??) step "Extractor endpoint answered at $EXTRACTOR_URL/models." ;;
+        401|403)
+            echo "WARNING: $EXTRACTOR_URL/models answered HTTP $endpoint_code: the server wants a key. Set PSEUDOLIFE_DREAM_API_KEY in ops/.env (outside the installer's managed block) before the first dream." >&2 ;;
+        [1-5]??)
+            echo "WARNING: $EXTRACTOR_URL/models answered HTTP $endpoint_code. The server is reachable; if dreams fail, check that the URL is its OpenAI-compatible base (usually ending in /v1)." >&2 ;;
+        *)
+            echo "The extractor endpoint did not answer at $EXTRACTOR_URL/models. Start the server, or correct the URL (its OpenAI-compatible base, usually ending in /v1), then re-run." >&2
+            exit 1 ;;
+    esac
+}
+# <<< endpoint preflight <<<
+case "$EXTRACTOR" in endpoint|endpoint-fallback) endpoint_preflight ;; esac
+
+# ── 3b. dreamer model choice (Claude-shim modes only) ──────────────────────
+# Opus is the recommended family per the 2026-08-02 same-harness comparison
+# (evals/results/dreamer-choice-verdict.json, run on claude-opus-5); Opus 5.5
+# is the default since 2026-09-29, when it cleared the paired extraction-ladder
+# gate with no regression against claude-opus-5
+# (evals/results/ladder-opus55-paired-verdict-threshold.json). The shim honours per-request
+# claude-* names, so this is only the launch default — switchable later from
+# the Console's Extractor panel without a reinstall.
+if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
+    if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
+        echo ""
+        echo "Which Claude model should extract memories (the 'dreamer')?"
+        echo "  1) claude-opus-5-5   — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
+        echo "  2) claude-opus-5     — the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
+        echo "  3) claude-sonnet-5-5 — balanced"
+        echo "  4) claude-sonnet-5   — the earlier Sonnet"
+        echo "  5) claude-haiku-5-5  — fastest / lightest on plan usage"
+        echo "  6) claude-haiku-4-5  — the earlier Haiku"
+        echo "  7) claude-fable-5-1  — most capable tier"
+        echo "  8) claude-fable-5    — the earlier Fable"
+        while [ -z "$MODEL" ]; do
+            printf "Choose 1-8 (Enter = 1): "
+            read -r choice
+            case "$choice" in
+                ""|1) MODEL=claude-opus-5-5 ;;
+                2) MODEL=claude-opus-5 ;;
+                3) MODEL=claude-sonnet-5-5 ;;
+                4) MODEL=claude-sonnet-5 ;;
+                5) MODEL=claude-haiku-5-5 ;;
+                6) MODEL=claude-haiku-4-5 ;;
+                7) MODEL=claude-fable-5-1 ;;
+                8) MODEL=claude-fable-5 ;;
+                *) echo "  please answer 1-8" ;;
+            esac
+        done
+    else
+        MODEL=claude-opus-5-5
+    fi
+    step "Dreamer model: $MODEL${INSTALLER_UNATTENDED:+ (unattended default)}"
+fi
+# GPT menu: no 'recommended' — extraction quality is unmeasured for all of
+# them (the ladder's terra rung exists to measure it); Terra is only the
+# shim's balanced default. The GPT-6 ids were accepted by the Codex CLI on
+# 2026-09-29; no ladder run has measured them.
+if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
+    if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
+        echo ""
+        echo "Which GPT model should extract memories (the 'dreamer')?"
+        echo "  1) gpt-5.6-terra — balanced default (extraction quality unmeasured)"
+        echo "  2) gpt-5.6-sol   — flagship (unmeasured)"
+        echo "  3) gpt-5.6-luna  — fastest / lightest on plan usage (unmeasured)"
+        echo "  4) gpt-6-sol     — GPT-6 flagship (unmeasured)"
+        echo "  5) gpt-6-luna    — GPT-6 fastest / lightest (unmeasured)"
+        echo "  6) gpt-6.1-sol   — GPT-6.1 flagship (unmeasured)"
+        while [ -z "$MODEL" ]; do
+            printf "Choose 1/2/3/4/5/6 (Enter = 1): "
+            read -r choice
+            case "$choice" in
+                ""|1) MODEL=gpt-5.6-terra ;;
+                2) MODEL=gpt-5.6-sol ;;
+                3) MODEL=gpt-5.6-luna ;;
+                4) MODEL=gpt-6-sol ;;
+                5) MODEL=gpt-6-luna ;;
+                6) MODEL=gpt-6.1-sol ;;
+                *) echo "  please answer 1, 2, 3, 4, 5 or 6" ;;
+            esac
+        done
+    else
+        MODEL=gpt-5.6-terra
+    fi
+    step "Dreamer model: $MODEL${INSTALLER_UNATTENDED:+ (unattended default)}"
+fi
+
+# ── 3c. ops/.env line endings ──────────────────────────────────────────────
+# >>> env line endings >>>
+# An ops/.env copied from a Windows host carries CRLF line endings, and a
+# value read from it here then ends in a CR: `docker volume create` refused
+# "pseudolife-mcp-bank-pg18\r" as an invalid name (Debian 13, 2026-09-29).
+# Compose tolerates CRLF; the shell reads do not. The file is rewritten in
+# place with LF endings, keeping its mode (owner-only once a token is
+# minted) and a copy of the original beside it; a file already on LF is not
+# touched. ops/install.sh and ops/update.sh carry this same block, and
+# tests/test_installer_env_file.py keeps the two identical.
+normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
+    [ -f "$1" ] || return 0
+    grep -q "$(printf '\r')" "$1" || return 0
+    env_backup="$1.crlf-$(date +%Y%m%d-%H%M%S)"
+    cp -p "$1" "$env_backup"
+    tr -d '\r' < "$env_backup" > "$1"
+    step "Rewrote $(basename "$1") with LF line endings (it had CRLF, which put a stray CR into every value read from it); the original is kept as $(basename "$env_backup")"
+}
+[ -n "$CLIENT_ONLY" ] || normalize_env_line_endings "$env_file"
+# <<< env line endings <<<
+
+# ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
+resolve_installer_volumes() {
+    "$(installer_python)" "$repo/ops/preflight.py" --env-file "$env_file" --volume-names
+}
+# >>> volumes >>>
+# A trailing CR is dropped here too: a reader placed before stage 3c, or a
+# file rewritten by hand, still yields clean names.
+get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 | tr -d '\r' || true; }
+if [ -z "$CLIENT_ONLY" ]; then
+    resolved_volumes="$(resolve_installer_volumes)" || exit 1
+    bank_vol="$(printf '%s\n' "$resolved_volumes" | sed -n '1p')"
+    state_vol="$(printf '%s\n' "$resolved_volumes" | sed -n '2p')"
+    existing_volumes="$(docker volume ls --format '{{.Name}}')"
+    volumes_changed=""
+    BANK_EXISTED=""
+    if printf '%s\n' "$existing_volumes" | grep -Fxq -- "$bank_vol"; then BANK_EXISTED=1; fi
+fi
+# <<< volumes <<<
+
+# ── 4b. daemon engine ──────────────────────────────────────────────────────
+# >>> shim tooling >>>
+# Whether stage 11 can be expected to install the shim: pipx, or a Python
+# >= 3.10 with pip outside a PEP 668 externally managed environment (where
+# `pip install --user` refuses). The helper needs that Python either way.
+shim_tooling_ready() {
+    [ -n "$(installer_python)" ] || return 1
+    command -v pipx >/dev/null 2>&1 && return 0
+    "$(installer_python)" -c 'import os, sys, sysconfig
+import pip
+marker = os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")
+sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' >/dev/null 2>&1
+}
+# <<< shim tooling <<<
+# >>> daemon engine >>>
+# The bearer stage 5b will have: one already set, or one it can mint
+# (which needs the shim's tooling). Rust is verified with an authenticated read.
+rust_token_expected() {
+    [ -n "$RUST_BEARER" ] || return 1
+    [ -n "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] && return 0
+    [ -n "$(get_env PSEUDOLIFE_MCP_TOKEN)$(get_env PSEUDOLIFE_MCP_TOKENS)" ] && return 0
+    [ "$TRANSPORT" = shim ] && shim_tooling_ready
+}
+# The engine already installed is kept; a new install takes --engine (default
+# rust since G2, python without a bearer or an available Rust image). Naming the other engine on an existing bank switches it after the
+# install through pseudolife-mcp update (backup, rollback tag, health gate).
+# Rust pulls the release's image and provisions its models into their own
+# volume here, before any container starts, so a refusal starts nothing.
+engine_helper() { "$(installer_python)" "$repo/ops/installer_engine.py" "$@"; }
+INSTALLED_ENGINE=""
+COMPOSE_ENGINE=""
+SWITCH_ENGINE=""
+ENGINE_DEFAULTED=""
+engine_files=()
+if [ -z "$CLIENT_ONLY" ]; then
+    INSTALLED_ENGINE="$(engine_helper detect --repo "$repo")" || exit 1
+    case "$INSTALLED_ENGINE" in
+        none)
+            # Rust is the default since G2; without a bearer the default stays Python.
+            if [ -n "$ENGINE" ]; then COMPOSE_ENGINE="$ENGINE"
+            elif [ -n "${BANK_EXISTED:-}" ]; then
+                # An existing bank moves only through update's checks, which its
+                # own default does on the next attended update.
+                COMPOSE_ENGINE=python
+                step "Daemon engine: python for this existing bank; the next attended pseudolife-mcp update moves it to Rust after its checks"
+            elif rust_token_expected; then COMPOSE_ENGINE=rust; ENGINE_DEFAULTED=1
+            else COMPOSE_ENGINE=python; step "Daemon engine: python (no bearer token for the default Rust daemon)"; fi
+            # An existing bank reaches Rust only through update, which checks
+            # its schema and counters first.
+            if [ "$COMPOSE_ENGINE" = rust ] && [ -n "${BANK_EXISTED:-}" ]; then
+                COMPOSE_ENGINE=python; SWITCH_ENGINE=rust
+            fi ;;
+        # This checkout's own unfinished Rust install: redo it, or install Python.
+        rust-unaccepted) COMPOSE_ENGINE="${ENGINE:-rust}" ;;
+        *)
+            COMPOSE_ENGINE="$INSTALLED_ENGINE"
+            if [ -n "$ENGINE" ] && [ "${INSTALLED_ENGINE%-checkout}" != "$ENGINE" ]; then SWITCH_ENGINE="$ENGINE"; fi ;;
+    esac
+    # Before anything is pulled: Rust with no bearer to come refuses here.
+    if [ "$COMPOSE_ENGINE" = rust ] && [ -z "${ENGINE_DEFAULTED:-}" ] && ! rust_token_expected; then
+        echo "The Rust daemon needs its bearer token, and this install cannot mint one (no pipx or pip-capable Python >= 3.10 to install the shim): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx, then rerun; or rerun with --engine python. Nothing was pulled or started." >&2
+        exit 2
+    fi
+    default_args=()
+    [ -z "${ENGINE_DEFAULTED:-}" ] || default_args=(--default)
+    engine_out="$(engine_helper prepare --repo "$repo" --engine "$COMPOSE_ENGINE" ${default_args[@]+"${default_args[@]}"})" || exit 1
+    while IFS= read -r engine_file; do
+        [ -z "$engine_file" ] || engine_files+=("$engine_file")
+    done <<< "$engine_out"
+    # A defaulted Rust install whose image or models are unavailable falls back
+    # to Python (the helper said why); an explicit --engine rust refused above.
+    if [ "$COMPOSE_ENGINE" = rust ] && [ ${#engine_files[@]} -eq 0 ]; then COMPOSE_ENGINE=python; fi
+    if [ -n "$SWITCH_ENGINE" ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout} for now; switching to $SWITCH_ENGINE after the install"
+    elif [ "$INSTALLED_ENGINE" = none ] || [ "$INSTALLED_ENGINE" = rust-unaccepted ]; then step "Daemon engine: ${COMPOSE_ENGINE%-checkout}"
+    else step "Daemon engine unchanged: ${COMPOSE_ENGINE%-checkout}"; fi
+fi
+# <<< daemon engine <<<
+
+# ── 4c. create volumes (after every refusal above) ───────────────────────
+# >>> create volumes >>>
+if [ -z "$CLIENT_ONLY" ]; then
+    for volume in "$bank_vol" "$state_vol"; do
+        if ! printf '%s\n' "$existing_volumes" | grep -Fxq -- "$volume"; then
+            docker volume create "$volume" >/dev/null
+            volumes_changed=1
+        fi
+    done
+    if [ -n "$volumes_changed" ]; then step "Volumes ready: $bank_vol, $state_vol"
+    else step "Volumes unchanged: $bank_vol, $state_vol"; fi
+fi
+# <<< create volumes <<<
+
+# ── 5. managed env block ───────────────────────────────────────────────────
+# >>> extractor env >>>
+# What the managed block of ops/.env says about the extractor. The daemon
+# runs in Docker, where this host is host.docker.internal (extra_hosts in
+# ops/docker-compose.yml), so a server named on loopback is written that way.
+extractor_container_url() {  # $1 = URL; echoes it as written for the daemon container
+    url_scheme="${1%%://*}"
+    url_rest="${1#*://}"
+    url_authority="${url_rest%%/*}"
+    url_path="${url_rest#"$url_authority"}"
+    case "$url_authority" in
+        \[*) url_host="${url_authority%%]*}]" ;;
+        *) url_host="${url_authority%%:*}" ;;
+    esac
+    url_port="${url_authority#"$url_host"}"
+    case "$url_host" in localhost|\[::1\]|127.*) url_host=host.docker.internal ;; esac
+    printf '%s://%s%s%s\n' "$url_scheme" "$url_host" "$url_port" "$url_path"
+}
+extractor_env_lines() {
+    case "$EXTRACTOR" in
+        sidecar)
+            echo "# extractor: sidecar (stock defaults — nothing to set)" ;;
+        claude-fallback|openai-fallback)
+            echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
+            echo "PSEUDOLIFE_DREAM_MODEL=extractor"
+            echo "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
+            echo "PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
+            echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto" ;;
+        claude-only|openai-only)
+            echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
+            echo "PSEUDOLIFE_DREAM_MODEL=extractor"
+            # `primary` (not `auto`): states the single-extractor intent and
+            # keeps the auto-without-fallback startup warning silent.
+            echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary" ;;
+        endpoint|endpoint-fallback)
+            echo "PSEUDOLIFE_DREAM_BASE_URL=$(extractor_container_url "$EXTRACTOR_URL")"
+            echo "PSEUDOLIFE_DREAM_MODEL=$MODEL"
+            if [ "$EXTRACTOR" = endpoint-fallback ]; then
+                echo "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
+                echo "PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
+                echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto"
+            else
+                echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary"
+            fi ;;
+    esac
+}
+# <<< extractor env <<<
+# Daemon-side writer default: a single first-class provider gets its own id;
+# any multi-provider or generic install falls back to the neutral id — the
+# per-provider ids then ride each MCP registration's env instead (stage 10).
+case "$CLIENTS" in
+    claude) WRITER_ID=claude-code ;;
+    claude-desktop) WRITER_ID=claude-desktop ;;
+    codex)  WRITER_ID=codex ;;
+    gemini) WRITER_ID=gemini ;;
+    *)      WRITER_ID=mcp-client ;;
+esac
+# >>> managed configuration >>>
+if [ -z "$CLIENT_ONLY" ]; then
+    managed_block="$({
+        echo "$ENV_BEGIN"
+        extractor_env_lines
+        echo "PSEUDOLIFE_WRITER_ID=$WRITER_ID"
+        echo "PSEUDOLIFE_INSTALL_EXTRACTOR=$EXTRACTOR"
+        echo "PSEUDOLIFE_INSTALL_MODEL=$MODEL"
+        echo "PSEUDOLIFE_INSTALL_EXTRACTOR_URL=$EXTRACTOR_URL"
+        echo "PSEUDOLIFE_INSTALL_SHIM_PORT=$SHIM_PORT"
+        echo "PSEUDOLIFE_INSTALL_CLIENT=$CLIENT_LIST"
+        echo "PSEUDOLIFE_INSTALL_BANK_LOCATION=$BANK_LOCATION"
+        echo "PSEUDOLIFE_INSTALL_INSTRUCTIONS=${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
+        echo "PSEUDOLIFE_INSTALL_CODEX_HOOKS=$CODEX_HOOKS"
+        echo "PSEUDOLIFE_INSTALL_CLAUDE_PLUGIN=$CLAUDE_PLUGIN"
+        echo "PSEUDOLIFE_INSTALL_CLAUDE_LEGACY_HOOKS=$CLAUDE_LEGACY_HOOKS"
+        echo "PSEUDOLIFE_INSTALL_TRANSPORT=$TRANSPORT"
+        echo "PSEUDOLIFE_INSTALL_NO_TOKEN=${NO_TOKEN:-0}"
+        echo "$ENV_END"
+    })"
+    managed_status="$(printf '%s\n' "$managed_block" | installer_state write-env --env-file "$env_file" --template "$repo/ops/.env.example")" || exit 1
+    if [ "$managed_status" = unchanged ]; then step "Managed configuration unchanged: ops/.env"
+    else step "Wrote managed block in ops/.env"; fi
+    case "$EXTRACTOR" in endpoint|endpoint-fallback)
+        endpoint_in_container="$(extractor_container_url "$EXTRACTOR_URL")"
+        [ "$endpoint_in_container" = "$EXTRACTOR_URL" ] ||
+            step "Extractor endpoint written as $endpoint_in_container: the daemon runs in Docker, where this host is host.docker.internal."
+        echo "    If the server wants a key, set PSEUDOLIFE_DREAM_API_KEY in ops/.env outside the managed block." ;;
+    esac
+fi
+# <<< managed configuration <<<
+
+# ── 5b. bearer token (the agent board needs one) ──────────────────────────
+# A default install mints one, so the board is on; every client wired below
+# then carries it in an owner-only token file. The value is never printed.
+# Open loopback (docs/guide/configuration.md) stays available: --no-token,
+# and --transport http, whose registrations cannot carry a token file. A
+# host that cannot install the shim falls back to HTTP, so it mints none.
+# >>> mint token >>>
+TOKEN_STATE=""
+token_py="$(installer_python)"
+# A client-only install never mints: the remote daemon's token is the file
+# the operator supplied. A token already set gates the daemon whatever this
+# run may mint, and the HTTP-registration warning and the board hint depend
+# on knowing that.
+if [ -n "${CLIENT_ONLY:-}" ]; then
+    TOKEN_STATE=remote
+elif [ -n "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] ||
+        [ -n "$(get_env PSEUDOLIFE_MCP_TOKEN)$(get_env PSEUDOLIFE_MCP_TOKENS)" ]; then
+    TOKEN_STATE=present
+elif [ -n "$NO_TOKEN" ]; then
+    TOKEN_STATE=opted-out
+elif [ "$TRANSPORT" != shim ]; then
+    TOKEN_STATE=http
+elif ! shim_tooling_ready; then
+    TOKEN_STATE=no-shim
+else
+    mint_output=$("$token_py" "$repo/ops/client_credentials.py" mint --env-file "$env_file") || true
+    case "$mint_output" in
+        *'"minted"'*)
+            TOKEN_STATE=minted
+            step "Minted a bearer token in ops/.env (owner-only, never printed) - the agent board needs one." ;;
+        *'"present"'*) TOKEN_STATE=present ;;
+        *)
+            TOKEN_STATE=failed
+            echo "WARNING: could not mint a bearer token in ops/.env, so the agent board stays off. Set PSEUDOLIFE_MCP_TOKEN there by hand and re-run." >&2 ;;
+    esac
+fi
+# <<< mint token <<<
+# >>> engine token >>>
+# The default Rust daemon is verified with an authenticated read, so it
+# follows the bearer this stage actually produced, not the one stage 4b
+# predicted (a host that cannot install the shim mints none).
+if [ "${COMPOSE_ENGINE:-}" = rust ] && [ "$TOKEN_STATE" != minted ] && [ "$TOKEN_STATE" != present ]; then
+    if [ -n "${ENGINE_DEFAULTED:-}" ]; then
+        COMPOSE_ENGINE=python
+        engine_files=()
+        step "Daemon engine: python after all (no bearer token for the default Rust daemon: $TOKEN_STATE)"
+    else
+        echo "The Rust daemon needs its bearer token, and this install has none ($TOKEN_STATE): set PSEUDOLIFE_MCP_TOKEN in ops/.env, or install pipx or a pip-capable Python >= 3.10 so the installer mints one, then rerun; or rerun with --engine python. The daemon was not started; the Rust image and models stay downloaded for the rerun." >&2
+        exit 2
+    fi
+fi
+# <<< engine token <<<
+
+# ── 6. sidecar enable/disable via the compose override ────────────────────
+# >>> sidecar override >>>
+installer_owns_override() {
+    [ -f "$override_file" ] || return 1
+    local first
+    first="$(head -1 "$override_file")"
+    [ "$first" = "$OVERRIDE_MARKER" ] || [ "$first" = "$LEGACY_OVERRIDE_MARKER" ] ||
+        [ "$first" = "$LEGACY_SHIM_OVERRIDE_MARKER" ]
+}
+if [ -n "$CLIENT_ONLY" ]; then
+    :  # no local daemon here, so its compose override is not this run's to change
+elif extractor_disables_sidecar; then
+    if [ ! -f "$override_file" ] || installer_owns_override; then
+        override_contents="$(cat <<EOF
+$OVERRIDE_MARKER
+# A profiled service is skipped by \`up\` entirely: the extractor image is
+# never built or pulled. Re-run ops/install.sh with a sidecar mode to remove.
+services:
+  pseudolife-extractor:
+    profiles: ["disabled"]
+EOF
+)"
+        override_status="$(printf '%s\n' "$override_contents" | "$(installer_python)" "$repo/ops/installer_state.py" write-file --path "$override_file")" || exit 1
+        if [ "$override_status" = unchanged ]; then step "Sidecar override unchanged (disabled)."
+        else step "Sidecar disabled via ops/docker-compose.override.yml"; fi
+    else
+        if [ -n "${INSTALLER_RERUN:-}" ]; then
+            step "Operator override unchanged (not installer-managed)."
+        else
+            echo "NOTE: ops/docker-compose.override.yml exists and is not installer-managed."
+            echo "      Add this to it yourself to disable the sidecar:"
+            echo "        services:"
+            echo "          pseudolife-extractor:"
+            echo "            profiles: [\"disabled\"]"
+        fi
+    fi
+    # Remove a leftover running extractor container (container only — it has
+    # no volumes; the image is kept for an easy switch back).
+    extractor_owner="$(docker inspect -f '{{.Id}} {{index .Config.Labels "com.docker.compose.project"}}' pseudolife-mcp-extractor 2>/dev/null || true)"
+    if [[ "$extractor_owner" =~ ^([a-f0-9]+)\ pseudolife-mcp$ ]]; then
+        # Remove the verified ID, never a name another stack could acquire.
+        docker rm -f "${BASH_REMATCH[1]}" >/dev/null
+        step "Removed the running extractor container"
+    fi
+else
+    if installer_owns_override; then
+        rm "$override_file"
+        step "Removed installer-managed override (sidecar re-enabled)"
+    else
+        step "Sidecar override unchanged (enabled)."
+    fi
+fi
+# <<< sidecar override <<<
+
+# ── 7. bring the stack up ──────────────────────────────────────────────────
+if [ -z "$CLIENT_ONLY" ]; then
+    compose=(-p pseudolife-mcp --env-file "$env_file" -f "$compose_file")
+    [ -f "$override_file" ] && compose+=(-f "$override_file")
+    # The engine overlays (stage 4b) follow, in the planner's checks too.
+    engine_state_args=()
+    for engine_file in ${engine_files[@]+"${engine_files[@]}"}; do
+        compose+=(-f "$engine_file")
+        engine_state_args+=(--overlay "$engine_file")
+    done
+    compose_snapshot_json="$(installer_state plan --snapshot --repo "$repo" --env-file "$env_file" --override "$override_file" ${engine_state_args[@]+"${engine_state_args[@]}"})" || exit 1
+    compose_plan="$(printf '%s' "$compose_snapshot_json" | "$(installer_python)" -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["action"])')"
+    case "$compose_plan" in
+        unchanged) step "Docker stack unchanged; no Compose up or build needed." ;;
+        start)
+            step "Starting Docker stack with existing images (no build)..."
+            docker compose "${compose[@]}" up -d --no-build ;;
+        build)
+            step "docker compose up -d --build (checkout or images changed)..."
+            docker compose "${compose[@]}" up -d --build ;;
+        *) echo "Cannot determine the Docker startup step; rerun ops/preflight.sh." >&2; exit 1 ;;
+    esac
+    compose_snapshot_json="$(printf '%s' "$compose_snapshot_json" | installer_state started --expected-stdin --repo "$repo" --env-file "$env_file" --override "$override_file" ${engine_state_args[@]+"${engine_state_args[@]}"})" || exit 1
+fi
+
+# ── 8b. Claude Code plugin (hooks + commands layer) ────────────────────────
+# >>> claude plugin >>>
+# The plugin is the third install beside the daemon and the shim, and the
+# only one that needed two commands typed inside Claude Code. Installing it
+# here gives a fresh machine the session briefing and per-turn hooks from
+# the plugin (section 9 then skips the settings.json hooks). Idempotent: an
+# installed plugin is left alone — its cache moves through /plugin update,
+# and the daemon's session briefing says when it is behind — except that a
+# marketplace recorded with the old github source is moved to HTTPS.
+CLAUDE_PLUGIN_ID="pseudolife-memory@pseudolife-mcp"
+CLAUDE_PLUGIN_MARKETPLACE="pseudolife-mcp"
+# The HTTPS git URL, not the owner/repo shorthand: Claude Code records the
+# shorthand as a GitHub source and refreshes it over SSH, which fails on a
+# host with no GitHub key (seen 2026-10-04). The repository is public.
+CLAUDE_PLUGIN_MARKETPLACE_SOURCE="https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+PLUGIN_CLAUDE=""
+PLUGIN_CLAUDE_RECOVERY=""
+claude_plugin_manual() {
+    echo "inside Claude Code run /plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE then /plugin install $CLAUDE_PLUGIN_ID"
+}
+claude_plugin_recorded() {
+    grep -q "\"$CLAUDE_PLUGIN_ID\"" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null
+}
+claude_plugin_installed_version() {
+    # The record is pretty-printed JSON: the plugin's entry follows its key
+    # within a few lines. curl+sed hosts only — no jq or python assumed.
+    { grep -A 12 "\"$CLAUDE_PLUGIN_ID\"" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null \
+        | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; } || true
+}
+claude_marketplace_https() {
+    # Up to 0.16.1 the marketplace was added by the owner/repo shorthand,
+    # which Claude Code records as a github source and refreshes over SSH:
+    # on a host with no GitHub SSH key the plugin stops updating (2026-10-04).
+    # ops/plugin_marketplace.py moves it to the HTTPS URL through Claude
+    # Code's own CLI (settings.json backed up and edited first), prints one
+    # line, and prints nothing when no marketplace is recorded.
+    mk_py="$(installer_python)"
+    if [ -z "$mk_py" ]; then
+        if grep -A 3 "\"$CLAUDE_PLUGIN_MARKETPLACE\"" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json" 2>/dev/null | grep -q '"github"'; then
+            echo "WARNING: the $CLAUDE_PLUGIN_MARKETPLACE plugin marketplace is recorded as a github source, which updates over SSH, and there is no Python 3.10+ here to move it to HTTPS; the README's Updating section has the steps" >&2
+        fi
+        return 0
+    fi
+    if mk_out=$("$mk_py" "$repo/ops/plugin_marketplace.py"); then
+        [ -z "$mk_out" ] || step "$mk_out"
+    else
+        echo "WARNING: ${mk_out:-ops/plugin_marketplace.py failed}" >&2
+    fi
+}
+install_claude_plugin() {
+    case " $CLIENTS " in *" claude "*) ;; *) return 0 ;; esac
+    if [ "$CLAUDE_PLUGIN" != skip ] && command -v claude >/dev/null 2>&1; then
+        claude_marketplace_https
+    fi
+    # An installed plugin is reported as such even under skip: the ladder
+    # line must agree with the hook-ownership lines section 9 derives from
+    # the same record.
+    if claude_plugin_recorded; then
+        PLUGIN_CLAUDE="present:$(claude_plugin_installed_version)"
+        return 0
+    fi
+    if [ "$CLAUDE_PLUGIN" = skip ]; then PLUGIN_CLAUDE=skipped; return 0; fi
+    if ! command -v claude >/dev/null 2>&1; then
+        PLUGIN_CLAUDE=no-cli
+        PLUGIN_CLAUDE_RECOVERY="the claude CLI is not on PATH; $(claude_plugin_manual)"
+        return 0
+    fi
+    if ! grep -q "\"$CLAUDE_PLUGIN_MARKETPLACE\"" "$HOME/.claude/plugins/known_marketplaces.json" 2>/dev/null; then
+        step "Adding the $CLAUDE_PLUGIN_MARKETPLACE plugin marketplace to Claude Code..."
+        if ! claude plugin marketplace add "$CLAUDE_PLUGIN_MARKETPLACE_SOURCE"; then
+            PLUGIN_CLAUDE=failed
+            PLUGIN_CLAUDE_RECOVERY="'claude plugin marketplace add $CLAUDE_PLUGIN_MARKETPLACE_SOURCE' failed (GitHub reachable?); retry it, or $(claude_plugin_manual)"
+            echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
+            return 0
+        fi
+    fi
+    step "Installing the $CLAUDE_PLUGIN_ID plugin into Claude Code..."
+    # --yes skips a confirmation newer CLIs require without a TTY; older
+    # ones lack the flag, so probe rather than assume. Captured, not piped:
+    # under pipefail a `grep -q` that exits early makes the CLI's SIGPIPE
+    # read as "no such flag", and some CLIs print help on stderr.
+    yes_flag=""
+    install_help=$(claude plugin install --help 2>&1 || true)
+    case "$install_help" in *--yes*) yes_flag=--yes ;; esac
+    if ! claude plugin install ${yes_flag:+"$yes_flag"} "$CLAUDE_PLUGIN_ID"; then
+        PLUGIN_CLAUDE=failed
+        PLUGIN_CLAUDE_RECOVERY="'claude plugin install $CLAUDE_PLUGIN_ID' failed (see above); retry it, or $(claude_plugin_manual)"
+        echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
+        return 0
+    fi
+    if claude_plugin_recorded; then
+        PLUGIN_CLAUDE="installed:$(claude_plugin_installed_version)"
+    else
+        PLUGIN_CLAUDE=failed
+        PLUGIN_CLAUDE_RECOVERY="'claude plugin install' returned success but ~/.claude/plugins/installed_plugins.json does not list $CLAUDE_PLUGIN_ID; check 'claude plugin list', or $(claude_plugin_manual)"
+        echo "WARNING: $PLUGIN_CLAUDE_RECOVERY" >&2
+    fi
+}
+describe_plugin() {  # $1 = state
+    case "$1" in
+        installed:*) echo "[x] Plugin               installed (v${1#*:}) - restart Claude Code or /reload-plugins to load it" ;;
+        present:*)   echo "[x] Plugin               already installed (v${1#*:})" ;;
+        skipped)     echo "[-] Plugin               skipped (--claude-plugin skip) - hooks come from settings.json instead" ;;
+        no-cli|failed) echo "[!] Plugin               not installed - $PLUGIN_CLAUDE_RECOVERY" ;;
+        *)           echo "[-] Plugin               not installed" ;;
+    esac
+}
+# <<< claude plugin <<<
+install_claude_plugin
+
+# >>> claude legacy hooks >>>
+# Installs from before the plugin wrote the briefing, coordination and
+# discipline hooks (and, before 2026-07-14, episode hooks) into
+# ~/.claude/settings.json. The plugin provides them now, so an upgraded user
+# runs each one twice. install-hook removes only the exact entries the
+# installers wrote, only while the plugin runs for every project, after a
+# backup. Section 9 calls this for a plugin-owned Claude; it asks first
+# unless --claude-legacy-hooks says otherwise.
+LEGACY_CLAUDE=""
+LEGACY_CLAUDE_BACKUP=""
+claude_legacy_answer() {  # prints the reply; fails when there is no terminal
+    [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ] || return 1
+    printf 'Remove them from ~/.claude/settings.json (a timestamped backup is taken first)? [y/N] ' >&2
+    read -r legacy_reply || legacy_reply=""
+    printf '%s' "$legacy_reply"
+}
+cleanup_claude_legacy_hooks() {
+    legacy_rc=0
+    legacy_report=$("$repo/ops/install-hook.sh" --client claude --remove-legacy --dry-run \
+        </dev/null 2>&1) || legacy_rc=$?
+    case "$legacy_rc" in
+        0) ;;
+        3)  # Nothing to remove; a lookalike the user should review still shows.
+            case "$legacy_report" in *"by hand"*) printf '%s\n' "$legacy_report" ;; esac
+            return 0 ;;
+        4) LEGACY_CLAUDE=inactive; printf '%s\n' "$legacy_report"; return 0 ;;
+        *) LEGACY_CLAUDE=error; printf '%s\n' "$legacy_report" >&2; return 0 ;;
+    esac
+    step "Found hooks an earlier install wrote to ~/.claude/settings.json; the plugin provides them now:"
+    printf '%s\n' "$legacy_report"
+    legacy_choice="$CLAUDE_LEGACY_HOOKS"
+    if [ "$legacy_choice" = ask ]; then
+        if legacy_reply=$(claude_legacy_answer); then
+            case "$legacy_reply" in y|Y|yes|YES|Yes) legacy_choice=remove ;; *) legacy_choice=keep ;; esac
+        else
+            legacy_choice=keep
+            echo "    No terminal to ask: left them in place. Rerun with --claude-legacy-hooks remove to remove them."
+        fi
+    fi
+    if [ "$legacy_choice" != remove ]; then
+        LEGACY_CLAUDE=kept
+        return 0
+    fi
+    legacy_rc=0
+    legacy_report=$("$repo/ops/install-hook.sh" --client claude --remove-legacy \
+        </dev/null 2>&1) || legacy_rc=$?
+    printf '%s\n' "$legacy_report"
+    if [ "$legacy_rc" = 0 ]; then
+        LEGACY_CLAUDE=removed
+        LEGACY_CLAUDE_BACKUP=$(printf '%s\n' "$legacy_report" | sed -n 's/^Backed up -> //p')
+    else
+        LEGACY_CLAUDE=error
+    fi
+}
+describe_legacy_hooks() {  # $1 = state
+    case "$1" in
+        removed)  echo "[x] Old hooks            removed from ~/.claude/settings.json (backup: $LEGACY_CLAUDE_BACKUP)" ;;
+        kept)     echo "[!] Old hooks            still in ~/.claude/settings.json, so they run twice - rerun with --claude-legacy-hooks remove" ;;
+        inactive) echo "[-] Old hooks            kept in ~/.claude/settings.json - the plugin is not enabled for all projects" ;;
+        error)    echo "[!] Old hooks            not removed (see the error above) - remove them by hand (plugin/README.md, Migrating from installer hook wiring)" ;;
+    esac
+}
+# <<< claude legacy hooks <<<
+
+# ── 9. session lifecycle hooks (hook-capable providers only) ───────────────
+# Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
+# exact hook trust, runtime verification, and instruction fallback together.
+# Gemini/generic have no hook system.
+# The stdio shim helpers come first: a client-only install runs the
+# installed shim's connect (the client-only connect block) before the
+# Codex credential setup here and the registrars in section 11.
+#
+# The shim install itself is client-agnostic; memoize one attempt so
+# multi-provider runs install once. The install runs as an `if` condition so
+# `set -e` is suspended around it: a failed install leaves SHIM_OK unset so
+# the per-client HTTP fallback and its remediation text fire, instead of
+# aborting the run after the images are already built (issue #176;
+# install.ps1 exit-checks the same path).
+SHIM_TRIED=""
+SHIM_OK=""
+SHIM_PATH=""
+SHIM_HELD=""
+SHIM_MANAGER_KIND=""
+resolve_installed_shim() {  # status 0 with SHIM_PATH = the stable launcher, when it is the native client
+    resolved_launcher="$(native_installed_launcher)"
+    [ -n "$resolved_launcher" ] || return 1
+    SHIM_PATH="$resolved_launcher"
+    return 0
+}
+ensure_shim() {
+    if [ -n "$SHIM_TRIED" ]; then return 0; fi
+    SHIM_TRIED=1
+    # The native client (the native client block): a new runtime beside any
+    # older one, so nothing a running session uses is replaced, and the
+    # launcher every client registers starts the newest complete runtime.
+    if native_install; then
+        SHIM_OK=1
+        SHIM_MANAGER_KIND=runtime
+    else
+        echo "WARNING: the native client could not be installed from $NATIVE_ARCHIVE (see above); rerun the installer, which reuses the verified download." >&2
+    fi
+    return 0
+}
+
+shim_registration_migrates() {  # $1 = client id (claude-code, codex, gemini); status 0 = its registration now runs the native launcher
+    # A pipx, pip --user or Python runtime registration moves to the native
+    # launcher (each changed file is backed up first); editable, self-spawning
+    # and unrecognised registrations stay as they are. Status 0 once it runs
+    # the launcher, with SHIM_MIGRATED=moved (now) or current (already); 1
+    # leaves it as it was.
+    ensure_shim
+    if [ -z "$SHIM_OK" ]; then return 1; fi
+    SHIM_MIGRATED=""
+    migrate_output="$("$SHIM_PATH" installer migrate-registrations --client "$1")" || true
+    case "$migrate_output" in
+        "moved $1 to the native client"*) SHIM_MIGRATED=moved; printf '%s\n' "$migrate_output" ;;
+        "$1 already runs the native client"*)
+            SHIM_MIGRATED=current
+            # Where the old Python client stays is said even when the
+            # registration needed no edit (it named the stable launcher).
+            case "$migrate_output" in *"old Python client"*) echo "  ${migrate_output#*(}" | sed 's/)$//' ;; esac ;;
+        *) [ -z "$migrate_output" ] || printf '%s\n' "$migrate_output"; return 1 ;;
+    esac
+    return 0
+}
+
+cli_env_flag() {  # $1 = cli; echoes the supported env flag, or nothing
+    if "$1" mcp add --help 2>/dev/null | grep -q -- '--env'; then
+        echo "--env"
+    fi
+}
+registration_is_http() {
+    printf '%s\n' "$1" | grep -Eqi '(^|[[:space:]])"?(transport|type)"?[[:space:]]*:[[:space:]]*"?(streamable_)?http"?([,}]|[[:space:]]|$)|\(http\)'
+}
+no_spawn_guard_is_enabled() {
+    printf '%s\n' "$1" | grep -Eqi '(^|[,{}])[[:space:]]*"?PSEUDOLIFE_MCP_NO_SPAWN"?[[:space:]]*[:=][[:space:]]*"?(1|true|yes|on)"?[[:space:]]*([,}]|$)'
+}
+registered_stdio_command() {
+    printf '%s\n' "$1" | sed -nE \
+        -e 's/^[[:space:]]*"?[Cc]ommand"?[[:space:]]*:[[:space:]]*"([^"]+)"[,]?[[:space:]]*$/\1/p' \
+        -e 's/^[[:space:]]*[Cc]ommand:[[:space:]]*(.+)[[:space:]]*$/\1/p' | sed -n '1p'
+}
+warn_unverified_no_spawn_guard() {
+    echo "WARNING: the existing $1 stdio registration's no-spawn guard is missing or cannot be verified; the registration was preserved and Docker-tier setup is incomplete." >&2
+    echo "  Edit the existing registration in place and set PSEUDOLIFE_MCP_NO_SPAWN=1; preserve its command, arguments, daemon URL, token file, and all other environment values." >&2
+    echo "  Re-run this installer after verifying the effective value with $2." >&2
+}
+
+# Two env pairs ride each shim registration: PSEUDOLIFE_WRITER_ID (the shim
+# forwards it as the X-PL-Writer header — per-provider write attribution)
+# and PSEUDOLIFE_MCP_NO_SPAWN=1 (Docker-tier no-spawn guard, 2026-08-29
+# incident). CLI env-flag support is probed, never assumed: a missing flag
+# fails closed before registration. HTTP transport cannot carry env, so there
+# the daemon default (ops/.env) applies and no shim exists to spawn anything.
+MCP_CLAUDE=""
+MCP_CLAUDE_DESKTOP=""
+MCP_CODEX=""
+MCP_GEMINI=""
+
+# >>> client-only connect >>>
+# A client-only install re-points the registrations this machine already has
+# (an earlier install's, naming another daemon) with the installed shim's
+# `connect`, before the Codex credential setup below and the registrars in
+# section 11: those create only what is still missing, and the Codex setup
+# refuses a daemon URL its configured server does not name. The dry run sends
+# no token and writes nothing; when it finds no registration (exit 3),
+# connect is not run again. A failed connect stops the install.
+CONNECTED_CLIENTS=""
+CONNECT_CHECKED=""
+connect_client_names() {  # the selected clients as connect names them, comma-separated
+    connect_names=""
+    for selected_client in $CLIENTS; do
+        case "$selected_client" in
+            claude) connect_name=claude-code ;;
+            claude-desktop|codex|gemini) connect_name="$selected_client" ;;
+            *) continue ;;
+        esac
+        connect_names="${connect_names:+$connect_names,}$connect_name"
+    done
+    printf '%s' "$connect_names"
+}
+connect_report_lines() {  # $1 = valid|error|plan|manual|handled; connect's --json report on stdin
+    "$(installer_python)" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+try:
+    report = json.load(sys.stdin)
+except ValueError:
+    report = None
+# connect'"'"'s report, or nothing to trust: a JSON object with rows and exit.
+valid = isinstance(report, dict) and isinstance(report.get("rows"), list) and "exit" in report
+if sys.argv[1] == "valid":
+    sys.exit(0 if valid else 1)
+if not valid:
+    sys.exit(0)
+if sys.argv[1] == "error":
+    print(report.get("error") or "")
+    sys.exit(0)
+rows = [row for row in report["rows"] if isinstance(row, dict)]
+if sys.argv[1] == "handled":
+    print(" ".join(row["client"] for row in rows if row.get("place") == "registration"
+                   and row.get("state") in ("current", "change")))
+    sys.exit(0)
+for row in rows:
+    # An absent client is for the registrars to create, not a connect action.
+    if row.get("state") == "absent" or (sys.argv[1] == "manual" and row.get("state") != "manual"):
+        continue
+    where = " ".join(part for part in (row.get("file") or "", "[%s]" % row["key"] if row.get("key") else "") if part)
+    print("    %-8s %s %s%s" % (row.get("state"), row.get("client"), row.get("place"), ": " + where if where else ""))
+    for key, change in (row.get("changes") or {}).items():
+        old, new = (list(change) + [None, None])[:2]
+        print("             %s: %s -> %s" % (key, "(unset)" if old is None else old, "(removed)" if new is None else new))
+    if row.get("detail"):
+        print("             " + row["detail"])
+' "$1"
+}
+connect_existing_registrations() {
+    connect_names="$(connect_client_names)"
+    [ -n "$connect_names" ] || return 0
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: existing registrations were not checked against $DAEMON_URL: the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is." >&2
+        return 0
+    fi
+    connect_rc=0
+    connect_report=$("$SHIM_PATH" connect "$DAEMON_URL" --token-file "$TOKEN_FILE" --client "$connect_names" --dry-run --json </dev/null) || connect_rc=$?
+    # Only connect's own report is trusted. Anything else (a shim from before
+    # connect, a held one, one that cannot start) leaves the install as it
+    # was: the registrars run, with their earlier advice for a mismatch.
+    if ! printf '%s' "$connect_report" | connect_report_lines valid; then
+        connect_why="$SHIM_PATH did not answer with connect's plan (exit $connect_rc; a shim from before connect has none)"
+        [ -z "${SHIM_HELD:-}" ] || connect_why="$connect_why. It is the shim left in place: $SHIM_HELD"
+        echo "WARNING: existing registrations were not checked against $DAEMON_URL: $connect_why. One that names another daemon stays as it is." >&2
+        return 0
+    fi
+    CONNECT_CHECKED=1
+    case "$connect_rc" in
+        0) ;;
+        3)  # No registration connect can write: the registrars create them.
+            connect_manual=$(printf '%s' "$connect_report" | connect_report_lines manual) || true
+            if [ -n "$connect_manual" ]; then
+                echo "WARNING: pseudolife-mcp connect found entries it does not rewrite; change them by hand:" >&2
+                printf '%s\n' "$connect_manual" >&2
+            fi
+            return 0 ;;
+        *)
+            # Under --json the reason is only in the report.
+            connect_error=$(printf '%s' "$connect_report" | connect_report_lines error) || connect_error=""
+            echo "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $connect_rc${connect_error:+: $connect_error}). Nothing was changed; fix that, then re-run" >&2
+            exit 1 ;;
+    esac
+    step "Existing registrations: pseudolife-mcp connect points them at $DAEMON_URL:"
+    printf '%s' "$connect_report" | connect_report_lines plan || true
+    connect_rc=0
+    "$SHIM_PATH" connect "$DAEMON_URL" --token-file "$TOKEN_FILE" --client "$connect_names" --yes </dev/null || connect_rc=$?
+    if [ "$connect_rc" -ne 0 ]; then
+        case "$connect_rc" in
+            1) connect_meaning="a write failed, and every file it wrote was rolled back" ;;
+            4) connect_meaning="the daemon refused the token file or the MCP handshake, and nothing was written" ;;
+            5) connect_meaning="the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" ;;
+            *) connect_meaning="see its message above" ;;
+        esac
+        echo "client-only install: pseudolife-mcp connect exited $connect_rc: $connect_meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run" >&2
+        exit 1
+    fi
+    CONNECTED_CLIENTS=$(printf '%s' "$connect_report" | connect_report_lines handled) || CONNECTED_CLIENTS=""
+}
+# <<< client-only connect <<<
+# >>> client-only pair >>>
+# A pairing code (--pairing-code, or one pasted where the token is asked
+# for) is redeemed by the installed shim's `pair` before anything reads the
+# token file: pair mints the token here, writes it owner-only to the token
+# file (never over an existing one) and has the daemon accept it. The code
+# goes to pair on stdin through a shell builtin, never in an argument list
+# or the output, and is forgotten once pair has it. The file is then checked
+# as a given one is, and the install continues exactly as with a token file.
+# Any failure stops the install: pair's exit 5 keeps the file, which may
+# hold a token the daemon now accepts.
+pair_report_field() {  # $1 = field; pair's --json report on stdin; echoes it when it is text
+    "$(installer_python)" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+try:
+    report = json.load(sys.stdin)
+except ValueError:
+    report = None
+value = report.get(sys.argv[1]) if isinstance(report, dict) else None
+print(value if isinstance(value, str) else "")
+' "$1"
+}
+pair_with_code() {
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        PAIRING_CODE=""
+        echo "client-only install: pairing needs the pseudolife-mcp shim, and it is unavailable (see above). Fix its installation and re-run with the pairing code, or pass --token-file <path> with the daemon's token" >&2
+        exit 1
+    fi
+    pair_rc=0
+    pair_report=$(printf '%s\n' "$PAIRING_CODE" |
+        "$SHIM_PATH" pair "$DAEMON_URL" --read-code --token-file "$TOKEN_FILE" --json) || pair_rc=$?
+    PAIRING_CODE=""
+    if [ "$pair_rc" -ne 0 ]; then
+        pair_error=$(printf '%s' "$pair_report" | pair_report_field error) || pair_error=""
+        case "$pair_rc" in
+            4) pair_meaning="the daemon did not accept the code, and nothing was kept. Ask for a new code (pseudolife-mcp invite <machine> on the daemon's host), then re-run" ;;
+            5) pair_meaning="the outcome is unknown, or the check after it failed. The token file was kept at $TOKEN_FILE and may hold a token the daemon now accepts: re-run with --token-file $TOKEN_FILE to use it, or remove it and ask for a new code" ;;
+            *) pair_meaning="see its message above" ;;
+        esac
+        echo "client-only install: pseudolife-mcp pair exited $pair_rc${pair_error:+ ($pair_error)}: $pair_meaning" >&2
+        exit 1
+    fi
+    pair_principal=$(printf '%s' "$pair_report" | pair_report_field principal) || pair_principal=""
+    step "Paired with the daemon at $DAEMON_URL${pair_principal:+ as $pair_principal}: wrote the token file $TOKEN_FILE (owner-only; the token is not shown)."
+    check_client_token_file
+}
+# <<< client-only pair <<<
+[ -z "${PAIRING_CODE:-}" ] || pair_with_code
+[ -z "${CLIENT_ONLY:-}" ] || connect_existing_registrations
+
+instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
+if grep -q "pseudolife-memory@pseudolife-mcp" \
+        "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
+    CLAUDE_PLUGIN_INSTALLED=1
+    case " $CLIENTS " in *" claude "*)
+        step "pseudolife-memory Claude Code plugin detected — skipping Claude"
+        if [ "$instruction_choice" = append ]; then
+            echo "    hook (the plugin provides it, serving a compact memory core); the full"
+            echo "    CLAUDE.md block is still appended, as requested. The plugin no longer"
+            echo "    bundles an MCP server, so the transport is still wired below."
+        else
+            echo "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+            echo "    compact memory core; the full block stays optional). The plugin no"
+            echo "    longer bundles an MCP server, so the transport is still wired below."
+        fi ;;
+    esac
+else
+    CLAUDE_PLUGIN_INSTALLED=""
+fi
+
+HOOK_CLAUDE=""
+HOOK_CODEX=""
+INSTR_CODEX=""
+CODEX_HOOK_SOURCE=skip
+CODEX_HOOK_RECOVERY=""
+CODEX_SETUP_VALID=""
+CODEX_CREDENTIAL_FILE=""
+CODEX_CREDENTIAL_URL=""
+CODEX_CONNECTION_CONFIGURED=""
+CODEX_CREDENTIAL_BOOTSTRAP_FAILED=""
+CODEX_RUNTIME_DEFAULTS=""
+CODEX_RUNTIME_RECOVERY=""
+briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+for selected_client in $CLIENTS; do
+    case "$selected_client" in claude|codex) ;; *) continue ;; esac
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
+        HOOK_CLAUDE=plugin
+        cleanup_claude_legacy_hooks
+        continue
+    fi
+    if [ "$selected_client" = codex ]; then
+        HOOK_CODEX=unavailable
+        INSTR_CODEX=skipped
+        CODEX_HOOK_RECOVERY="Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
+        codex_python=""
+        for candidate in python3 python; do
+            if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+                codex_python="$candidate"
+                break
+            fi
+        done
+        if [ -n "$codex_python" ]; then
+            credential_exit=0
+            installer_token="$(get_env PSEUDOLIFE_MCP_TOKEN)"
+            installer_url="${DAEMON_URL:-$(get_env PSEUDOLIFE_MCP_DAEMON_URL)}"
+            installer_url="${installer_url:-http://127.0.0.1:8765}"
+            credential_args=("$repo/ops/setup-codex-coordination.py" --credentials
+                --installer-daemon-url "$installer_url")
+            if [ -n "${CLIENT_ONLY:-}" ]; then
+                # The remote daemon's token, from the operator's file on stdin.
+                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
+                    --credentials --installer-token-stdin \
+                    --installer-daemon-url "$installer_url" < "$TOKEN_FILE") || credential_exit=$?
+            elif [ -n "$installer_token" ]; then
+                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
+                    --credentials --installer-token-stdin \
+                    --installer-daemon-url "$installer_url" <<< "$installer_token") || credential_exit=$?
+            else
+                credential_output=$("$codex_python" "${credential_args[@]}") || credential_exit=$?
+            fi
+            if [ "$credential_exit" -eq 0 ] && credential_fields=$("$codex_python" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+r = json.load(sys.stdin)
+assert r["status"] in ("ready", "tokenless")
+assert isinstance(r.get("credential_file_configured"), bool)
+assert isinstance(r.get("connection_configured"), bool)
+print("1" if r["credential_file_configured"] else "0")
+print("1" if r["connection_configured"] else "0")
+print(r.get("credential_file_path") or "")
+print(r.get("daemon_url") or "")
+' <<< "$credential_output" 2>/dev/null); then
+                {
+                    IFS= read -r credential_configured
+                    IFS= read -r CODEX_CONNECTION_CONFIGURED
+                    IFS= read -r CODEX_CREDENTIAL_FILE || true
+                    IFS= read -r CODEX_CREDENTIAL_URL || true
+                } <<< "$credential_fields"
+                if [ "$CODEX_CONNECTION_CONFIGURED" != 1 ]; then
+                    CODEX_CONNECTION_CONFIGURED=""
+                fi
+                if [ "$credential_configured" = 1 ]; then
+                    step "Codex credential file ready; future rotations are picked up by new requests."
+                fi
+                # pseudolife-mcp connect (the client-only connect block)
+                # re-pointed an existing registration already; one still
+                # naming another daemon is one it could not write, or
+                # connect did not run (a shim from before it).
+                if [ -n "${CLIENT_ONLY:-}" ] && [ "${CODEX_CREDENTIAL_URL%/}" != "$DAEMON_URL" ]; then
+                    CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
+                    if [ -n "${CONNECT_CHECKED:-}" ]; then
+                        CODEX_HOOK_RECOVERY="The existing Codex registration names the daemon at ${CODEX_CREDENTIAL_URL:-(none)}, not the daemon at $DAEMON_URL, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DAEMON_URL where that Codex configuration sets it, or run pseudolife-mcp connect $DAEMON_URL --client codex --token-file $TOKEN_FILE, then re-run."
+                    else
+                        CODEX_HOOK_RECOVERY="The existing Codex registration names the daemon at ${CODEX_CREDENTIAL_URL:-(none)}, not the daemon at $DAEMON_URL. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DAEMON_URL in [mcp_servers.pseudolife-memory.env], then re-run."
+                    fi
+                fi
+            else
+                CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
+                CODEX_HOOK_RECOVERY="Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+            fi
+            if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
+                setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
+                    --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
+                if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; }; then setup_args+=(--non-interactive); fi
+                setup_exit=0
+                if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
+                    if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    else
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKEN_FILE PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    fi
+                elif [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                    setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                else
+                    setup_output=$("$codex_python" "${setup_args[@]}") || setup_exit=$?
+                fi
+                # Parse only data, never shell code. A failed helper must leave the
+                # remaining provider setup available and must never imply readiness.
+                if [ "$setup_exit" -le 1 ] && setup_fields=$("$codex_python" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+r = json.load(sys.stdin)
+assert r["status"] in ("ready", "pending", "unavailable", "skipped")
+assert r["source"] in ("manual", "plugin", "skip")
+assert r["instructions"] in ("present", "appended", "skipped", "covered-by-hooks")
+for key in ("status", "source", "instructions", "recovery"):
+    print(" ".join(str(r.get(key) or "").splitlines()))
+' <<< "$setup_output" 2>/dev/null); then
+                    {
+                        IFS= read -r HOOK_CODEX
+                        IFS= read -r CODEX_HOOK_SOURCE
+                        IFS= read -r INSTR_CODEX
+                        IFS= read -r CODEX_HOOK_RECOVERY || true
+                    } <<< "$setup_fields"
+                    CODEX_SETUP_VALID=1
+                else
+                    CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Run python3 ops/setup-codex-hooks.py to retry."
+                fi
+            fi
+        fi
+        step "Codex hooks: $HOOK_CODEX; standing instructions: $INSTR_CODEX."
+        if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
+        continue
+    fi
+    if [ -n "${CLIENT_ONLY:-}" ]; then
+        # No daemon container here: the hook runs the installed shim by its
+        # path, known once section 11 installed it (after section 12's check).
+        HOOK_CLAUDE=deferred
+        continue
+    fi
+    step "Installing $selected_client session hook..."
+    "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
+    if [ "$selected_client" = claude ]; then HOOK_CLAUDE=hook; else HOOK_CODEX=hook; fi
+done
+
+# ── 10. standing memory instructions (consent; never edited without it) ────
+# Codex instructions are resolved by the setup helper after hook verification.
+# Other clients retain the existing auto/append/skip behavior and prompts.
+INSTR_CLAUDE=""
+INSTR_GEMINI=""
+INSTR_GENERIC=""
+RESOLVED_INSTRUCTIONS_GEMINI=""
+RESOLVED_INSTRUCTIONS_GENERIC=""
+RESOLVED_GENERIC_TARGET=""
+
+record_instr() {
+    case "$1" in
+        claude)  INSTR_CLAUDE="$2" ;;
+        codex)   INSTR_CODEX="$2" ;;
+        gemini)  INSTR_GEMINI="$2" ;;
+        generic) INSTR_GENERIC="$2" ;;
+    esac
+}
+
+append_block() {  # $1 = target path, $2 = provider
+    # Presence check HERE, not only at the loop top: the generic prompt
+    # resolves its target path after that check ran against an empty
+    # --agents-file, and a re-run must never double-append.
+    if grep -q "pseudolife-memory" "$1" 2>/dev/null; then
+        step "Memory block already present in $1 — skipping."
+        record_instr "$2" "present:$1"
+        return 0
+    fi
+    mkdir -p "$(dirname "$1")"
+    cat "$repo/examples/CLAUDE.memory.md" >> "$1"
+    step "Appended memory block to $1"
+    record_instr "$2" "appended:$1"
+}
+
+for selected_client in $CLIENTS; do
+    if [ "$selected_client" = codex ]; then
+        # A valid helper result owns the fallback. Otherwise preserve explicit
+        # append consent even when Python is missing or setup cannot run.
+        if [ -z "$CODEX_SETUP_VALID" ] && { [ "$instruction_choice" = append ] ||
+            { [ "$instruction_choice" = auto ] && [ "$CODEX_HOOK_TRUST" = yes ]; }; }; then
+            codex_home="${CODEX_HOME:-$HOME/.codex}"
+            fallback_path="$codex_home/AGENTS.md"
+            if [ -f "$codex_home/AGENTS.override.md" ] &&
+                grep -q '[^[:space:]]' "$codex_home/AGENTS.override.md"; then
+                fallback_path="$codex_home/AGENTS.override.md"
+            fi
+            if grep -Eq '^## Memory([[:space:]]|$)' "$fallback_path" 2>/dev/null &&
+                grep -q 'pseudolife-memory' "$fallback_path" &&
+                grep -q 'RECALL' "$fallback_path" && grep -q 'CAPTURE' "$fallback_path" &&
+                grep -q 'REFLECT' "$fallback_path"; then
+                INSTR_CODEX=present
+            else
+                fallback_ok=1
+                mkdir -p "$codex_home" || fallback_ok=""
+                if [ -n "$fallback_ok" ] && [ -f "$fallback_path" ]; then
+                    saved=$(mktemp "$fallback_path.bak-pseudolife-XXXXXXXX") &&
+                        cp "$fallback_path" "$saved" || fallback_ok=""
+                    if [ -n "$fallback_ok" ]; then step "Backed up Codex standing instructions to $saved"; fi
+                fi
+                if [ -n "$fallback_ok" ] && [ -r "$repo/examples/CLAUDE.memory.md" ] &&
+                    { printf '\n\n'; cat "$repo/examples/CLAUDE.memory.md"; } >> "$fallback_path"; then
+                    INSTR_CODEX=appended
+                else
+                    CODEX_HOOK_RECOVERY="$CODEX_HOOK_RECOVERY Could not write standing instructions; check the Codex home and file permissions."
+                    step "$CODEX_HOOK_RECOVERY"
+                fi
+            fi
+            step "Codex standing instructions: $INSTR_CODEX ($fallback_path). Hooks still require setup."
+        fi
+        continue
+    fi
+    if [ "$selected_client" = claude-desktop ]; then
+        # Desktop reads no standing file; the MCP instructions field is its
+        # only briefing channel.
+        continue
+    fi
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
+        # The plugin's SessionStart hook serves a compact memory core, not
+        # this block: auto and skip leave CLAUDE.md alone (the summary says
+        # so), and an explicit append still writes it.
+        if [ "$instruction_choice" != append ]; then
+            record_instr claude "covered-by-plugin"
+            continue
+        fi
+    fi
+    choice="$instruction_choice"
+    if [ "$choice" = auto ]; then
+        case " $EXPLICIT_ARGS " in *" --instructions "*|*" --claude-md "*) ;; *)
+            case "$selected_client" in
+                gemini) choice="${RECORDED_INSTRUCTIONS_GEMINI:-auto}" ;;
+                generic) case " $EXPLICIT_ARGS " in *" --agents-file "*) ;; *) choice="${RECORDED_INSTRUCTIONS_GENERIC:-auto}" ;; esac ;;
+            esac ;;
+        esac
+    fi
+    case "$selected_client" in
+        gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;
+        generic) instruction_path="$AGENTS_FILE" ;;
+        *)       instruction_path="$HOME/.claude/CLAUDE.md" ;;
+    esac
+    if [ -n "$instruction_path" ] \
+            && grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
+        step "Memory block already present in $instruction_path — skipping."
+        record_instr "$selected_client" "present:$instruction_path"
+        case "$selected_client" in
+            gemini) RESOLVED_INSTRUCTIONS_GEMINI="${choice/auto/append}" ;;
+            generic)
+                RESOLVED_INSTRUCTIONS_GENERIC="${choice/auto/append}"
+                case "$instruction_path" in /*|[A-Za-z]:*) RESOLVED_GENERIC_TARGET="$instruction_path" ;; *) RESOLVED_GENERIC_TARGET="$PWD/$instruction_path" ;; esac ;;
+        esac
+        continue
+    fi
+    if [ "$choice" = auto ]; then
+        case "$selected_client" in
+            claude)
+                # Skipped by default. The settings.json SessionStart hook
+                # serves the compact memory core and the live briefing, not
+                # this block; the summary names the file to append it to.
+                choice=skip ;;
+            gemini)
+                if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
+                    printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
+                    read -r yn
+                    case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
+                else
+                    choice=append
+                    echo "Unattended default: Gemini standing instructions=append ($instruction_path)."
+                fi ;;
+            generic)
+                if [ -n "$AGENTS_FILE" ]; then
+                    choice=append
+                elif [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]; then
+                    printf 'Append the standing memory block to which file? (Enter = %s, "-" to skip) ' "$HOME/AGENTS.md"
+                    read -r answer
+                    if [ "$answer" = "-" ]; then
+                        choice=skip
+                    else
+                        instruction_path="${answer:-$HOME/AGENTS.md}"
+                        choice=append
+                    fi
+                else
+                    instruction_path="$HOME/AGENTS.md"
+                    choice=append
+                    echo "Unattended default: generic standing instructions=append ($instruction_path)."
+                fi ;;
+        esac
+    fi
+    if [ "$choice" = append ] && [ "$selected_client" = generic ] \
+            && [ -z "$instruction_path" ]; then
+        echo "NOTE: generic append needs a target — pass --agents-file <path>." >&2
+        choice=skip
+    fi
+    case "$selected_client" in
+        gemini) RESOLVED_INSTRUCTIONS_GEMINI="$choice" ;;
+        generic) RESOLVED_INSTRUCTIONS_GENERIC="$choice" ;;
+    esac
+    if [ "$choice" = append ]; then
+        append_block "$instruction_path" "$selected_client"
+    else
+        hint_path="${instruction_path:-<your AGENTS.md>}"
+        if [ -n "${INSTALLER_RERUN:-}" ]; then step "Standing instructions unchanged (skipped): $selected_client"
+        else
+            step "Standing memory block not written for $selected_client. To add it:"
+            echo "  cat $repo/examples/CLAUDE.memory.md >> $hint_path"
+        fi
+        record_instr "$selected_client" "skipped:$hint_path"
+    fi
+done
+
+# ── 11. wire into selected MCP clients ─────────────────────────────────────
+# Runs even with the plugin installed: the plugin is the hooks/commands layer
+# only, so the MCP transport (shim by default) always comes from here.
+# Its shim helpers (ensure_shim and the registration checks) are defined at
+# the top of section 9, where a client-only install first needs them.
+#
+# Claude Desktop launches MCP servers with a sanitized environment, so a
+# token-gated daemon needs a token FILE path on the entry — never the value,
+# and never an OS env var, which Desktop cannot see (2026-09-19 incident).
+# Honour an explicit PSEUDOLIFE_MCP_TOKEN_FILE; otherwise, when any token is
+# configured for the daemon, use a private default path. The registrar
+# WRITES that file (owner-only) from the token source below, or migrates a
+# literal already in the entry, and never points the entry at a file it did
+# not write or validate.
+desktop_token_file() {
+    if [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+        echo "$PSEUDOLIFE_MCP_TOKEN_FILE"
+        return 0
+    fi
+    if [ -z "${PSEUDOLIFE_MCP_TOKEN:-}" ] && [ -z "${PSEUDOLIFE_MCP_TOKENS:-}" ] &&
+        [ -z "$(get_env PSEUDOLIFE_MCP_TOKEN)" ] && [ -z "$(get_env PSEUDOLIFE_MCP_TOKENS)" ]; then
+        return 0
+    fi
+    echo "$HOME/.pseudolife-mcp/claude-desktop.token"
+}
+# The singular daemon token, from the installer's environment or ops/.env
+# (a per-principal PSEUDOLIFE_MCP_TOKENS map names no single value to copy).
+desktop_token_source() {
+    if [ -n "${PSEUDOLIFE_MCP_TOKEN:-}" ]; then
+        echo "$PSEUDOLIFE_MCP_TOKEN"
+        return 0
+    fi
+    get_env PSEUDOLIFE_MCP_TOKEN
+}
+desktop_tokens_source() {
+    if [ -n "${PSEUDOLIFE_MCP_TOKENS:-}" ]; then
+        echo "$PSEUDOLIFE_MCP_TOKENS"
+        return 0
+    fi
+    get_env PSEUDOLIFE_MCP_TOKENS
+}
+configure_codex_runtime_defaults() {
+    if [ -z "$codex_python" ]; then
+        MCP_CODEX=failed
+        CODEX_RUNTIME_DEFAULTS=failed
+        CODEX_RUNTIME_RECOVERY="Install Python 3.10 or newer, then run python3 ops/setup-codex-coordination.py --runtime-defaults."
+        echo "WARNING: Codex was registered, but its runtime defaults could not be configured because Python 3.10 or newer was not found." >&2
+        return 0
+    fi
+    runtime_exit=0
+    runtime_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" --runtime-defaults) || runtime_exit=$?
+    if [ "$runtime_exit" -eq 0 ] && runtime_state=$("$codex_python" -c '
+import json, sys
+r = json.load(sys.stdin)
+assert r["status"] == "ready"
+assert r["runtime_defaults"] in ("configured", "preserved")
+print(r["runtime_defaults"])
+' <<< "$runtime_output" 2>/dev/null); then
+        CODEX_RUNTIME_DEFAULTS="$runtime_state"
+        step "Codex runtime defaults ready (startup 240s, tools 240s, required)."
+    else
+        MCP_CODEX=failed
+        CODEX_RUNTIME_DEFAULTS=failed
+        CODEX_RUNTIME_RECOVERY="Run python3 ops/setup-codex-coordination.py --runtime-defaults, then retry the Codex task."
+        echo "WARNING: Codex was registered, but its runtime defaults were not confirmed. $CODEX_RUNTIME_RECOVERY" >&2
+    fi
+    return 0
+}
+# Board credentials for the Claude Code and Gemini shims: an owner-only token
+# file per client holding its principal's own PSEUDOLIFE_MCP_TOKENS entry,
+# else the singular token; the shim re-reads it per call. Claude Code also
+# gets a private directory for its board address, keyed by session id so
+# `claude --resume <id>` keeps it. The plugin's hooks read the Claude Code
+# process environment, not the registration, so they get the file through
+# settings.json unless the user's own environment supplies a credential.
+# >>> client token files >>>
+CLIENT_DAEMON_URL="${DAEMON_URL:-$(get_env PSEUDOLIFE_MCP_DAEMON_URL)}"
+CLIENT_DAEMON_URL="${CLIENT_DAEMON_URL:-http://127.0.0.1:8765}"
+CLAUDE_AGENT_STATE_DIR="$HOME/.pseudolife-mcp/claude-code-agents"
+CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+client_token_file() {  # $1 = principal; echoes the token file it wrote or kept, or nothing
+    [ "$TRANSPORT" = shim ] || return 0
+    client_py="$(installer_python)"
+    [ -n "$client_py" ] || return 0
+    client_target="$HOME/.pseudolife-mcp/$1.token"
+    # The value rides process-scoped env vars, never an argument.
+    client_output=$(PSEUDOLIFE_INSTALLER_TOKEN="$(desktop_token_source)" \
+        PSEUDOLIFE_INSTALLER_TOKENS="$(desktop_tokens_source)" \
+        "$client_py" "$repo/ops/client_credentials.py" token-file \
+        --principal "$1" --path "$client_target") || true
+    case "$client_output" in
+        *'"ready"'*) printf '%s\n' "$client_target" ;;
+        *'"tokenless"'*) ;;
+        *) echo "WARNING: could not write the $1 token file ($client_output); its registration gets no board credential." >&2 ;;
+    esac
+}
+CLAUDE_TOKEN_FILE=""
+GEMINI_TOKEN_FILE=""
+if [ -n "${CLIENT_ONLY:-}" ]; then
+    # A remote daemon's token stays in the file the operator supplied.
+    case " $CLIENTS " in *" claude "*) CLAUDE_TOKEN_FILE="$TOKEN_FILE" ;; esac
+    case " $CLIENTS " in *" gemini "*) GEMINI_TOKEN_FILE="$TOKEN_FILE" ;; esac
+else
+    case " $CLIENTS " in *" claude "*) CLAUDE_TOKEN_FILE="$(client_token_file claude-code)" ;; esac
+    case " $CLIENTS " in *" gemini "*) GEMINI_TOKEN_FILE="$(client_token_file gemini)" ;; esac
+fi
+# A client-only install's settings.json hooks run the host shim, which needs
+# the file and the URL there as much as the plugin's hooks do.
+if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$CLAUDE_TOKEN_FILE" ]; then
+    settings_args=("$repo/ops/client_credentials.py" claude-settings-env
+        --settings "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+        --token-file "$CLAUDE_TOKEN_FILE" --daemon-url "$CLIENT_DAEMON_URL")
+    # A client-only install's hooks must reach the remote daemon with the
+    # operator's file, whatever an earlier local install left there.
+    [ -z "${CLIENT_ONLY:-}" ] || settings_args+=(--replace)
+    settings_output=$("$(installer_python)" "${settings_args[@]}") || true
+    case "$settings_output" in
+        *'"updated"'*)
+            if [ -n "${CLIENT_ONLY:-}" ]; then
+                settings_changed=$(printf '%s' "$settings_output" | sed -n 's/.*"changed": \[\([^]]*\)\].*/\1/p' | tr -d '"')
+                settings_backup=$(printf '%s' "$settings_output" | sed -n 's/.*"backup": "\([^"]*\)".*/\1/p')
+                step "Claude Code hooks: set ${settings_changed:-the daemon URL and token file} in ~/.claude/settings.json (env) for the daemon at $CLIENT_DAEMON_URL${settings_backup:+ (backup: $settings_backup)}."
+            else
+                step "Claude Code plugin hooks: PSEUDOLIFE_MCP_TOKEN_FILE set in ~/.claude/settings.json (env)."
+            fi ;;
+        *'"kept"'*|*'"unchanged"'*) ;;
+        *) echo "WARNING: could not give the Claude Code hooks the token file ($settings_output). Set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE and PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL in the env block of ~/.claude/settings.json." >&2 ;;
+    esac
+fi
+# <<< client token files <<<
+for selected_client in $CLIENTS; do
+    if [ "$selected_client" = claude-desktop ]; then
+        # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
+        # by ops/register_claude_desktop.py (absolute shim path — Desktop's
+        # sanitized PATH omits pipx/venv bin dirs; token FILE when gated). It is
+        # named pseudolife-desktop so Code-tab sessions keep their own
+        # per-session pseudolife-memory server.
+        if [ "$TRANSPORT" != "shim" ]; then
+            echo "WARNING: Claude Desktop needs the stdio shim (its connector dialog rejects plain-http URLs) — ignoring --transport http for it." >&2
+        fi
+        ensure_shim
+        desktop_py="$(installer_python)"
+        if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+            echo "WARNING: pseudolife-mcp shim installation did not yield a usable executable — Claude Desktop not wired. Re-run once the native client installs, or register by hand: python3 ops/register_claude_desktop.py --command <absolute path to pseudolife-mcp>" >&2
+            MCP_CLAUDE_DESKTOP=failed
+            continue
+        fi
+        if [ -z "$desktop_py" ]; then
+            echo "WARNING: no python >= 3.10 found to write claude_desktop_config.json — Claude Desktop not wired." >&2
+            MCP_CLAUDE_DESKTOP=failed
+            continue
+        fi
+        token_file="$(desktop_token_file)"
+        token_source=""
+        tokens_source=""
+        desktop_args=(--command "$SHIM_PATH" --writer-id claude-desktop)
+        if [ -n "${CLIENT_ONLY:-}" ]; then
+            # The operator's file as it is: a remote daemon's token is never copied.
+            desktop_args+=(--daemon-url "$CLIENT_DAEMON_URL" --token-file "$TOKEN_FILE")
+        elif [ -n "$token_file" ]; then
+            if [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+                desktop_args+=(--token-file "$token_file")
+            else
+                desktop_args+=(--default-token-file "$token_file")
+            fi
+            # The token value rides a process-scoped env var the registrar
+            # reads by NAME — never a command-line argument, never printed.
+            token_source="$(desktop_token_source)"
+            tokens_source="$(desktop_tokens_source)"
+            if [ -n "$token_source" ]; then
+                desktop_args+=(--token-from-env PSEUDOLIFE_DESKTOP_TOKEN_SOURCE)
+            elif [ -n "$tokens_source" ]; then
+                desktop_args+=(--tokens-from-env PSEUDOLIFE_DESKTOP_TOKENS_SOURCE)
+            else
+                echo "WARNING: the daemon is token-gated but no token source is set (environment or ops/.env) — the registrar can only reuse a credential already in the Desktop entry. If registration fails, configure a singular token or exactly one claude-desktop principal in PSEUDOLIFE_MCP_TOKENS." >&2
+            fi
+        fi
+        if PSEUDOLIFE_DESKTOP_TOKEN_SOURCE="$token_source" \
+                PSEUDOLIFE_DESKTOP_TOKENS_SOURCE="$tokens_source" \
+                "$desktop_py" "$repo/ops/register_claude_desktop.py" "${desktop_args[@]}"; then
+            MCP_CLAUDE_DESKTOP=shim-env
+        else
+            MCP_CLAUDE_DESKTOP=failed
+        fi
+        if [ "$MCP_CLAUDE_DESKTOP" = shim-env ]; then
+            step "Wired into Claude Desktop as pseudolife-desktop via the pseudolife-mcp shim (claude_desktop_config.json) — fully quit and relaunch Desktop to load it."
+        else
+            echo "WARNING: Claude Desktop registration failed — see the error above and re-run." >&2
+        fi
+        continue
+    fi
+    if [ "$selected_client" = generic ]; then
+        echo ""
+        step "Other MCP-capable agents — paste-ready config:"
+        echo ""
+        show_generic_snippets
+        echo ""
+        if [ -n "${CLIENT_ONLY:-}" ]; then
+            echo "  This daemon is remote: use the stdio shape, with"
+            echo "  \"PSEUDOLIFE_MCP_DAEMON_URL\": \"$CLIENT_DAEMON_URL\" and"
+            echo "  \"PSEUDOLIFE_MCP_TOKEN_FILE\": \"$TOKEN_FILE\" added to its env"
+            echo "  (the HTTP shape cannot carry the token)."
+            echo ""
+        fi
+        continue
+    fi
+    if [ "$selected_client" = codex ]; then
+        if [ -n "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
+            MCP_CODEX=failed
+            echo "WARNING: Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem." >&2
+            continue
+        elif [ -n "${CLIENT_ONLY:-}" ] && [ -z "$CODEX_CREDENTIAL_FILE" ]; then
+            # Without it Codex would reach whatever daemon its defaults name.
+            MCP_CODEX=failed
+            echo "WARNING: Codex was not registered: a client-only install points it at $CLIENT_DAEMON_URL through the Codex credential setup, which did not run (it needs Python 3.10 or newer; see above). Fix that, then re-run." >&2
+            continue
+        elif existing_codex=$(codex mcp get pseudolife-memory 2>/dev/null); then
+            existing_codex_guard=$(codex mcp get pseudolife-memory --json 2>/dev/null || printf '%s' "$existing_codex")
+            codex_guard_unverified=""
+            if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$existing_codex_guard" && ! registration_is_http "$existing_codex"; then
+                if ! no_spawn_guard_is_enabled "$existing_codex_guard"; then
+                    warn_unverified_no_spawn_guard "Codex" "codex mcp get pseudolife-memory --json"
+                    codex_guard_unverified=1
+                fi
+                managed_registered_shim=""
+                bare_registered_shim=""
+                registered_shim=$(registered_stdio_command "$existing_codex")
+                if printf '%s' "$registered_shim" | grep -Eqi '^pseudolife-mcp(\.exe)?$'; then
+                    managed_registered_shim=1; bare_registered_shim=1
+                elif resolve_installed_shim; then
+                    if [ -n "$registered_shim" ] && command -v cygpath >/dev/null 2>&1; then
+                        registered_shim=$(cygpath -aw "$registered_shim" 2>/dev/null || printf '%s' "$registered_shim")
+                        managed_shim=$(cygpath -aw "$SHIM_PATH" 2>/dev/null || printf '%s' "$SHIM_PATH")
+                    else
+                        managed_shim="$SHIM_PATH"
+                    fi
+                    if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
+                fi
+                if [ -z "$managed_registered_shim" ] && shim_registration_migrates codex; then
+                    if [ "$SHIM_MIGRATED" = current ]; then
+                        step "Codex registration preserved; it already runs the native client."
+                        MCP_CODEX=present-current
+                    else
+                        step "Codex registration moved to the shim launcher; the native client is installed."
+                        MCP_CODEX=present-migrated
+                    fi
+                elif [ -n "$managed_registered_shim" ]; then
+                    ensure_shim
+                    if [ -n "$SHIM_OK" ]; then
+                        if [ -n "${SHIM_HELD:-}" ]; then
+                            echo "WARNING: the existing Codex registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
+                            MCP_CODEX=failed
+                        elif [ -z "$bare_registered_shim" ]; then
+                            # a pipx or pip launcher registration moves to the native launcher
+                            if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
+                                step "Codex registration preserved; it runs the native client installed from this release."
+                                MCP_CODEX=present-upgraded
+                            elif shim_registration_migrates codex "$registered_shim"; then
+                                if [ "$SHIM_MIGRATED" = current ]; then
+                                    step "Codex registration preserved; it already runs the native client."
+                                    MCP_CODEX=present-current
+                                else
+                                    step "Codex registration moved to the shim launcher; the native client is installed."
+                                    MCP_CODEX=present-upgraded
+                                fi
+                            else
+                                echo "WARNING: the Codex registration still names $registered_shim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: \"$SHIM_PATH\" installer migrate-registrations --client codex" >&2
+                                MCP_CODEX=failed
+                            fi
+                        elif shim_registration_migrates codex; then
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Codex registration preserved; it already runs the native client."
+                                MCP_CODEX=present-current
+                            else
+                                step "Codex registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                MCP_CODEX=present-upgraded
+                            fi
+                        else
+                        resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
+                        installed_shim="$SHIM_PATH"
+                        if command -v cygpath >/dev/null 2>&1; then
+                            resolved_shim=$(cygpath -aw "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(cygpath -aw "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        elif command -v readlink >/dev/null 2>&1; then
+                            resolved_shim=$(readlink -f "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        fi
+                        if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
+                            step "Codex registration preserved; it runs the native client installed from this release."
+                            MCP_CODEX=present-upgraded
+                        else
+                            echo "WARNING: the existing Codex registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
+                            MCP_CODEX=failed
+                        fi
+                        fi
+                    else
+                        echo "WARNING: the existing Codex registration was preserved, but its pseudolife-mcp native client install failed — see the message above and re-run." >&2
+                        MCP_CODEX=failed
+                    fi
+                else
+                    echo "WARNING: the existing Codex stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update." >&2
+                    MCP_CODEX=present-custom
+                fi
+                if [ -n "$codex_guard_unverified" ]; then MCP_CODEX=failed; fi
+            else
+                step "MCP server already wired into Codex — registration preserved."
+                MCP_CODEX=present
+            fi
+            CODEX_RUNTIME_DEFAULTS=preserved
+        elif [ "$TRANSPORT" = "shim" ]; then
+            ensure_shim
+            if [ -n "$SHIM_OK" ]; then
+                env_flag="$(cli_env_flag codex)"
+                if [ -n "$env_flag" ]; then
+                    # Name first, env after — the documented codex form
+                    # (an env flag directly before the name risks the
+                    # variadic-option parse that breaks claude's CLI).
+                    # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier install — the
+                    # shim must wait for the compose container, never spawn
+                    # a host-side fallback that can win the port-bind race
+                    # against a still-booting Docker and shadow the real
+                    # bank (2026-08-29 incident). Flag repeated per pair:
+                    # codex's --env takes one KEY=VALUE per occurrence.
+                    if [ -n "$CODEX_CONNECTION_CONFIGURED" ] && [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" "$env_flag" "PSEUDOLIFE_MCP_TOKEN_FILE=$CODEX_CREDENTIAL_FILE" -- "$SHIM_PATH"
+                    elif [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 "$env_flag" "PSEUDOLIFE_MCP_DAEMON_URL=$CODEX_CREDENTIAL_URL" -- "$SHIM_PATH"
+                    else
+                        codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex "$env_flag" PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"
+                    fi
+                    MCP_CODEX=shim-env
+                    configure_codex_runtime_defaults
+                else
+                    echo "WARNING: this Codex CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
+                    MCP_CODEX=failed
+                fi
+                if [ "$MCP_CODEX" = shim-env ]; then
+                    step "Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+                fi
+            else
+                echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
+                echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
+                if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
+                    echo "WARNING: Codex authentication requires the stdio shim; HTTP fallback was not registered." >&2
+                    MCP_CODEX=failed
+                else
+                    codex_http_url="${CODEX_CREDENTIAL_URL:-http://127.0.0.1:8765}/mcp"
+                    codex mcp add pseudolife-memory --url "$codex_http_url"
+                    MCP_CODEX=http
+                    step "Wired into Codex (codex mcp add, HTTP fallback)."
+                    configure_codex_runtime_defaults
+                fi
+            fi
+        else
+            if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
+                echo "WARNING: Codex authentication requires the stdio shim; HTTP transport was not registered." >&2
+                MCP_CODEX=failed
+            else
+                codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+                step "Wired into Codex (codex mcp add, HTTP)."
+                MCP_CODEX=http
+            fi
+        fi
+    elif [ "$selected_client" = gemini ]; then
+        if existing_gemini=$(gemini mcp list 2>/dev/null) && printf '%s' "$existing_gemini" | grep -q pseudolife-memory; then
+            gemini_registration=$(printf '%s\n' "$existing_gemini" | grep -E 'pseudolife-memory:' | sed -n '1p')
+            gemini_guard_unverified=""
+            if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$gemini_registration"; then
+                # `gemini mcp list` does not expose env values, so an existing
+                # stdio guard cannot be verified without inspecting settings.
+                warn_unverified_no_spawn_guard "Gemini CLI" "the pseudolife-memory entry in ~/.gemini/settings.json"
+                gemini_guard_unverified=1
+                managed_registered_shim=""
+                bare_registered_shim=""
+                if printf '%s' "$gemini_registration" | grep -Eqi 'pseudolife-memory:[[:space:]]*pseudolife-mcp(\.exe)?[[:space:]]*\(stdio\)'; then
+                    managed_registered_shim=1; bare_registered_shim=1
+                elif resolve_installed_shim && printf '%s' "$gemini_registration" | grep -Fq "pseudolife-memory: $SHIM_PATH (stdio)"; then
+                    managed_registered_shim=1
+                fi
+                if [ -z "$managed_registered_shim" ] && shim_registration_migrates gemini; then
+                    if [ "$SHIM_MIGRATED" = current ]; then
+                        step "Gemini CLI registration preserved; it already runs the native client."
+                        MCP_GEMINI=present-current
+                    else
+                        step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                        MCP_GEMINI=present-migrated
+                    fi
+                elif [ -n "$managed_registered_shim" ]; then
+                    ensure_shim
+                    if [ -n "$SHIM_OK" ]; then
+                        if [ -n "${SHIM_HELD:-}" ]; then
+                            echo "WARNING: the existing Gemini CLI registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
+                            MCP_GEMINI=failed
+                        elif [ -z "$bare_registered_shim" ]; then
+                            # a pipx or pip launcher registration moves to the native launcher
+                            if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
+                                step "Gemini CLI registration preserved; it runs the native client installed from this release."
+                                MCP_GEMINI=present-upgraded
+                            elif shim_registration_migrates gemini "$registered_shim"; then
+                                if [ "$SHIM_MIGRATED" = current ]; then
+                                    step "Gemini CLI registration preserved; it already runs the native client."
+                                    MCP_GEMINI=present-current
+                                else
+                                    step "Gemini CLI registration moved to the shim launcher; the native client is installed."
+                                    MCP_GEMINI=present-upgraded
+                                fi
+                            else
+                                echo "WARNING: the Gemini CLI registration still names $registered_shim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: \"$SHIM_PATH\" installer migrate-registrations --client gemini" >&2
+                                MCP_GEMINI=failed
+                            fi
+                        elif shim_registration_migrates gemini; then
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Gemini CLI registration preserved; it already runs the native client."
+                                MCP_GEMINI=present-current
+                            else
+                                step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                                MCP_GEMINI=present-upgraded
+                            fi
+                        else
+                        resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
+                        installed_shim="$SHIM_PATH"
+                        if command -v cygpath >/dev/null 2>&1; then
+                            resolved_shim=$(cygpath -aw "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(cygpath -aw "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        elif command -v readlink >/dev/null 2>&1; then
+                            resolved_shim=$(readlink -f "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                            installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                        fi
+                        if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
+                            step "Gemini CLI registration preserved; it runs the native client installed from this release."
+                            MCP_GEMINI=present-upgraded
+                        else
+                            echo "WARNING: the existing Gemini CLI registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
+                            MCP_GEMINI=failed
+                        fi
+                        fi
+                    else
+                        echo "WARNING: the existing Gemini CLI registration was preserved, but its pseudolife-mcp native client install failed — see the message above and re-run." >&2
+                        MCP_GEMINI=failed
+                    fi
+                else
+                    echo "WARNING: the existing Gemini CLI stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update." >&2
+                    MCP_GEMINI=present-custom
+                fi
+                if [ -n "$gemini_guard_unverified" ]; then MCP_GEMINI=failed; fi
+            else
+                step "MCP server already wired into Gemini CLI — registration preserved."
+                MCP_GEMINI=present
+            fi
+            # `gemini mcp list` shows no env, so the installer cannot tell
+            # whether this registration carries a token; say how to add one,
+            # unless pseudolife-mcp connect just wrote or confirmed it.
+            case " ${CONNECTED_CLIENTS:-} " in *" gemini "*) gemini_connected=1 ;; *) gemini_connected="" ;; esac
+            if [ -n "${GEMINI_TOKEN_FILE:-}" ] && [ -z "$gemini_connected" ]; then
+                echo "WARNING: the daemon requires a bearer token; unless the existing Gemini CLI registration already carries one, its memory calls will be refused. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with --no-token." >&2
+            fi
+        elif [ "$TRANSPORT" = "shim" ]; then
+            ensure_shim
+            if [ -n "$SHIM_OK" ]; then
+                # Probe gemini's own spelling (`-e, --env`): the command
+                # below emits the short form, so a help listing only `-e`
+                # must still count as env support (cli_env_flag greps
+                # `--env` alone, which is claude/codex's spelling).
+                env_flag=""
+                if gemini mcp add --help 2>/dev/null | grep -q -- '--env\|-e,'; then
+                    env_flag="-e"
+                fi
+                if [ -n "$env_flag" ]; then
+                    # -e repeated per pair (one KEY=VALUE each, verified on
+                    # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries
+                    # the same Docker-tier no-spawn guard as the claude and
+                    # codex registrations (2026-08-29 incident).
+                    if [ -n "${GEMINI_TOKEN_FILE:-}" ]; then
+                        gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 -e "PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE" -e "PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL" pseudolife-memory "$SHIM_PATH"
+                    else
+                        gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory "$SHIM_PATH"
+                    fi
+                    MCP_GEMINI=shim-env
+                else
+                    echo "WARNING: this Gemini CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
+                    MCP_GEMINI=failed
+                fi
+                if [ "$MCP_GEMINI" = shim-env ]; then
+                    step "Wired into Gemini CLI via the pseudolife-mcp shim — per-session identity."
+                fi
+            elif [ -n "${CLIENT_ONLY:-}" ]; then
+                echo "WARNING: shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run." >&2
+                MCP_GEMINI=failed
+            else
+                echo "WARNING: shim unavailable for Gemini CLI (see warnings above) — falling back to HTTP." >&2
+                gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
+                step "Wired into Gemini CLI (gemini mcp add, HTTP fallback)."
+                MCP_GEMINI=http
+            fi
+        else
+            gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
+            step "Wired into Gemini CLI (gemini mcp add, HTTP)."
+            MCP_GEMINI=http
+        fi
+    elif existing_claude=$(claude mcp get pseudolife-memory 2>/dev/null); then
+        claude_guard_unverified=""
+        if [ "$TRANSPORT" = "shim" ] && ! registration_is_http "$existing_claude"; then
+            if ! no_spawn_guard_is_enabled "$existing_claude"; then
+                warn_unverified_no_spawn_guard "Claude Code" "claude mcp get pseudolife-memory"
+                claude_guard_unverified=1
+            fi
+            managed_registered_shim=""
+            bare_registered_shim=""
+            registered_shim=$(registered_stdio_command "$existing_claude")
+            if printf '%s' "$registered_shim" | grep -Eqi '^pseudolife-mcp(\.exe)?$'; then
+                managed_registered_shim=1; bare_registered_shim=1
+            elif resolve_installed_shim; then
+                if [ -n "$registered_shim" ] && command -v cygpath >/dev/null 2>&1; then
+                    registered_shim=$(cygpath -aw "$registered_shim" 2>/dev/null || printf '%s' "$registered_shim")
+                    managed_shim=$(cygpath -aw "$SHIM_PATH" 2>/dev/null || printf '%s' "$SHIM_PATH")
+                else
+                    managed_shim="$SHIM_PATH"
+                fi
+                if [ -n "$registered_shim" ] && [ "$registered_shim" = "$managed_shim" ]; then managed_registered_shim=1; fi
+            fi
+            if [ -z "$managed_registered_shim" ] && shim_registration_migrates claude-code; then
+                if [ "$SHIM_MIGRATED" = current ]; then
+                    step "Claude Code registration preserved; it already runs the native client."
+                    MCP_CLAUDE=present-current
+                else
+                    step "Claude Code registration moved to the shim launcher; the native client is installed."
+                    MCP_CLAUDE=present-migrated
+                fi
+            elif [ -n "$managed_registered_shim" ]; then
+                ensure_shim
+                if [ -n "$SHIM_OK" ]; then
+                    if [ -n "${SHIM_HELD:-}" ]; then
+                        echo "WARNING: the existing Claude Code registration was preserved, but its pseudolife-mcp shim was not upgraded — see the warning above." >&2
+                        MCP_CLAUDE=failed
+                    elif [ -z "$bare_registered_shim" ]; then
+                        # a pipx or pip launcher registration moves to the native launcher
+                        if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
+                            step "Claude Code registration preserved; it runs the native client installed from this release."
+                            MCP_CLAUDE=present-upgraded
+                        elif shim_registration_migrates claude-code "$registered_shim"; then
+                            if [ "$SHIM_MIGRATED" = current ]; then
+                                step "Claude Code registration preserved; it already runs the native client."
+                                MCP_CLAUDE=present-current
+                            else
+                                step "Claude Code registration moved to the shim launcher; the native client is installed."
+                                MCP_CLAUDE=present-upgraded
+                            fi
+                        else
+                            echo "WARNING: the Claude Code registration still names $registered_shim, which nothing upgrades any more: the native client was installed but the registration could not be moved to it (see above). Move it by hand: \"$SHIM_PATH\" installer migrate-registrations --client claude-code" >&2
+                            MCP_CLAUDE=failed
+                        fi
+                    elif shim_registration_migrates claude-code; then
+                        if [ "$SHIM_MIGRATED" = current ]; then
+                            step "Claude Code registration preserved; it already runs the native client."
+                            MCP_CLAUDE=present-current
+                        else
+                            step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; the native client is installed."
+                            MCP_CLAUDE=present-upgraded
+                        fi
+                    else
+                    resolved_shim=$(command -v pseudolife-mcp 2>/dev/null || true)
+                    installed_shim="$SHIM_PATH"
+                    if command -v cygpath >/dev/null 2>&1; then
+                        resolved_shim=$(cygpath -aw "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                        installed_shim=$(cygpath -aw "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                    elif command -v readlink >/dev/null 2>&1; then
+                        resolved_shim=$(readlink -f "$resolved_shim" 2>/dev/null || printf '%s' "$resolved_shim")
+                        installed_shim=$(readlink -f "$installed_shim" 2>/dev/null || printf '%s' "$installed_shim")
+                    fi
+                    if [ -n "$resolved_shim" ] && [ "$resolved_shim" = "$installed_shim" ]; then
+                        step "Claude Code registration preserved; it runs the native client installed from this release."
+                        MCP_CLAUDE=present-upgraded
+                    else
+                        echo "WARNING: the existing Claude Code registration was preserved and the checkout shim installed, but bare pseudolife-mcp still resolves to a different executable. Remove the earlier pseudolife-mcp from PATH or put the installed scripts directory first, then re-run." >&2
+                        MCP_CLAUDE=failed
+                    fi
+                    fi
+                else
+                    echo "WARNING: the existing Claude Code registration was preserved, but its pseudolife-mcp native client install failed — see the message above and re-run." >&2
+                    MCP_CLAUDE=failed
+                fi
+            else
+                echo "WARNING: the existing Claude Code stdio registration uses a custom registered command or interpreter; it was preserved and may need a separate update." >&2
+                MCP_CLAUDE=present-custom
+            fi
+            if [ -n "$claude_guard_unverified" ]; then MCP_CLAUDE=failed; fi
+        else
+            step "MCP server already wired into Claude Code — registration preserved."
+            MCP_CLAUDE=present
+        fi
+        # An install from before the board token: the upgraded shim reads a
+        # token file, so add it, the daemon URL and the state directory to
+        # the registration in place (never a remove and re-add), keeping any
+        # credential it already has. Anything else gets the manual fix.
+        claude_credential_ok=""
+        if { [ "$MCP_CLAUDE" = present-upgraded ] || [ "$MCP_CLAUDE" = present-migrated ] || [ "$MCP_CLAUDE" = present-current ]; } && [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
+            claude_env_output=$("$(installer_python)" "$repo/ops/client_credentials.py" registration-env \
+                --config "$CLAUDE_JSON" \
+                --set "PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE" \
+                --set "PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL" \
+                --set "PSEUDOLIFE_AGENT_STATE_DIR=$CLAUDE_AGENT_STATE_DIR") || true
+            case "$claude_env_output" in
+                *'"updated"'*)
+                    claude_credential_ok=1
+                    step "Claude Code registration: added the board token file, daemon URL and state directory in place. Restart Claude Code sessions to load them." ;;
+                *'"unchanged"'*) claude_credential_ok=1 ;;
+            esac
+        fi
+        if [ -z "$claude_credential_ok" ] && [ -n "${CLAUDE_TOKEN_FILE:-}" ] &&
+                ! printf '%s\n' "$existing_claude" | grep -q 'PSEUDOLIFE_MCP_TOKEN'; then
+            echo "WARNING: the daemon requires a bearer token, but the existing Claude Code registration carries none, so its memory calls will be refused. Edit the registration in place and set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with --no-token." >&2
+        fi
+        # pseudolife-mcp connect (the client-only connect block) re-pointed
+        # an existing registration already; one still naming another daemon
+        # is one it could not write (a project scope, an HTTP entry), or
+        # connect did not run (a shim from before it).
+        # Captured, then matched: a `grep -q` that exits early under
+        # pipefail would read the CLI's SIGPIPE as a mismatch.
+        if [ -n "${CLIENT_ONLY:-}" ]; then
+            claude_registration_now=$(claude mcp get pseudolife-memory 2>/dev/null || true)
+            case "$claude_registration_now" in *"$CLIENT_DAEMON_URL"*) ;; *)
+                if [ -n "${CONNECT_CHECKED:-}" ]; then
+                    echo "WARNING: the existing Claude Code registration does not name the daemon at $CLIENT_DAEMON_URL, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE in the entry it names, or run pseudolife-mcp connect $CLIENT_DAEMON_URL --client claude-code --token-file $CLAUDE_TOKEN_FILE." >&2
+                else
+                    echo "WARNING: the existing Claude Code registration does not name the daemon at $CLIENT_DAEMON_URL. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE." >&2
+                fi ;;
+            esac
+        fi
+    elif [ "$TRANSPORT" = "shim" ]; then
+        ensure_shim
+        if [ -n "$SHIM_OK" ]; then
+            env_flag="$(cli_env_flag claude)"
+            if [ -n "$env_flag" ]; then
+                # --env is variadic and must come AFTER the server name:
+                # placed earlier it swallows the name as another KEY=value
+                # pair and the whole add fails (verified against the claude
+                # CLI 2026-08-29; the `--` separator ends the value list).
+                # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier shims wait for the
+                # compose daemon instead of spawning a fallback that can
+                # shadow the real bank (see the Codex registration above).
+                # With a token, the board credential rides along: the token
+                # file (re-read per call), the daemon URL, and the state
+                # directory that keeps a resumed session's board address.
+                if [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
+                    claude mcp add --scope user pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE" "PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL" "PSEUDOLIFE_AGENT_STATE_DIR=$CLAUDE_AGENT_STATE_DIR" -- "$SHIM_PATH"
+                else
+                    claude mcp add --scope user pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"
+                fi
+                MCP_CLAUDE=shim-env
+            else
+                echo "WARNING: this Claude CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
+                MCP_CLAUDE=failed
+            fi
+            if [ "$MCP_CLAUDE" = shim-env ]; then
+                step "Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
+            fi
+        elif [ -n "${CLIENT_ONLY:-}" ]; then
+            echo "WARNING: the pseudolife-mcp shim is unavailable (see the message above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Fix that and re-run." >&2
+            MCP_CLAUDE=failed
+        else
+            echo "WARNING: the pseudolife-mcp shim is unavailable: the native client install failed (see the message above)." >&2
+            echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
+            echo "  Re-run once that is fixed (the verified download is reused), or pass --transport http to silence this." >&2
+            claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+            step "Wired into Claude Code via HTTP (fallback — shim tooling not found)."
+            MCP_CLAUDE=http
+        fi
+    else
+        claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+        step "Wired into Claude Code via HTTP (--transport http)."
+        MCP_CLAUDE=http
+    fi
+done
+
+# ── 12. health ─────────────────────────────────────────────────────────────
+# >>> claude profile scope >>>
+case "${MCP_CLAUDE:-}" in
+    ""|skipped|failed) ;;
+    *)
+        echo "Claude Code user-profile MCP destination: ${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+        echo "Project/local registrations may take precedence over this user-scope file."
+        echo "MCP registration is per-profile; shared plugins or settings do not share memory tools."
+        echo "To add another profile, rerun this installer with CLAUDE_CONFIG_DIR set to that profile's directory; unset CLAUDE_CONFIG_DIR for the default profile."
+        ;;
+esac
+# <<< claude profile scope <<<
+
+# >>> endpoint container probe >>>
+# A server named on this machine's loopback is written as host.docker.internal
+# (the extractor env block). Docker Desktop routes that name to this
+# machine's loopback; Linux Docker Engine routes it to the docker bridge,
+# where a server bound only to 127.0.0.1 is not listening (the same trap
+# ops/install-shim-autostart.sh binds the Claude shim around). So once the
+# daemon is up, the endpoint is asked from inside its container, the only
+# place the answer means anything.
+ENDPOINT_CONTAINER=""
+container_http_probe() {  # status 0 when the daemon's container gets any HTTP answer from $1/models
+    case "${COMPOSE_ENGINE:-python}" in
+        python)
+            docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
+except urllib.error.HTTPError:
+    pass' "$1" >/dev/null 2>&1 ;;
+        # The Rust image has curl and no Python; without -f any HTTP status is 0.
+        *) docker exec pseudolife-mcp-daemon curl -s -o /dev/null --max-time 10 "$1/models" >/dev/null 2>&1 ;;
+    esac
+}
+endpoint_container_probe() {
+    case "$EXTRACTOR" in endpoint|endpoint-fallback) ;; *) return 0 ;; esac
+    probe_url="$(extractor_container_url "$EXTRACTOR_URL")"
+    [ "$probe_url" != "$EXTRACTOR_URL" ] || return 0
+    if [ "$(uname -s 2>/dev/null)" = Linux ]; then
+        step "Note: on Linux, host.docker.internal is the docker bridge address, so a server listening only on 127.0.0.1 is out of the daemon container's reach."
+    fi
+    # Any HTTP answer counts: a 401 or 404 still means the server is there.
+    if container_http_probe "$probe_url"; then
+        ENDPOINT_CONTAINER=reachable
+        step "The daemon's container reaches the extractor endpoint at $probe_url."
+    else
+        ENDPOINT_CONTAINER=unreachable
+        if [ "$EXTRACTOR" = endpoint-fallback ]; then endpoint_until="dreams fall back to the sidecar"
+        else endpoint_until="dreams pause"; fi
+        echo "WARNING: the daemon's container cannot reach the extractor endpoint at $probe_url/models. A server on this machine must listen where the container can reach it, not only on 127.0.0.1: OLLAMA_HOST=0.0.0.0 (or the docker bridge address) for Ollama, llama-server --host <bridge address>, LM Studio's \"Serve on Local Network\". Restart the server so; the daemon retries every sweep, and until then $endpoint_until." >&2
+    fi
+}
+# The CLI shim modes: on Linux the shim autostart binds the docker bridge
+# address (ops/install-shim-autostart.sh), where a host firewall such as
+# ufw drops the container's traffic by default, so the shim answers on this
+# host while every dream pauses. Docker Desktop routes host.docker.internal
+# to this machine's loopback, with no bridge firewall in between, so the
+# shim is probed on Linux only.
+ENDPOINT_WHAT="Extractor endpoint"
+# ufw's own switch and policy, readable without root, unlike `ufw status`.
+UFW_CONF=/etc/ufw/ufw.conf
+UFW_DEFAULTS=/etc/default/ufw
+docker_bridge_address() {
+    ip -4 addr show docker0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1 || true
+}
+# The subnet of the compose network the daemon sits on: the narrowest
+# source a rule can name that outlives the daemon's recreation on update
+# (only `down` drops the network, and `up` may then give it another one).
+# Echoes nothing unless there is exactly one well-formed IPv4 subnet with a
+# /8 to /32 prefix: a daemon on several networks, or a value such as
+# 0.0.0.0/0, gets no rule offered rather than a guess or a wide one.
+daemon_subnet() {
+    docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' pseudolife-mcp-daemon 2>/dev/null \
+        | tr ' ' '\n' | while IFS= read -r net; do
+            [ -n "$net" ] || continue
+            docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$net" 2>/dev/null || true
+        done | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' \
+        | awk -F'[./]' '$1 <= 255 && $2 <= 255 && $3 <= 255 && $4 <= 255 && $5 >= 8 && $5 <= 32 { n++; s = $0 }
+            END { if (n == 1) print s }' || true
+}
+ufw_drops_input() {  # status 0 when ufw is on and drops what no rule allows
+    grep -qs '^ENABLED=yes' "$UFW_CONF" || return 1
+    ufw_policy="$(sed -n 's/^DEFAULT_INPUT_POLICY="\{0,1\}\([A-Z]*\).*/\1/p' "$UFW_DEFAULTS" 2>/dev/null | head -1 || true)"
+    # DROP, REJECT, or a defaults file this user cannot read: ufw's default.
+    [ "$ufw_policy" != ACCEPT ]
+}
+container_reaches_shim() {  # any HTTP answer counts, as for the endpoint
+    container_http_probe "$1"
+}
+# A firewall rule is a persistent change the user did not choose by running
+# the installer: asked once at a terminal, no by default, and never applied
+# unattended unless --firewall-rule yes says so.
+firewall_rule_wanted() {
+    case "${FIREWALL_RULE:-ask}" in
+        yes) return 0 ;;
+        no) echo "  Not added (--firewall-rule no): run the command above when you want dreams to reach the shim."; return 1 ;;
+    esac
+    # The prompt goes to stderr, which stays the terminal when stdout is
+    # captured; with no terminal on either side nothing is asked.
+    if { [ -n "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] || [ ! -t 0 ]; } || [ ! -t 2 ]; then
+        echo "  Not added (no terminal to ask on): run the command above, or re-run with --firewall-rule yes."
+        return 1
+    fi
+    printf "Add this ufw rule now? It runs sudo and opens only port %s on %s to the daemon's network [y/N]: " "$SHIM_PORT" "$bridge" >&2
+    firewall_reply=""
+    IFS= read -r firewall_reply || firewall_reply=""
+    case "$firewall_reply" in
+        y|Y|yes|Yes|YES) return 0 ;;
+    esac
+    echo "  Not added: run the command above when you are ready."
+    return 1
+}
+shim_container_probe() {
+    [ -n "${claude_shim_mode:-}${codex_shim_mode:-}" ] || return 0
+    [ "$(uname -s 2>/dev/null)" = Linux ] || return 0
+    if [ -n "${claude_shim_mode:-}" ]; then
+        shim_name="Claude shim"; shim_unit=pseudolife-sonnet-shim.service
+    else
+        shim_name="Codex shim"; shim_unit=pseudolife-codex-shim.service
+    fi
+    ENDPOINT_WHAT="Extractor shim"
+    probe_url="http://host.docker.internal:$SHIM_PORT/v1"
+    # The autostart unit started moments ago: give it a few tries.
+    for attempt in 1 2 3; do
+        if container_reaches_shim "$probe_url"; then
+            ENDPOINT_CONTAINER=reachable
+            step "The daemon's container reaches the $shim_name at $probe_url."
+            return 0
+        fi
+        [ "$attempt" = 3 ] || sleep 2
+    done
+    ENDPOINT_CONTAINER=unreachable
+    case "$EXTRACTOR" in *-fallback) shim_until="dreams fall back to the sidecar" ;; *) shim_until="dreams pause" ;; esac
+    bridge="$(docker_bridge_address)"; bridge="${bridge:-172.17.0.1}"
+    # Any HTTP answer counts, without -f: a shim whose CLI is signed out
+    # serves /health as 503 but is up, and the firewall is still the cause.
+    if ! curl -sS --max-time 5 -o /dev/null "http://$bridge:$SHIM_PORT/health" >/dev/null 2>&1; then
+        echo "WARNING: the $shim_name is not answering at $bridge:$SHIM_PORT, so the daemon's container cannot reach it either. Check it: systemctl --user status $shim_unit (log: journalctl --user -u $shim_unit). The daemon retries every sweep, and until then $shim_until." >&2
+        return 0
+    fi
+    if ! ufw_drops_input; then
+        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it: a host firewall (nftables, firewalld or iptables rules) drops traffic from the docker networks to $bridge port $SHIM_PORT/tcp. Allow it; the daemon retries every sweep, and until then $shim_until." >&2
+        return 0
+    fi
+    subnet="$(daemon_subnet)"
+    if [ -z "$subnet" ]; then
+        echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it; ufw is enabled with a dropping input policy, the likely cause. The daemon's network subnet could not be read as one IPv4 network, so no rule is offered. Find it with docker network inspect pseudolife-mcp_default, then allow only that network: sudo ufw allow from <subnet> to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. The daemon retries every sweep, and until then $shim_until." >&2
+        return 0
+    fi
+    echo "WARNING: the $shim_name answers on this host at $bridge:$SHIM_PORT, but the daemon's container cannot reach it; ufw is enabled with a dropping input policy, the likely cause. This rule lets only the daemon's network through, to that one port: sudo ufw allow from $subnet to $bridge port $SHIM_PORT proto tcp comment 'pseudolife dream shim'. If a later docker compose down gives the network another subnet, the installer's next run names the new rule." >&2
+    if firewall_rule_wanted; then
+        # Without a terminal on both sides sudo must not ask for a password
+        # (it could still prompt on /dev/tty and wait): -n fails instead.
+        sudo_ask=-n
+        if [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ] && [ -t 2 ]; then sudo_ask=""; fi
+        if sudo ${sudo_ask:+"$sudo_ask"} ufw allow from "$subnet" to "$bridge" port "$SHIM_PORT" proto tcp comment 'pseudolife dream shim'; then
+            if container_reaches_shim "$probe_url"; then
+                ENDPOINT_CONTAINER=reachable
+                step "Added the ufw rule: the daemon's container now reaches the $shim_name at $probe_url."
+                return 0
+            fi
+            echo "WARNING: the ufw rule was added, but the daemon's container still cannot reach the $shim_name: another firewall rule may drop it (sudo ufw status numbered)." >&2
+        else
+            echo "WARNING: the ufw rule was not added (see above): run the command above yourself." >&2
+        fi
+    fi
+    echo "  The daemon retries every sweep, and until then $shim_until." >&2
+}
+describe_endpoint_container() {
+    case "${ENDPOINT_CONTAINER:-}" in
+        reachable) printf '  [x] %-21sreachable from the daemon'"'"'s container\n' "$ENDPOINT_WHAT" ;;
+        unreachable) printf '  [!] %-21snot reachable from the daemon'"'"'s container - see the warning above\n' "$ENDPOINT_WHAT" ;;
+    esac
+}
+# <<< endpoint container probe <<<
+
+# >>> test login >>>
+# The test suite's own Postgres login (`pseudolife-mcp test-login create`,
+# pseudolife_memory/test_login_cli.py): a role that creates and drops its own
+# databases and cannot connect to the bank, written to
+# ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
+# ops/.env. So no checkout or agent session needs ops/.env, which holds the
+# bank owner's password (2026-10-04). Only with --test-login: an end user's
+# server has no use for a CREATEDB password login (review, 2026-10-04).
+# Idempotent: a re-run re-applies the same password. It runs psql in the
+# Postgres container as its own superuser; a failure leaves the install
+# working.
+setup_test_login() {
+    local py
+    py="$(installer_python)"
+    if [ -z "$py" ]; then
+        echo "WARNING: no Python 3.10+ found, so the test suite's Postgres login was not set up. Later, from $repo: python3 -m pseudolife_memory.cli test-login create" >&2
+        return 0
+    fi
+    step "Setting up the test suite's Postgres login (it cannot open the bank)..."
+    if ! (cd "$repo" && PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$py" -m pseudolife_memory.test_login_cli create); then
+        echo "WARNING: the test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later from $repo: $py -m pseudolife_memory.test_login_cli create" >&2
+    fi
+    return 0
+}
+# <<< test login <<<
+
+# ── 12a. CLI shim autostart (Claude / Codex modes) ──────────────────────────
+# Placed here, at the top of stage 12, for three reasons: after stage 11's
+# shim install (below); before the health wait, so a daemon that is not yet
+# healthy still leaves the autostart registered, as when this was stage 8;
+# and outside every stage range the installer tests extract (they run
+# stages 9 through the '12. health' header), so no test ever reaches the
+# real systemctl / Task Scheduler calls below.
+# >>> shim autostart >>>
+# Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
+# must not abort the install after `compose up` — that strands a running
+# stack that was never wired into Claude Code. Runs after stage 11 on
+# purpose: the shim install there (pipx, or pip --user) is what puts the
+# package where an interpreter imports it on a host without a checkout
+# venv, and the autostart script's interpreter pick (ops/shim_python.py)
+# finds it there instead of building a venv of its own.
+# A mode switch must tear down the OTHER family's autostart: an abandoned
+# shim unit keeps making real CLI calls at every /health refresh, forever,
+# on a plan whose owner believes it is turned off.
+remove_shim_unit() {  # $1 = unit, $2 = the shim family it runs
+    command -v systemctl >/dev/null 2>&1 || return 0
+    if systemctl --user is-enabled "$1" >/dev/null 2>&1 \
+            || systemctl --user is-active "$1" >/dev/null 2>&1; then
+        systemctl --user disable --now "$1" >/dev/null 2>&1 || true
+        step "Removed autostart unit $1 (the $2 shim): extractor mode $EXTRACTOR does not use it, and an abandoned shim keeps making real CLI calls at every health refresh"
+    fi
+}
+# A client-only install leaves any local daemon's extractor shims alone.
+# (The mode flags are set at stage 3; `:-` keeps this stage runnable on its
+# own under `set -u`, the way tests extract stage ranges.)
+[ -n "${codex_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-codex-shim.service Codex
+[ -n "${claude_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-sonnet-shim.service Claude
+if [ -n "${claude_shim_mode:-}" ]; then
+    step "Registering the Claude shim autostart (systemd --user)..."
+    if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
+        echo "WARNING: shim autostart registration failed (see above: no systemd --user on this host, or no interpreter that imports pseudolife_memory for the unit)" >&2
+        echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL (add --python <interpreter> to name one)" >&2
+        echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v5.md" >&2
+    fi
+elif [ -n "${codex_shim_mode:-}" ]; then
+    step "Registering the Codex shim autostart (systemd --user)..."
+    if ! "$repo/ops/install-codex-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
+        echo "WARNING: shim autostart registration failed (see above: no systemd --user on this host, or no interpreter that imports pseudolife_memory for the unit)" >&2
+        echo "  Re-run later: ops/install-codex-shim-autostart.sh --port $SHIM_PORT --model $MODEL (add --python <interpreter> to name one)" >&2
+        echo "  Or start it manually: python evals/codex_shim.py --port $SHIM_PORT --model $MODEL" >&2
+    fi
+fi
+# <<< shim autostart <<<
+# A client-only install checked the remote daemon at preflight, and nothing
+# starts locally, so there is nothing to wait for.
+if [ -z "$CLIENT_ONLY" ]; then
+    if [ "${compose_plan:-}" != unchanged ]; then step "Waiting for the daemon to report healthy..."; fi
+    healthy=""
+    # Rust verifies its provisioned models before it serves: allow it longer.
+    health_tries=40
+    [ "${COMPOSE_ENGINE:-python}" = python ] || health_tries=120
+    # Rust answers "ok" while it still initializes: wait for "ready": true.
+    health_ready='"status"[[:space:]]*:[[:space:]]*"ok"'
+    [ "${COMPOSE_ENGINE:-python}" = python ] || health_ready='"ready"[[:space:]]*:[[:space:]]*true'
+    for _ in $(seq 1 "$health_tries"); do
+        if health_body="$(curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null)" \
+            && printf '%s' "$health_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' \
+            && printf '%s' "$health_body" | grep -q "$health_ready"; then
+            healthy=1; break
+        fi
+        sleep 1.5
+    done
+    [ -n "$healthy" ] || {
+        echo "WARNING: daemon not healthy yet. Logs: docker logs pseudolife-mcp-daemon" >&2
+        exit 1
+    }
+    step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    # >>> engine record >>>
+    if [ "${COMPOSE_ENGINE:-python}" = rust ]; then
+        # Recorded only now, as update records its own after its health gate.
+        engine_status="$(engine_helper accept)" || exit 1
+        [ "$engine_status" != accepted ] || step "Rust daemon selection recorded; pseudolife-mcp update keeps it"
+    elif [ "${ENGINE:-}" = python ]; then
+        # Kept by later updates too: the G2 default never moves a chosen host.
+        engine_helper choose --engine python >/dev/null || exit 1
+    fi
+    # <<< engine record <<<
+    endpoint_container_probe
+    shim_container_probe
+    if [ -n "${TEST_LOGIN:-}" ]; then
+        setup_test_login
+    fi
+fi
+
+# >>> client-only claude hook >>>
+# A client-only install's Claude Code session hook (deferred from section
+# 9): the installed shim by its path, since a hook's PATH need not include
+# pipx's directory. It reads the daemon's address and the token file from
+# the settings.json env block section 11 wrote.
+if [ "${HOOK_CLAUDE:-}" = deferred ]; then
+    ensure_shim
+    if [ -n "$SHIM_OK" ] && [ -n "$SHIM_PATH" ]; then
+        shim_command="${SHIM_PATH%.exe}"
+        case "$shim_command" in *[[:space:]]*)
+            echo "WARNING: the shim's path holds a space, so the session hook runs pseudolife-mcp from PATH instead: $shim_command" >&2
+            shim_command=pseudolife-mcp ;;
+        esac
+        step "Installing claude session hook..."
+        "$repo/ops/install-hook.sh" --client claude "" "$shim_command briefing --hook-json"
+        HOOK_CLAUDE=hook
+    else
+        echo "WARNING: the Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)." >&2
+        HOOK_CLAUDE=failed
+    fi
+fi
+# <<< client-only claude hook <<<
+
+# ── 13. per-provider wiring ladder + per-mode verify hints ─────────────────
+# [x] wired · [-] deliberately skipped · [!] unavailable, with remediation.
+mcp_marker() {  # $1 = state
+    if [ "$1" = failed ]; then echo "[!]"; else echo "[x]"; fi
+}
+describe_mcp() {  # $1 = state
+    case "$1" in
+        shim-env) echo "stdio shim (per-provider writer id set)" ;;
+        shim)     echo "stdio shim (writer id: daemon default in ops/.env)" ;;
+        http)     echo "HTTP (writer id: daemon default in ops/.env)" ;;
+        present)  echo "already wired (unchanged)" ;;
+        present-current) echo "already wired (unchanged; it runs the native client)" ;;
+        present-upgraded) echo "already wired; it runs the native client from this release" ;;
+        present-migrated) echo "already wired; registration moved to the native launcher (old file backed up)" ;;
+        present-custom) echo "already wired with custom command (unchanged)" ;;
+        failed)   echo "registration or shim upgrade FAILED - see warning above and re-run" ;;
+        *)        echo "not wired" ;;
+    esac
+}
+describe_instr() {  # $1 = state
+    case "$1" in
+        appended:*|present:*) echo "[x] Standing file        ${1#*:}" ;;
+        covered-by-plugin)    echo "[-] Standing file        skipped - the plugin serves a compact memory core; append examples/CLAUDE.memory.md for the full guide" ;;
+        covered-by-hooks)     echo "[-] Standing file        skipped - verified hooks serve a compact memory core; append examples/CLAUDE.memory.md for the full guide" ;;
+        present)             echo "[x] Standing file        existing Codex memory fallback" ;;
+        appended)            echo "[x] Standing file        Codex memory fallback appended" ;;
+        skipped:*) echo "[-] Standing file        skipped - append later: cat examples/CLAUDE.memory.md >> ${1#*:}" ;;
+        *)         echo "[-] Standing file        skipped" ;;
+    esac
+}
+echo ""
+step "What got wired, per agent:"
+if [ -n "$CLIENT_ONLY" ]; then
+    echo ""
+    echo "  Daemon: remote at $CLIENT_DAEMON_URL - this machine runs none (client-only install)"
+fi
+for selected_client in $CLIENTS; do
+    echo ""
+    case "$selected_client" in
+        claude)
+            echo "  Claude Code"
+            echo "    $(mcp_marker "$MCP_CLAUDE") MCP transport        $(describe_mcp "$MCP_CLAUDE")"
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            if [ "$HOOK_CLAUDE" = plugin ]; then
+                echo "    [x] Session briefing     Claude Code plugin"
+                echo "    [x] Per-turn discipline  Claude Code plugin"
+            elif [ "$HOOK_CLAUDE" = failed ]; then
+                echo "    [!] Session briefing     not installed - the shim is unavailable"
+                echo "    [!] Per-turn discipline  not installed"
+            else
+                echo "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
+                echo "    [x] Per-turn discipline  UserPromptSubmit hook"
+            fi
+            echo "    $(describe_plugin "$PLUGIN_CLAUDE")"
+            [ -z "$LEGACY_CLAUDE" ] || echo "    $(describe_legacy_hooks "$LEGACY_CLAUDE")"
+            describe_instr "$INSTR_CLAUDE" | sed 's/^/    /' ;;
+        claude-desktop)
+            echo "  Claude Desktop"
+            if [ "$MCP_CLAUDE_DESKTOP" = shim-env ]; then
+                echo "    [x] MCP transport        $(describe_mcp "$MCP_CLAUDE_DESKTOP")"
+            else
+                echo "    [!] MCP transport        registration FAILED - see the warning above and re-run"
+            fi
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            echo "    [!] Session briefing     unavailable - Claude Desktop has no hook system"
+            echo "    [!] Per-turn discipline  unavailable"
+            echo "    [-] Standing file        none - Desktop reads no CLAUDE.md"
+            echo "    Restart: fully quit Claude Desktop (tray / menu-bar icon) and relaunch to load the entry." ;;
+        codex)
+            echo "  OpenAI Codex"
+            echo "    $(mcp_marker "$MCP_CODEX") MCP transport        $(describe_mcp "$MCP_CODEX")"
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            if [ "$HOOK_CODEX" = ready ]; then
+                echo "    [x] Memory hooks         trusted and verified ($CODEX_HOOK_SOURCE)"
+            else
+                echo "    [!] Memory hooks         $HOOK_CODEX"
+                if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
+            fi
+            echo "    Verify runtime: codex mcp get pseudolife-memory; run doctor from that command's environment."
+            case "$CODEX_RUNTIME_DEFAULTS" in
+                configured) echo "    [x] Runtime defaults     startup 240s; tools 240s; required" ;;
+                preserved)  echo "    [-] Runtime settings     existing registration unchanged" ;;
+                failed)     echo "    [!] Runtime defaults     not confirmed - $CODEX_RUNTIME_RECOVERY" ;;
+                *)          echo "    [!] Runtime defaults     unavailable" ;;
+            esac
+            describe_instr "$INSTR_CODEX" | sed 's/^/    /' ;;
+        gemini)
+            echo "  Gemini CLI"
+            echo "    $(mcp_marker "$MCP_GEMINI") MCP transport        $(describe_mcp "$MCP_GEMINI")"
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            echo "    [!] Session briefing     unavailable - Gemini CLI has no hook system"
+            echo "    [!] Per-turn discipline  unavailable"
+            describe_instr "$INSTR_GEMINI" | sed 's/^/    /' ;;
+        generic)
+            echo "  Other MCP agent"
+            echo "    [-] MCP transport        paste the printed config into your agent"
+            echo "    [x] Server instructions  automatic once connected (MCP instructions field)"
+            echo "    [!] Session briefing     unavailable - no hook system to wire"
+            echo "    [!] Per-turn discipline  unavailable"
+            describe_instr "$INSTR_GENERIC" | sed 's/^/    /' ;;
+    esac
+done
+echo ""
+# One line for the agent board, as the daemon answers it for the first client
+# token file (else the daemon's singular token): on, or off and why.
+# >>> board line >>>
+board_hint=""
+case "$TOKEN_STATE" in
+    opted-out) board_hint=" (installed with --no-token; re-run without it to turn the board on)" ;;
+    http)      board_hint=" (--transport http registrations cannot carry a token file)" ;;
+    no-shim)   board_hint=" (no pipx or pip-capable Python >= 3.10 to install the shim, so no token was minted; install one and re-run)" ;;
+esac
+board_file="${CLAUDE_TOKEN_FILE:-${GEMINI_TOKEN_FILE:-${CODEX_CREDENTIAL_FILE:-${TOKEN_FILE:-}}}}"
+board_py="$(installer_python)"
+if [ -z "$board_py" ]; then
+    board_line="unknown - no Python >= 3.10 to ask the daemon"
+elif [ -n "$board_file" ]; then
+    board_line=$("$board_py" "$repo/ops/client_credentials.py" board \
+        --daemon-url "$CLIENT_DAEMON_URL" --token-file "$board_file") || board_line="unknown"
+else
+    board_line=$(PSEUDOLIFE_INSTALLER_TOKEN="$(desktop_token_source)" \
+        "$board_py" "$repo/ops/client_credentials.py" board \
+        --daemon-url "$CLIENT_DAEMON_URL") || board_line="unknown"
+fi
+case "$board_line" in
+    on*) echo "  [x] Agent board          $board_line" ;;
+    *)   echo "  [!] Agent board          $board_line$board_hint" ;;
+esac
+case "$TOKEN_STATE" in minted|present)
+    for http_state in "${MCP_CLAUDE:-}" "${MCP_GEMINI:-}" "${MCP_CODEX:-}"; do
+        if [ "$http_state" = http ]; then
+            echo "WARNING: an HTTP registration sends no bearer token, and this daemon requires one, so its memory calls will be refused. Register the stdio shim (fix its install and re-run without --transport http), or remove the token from ops/.env for an open-loopback install." >&2
+            break
+        fi
+    done ;;
+esac
+echo ""
+# <<< board line <<<
+describe_endpoint_container
+case "$EXTRACTOR" in
+    sidecar)
+        echo "Verify: memory_dream(action=\"status\") — primary_url should point at pseudolife-extractor:8081." ;;
+    claude-fallback|openai-fallback)
+        echo "Verify: memory_dream(action=\"status\") — fallback_url set and primary_healthy: true (shim up)." ;;
+    claude-only|openai-only)
+        echo "Verify: memory_dream(action=\"status\") — primary_url on :$SHIM_PORT, extractor_mode: primary."
+        echo "Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out." ;;
+    endpoint-fallback)
+        echo "Verify: memory_dream(action=\"status\") — primary_url on your endpoint, fallback_url set, primary_healthy: true." ;;
+    endpoint)
+        echo "Verify: memory_dream(action=\"status\") — primary_url on your endpoint, extractor_mode: primary."
+        echo "Note: dreams pause (and retry next sweep) whenever the endpoint is down." ;;
+esac
+if [ -n "$codex_shim_mode" ]; then
+    echo "Note: Codex-served extraction quality is unmeasured — see the 'OpenAI primary' section of docs/guide/dreaming.md."
+fi
+if [ -n "$CLIENT_ONLY" ]; then show_client_only_notes; echo ""; fi
+if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi
+if [ "${BANK_LOCATION:-}" = shared ]; then offer_shared_bank_expose; fi
+if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
+# >>> record successful deployment >>>
+if [ -z "$CLIENT_ONLY" ]; then
+    record_args=(record --expected-stdin --repo "$repo" --env-file "$env_file" --override "$override_file")
+    [ -z "${RESOLVED_INSTRUCTIONS_GEMINI:-}" ] || record_args+=(--instruction-gemini "$RESOLVED_INSTRUCTIONS_GEMINI")
+    [ -z "${RESOLVED_INSTRUCTIONS_GENERIC:-}" ] || record_args+=(--instruction-generic "$RESOLVED_INSTRUCTIONS_GENERIC")
+    [ -z "${RESOLVED_GENERIC_TARGET:-}" ] || record_args+=(--generic-target "$RESOLVED_GENERIC_TARGET")
+    record_args+=(${engine_state_args[@]+"${engine_state_args[@]}"})
+    printf '%s' "$compose_snapshot_json" | installer_state "${record_args[@]}" >/dev/null
+fi
+# <<< record successful deployment <<<
+# >>> engine switch >>>
+# After the record: the switch recreates the daemon, which the record checks.
+if [ -n "${SWITCH_ENGINE:-}" ]; then
+    switch_version="$( { curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null || true; } \
+        | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    switch_args=(update --engine "$SWITCH_ENGINE" --daemon-only)
+    # (A checkout-mode Rust host never gets here: stage 4b refuses it.)
+    if [ -n "$switch_version" ]; then switch_args+=(--tag "$switch_version")
+    else
+        # Without --tag, update would move to the newest release instead.
+        echo "The installed daemon was kept: its version could not be read from http://127.0.0.1:8765/health, so the switch to $SWITCH_ENGINE did not run. Run: pseudolife-mcp update --engine $SWITCH_ENGINE --daemon-only --tag <the daemon's version>" >&2
+        exit 1
+    fi
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "The installed daemon was kept; switching it to $SWITCH_ENGINE needs the pseudolife-mcp shim, which is unavailable (see above). Run: pseudolife-mcp ${switch_args[*]}" >&2
+        exit 1
+    fi
+    step "Switching the daemon to $SWITCH_ENGINE (backup, rollback tag and health gate)..."
+    # Stdin closed: update's own questions take their defaults, never hang.
+    if ! "$SHIM_PATH" "${switch_args[@]}" </dev/null; then
+        echo "The switch to $SWITCH_ENGINE failed; its output above says what changed and how to roll back. Retry with: $SHIM_PATH ${switch_args[*]}" >&2
+        exit 1
+    fi
+fi
+# <<< engine switch <<<
+if [ -z "$CLIENT_ONLY" ]; then offer_maintainer_setup; fi
+if [ -z "$CLIENT_ONLY" ]; then open_console_signin; fi
+# >>> update line >>>
+# The installers do not put the shim launcher's directory on PATH, so a bare
+# `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this
+# run installed by its path until PATH finds it.
+update_command() {  # sets upd_cmd, and upd_path while PATH does not find the shim this run installed
+    upd_cmd="pseudolife-mcp"
+    upd_path=""
+    if [ -n "${SHIM_PATH:-}" ]; then
+        upd_found="$(command -v pseudolife-mcp 2>/dev/null || true)"
+        if [ -z "$upd_found" ] || ! [ "$upd_found" -ef "$SHIM_PATH" ]; then
+            upd_cmd="\"$SHIM_PATH\""
+            upd_path=" (add $(dirname "$SHIM_PATH") to PATH to run it as plain pseudolife-mcp)"
+        fi
+    fi
+}
+print_update_line() {
+    update_command
+    if [ -n "${CLIENT_ONLY:-}" ]; then
+        if [ "${CLIENT_SCHEDULE_STATE:-}" = scheduled ]; then
+            upd_lead="The daily client update job keeps this machine's clients on the daemon's release; to update them now, no checkout needed:"
+        else
+            upd_lead="Update this machine's clients later with one command, no checkout needed:"
+        fi
+        echo "$upd_lead $upd_cmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$upd_path."
+        if [ -n "${PAIRING_HINT_URL:-}" ]; then
+            echo "If another machine uses this same token, rotating it breaks both and neither can be revoked alone: give each machine its own with pseudolife-mcp invite <name> on the daemon's host and $upd_cmd connect $PAIRING_HINT_URL --read-code here. A machine paired with invite, or given a token no other machine uses, already has its own: nothing to do."
+        fi
+    else
+        echo "Update later with one command: $upd_cmd update (--check reports whether a newer release exists)$upd_path; from this checkout, ops/update.sh --all does the same after a git pull."
+        echo "Keep this checkout: ops/.env is this install's configuration and credential source, and extractor autostart may reference its files."
+    fi
+}
+# <<< update line <<<
+# >>> client update schedule offer >>>
+# A client-only machine's shim and plugin move to the daemon's release only
+# when something moves them: `pseudolife-mcp update --schedule` registers the
+# daily job that does (pseudolife_memory/unattended_update.py). That is a
+# persistent job the user did not choose by running the installer, so it is
+# asked once, default no, and --client-update-schedule answers it. 04:30 is
+# an hour after the 03:30 the docs give a daemon host's own job, so a daemon
+# updated overnight is matched the same morning. --schedule installs a
+# systemd --user timer here (a Windows task from install.ps1), never on macOS.
+CLIENT_SCHEDULE_DEFAULT=04:30
+CLIENT_SCHEDULE_UNIT=pseudolife-client-update   # unattended_update.CLIENT_UNIT_NAME
+CLIENT_SCHEDULE_CONTAINER=pseudolife-mcp-daemon  # update_cli.DAEMON_CONTAINER
+CLIENT_SCHEDULE_STATE=""
+# Status 0 when the job's timer is installed and enabled, 2 when its files
+# are there but the timer is not enabled (it never runs), 1 when there is
+# none; sets its path, and with 0 the daemon URL and time it runs with.
+client_schedule_existing() {
+    sched_units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    CLIENT_SCHEDULE_WHERE="$sched_units/$CLIENT_SCHEDULE_UNIT.timer"
+    [ -f "$CLIENT_SCHEDULE_WHERE" ] || return 1
+    systemctl --user is-enabled --quiet "$CLIENT_SCHEDULE_UNIT.timer" >/dev/null 2>&1 || return 2
+    CLIENT_SCHEDULE_URL="$(sed -n 's/^ExecStart=.*--daemon-url[= ]"\{0,1\}\([^" ]*\).*/\1/p' \
+        "$sched_units/$CLIENT_SCHEDULE_UNIT.service" 2>/dev/null | head -n 1 || true)"
+    # --schedule leaves the default daemon URL off the command line.
+    CLIENT_SCHEDULE_URL="${CLIENT_SCHEDULE_URL:-http://127.0.0.1:8765}"
+    CLIENT_SCHEDULE_TIME="$(sed -n 's/^OnCalendar=[^ ]* \([0-9][0-9]:[0-9][0-9]\).*/\1/p' \
+        "$CLIENT_SCHEDULE_WHERE" 2>/dev/null | head -n 1 || true)"
+    return 0
+}
+offer_client_update_schedule() {
+    sched_mode="$(printf '%s' "${CLIENT_UPDATE_SCHEDULE:-ask}" | tr '[:upper:]' '[:lower:]')"
+    sched_url="${CLIENT_DAEMON_URL%/}"
+    case "$sched_mode" in
+        ask|yes|no) sched_time="$CLIENT_SCHEDULE_DEFAULT" ;;
+        *) sched_time="$(printf '%02d:%s' "$((10#${sched_mode%%:*}))" "${sched_mode#*:}")" ;;
+    esac
+    ensure_shim
+    update_command
+    sched_cmd="$upd_cmd update --schedule $sched_time --daemon-url $sched_url"
+    if [ "$sched_mode" = no ]; then
+        CLIENT_SCHEDULE_STATE=declined
+        echo "Automatic client updates: not set up (--client-update-schedule no); $sched_cmd sets them up later."
+        return 0
+    fi
+    case "$(uname -s 2>/dev/null || true)" in
+        Linux) ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "Automatic client updates: not offered from Git Bash; ops\\install.ps1 offers them on Windows, or $sched_cmd sets them up."
+            return 0 ;;
+        *)
+            if [ "$sched_mode" != ask ]; then
+                echo "Automatic client updates: --client-update-schedule $sched_mode does nothing here, since the daily job needs systemd (Linux) or Task Scheduler (Windows); run $upd_cmd update --clients-only after the daemon upgrades." >&2
+            fi
+            return 0 ;;
+    esac
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not set up, since no systemd user manager answers here (systemctl --user) to run the daily job; once one does (a login session, or loginctl enable-linger), $sched_cmd sets them up."
+        return 0
+    fi
+    if [ -z "${SHIM_OK:-}" ] || [ -z "${SHIM_PATH:-}" ]; then
+        CLIENT_SCHEDULE_STATE=failed
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so automatic client updates were not set up: run pseudolife-mcp update --schedule $sched_time --daemon-url $sched_url once it is installed." >&2
+        return 0
+    fi
+    # --schedule takes the client path only from a shim runtime.
+    if [ "${SHIM_MANAGER_KIND:-}" != runtime ]; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not offered, since the shim is not installed as a shim runtime here (see above for why), and pseudolife-mcp update --schedule installs the client job only from one; re-run the installer once the runtime installs to be offered them."
+        return 0
+    fi
+    # With a daemon container here, even a stopped one, --schedule installs
+    # the daemon host's job, which this question never offered.
+    if command -v docker >/dev/null 2>&1 &&
+            docker inspect -f '{{.Id}}' "$CLIENT_SCHEDULE_CONTAINER" >/dev/null 2>&1; then
+        CLIENT_SCHEDULE_STATE=skipped
+        echo "Automatic client updates: not offered, since this machine still has a local daemon container ($CLIENT_SCHEDULE_CONTAINER), so pseudolife-mcp update --schedule here would install the daemon host's job rather than the client's; once that container is removed (docker rm $CLIENT_SCHEDULE_CONTAINER keeps its volumes and bank), $sched_cmd sets them up."
+        return 0
+    fi
+    sched_found=0
+    client_schedule_existing || sched_found=$?
+    if [ "$sched_found" = 0 ]; then
+        sched_at="${CLIENT_SCHEDULE_TIME:-its set time}"
+        sched_move=""
+        if [ "${CLIENT_SCHEDULE_URL%/}" != "$sched_url" ]; then
+            CLIENT_SCHEDULE_STATE=elsewhere
+            sched_move=", following the daemon at $CLIENT_SCHEDULE_URL rather than $sched_url"
+            case "$sched_mode" in ask|yes) sched_time="${CLIENT_SCHEDULE_TIME:-$sched_time}" ;; esac
+        else
+            CLIENT_SCHEDULE_STATE=scheduled
+            case "$sched_mode" in ask|yes) ;; *)
+                [ "$sched_time" = "${CLIENT_SCHEDULE_TIME:-}" ] || sched_move=", rather than at $sched_time" ;;
+            esac
+        fi
+        if [ -n "$sched_move" ]; then
+            echo "Automatic client updates: already scheduled (daily at $sched_at, $CLIENT_SCHEDULE_WHERE)$sched_move; nothing changed: $upd_cmd update --schedule $sched_time --daemon-url $sched_url moves it."
+        else
+            echo "Automatic client updates: already scheduled (daily at $sched_at, $CLIENT_SCHEDULE_WHERE); nothing changed."
+        fi
+        return 0
+    fi
+    if [ "$sched_found" = 2 ]; then
+        echo "Automatic client updates: $CLIENT_SCHEDULE_WHERE is installed but its timer is not enabled, so it never runs."
+    fi
+    if [ "$sched_mode" = ask ]; then
+        if ! bank_can_ask; then
+            CLIENT_SCHEDULE_STATE=skipped
+            echo "Automatic client updates: not set up (no terminal to ask on): $sched_cmd sets them up, or re-run with --client-update-schedule yes."
+            return 0
+        fi
+        bank_read "A daily job at $sched_time can keep this machine's Pseudolife clients on the daemon's release: it runs pseudolife-mcp update --unattended, which moves the shim and plugin to the release the daemon at $sched_url runs, never past it. Set it up? [y/N]: " ||
+            BANK_REPLY=""
+        case "$(bank_trimmed "$BANK_REPLY")" in
+            y|Y|yes|Yes|YES) ;;
+            *)
+                CLIENT_SCHEDULE_STATE=declined
+                echo "  Not now: $sched_cmd sets them up later (any time of day as HH:MM)."
+                return 0 ;;
+        esac
+    fi
+    sched_rc=0
+    "$SHIM_PATH" update --schedule "$sched_time" --daemon-url "$sched_url" </dev/null || sched_rc=$?
+    if [ "$sched_rc" -ne 0 ]; then
+        CLIENT_SCHEDULE_STATE=failed
+        echo "WARNING: pseudolife-mcp update --schedule exited $sched_rc (see its message above), so nothing was scheduled. The install itself is complete: run $sched_cmd once that is fixed." >&2
+        return 0
+    fi
+    CLIENT_SCHEDULE_STATE=scheduled
+}
+# <<< client update schedule offer <<<
+if [ -n "$CLIENT_ONLY" ]; then offer_client_update_schedule; fi
+print_update_line
+if [ -n "$TUNNEL" ] && [ -n "${INSTALLER_UNATTENDED:-}" ]; then
+    echo "Unattended: guided tunnel setup skipped; run pseudolife-mcp tunnel setup when a person can complete it."
+elif [ -n "$TUNNEL" ]; then
+    if [ -z "${SHIM_PATH:-}" ]; then
+        echo "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup." >&2
+        exit 2
+    fi
+    if [ -n "${board_file:-}" ]; then
+        PSEUDOLIFE_MCP_DAEMON_URL="$CLIENT_DAEMON_URL" PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" tunnel setup
+    else
+        "$SHIM_PATH" tunnel setup
+    fi
+else
+    echo "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
+fi
+echo "Done. First session: tell your coding agent to remember something."

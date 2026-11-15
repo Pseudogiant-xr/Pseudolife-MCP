@@ -121,6 +121,8 @@ case "$1" in
         echo "$PSEUDOLIFE_SHIM_LAUNCHER"; exit 0 ;;
 esac
 if [ "$1" = update ] && [ "$2" = --native-capability ]; then echo "pseudolife-mcp native-update-v1"; exit 0; fi
+# The installers' probe of the staged release (ops/install-native.sh, NATIVE_INSTALLER_PROTOCOL).
+if [ "$1" = installer ] && [ "$2" = --capability ]; then echo "pseudolife-mcp installer-protocol 1"; exit 0; fi
 '''
 
 
