@@ -263,23 +263,45 @@ native-client block, before anything on the host changes: they download that ver
 `~/.pseudolife-mcp/downloads/<version>/` (kept for a rerun), refuse unless
 the sums name it exactly once and its digest matches, extract the one
 binary into a private temporary directory, run its `version` command, and
-ask it `installer --capability`. It must answer exactly `pseudolife-mcp
+ask it `installer --capability`, each with a deadline (30 s,
+`PSEUDOLIFE_NATIVE_PROBE_SECONDS`), so a client that hangs is refused rather
+than stalling an unattended run. It must answer exactly `pseudolife-mcp
 installer-protocol <N>` with N at least the installer's level
 (`NATIVE_INSTALLER_PROTOCOL`, the binary's `INSTALLER_PROTOCOL`), because the
-installer runs that release's `installer` steps; a release older than the
-installer (0.24.0 answers with a usage error) is refused, naming the fix:
-PSEUDOLIFE_NATIVE_ARCHIVE_URL pointed at archives built from this checkout.
-Any failure refuses with its cause and fix and nothing changed; there is no
+installer runs that release's `installer` steps. A release older than the
+installer (0.24.0 answers with a usage error) is refused, naming the route that
+works today: install the default client (the installer without
+`PSEUDOLIFE_SHIM_ENGINE`), then move the machine with
+`PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only`; the
+native installer itself works from a checkout of a release that carries it. An
+interactive first install stages, verifies and probes the release before its
+first question, so a refusal costs no answers; an unattended one stages after
+the flag checks. Any failure refuses with its cause and fix; a refusal after
+the download names the download it keeps for a rerun, and nothing else
+changed. A `SHA256SUMS` the server does not have (404) and one it could not
+serve (another HTTP status, with the status) are told apart. There is no
 fallback to a Python client. The shim step then runs that staged binary's
 `runtime install` with the verified files and registers every client
 against the stable launcher; `installer migrate-registrations --client X`
 moves a client's pipx, `pip --user` or Python runtime registration, and
-`installer expose` adds the POSIX user-bin link (the PowerShell installer
-puts the launcher's directory first on the user PATH itself).
+`installer expose` adds the POSIX user-bin link. On Windows the launcher's
+directory goes first on the user PATH (`ops/add-user-path.ps1`), from the
+PowerShell installer and from the shell one under Git Bash alike.
 `PSEUDOLIFE_NATIVE_ARCHIVE_URL` (also a local directory, for the installers
 only) and `PSEUDOLIFE_NATIVE_TARGET` (one of the five targets) override the
 download and the detected target. A rerun whose launcher already matches
 says nothing changed.
+
+A contributor who wants the native installer from a checkout no release
+carries yet serves it archives built from that checkout: build the client
+(`cargo build --release --locked -p pseudolife-stdio` in `rust/`), package it
+(`python rust/ci/release_assets.py package --target <target> --binary
+<the built pseudolife-stdio> --out <dir>`), write its `SHA256SUMS` in the
+release's own form, lowercase hex, two spaces and the name, with LF line
+endings (`(cd <dir> && sha256sum pseudolife-mcp-*.tar.gz pseudolife-mcp-*.zip
+2>/dev/null > SHA256SUMS)`, or `shasum -a 256` on macOS), and run the installer
+with `PSEUDOLIFE_SHIM_ENGINE=native PSEUDOLIFE_NATIVE_ARCHIVE_URL=<dir>`. The
+version in the archive's name is the checkout's `pyproject.toml` version.
 
 ## Recovery and validation
 

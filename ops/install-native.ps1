@@ -298,6 +298,50 @@ if ($Extractor) { Assert-ExtractorArgs }
 # <<< extractor modes <<<
 
 # >>> native client >>>
+# How long the staged client may take to answer `version` and
+# `installer --capability` (seconds); PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
+$NativeProbeSeconds = 30
+if ("$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS" -match '^[1-9][0-9]{0,4}$') { $NativeProbeSeconds = [int]$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS }
+function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
+    # The staged client's answer, or TimedOut when it does not finish in time.
+    # Shares this console (no new window, and Ctrl-C still reaches it).
+    $info = [System.Diagnostics.ProcessStartInfo]::new($Exe)
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $out = $process.StandardOutput.ReadToEndAsync()
+    $err = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($NativeProbeSeconds * 1000)) {
+        try { $process.Kill($true) } catch { }
+        return [pscustomobject]@{ TimedOut = $true; Code = $null; Out = ""; Err = "" }
+    }
+    $process.WaitForExit()
+    return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
+}
+# How long the staged client may take to answer `version` and
+# `installer --capability` (seconds); PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
+$NativeProbeSeconds = 30
+if ("$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS" -match '^[1-9][0-9]{0,4}$') { $NativeProbeSeconds = [int]$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS }
+function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
+    # The staged client's answer, or TimedOut when it does not finish in time.
+    # Shares this console (no new window, and Ctrl-C still reaches it).
+    $info = [System.Diagnostics.ProcessStartInfo]::new($Exe)
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $out = $process.StandardOutput.ReadToEndAsync()
+    $err = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($NativeProbeSeconds * 1000)) {
+        try { $process.Kill($true) } catch { }
+        return [pscustomobject]@{ TimedOut = $true; Code = $null; Out = ""; Err = "" }
+    }
+    $process.WaitForExit()
+    return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
+}
 # The installer-protocol level the staged release must answer (Initialize-NativeClient).
 $NativeInstallerProtocol = 2
 # The client side (the stdio MCP shim every agent registers, and the
@@ -342,8 +386,28 @@ function Get-NativeTarget {
 }
 function Stop-NativeInstall([string]$Cause, [string]$Fix) {
     Remove-NativeStage
-    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix Nothing was changed.")
+    # A download already made is kept for a rerun, and the refusal says where.
+    $left = " Nothing was changed."
+    if ($script:nativeDownloads -and (Test-Path -LiteralPath $script:nativeDownloads) -and
+            @(Get-ChildItem -LiteralPath $script:nativeDownloads -Force -ErrorAction SilentlyContinue).Count) {
+        $left = " Nothing else was changed: the download in $($script:nativeDownloads) is kept for a rerun (delete it to free the space)."
+    }
+    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left")
     exit 1
+}
+# The staging folder goes whatever way the run ends (an exit 1 or 2 from a
+# later refusal, or an error), not only on the paths that call Remove-NativeStage.
+$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    if ($global:PseudolifeNativeStageDir -and (Test-Path -LiteralPath $global:PseudolifeNativeStageDir)) {
+        Remove-Item -LiteralPath $global:PseudolifeNativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+# The staging folder goes whatever way the run ends (an exit 1 or 2 from a
+# later refusal, or an error), not only on the paths that call Remove-NativeStage.
+$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    if ($global:PseudolifeNativeStageDir -and (Test-Path -LiteralPath $global:PseudolifeNativeStageDir)) {
+        Remove-Item -LiteralPath $global:PseudolifeNativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 function Remove-NativeStage {
     # This run's staging directory; the verified download is kept.
@@ -365,6 +429,7 @@ function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
                 $status = $null
                 if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
                 if ($status -eq 404) { return "missing" }
+                if ($status) { return "HTTP $status" }
                 return "$($_.Exception.Message)"
             }
             Move-Item -LiteralPath $part -Destination $Destination -Force
@@ -401,7 +466,7 @@ function Initialize-NativeClient {
     }
     $downloads = Join-Path (Join-Path (Join-Path $HOME ".pseudolife-mcp") "downloads") $script:nativeVersion
     # A folder that could not be made is the cause, not the download after it.
-    try { New-Item -ItemType Directory -Force -Path $downloads -ErrorAction Stop | Out-Null }
+    try { New-Item -ItemType Directory -Force -Path $downloads -ErrorAction Stop | Out-Null; $script:nativeDownloads = $downloads }
     catch { Stop-NativeInstall "the download folder $downloads could not be made ($($_.Exception.Message))" "Check that $(Join-Path $HOME '.pseudolife-mcp') is a folder you can write (free space, permissions, or a file in its place) and rerun." }
     $script:nativeSums = Join-Path $downloads "SHA256SUMS"
     $script:nativeArchive = Join-Path $downloads $name
@@ -409,7 +474,10 @@ function Initialize-NativeClient {
     if ($sumsFetch -eq "missing") {
         Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
     } elseif ($sumsFetch -ne "ok") {
-        Stop-NativeInstall "SHA256SUMS could not be downloaded from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+        if ($sumsFetch -like "HTTP *") {
+            Stop-NativeInstall "SHA256SUMS could not be fetched from $base ($sumsFetch)" "Retry in a few minutes; if it persists, check a proxy or firewall in between (or PSEUDOLIFE_NATIVE_ARCHIVE_URL)."
+        }
+        Stop-NativeInstall "SHA256SUMS could not be fetched from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry."
     }
     $pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($name) + '$'
     $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
@@ -431,6 +499,7 @@ function Initialize-NativeClient {
     $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pseudolife-native-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $stage | Out-Null
     $script:nativeStageDir = $stage
+    $global:PseudolifeNativeStageDir = $stage
     try {
         if ($isZip) {
             Expand-Archive -LiteralPath $script:nativeArchive -DestinationPath $stage -Force
@@ -450,8 +519,12 @@ function Initialize-NativeClient {
         try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
     }
     try {
-        $says = (& $script:nativeStaged version 2>&1 | Out-String).Trim()
-        $ran = ($LASTEXITCODE -eq 0)
+        $answer = Invoke-NativeBounded $script:nativeStaged @("version")
+        if ($answer.TimedOut) {
+            Stop-NativeInstall "the downloaded client did not answer version within $NativeProbeSeconds s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+        }
+        $says = "$($answer.Out)$($answer.Err)".Trim()
+        $ran = ($answer.Code -eq 0)
     } catch { $says = $_.Exception.Message; $ran = $false }
     if (-not $ran) {
         $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
@@ -462,13 +535,17 @@ function Initialize-NativeClient {
     # `pseudolife-mcp installer-protocol <N>`, N at least this level.
     $level = -1
     try {
-        $global:LASTEXITCODE = 0
-        $answer = @(& $script:nativeStaged installer --capability 2>$null)
+        $probe = Invoke-NativeBounded $script:nativeStaged @("installer", "--capability")
+        if ($probe.TimedOut) {
+            Stop-NativeInstall "the downloaded client did not answer installer --capability within $NativeProbeSeconds s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+        }
+        $answer = @("$($probe.Out)" -split "`n" | ForEach-Object { $_.TrimEnd("`r") })
+        if ($answer.Count -gt 1 -and $answer[-1] -eq "") { $answer = $answer[0..($answer.Count - 2)] }
         # Exactly one line, and a level of 1 to 9 digits with no leading zero.
-        if (($LASTEXITCODE -eq 0) -and ($answer.Count -eq 1) -and ("$($answer[0])".TrimEnd("`r") -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
+        if (($probe.Code -eq 0) -and ($answer.Count -eq 1) -and ($answer[0] -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
     } catch { $level = -1 }
     if ($level -lt $NativeInstallerProtocol) {
-        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (rust/ci/release_assets.py package), since no published release carries them yet."
+        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only (PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'; pseudolife-mcp update --clients-only); this native installer itself works from a checkout of a release that carries it."
     }
 }
 function Get-NativeLauncherPath {
@@ -913,8 +990,13 @@ Where does the memory bank live?
   3) On this machine, and other machines will connect to it
 '@
 }
+function Read-NativeBeforeAsking {
+    # The first question waits for the staged, verified and probed release.
+    if (-not $script:nativeStaged) { Initialize-NativeClient }
+}
 function Read-BankAnswer([string]$Prompt) {
     # The reply, or $null at the end of input.
+    Read-NativeBeforeAsking
     return (Read-Host $Prompt)
 }
 function Get-BankReply($reply) {
@@ -937,6 +1019,7 @@ function Invoke-BankLocationQuestion {
         return
     }
     if (-not $script:TokenFile -and -not $script:ReadToken -and -not $script:PairingCode) {
+        Read-NativeBeforeAsking
         Show-BankLocationQuestion
         $remote = $false
         while (-not $remote) {
@@ -1187,6 +1270,7 @@ if (-not $Client) {
         $Client = if ($found) { $found -join "," } else { "generic" }
         Write-Host "Unattended default: clients=$Client (installed CLIs; generic when none are found)."
     } else {
+        Read-NativeBeforeAsking
         Write-Host ""
         Write-Host "Which coding agents should this install wire up?"
         Write-Host ""
