@@ -1109,7 +1109,11 @@ def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None =
     for m in members:
         if _not_ready(m) or _fetch_head(m.number) != m.sha:
             continue
-        if m.sha in refused or any(sha != m.sha and _is_ancestor(sha, m.sha) for sha in refused):
+        # The same test _merge_members leaves a member out by (its own entry,
+        # or _carried: a refused one its head carries that does not merely
+        # wait on a labelled parent). A cut skipped here for any other reason
+        # would still merge there, beside the other members.
+        if m.sha in refused or _carried(refused, m):
             continue
         base = _out("merge-base", plan.base_sha, m.sha)
         if _project_version(m.sha) == _project_version(base):
@@ -2018,6 +2022,7 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
     cut_drops = list(plan.dropped)
     _merge_members(plan, members, freeze, prepass)
     _record_carried(plan, prepass)
+    _refuse_a_cut_beside_others(plan)
     inputs = _census_inputs(plan.base_sha)
     if not plan.merged or inputs is None and _budget_tools(plan.base_sha) is None:
         return judged    # master has no supported generated metadata
@@ -2042,7 +2047,22 @@ def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
         out = {d.member.number for d in drops}
         print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
         _remerge(plan, members, cut_drops + drops, out, freeze, prepass)
+        _refuse_a_cut_beside_others(plan)
     return judged
+
+
+def _refuse_a_cut_beside_others(plan: Plan) -> None:
+    """A release cut is batched alone (_release_cut_alone says why); a batch
+    that merged one beside anything else is refused, whatever let it through,
+    so a drift between the cut search and the merge fails loudly instead of
+    shipping changes outside the release notes."""
+    cuts = [m.number for m in plan.merged if _is_release_cut(plan.base_sha, m)]
+    if cuts and len(plan.merged) > 1:
+        others = ", ".join(f"#{m.number}" for m in plan.merged if m.number not in cuts)
+        raise Refusal(f"release cut {', '.join(f'#{n}' for n in cuts)} merged beside {others}, but a "
+                      "cut is batched alone (the release is tagged at the batch's merge); nothing was "
+                      "built. This is a fault in ops/integrate.py's cut search: build with only the "
+                      "cut labelled, and report it")
 
 
 def _new_markers(base_sha: str) -> list[str]:
