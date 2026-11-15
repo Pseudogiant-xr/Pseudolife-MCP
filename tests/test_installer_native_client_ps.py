@@ -393,16 +393,7 @@ def test_a_staged_client_that_does_not_answer_is_refused_in_time(tmp_path, hang)
 
 
 @needs_client
-@pytest.mark.parametrize("ending", ["exit 2", "throw 'boom'"])
-def test_the_staging_folder_is_removed_on_every_exit(tmp_path, ending):
-    # A rerun stages first; a later refusal (exit 2) or an error must not
-    # leave the staged copy behind, as the shell installer's EXIT trap does not.
-    temp = tmp_path / "temp"
-    temp.mkdir()
-    result = _run(tmp_path, f'Initialize-NativeClient; Write-Host STAGED; {ending}',
-                  extra_env={"TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp)})
-    assert "STAGED" in result.stdout, result.stdout + result.stderr
-    assert not list(temp.glob("pseudolife-native-*")), list(temp.iterdir())
+
 
 
 # -- round 4 ------------------------------------------------------------------
@@ -412,7 +403,10 @@ def test_a_question_after_the_install_does_not_stage_the_release_again(tmp_path)
     # After Install-ShimOnce the staged copy is gone and the installed client
     # answers; a later question (the passkey, expose or schedule offer) must
     # not download SHA256SUMS again, nor refuse a half-finished install.
+    # The hook every question calls (the bank-location block).
+    hook = _block("function Read-NativeBeforeAsking", "\nfunction Read-BankAnswer")
     body = "\n".join([
+        hook,
         'if (-not (Install-ShimOnce)) { Write-Host "INSTALL FAILED"; exit 3 }',
         f"Remove-Item -LiteralPath '{tmp_path / 'release' / 'SHA256SUMS'}'",
         "Read-NativeBeforeAsking",

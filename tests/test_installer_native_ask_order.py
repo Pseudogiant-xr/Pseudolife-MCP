@@ -6,7 +6,8 @@ and find it too old for the installer. Now the first question waits for the
 staged release: downloaded, verified and probed. A release that predates the
 installer is refused before any question, so no answer is wasted.
 
-POSIX only (a pty); a copy of the checkout, a throwaway home, and a release
+The terminal runs are POSIX only (a pty); the structural check at the end
+runs everywhere. A copy of the checkout, a throwaway home, and a release
 whose client answers ``installer --capability`` as 0.24.0 does.
 """
 from __future__ import annotations
@@ -27,7 +28,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = "x86_64-unknown-linux-gnu"
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="a pty is POSIX-only")
+POSIX = pytest.mark.skipif(os.name == "nt", reason="a pty is POSIX-only")
 
 # What 0.24.0's client answers: it runs, and has no `installer --capability`.
 OLD_CLIENT = r'''#!/bin/sh
@@ -123,6 +124,7 @@ def _at_a_terminal(argv: list[str], env: dict[str, str], cwd: Path, timeout: flo
     return proc.returncode, output.decode("utf-8", "replace").replace("\r\n", "\n")
 
 
+@POSIX
 @pytest.mark.parametrize("shell", ["sh", "ps1"])
 def test_a_first_native_install_refuses_an_old_release_before_asking_anything(tmp_path, shell):
     if shell == "ps1" and not shutil.which("pwsh"):
@@ -173,6 +175,7 @@ def _asked_before_refusal(output: str) -> list[str]:
     return [question for question in QUESTIONS if question in before]
 
 
+@POSIX
 @pytest.mark.parametrize("shell", ["sh", "ps1"])
 def test_the_ask_order_check_sees_a_question_that_comes_first(tmp_path, shell):
     # Positive control: with a release this installer accepts, the first
