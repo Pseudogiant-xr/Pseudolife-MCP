@@ -73,6 +73,8 @@ def _inside(entry: str, home: str) -> bool:
     if not entry.strip():
         return False
     entry, home = norm(entry), norm(home)
+    if ";" in entry:   # a %VAR% that expands to several entries is not one entry inside home
+        return False
     return entry == home or entry.startswith(home.rstrip("\\") + "\\")
 
 
@@ -104,16 +106,30 @@ def _leaked_entries(before, value, home: str) -> list[str] | None:
     return added
 
 
-def _path_difference(before, value) -> tuple[list[str], list[str]]:
-    """(added, removed) entries between two values, for a failure message."""
+def _path_difference(before, value) -> str:
+    """What differs between two user PATH values, for a failure message: the
+    entries added and removed, and whether the entries both keep changed
+    order or the value's registry type changed."""
     old, new = _path_entries(before), _path_entries(value)
-    remaining, added = list(old), []
+    remaining, added, common = list(old), [], []
     for entry in new:
         if entry in remaining:
             remaining.remove(entry)
+            common.append(entry)
         else:
             added.append(entry)
-    return added, remaining
+    unmatched, kept_in_old_order = list(remaining), []
+    for entry in old:
+        if entry in unmatched:
+            unmatched.remove(entry)
+        else:
+            kept_in_old_order.append(entry)
+    parts = [f"added {added!r}", f"removed {remaining!r}"]
+    if common != kept_in_old_order:
+        parts.append("the entries both values have are in a different order")
+    if before is not None and value is not None and value[1] != before[1]:
+        parts.append(f"the registry type changed from {before[1]} to {value[1]}")
+    return ", ".join(parts)
 
 
 @contextlib.contextmanager
@@ -147,10 +163,8 @@ def user_path_unchanged(fixture_home, broadcast=None):
                 return None
 
     def not_ours(value):
-        added, removed = _path_difference(before, value)
-        other = "" if added or removed else " (the same entries, reordered, or the value's type changed)"
         return AssertionError("the real user PATH changed during the test in a way this test did not "
-                              f"cause (nothing was changed back): added {added!r}, removed {removed!r}{other}")
+                              f"cause (nothing was changed back): {_path_difference(before, value)}")
 
     before = read()
     try:
@@ -1121,6 +1135,29 @@ def test_the_user_path_guard_leaves_a_reorder_alone_even_beside_the_leak(monkeyp
     # which program wins; with a fixture entry added too, nothing is written.
     fake, announced, guard = _guarded(monkeypatch, ("C:\\a;C:\\b", 2))
     changed = (HOME + "\\bin;C:\\b;C:\\a", 2)
+    # Codex review of 721fb8c00: the failure names the reorder, not only the addition.
+    with pytest.raises(AssertionError, match="did not cause .*in a different order"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_the_user_path_guard_names_a_type_change_beside_the_leak(monkeypatch):
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = (HOME + "\\bin;" + BEFORE[0], 1)
+    with pytest.raises(AssertionError, match="did not cause .*registry type changed from 2 to 1"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_a_variable_that_expands_to_several_entries_is_not_inside_the_home(monkeypatch):
+    # Codex review of 721fb8c00: %VAR% naming a home entry and an outside one
+    # must not let the guard remove the outside one.
+    monkeypatch.setenv("PL_GUARD_TWO", HOME + "\\bin;C:\\other\\bin")
+    assert not _inside("%PL_GUARD_TWO%", HOME)
+    fake, announced, guard = _guarded(monkeypatch, BEFORE)
+    changed = ("%PL_GUARD_TWO%;" + BEFORE[0], 2)
     with pytest.raises(AssertionError, match="in a way this test did not cause"):
         with guard():
             fake.values["Path"] = changed
@@ -1129,7 +1166,7 @@ def test_the_user_path_guard_leaves_a_reorder_alone_even_beside_the_leak(monkeyp
 
 def test_the_user_path_guard_names_a_reorder_on_its_own(monkeypatch):
     fake, announced, guard = _guarded(monkeypatch, ("C:\\a;C:\\b", 2))
-    with pytest.raises(AssertionError, match="the same entries, reordered"):
+    with pytest.raises(AssertionError, match="in a different order"):
         with guard():
             fake.values["Path"] = ("C:\\b;C:\\a", 2)
     assert fake.values["Path"] == ("C:\\b;C:\\a", 2) and announced == []
