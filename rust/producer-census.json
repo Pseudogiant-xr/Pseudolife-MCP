@@ -14,9 +14,10 @@
     "docs/dev/dev-machines.md": "0c8e4a571f2700ea5974ca924153f075577d753ff1532658ca84907951dab699",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "0772c00f642c3d4324d26cd4d8900889866a465a34ee622cd4e8266573e408ee",
+    "docs/dev/merge-batches.md": "3414364da24999822501f5a2016ffe9b261b0bbbee256c2aa1d254ab6510324b",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
-    "docs/dev/native-runtimes.md": "0ea6c761510b92bc74b5869753c4958067065efb11f68b7d4c018c5fc465f650",
+    "docs/dev/native-runtimes.md": "fcbcfe1f6285b33486bbf0e20e0cdaa013a0d238f79103c759dc3288b6efeed0",
+    "docs/dev/python-retirement.md": "ab31b53b38f844f078a4a3bdc32e001124ee083f9752bdc556792ff792f8cbd6",
     "docs/dev/release-assets.md": "ecabfc6658aba8208b37f4e41c4fa5a060eca3985ba432fba0828b22056aaec5",
     "docs/dev/run-rust-beside-python.md": "12d52aa9774f05ae699cd67277173b04ff1b837b1772c2c96700b2fb0b110b15",
     "docs/dev/worktree-retention.md": "23464a303672be4f546ecbf7c8e357c41c4bd2c684202e05cfebec6df78d7355",
@@ -263,7 +264,7 @@
     "ops/install.sh": "c96916dcf81674b9ee92dbe16ac19c84d729965345ba78c276e6abfc52749a14",
     "ops/installer_engine.py": "1b83c360e5b7e02f0b56681f23dc8c88ac4803cebd88d2bb28c30c751141ec6e",
     "ops/installer_state.py": "3f53fa5268be9ab4e0dc7fc6df563f1cec306f4c0f9a92e6ec4e1500124c519a",
-    "ops/integrate.py": "dc6fae78e16a3ceed6c0313fb1d432724508ed1fd686146c062c5018190c777f",
+    "ops/integrate.py": "fa0d4f66aec5c5666bf2a72db5f820e567ed4f3ee3b113497d304a0a561e406f",
     "ops/measure_reverify_population.py": "413ff8baa0e0b25b8a727b6bead248df753d4d26e7c697aa6a0542b68715cfa5",
     "ops/migrate-pg18.ps1": "a2a8bd96ab754249395a9d42b26bfd8e6b5ecf8d6da1cd72383ebf745c0acde8",
     "ops/migrate_drop_age.py": "bad14579affef14699a3e1898afd4ba6326944f5db1e9b5c0486ee2b23153eac",
@@ -48951,7 +48952,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/native-runtimes.md:27",
+          "location": "docs/dev/native-runtimes.md:31",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -48964,7 +48965,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/native-runtimes.md:80",
+          "location": "docs/dev/native-runtimes.md:84",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49318,7 +49319,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/native-runtimes.md:80",
+          "location": "docs/dev/native-runtimes.md:84",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49482,7 +49483,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/native-runtimes.md:83",
+          "location": "docs/dev/native-runtimes.md:87",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -50678,7 +50679,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:509",
+          "location": "docs/dev/merge-batches.md:517",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -50708,7 +50709,7 @@
         },
         {
           "evidence": "static",
-          "location": "ops/integrate.py:2189",
+          "location": "ops/integrate.py:2284",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -68697,7 +68698,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/dev/native-runtimes.md:227",
+      "location": "docs/dev/native-runtimes.md:231",
       "name": "runtime",
       "shape": {
         "argv_source": "runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]",
@@ -68721,7 +68722,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "cli",
-      "location": "docs/dev/native-runtimes.md:243",
+      "location": "docs/dev/native-runtimes.md:247",
       "name": "installer",
       "shape": {
         "argv_source": "installer migrate-registrations [--client <name>]... [--json]",
@@ -69269,7 +69270,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:526",
+      "location": "docs/dev/merge-batches.md:534",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -69283,7 +69284,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:108",
+      "location": "docs/dev/native-runtimes.md:112",
       "name": "PSEUDOLIFE_NATIVE_ARCHIVE_URL",
       "shape": {
         "channel": "environment",
@@ -69297,8 +69298,8 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:26",
-      "name": "PSEUDOLIFE_NATIVE_CLI",
+      "location": "docs/dev/native-runtimes.md:277",
+      "name": "PSEUDOLIFE_NATIVE_TEST_BINARY",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -69311,8 +69312,8 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:273",
-      "name": "PSEUDOLIFE_NATIVE_TEST_BINARY",
+      "location": "docs/dev/native-runtimes.md:30",
+      "name": "PSEUDOLIFE_NATIVE_CLI",
       "shape": {
         "channel": "environment",
         "complete": false,
@@ -75913,6 +75914,20 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
+      "location": "docs/dev/python-retirement.md:119",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
       "location": "docs/dev/run-rust-beside-python.md:178",
       "method": null,
       "name": "/health",
@@ -80839,7 +80854,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:10",
+      "location": "docs/dev/native-runtimes.md:14",
       "name": "PSEUDOLIFE_NATIVE_UPDATE",
       "shape": {
         "channel": "environment",
@@ -80855,7 +80870,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:136",
+      "location": "docs/dev/native-runtimes.md:140",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -80871,7 +80886,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:139",
+      "location": "docs/dev/native-runtimes.md:143",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -80887,7 +80902,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:274",
+      "location": "docs/dev/native-runtimes.md:278",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
       "shape": {
         "channel": "environment",
@@ -80903,7 +80918,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/native-runtimes.md:35",
+      "location": "docs/dev/native-runtimes.md:39",
       "name": "PSEUDOLIFE_SHIM_ENGINE",
       "shape": {
         "channel": "environment",
@@ -83958,13 +83973,13 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:526",
+      "location": "docs/dev/merge-batches.md:534",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:576",
+      "location": "docs/dev/merge-batches.md:584",
       "reason": "forwarded parameters"
     },
     {
@@ -83974,57 +83989,73 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:108",
+      "location": "docs/dev/native-runtimes.md:112",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_ARCHIVE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:227",
+      "location": "docs/dev/native-runtimes.md:231",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:runtime"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:243",
+      "location": "docs/dev/native-runtimes.md:247",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:installer"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:26",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_CLI"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:27",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:273",
+      "location": "docs/dev/native-runtimes.md:277",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_TEST_BINARY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:80",
+      "location": "docs/dev/native-runtimes.md:30",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_CLI"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/native-runtimes.md:31",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:80",
+      "location": "docs/dev/native-runtimes.md:84",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/native-runtimes.md:84",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/native-runtimes.md:83",
+      "location": "docs/dev/native-runtimes.md:87",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_USER_BIN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/python-retirement.md:113",
+      "reason": "forwarded parameters"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/python-retirement.md:119",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "docs/dev/python-retirement.md:120",
+      "reason": "forwarded parameters"
     },
     {
       "dynamic": "unresolved",

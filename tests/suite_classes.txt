@@ -11,7 +11,8 @@
 # 2. It tests the suite's own infrastructure: tests/conftest.py,
 #    tests/fake_embedder.py, tests/pg_fixtures.py (its private members),
 #    tests/pg_defaults.py, tests/report_redaction.py, the suite profiler,
-#    tests/suite_lock.py, tests/client_environment.py; or it imports a helper
+#    tests/suite_lock.py, tests/client_environment.py,
+#    tests/windowless_children.py; or it imports a helper
 #    from a live test module that does any of 1-2.
 # 3. It imports a pseudolife_memory module that an open, maintainer-ruled
 #    freeze exception changes. Re-freeze these once the exception has landed
@@ -565,6 +566,7 @@ frozen test_warmup_access.py
 live test_web.py
 frozen test_web_hardening.py
 frozen test_wiki_page.py
+live test_windowless_children.py
 frozen test_world_cortex.py
 frozen test_write_through.py
 frozen test_writer_context.py

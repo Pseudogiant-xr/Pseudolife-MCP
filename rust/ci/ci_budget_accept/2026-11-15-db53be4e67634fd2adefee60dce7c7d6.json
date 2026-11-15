@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "53af7849fa66bf99",
+  "fingerprint": "5c5191fe0058ce7b",
+  "reason": "Adds tests/test_windowless_children.py to the one pytest step: thirteen fakes-only cases and one real Windows spawn of python -c, well under a second; no new job, shard, setup or dependency, so the measured lane cost holds."
+}
