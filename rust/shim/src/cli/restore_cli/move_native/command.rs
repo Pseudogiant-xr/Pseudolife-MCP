@@ -473,16 +473,13 @@ pub(super) fn release(request: &Rollback) -> u8 {
     // What the record alone answers (committed, released, not rolled back,
     // never restored there) needs no host.
     let runs = !record.committed
-        && matches!(
-            record.phase,
-            Phase::RolledBack | Phase::Releasing | Phase::GivenUp
-        )
+        && matches!(record.phase, Phase::RolledBack | Phase::Releasing)
         && record.flags.target_restored;
     if !runs {
         let mut none = NoHosts;
         let id = record.move_id.clone();
         let outcome = engine::release_target(&mut none, record.clone());
-        return report_release(request.json, &id, &outcome, &record.kept);
+        return report_release(request.json, &id, &outcome, &record);
     }
     if let Err(why) = confirm(
         request.yes,
@@ -514,16 +511,7 @@ pub(super) fn release(request: &Rollback) -> u8 {
     let id = record.move_id.clone();
     let mut again = Files::under_home(&home);
     let outcome = locked(|| match again.load(&id) {
-        Ok(Some(now)) if now == record => {
-            // A later move of the same bank that committed: the bank is
-            // served by its target now, not this host.
-            let later = records(&mut again).ok().and_then(|all| {
-                all.into_iter().find(|r| {
-                    r.committed && r.source_bank == record.source_bank && r.move_id > record.move_id
-                })
-            });
-            engine::release_target_after(&mut live, record, later.as_ref())
-        }
+        Ok(Some(now)) if now == record => engine::release_target(&mut live, record.clone()),
         Ok(_) => engine::Outcome {
             code: engine::EXIT_REFUSED,
             message: format!(
@@ -537,13 +525,12 @@ pub(super) fn release(request: &Rollback) -> u8 {
     });
     match outcome {
         Ok(outcome) => {
-            let kept = Files::under_home(&home)
+            let after = Files::under_home(&home)
                 .load(&id)
                 .ok()
                 .flatten()
-                .map(|r| r.kept)
-                .unwrap_or_default();
-            report_release(request.json, &id, &outcome, &kept)
+                .unwrap_or(record);
+            report_release(request.json, &id, &outcome, &after)
         }
         Err(why) => refuse(request.json, 4, &why),
     }
@@ -553,7 +540,7 @@ pub(super) fn release(request: &Rollback) -> u8 {
 /// host, only while it does not answer and this host serves its own bank.
 fn give_up_target(request: &Rollback, home: &std::path::Path, record: &Record) -> u8 {
     if let Some(outcome) = engine::give_up_refusal(record) {
-        return report_release(request.json, &record.move_id, &outcome, &record.kept);
+        return report_release(request.json, &record.move_id, &outcome, record);
     }
     // Unattended without --yes: refused before anything is asked of a host.
     if !request.yes && !std::io::stdin().is_terminal() {
@@ -568,7 +555,7 @@ fn give_up_target(request: &Rollback, home: &std::path::Path, record: &Record) -
             code: engine::EXIT_REFUSED,
             message: format!("{why}. {NOTHING}"),
         };
-        report_release(request.json, &record.move_id, &outcome, &record.kept)
+        report_release(request.json, &record.move_id, &outcome, record)
     };
     let docker = match super::docker_program() {
         Ok(program) => super::super::docker::Real {
@@ -592,11 +579,11 @@ fn give_up_target(request: &Rollback, home: &std::path::Path, record: &Record) -
     let (given_up, outcome) = match engine::give_up(&mut live, record) {
         Ok(found) => found,
         Err(outcome) => {
-            return report_release(request.json, &record.move_id, &outcome, &record.kept);
+            return report_release(request.json, &record.move_id, &outcome, record);
         }
     };
     let mut question = format!(
-        "{} does not answer. Give it up on this host only? Move {}'s claim, its gate and its stopped copy of this host's bank stay there if it comes back, and its own bank is not given back.",
+        "{} gave no answer as a move target. Give it up on this host only, for good? Nothing is sent to it from this host for move {} again; its claim, its gate and its stopped copy of this host's bank stay there for whoever runs it to clear by hand, and its own bank is not given back.",
         record.target, record.move_id
     );
     if record.parked_writes.is_some() {
@@ -623,22 +610,28 @@ fn give_up_target(request: &Rollback, home: &std::path::Path, record: &Record) -
     });
     match saved {
         Ok(answer) if answer.code == engine::EXIT_OK => {
-            report_release(request.json, &id, &answer, &given_up.kept)
+            report_release(request.json, &id, &answer, &given_up)
         }
-        Ok(answer) => report_release(request.json, &id, &answer, &record.kept),
+        Ok(answer) => report_release(request.json, &id, &answer, record),
         Err(why) => refuse(request.json, 4, &why),
     }
 }
 
 /// `--release-target`'s outcome; under `--json` it names the files that
-/// keep the moved bank.
-fn report_release(json: bool, move_id: &str, outcome: &Outcome, kept: &[String]) -> u8 {
+/// keep the moved bank and how the release ended (`ending`: `given_back`,
+/// `nothing_there` or `given_up`), with `released` true only for a target
+/// given back its own bank.
+fn report_release(json: bool, move_id: &str, outcome: &Outcome, record: &Record) -> u8 {
     if json {
+        let ending = matches!(record.phase, Phase::Released | Phase::GivenUp)
+            .then(|| engine::ending(record));
         let doc = json!({
             "move_id": move_id,
             "moved": false,
-            "released": outcome.code == engine::EXIT_OK,
-            "kept": kept,
+            "released": outcome.code == engine::EXIT_OK
+                && ending == Some(super::record::Ending::GivenBack),
+            "ending": ending,
+            "kept": record.kept,
             "exit": outcome.code,
             "message": outcome.message,
         });

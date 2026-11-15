@@ -40,9 +40,20 @@ pub(super) enum Phase {
     /// (`ending` says whether it was given back or found so).
     Released,
     /// `--release-target --target-gone`: this host gave the target up while
-    /// it could not be reached. Whatever the move left there stays; a later
-    /// `--release-target` gives it back if the target returns.
+    /// it gave no answer as a move target. Final: nothing is sent to it from
+    /// this host again, and what the move left there is cleared by hand.
     GivenUp,
+}
+
+/// Which reading of the restored bank a rollback compares with: taken in
+/// the invocation that ran the restore, right after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Reading {
+    /// The forward run's check of the restored bank.
+    Check,
+    /// That run's own rollback, reading the bank stopped and gated.
+    Rollback,
 }
 
 /// How a release ended, which every later answer repeats.
@@ -55,7 +66,7 @@ pub(super) enum Ending {
     /// The target was read and held none of the move's claim, bank or gate:
     /// nothing was changed there.
     NothingThere,
-    /// The target could not be reached and was given up on this host only.
+    /// The target gave no answer and was given up on this host only.
     GivenUp,
 }
 
@@ -142,6 +153,9 @@ pub(super) struct Record {
     pub restored_counts: std::collections::BTreeMap<String, i64>,
     /// The restored target's mutation counters before it first started.
     pub restored_mutations: Option<std::collections::BTreeMap<String, i64>>,
+    /// Which reading `restored_counts` and `restored_mutations` came from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restored_reading: Option<Reading>,
     /// The gated target bank as the last finished rollback read it (`None`:
     /// it could not be read whole, so a resume cannot rule out writes).
     #[serde(skip_serializing_if = "Option::is_none")]

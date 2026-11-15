@@ -570,6 +570,7 @@ fn release_target_answers_from_the_record_and_names_what_it_keeps() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["moved"], false);
     assert_eq!(report["released"], true);
+    assert_eq!(report["ending"], "given_back");
     assert_eq!(
         report["kept"],
         serde_json::json!(["/home/dev/k/a.sql.gz", "/home/dev/k/a.tgz"])
@@ -580,6 +581,16 @@ fn release_target_answers_from_the_record_and_names_what_it_keeps() {
             .unwrap()
             .contains("/home/dev/k/a.sql.gz")
     );
+    // Read and found holding nothing of the move: closed, not given back.
+    plant(
+        &home.0,
+        &rolled_back_to_box(r#","ending":"nothing_there""#).replace("rolled_back", "released"),
+    );
+    let output = release(&["--release-target", MOVE_ID, "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["released"], false);
+    assert_eq!(report["ending"], "nothing_there");
     assert_quiet(&socket);
 }
 
@@ -758,17 +769,14 @@ fn a_given_up_target_stops_holding_this_host_and_names_its_way_back() {
         &rolled_back_to_box(r#","kept":["/home/dev/k/a.sql.gz"],"ending":"given_up""#)
             .replace("rolled_back", "given_up"),
     );
-    // Its answers say it was given up, never given back, and name the
-    // release that gives it back if it returns.
+    // Its answers say it was given up for good, never given back, and what
+    // is left to clear on the target by hand.
     let output = rollback(&home.0, &url, &["--rollback", MOVE_ID]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("given up"), "{stdout}");
+    assert!(stdout.contains("gave root@box up"), "{stdout}");
+    assert!(stdout.contains("that is final here"), "{stdout}");
     assert!(!stdout.contains("was given back"), "{stdout}");
-    assert!(
-        stdout.contains(&format!("move --release-target {MOVE_ID}")),
-        "{stdout}"
-    );
     let output = rollback(
         &home.0,
         &url,
@@ -777,6 +785,8 @@ fn a_given_up_target_stops_holding_this_host_and_names_its_way_back() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["kept"], serde_json::json!(["/home/dev/k/a.sql.gz"]));
+    assert_eq!(report["ending"], "given_up");
+    assert_eq!(report["released"], false);
     assert!(
         report["message"]
             .as_str()
@@ -784,13 +794,21 @@ fn a_given_up_target_stops_holding_this_host_and_names_its_way_back() {
             .contains("already given up"),
         "{report}"
     );
-    // A release of it is a real give-back again: it asks first.
-    let output = rollback(&home.0, &url, &["--release-target", MOVE_ID]);
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    // A release of it is refused from the record: nothing is asked of any
+    // host, whatever --yes says.
+    let output = rollback(&home.0, &url, &["--release-target", MOVE_ID, "--yes"]);
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("re-run with --yes"),
+        String::from_utf8_lossy(&output.stderr).contains("that is final here"),
         "{output:?}"
     );
+    // A resume of it is refused with the same true cause.
+    let resume = [DRY, &["--resume"]].concat();
+    let output = run(&home.0, &url, "80", &resume);
+    assert_ne!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("is not resumed"), "{stderr}");
+    assert!(stderr.contains("that is final here"), "{stderr}");
     // It no longer holds this host: a move elsewhere goes on to the ssh
     // lookup (which PATH lacks here).
     let other: Vec<&str> = DRY

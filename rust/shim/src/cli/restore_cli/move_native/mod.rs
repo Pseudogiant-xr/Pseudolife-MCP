@@ -684,6 +684,20 @@ pub(in crate::cli) fn run(arguments: &[OsString]) -> Option<u8> {
                             && (r.parked_writes.is_some() || r.unresolved.is_some())
                             && r.target == request.to
                     });
+                    // Given up on this host: final, whatever the target holds.
+                    if let Some(given_up) = records.iter().find(|r| {
+                        !r.committed && r.phase == record::Phase::GivenUp && r.target == request.to
+                    }) {
+                        return Some(finish(
+                            &request,
+                            Err(format!(
+                                "move {} to {} is not resumed: {}",
+                                given_up.move_id,
+                                given_up.target,
+                                engine::given_up_line(given_up)
+                            )),
+                        ));
+                    }
                     if let Some(parked) = parked {
                         let why = match (&parked.parked_writes, &parked.unresolved) {
                             (Some(tables), _) => format!(

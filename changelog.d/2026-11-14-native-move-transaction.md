@@ -38,12 +38,14 @@
   steps is safe to repeat.
   While such a target holds a copy of this host's bank, no other move starts
   from this host; the refusal names the commands that work for that move. A
-  target read as holding nothing of this host's bank (another bank, or none of
-  the move's claim, bank or gate) closes the record and is left unchanged; one
-  whose Docker does not answer keeps it.
-  `--release-target <move id> --target-gone` gives up, on this host only, a
-  target that does not answer, while this host serves its own bank; it names
-  what stays there, and a later `--release-target` gives it back if it returns.
+  target read as holding neither this move's claim nor its bank closes the
+  record and is left unchanged; one whose Docker does not answer, or that has
+  no bank identity behind an unclaimed gate, keeps it. `--json` gives the
+  `ending`.
+  `--release-target <move id> --target-gone` gives up, on this host only and
+  for good, a target that gives no answer, while this host serves its own
+  bank. Nothing is sent to it for that move again; the output says how to
+  clear it there by hand.
 - A gated bank with no reading taken right after the move's restore by the
   same run (or whose restore may or may not have run) is kept and never resumed
   over (exit 6, naming `--release-target`); no writes are claimed for it.
