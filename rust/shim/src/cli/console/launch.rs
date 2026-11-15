@@ -3,7 +3,7 @@
 //!
 //! - A background launch: `[program] + [arg.replace("%s", url) ...]` (the
 //!   URL is always one argument, never read by a shell). POSIX: fds 0-2
-//!   inherited and every other descriptor closed, `setsid`, then `execve`
+//!   are `/dev/null`, every other descriptor closed, `setsid`, then `execve`
 //!   over each `PATH` candidate (never execvp's `/bin/sh` fallback),
 //!   reporting the first error that is not ENOENT/ENOTDIR. The launcher is
 //!   then given [`SETTLE`] to exit: a zero exit or a program still running
@@ -415,6 +415,10 @@ mod posix {
                 // Still running at the deadline: the browser itself.
                 Ok(None) if std::time::Instant::now() >= deadline => return Ok(()),
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                // A caller that ignores SIGCHLD has the kernel reap the
+                // launcher as it exits: it started and is gone, its status
+                // unknowable, which is a hand-off, not a failure.
+                Err(error) if error.raw_os_error() == Some(libc::ECHILD) => return Ok(()),
                 Err(error) => return Err(format!("could not wait for {program} ({error})")),
             }
         }

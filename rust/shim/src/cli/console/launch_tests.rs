@@ -25,9 +25,10 @@ fn a_test_build_intercepts_every_launch_but_a_registered_stub() {
     stub_root(None);
     let message = refuses(&nowhere());
     assert!(message.contains("tests start only stubs"), "{message}");
-    // A bare name (what the default launchers are) is never a stub.
+    // A bare name (what the default launchers are) is never a stub. The
+    // name cannot exist, so a guard broken here still opens nothing.
     let named = Plan::Background {
-        program: "xdg-open".to_owned(),
+        program: "pl-w10-no-such-launcher".to_owned(),
         args: vec!["%s".to_owned()],
     };
     stub_root(Some(std::env::temp_dir()));
@@ -198,5 +199,43 @@ mod stubs {
         assert_eq!(open(&plan(program, &["%s"]), "http://h/"), Ok(()));
         let waited = started.elapsed();
         assert!(waited >= SETTLE && waited < SETTLE * 2, "{waited:?}");
+    }
+
+    /// A caller that ignores SIGCHLD (it survives `exec`) has the kernel
+    /// reap the launcher itself, so waiting for it fails with ECHILD after
+    /// a launcher that handed off and exited: that is not "no browser".
+    /// Run in a child test process, so this process's own SIGCHLD stays
+    /// at its default for every other test.
+    #[test]
+    #[allow(unsafe_code)]
+    fn an_ignored_sigchld_does_not_turn_a_handed_off_launch_into_a_failure() {
+        const CHILD: &str = "PL_W10_SIGCHLD_IGNORED_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let stubs = Stubs::new("sigchld");
+            let program = stubs.launcher("exit 0");
+            assert_eq!(open(&plan(program, &["%s"]), "http://h/"), Ok(()));
+            return;
+        }
+        use std::os::unix::process::CommandExt;
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "cli::console::launch::tests::stubs::an_ignored_sigchld_does_not_turn_a_handed_off_launch_into_a_failure",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1");
+        // SAFETY: `signal` is async-signal-safe; the closure allocates
+        // nothing and only sets the child's SIGCHLD disposition.
+        unsafe {
+            command.pre_exec(|| {
+                libc::signal(libc::SIGCHLD, libc::SIG_IGN);
+                Ok(())
+            })
+        };
+        let output = command.output().unwrap();
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{text}");
+        assert!(text.contains("1 passed"), "the child ran no test: {text}");
     }
 }

@@ -119,7 +119,9 @@ prints:
   that is not ENOENT/ENOTDIR reported; never execvp's `/bin/sh` fallback.
   The launcher then has two seconds to exit: a zero exit, or a program
   still running (the browser itself), is opened; a non-zero exit or a start
-  that fails prints the link with the cause. Windows: std's `CreateProcess`
+  that fails prints the link with the cause (a launcher the caller's
+  ignored SIGCHLD reaps before its status is read counts as opened).
+  Windows: std's `CreateProcess`
   with nothing redirected, so the browser gets this command's own standard
   handles, as CPython's child does (Windows copies a parent's redirected
   standard handles to a child started with none named), and opened when it
@@ -297,3 +299,14 @@ against master's deferring binary on Windows: 37 of the new and changed
 cases differed, and the five that matched are the four declared pre-mint
 deferrals and a `--no-open --json` answer the first slice already gave.
 Hosted runs are CI's.
+
+Evidence of 16 November 2026 (the native macOS and Linux browser rules):
+WSL Ubuntu, `--golden` 167/167 against the Linux golden re-recorded from
+the candidate (`--record-candidate --write`; three Windows-only cases keep
+orphaned Linux entries, which the recorder does not remove). The row's 16
+mutants now split by OS: Linux runs 13 (`console-exited-counts-as-opened`,
+`console-generic-launched` and `console-winerror-full-stop` are
+Windows-only), Windows runs 15 (`console-running-counts-as-failed` is
+Linux-only); `console-display-ignored` was removed, since its case now
+differs from the oracle on purpose and so could not catch it. The mutants
+were not run in that change.
