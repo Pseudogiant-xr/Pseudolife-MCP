@@ -667,43 +667,37 @@ def test_inventory_rejects_an_oracle_binding_in_the_source_mutants():
         check(workflow)
 
 
-KEPT = "Daemon security live checks without a Rust test"
-
-
-def test_the_kept_security_checks_are_the_only_live_comparison_allowed():
-    from inventory import LIVE_SECURITY_EXCEPTIONS, live_invocations
-    workflow = workflow_copy()
-    step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == KEPT)
-    lines = [line.strip() for line in step['run'].splitlines() if 'run.py live' in line]
-    assert lines == list(LIVE_SECURITY_EXCEPTIONS[KEPT])
-    assert live_invocations(workflow) == []
-
-
-def test_an_exception_line_in_another_step_is_refused():
-    from inventory import LIVE_SECURITY_EXCEPTIONS, check
-    workflow = workflow_copy()
-    workflow['jobs']['parity-checks']['steps'].append(
-        {'name': 'Elsewhere', 'run': LIVE_SECURITY_EXCEPTIONS[KEPT][0]})
-    with pytest.raises(AssertionError, match='live comparison against the Python oracle'):
-        check(workflow)
-
-
-@pytest.mark.parametrize('line', [
+# The one live comparison kept after the freeze, "Daemon security live checks
+# without a Rust test", left CI once Rust tests held all 69 of its cases
+# (rust/daemon/tests/security_startup.rs, tests/security_admission.rs and
+# src/http_security_tests.rs). Its run lines, and any other live security
+# line, are refused under its old name in every job.
+RETIRED_SECURITY_STEP = "Daemon security live checks without a Rust test"
+RETIRED_SECURITY_LINES = (
+    "python rust/daemon/harness/run.py live --rust-bin $candidate --only security-refusals "
+    "--out (Join-Path $env:RUNNER_TEMP 'daemon-security-refusals.json')",
+    "python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open "
+    "security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')",
     "python rust/daemon/harness/run.py live --rust-bin $candidate --only security-open --out x",
     "python rust/daemon/harness/run.py mutants --rust-bin $candidate --only security-open --out x",
-])
-def test_another_live_line_in_the_kept_step_is_refused(line):
+)
+
+
+def test_no_step_of_rust_yml_starts_a_live_comparison():
+    from inventory import live_invocations
+    assert live_invocations(workflow_copy()) == []
+
+
+@pytest.mark.parametrize('job', ['parity-checks', 'parity-selfhosted', 'rust'])
+@pytest.mark.parametrize('line', RETIRED_SECURITY_LINES)
+def test_the_retired_security_live_step_cannot_come_back(job, line):
     from inventory import check
     workflow = workflow_copy()
-    step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == KEPT)
-    step['run'] = line + "\n" + step['run']
-    with pytest.raises(AssertionError, match='live comparison against the Python oracle'):
-        check(workflow)
-
-
-def test_the_exception_holds_only_in_the_parity_lanes():
-    from inventory import LIVE_SECURITY_EXCEPTIONS, check
-    workflow = workflow_copy()
-    workflow['jobs']['rust']['steps'].append({'name': KEPT, 'run': LIVE_SECURITY_EXCEPTIONS[KEPT][0]})
+    steps = workflow['jobs'][job]['steps']
+    old = next((s for s in steps if s.get('name') == RETIRED_SECURITY_STEP), None)
+    if old is None:
+        steps.append({'name': RETIRED_SECURITY_STEP, 'run': line})
+    else:
+        old['run'] = line + "\n" + old['run']
     with pytest.raises(AssertionError, match='live comparison against the Python oracle'):
         check(workflow)

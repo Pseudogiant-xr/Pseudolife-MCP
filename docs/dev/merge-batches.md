@@ -55,12 +55,11 @@ Each change waits for hosted CI once, on its batch:
   backup, migrate_flat; `rust/ci/parity_scope.py` `UNREPLAYED_ROWS`) are
   not replayed at all. The precheck never records, and
   `rust/ci/inventory.py` refuses a step that starts a live comparison in
-  any of those jobs, with one named exception: cli-store's `Daemon
-  security live checks without a Rust test` (the startup bind and
-  token-map refusals, and the 0.0.0.0-bound Host/Origin and bearer cases)
-  keeps its live comparison until Rust tests assert those properties
-  (`LIVE_SECURITY_EXCEPTIONS`). The weekly source mutants still compare
-  with the frozen Python too.
+  any of those jobs. The last exception, cli-store's live security step,
+  left on 16 November 2026: Rust tests the Rust job runs now hold the
+  startup bind and token-map refusals and the 0.0.0.0-configured
+  Host/Origin and bearer cases. Only the weekly source mutants still
+  compare with the frozen Python.
 - **The `Python freeze` check** (its own workflow, `python-freeze.yml`)
   refuses an ordinary pull request whose net change touches
   `pseudolife_memory/` outside `pseudolife_memory/web/static/`, the Console
