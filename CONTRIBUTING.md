@@ -8,6 +8,13 @@ Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md). The
 project is solo-maintained and best-effort: issues are read and most get an
 answer, but there is no response-time commitment.
 
+The Python package is frozen since 14 November 2026: a pull request that
+changes anything under `pseudolife_memory/` (other than the Console build
+output in `pseudolife_memory/web/static/`) fails the `Python freeze` check
+and is refused by the batch tool, unless it carries the `freeze-exception`
+label, which marks an exception the maintainer ruled on. Fix a defect
+found there in the Rust code under `rust/` instead.
+
 ## Dev setup
 
 Python 3.10+ and a Postgres with pgvector (the bundled compose stack provides
@@ -174,8 +181,11 @@ suite lock, since a server that refused the first connection may be up by
 then.
 
 All tests must pass. Every PR requires fresh CI for its current head
-integrated with current master, including the full PostgreSQL, lite Linux,
-Windows, macOS and required analysis checks. If master moves, update the
+integrated with current master. An ordinary pull request runs only the
+fast lanes (`scope`, `guards`, `lock-resolve` and `frontend`); it lands
+through an integration batch ([docs/dev/merge-batches.md](docs/dev/merge-batches.md)),
+whose own pull request runs the full PostgreSQL, Windows, macOS and
+required analysis checks on the combined head. If master moves, update the
 branch and wait for fresh CI; rerunning an old job tests its old merge
 commit. Independent review remains required; for an outside contribution
 the maintainer runs it (see
@@ -205,10 +215,11 @@ caught it.
 
 A pull request that touches `rust/` and changes nothing else except
 `.github/workflows/rust.yml`, `CHANGELOG.md` or `changelog.d/` fragments
-changes no Python, so CI skips the four Python suite lanes for it and runs
-a `guards` job instead (the tracked-tree and release-doc guards); the Rust
-workflow is that PR's gate. The master push that merges it, and a nightly
-run, still run the full suite. The Rust daemon under `rust/` is the
+changes no Python, so CI skips the three Python suite lanes (`test`,
+`test-lite-windows`, `test-lite-macos`) for it and runs a `guards` job
+instead (the tracked-tree and release-doc guards); the Rust workflow is
+that PR's gate. The master push of a Rust-only batch skips them too, and
+the next nightly run, on master's tip, runs the full suite. The Rust daemon under `rust/` is the
 default Docker engine for a release that publishes its image: a new install
 runs it, and a release-mode `pseudolife-mcp update` moves a host that never
 chose an engine to it (`--engine python` keeps the Python daemon; see

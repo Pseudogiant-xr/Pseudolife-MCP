@@ -1,6 +1,6 @@
 # Dreaming — consolidating memories into facts
 
-The dream pass, its extractor tiers (regex floor / agent-driven / headless
+The dream pass, its extractor tiers (none / agent-driven / headless
 auto-sweep), the bundled CPU sidecar, upgrading to a bigger model, the
 Claude-primary fallback setup (default dreamer model `claude-opus-5-5`),
 cadence, deep dream, and the deliberate consolidation workflow. Part of the
