@@ -289,9 +289,12 @@ def _copy_repo(tmp_path: Path) -> Path:
     return repo
 
 
-@BASH
-def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path,
-                                                                  board_server):
+FRESH_CONNECT = '{"url": null, "rows": [], "exit": 3, "error": "none"}'
+
+
+def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str = FRESH_CONNECT, connect_exit: int = 3):
+    """The whole client-only run; the staged client answers connect's dry run with
+    ``connect_report`` and exit ``connect_exit`` (a fresh machine's: no registration, 3)."""
     shell = _Shell(bash, tmp_path)
     token = _token(shell)
     repo = _copy_repo(tmp_path)
@@ -302,7 +305,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
         tmp_path / "release", version,
         "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
         "if [ \"$1\" = connect ]; then\n"
-        "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+        f"  echo '{connect_report}'; exit {connect_exit}\nfi\n"
         "exit 0\n")
     release_env["PSEUDOLIFE_NATIVE_ARCHIVE_URL"] = shell.path(tmp_path / "release")
     python = shell.path(sys.executable)
@@ -335,6 +338,13 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
                        "PYTHONPATH": str(ROOT),
                        # The installer's own environment carries an older credential.
                        "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
+    return installed, proc, repo, shell, token
+
+
+@BASH
+def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path,
+                                                                  board_server):
+    installed, proc, repo, shell, token = _whole_client_only_run(bash, tmp_path, board_server)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     calls = shell.logged()
     assert not any(call.startswith("docker|") for call in calls)
@@ -380,3 +390,15 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     connects = [call for call in calls if call.startswith("shim|connect")]
     assert len(connects) == 1 and "--dry-run" in connects[0]
     assert "not checked" not in output
+
+
+@BASH
+def test_an_exit_after_the_native_client_is_installed_says_the_run_stopped_part_way(bash, tmp_path, board_server):
+    # connect's dry run refuses after the native client is installed: that exit
+    # must not claim that nothing changed, and says what this run already did.
+    proc, *_ = _whole_client_only_run(bash, tmp_path, board_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 1, output
+    assert "could not check this machine's existing registrations" in output
+    assert "Nothing was changed" not in output and "nothing was changed" not in output
+    assert "stopped part way" in output and "the native client" in output and "Rerun the installer" in output
