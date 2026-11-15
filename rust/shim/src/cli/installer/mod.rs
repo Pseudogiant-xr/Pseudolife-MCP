@@ -87,7 +87,9 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
             helpers::plugin_marketplace(&crate::cli::update::clients::migrate_marketplace())
         }
         Some("--capability") => match &arguments[1..] {
-            [] => emit(&format!("pseudolife-mcp installer-protocol {INSTALLER_PROTOCOL}")),
+            [] => emit(&format!(
+                "pseudolife-mcp installer-protocol {INSTALLER_PROTOCOL}"
+            )),
             _ => usage("--capability takes no arguments"),
         },
         Some("--help" | "-h") => emit(USAGE),
