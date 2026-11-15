@@ -22,7 +22,7 @@ from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_client_install_ux import _heredoc_payload, _marker_block
-from tests.test_installer_existing_upgrade import _bash_fixture_path, _bash_variants, _between
+from tests.test_installer_existing_upgrade import _bash_fixture_path, _bash_variants, _between, user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
@@ -339,7 +339,8 @@ def test_a_pairing_code_with_a_remote_daemon_url_is_client_only(bash, tmp_path):
 def test_the_script_itself_refuses_client_only_without_a_url(bash, tmp_path):
     """Refused while parsing arguments: nothing else has run yet."""
     shell = _Shell(bash, tmp_path)
-    proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install-native.sh')}' --client-only --no-art\n")
+    with user_path_unchanged(shell.home):
+        proc = shell.run(f"exec '{shell.path(ROOT / 'ops' / 'install-native.sh')}' --client-only --no-art\n")
     assert proc.returncode == 2
     assert "--client-only needs" in proc.stderr
     assert shell.logged() == []
@@ -1117,16 +1118,17 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     settings_path.write_text(json.dumps({"env": {
         "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/local/claude-code.token",
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}}), encoding="utf-8")
-    proc = shell.run(
-        f"exec '{shell.path(repo / 'ops' / 'install-native.sh')}' --client-only "
-        f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
-        "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
-        extra_env={"FAKE_HEALTH": HEALTH_ON,
-                   **release_env,
-                   "PSEUDOLIFE_SHIM_RUNTIMES": shell.path(installed / "runtimes"),
-                   "PSEUDOLIFE_SHIM_LAUNCHER": shell.path(installed / "pseudolife-mcp"),
-                   # The installer's own environment carries an older credential.
-                   "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
+    with user_path_unchanged(shell.home):
+        proc = shell.run(
+            f"exec '{shell.path(repo / 'ops' / 'install-native.sh')}' --client-only "
+            f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
+            "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
+            extra_env={"FAKE_HEALTH": HEALTH_ON,
+                       **release_env,
+                       "PSEUDOLIFE_SHIM_RUNTIMES": shell.path(installed / "runtimes"),
+                       "PSEUDOLIFE_SHIM_LAUNCHER": shell.path(installed / "pseudolife-mcp"),
+                       # The installer's own environment carries an older credential.
+                       "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert not python_calls.exists(), "the installer ran Python tooling: " + python_calls.read_text()
     calls = shell.logged()

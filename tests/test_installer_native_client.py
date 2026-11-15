@@ -482,3 +482,105 @@ def test_a_staged_client_that_does_not_answer_is_refused_in_time(tmp_path, hang)
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     step = "version" if hang == "STUB_HANG_VERSION" else "installer --capability"
     assert f"did not answer {step} within 2 s" in line
+
+
+# -- round 4 ------------------------------------------------------------------
+
+def _rewrite_sums(tmp_path: Path, separator: str) -> None:
+    """The release's SHA256SUMS line for the archive, written with another separator."""
+    _release(tmp_path / "release")
+    digest = hashlib.sha256((tmp_path / "release" / ASSET).read_bytes()).hexdigest()
+    (tmp_path / "release" / "SHA256SUMS").write_text(f"{digest}{separator}{ASSET}\n", encoding="utf-8")
+
+
+def test_a_binary_mode_checksum_line_is_accepted(tmp_path):
+    # `sha256sum` under Git Bash writes `<hash> *<name>` (binary mode): the
+    # other standard form of a checksum line.
+    _rewrite_sums(tmp_path, " *")
+    result = _run(tmp_path, 'native_stage; ensure_shim; echo "OK=$SHIM_OK"', release=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OK=1" in result.stdout
+
+
+@pytest.mark.parametrize("separator", [" ", "\t", "   ", " * "])
+def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
+    # The near miss: only two spaces or space-asterisk.
+    _rewrite_sums(tmp_path, separator)
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert f"lists {ASSET} 0 times, not once" in result.stderr
+
+
+@pytest.mark.parametrize("value, used", [
+    ("08", "8"), ("09", "9"), ("010", "10"), ("7", "7"), ("00", "30"), ("0", "30"),
+    ("", "30"), ("abc", "30"), ("1.5", "30"), ("-3", "30"), ("123456", "30"),
+])
+def test_the_probe_deadline_is_read_as_a_decimal_number_of_seconds(tmp_path, value, used):
+    result = _run(tmp_path, 'echo "SECONDS=$NATIVE_PROBE_SECONDS"', env={"PSEUDOLIFE_NATIVE_PROBE_SECONDS": value})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"SECONDS={used}" in result.stdout
+    # A value that cannot be used is named, with the deadline used instead.
+    named = [line for line in result.stderr.splitlines() if "PSEUDOLIFE_NATIVE_PROBE_SECONDS" in line]
+    if value and used == "30" and value not in ("30",):
+        assert named and f"'{value}'" in named[0] and "30 s" in named[0], result.stderr
+    else:
+        assert not named, result.stderr
+
+
+def test_a_leading_zero_deadline_still_refuses_with_the_timeout_cause(tmp_path):
+    result = _run(tmp_path, 'native_stage; echo STAGED', env={"STUB_HANG_VERSION": "1", "PSEUDOLIFE_NATIVE_PROBE_SECONDS": "02"})
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "did not answer version within 2 s" in line and "does not run on this host" not in line
+
+
+def _fake_curl(tmp_path: Path, script: str) -> dict[str, str]:
+    stubs = tmp_path / "curl-stub"
+    stubs.mkdir()
+    curl = stubs / "curl"
+    curl.write_text("#!/bin/sh\n" + script, encoding="utf-8", newline="\n")
+    curl.chmod(0o755)
+    return {"PATH": f"{_p(tmp_path / 'bin')}:{_p(stubs)}:/usr/bin:/bin",
+            "PSEUDOLIFE_NATIVE_ARCHIVE_URL": "https://release.example.invalid/v9.8.7"}
+
+
+def test_a_download_that_cannot_be_written_names_the_write_not_an_http_status(tmp_path):
+    # curl's own exit 23 is a write error (a full disk): -w still printed 200.
+    env = _fake_curl(tmp_path, "printf 200\nexit 23\n")
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False, env=env)
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "HTTP 200" not in line and "proxy" not in line
+    assert "could not be written" in line and "curl exit 23" in line and ".pseudolife-mcp" in line
+
+
+@pytest.mark.skipif(os.name == "nt", reason="builds a PATH without curl from /usr/bin")
+def test_a_missing_downloader_is_named_not_the_network(tmp_path):
+    tools = tmp_path / "no-curl"
+    tools.mkdir()
+    for directory in ("/usr/bin", "/bin"):
+        for name in os.listdir(directory):
+            if name in ("curl", "wget") or (tools / name).exists():
+                continue
+            try:
+                (tools / name).symlink_to(Path(directory) / name)
+            except OSError:
+                pass
+    result = _run(tmp_path, 'native_stage; echo STAGED', release=False,
+                  env={"PATH": f"{_p(tmp_path / 'bin')}:{tools}",
+                       "PSEUDOLIFE_NATIVE_ARCHIVE_URL": "https://release.example.invalid/v9.8.7"})
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "curl" in line and "network" not in line and "proxy" not in line
+    assert "install curl" in line.lower()
+
+
+def test_a_mismatched_archive_refusal_names_only_what_is_kept(tmp_path):
+    result = _run(tmp_path, "native_stage; echo STAGED", sums_override="f" * 64)
+    assert result.returncode == 1
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "was removed" in line
+    # The archive is gone; only SHA256SUMS stays, and the refusal says so.
+    assert "the download in" not in line
+    assert "SHA256SUMS in" in line and "kept for a rerun" in line

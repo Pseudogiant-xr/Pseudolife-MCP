@@ -300,8 +300,18 @@ if ($Extractor) { Assert-ExtractorArgs }
 # >>> native client >>>
 # How long the staged client may take to answer `version` and
 # `installer --capability` (seconds); PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
+# The setting is read as a decimal whole number; anything else is named and
+# the probe keeps 30.
 $NativeProbeSeconds = 30
-if ("$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS" -match '^[1-9][0-9]{0,4}$') { $NativeProbeSeconds = [int]$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS }
+$nativeProbeSetting = "$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS"
+if ($nativeProbeSetting -ne "") {
+    $nativeProbeDigits = $nativeProbeSetting.TrimStart([char]'0')
+    if (($nativeProbeSetting -cmatch '^[0-9]+$') -and ($nativeProbeDigits -cmatch '^[1-9][0-9]{0,4}$')) {
+        $NativeProbeSeconds = [int]$nativeProbeDigits
+    } else {
+        [Console]::Error.WriteLine("PSEUDOLIFE_NATIVE_PROBE_SECONDS='$nativeProbeSetting' is not a whole number of seconds from 1 to 99999; the probe waits 30 s.")
+    }
+}
 function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
     # The staged client's answer, or TimedOut when it does not finish in time.
     # Shares this console (no new window, and Ctrl-C still reaches it).
@@ -314,7 +324,8 @@ function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
     $out = $process.StandardOutput.ReadToEndAsync()
     $err = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit($NativeProbeSeconds * 1000)) {
-        try { $process.Kill($true) } catch { }
+        # Killed and waited for, so its folder can be removed after.
+        try { $process.Kill($true); $null = $process.WaitForExit(10000) } catch { }
         return [pscustomobject]@{ TimedOut = $true; Code = $null; Out = ""; Err = "" }
     }
     $process.WaitForExit()
@@ -337,6 +348,12 @@ $script:nativeArchive = $null
 $script:nativeSums = $null
 $script:nativeStaged = $null
 $script:nativeStageDir = $null
+# Set once the release is staged, verified and probed; it stays set after the
+# install removes the staged copy, so nothing stages a second time.
+$script:nativeProbed = $false
+# Set once this run starts changing the host: a later refusal must not say
+# that nothing changed.
+$script:nativeHostChanging = $false
 $script:nativeHelper = $null
 function Get-NativeTarget {
     # This host's release target triple, or $null. PSEUDOLIFE_NATIVE_TARGET
@@ -364,21 +381,22 @@ function Get-NativeTarget {
 }
 function Stop-NativeInstall([string]$Cause, [string]$Fix) {
     Remove-NativeStage
-    # A download already made is kept for a rerun, and the refusal says where.
+    if ($script:nativeHostChanging) {
+        [Console]::Error.WriteLine("The install stopped part way: $Cause. $Fix Then rerun the installer to finish; the steps it already completed are kept.")
+        exit 1
+    }
+    # A download already made is kept for a rerun, and the refusal names what
+    # is there: the download, or only SHA256SUMS when the archive is not.
     $left = " Nothing was changed."
     if ($script:nativeDownloads -and (Test-Path -LiteralPath $script:nativeDownloads) -and
             @(Get-ChildItem -LiteralPath $script:nativeDownloads -Force -ErrorAction SilentlyContinue).Count) {
-        $left = " Nothing else was changed: the download in $($script:nativeDownloads) is kept for a rerun (delete it to free the space)."
+        $kept = "the download"
+        if ($script:nativeArchive -and -not (Test-Path -LiteralPath $script:nativeArchive) -and
+                $script:nativeSums -and (Test-Path -LiteralPath $script:nativeSums)) { $kept = "SHA256SUMS" }
+        $left = " Nothing else was changed: $kept in $($script:nativeDownloads) is kept for a rerun (delete it to free the space)."
     }
     [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left")
     exit 1
-}
-# The staging folder goes whatever way the run ends (an exit 1 or 2 from a
-# later refusal, or an error), not only on the paths that call Remove-NativeStage.
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    if ($global:PseudolifeNativeStageDir -and (Test-Path -LiteralPath $global:PseudolifeNativeStageDir)) {
-        Remove-Item -LiteralPath $global:PseudolifeNativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
 }
 function Remove-NativeStage {
     # This run's staging directory; the verified download is kept.
@@ -450,7 +468,9 @@ function Initialize-NativeClient {
         }
         Stop-NativeInstall "SHA256SUMS could not be fetched from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry."
     }
-    $pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($name) + '$'
+    # Either standard form of a checksum line: two spaces, or space-asterisk
+    # (binary mode, as sha256sum writes under Git Bash); nothing looser.
+    $pattern = '^[0-9a-f]{64} [ *]' + [regex]::Escape($name) + '$'
     $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
     if ($lines.Count -ne 1) {
         Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
@@ -465,12 +485,11 @@ function Initialize-NativeClient {
     }
     if ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
         Remove-Item -LiteralPath $script:nativeArchive -Force
-        Stop-NativeInstall "$name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+        Stop-NativeInstall "$name does not match the release's SHA256SUMS (the downloaded archive was removed)" "Rerun to download it again."
     }
     $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pseudolife-native-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $stage | Out-Null
     $script:nativeStageDir = $stage
-    $global:PseudolifeNativeStageDir = $stage
     try {
         if ($isZip) {
             Expand-Archive -LiteralPath $script:nativeArchive -DestinationPath $stage -Force
@@ -516,8 +535,9 @@ function Initialize-NativeClient {
         if (($probe.Code -eq 0) -and ($answer.Count -eq 1) -and ($answer[0] -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
     } catch { $level = -1 }
     if ($level -lt $NativeInstallerProtocol) {
-        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only (PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'; pseudolife-mcp update --clients-only); this native installer itself works from a checkout of a release that carries it."
+        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first), then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only (PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'; pseudolife-mcp update --clients-only); this native installer itself works from a checkout of a release that carries it."
     }
+    $script:nativeProbed = $true
 }
 function Get-NativeLauncherPath {
     # The stable launcher's path, whether or not it exists yet.
@@ -562,6 +582,7 @@ function Install-NativeClient {
     $launcherPath = Get-NativeLauncherPath
     $before = $null
     if (Get-NativeInstalledLauncher) { $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash }
+    $script:nativeHostChanging = $true
     # A failed install keeps the staged copy: the installer steps after this
     # one still run it (Invoke-NativeHelper), and the script's end removes it.
     try {
@@ -602,6 +623,10 @@ function Invoke-NativeHelper {
     if ($MyInvocation.ExpectingInput) { $input | & $exe installer @args } else { & $exe installer @args }
 }
 # <<< native client <<<
+# The rest of the run is inside try/finally, so the staging folder goes
+# whatever way it ends: an exit, an error or Ctrl-C, also when the script
+# returns to an open pwsh session (Remove-NativeStage; the download is kept).
+try {
 # >>> native client stage >>>
 # Fetched and verified before anything here changes: a refusal leaves the
 # host as it was. A rerun reads its recorded choices through it, so it is
@@ -962,8 +987,9 @@ Where does the memory bank live?
 '@
 }
 function Read-NativeBeforeAsking {
-    # The first question waits for the staged, verified and probed release.
-    if (-not $script:nativeStaged) { Initialize-NativeClient }
+    # The first question waits for the staged, verified and probed release;
+    # a question after that (the install included) stages nothing again.
+    if (-not $script:nativeProbed -and -not $script:nativeHelper) { Initialize-NativeClient }
 }
 function Read-BankAnswer([string]$Prompt) {
     # The reply, or $null at the end of input.
@@ -1289,7 +1315,9 @@ Invoke-BankTokenQuestion
 
 # -- 2. preflight --------------------------------------------------------------
 # >>> native client late stage >>>
-if (-not $script:nativeStaged -and -not $script:nativeHelper) { Initialize-NativeClient }
+if (-not $script:nativeProbed -and -not $script:nativeHelper) { Initialize-NativeClient }
+# From here on the run changes the host.
+$script:nativeHostChanging = $true
 # <<< native client late stage <<<
 
 # The status field of an installer credentials step's JSON report, or $null.
@@ -3908,3 +3936,6 @@ if ($Tunnel -and -not $interactive) {
 }
 Remove-NativeStage
 Write-Host "Done. First session: tell your coding agent to remember something."
+} finally {
+    Remove-NativeStage
+}

@@ -22,7 +22,7 @@ from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
-from tests.test_installer_existing_upgrade import _between
+from tests.test_installer_existing_upgrade import _between, user_path_unchanged
 from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
@@ -1093,13 +1093,14 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
                 "NO_COLOR": "1", "TERM": "dumb",
                 # The installer's own environment carries an older credential.
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
-    proc = installer_sandbox.run(
-        [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install-native.ps1"),
-         "-ClientOnly", "-DaemonUrl", daemon_server, "-TokenFile", str(token),
-         "-Client", "claude,gemini", "-ClaudePlugin", "skip", "-Instructions", "skip",
-         "-NoArt"],
-        capture_output=True, text=True, timeout=300, env=env, root=tmp_path, check=False,
-        stdin=subprocess.DEVNULL)
+    with user_path_unchanged(ps.home):
+        proc = installer_sandbox.run(
+            [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install-native.ps1"),
+             "-ClientOnly", "-DaemonUrl", daemon_server, "-TokenFile", str(token),
+             "-Client", "claude,gemini", "-ClaudePlugin", "skip", "-Instructions", "skip",
+             "-NoArt"],
+            capture_output=True, text=True, timeout=300, env=env, root=tmp_path, check=False,
+            stdin=subprocess.DEVNULL)
     output = _output(proc)
     assert proc.returncode == 0, output
     logged = ps.logged()
