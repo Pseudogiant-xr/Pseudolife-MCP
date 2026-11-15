@@ -514,13 +514,13 @@ def test_the_staging_folder_is_gone_when_the_installer_returns_to_an_open_sessio
     home.mkdir()
     temp = tmp_path / "temp"
     temp.mkdir()
-    token = tmp_path / "daemon.token"
-    token.write_text("fixture-token-not-real\n", encoding="utf-8")
-    if not WINDOWS:
-        token.chmod(0o600)
     installer = repo / "ops" / "install.ps1"
-    run = (f"& '{installer}' -ClientOnly -DaemonUrl http://127.0.0.1:9 -TokenFile '{token}' "
-           "-Client claude -ClaudePlugin skip -Instructions skip -NoArt -ClientUpdateSchedule no")
+    # A pairing code: the token file is made only after the daemon answers,
+    # so the run reaches the health check (port 9 answers nothing). A throw
+    # is caught, so the check after it still runs in the same session.
+    run = (f"try {{ & '{installer}' -ClientOnly -DaemonUrl http://127.0.0.1:9 -PairingCode ABCD-EFGH-JKMN "
+           "-Client claude -ClaudePlugin skip -Instructions skip -NoArt -ClientUpdateSchedule no } "
+           "catch { Write-Host \"THREW: $_\" }")
     command = "; ".join([
         run, "Write-Host \"FIRST=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
         run, "Write-Host \"SECOND=$LASTEXITCODE LEFT=$(@(Get-ChildItem -LiteralPath $env:TEMP -Filter 'pseudolife-native-*').Count)\"",
