@@ -160,9 +160,9 @@ Since 14 November 2026 Python is frozen and exact parity with it is no
 longer the acceptance bar: the Rust system has to work. CI no longer runs
 the live mode (oracle beside candidate) of any row; every parity shard
 replays the committed goldens with `--golden`, so they are Rust regression
-snapshots. Only the weekly CLI source mutants (`--mutants`), the one
-security step no Rust test replaces yet (`rust/ci/inventory.py`
-`LIVE_SECURITY_EXCEPTIONS`) and a stress loop still run the frozen oracle.
+snapshots. Only the weekly CLI source mutants (`--mutants`) and a stress
+loop still run the frozen oracle. The last live security step left CI on
+16 November 2026, once Rust tests held all 69 of its cases.
 
 `--record` still records the oracle, which can no longer change, so it
 reproduces the golden a deliberate Rust change departs from. A pull request

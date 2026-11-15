@@ -65,9 +65,11 @@ NOT_FORCED = {
 _BIND_FIXTURE = (
     "needs the debug mutants bind fixture (run.py's capability probe); the forced runner uses the "
     "release image, whose binary rightly refuses; not forced by the conductor under the "
-    "maintainer's delegation of 2026-11-11. security-remote-open and security-remote-auth run "
-    "live in CI with the debug binary (rust.yml 'run.py live --only security-remote-open "
-    "security-remote-auth'); trust-bind has no live CI step (issue #1473)")
+    "maintainer's delegation of 2026-11-11. security-remote-open and security-remote-auth have "
+    "no CI run since 16 November 2026: Rust tests hold their cases (rust/daemon/src/"
+    "http_security_tests.rs, rust/daemon/tests/security_admission.rs), and by hand they run "
+    "with the debug binary ('run.py live --only security-remote-open security-remote-auth'); "
+    "trust-bind has no live CI step (issue #1473)")
 # Scenarios this run does not force, by scenario, and why: no arm of theirs
 # can compare anything here, so none is invoked (ruling G of 2026-11-11).
 # Each suite lists the ones it left out, and the summary's not_forced

@@ -1213,11 +1213,11 @@ def _python_identity_mutant() -> Mutant:
     return Mutant(
         "doctor-identity-claims-python", "doctor", "shim/src/cli/doctor/mod.rs",
         '        ("interpreter", interpreter),\n        ("source", source),\n'
-        '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n    ])',
+        '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n    ]',
         f'        ("interpreter", r"{sys.executable}".to_owned()),\n'
         f'        ("source", {{ let _ = (interpreter, source); r"{source}".to_owned() }}),\n'
         '        ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),\n'
-        f'        ("mcp", "{sdk}".to_owned()),\n    ])',
+        f'        ("mcp", "{sdk}".to_owned()),\n    ]',
         ("unreachable",))
 
 
@@ -1227,11 +1227,11 @@ MUTANTS = [
     # exist, in another directory, with a source consistent with it and the
     # right version: only binding to the launched binary rejects it.
     Mutant("doctor-identity-wrong-path", "doctor", "shim/src/cli/doctor/mod.rs",
-           "    let interpreter = executable.to_str().ok_or(Defer)?.to_owned();\n"
-           "    let resolved = std::fs::canonicalize(&executable).map_err(|_| Defer)?;\n",
-           "    let executable = executable.parent().ok_or(Defer)?.join(\"elsewhere\")"
-           ".join(executable.file_name().ok_or(Defer)?);\n"
-           "    let interpreter = executable.to_str().ok_or(Defer)?.to_owned();\n"
+           "    let executable = std::env::current_exe().ok();\n"
+           "    let resolved = executable\n        .as_deref()\n"
+           "        .and_then(|path| std::fs::canonicalize(path).ok());\n",
+           "    let executable = std::env::current_exe().ok().and_then(|executable| "
+           "Some(executable.parent()?.join(\"elsewhere\").join(executable.file_name()?)));\n"
            "    let resolved = executable.clone();\n",
            ("unreachable",)),
     # The handshake cache's bytes (review of #678): compared byte for byte,
@@ -1260,8 +1260,9 @@ MUTANTS = [
            '"on - token present, principal allowed"', '"on - token present, principal admitted"',
            ("board-on",)),
     Mutant("doctor-skip-maintainer", "doctor", "shim/src/cli/doctor/mod.rs",
-           "probes::maintainer(&url, &token, short).await?",
-           "{ let _ = &token; Map::new() }", ("maintainer-on",)),
+           "probes::maintainer(url, &token, short)",
+           "std::future::ready(Ok::<_, Defer>({ let _ = (url, &token); Map::new() }))",
+           ("maintainer-on",)),
     Mutant("doctor-registration-label", "doctor", "shim/src/cli/doctor/clients.rs",
            '"Claude Code registration ({claude})"', '"Claude registration ({claude})"',
            ("claude-registration-token",)),
@@ -1274,7 +1275,8 @@ MUTANTS = [
            "if answer == expected {", "if answer != expected {",
            ("agent-state-authenticated", "agent-state-bad-proof")),
     Mutant("doctor-maintainer-frozen-bearer", "doctor", "shim/src/cli/doctor/mod.rs",
-           "        match fresh() {\n", "        match Ok::<_, ()>(token.clone()) {\n",
+           "(Some(url), \"on\") => match fresh() {\n",
+           "(Some(url), \"on\") => match Ok::<_, ()>(token.clone()) {\n",
            ("token-rotated-between-probes",)),
     Mutant("doctor-unbounded-body-read", "doctor", "shim/src/cli/doctor/probes.rs",
            "let limits = (Some(1 << 20), Some(65536));",

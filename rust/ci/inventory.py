@@ -68,27 +68,11 @@ UNREPLAYED_SCENARIOS = frozenset({
     "session-tombstone-restart", "sweep-recovery",
     # Live only before the freeze too (coverage_plan EXCEPTIONS['daemon_scenarios']).
     "pairing", "console-signin", "console-passkey-signin",
-    # The security remote-bind cases: no golden; they run live under
-    # LIVE_SECURITY_EXCEPTIONS below.
+    # The security remote-bind cases: no golden and, since 16 November 2026,
+    # no CI run; Rust tests hold every case (rust/daemon/src/http_security_tests.rs,
+    # rust/daemon/tests/security_admission.rs), and run.py runs them by hand.
     "security-remote-open", "security-remote-auth",
 })
-# The live comparisons kept after the freeze because each checks a security
-# property no Rust test asserts yet (conductor rule, 14 November 2026): the
-# exact run lines, by step of the parity steps (parity-checks, and
-# parity-selfhosted through the YAML anchor). Each goes once a Rust test
-# covers it; nothing else may start a live comparison.
-LIVE_SECURITY_JOBS = ("parity-checks", "parity-selfhosted")
-LIVE_SECURITY_EXCEPTIONS = {
-    "Daemon security live checks without a Rust test": (
-        # The startup bind guard and token-map refusals (rust/daemon/src/main.rs
-        # `fail(2, ...)` before listening): no Rust test starts the daemon there.
-        "python rust/daemon/harness/run.py live --rust-bin $candidate --only security-refusals "
-        "--out (Join-Path $env:RUNNER_TEMP 'daemon-security-refusals.json')",
-        # Bound on 0.0.0.0: the Host/Origin gate and the bearer still hold.
-        "python rust/daemon/harness/run.py live --rust-bin $bindFixture --only security-remote-open "
-        "security-remote-auth --out (Join-Path $env:RUNNER_TEMP 'daemon-security-remote.json')",
-    ),
-}
 # Run text that starts a Python oracle to compare the candidate against, or
 # replays a recording the same run made from one. No job a pull request, a
 # batch, a master push or a schedule starts may hold one, except the weekly
@@ -122,8 +106,8 @@ COMMAND_SEPARATORS = re.compile(r";|&&|\|\|")
 
 def live_invocations(workflow, exempt=True):
     """Every (job, step, line) whose run text starts a live comparison;
-    ``exempt`` applies the exempt jobs and security exceptions, which name
-    rust.yml's jobs and are off for every other workflow.
+    ``exempt`` applies the exempt jobs, which name rust.yml's jobs and are
+    off for every other workflow.
 
     Lexical: it catches a live comparison coming back by accident, not a
     deliberate evasion (a mode or script from a variable, a module form, a
@@ -135,9 +119,6 @@ def live_invocations(workflow, exempt=True):
         for step in job.get("steps", []):
             for line in step.get("run", "").splitlines():
                 text = line.strip()
-                if exempt and name in LIVE_SECURITY_JOBS and \
-                        text in LIVE_SECURITY_EXCEPTIONS.get(step.get("name", ""), ()):
-                    continue
                 if not text or text.startswith("#"):
                     continue
                 command_text = TRAILING_COMMENT.sub("", text).replace("\\", "/")

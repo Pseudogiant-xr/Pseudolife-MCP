@@ -40,20 +40,25 @@ durable-storage write parity.
 | security-remote-open | 32 | Trusted remote-bind policy retains tokenless browser refusals |
 | security-remote-auth | 33 | Authenticated remote-bind policy retains credential admission |
 
-The ordinary 75-case corpus and four startup refusals use the default static
-release artifact. The same 75 cases exercise six source controls through the
-existing release `mutants,graph-harness` artifact. Golden replay uses recorded
-Python responses; no security refusal is declared away.
+The ordinary 75-case corpus uses the default static release artifact. The
+same 75 cases exercise six source controls through the existing release
+`mutants,graph-harness` artifact. Golden replay uses recorded Python
+responses; no security refusal is declared away.
 
-Both OS CLI shards also run the 65 remote-policy cases using a debug mutants
-artifact produced by the Rust job after its build-configuration checks. The
-shards depend on both artifact producers and never rebuild the daemon. The
-default static, release mutants, stdio and graph artifacts retain their roles;
-the separately downloaded debug fixture enables only the guarded loopback test.
+Since 16 November 2026 no CI job runs the four startup refusals or the 65
+remote-policy cases through the harness. Rust tests in the Rust job (Linux
+and Windows) hold them instead:
+- `tests/security_startup.rs` starts the daemon with each refusal's
+  environment;
+- `src/http_security_tests.rs` answers the 65 cases in process, built from
+  each remote scenario's environment, with the host 0.0.0.0 and again unset;
+- `tests/security_admission.rs`, on Linux only, sends the 65 cases to a
+  daemon process over a socket: the closed configuration bound on 0.0.0.0,
+  the open one on 127.0.0.1.
 
-The two remote scenarios require the debug mutants artifact on each OS. The
-harness probes its capability before database allocation or either daemon
-launch. It then gives both daemons the configured remote policy host while
+Run by hand (`run.py live`), the two remote scenarios require a debug
+mutants build on each OS. The harness probes its capability before database
+allocation or either daemon launch. It then gives both daemons the configured remote policy host while
 forcing their actual listeners to 127.0.0.1. Default and release mutants
 artifacts have no bind override and refuse these scenarios before launch.
 Remote success evidence must come from this guarded fixture.
