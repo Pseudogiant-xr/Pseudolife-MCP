@@ -2,6 +2,9 @@
 # Prompt, rerun and refusal behaviour follow docs/dev/install-ux.md; read it
 # before changing what this script asks or prints.
 # >>> usage >>>
+# The native client's installer: ops/install.sh runs it, with the same
+# flags, when PSEUDOLIFE_SHIM_ENGINE=native asks for the native client.
+#
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: provider selection -> preflight ->
 # extractor choice -> compose up -> client hooks -> standing instructions ->
@@ -223,6 +226,7 @@ if [ -n "$YES" ] || [ "${PSEUDOLIFE_UNATTENDED:-}" = 1 ] || [ ! -t 0 ]; then
     echo "Unattended install: no prompts; documented defaults apply (explicit flags override)."
 fi
 # <<< unattended mode <<<
+echo "Native client install (PSEUDOLIFE_SHIM_ENGINE=native): rerun it with that variable set; without it, ops/install.sh installs the Python client."
 # >>> extractor modes >>>
 # The dream extractor modes, named for the extractor family, and the models
 # the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
@@ -1190,14 +1194,16 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
         native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
     fi
     native_protocol="$("$NATIVE_STAGED" installer --capability 2>/dev/null)" || native_protocol=""
-    native_protocol="${native_protocol%$''}"
+    native_protocol="${native_protocol%$'\r'}"
     native_level=""
     case "$native_protocol" in
         "pseudolife-mcp installer-protocol "*) native_level="${native_protocol#pseudolife-mcp installer-protocol }" ;;
     esac
-    case "$native_level" in ""|*[!0-9]*) native_level=-1 ;; esac
+    # Exactly one line, and a level of 1 to 9 digits with no leading zero, so
+    # `[ -lt ]` below never sees a number it cannot compare.
+    case "$native_level" in ""|*[!0-9]*|0?*|??????????*) native_level=-1 ;; esac
     if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
-        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Run the installer from a release tag's checkout, whose release carries the steps its installer runs (git checkout v<the newest release>), or serve archives built from this checkout with PSEUDOLIFE_NATIVE_ARCHIVE_URL, or unset PSEUDOLIFE_SHIM_ENGINE to install the Python client."
+        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (python rust/ci/release_assets.py package), since no published release carries them yet."
     fi
 }
 # ensure_shim's install: the verified archive into a new side-by-side runtime
@@ -1631,16 +1637,11 @@ fi
 
 # ── 4b. daemon engine ──────────────────────────────────────────────────────
 # >>> shim tooling >>>
-# Whether stage 11 can be expected to install the shim: pipx, or a Python
-# >= 3.10 with pip outside a PEP 668 externally managed environment (where
-# `pip install --user` refuses). The helper needs that Python either way.
+# Whether the token helper can run: the native client needs no pip or pipx
+# (stage 11 installs the verified release binary), only the Python >= 3.10
+# the stdlib-only ops helpers run on.
 shim_tooling_ready() {
-    [ -n "$(installer_python)" ] || return 1
-    command -v pipx >/dev/null 2>&1 && return 0
-    "$(installer_python)" -c 'import os, sys, sysconfig
-import pip
-marker = os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")
-sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' >/dev/null 2>&1
+    [ -n "$(installer_python)" ]
 }
 # <<< shim tooling <<<
 # >>> daemon engine >>>
