@@ -3,6 +3,9 @@ developer's desktop, and a spawn that chose its console keeps its choice."""
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -56,7 +59,9 @@ def test_install_wraps_popen_once_on_windows(monkeypatch, has_console):
     monkeypatch.setattr(wc.os, "name", "nt")
     monkeypatch.setattr(wc, "_has_console", lambda: has_console)
     wc.install()
+    wrapped = fake.Popen.__init__
     wc.install()   # idempotent: tests/ and rust/ both call it
+    assert fake.Popen.__init__ is wrapped
     child = fake.Popen(["pwsh", "-NoProfile"], stdout=None)
     assert child.creationflags == (0 if has_console else wc.CREATE_NO_WINDOW)
     assert child.args == ["pwsh", "-NoProfile"] and child.kwargs == {"stdout": None}
@@ -77,3 +82,15 @@ def test_the_suite_conftest_installs_it():
     # rust/conftest.py installs it too: rust/ci/test_windowless_conftest.py
     # checks that, beside the file it reads.
     assert "windowless_children.install()" in (ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the console check and the wrapped spawn are Windows code")
+def test_the_real_wrapper_installed_by_conftest_still_spawns_children():
+    # The reviewer of 89fb40875: the tests above fake the console check and
+    # Popen. Here conftest's real install() is in effect: the console check
+    # answers, Popen carries the marker, and a real child runs and reports.
+    assert isinstance(wc._has_console(), bool)
+    assert getattr(subprocess.Popen, "_pseudolife_windowless_children", False)
+    done = subprocess.run([sys.executable, "-c", "print('child ran')"], capture_output=True, text=True,
+                          timeout=60, check=True)
+    assert done.stdout.strip() == "child ran"
