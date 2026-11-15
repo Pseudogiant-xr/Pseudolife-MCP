@@ -171,7 +171,7 @@ fn discovered(
 fn unvouched(dir: &Path, name: &str, client: bool, said: &dyn Fn(&str) -> Blocker) -> Installed {
     let file = |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
     let remove = format!(
-        "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
+        "systemctl --user disable --now {name}.timer; rm -f {} {}; systemctl --user daemon-reload",
         file("service"),
         file("timer")
     );
@@ -890,7 +890,7 @@ fn systemd_dropins(
                 Err(Unreadable::Rejected(line, what)) => {
                     return Err(Blocker::new(
                         format!(
-                            "systemd rejects the drop-in {}{masked} (line {line}: {what}), so the unit does not load as `update --schedule` writes it",
+                            "systemd stops reading the drop-in {}{masked} at line {line} ({what}) and loads the unit without it, so what that file was meant to change is not in force and connect cannot tell what it applies",
                             file.display()
                         ),
                         "fix or remove that file, run `systemctl --user daemon-reload`, then re-run connect",
@@ -1123,7 +1123,7 @@ fn systemd_parse(
         differs: None,
         encoded: false,
         remove: format!(
-            "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
+            "systemctl --user disable --now {name}.timer; rm -f {} {}; systemctl --user daemon-reload",
             file("service"),
             file("timer")
         ),
@@ -1531,7 +1531,7 @@ mod tests {
         assert!(
             found
                 .remove
-                .starts_with("systemctl --user disable --now pseudolife-update.timer && rm ")
+                .starts_with("systemctl --user disable --now pseudolife-update.timer; rm -f ")
         );
         // Near misses: a flag added by hand, another bearer file, a second
         // ExecStart, a monthly calendar, no timer, a disabled timer.
@@ -1780,7 +1780,7 @@ mod tests {
         assert_eq!(
             systemd_override(&roots, name),
             Some(format!(
-                "systemd rejects the drop-in {} (line 1: an unterminated section header)",
+                "systemd stops reading the drop-in {} at line 1 (an unterminated section header) and loads the unit without it",
                 file.display()
             ))
         );
@@ -2550,6 +2550,14 @@ mod tests {
             shown
                 .remove
                 .starts_with("systemctl --user disable --now pseudolife-update.timer")
+        );
+        // It completes for an incomplete schedule: `;` and `rm -f`, so a
+        // missing file or an unknown timer does not stop the reload.
+        assert!(shown.remove.contains("; rm -f '"), "{}", shown.remove);
+        assert!(
+            shown.remove.ends_with("; systemctl --user daemon-reload"),
+            "{}",
+            shown.remove
         );
         assert!(discovered(unreadable(), false, &dir, NAME, false).is_none());
         // Near miss: a schedule that is simply not installed is no row.
