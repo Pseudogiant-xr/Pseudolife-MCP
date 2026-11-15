@@ -688,7 +688,9 @@ def test_no_step_of_rust_yml_starts_a_live_comparison():
     assert live_invocations(workflow_copy()) == []
 
 
-@pytest.mark.parametrize('job', ['parity-checks', 'parity-selfhosted', 'rust'])
+# parity-selfhosted shares parity-checks' steps through a YAML anchor, so
+# parity-checks stands for both.
+@pytest.mark.parametrize('job', ['parity-checks', 'fixtures', 'rust'])
 @pytest.mark.parametrize('line', RETIRED_SECURITY_LINES)
 def test_the_retired_security_live_step_cannot_come_back(job, line):
     from inventory import check

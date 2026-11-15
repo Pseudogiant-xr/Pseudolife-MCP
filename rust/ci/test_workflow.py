@@ -403,10 +403,12 @@ def test_shards_cover_both_systems_and_build_once():
     fixture_steps = {step.get("name"): step for step in fixtures["steps"]}
     require_command(commands(fixture_steps["Build the daemon storage test executable"]["run"]),
                     ("python", "rust/daemon/harness/schema_ci.py", "--build-only"), ("--test-bin-out",))
-    # No job builds, keeps or fetches the debug bind fixture any more.
+    # No job builds, keeps or fetches the debug bind fixture any more: no
+    # step names its artifact, and outside the Rust job (whose PR precheck
+    # runs its own debug build) none reads or writes rust/target/debug.
     assert not [(name, step.get("name")) for name, job in jobs.items() for step in job.get("steps", [])
                 if "daemon-bind-fixture" in json.dumps(step)
-                or ("rust/target/debug" in step.get("run", "") and name != "rust")]
+                or ("rust/target/debug" in json.dumps(step) and name != "rust")]
     assert jobs["parity-checks"]["strategy"]["matrix"]["suite"] == PARITY_SUITES
     builds = [step for name in ("rust", "candidate", "parity-checks")
               for step in jobs[name]["steps"]
