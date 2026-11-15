@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_ps_volume_creation_consumes_resolved_names_and_stops_on_failure(tmp_path):
-    from tests.test_installer_client_only_ps import _PowerShell, _q, _output
+    from tests.test_installer_client_only_ps import _q, _output
+    from tests.test_installer_client_only_ps_native import _PowerShell
     text = (ROOT / "ops/install-native.ps1").read_text(encoding="utf-8")
     block = text.split("# >>> volumes >>>\n", 1)[1].split("# <<< volumes <<<", 1)[0]
     # Creation runs in its own block, after the engine stage can refuse.
@@ -44,9 +45,11 @@ def test_ps_volume_creation_consumes_resolved_names_and_stops_on_failure(tmp_pat
 @pytest.mark.parametrize("script", ["install-native.sh", "install-native.ps1"])
 def test_extractor_removal_rechecks_project_and_uses_verified_id(tmp_path, script, project):
     from tests.native_client_stub import HELPER_PS, HELPER_SH
-    from tests.test_installer_client_only import _Shell, _stub
+    from tests.test_installer_client_only import _stub
+    from tests.test_installer_client_only_native import _Shell
     from tests.test_installer_existing_upgrade import _bash_variants
-    from tests.test_installer_client_only_ps import _PowerShell, _q, _output
+    from tests.test_installer_client_only_ps import _q, _output
+    from tests.test_installer_client_only_ps_native import _PowerShell
 
     text = (ROOT / "ops" / script).read_text(encoding="utf-8")
     block = text.split("# >>> sidecar override >>>\n", 1)[1].split("# <<< sidecar override <<<", 1)[0]

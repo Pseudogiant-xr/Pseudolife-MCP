@@ -90,7 +90,7 @@ def test_the_shared_fixture_environment_passes_its_own_check(tmp_path):
 
 
 def test_the_shell_harness_refuses_a_real_home(tmp_path):
-    from tests.test_installer_client_only import _Shell
+    from tests.test_installer_client_only_native import _Shell
 
     shell = object.__new__(_Shell)
     shell.bash, shell.tmp = "fixture-bash", tmp_path
@@ -103,7 +103,7 @@ def test_the_shell_harness_refuses_a_real_home(tmp_path):
 
 
 def test_the_powershell_harness_refuses_a_real_home(tmp_path):
-    from tests.test_installer_client_only_ps import _PowerShell
+    from tests.test_installer_client_only_ps_native import _PowerShell
 
     ps = object.__new__(_PowerShell)
     ps.pwsh, ps.tmp = "fixture-pwsh", tmp_path

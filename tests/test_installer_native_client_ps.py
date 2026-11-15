@@ -57,12 +57,10 @@ case "$1" in
     installer)
         if [ "$2" = --capability ]; then
             if [ -n "$STUB_V0240" ]; then
-                printf '%s
-' "installer: expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop" >&2
+                printf '%s\n' "installer: expected an installer step: migrate-registrations, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop" >&2
                 exit 2
             fi
-            printf '%s
-' "${STUB_CAPABILITY-pseudolife-mcp installer-protocol $STUB_LEVEL}"
+            printf '%s\n' "${STUB_CAPABILITY-pseudolife-mcp installer-protocol $STUB_LEVEL}"
         elif [ "$2" = migrate-registrations ]; then echo "$4 already runs the native client; nothing changed"; fi ;;
 esac
 '''
