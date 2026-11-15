@@ -466,7 +466,7 @@ function Initialize-NativeClient {
         if (($LASTEXITCODE -eq 0) -and ($answer.Count -eq 1) -and ("$($answer[0])".TrimEnd("`r") -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
     } catch { $level = -1 }
     if ($level -lt $NativeInstallerProtocol) {
-        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (python rust/ci/release_assets.py package), since no published release carries them yet."
+        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (rust/ci/release_assets.py package), since no published release carries them yet."
     }
 }
 function Get-NativeLauncherPath {

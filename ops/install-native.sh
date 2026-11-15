@@ -544,7 +544,7 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     # `[ -lt ]` below never sees a number it cannot compare.
     case "$native_level" in ""|*[!0-9]*|0?*|??????????*) native_level=-1 ;; esac
     if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
-        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (python rust/ci/release_assets.py package), since no published release carries them yet."
+        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (rust/ci/release_assets.py package), since no published release carries them yet."
     fi
 }
 # ensure_shim's install: the verified archive into a new side-by-side runtime
