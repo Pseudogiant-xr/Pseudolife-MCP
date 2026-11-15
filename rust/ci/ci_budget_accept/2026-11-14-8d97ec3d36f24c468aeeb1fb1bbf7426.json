@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "f18af06d339169a0",
+  "fingerprint": "b8d920ee0dc31621",
+  "reason": "Slow-runner headroom only: timeout-minutes 20 -> 30, about twice the 14.6-minute estimate, because the native client build's 1.3-1.8 minutes are warm and the Rust cache key rolls with the UTC ISO week, so from Monday 00:00 UTC until master's first Rust run that week the build is cold and unmeasured. No step, command, job or shard changes, so the estimate holds; measure the cold build from the first batch that builds cold."
+}

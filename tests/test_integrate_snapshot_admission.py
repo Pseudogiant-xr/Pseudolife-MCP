@@ -480,6 +480,8 @@ def test_already_landed_runtime_edit_does_not_stall_no_row_merge(
         # freeze only a member carrying the exception label is admitted.
         value.labels = ("freeze-exception",)
         plan = integrate.Plan("integrate/2026-11-06-batch-1", base)
+        # The freeze pre-pass lists open pull requests: none here.
+        monkeypatch.setattr(integrate, "gh", lambda *args, **kwargs: "[]")
         integrate._merge_members(plan, [value])
         if budget_conflict == "semantic":
             assert not plan.merged and len(plan.dropped) == 1

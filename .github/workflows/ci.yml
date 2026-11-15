@@ -334,7 +334,7 @@ jobs:
           tests/test_runner_cleanup.py tests/test_rust_mcp_catalogue.py tests/test_schema_version_guard.py
           tests/test_update_engine.py tests/test_suite_classes.py
           tests/test_ci_budget_integration.py tests/test_ci_push_passed.py tests/test_ci_batch_passed.py
-          tests/test_claude_md_citations.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py
+          tests/test_claude_md_citations.py tests/test_ci_native_client.py tests/test_codex_hook_native_golden.py tests/test_update_bridge.py
 
   lock-resolve:
     # Replays the daemon image's constrained install (ops/Dockerfile.daemon
@@ -469,6 +469,70 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-minilm-l6-v2-qwen3-embedding-0.6b
 
+      # The installer tests run a native client built from this commit:
+      # PSEUDOLIFE_NATIVE_TEST_BINARY names it, and with
+      # PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1 a test that needs it fails
+      # instead of skipping. Unset locally, those tests skip or stub.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (rust.yml's Rust
+      # job says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
+      # Read-only reuse of the Rust job's cache (rust.yml), as its fixtures
+      # job does: shared-key "rust" is the key rust-cache derives for the job
+      # id rust, and the toolchain set above matches that job's.
+      - uses: Swatinem/rust-cache@v2
+        # rust-cache hashes the CARGO*/RUST* environment into the restore key
+        # itself: these are rust.yml's workflow env, or the key never meets
+        # the Rust job's (tests/test_ci_native_client.py compares them).
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
+        with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
+          workspaces: rust
+          shared-key: rust
+          save-if: false
+      - name: Build the native client the installer tests run
+        # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
+        # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
+        shell: pwsh
+        working-directory: rust
+        run: |
+          cargo build --locked -p pseudolife-stdio -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Join-Path $env:GITHUB_WORKSPACE ('rust/target/debug/pseudolife-stdio' + $(if ($IsWindows) { '.exe' } else { '' }))
+          & $binary version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_NATIVE_TEST_BINARY=$binary" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Tests (offline + deterministic, 2 xdist workers)
         # -n 2 --dist loadfile: whole files stay on one worker, so every
         # module-scoped fixture (shared services, staged banks, daemons)
@@ -511,10 +575,16 @@ jobs:
     # weights here). Measured 2026-10-20 on the maintainer's Windows host,
     # serially, against embedded PG: this selection's 377 cases took 75 s
     # (85 s wall; 187 s while another session saturated loopback sockets); the 30-file, 1,865-case lane it replaced took 1,383 s
-    # there and 862 s on windows-latest (18 of its 25 minutes). 20, not 15:
-    # setup and the PG start take ~3.5 min, and a hung test must still reach
-    # pyproject's 600 s faulthandler dump before the job timeout.
-    timeout-minutes: 20
+    # there and 862 s on windows-latest (18 of its 25 minutes). Setup and the
+    # PG start take ~3.5 min, and a hung test must still reach pyproject's
+    # 600 s faulthandler dump before the job timeout. 30, about twice the
+    # 14.6-minute estimate (rust/ci/ci_budget.json), because the native
+    # client build's 1.3-1.8 minutes are warm: the Rust cache key rolls with
+    # the UTC ISO week, so from Monday 00:00 UTC until master's first Rust
+    # run that week this build is cold, and no cold Windows debug build of
+    # it has been measured yet. Measure it from the first batch run that
+    # builds cold, then set this from that figure.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -558,6 +628,70 @@ jobs:
               fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
           print("embedded PG up:", base.rsplit("@", 1)[-1])
           PY
+
+      # The installer tests run a native client built from this commit:
+      # PSEUDOLIFE_NATIVE_TEST_BINARY names it, and with
+      # PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1 a test that needs it fails
+      # instead of skipping. Unset locally, those tests skip or stub.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (rust.yml's Rust
+      # job says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
+      # Read-only reuse of the Rust job's cache (rust.yml), as its fixtures
+      # job does: shared-key "rust" is the key rust-cache derives for the job
+      # id rust, and the toolchain set above matches that job's.
+      - uses: Swatinem/rust-cache@v2
+        # rust-cache hashes the CARGO*/RUST* environment into the restore key
+        # itself: these are rust.yml's workflow env, or the key never meets
+        # the Rust job's (tests/test_ci_native_client.py compares them).
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
+        with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
+          workspaces: rust
+          shared-key: rust
+          save-if: false
+      - name: Build the native client the installer tests run
+        # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
+        # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
+        shell: pwsh
+        working-directory: rust
+        run: |
+          cargo build --locked -p pseudolife-stdio -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Join-Path $env:GITHUB_WORKSPACE ('rust/target/debug/pseudolife-stdio' + $(if ($IsWindows) { '.exe' } else { '' }))
+          & $binary version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_NATIVE_TEST_BINARY=$binary" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Product paths that differ on Windows
         # A merge gate: product paths only, no retries. The process-spawning
@@ -740,6 +874,69 @@ jobs:
           command -v bash
           bash -c 'echo "$BASH_VERSION"; case "$BASH_VERSION" in 3.2*) ;; *) exit 1 ;; esac'
 
+      # The installer tests run a native client built from this commit:
+      # PSEUDOLIFE_NATIVE_TEST_BINARY names it, and with
+      # PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1 a test that needs it fails
+      # instead of skipping. Unset locally, those tests skip or stub.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (rust.yml's Rust
+      # job says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
+      # No Rust job runs on macOS, so this lane keeps its own cache (the only
+      # save under this key on macOS). It saves on master only (the nightly
+      # and the weekly run), since a pull request's or batch's save is scoped
+      # to that ref, which nothing else reads, and would only churn the
+      # cache quota; other runs restore master's entry or build cold.
+      - uses: Swatinem/rust-cache@v2
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
+        with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
+          workspaces: rust
+          shared-key: native-test-macos
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Build the native client the installer tests run
+        # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
+        # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
+        shell: pwsh
+        working-directory: rust
+        run: |
+          cargo build --locked -p pseudolife-stdio -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Join-Path $env:GITHUB_WORKSPACE ('rust/target/debug/pseudolife-stdio' + $(if ($IsWindows) { '.exe' } else { '' }))
+          & $binary version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_NATIVE_TEST_BINARY=$binary" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Hook, installer and embedded-provider tests
         # The plugin hooks' BSD branches (stat -f, base64 -D, shasum,
         # ps -o lstart=) execute only here. No Postgres is started, so the
@@ -816,6 +1013,70 @@ jobs:
               fh.write(f"PSEUDOLIFE_TEST_DATABASE_URL={base}/pseudolife_memory_test\n")
           print("embedded PG up:", base.rsplit("@", 1)[-1])
           PY
+
+      # The installer tests run a native client built from this commit:
+      # PSEUDOLIFE_NATIVE_TEST_BINARY names it, and with
+      # PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1 a test that needs it fails
+      # instead of skipping. Unset locally, those tests skip or stub.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+      - name: Keep only the pinned Rust toolchain
+        shell: pwsh
+        run: |
+          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
+          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
+          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
+          $pinned = $match.Matches[0].Groups[1].Value
+          foreach ($line in @(rustup toolchain list)) {
+            $name = ($line -split '\s+')[0]
+            if ($name -and -not $name.StartsWith("$pinned-")) {
+              rustup toolchain uninstall $name
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+          rustup toolchain list
+          exit $LASTEXITCODE
+      # The Rust caches' key starts with this UTC ISO week (rust.yml's Rust
+      # job says why), so its entries are never a week old.
+      - name: Name this week's Rust cache
+        id: cache_week
+        shell: pwsh
+        run: |
+          $now = [DateTime]::UtcNow
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Rust cache week: $week"
+      # Read-only reuse of the Rust job's cache (rust.yml), as its fixtures
+      # job does: shared-key "rust" is the key rust-cache derives for the job
+      # id rust, and the toolchain set above matches that job's.
+      - uses: Swatinem/rust-cache@v2
+        # rust-cache hashes the CARGO*/RUST* environment into the restore key
+        # itself: these are rust.yml's workflow env, or the key never meets
+        # the Rust job's (tests/test_ci_native_client.py compares them).
+        env:
+          CARGO_TERM_COLOR: always
+          CARGO_BUILD_JOBS: 4
+        with:
+          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
+          workspaces: rust
+          shared-key: rust
+          save-if: false
+      - name: Build the native client the installer tests run
+        # The debug build rust.yml's ordinary PR prechecks used: 0.4-0.9 min
+        # warm on Linux, 1.3-1.8 on Windows (runs 43500925046 to 43516792342,
+        # 2026-11-13); macOS builds cold unless master saved this week. In
+        # rust/, so its rust-toolchain.toml applies.
+        shell: pwsh
+        working-directory: rust
+        run: |
+          cargo build --locked -p pseudolife-stdio -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Join-Path $env:GITHUB_WORKSPACE ('rust/target/debug/pseudolife-stdio' + $(if ($IsWindows) { '.exe' } else { '' }))
+          & $binary version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_NATIVE_TEST_BINARY=$binary" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Windows plumbing (one recorded retry)
         # Tests the merge gate names from a split file are deselected here (and

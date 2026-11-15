@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "8d99314724dc5541",
+  "fingerprint": "76ed10556ee249b2",
+  "reason": "Merge of #1550 and #1557 into #1559: the minutes are #1557's 12.1 plus #1559's estimated 2.5 for the native client build; #1550 removed this lane's frozen files, which can only lower them. Re-measure with test."
+}
