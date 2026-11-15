@@ -209,3 +209,24 @@ def test_a_fragment_harness_needs_no_layout_overrides(tmp_path):
     # The near-miss: `require` alone (fragments) still accepts a home
     # without them.
     installer_sandbox.require(installer_sandbox.environment(tmp_path), tmp_path)
+
+
+# An installer reads an empty value as unset and falls back to the real
+# default: an empty PSEUDOLIFE_SHIM_LAUNCHER puts the launcher's directory on
+# the real Windows user PATH (Git Bash's native_user_path and PowerShell's
+# Add-NativeLauncherToUserPath test only that it is non-empty). So `require`
+# refuses a redirect that is set but empty; one that is absent is unchanged.
+@pytest.mark.parametrize("name", installer_sandbox.REDIRECTS)
+def test_a_redirect_set_but_empty_is_refused(tmp_path, name):
+    env = installer_sandbox.layout(installer_sandbox.environment(tmp_path), tmp_path)
+    env[name] = ""
+    with pytest.raises(installer_sandbox.RealHomeRefused, match=f"{name} is set but empty"):
+        installer_sandbox.require(env, tmp_path)
+
+
+def test_a_redirect_that_is_absent_still_passes_require(tmp_path):
+    # The near miss: a fragment harness that never sets them.
+    env = installer_sandbox.environment(tmp_path)
+    for name in installer_sandbox.REDIRECTS:
+        env.pop(name, None)
+    installer_sandbox.require(env, tmp_path)
