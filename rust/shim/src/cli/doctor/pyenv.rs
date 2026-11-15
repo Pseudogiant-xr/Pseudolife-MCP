@@ -186,17 +186,6 @@ fn stat(path: &str) -> Res<Option<std::fs::Metadata>> {
     }
 }
 
-/// `os.path.lexists`.
-pub(super) fn lexists(path: &str) -> Res<bool> {
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
-            Ok(false)
-        }
-        Err(_) => Err(Defer),
-    }
-}
-
 /// The outcome of `Path.read_text(encoding=...)`.
 pub(super) enum Text {
     /// `OSError` (absent, a directory, unreadable).
@@ -361,7 +350,10 @@ pub(super) fn which(cmd: &str, env: &Env) -> Res<Option<String>> {
     let path = match env.var("PATH")? {
         Some(path) => path,
         None if WINDOWS => ".;C:\\bin".into(),
-        None => return Err(Defer),
+        // No PATH: the platform's default search path, as CPython's
+        // `os.confstr("CS_PATH")` reports it.
+        None if cfg!(target_os = "macos") => "/usr/bin:/bin:/usr/sbin:/sbin".into(),
+        None => "/bin:/usr/bin".into(),
     };
     if path.is_empty() {
         return Ok(None);

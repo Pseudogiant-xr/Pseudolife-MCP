@@ -156,7 +156,10 @@ SHIM_COMMANDS = {
     "maintainer": ("maintainer", "maintainer_setup") + UPDATE_CYCLE,
     "coordination_recovery": ("coordination_recovery",),
     "move_cli.rs": ("move", "console", "conductor_watch", "expose"), "test_login": ("test_login",),
-    "transfer": ("transfer",), "transfer.rs": ("transfer",), "tunnel": ("tunnel",),
+    "transfer": ("transfer",), "transfer.rs": ("transfer",),
+    # doctor reads saved profiles through tunnel's store (doctor_section),
+    # so tunnel's rows include doctor's, and console's with them.
+    "tunnel": ("tunnel", "doctor", "console"),
     # backup's Docker tier is restore_cli's docker_backup (UPDATE_CYCLE); its
     # move_native answers the move row through the cli.rs dispatcher, which
     # the import scan skips.
