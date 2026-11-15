@@ -466,6 +466,7 @@ def test_the_probe_deadline_is_read_as_a_decimal_number_of_seconds(tmp_path, val
         assert not named, result.stdout + result.stderr
 
 
+@pytest.mark.skipif(WINDOWS, reason="the v0.24.0 stand-in is a shell script; on Windows the fixture is a real client")
 def test_the_refusal_says_how_to_clear_the_variable_in_powershell(tmp_path):
     result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env={"STUB_V0240": "1"})
     assert result.returncode == 1
