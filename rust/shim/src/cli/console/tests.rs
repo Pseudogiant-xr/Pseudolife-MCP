@@ -2,6 +2,7 @@
 //! 3.11.9, `console_cli.py` at this branch's base). Nothing here reads the
 //! process environment or a home directory; the two transport tests use a
 //! loopback listener of their own.
+use super::browser::NO_DISPLAY;
 use super::*;
 
 fn context() -> Context {
@@ -20,6 +21,11 @@ fn argv(items: &[&str]) -> Vec<String> {
 /// A chooser for calls that must never ask which browser to start.
 fn no_browser() -> Result<browser::Plan, browser::Unsupported> {
     panic!("this call chooses no browser")
+}
+
+/// A launcher for calls that must never start one.
+fn no_launch(_plan: &browser::Plan, _url: &str) -> launch::Launched {
+    panic!("this call starts no browser")
 }
 
 fn read(text: &str) -> Dict {
@@ -229,9 +235,16 @@ async fn a_launcher_this_port_lacks_defers_before_any_request() {
     };
     let unsupported = || Err(browser::Unsupported);
     assert!(
-        answer(link, "http://127.0.0.1:9", "t", false, &unsupported)
-            .await
-            .is_err()
+        answer(
+            link,
+            "http://127.0.0.1:9",
+            "t",
+            false,
+            &unsupported,
+            &no_launch
+        )
+        .await
+        .is_err()
     );
 }
 
@@ -587,7 +600,7 @@ fn the_browser_starts_only_for_a_safe_link_and_before_anything_prints() {
         let started = &started;
         move |url: &str| {
             started.borrow_mut().push(url.to_owned());
-            answer
+            if answer { Ok(()) } else { Err(None) }
         }
     };
     let out = opened(&link(""), false, None, Some(&mut start(true)));
@@ -711,9 +724,16 @@ async fn a_list_request_carries_the_oracle_headers() {
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{\"sessions\": []}",
     )
     .await;
-    let out = answer(Call::List, &origin, "fixture-token", true, &no_browser)
-        .await
-        .unwrap();
+    let out = answer(
+        Call::List,
+        &origin,
+        "fixture-token",
+        true,
+        &no_browser,
+        &no_launch,
+    )
+    .await
+    .unwrap();
     let request = String::from_utf8(task.await.unwrap()).unwrap();
     assert!(
         request.starts_with("GET /api/console/sessions HTTP/1.1\r\n"),
@@ -748,7 +768,9 @@ async fn a_link_request_posts_the_oracle_body_and_reads_a_refusal() {
         open: false,
         unless: false,
     };
-    let out = answer(link, &origin, "t", true, &no_browser).await.unwrap();
+    let out = answer(link, &origin, "t", true, &no_browser, &no_launch)
+        .await
+        .unwrap();
     let request = String::from_utf8(task.await.unwrap()).unwrap();
     assert!(
         request.starts_with("POST /api/console/link HTTP/1.1\r\n"),
@@ -767,4 +789,124 @@ async fn a_link_request_posts_the_oracle_body_and_reads_a_refusal() {
             4
         )
     );
+}
+
+/// A 200 sign-in answer for `serve_once`.
+fn signin_reply() -> &'static [u8] {
+    let body = r#"{"url": "http://127.0.0.1:1/ui/#/signin?code=AB", "code": "AB", "origin": "http://127.0.0.1:1", "expires_in": 300}"#;
+    let reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    Box::leak(reply.into_bytes().into_boxed_slice())
+}
+
+const PRINTED: &str = "Open this link to sign in to the Console:\n  http://127.0.0.1:1/ui/#/signin?code=AB\nOr type the code AB into the Console's sign-in dialog at http://127.0.0.1:1/ui/. It works once, within 5 minutes.\n";
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_launcher_that_fails_leaves_the_link_and_its_cause_after_one_mint() {
+    for as_json in [false, true] {
+        let (origin, task) = serve_once(signin_reply()).await;
+        let link = Call::Link {
+            to: None,
+            open: true,
+            unless: false,
+        };
+        let chosen = std::cell::Cell::new(0);
+        let choose = || {
+            chosen.set(chosen.get() + 1);
+            Ok(browser::Plan::Background {
+                program: "/x/launcher".to_owned(),
+                args: vec!["%s".to_owned()],
+            })
+        };
+        let starts = std::cell::RefCell::new(Vec::new());
+        let fail = |plan: &browser::Plan, url: &str| {
+            starts.borrow_mut().push((plan.clone(), url.to_owned()));
+            Err(Some(
+                "launcher failed (exit status: 3); try BROWSER".to_owned(),
+            ))
+        };
+        let out = answer(link, &origin, "t", as_json, &choose, &fail)
+            .await
+            .unwrap();
+        let request = String::from_utf8(task.await.unwrap()).unwrap();
+        assert!(request.starts_with("POST /api/console/link HTTP/1.1\r\n"));
+        assert_eq!(chosen.get(), 1);
+        assert_eq!(
+            starts.into_inner(),
+            vec![(
+                browser::Plan::Background {
+                    program: "/x/launcher".to_owned(),
+                    args: vec!["%s".to_owned()],
+                },
+                "http://127.0.0.1:1/ui/#/signin?code=AB".to_owned()
+            )],
+            "one start, with the minted link"
+        );
+        if as_json {
+            assert_eq!(
+                out,
+                Out::stdout(
+                    "{\"state\": \"printed\", \"url\": \"http://127.0.0.1:1/ui/#/signin?code=AB\", \"code\": \"AB\", \"origin\": \"http://127.0.0.1:1\", \"principal\": null, \"expires_in\": 300, \"browser_error\": \"launcher failed (exit status: 3); try BROWSER\"}\n".into(),
+                    0
+                )
+            );
+        } else {
+            let mut want = Out::stdout(PRINTED.into(), 0);
+            want.note = "pseudolife-mcp console: no browser opened: launcher failed (exit status: 3); try BROWSER\n".into();
+            assert_eq!(out, want);
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn no_open_chooses_nothing_starts_nothing_and_prints_no_cause() {
+    let (origin, task) = serve_once(signin_reply()).await;
+    let link = Call::Link {
+        to: None,
+        open: false,
+        unless: false,
+    };
+    let out = answer(link, &origin, "t", false, &no_browser, &no_launch)
+        .await
+        .unwrap();
+    task.await.unwrap();
+    assert_eq!(out, Out::stdout(PRINTED.into(), 0));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_refused_plan_prints_its_cause_through_the_real_launcher() {
+    // `launch::open` itself: a refusal starts nothing (the interception
+    // would panic on any start) and hands its cause to the printed link.
+    let (origin, task) = serve_once(signin_reply()).await;
+    let link = Call::Link {
+        to: None,
+        open: true,
+        unless: false,
+    };
+    let refused = || Ok(browser::Plan::Refused(Some(NO_DISPLAY.to_owned())));
+    let out = answer(link, &origin, "t", false, &refused, &launch::open)
+        .await
+        .unwrap();
+    task.await.unwrap();
+    let mut want = Out::stdout(PRINTED.into(), 0);
+    want.note = format!("pseudolife-mcp console: no browser opened: {NO_DISPLAY}\n");
+    assert_eq!(out, want);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn windows_refusals_print_the_link_as_before() {
+    let (origin, task) = serve_once(signin_reply()).await;
+    let link = Call::Link {
+        to: None,
+        open: true,
+        unless: false,
+    };
+    let refused = || Ok(browser::Plan::Refused(None));
+    let out = answer(link, &origin, "t", false, &refused, &launch::open)
+        .await
+        .unwrap();
+    task.await.unwrap();
+    assert_eq!(out, Out::stdout(PRINTED.into(), 0));
 }
