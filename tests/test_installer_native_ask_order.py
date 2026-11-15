@@ -227,7 +227,7 @@ def test_the_ordering_check_catches_a_question_moved_before_the_stage(script, ho
 
 
 def _unguarded(text: str, script: str, hook: str, reader: str, pattern: str) -> list[str]:
-    lines = text[:text.index("# >>> native client stage >>>")].splitlines()
+    lines = _before_the_late_stage(text).splitlines()
     unguarded = []
     for number, line in enumerate(lines):
         if not re.search(pattern, line) or line.lstrip().startswith("#"):
