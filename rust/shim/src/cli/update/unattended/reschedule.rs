@@ -43,8 +43,59 @@ pub(crate) fn installed(names: &Names) -> Vec<Installed> {
 fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>) -> Vec<Installed> {
     [false, true]
         .into_iter()
-        .filter_map(|client| installed_kind_with(names, client, expected).ok().flatten())
+        .filter_map(|client| {
+            let name = if client {
+                names.client_unit
+            } else {
+                names.unit
+            };
+            discovered(
+                installed_kind_with(names, client, expected),
+                cfg!(target_os = "linux"),
+                &systemd_dir(),
+                name,
+                client,
+            )
+        })
         .collect()
+}
+
+/// What discovery reports for one kind's read. On Linux a unit or timer
+/// that exists but cannot be read stays visible, as a schedule connect
+/// cannot vouch for, with the read error as its cause, so a move never
+/// leaves it behind unreported. On Windows a failed query cannot be told
+/// from a task that does not exist (schtasks exits 1 for both), so it is
+/// left out, as it always was.
+fn discovered(
+    read: std::result::Result<Option<Installed>, String>,
+    linux: bool,
+    dir: &Path,
+    name: &str,
+    client: bool,
+) -> Option<Installed> {
+    match read {
+        Ok(found) => found,
+        Err(cause) if linux => {
+            let file =
+                |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
+            Some(Installed {
+                client,
+                place: dir.join(format!("{name}.service")).display().to_string(),
+                time: None,
+                url: None,
+                shaped: false,
+                why: Some(cause),
+                overridden: None,
+                differs: None,
+                remove: format!(
+                    "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
+                    file("service"),
+                    file("timer")
+                ),
+            })
+        }
+        Err(_) => None,
+    }
 }
 
 /// The schedule of one kind, read again: `None` when it is not installed,
@@ -232,8 +283,10 @@ fn systemd_roots(dir: &Path, env: &dyn Fn(&str) -> Option<String>, home: &Path) 
 }
 
 /// The keys a drop-in may not set for `connect` to vouch for the schedule.
-/// In the service, what the run executes and with which environment: the
-/// command names the daemon URL, and the environment carries the bearer
+/// In the service, what the run executes and with which environment: every
+/// command-running directive of systemd.service(5) (any of them may name a
+/// daemon URL) and `ExecSearchPath=`, which decides which executable runs;
+/// the environment carries the bearer
 /// file and layout variables the base unit's shape check compares. In the
 /// timer, any key: every `[Timer]` key decides when it runs or which unit
 /// it starts, and `connect` reports and keeps that daily time. Any other
@@ -243,9 +296,14 @@ fn blocking_key(kind: &str, section: &str, key: &str) -> bool {
     match (kind, section) {
         ("service", "Service") => matches!(
             key,
-            "ExecStart"
+            "ExecCondition"
                 | "ExecStartPre"
+                | "ExecStart"
                 | "ExecStartPost"
+                | "ExecReload"
+                | "ExecStop"
+                | "ExecStopPost"
+                | "ExecSearchPath"
                 | "Environment"
                 | "EnvironmentFile"
                 | "UnsetEnvironment"
@@ -1131,6 +1189,26 @@ mod tests {
                 "EnvironmentFile=",
             ),
             (
+                "pseudolife-update.service.d",
+                "[Service]\nExecStopPost=/x --daemon-url http://OLD\n",
+                "ExecStopPost=",
+            ),
+            (
+                "pseudolife-update.service.d",
+                "[Service]\nExecStop=/x\n",
+                "ExecStop=",
+            ),
+            (
+                "pseudolife-update.service.d",
+                "[Service]\nExecCondition=/x\n",
+                "ExecCondition=",
+            ),
+            (
+                "pseudolife-update.service.d",
+                "[Service]\nExecSearchPath=/opt/old\n",
+                "ExecSearchPath=",
+            ),
+            (
                 "pseudolife-update.timer.d",
                 "[Timer]\nOnCalendar=\nOnCalendar=*-*-* 05:00:00\n",
                 "OnCalendar=",
@@ -1327,6 +1405,30 @@ mod tests {
                 .unwrap()
                 .ends_with("override.conf sets ExecStart=")
         );
+        // A timer that exists but cannot be read (here a directory) is a read
+        // failure for the re-read, and stays visible to discovery on Linux
+        // with that cause; on Windows discovery leaves a failed read out.
+        fs::remove_dir_all(dir.join(format!("{NAME}.service.d"))).unwrap();
+        fs::remove_file(dir.join(format!("{NAME}.timer"))).unwrap();
+        fs::create_dir(dir.join(format!("{NAME}.timer"))).unwrap();
+        let cause = read().err().expect("an unreadable timer is a read failure");
+        assert!(
+            cause.contains(&format!("{NAME}.timer cannot be read")),
+            "{cause}"
+        );
+        let shown = discovered(read(), true, &dir, NAME, false).expect("visible on Linux");
+        assert!(!shown.shaped);
+        assert_eq!(shown.why.as_deref(), Some(cause.as_str()));
+        assert!(
+            shown
+                .remove
+                .starts_with("systemctl --user disable --now pseudolife-update.timer")
+        );
+        assert!(discovered(read(), false, &dir, NAME, false).is_none());
+        // Near miss: a schedule that is simply not installed is no row.
+        assert!(discovered(Ok(None), true, &dir, NAME, false).is_none());
+        fs::remove_dir(dir.join(format!("{NAME}.timer"))).unwrap();
+        fs::write(dir.join(format!("{NAME}.timer")), timer_body(NAME, 3, 7)).unwrap();
         // An enabled-check that was interrupted is a read failure.
         let interrupted = || Err("interrupted".to_owned());
         assert_eq!(
