@@ -51,12 +51,27 @@ fn start(home: &Path, vars: &[(&str, &str)]) -> (i32, String) {
         .stderr(Stdio::piped());
     // What a process needs to start at all on this OS; nothing of the
     // caller's Pseudolife setup.
-    for name in ["PATH", "SystemRoot", "SYSTEMROOT", "windir", "TEMP", "TMP", "TMPDIR"] {
+    for name in [
+        "PATH",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "windir",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+    ] {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
         }
     }
-    for name in ["HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+    ] {
         command.env(name, home);
     }
     command
@@ -97,17 +112,29 @@ fn start(home: &Path, vars: &[(&str, &str)]) -> (i32, String) {
 fn refused(name: &str, vars: &[(&str, &str)], message: &str) {
     let home = scratch(name);
     let (code, err) = start(&home, vars);
-    assert_eq!(code, 2, "{name}: want a startup refusal (exit 2), got {code}: {err}");
+    assert_eq!(
+        code, 2,
+        "{name}: want a startup refusal (exit 2), got {code}: {err}"
+    );
     assert!(err.contains(message), "{name}: want {message:?} in: {err}");
-    assert!(!err.contains(ADMITTED), "{name}: refused after the guards: {err}");
+    assert!(
+        !err.contains(ADMITTED),
+        "{name}: refused after the guards: {err}"
+    );
     let _ = std::fs::remove_dir_all(home);
 }
 
 fn admitted(name: &str, vars: &[(&str, &str)]) -> String {
     let home = scratch(name);
     let (code, err) = start(&home, vars);
-    assert_eq!(code, 1, "{name}: want every startup guard passed (exit 1 at the port), got {code}: {err}");
-    assert!(err.contains(ADMITTED), "{name}: want {ADMITTED:?} in: {err}");
+    assert_eq!(
+        code, 1,
+        "{name}: want every startup guard passed (exit 1 at the port), got {code}: {err}"
+    );
+    assert!(
+        err.contains(ADMITTED),
+        "{name}: want {ADMITTED:?} in: {err}"
+    );
     let _ = std::fs::remove_dir_all(home);
     err
 }
@@ -135,7 +162,10 @@ fn off_loopback_without_a_token_refuses_to_start() {
     }
     // Loopback needs no token.
     for host in ["127.0.0.1", "::1", "localhost"] {
-        admitted(&format!("loopback {host}"), &[("PSEUDOLIFE_MCP_HOST", host)]);
+        admitted(
+            &format!("loopback {host}"),
+            &[("PSEUDOLIFE_MCP_HOST", host)],
+        );
     }
 }
 
