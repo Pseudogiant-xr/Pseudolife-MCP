@@ -110,6 +110,25 @@ fn report(output: &Output) -> Value {
     })
 }
 
+/// The installers' one probe of a staged release (ops/install-native.sh,
+/// NATIVE_INSTALLER_PROTOCOL): exactly this line on stdout, exit 0, and no
+/// other output; anything after the flag is a usage error.
+#[test]
+fn the_capability_probe_names_the_installer_protocol_and_nothing_else() {
+    let home = Home::new();
+    let output = home.run(&["--capability"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "pseudolife-mcp installer-protocol 1
+"
+    );
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let extra = home.run(&["--capability", "--json"]);
+    assert_eq!(extra.status.code(), Some(2), "{extra:?}");
+    assert!(extra.stdout.is_empty());
+}
+
 #[test]
 fn refuses_without_the_native_client_and_changes_nothing() {
     let home = Home::new();
@@ -498,6 +517,55 @@ fn expose_keeps_the_old_entry_while_a_self_spawning_registration_runs_it() {
         .env("PSEUDOLIFE_SHIM_RUNTIMES", layout.root)
         .env("PSEUDOLIFE_SHIM_LAUNCHER", &layout.launcher)
         .env("PSEUDOLIFE_SHIM_USER_BIN", &bin)
+        .args(["installer", "expose", "--json"])
+        .output()
+        .unwrap();
+    let result = report(&output);
+    assert_eq!(output.status.code(), Some(0), "{result}");
+    assert_eq!(result["state"], "left", "{result}");
+    assert!(
+        result["detail"]
+            .as_str()
+            .unwrap()
+            .contains("claude-code registration still runs it"),
+        "{result}"
+    );
+    assert_eq!(fs::read_to_string(&entry).unwrap(), content);
+}
+
+/// A registration that names the bare command reaches the old entry through
+/// PATH, not through the installer's working directory.
+#[cfg(unix)]
+#[test]
+fn expose_keeps_the_old_entry_a_bare_command_reaches_through_path() {
+    let home = Home::new();
+    home.install_native();
+    let bin = home.0.join("user-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let entry = bin.join(BINARY);
+    let content = "#!/usr/bin/python3\nfrom pseudolife_memory.cli import main\nmain()\n";
+    fs::write(&entry, content).unwrap();
+    // Self-spawning (no PSEUDOLIFE_MCP_NO_SPAWN), so the move leaves it alone.
+    fs::write(
+        home.0.join("claude").join(".claude.json"),
+        serde_json::to_vec(
+            &json!({"mcpServers": {"pseudolife-memory": {"command": BINARY, "args": []}}}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let layout = home.layout();
+    let output = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"))
+        .env_clear()
+        .env("HOME", &home.0)
+        .env("CLAUDE_CONFIG_DIR", home.0.join("claude"))
+        .env("CODEX_HOME", home.0.join("codex"))
+        .env("PATH", &bin)
+        .env("PSEUDOLIFE_SHIM_RUNTIMES", layout.root)
+        .env("PSEUDOLIFE_SHIM_LAUNCHER", &layout.launcher)
+        .env("PSEUDOLIFE_SHIM_USER_BIN", &bin)
+        // Not the user bin: a relative lookup would miss the entry.
+        .current_dir(&home.0)
         .args(["installer", "expose", "--json"])
         .output()
         .unwrap();

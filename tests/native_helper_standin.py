@@ -3,8 +3,8 @@
     python tests/native_helper_standin.py <repo> <step> [args...]
 
 The installers run their helpers as steps of the native client
-(``native_helper`` in ``ops/install.sh``, ``Invoke-NativeHelper`` in
-``ops/install.ps1``). A test that slices installer code has no native binary,
+(``native_helper`` in ``ops/install-native.sh``, ``Invoke-NativeHelper`` in
+``ops/install-native.ps1``). A test that slices installer code has no native binary,
 so ``native_client_stub.HELPER_SH`` / ``HELPER_PS`` define those functions to
 run this file, which answers each step with the Python helper the native step
 replaced (``<repo>/ops/...``, so a test's fixture repository still supplies

@@ -57,7 +57,7 @@ pub async fn trust_hooks(
         .apply(client, cwd)
         .await?;
     if let Some(backup) = applied.backup {
-        report.backups.push(backup);
+        report.backed_up(backup);
     }
     Ok(())
 }
@@ -143,7 +143,7 @@ pub async fn mailbox_approval<R: Rpc>(
             )],
         )?;
         if let Some(backup) = plan.apply(client, cwd).await?.backup {
-            report.backups.push(backup);
+            report.backed_up(backup);
         }
         Ok("set".into())
     }

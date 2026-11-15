@@ -26,6 +26,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from tests.installer_protocol import LEVEL
+
 _STANDIN = (Path(__file__).resolve().parent / "native_helper_standin.py").as_posix()
 _PYTHON = Path(sys.executable).as_posix()
 
@@ -146,7 +148,9 @@ case "$1" in
         echo "$PSEUDOLIFE_SHIM_LAUNCHER"; exit 0 ;;
 esac
 if [ "$1" = update ] && [ "$2" = --native-capability ]; then echo "pseudolife-mcp native-update-v1"; exit 0; fi
-'''
+# The installers' probe of the staged release (ops/install-native.sh, NATIVE_INSTALLER_PROTOCOL).
+if [ "$1" = installer ] && [ "$2" = --capability ]; then echo "pseudolife-mcp installer-protocol ${FAKE_INSTALLER_PROTOCOL:-%LEVEL%}"; exit 0; fi
+'''.replace("%LEVEL%", str(LEVEL))
 
 
 def write_release(directory, version: str, launcher_body: str) -> dict[str, str]:
@@ -202,7 +206,7 @@ _ROOT = Path(__file__).resolve().parents[1].as_posix()
 
 def native_cli(directory) -> Path:
     """A client for scripts that run ``"$PSEUDOLIFE_NATIVE_CLI" installer <step>``
-    (ops/preflight.sh, ops/install-hook.sh): the real one when
+    (ops/preflight-native.sh, ops/install-hook-native.sh): the real one when
     PSEUDOLIFE_NATIVE_TEST_BINARY names it, else a shell launcher in
     ``directory`` that answers each installer step with the stand-in. Neither
     looks Python up on PATH."""

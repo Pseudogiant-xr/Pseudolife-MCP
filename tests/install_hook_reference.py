@@ -1,4 +1,4 @@
-"""The Python programs ops/install-hook.sh ran before 14 November 2026.
+"""The Python programs ops/install-hook-native.sh ran before 14 November 2026.
 
 ``python tests/install_hook_reference.py install|remove-legacy`` runs one of
 them, reading the same environment variables the script passed. They are the
@@ -282,4 +282,4 @@ with open(path, "w", encoding="utf-8") as f:
 if __name__ == "__main__":
     program = {"install": INSTALL, "remove-legacy": REMOVE_LEGACY}[sys.argv[1]]
     sys.argv = [sys.argv[0]]
-    exec(compile(program, "install-hook.sh", "exec"), {"__name__": "__main__"})
+    exec(compile(program, "install-hook-native.sh", "exec"), {"__name__": "__main__"})

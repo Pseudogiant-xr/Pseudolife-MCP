@@ -4,7 +4,7 @@ Every step they used to run through Python is a step of the native client
 (``pseudolife-mcp installer ...``). Two guards hold that:
 
 - ``test_installer_client_only.py::test_a_client_only_install_wires_clients_to_the_remote_daemon``
-  runs a whole ``ops/install.sh`` client-only install with ``python``,
+  runs a whole ``ops/install-native.sh`` client-only install with ``python``,
   ``python3``, ``py``, ``pip``, ``pip3`` and ``pipx`` on PATH as stubs that
   record any call and fail it, and asserts none was made;
 - this file checks every script an install runs for a Python lookup or start
@@ -20,8 +20,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ("ops/install.sh", "ops/install.ps1", "ops/preflight.sh", "ops/preflight.ps1",
-           "ops/install-hook.sh", "ops/install-hook.ps1", "ops/add-user-path.ps1")
+SCRIPTS = ("ops/install-native.sh", "ops/install-native.ps1", "ops/preflight-native.sh", "ops/preflight-native.ps1",
+           "ops/install-hook-native.sh", "ops/install-hook.ps1", "ops/add-user-path.ps1")
 
 # A host interpreter or package tool, by name or by path, with or without a
 # version or .exe.

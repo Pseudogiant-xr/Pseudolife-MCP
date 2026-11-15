@@ -1,6 +1,6 @@
 """The installer harnesses refuse to start outside a disposable home.
 
-On 14 November 2026 a test-fixing session started ``ops/install.ps1``
+On 14 November 2026 a test-fixing session started ``ops/install-native.ps1``
 directly from its own shell, with the developer's environment; it stopped
 only because that release carried no native archives. Every shared harness
 that runs installer code now checks its environment with
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from tests import installer_sandbox
-from tests.test_installer_existing_upgrade import _fixture_env
+from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
 def test_the_developers_own_environment_is_refused(tmp_path):
@@ -90,7 +90,7 @@ def test_the_shared_fixture_environment_passes_its_own_check(tmp_path):
 
 
 def test_the_shell_harness_refuses_a_real_home(tmp_path):
-    from tests.test_installer_client_only import _Shell
+    from tests.test_installer_client_only_native import _Shell
 
     shell = object.__new__(_Shell)
     shell.bash, shell.tmp = "fixture-bash", tmp_path
@@ -103,7 +103,7 @@ def test_the_shell_harness_refuses_a_real_home(tmp_path):
 
 
 def test_the_powershell_harness_refuses_a_real_home(tmp_path):
-    from tests.test_installer_client_only_ps import _PowerShell
+    from tests.test_installer_client_only_ps_native import _PowerShell
 
     ps = object.__new__(_PowerShell)
     ps.pwsh, ps.tmp = "fixture-pwsh", tmp_path
