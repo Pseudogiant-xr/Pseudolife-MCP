@@ -6,6 +6,7 @@ package managers.  They never touch live registrations or installed packages.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -34,13 +35,57 @@ def _fixture_env(tmp_path: Path) -> dict[str, str]:
     }
     fixture_home = tmp_path / "home"
     fixture_home.mkdir(parents=True, exist_ok=True)
+    shim = fixture_home / "shim"
     env.update({
         "CODEX_HOME": str(fixture_home / "codex"),
         "HOME": str(fixture_home),
         "USERPROFILE": str(fixture_home),
         "XDG_CONFIG_HOME": str(fixture_home / "config"),
+        "LOCALAPPDATA": str(fixture_home / "AppData" / "Local"),
+        "APPDATA": str(fixture_home / "AppData" / "Roaming"),
+        # Both shim layout overrides, inside the fixture home: with both set,
+        # `ops/shim_runtime.py expose` puts the launcher on no PATH
+        # (pseudolife_memory/runtimes.py default_layout). Without them, a
+        # whole-installer run that reaches the real runtime install writes
+        # the real HKCU\Environment Path on Windows, whatever USERPROFILE
+        # says, since the registry is not under the fixture home.
+        "PSEUDOLIFE_SHIM_RUNTIMES": str(shim / "runtimes"),
+        "PSEUDOLIFE_SHIM_LAUNCHER": str(
+            shim / "bin" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")),
     })
     return env
+
+
+@contextlib.contextmanager
+def user_path_unchanged():
+    """On Windows, fail when the block changed the real user PATH
+    (HKCU\\Environment Path), and put the value back as it was; elsewhere a
+    no-op. A whole-installer test wraps its run in it, because a fixture home
+    does not contain the registry."""
+    if os.name != "nt":
+        yield
+        return
+    import winreg
+
+    def read():
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            try:
+                return winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                return None
+
+    before = read()
+    try:
+        yield
+    finally:
+        after = read()
+        if after != before:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+                if before is None:
+                    winreg.DeleteValue(key, "Path")
+                else:
+                    winreg.SetValueEx(key, "Path", 0, before[1], before[0])
+            raise AssertionError(f"the test changed the real user PATH (restored): {before!r} -> {after!r}")
 
 
 def _bash_fixture_path(
@@ -786,3 +831,89 @@ def test_install_ps1_flagless_fresh_cli_fails_before_registration(
     assert "registration was skipped" in output
     assert not any("mcp add" in call and "--help" not in call for call in calls)
     assert not any("mcp remove" in call for call in calls)
+
+
+class _NoRegistry(dict):
+    """A user environment that fails any test reaching it."""
+
+    def get(self, *args):
+        raise AssertionError("the user PATH was read for exposure")
+
+    def __setitem__(self, *args):
+        raise AssertionError("the user PATH was written")
+
+
+@pytest.mark.parametrize("windows", [True, False], ids=["windows", "posix"])
+def test_the_installer_fixture_environment_exposes_the_shim_on_no_path(tmp_path, windows):
+    # The fixture home holds HOME and USERPROFILE, but not the Windows
+    # registry: a whole-installer harness built from this environment, whose
+    # python runs the real `ops/shim_runtime.py expose`, would otherwise
+    # write the developer's real HKCU Environment Path. Every name a default
+    # layout or a Windows path is derived from lies inside the fixture home,
+    # and both layout overrides are set, so exposure is skipped.
+    from pseudolife_memory import runtimes
+
+    env = _fixture_env(tmp_path)
+    home = Path(env["HOME"])
+    for name in ("USERPROFILE", "LOCALAPPDATA", "APPDATA", "PSEUDOLIFE_SHIM_RUNTIMES",
+                 "PSEUDOLIFE_SHIM_LAUNCHER"):
+        assert home == Path(env[name]) or home in Path(env[name]).parents, name
+    if windows != (os.name == "nt"):
+        suffix = ".exe" if windows else ""
+        env["PSEUDOLIFE_SHIM_LAUNCHER"] = str(Path(env["PSEUDOLIFE_SHIM_LAUNCHER"]).with_suffix(suffix))
+    layout = runtimes.default_layout(env, windows=windows)
+    assert not layout.user_path and layout.user_bin is None
+    exposed = runtimes.expose_launcher(layout, env=env, registry=_NoRegistry(),
+                                       broadcast=lambda: pytest.fail("broadcast"))
+    assert exposed["state"] == "skipped", exposed
+
+
+def test_the_client_only_whole_installer_harnesses_use_the_fixture_environment():
+    # The two tests that run a whole installer with the real interpreter
+    # build their environment from _fixture_env and guard the user PATH.
+    for name in ("test_installer_client_only.py", "test_installer_client_only_ps.py"):
+        source = (ROOT / "tests" / name).read_text(encoding="utf-8")
+        assert "self.env = _fixture_env(" in source, name
+        start = source.index("def test_a_client_only_install_wires_clients_to_the_remote_daemon(")
+        body = source[start:source.find("\ndef ", start + 1)]
+        assert "with user_path_unchanged():" in body, name
+
+
+class _FakeWinreg:
+    """Just enough of winreg for user_path_unchanged, over a dict."""
+
+    HKEY_CURRENT_USER = "HKCU"
+    KEY_SET_VALUE = 2
+
+    def __init__(self, path):
+        self.values = {} if path is None else {"Path": path}
+
+    @contextlib.contextmanager
+    def OpenKey(self, *args):
+        yield self
+
+    def QueryValueEx(self, key, name):
+        if name not in self.values:
+            raise FileNotFoundError(name)
+        return self.values[name]
+
+    def SetValueEx(self, key, name, reserved, kind, value):
+        self.values[name] = (value, kind)
+
+    def DeleteValue(self, key, name):
+        del self.values[name]
+
+
+@pytest.mark.parametrize("before", [("C:\\fixture;%USERPROFILE%\\x", 2), None], ids=["set", "absent"])
+def test_the_user_path_guard_fails_and_restores_a_changed_path(monkeypatch, before):
+    # Never the real registry: a fake winreg stands in, and os.name reads nt.
+    import sys
+    fake = _FakeWinreg(before)
+    monkeypatch.setitem(sys.modules, "winreg", fake)
+    monkeypatch.setattr(os, "name", "nt")
+    with user_path_unchanged():
+        pass
+    with pytest.raises(AssertionError, match="changed the real user PATH"):
+        with user_path_unchanged():
+            fake.values["Path"] = ("C:\\leaked", 2)
+    assert fake.values.get("Path") == before
