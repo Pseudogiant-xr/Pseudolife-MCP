@@ -1075,6 +1075,23 @@ def _is_release_cut(base_sha: str, m: Member) -> bool:
     return common.returncode == 0 and _project_version(m.sha) != _project_version(common.stdout.strip())
 
 
+def _unfolded_reason(base_sha: str, fork: str, m: Member) -> str | None:
+    """Why a release cut forked at ``fork`` may not merge onto ``base_sha``:
+    the merge would leave changelog fragments unfolded."""
+    at_base, at_fork, at_cut = _fragments(base_sha), _fragments(fork), _fragments(m.sha)
+    # What the merge keeps: master's fragments the cut did not fold, and any
+    # the cut adds.
+    unfolded = sorted((at_base - (at_fork - at_cut)) | (at_cut - at_fork))
+    if not unfolded:
+        return None
+    return (f"it is a release cut, but merging it onto {BASE} leaves "
+            f"{len(unfolded)} changelog fragment(s) unfolded "
+            f"({', '.join(unfolded[:3])}{', ...' if len(unfolded) > 3 else ''}), "
+            "so the release would ship changes its notes do not describe; merge "
+            f"{BASE} forward, run `python ops/assemble_changelog.py` again, "
+            "rerun the cut's pinned tests, then re-apply the label")
+
+
 def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None = None) -> list[Member]:
     """The members to merge: all of them, or only the first ready release cut
     (a member whose own diff changes project.version), with the others
@@ -1097,17 +1114,8 @@ def _release_cut_alone(plan: Plan, members: list[Member], refused: dict | None =
         base = _out("merge-base", plan.base_sha, m.sha)
         if _project_version(m.sha) == _project_version(base):
             continue
-        at_base, at_fork, at_cut = _fragments(plan.base_sha), _fragments(base), _fragments(m.sha)
-        # What the merge keeps: master's fragments the cut did not fold,
-        # and any the cut adds.
-        unfolded = sorted((at_base - (at_fork - at_cut)) | (at_cut - at_fork))
-        if unfolded:
-            reason = (f"it is a release cut, but merging it onto {BASE} leaves "
-                      f"{len(unfolded)} changelog fragment(s) unfolded "
-                      f"({', '.join(unfolded[:3])}{', ...' if len(unfolded) > 3 else ''}), "
-                      "so the release would ship changes its notes do not describe; merge "
-                      f"{BASE} forward, run `python ops/assemble_changelog.py` again, "
-                      "rerun the cut's pinned tests, then re-apply the label")
+        reason = _unfolded_reason(plan.base_sha, base, m)
+        if reason:
             plan.dropped.append(Dropped(m, reason))
             print(f"  dropped #{m.number}: {reason}")
             # Another cut among the rest is still batched alone.
@@ -1216,6 +1224,7 @@ def _budget_member_evidence(base_sha: str, member: Member) -> list[dict]:
     baseline_document = _budget_json(common, CI_FINGERPRINTS)
     baselines = module.parse_fingerprint_baseline(baseline_document) if baseline_document is not None else {}
     imported = []
+    missing: list[str] = []   # every job without a reviewed reason, named at once
     for name in sorted(names):
         entry = (data or {}).get(name, {})
         old_entry = (before or {}).get(name, {})
@@ -1247,11 +1256,14 @@ def _budget_member_evidence(base_sha: str, member: Member) -> list[dict]:
                     imported.append({"workflow": name, "job": job,
                                      "fingerprint": expected or previous[name].get(job), "reason": reason})
             if reason is None:
-                raise ValueError(f"{name}/{job} changed without a reviewed cost reason; run ci_budget.py accept")
+                missing.append(f"{name}/{job}")
         if legacy:
             existing = {json.dumps(row, sort_keys=True) for row in old_entry.get("accepted", [])}
             imported.extend({"workflow": name, **row} for row in entry.get("accepted", [])
                             if json.dumps(row, sort_keys=True) not in existing)
+    if missing:
+        raise ValueError(f"{', '.join(missing)} changed without a reviewed cost reason; "
+                         "run ci_budget.py accept" + (" for each" if len(missing) > 1 else ""))
     # Historical records remain audit evidence, never fresh cost approvals.
     unique = {json.dumps(row, sort_keys=True): row for row in imported}
     for row in unique.values():
@@ -1660,6 +1672,79 @@ def _own_frozen_refusal(freeze, base_sha: str, m: Member, labels) -> str | None:
     return None
 
 
+def _carried(refused: dict, m: Member) -> list[int]:
+    """The refused pull requests ``m``'s head carries. A waiting entry (keep)
+    only waits on a labelled parent, and its frozen files are that parent's:
+    carrying it carries nothing unruled."""
+    return [number for sha, (number, _, keep) in refused.items()
+            if not keep and sha != m.sha and _is_ancestor(sha, m.sha)]
+
+
+def _carried_reason(freeze, carried: list[int]) -> str:
+    names = ", ".join(f"#{number}" for number in carried)
+    return (f"its head carries {names}'s change to the frozen Python package, which "
+            f"{names} is not labelled `{freeze.EXCEPTION_LABEL}` for; it joins once "
+            f"{names} lands, leaves the stack, or the maintainer rules {names}'s change "
+            "an exception")
+
+
+def _once_ready(base_sha: str, m: Member, freeze, prepass: _Prepass) -> list[str]:
+    """What would still refuse a member that sits this batch out as not
+    ready, once it is: the checks `_merge_members` runs only after
+    readiness, judged against master alone. Without this, a pending replay
+    hides a budget or freeze refusal until the replay has finished."""
+    if not _has_commit(m.sha):
+        return [f"its listed head {m.sha[:12]} is not in this checkout (it moved after listing), "
+                "so it was not judged further; rebuild to judge it"]
+    reasons: list[str] = []
+    # The freeze's own verdict, as `_merge_members` would give it; the merge
+    # check below would only repeat it, and for a child waiting on a
+    # labelled parent would contradict it.
+    judged = False
+    if m.sha in prepass.refused:
+        reasons.append(prepass.refused[m.sha][1])
+        judged = True
+    if carried := _carried(prepass.refused, m):
+        reasons.append(_carried_reason(freeze, carried))
+        judged = True
+    if _is_release_cut(base_sha, m):
+        unfolded = _unfolded_reason(base_sha, _out("merge-base", base_sha, m.sha), m)
+        if unfolded:
+            reasons.append(unfolded)
+    try:
+        _budget_member_evidence(base_sha, m)
+    except (ValueError, TypeError, KeyError, Refusal) as error:
+        reasons.append(f"CI budget metadata refused: {error}")
+    merged = git("merge-tree", "--write-tree", "--name-only", "--no-messages", base_sha, m.sha, check=False)
+    lines = merged.stdout.splitlines()
+    if merged.returncode == 1:
+        files = [line for line in lines[1:] if line]
+        # `_merge_members` normalizes a conflict in the budget file alone
+        # (`_merge_budget_conflict`), so only that merge can tell.
+        if files != [CI_BUDGET]:
+            reasons.append(f"its merge onto {BASE} conflicts in {', '.join(files) or 'files git did not name'}")
+    elif merged.returncode != 0 or not lines:
+        reasons.append(f"its merge onto {BASE} could not be computed ({merged.stderr.strip() or 'no tree'})")
+    elif not judged:
+        frozen = _frozen_between(freeze, base_sha, lines[0])
+        if frozen is None:
+            reasons.append(f"its merge onto {BASE} could not be read for the Python freeze check")
+        elif frozen and freeze.EXCEPTION_LABEL not in m.labels:
+            reasons.append(freeze.refusal(frozen))
+    return list(dict.fromkeys(reasons))
+
+
+def _report_once_ready(base_sha: str, waiting: list[tuple[Member, str]], freeze, prepass: _Prepass) -> None:
+    """Report only: it never refuses, so a build it follows stands as built."""
+    for m, _ in waiting:
+        try:
+            later = _once_ready(base_sha, m, freeze, prepass)
+        except Refusal as error:
+            later = [f"it could not be judged further ({error})"]
+        print(f"  #{m.number}, once ready: " + ("nothing else refuses it" if not later else
+                                                "; and ".join(later)))
+
+
 def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Prepass | None = None) -> None:
     freeze = freeze or _freeze_module(plan.base_sha, members)
     # Every pull request's own change is judged before anything merges
@@ -1685,16 +1770,9 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
             plan.dropped.append(Dropped(m, reason, comment=not keep))
             print(f"  {'left out' if keep else 'dropped'} #{m.number}: {reason}")
             continue
-        # A waiting entry (keep) only waits on a labelled parent, and its
-        # frozen files are that parent's: carrying it carries nothing unruled.
-        carried = [number for sha, (number, _, keep) in own.items()
-                   if not keep and sha != m.sha and _is_ancestor(sha, m.sha)]
+        carried = _carried(own, m)
         if carried:
-            names = ", ".join(f"#{number}" for number in carried)
-            reason = (f"its head carries {names}'s change to the frozen Python package, which "
-                      f"{names} is not labelled `{freeze.EXCEPTION_LABEL}` for; it joins once "
-                      f"{names} lands, leaves the stack, or the maintainer rules {names}'s change "
-                      "an exception")
+            reason = _carried_reason(freeze, carried)
             plan.dropped.append(Dropped(m, reason, comment=False))
             print(f"  left out #{m.number}: {reason}")
             continue
@@ -1925,7 +2003,7 @@ def _record_carried(plan: Plan, prepass: _Prepass | None) -> None:
                            if number not in merged and _is_ancestor(sha, head)})
 
 
-def _merge_batch(plan: Plan, members: list[Member]) -> None:
+def _merge_batch(plan: Plan, members: list[Member]) -> tuple:
     """Merge the members, then regenerate derived CI metadata on the head
     (see `_regenerate_census`). When the head's census script fails, the
     members whose own diff changes the census inputs leave and the rest
@@ -1935,13 +2013,14 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
     _fetch_listed(members)       # the first landing reads the guard the members carry
     freeze = _freeze_module(plan.base_sha, members)
     prepass = _freeze_prepass(plan, freeze, members)
+    judged = (freeze, prepass)
     members = _release_cut_alone(plan, members, prepass.refused)
     cut_drops = list(plan.dropped)
     _merge_members(plan, members, freeze, prepass)
     _record_carried(plan, prepass)
     inputs = _census_inputs(plan.base_sha)
     if not plan.merged or inputs is None and _budget_tools(plan.base_sha) is None:
-        return    # master has no supported generated metadata
+        return judged    # master has no supported generated metadata
     drops: list[Dropped] = []
     # Each round drops at least one member, so this ends. A member a dropped
     # one had kept out (a conflict with it) merges in the next round, and is
@@ -1963,6 +2042,7 @@ def _merge_batch(plan: Plan, members: list[Member]) -> None:
         out = {d.member.number for d in drops}
         print("  merging again without " + ", ".join(f"#{n}" for n in sorted(out)))
         _remerge(plan, members, cut_drops + drops, out, freeze, prepass)
+    return judged
 
 
 def _new_markers(base_sha: str) -> list[str]:
@@ -2124,6 +2204,18 @@ def build(args: argparse.Namespace) -> int:
               f"failing); a batch needs {MIN_MEMBERS}.")
         for m, reason in waiting:
             print(f"  #{m.number} {reason}")
+        if waiting:
+            # Report only: what cannot be judged is said, and this still
+            # returns 0 as it did before the report existed.
+            try:
+                _fetch_listed(members)
+                freeze = _freeze_module(base_sha, members)
+                stub = Plan(branch=f"{PREFIX}{args.date}-batch-0", base_sha=base_sha, label=args.label)
+                prepass = _freeze_prepass(stub, freeze, members)
+            except Refusal as error:
+                print(f"  (what would refuse them once ready could not be judged: {error})")
+            else:
+                _report_once_ready(base_sha, waiting, freeze, prepass)
         return 0
     n = max(_used_numbers(args.date), default=0) + 1
     plan = Plan(branch=f"{PREFIX}{args.date}-batch-{n}", base_sha=base_sha,
@@ -2135,8 +2227,9 @@ def build(args: argparse.Namespace) -> int:
     else:
         git("switch", "-q", "-c", plan.branch, base_sha)
     done = False
+    judged = None
     try:
-        _merge_batch(plan, members)
+        judged = _merge_batch(plan, members)
         plan.markers = _new_markers(base_sha)
         plan.head = _out("rev-parse", "HEAD")
         done = True
@@ -2152,6 +2245,8 @@ def build(args: argparse.Namespace) -> int:
 
     for d in plan.dropped:
         print(f"  left out #{d.member.number}: {d.reason}")
+    if waiting and judged:
+        _report_once_ready(base_sha, waiting, *judged)
     if len(plan.merged) < MIN_MEMBERS:
         merged = ", ".join(f"#{m.number}" for m in plan.merged) or "none"
         print(f"{merged} merged cleanly; no batch built.")
