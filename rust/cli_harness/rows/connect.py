@@ -4,15 +4,18 @@ Canonical argv (the producers: ``ops/install.sh`` / ``ops/install.ps1``'s
 client-only connect block, ``docs/guide/remote-bank.md``, ``move_cli``):
 ``connect <url> [--token-file P] [--read-token] [--client NAMES] [--dry-run]
 [--yes] [--json]``, the URL first, each option at most once with its value
-as the next argument. An interactive question or token prompt and an
-unattended-update schedule defer before any effect; pairing
-(``--code`` / ``--read-code``), a Codex ``config.toml`` and a Windows
-User-scope daemon URL are native, covered by the Rust tests
+as the next argument. Pairing (``--code`` / ``--read-code``), a Codex
+``config.toml``, a Windows User-scope daemon URL, the unattended-update
+schedules and the terminal prompts are native, covered by the Rust tests
 (``rust/shim/tests/cli_connect_contract.rs``, ``cli_connect_pairing.rs``,
-``src/cli/connect/native_tests.rs``). This row compares answered cases only,
-and refuses to run on a Windows host whose User- or Machine-scope
-environment sets ``PSEUDOLIFE_MCP_DAEMON_URL``: the native arm's ``--yes``
-cases would re-point a real User-scope one.
+``src/cli/connect/native_tests.rs``, ``src/cli/update/unattended/reschedule.rs``)
+and the pseudo-terminal cases in ``test_pair_terminal.py``. Native
+``connect`` re-creates a schedule the oracle only reports, so no case here
+installs one. This row compares answered cases only, and refuses to run on
+a Windows host whose User- or Machine-scope environment sets
+``PSEUDOLIFE_MCP_DAEMON_URL`` or that has an unattended-update scheduled
+task: the native arm's ``--yes`` cases would re-point or re-create a real
+one.
 
 Contract per arm: exit code, both streams byte-exact, every file under the
 home (written configs, backups, created token files), and the requests the
@@ -711,6 +714,21 @@ def _real_state() -> dict:
     return state
 
 
+def _windows_scheduled_updates() -> list[str]:
+    """The unattended-update scheduled tasks on this Windows host, which
+    native ``connect --yes`` re-creates for a new daemon URL."""
+    if not WINDOWS:
+        return []
+    schtasks = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "schtasks.exe"
+    found = []
+    for task in ("Pseudolife Unattended Update", "Pseudolife Client Update"):
+        result = subprocess.run([str(schtasks), "/Query", "/TN", task], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if result.returncode == 0:
+            found.append(f"task {task!r}")
+    return found
+
+
 def _windows_daemon_urls() -> dict:
     """The Windows User- and Machine-scope ``PSEUDOLIFE_MCP_DAEMON_URL``,
     which native ``connect --yes`` re-points (User) or reports (Machine)."""
@@ -911,10 +929,11 @@ def cases() -> list[Case]:
     if _BASELINE is None:
         _BASELINE = _real_state()
         present = [key for key, value in _windows_daemon_urls().items() if value is not None]
+        present += _windows_scheduled_updates()
         if present:
             raise AssertionError(
-                f"connect row: this host sets PSEUDOLIFE_MCP_DAEMON_URL in its Windows environment ({', '.join(present)}); "
-                "the native arm's --yes cases would re-point a real User-scope value. Run the row on a host without one")
+                f"connect row: this host has a Windows PSEUDOLIFE_MCP_DAEMON_URL or unattended-update task ({', '.join(present)}); "
+                "the native arm's --yes cases would re-point or re-create a real one. Run the row on a host without them")
     out: list[Case] = []
     add = out.append
 

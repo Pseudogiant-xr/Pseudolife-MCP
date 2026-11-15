@@ -1,8 +1,7 @@
 //! `connect_cli.discover`: one row per place a selected client keeps the
 //! daemon URL (the Codex rows come from `codex.rs`, read asynchronously),
 //! plus the environment rows: the shell's own URL and the Windows
-//! User-scope one. An unattended-update schedule defers before discovery
-//! (see `mod.rs`).
+//! User-scope one. The unattended-update schedule rows are `schedule.rs`'s.
 use super::files::{self, Read};
 use super::pyjson::{self, Dict, J};
 use super::{Cred, Defer, paths, url};
@@ -58,6 +57,8 @@ pub(super) struct Row {
     pub user_env: Option<super::user_env::Value>,
     /// The Codex registration row: the environment shown and confirmed.
     pub codex_after: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The unattended-update schedule row: what it re-creates.
+    pub schedule: Option<super::schedule::Plan>,
 }
 
 pub(super) fn row(
@@ -83,6 +84,7 @@ pub(super) fn row(
         codex: None,
         user_env: None,
         codex_after: None,
+        schedule: None,
     })
 }
 
@@ -674,5 +676,8 @@ pub(super) fn discover(ctx: &Ctx, codex: Vec<Row>) -> Result<Vec<Row>, Defer> {
         rows.extend(gemini_rows(ctx)?);
     }
     rows.extend(environment_rows(ctx)?);
+    if ctx.clients.len() == super::CLIENTS.len() {
+        rows.extend(super::schedule::rows(ctx)?);
+    }
     Ok(rows)
 }
