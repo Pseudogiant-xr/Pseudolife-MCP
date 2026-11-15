@@ -81,8 +81,9 @@ fn own_group(command: &mut Command) {
         // No window of its own only when this process has no console: at a
         // terminal, ssh shares it, so a prompt BatchMode does not cover stays
         // visible.
-        command
-            .creation_flags(CREATE_NEW_PROCESS_GROUP | super::super::console::child_window_flag());
+        command.creation_flags(
+            CREATE_NEW_PROCESS_GROUP | super::super::child_window::child_window_flag(),
+        );
     }
 }
 

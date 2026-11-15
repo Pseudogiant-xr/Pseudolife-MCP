@@ -667,7 +667,7 @@ pub(super) fn no_window(command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(super::super::console::child_window_flag());
+        command.creation_flags(super::super::child_window::child_window_flag());
     }
     #[cfg(not(windows))]
     let _ = command;

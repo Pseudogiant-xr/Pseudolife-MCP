@@ -21,8 +21,8 @@ use super::lease::lock as os_lock;
 
 mod args;
 mod bank;
+mod child_window;
 mod conn;
-mod console;
 mod docker;
 pub(super) mod docker_backup;
 mod dump;
