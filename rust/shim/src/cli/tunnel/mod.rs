@@ -1007,7 +1007,9 @@ mod tests {
     /// beside what its record says; the update still answers (exit 0).
     #[test]
     fn update_names_each_profile_it_cannot_read_and_still_answers() {
-        let token = |store: &Store| serde_json::to_string(&store.0.join("token")).unwrap();
+        fn token(store: &Store) -> String {
+            serde_json::to_string(&store.0.join("token")).unwrap()
+        }
         type Shape = (&'static str, Box<dyn Fn(&Store) -> Vec<u8>>, &'static str);
         let shapes: Vec<Shape> = vec![
             (
