@@ -56,10 +56,14 @@ def _fixture_env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
-def _inside(entry: str, home: str) -> bool:
+REG_EXPAND_SZ = 2   # winreg.REG_EXPAND_SZ, named here so the helpers run off Windows
+
+
+def _inside(entry: str, home: str, *, expand_vars: bool = True) -> bool:
     """Whether a user PATH entry names ``home`` or a path under it, in
     Windows terms: case-insensitive, either separator, surrounding quotes
-    dropped, and only ``%VAR%`` expanded (Windows does not expand ``$VAR``)."""
+    dropped, and ``%VAR%`` expanded only when ``expand_vars`` (a REG_EXPAND_SZ
+    value; Windows expands nothing in a REG_SZ one, and never ``$VAR``)."""
     import ntpath
     import re
 
@@ -67,6 +71,8 @@ def _inside(entry: str, home: str) -> bool:
         path = path.strip()
         if len(path) >= 2 and path[0] == path[-1] == '"':
             path = path[1:-1]
+        if not expand_vars:
+            return path
         return re.sub(r"%([^%]+)%", lambda match: os.environ.get(match[1], match[0]), path)
 
     def norm(path: str) -> str:
@@ -99,10 +105,11 @@ def _leaked_entries(before, value, home: str) -> list[str] | None:
     if before is not None and value[1] != before[1]:
         return None
     old, added, kept = _path_entries(before), [], 0
+    expand_vars = value[1] == REG_EXPAND_SZ
     for entry in _path_entries(value):
         if kept < len(old) and entry == old[kept]:
             kept += 1
-        elif _inside(entry, home):
+        elif _inside(entry, home, expand_vars=expand_vars):
             added.append(entry)
         else:
             return None
@@ -115,25 +122,24 @@ def _path_difference(before, value) -> str:
     """What differs between two user PATH values, for a failure message: the
     entries added and removed, and whether the entries both keep changed
     order or the value's registry type changed."""
-    import difflib
+    from collections import Counter
 
     old, new = _path_entries(before), _path_entries(value)
-    # An order-keeping alignment: what it leaves out of old was deleted, what
-    # it leaves out of new was inserted, and a value in both moved.
-    deleted, inserted = [], []
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
-        if tag != "equal":
-            deleted.extend(old[i1:i2])
-            inserted.extend(new[j1:j2])
-    moved = []
-    for entry in list(inserted):
-        if entry in deleted:
-            deleted.remove(entry)
-            inserted.remove(entry)
-            moved.append(entry)
-    parts = [f"added {inserted!r}", f"removed {deleted!r}"]
-    if moved:
-        parts.append(f"the entries both values have are in a different order ({moved!r} moved)")
+    # Added and removed as counts; the entries both have, in their new order,
+    # are reordered only if they are not a subsequence of the old entries.
+    pool, kept, added = Counter(old), [], []
+    for entry in new:
+        if pool[entry]:
+            pool[entry] -= 1
+            kept.append(entry)
+        else:
+            added.append(entry)
+    removed = list((Counter(old) - Counter(kept)).elements())
+    remaining = iter(old)
+    in_order = all(entry in remaining for entry in kept)
+    parts = [f"added {added!r}", f"removed {removed!r}"]
+    if not in_order:
+        parts.append("the entries both values have are in a different order")
     if before is None and value is not None:
         parts.append("the value was created")
     elif before is not None and value is None:
@@ -1214,3 +1220,22 @@ def test_the_failure_names_removals_and_moves_apart(old, new, names, not_named):
 def test_the_failure_names_a_created_or_deleted_value():
     assert "the value was created" in _path_difference(None, ("", 2))
     assert "the value was deleted" in _path_difference(("", 2), None)
+
+
+def test_a_plain_string_path_expands_no_variable(monkeypatch):
+    # Codex review of 7519cc866: Windows expands %VAR% only in a REG_EXPAND_SZ
+    # value; in a REG_SZ one the entry is the literal text, not the home.
+    monkeypatch.setenv("PL_GUARD_HOME", HOME)
+    assert not _inside("%PL_GUARD_HOME%\\bin", HOME, expand_vars=False)
+    fake, announced, guard = _guarded(monkeypatch, ("C:\\tools", 1))
+    changed = ("%PL_GUARD_HOME%\\bin;C:\\tools", 1)
+    with pytest.raises(AssertionError, match="in a way this test did not cause"):
+        with guard():
+            fake.values["Path"] = changed
+    assert fake.values["Path"] == changed and announced == []
+
+
+def test_a_deletion_among_duplicates_is_not_reported_as_a_move():
+    # Codex review of 7519cc866: the new entries are a subsequence of the old.
+    message = _path_difference(("B;C;D;A;B;X;C;Y;D;E", 2), ("A;B;C;D;E", 2))
+    assert "different order" not in message, message
