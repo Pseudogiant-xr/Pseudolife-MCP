@@ -591,7 +591,7 @@ fn a_maintainer_refusal_whose_body_never_arrives_is_not_checked() {
     assert_eq!(
         map["maintainer_passkeys"],
         json!({"state": "not_checked",
-               "line": "not checked - the daemon's maintainer answer did not arrive in full"})
+               "line": "not checked - the daemon's maintainer answer was incomplete or in a form this client does not read"})
     );
     // The 404 /health is no health answer: the daemon is unavailable.
     assert_eq!(map["error"], json!("DaemonUnavailable"));
@@ -876,6 +876,8 @@ fn an_empty_tunnel_directory_keeps_every_ordinary_diagnostic() {
     assert!(!map.contains_key("tunnels"));
     // An empty, old tunnel directory: still no tunnel section, nothing lost.
     std::fs::create_dir_all(home.0.join(".pseudolife-mcp").join("tunnel")).unwrap();
+    // A fresh daemon: the fixture answers its tool list once.
+    let fixture = healthy_fixture();
     let output = diagnose(&home, &fixture.url).output().unwrap();
     let map = report(&output);
     assert_ordinary(&map, &output);
@@ -921,7 +923,12 @@ mod tunnel_profiles {
         entries[0].3 = meta.modified().unwrap();
         for (rel, bytes) in tree(&root) {
             let meta = std::fs::symlink_metadata(root.join(&rel)).unwrap();
-            entries.push((rel, bytes, meta.permissions().mode(), meta.modified().unwrap()));
+            entries.push((
+                rel,
+                bytes,
+                meta.permissions().mode(),
+                meta.modified().unwrap(),
+            ));
         }
         entries
     }
@@ -1057,6 +1064,7 @@ fn a_proxy_variable_is_named_and_every_check_still_runs() {
     );
     // NO_PROXY covering the daemon lets the shim through; doctor still names
     // the variables it saw.
+    let fixture = healthy_fixture();
     let output = diagnose(&home, &fixture.url)
         .env("HTTP_PROXY", &proxy)
         .env("NO_PROXY", "127.0.0.1")
@@ -1157,7 +1165,7 @@ fn an_unreadable_token_source_is_named_and_the_other_checks_run() {
         map["recovery"]
             .as_str()
             .unwrap()
-            .contains("configured credential file is unavailable"),
+            .contains("(configured credential file is missing; source: environment)"),
         "{map:?}"
     );
 }

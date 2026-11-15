@@ -671,10 +671,7 @@ open a new terminal",
     Ok(Value::Object(report))
 }
 
-/// Saved tunnels exist: their diagnostics are beyond this port.
-pub(super) fn tunnels_present(env: &Env) -> Res<bool> {
-    pyenv::lexists(&join(
-        &join(&pyenv::home(env)?, ".pseudolife-mcp"),
-        "tunnel",
-    ))
+/// Where saved tunnel profiles live (`tunnel_profiles.default_root`).
+pub(super) fn tunnel_root(env: &Env) -> Res<String> {
+    Ok(join(&join(&pyenv::home(env)?, ".pseudolife-mcp"), "tunnel"))
 }

@@ -1,7 +1,9 @@
 //! `pseudolife-mcp doctor`: read-only runtime diagnostics and an explicit
-//! disposable proof through the native daemon. Every input outside the
-//! reproduced domain defers before the first request to the daemon, or,
-//! for an answer only the daemon can give, before the handshake starts.
+//! disposable proof through the native daemon. A check whose input the
+//! native reader does not parse (a client file, a daemon answer, a saved
+//! tunnel, a proxy or an unusable credential) is named in the report while
+//! every unrelated check still runs; only argument shapes and an
+//! unresolvable --agent-state path still defer the whole command.
 mod agent;
 mod clients;
 mod handshake;
@@ -189,19 +191,90 @@ pub(super) fn truthy(value: &Value) -> bool {
     }
 }
 
-/// urllib proxies `http_proxy`/`https_proxy`; the native probes connect
-/// directly, so either variable defers. Without them urllib also reads the
-/// Windows registry (WinINet) and macOS `_scproxy` settings, which this does
-/// not consult (a declared divergence).
-fn no_proxy_environment() -> Res<()> {
+/// The proxy variables this environment sets, by name only (a proxy URL
+/// may carry credentials), and whether any of them routes traffic. Doctor's
+/// own probes connect to the daemon directly; the shim it starts, like every
+/// client's shim, uses reqwest's environment proxy (`HTTP_PROXY`,
+/// `HTTPS_PROXY`, `ALL_PROXY`, with `NO_PROXY` exceptions).
+fn proxy_variables() -> (Vec<String>, bool) {
+    let mut names = Vec::new();
+    let mut routes = false;
     for (name, value) in std::env::vars_os() {
-        // urllib's ProxyHandler uses the scheme entries only.
-        let name = name.to_string_lossy().to_ascii_lowercase();
-        if matches!(name.as_str(), "http_proxy" | "https_proxy") && !value.is_empty() {
-            return Err(Defer);
+        let name = name.to_string_lossy().into_owned();
+        let lower = name.to_ascii_lowercase();
+        if value.is_empty()
+            || !matches!(
+                lower.as_str(),
+                "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy"
+            )
+        {
+            continue;
+        }
+        routes |= lower != "no_proxy";
+        names.push(name);
+    }
+    names.sort();
+    names.dedup();
+    (names, routes)
+}
+
+/// The report line for set proxy variables, when one of them routes.
+fn proxy_note(names: &[String]) -> String {
+    format!(
+        "{} set: doctor's own /health, board and maintainer probes connect to the daemon directly, while the shim this doctor starts, like every client's shim, connects through the proxy unless NO_PROXY names the daemon's host.",
+        names.join(", ")
+    )
+}
+
+/// Appended to a handshake recovery while a proxy variable routes traffic.
+const PROXY_RECOVERY: &str = " A proxy variable is set and the shim connects through it: add the daemon's host to NO_PROXY (or unset the proxy for this client), then retry.";
+
+/// A section whose input the native reader does not parse; the rest of
+/// the report is unaffected.
+fn unread(input: &str) -> String {
+    format!("unknown (not read by the native client: {input})")
+}
+
+const REGISTRATIONS_UNREAD: &str = "not read by the native client: ~/.claude.json or the Codex config.toml holds syntax it does not parse (Python-only JSON such as NaN, or invalid TOML). Fix that file, or set PSEUDOLIFE_MCP_TOKEN_FILE in this shell to name the credential directly.";
+
+/// Why the configured credential cannot be used. Its text never includes
+/// the token or the token file's contents.
+enum BearerProblem {
+    /// The source could not be read or is configured wrongly (the
+    /// credential module's own reason).
+    Unavailable(&'static str),
+    /// The token holds characters an HTTP header cannot carry.
+    Unsendable,
+}
+
+impl BearerProblem {
+    fn board_line(&self) -> String {
+        match self {
+            Self::Unavailable(reason) => {
+                format!("not checked - the credential is unusable ({reason})")
+            }
+            Self::Unsendable => {
+                "not checked - the bearer token contains characters other than printable ASCII"
+                    .into()
+            }
         }
     }
-    Ok(())
+    fn error(&self, source: &str) -> (&'static str, String) {
+        match self {
+            Self::Unavailable(reason) => (
+                "CredentialUnavailable",
+                format!(
+                    "doctor could not use the configured credential ({reason}; source: {source}). Point PSEUDOLIFE_MCP_TOKEN_FILE at an owner-only file holding only the token, or set PSEUDOLIFE_MCP_TOKEN, then retry; the checks that need no credential ran."
+                ),
+            ),
+            Self::Unsendable => (
+                "BearerUnsendable",
+                format!(
+                    "The configured bearer token (source: {source}) contains characters other than printable ASCII, which no Pseudolife client can send in an HTTP Authorization header. Copy the token again from where it was issued (pseudolife-mcp invite on the daemon host, or the daemon's ops/.env) without extra characters, then retry; the checks that need no credential ran."
+                ),
+            ),
+        }
+    }
 }
 
 /// `principal_activity.token_hash_prefix`: the first 8 hex of the SHA-256
@@ -215,10 +288,9 @@ fn token_hash_prefix(token: &str) -> String {
         .collect()
 }
 
-/// A bearer every client of the run sends alike: printable ASCII. urllib
-/// (board, maintainer) would send Latin-1, but the handshake's Python shim
-/// (httpx) and the --agent-state check cannot encode it, so anything
-/// beyond ASCII defers; DEL is a header value reqwest refuses.
+/// A bearer the native shim can send: printable ASCII, what
+/// `HeaderValue::from_str` admits (`lifecycle.rs` builds its Authorization
+/// header that way; whitespace is already refused by `decode_token`).
 fn sendable(token: &str) -> bool {
     token.bytes().all(|byte| (0x20..0x7f).contains(&byte))
 }
@@ -228,17 +300,26 @@ fn sendable(token: &str) -> bool {
 /// `mcp` (its MCP SDK version) has no native counterpart and is omitted:
 /// after cutover a placeholder would read as a broken install (maintainer
 /// decision 2026-10-09).
-fn identity() -> Res<Vec<(&'static str, String)>> {
-    let executable = std::env::current_exe().map_err(|_| Defer)?;
-    let interpreter = executable.to_str().ok_or(Defer)?.to_owned();
-    let resolved = std::fs::canonicalize(&executable).map_err(|_| Defer)?;
-    let source = resolved.parent().ok_or(Defer)?.to_str().ok_or(Defer)?;
-    let source = source.strip_prefix("\\\\?\\").unwrap_or(source).to_owned();
-    Ok(vec![
+/// A path this runtime cannot name (not UTF-8, or unresolvable) is
+/// `unknown`; the version is always known.
+fn identity() -> Vec<(&'static str, String)> {
+    let executable = std::env::current_exe().ok();
+    let interpreter = executable
+        .as_deref()
+        .and_then(std::path::Path::to_str)
+        .map_or_else(|| "unknown".to_owned(), str::to_owned);
+    let source = executable
+        .and_then(|executable| std::fs::canonicalize(executable).ok())
+        .and_then(|resolved| {
+            let parent = resolved.parent()?.to_str()?;
+            Some(parent.strip_prefix("\\\\?\\").unwrap_or(parent).to_owned())
+        })
+        .unwrap_or_else(|| "unknown".to_owned());
+    vec![
         ("interpreter", interpreter),
         ("source", source),
         ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),
-    ])
+    ]
 }
 
 fn put(report: &mut Map<String, Value>, key: &str, value: Value) {
@@ -284,16 +365,62 @@ fn caps(health: Option<&Map<String, Value>>) -> Value {
 /// `dream_health_line(health, daemon_url)`: `unknown` with no `/health`
 /// answer, `no stall reported` for any answer without a stall object (an
 /// empty `{}` included, as Python's `isinstance(health, dict)` admits it).
-/// A stall object needs the session-start hook's stall line and where its
-/// extractor runs; that answer only the Python doctor gives, so it defers.
-fn dreams(health: Option<&Map<String, Value>>) -> Res<Value> {
+/// A stall object (only a Python daemon sends one) is named by its kind;
+/// the session-start hook's full stall line is not rendered here.
+fn dreams(health: Option<&Map<String, Value>>) -> Value {
     match health {
-        None => Ok(json!("unknown")),
+        None => json!("unknown"),
         Some(health) => match health.get("stall") {
-            Some(Value::Object(_)) => Err(Defer),
-            _ => Ok(json!("no stall reported")),
+            Some(Value::Object(stall)) => {
+                let kind = stall
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .filter(|kind| !kind.is_empty())
+                    .unwrap_or("unknown");
+                json!(format!(
+                    "stalled ({kind}): the daemon reports a dream stall; this client does not render its detail, so read the session-start briefing or the daemon's log for the fix"
+                ))
+            }
+            _ => json!("no stall reported"),
         },
     }
+}
+
+/// `daemon_version` and `codex_hooks` from a `status: ok` health answer.
+async fn health_details(
+    health: &Map<String, Value>,
+    hooks: clients::CodexHooks,
+) -> (String, String) {
+    let daemon_version = match health.get("version") {
+        Some(Value::String(text)) if !text.is_empty() => text.clone(),
+        // A version that is not text is not one doctor can compare.
+        _ => "unknown".into(),
+    };
+    let hooks_line = match hooks {
+        clients::CodexHooks::Line(line) => line,
+        clients::CodexHooks::Plugin => match health.get("hooks_digest") {
+            None | Some(Value::Null) => "unknown".into(),
+            Some(digest) => {
+                let checked =
+                    super::update::clients::check_codex_hooks(None, digest.as_str(), false);
+                let state = checked["state"].as_str().unwrap_or("unknown");
+                if state == "current" || state == "needs-approval" {
+                    let trust = super::update::clients::runtime_hook_status().await;
+                    super::update::clients::runtime_hook_line(trust, state)
+                } else {
+                    // The file check's own detail names the next step.
+                    match checked["detail"]
+                        .as_str()
+                        .filter(|detail| !detail.is_empty())
+                    {
+                        Some(detail) => format!("{state}: {detail}"),
+                        None => state.to_owned(),
+                    }
+                }
+            }
+        },
+    };
+    (daemon_version, hooks_line)
 }
 
 fn coordination_snapshot(
@@ -443,56 +570,93 @@ async fn diagnose(
     environment: &super::host_connection::Environment,
 ) -> Res<(Value, bool)> {
     // Everything before the first request: environment and client files.
-    no_proxy_environment()?;
-    // Python's int() digit limit is part of what json.loads accepts.
-    if std::env::var_os("PYTHONINTMAXSTRDIGITS").is_some() {
-        return Err(Defer);
-    }
+    // A section whose input the native reader does not parse is named in
+    // the report; it never ends the run.
+    let (proxy_names, proxy_routes) = proxy_variables();
     let mut env = Env::default();
     for (key, value) in environment.additions() {
         env.set(key, value.clone());
     }
-    let (overrides, credential_source) = clients::registration_credentials(&env)?;
+    let (overrides, credential_source, registrations_unread) =
+        match clients::registration_credentials(&env) {
+            Ok((overrides, source)) => (overrides, source, false),
+            Err(Defer) => (Vec::new(), None, true),
+        };
     for (key, value) in overrides {
         env.set(&key, value);
     }
-    let url_value = env
-        .var("PSEUDOLIFE_MCP_DAEMON_URL")?
-        .unwrap_or_else(|| crate::daemon_url::DEFAULT_URL.to_owned());
-    let url = crate::daemon_url::validate(&url_value).map_err(|_| Defer)?;
-    let token_file = env.var("PSEUDOLIFE_MCP_TOKEN_FILE")?;
-    let token_value = env.var("PSEUDOLIFE_MCP_TOKEN")?;
-    let provider = crate::credentials::CredentialProvider::from_lookup(|key| match key {
-        "PSEUDOLIFE_MCP_TOKEN_FILE" => token_file.clone().map(OsString::from),
-        "PSEUDOLIFE_MCP_TOKEN" => token_value.clone().map(OsString::from),
-        _ => None,
-    })
-    .map_err(|_| Defer)?;
-    let token = provider
-        .snapshot()
-        .map_err(|_| Defer)?
-        .token()
-        .map(str::to_owned);
+    // An invalid URL is a named error; nothing is requested.
+    let url = env
+        .var("PSEUDOLIFE_MCP_DAEMON_URL")
+        .ok()
+        .map(|value| value.unwrap_or_else(|| crate::daemon_url::DEFAULT_URL.to_owned()))
+        .and_then(|value| crate::daemon_url::validate(&value).ok());
+    let mut problem = None;
+    let provider = match (
+        env.var("PSEUDOLIFE_MCP_TOKEN_FILE"),
+        env.var("PSEUDOLIFE_MCP_TOKEN"),
+    ) {
+        (Ok(token_file), Ok(token_value)) => {
+            match crate::credentials::CredentialProvider::from_lookup(|key| match key {
+                "PSEUDOLIFE_MCP_TOKEN_FILE" => token_file.clone().map(OsString::from),
+                "PSEUDOLIFE_MCP_TOKEN" => token_value.clone().map(OsString::from),
+                _ => None,
+            }) {
+                Ok(provider) => Some(provider),
+                Err(error) => {
+                    problem = Some(BearerProblem::Unavailable(error.0));
+                    None
+                }
+            }
+        }
+        _ => {
+            problem = Some(BearerProblem::Unavailable(
+                "PSEUDOLIFE_MCP_TOKEN or PSEUDOLIFE_MCP_TOKEN_FILE is not valid text",
+            ));
+            None
+        }
+    };
+    let token = match provider.as_ref().map(|provider| provider.snapshot()) {
+        Some(Ok(snapshot)) => snapshot.token().map(str::to_owned),
+        Some(Err(error)) => {
+            problem = Some(BearerProblem::Unavailable(error.0));
+            None
+        }
+        None => None,
+    };
     if token.as_deref().is_some_and(|token| !sendable(token)) {
-        return Err(Defer);
+        problem = Some(BearerProblem::Unsendable);
     }
     let git_bash = if pyenv::WINDOWS {
-        Some(clients::git_bash_report(&env)?)
+        Some(clients::git_bash_report(&env).unwrap_or_else(|_| {
+            vec![(
+                "git_bash",
+                json!(unread(
+                    "the Claude Code settings or PATH that locate Git Bash"
+                )),
+            )]
+        }))
     } else {
         None
     };
-    let claude_wake = clients::claude_code_wake(&env)?;
-    let codex_wake = clients::codex_wake(&env)?;
-    let hooks = clients::codex_hooks(&env)?;
-    let resolution = clients::path_resolution(&env)?;
-    if clients::tunnels_present(&env)? {
-        return Err(Defer);
-    }
-    let identity = identity()?;
+    let claude_wake = clients::claude_code_wake(&env).unwrap_or_else(|_| {
+        clients::ClaudeWake::Fixed(
+            json!({"registered": unread("~/.claude.json or the Claude Code plugin list")}),
+        )
+    });
+    let codex_wake = clients::codex_wake(&env).unwrap_or_else(|_| {
+        clients::CodexWake::Fixed(json!({"registered": unread("the Codex config.toml")}))
+    });
+    let hooks = clients::codex_hooks(&env)
+        .unwrap_or_else(|_| clients::CodexHooks::Line(unread("the Codex home or its config.toml")));
+    let resolution = clients::path_resolution(&env)
+        .unwrap_or_else(|_| json!({"on_path": unread("PATH or the launcher location")}));
+    let tunnel_root = clients::tunnel_root(&env).ok();
+    let identity = identity();
     // A saved instance is read now; its context request runs after the
     // handshake, as in Python. Claude Desktop is never checked.
-    let saved = match &args.agent_state {
-        Some(path) if args.host != "claude-desktop" => Some(agent::read(path, &url)?),
+    let saved = match (&args.agent_state, &url) {
+        (Some(path), Some(url)) if args.host != "claude-desktop" => Some(agent::read(path, url)?),
         _ => None,
     };
 
@@ -500,6 +664,7 @@ async fn diagnose(
     // _maintainer_probe and the --agent-state check build a new provider
     // and snapshot it again (the token file is read again).
     let fresh = || -> Result<Option<String>, ()> {
+        let provider = provider.as_ref().ok_or(())?;
         provider
             .snapshot()
             .map(|snapshot| snapshot.token().map(str::to_owned))
@@ -515,6 +680,9 @@ async fn diagnose(
         "credential_source",
         json!(credential_source.as_deref().unwrap_or("none")),
     );
+    if registrations_unread {
+        put(&mut report, "registrations", json!(REGISTRATIONS_UNREAD));
+    }
     // `_token_prefix` (v58): never the token, the 8 hex of its SHA-256 that
     // the daemon's `invite --list` shows when it refuses it.
     put(
@@ -525,7 +693,28 @@ async fn diagnose(
             .filter(|token| !token.is_empty())
             .map_or(Value::Null, |token| json!(token_hash_prefix(token))),
     );
-    let board = probes::board(&url, token.as_deref(), short).await?;
+    if proxy_routes {
+        put(&mut report, "proxy", json!(proxy_note(&proxy_names)));
+    }
+    let not_checked = |line: &str| {
+        let mut off = Map::new();
+        off.insert("state".into(), json!("not_checked"));
+        off.insert("line".into(), json!(line));
+        off
+    };
+    // Board and maintainer probes send the bearer: an unusable one is
+    // never sent, and the probes are named as not checked.
+    let board = match (&url, &problem) {
+        (None, _) => not_checked("not checked - PSEUDOLIFE_MCP_DAEMON_URL is invalid"),
+        (Some(_), Some(problem)) => not_checked(&problem.board_line()),
+        (Some(url), None) => probes::board(url, token.as_deref(), short)
+            .await
+            .unwrap_or_else(|_| {
+                not_checked(
+                    "not checked - the daemon's board answer is in a form this client does not read",
+                )
+            }),
+    };
     let board_state = board
         .get("state")
         .and_then(Value::as_str)
@@ -536,22 +725,23 @@ async fn diagnose(
         "board",
         board.get("line").cloned().unwrap_or(Value::Null),
     );
-    let not_checked = |line: &str| {
-        let mut off = Map::new();
-        off.insert("state".into(), json!("not_checked"));
-        off.insert("line".into(), json!(line));
-        off
-    };
-    let maintainer = if board_state == "on" {
-        match fresh() {
+    let maintainer = match (&url, board_state.as_str()) {
+        (Some(url), "on") => match fresh() {
             Err(()) => not_checked("not checked - no usable credential or URL"),
-            Ok(Some(token)) if !token.is_empty() => probes::maintainer(&url, &token, short).await?,
+            Ok(Some(token)) if !token.is_empty() => probes::maintainer(url, &token, short)
+                .await
+                .unwrap_or_else(|_| {
+                    not_checked(
+                        "not checked - the daemon's maintainer answer was incomplete or in a form this client does not read",
+                    )
+                }),
             Ok(_) => {
                 not_checked("not checked - no bearer token (a tokenless daemon refuses passkeys)")
             }
-        }
-    } else {
-        not_checked("not checked - the board is off for this token")
+        },
+        (None, _) => not_checked("not checked - PSEUDOLIFE_MCP_DAEMON_URL is invalid"),
+        (Some(_), _) if problem.is_some() => not_checked("not checked - no usable credential"),
+        _ => not_checked("not checked - the board is off for this token"),
     };
     let maintainer_invalid = maintainer.get("state") == Some(&json!("invalid"));
     let maintainer_recovery = maintainer.get("recovery").cloned();
@@ -565,23 +755,69 @@ async fn diagnose(
             put(&mut report, key, value.clone());
         }
     }
-    let health = match probes::health(&url, short).await? {
-        None => None,
-        Some(Value::Object(map)) => Some(map),
-        Some(_) => return Err(Defer),
+    // `None` for no answer; `Err` for an answer that is no daemon's health
+    // report (not an object, a status that is not text, a redirect off HTTP).
+    let answer = match &url {
+        None => Ok(None),
+        Some(url) => match probes::health(url, short).await {
+            Ok(None) => Ok(None),
+            Ok(Some(Value::Object(map))) => match map.get("status") {
+                None | Some(Value::Null | Value::String(_)) => Ok(Some(map)),
+                Some(_) => Err(()),
+            },
+            Ok(Some(_)) | Err(Defer) => Err(()),
+        },
     };
+    let unrecognized = answer.is_err();
+    let health = answer.unwrap_or(None);
     let present = health.as_ref().filter(|map| !map.is_empty());
     let status = present.map(|map| map.get("status").cloned().unwrap_or(Value::Null));
-    match &status {
-        None => put(&mut report, "daemon_status", json!("unreachable")),
-        Some(value @ (Value::Null | Value::String(_))) => {
-            put(&mut report, "daemon_status", value.clone())
-        }
-        Some(_) => return Err(Defer),
-    }
-    put(&mut report, "dreams", dreams(health.as_ref())?);
+    put(
+        &mut report,
+        "daemon_status",
+        if url.is_none() {
+            json!("not_checked")
+        } else if unrecognized {
+            json!("unrecognized")
+        } else {
+            status.clone().unwrap_or_else(|| json!("unreachable"))
+        },
+    );
+    put(&mut report, "dreams", dreams(health.as_ref()));
     let mut tools_present = None;
-    if status != Some(json!("ok")) {
+    let healthy = present.filter(|_| status == Some(json!("ok")));
+    if url.is_none() {
+        put(&mut report, "error", json!("DaemonUrlInvalid"));
+        put(
+            &mut report,
+            "recovery",
+            json!(format!(
+                "PSEUDOLIFE_MCP_DAEMON_URL is not a URL the client accepts: use an http(s) origin without credentials, a path, query, or fragment, such as {}. Correct it in this shell or in the client registration that sets it, then retry; doctor requested nothing.",
+                crate::daemon_url::DEFAULT_URL
+            )),
+        );
+    } else if let Some(problem) = &problem {
+        let (error, recovery) =
+            problem.error(credential_source.as_deref().unwrap_or("environment"));
+        put(&mut report, "error", json!(error));
+        put(&mut report, "recovery", json!(recovery));
+        // The unauthenticated details still help; the handshake would only
+        // fail on the same credential.
+        if let Some(health) = healthy {
+            let (daemon_version, hooks_line) = health_details(health, hooks).await;
+            put(&mut report, "daemon_version", json!(daemon_version));
+            put(&mut report, "codex_hooks", json!(hooks_line));
+        }
+    } else if unrecognized {
+        put(&mut report, "error", json!("DaemonUnrecognized"));
+        put(
+            &mut report,
+            "recovery",
+            json!(
+                "The daemon URL answered /health with something that is not a Pseudolife daemon's health report. Check that PSEUDOLIFE_MCP_DAEMON_URL names the Pseudolife daemon (not a proxy or another service), then retry."
+            ),
+        );
+    } else if status != Some(json!("ok")) {
         if board_state == "unauthorized" {
             put(&mut report, "error", json!("BearerRejected"));
             put(
@@ -604,33 +840,23 @@ async fn diagnose(
         && credential_source.is_none()
     {
         put(&mut report, "error", json!("BearerMissing"));
-        put(&mut report, "recovery", json!(BEARER_MISSING));
+        let recovery = if registrations_unread {
+            format!("{BEARER_MISSING} A client registration was {REGISTRATIONS_UNREAD}")
+        } else {
+            BEARER_MISSING.to_owned()
+        };
+        put(&mut report, "recovery", json!(recovery));
     } else if let Some(health) = present {
-        let daemon_version = match health.get("version") {
-            Some(Value::String(text)) if !text.is_empty() => text.clone(),
-            Some(value) if truthy(value) => return Err(Defer),
-            _ => "unknown".into(),
-        };
-        let hooks_line = match hooks {
-            clients::CodexHooks::Line(line) => line,
-            clients::CodexHooks::Plugin => match health.get("hooks_digest") {
-                None | Some(Value::Null) => "unknown".into(),
-                Some(digest) => {
-                    let checked =
-                        super::update::clients::check_codex_hooks(None, digest.as_str(), false);
-                    if checked["state"] != "current" && checked["state"] != "needs-approval" {
-                        return Err(Defer);
-                    }
-                    let trust = super::update::clients::runtime_hook_status().await;
-                    super::update::clients::runtime_hook_line(
-                        trust,
-                        checked["state"].as_str().unwrap_or("unknown"),
-                    )
-                }
-            },
-        };
+        let (daemon_version, hooks_line) = health_details(health, hooks).await;
         put(&mut report, "daemon_version", json!(daemon_version));
         put(&mut report, "codex_hooks", json!(hooks_line));
+        let proxy_hint = |text: &str| {
+            if proxy_routes {
+                format!("{text}{PROXY_RECOVERY}")
+            } else {
+                text.to_owned()
+            }
+        };
         // Nothing defers past this point: the handshake starts a shim.
         let budget = Duration::try_from_secs_f64(args.timeout).map_err(|_| Defer)?;
         match handshake::run(env.overlay(), budget).await {
@@ -660,9 +886,9 @@ async fn diagnose(
                     put(
                         &mut report,
                         "recovery",
-                        json!(
+                        json!(proxy_hint(
                             "Check shim stderr and daemon MCP access, then compare daemon and shim versions; update the component missing instructions or annotations and reconnect."
-                        ),
+                        )),
                     );
                 }
                 let installed = env!("CARGO_PKG_VERSION");
@@ -683,9 +909,9 @@ async fn diagnose(
                 put(
                     &mut report,
                     "recovery",
-                    json!(
+                    json!(proxy_hint(
                         "Check daemon health and MCP access; if startup is slow, retry doctor with a larger --timeout budget."
-                    ),
+                    )),
                 );
             }
             Err(handshake::Failure::Group) => {
@@ -693,9 +919,9 @@ async fn diagnose(
                 put(
                     &mut report,
                     "recovery",
-                    json!(
+                    json!(proxy_hint(
                         "Check daemon health and the exact registered interpreter. Run that interpreter with -m pip check and -m pip show pseudolife-mcp mcp; reinstall there if stale, then retry."
-                    ),
+                    )),
                 );
             }
         }
@@ -719,7 +945,10 @@ async fn diagnose(
             (Err(()), _) => "unavailable",
             (_, agent::Saved::Missing) => "missing_registration",
             (_, agent::Saved::Invalid) => "invalid_state",
-            (token, agent::Saved::State(state)) => agent::probe(&url, token, state, short).await,
+            (token, agent::Saved::State(state)) => match &url {
+                Some(url) => agent::probe(url, token, state, short).await,
+                None => "unavailable",
+            },
         }),
     };
     let snapshot = coordination_snapshot(
@@ -738,6 +967,14 @@ async fn diagnose(
     }
     finalize(&mut report, maintainer_invalid, maintainer_recovery);
     put(&mut report, "path_resolution", resolution);
+    // Saved tunnel profiles, read-only and informational; no profile
+    // files (an absent or empty directory) adds nothing.
+    if let Some(tunnels) = tunnel_root
+        .as_deref()
+        .and_then(|root| super::tunnel::doctor_section(std::path::Path::new(root)))
+    {
+        put(&mut report, "tunnels", json!(tunnels));
+    }
     let ok = report.get("ok") == Some(&json!(true));
     Ok((Value::Object(report), ok))
 }
@@ -817,29 +1054,38 @@ mod tests {
     }
 
     #[test]
-    fn the_dreams_line_follows_dream_health_line_and_defers_a_stall() {
+    fn the_dreams_line_follows_dream_health_line_and_names_a_stall() {
         let line = |health: Option<Value>| {
             let map = health.map(report);
-            dreams(map.as_ref()).ok()
+            dreams(map.as_ref())
         };
-        assert_eq!(line(None), Some(json!("unknown")));
-        assert_eq!(line(Some(json!({}))), Some(json!("no stall reported")));
+        assert_eq!(line(None), json!("unknown"));
+        assert_eq!(line(Some(json!({}))), json!("no stall reported"));
         assert_eq!(
             line(Some(json!({"status": "ok"}))),
-            Some(json!("no stall reported"))
+            json!("no stall reported")
         );
         for stall in [json!(null), json!("stalled"), json!([]), json!(1)] {
             assert_eq!(
                 line(Some(json!({"status": "ok", "stall": stall}))),
-                Some(json!("no stall reported"))
+                json!("no stall reported")
             );
         }
-        assert_eq!(line(Some(json!({"status": "ok", "stall": {}}))), None);
+        // A stall object is named by its kind, never a deferral.
+        let stalled = |kind: &str| {
+            json!(format!(
+                "stalled ({kind}): the daemon reports a dream stall; this client does not render its detail, so read the session-start briefing or the daemon's log for the fix"
+            ))
+        };
+        assert_eq!(
+            line(Some(json!({"status": "ok", "stall": {}}))),
+            stalled("unknown")
+        );
         assert_eq!(
             line(Some(
                 json!({"status": "ok", "stall": {"kind": "signed_out"}})
             )),
-            None
+            stalled("signed_out")
         );
     }
 

@@ -478,6 +478,139 @@ fn setup(options: &Options, root: &Path) -> Output {
     Err(Fail::Defer)
 }
 
+/// `doctor`'s saved-tunnel section, read-only: `None` when `root` holds no
+/// `*.profile.json` (absent, empty or unrelated files say nothing), else one
+/// entry per profile, where a profile or a store this client cannot read is
+/// a named `unavailable` entry, never a reason to stop. Key presence only:
+/// no key, token or credential path is reported.
+pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
+    use serde_json::json;
+    let unavailable = |profile: Option<&str>, reason: &str, recovery: String| {
+        let mut entry = Map::new();
+        if let Some(profile) = profile {
+            entry.insert("profile".into(), json!(profile));
+        }
+        entry.insert("state".into(), json!("unavailable"));
+        entry.insert("reason".into(), json!(reason));
+        entry.insert("recovery".into(), json!(recovery));
+        Value::Object(entry)
+    };
+    let store_recovery = format!(
+        "Make {} a directory only your account can access, holding only tunnel profile files, then retry.",
+        root.display()
+    );
+    match std::fs::symlink_metadata(root) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+        Err(_) => {
+            return Some(vec![unavailable(
+                None,
+                "the tunnel directory cannot be inspected",
+                store_recovery,
+            )]);
+        }
+        Ok(_) => {}
+    }
+    // Profiles first, then the store's own checks: an empty or unrelated
+    // directory is not a store anyone set up.
+    let any_profile = std::fs::read_dir(root).ok().map(|entries| {
+        entries.flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".profile.json")
+        })
+    });
+    if any_profile == Some(false) {
+        return None;
+    }
+    let names = match store::checked_path(root).and_then(|root| store::list(&root)) {
+        Ok(names) if names.is_empty() => return None,
+        Ok(names) => names,
+        Err(Fail::Tunnel(reason)) => return Some(vec![unavailable(None, reason, store_recovery)]),
+        Err(Fail::Defer) => {
+            return Some(vec![unavailable(
+                None,
+                "the tunnel directory holds entries this client does not read",
+                store_recovery,
+            )]);
+        }
+    };
+    let entries = names
+        .iter()
+        .map(|name| {
+            let recovery = format!(
+                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside and run pseudolife-mcp tunnel setup again.",
+                root.join(format!("{name}.profile.json")).display()
+            );
+            let profile = match store::load(root, name) {
+                Ok(profile) => profile,
+                Err(Fail::Tunnel(reason)) => return unavailable(Some(name), reason, recovery),
+                Err(Fail::Defer) => {
+                    return unavailable(
+                        Some(name),
+                        "the profile is in a form this client does not read",
+                        recovery,
+                    );
+                }
+            };
+            let now = Utc::now();
+            let (key_expiry, expired) = match &profile.expires_at {
+                None => (json!({"known": false, "expired": null}), false),
+                Some((text, instant)) => (
+                    json!({"known": true, "expires_at": text, "expired": *instant <= now}),
+                    *instant <= now,
+                ),
+            };
+            let key = match store::key_present(root, name) {
+                Ok(present) => json!(present),
+                // A Windows DPAPI key needs CryptUnprotectData to prove.
+                Err(_) => json!("not_verified"),
+            };
+            let mut next = Vec::new();
+            let update = match refresh_status(root, name) {
+                Ok(refresh) => {
+                    if refresh.needs_attention() {
+                        next.push(format!(
+                            "Last tunnel refresh: {}; needs attention. Inspect pseudolife-mcp tunnel status --profile {name} before retrying the update.",
+                            refresh.state()
+                        ));
+                    }
+                    let mut update = json!({"state": refresh.state(),
+                        "needs_attention": refresh.needs_attention()});
+                    if let Refresh::Done { rolled_back, .. } = refresh {
+                        update["rolled_back"] = json!(rolled_back);
+                    }
+                    update
+                }
+                Err(_) => json!("not_checked"),
+            };
+            if expired {
+                next.push(format!(
+                    "Renew privately: pseudolife-mcp tunnel setup --profile {name} --read-key --key-expires-at <ISO timestamp>."
+                ));
+            }
+            let process_record =
+                occupied(&root.join(format!("{name}.process.json"))).unwrap_or(true);
+            let mut entry = json!({
+                "profile": profile.name,
+                "state": profile.state,
+                "catalog": profile.catalog,
+                "private_key_present": key,
+                "key_expiry": key_expiry,
+                "update": update,
+                "runtime": {"checked": false, "process_record": process_record},
+                "cloud": "not_checked",
+            });
+            if !next.is_empty() {
+                entry["next"] = json!(next);
+            }
+            entry
+        })
+        .collect();
+    Some(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

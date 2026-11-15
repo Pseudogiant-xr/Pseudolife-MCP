@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "c26df800fae3fe6b",
+  "fingerprint": "786e2652a5af78e1",
+  "reason": "parity_scope.py maps a change under rust/shim/src/cli/tunnel to the doctor and console rows as well as tunnel's, because doctor now reads saved profiles through tunnel's store; no suite, shard, job or step is added and a full batch run is unchanged."
+}
