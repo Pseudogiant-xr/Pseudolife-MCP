@@ -144,15 +144,33 @@ has to work, not match Python):
 - A serve that failed although its forward appeared is removed again and
   the state read back once more before the report (the oracle does not
   re-read). Anything other than this daemon's forward on the port after
-  the serve is named and left alone with exit 5 (the oracle removes it).
-- A serve that did not finish within 30 s names the link it printed
-  (Serve waiting to be enabled on the tailnet) and exits 4 when nothing
-  appeared (the oracle reports `tailscale refused the serve (timed out
-  after 30s)`). On POSIX a timed-out read is answered rather than
-  deferred; on both OSes the pipes are drained for at most 2 s after the
-  kill.
+  the serve, or after that removal, is named and left alone with exit 5
+  (the oracle removes it).
+- A permission refusal is reported only after the serve state was read
+  back (the oracle reports it straight away, with no read): if the forward
+  appeared anyway it is handled as a failed serve, and an `off` whose
+  forward is gone anyway is the removal. Cases `tailscale-yes-permission`
+  and `off-yes-permission` therefore hold one more `serve status --json`
+  call than the oracle makes.
+- After a question, the port is read again before the change; one that
+  changed while the question waited (another serve put there, or this one
+  removed) is named and nothing is changed (the oracle goes ahead).
+- On Windows, stdin redirected from `NUL` is no terminal (the oracle's
+  `isatty()` says it is, then reads end of input as "declined"): without
+  `--yes` the run refuses naming `--yes`.
+- A serve interrupted by Ctrl-C with nothing on the port says it was
+  interrupted (exit 130), not that tailscale refused it.
+- Help at a width other than 80 columns is argparse's 80-column text
+  (`help-width`; the oracle wraps at `COLUMNS - 2`).
+- A serve that did not finish within 30 s names the link it printed on
+  either stream (Serve waiting to be enabled on the tailnet) and exits 4
+  when nothing appeared (the oracle reports `tailscale refused the serve
+  (timed out after 30s)`). On POSIX a timed-out read is answered rather
+  than deferred; on both OSes, after the kill, the child gets up to 2 s to
+  exit and its pipes up to 2 s more.
 - `off` whose read-back finds something other than this daemon's forward
-  on the port reports the removal and warns, naming it.
+  on the port reports `removed: this daemon's forward on tailnet port N`
+  and warns, naming what serves the port now.
 - From the change on, Ctrl-C is held: the `tailscale` child receives the
   same interrupt, and the state read back is still reported, with a
   warning that the run was interrupted.

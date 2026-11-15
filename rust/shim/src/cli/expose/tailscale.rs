@@ -38,7 +38,7 @@ pub(super) struct Binary {
 /// One finished `tailscale` call. `unreadable`: its output was not UTF-8,
 /// so `out` and `err` are empty. `timed_out`: it was killed at the bound;
 /// `out` is what it printed before (decoded with replacement), `err` says
-/// so, and `code` is 124.
+/// so, `code` is 124, and `err_before` is what it wrote to stderr before.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct Proc {
     pub(super) code: i64,
@@ -46,6 +46,7 @@ pub(super) struct Proc {
     pub(super) err: String,
     pub(super) unreadable: bool,
     pub(super) timed_out: bool,
+    pub(super) err_before: String,
 }
 
 impl Proc {
@@ -235,6 +236,7 @@ async fn run_within(binary: &Binary, args: &[&str], timeout: Duration) -> Proc {
                 err: format!("timed out after {}s", timeout.as_secs()),
                 unreadable: false,
                 timed_out: true,
+                err_before: newlines(&String::from_utf8_lossy(&taken(&err))),
             }
         }
     }
@@ -574,6 +576,22 @@ mod tests {
         .await;
         assert!(ran.timed_out, "{ran:?}");
         assert_eq!(ran.out, "early\n");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn what_a_wedged_program_wrote_to_stderr_is_kept_too() {
+        let ran = run_within(
+            &sh(),
+            &[
+                "-c",
+                "echo 'visit https://login.example.com/e' >&2; exec sleep 30",
+            ],
+            Duration::from_millis(300),
+        )
+        .await;
+        assert!(ran.timed_out, "{ran:?}");
+        assert_eq!(ran.err_before, "visit https://login.example.com/e\n");
     }
 
     /// A program still running at the bound is killed; its partial output

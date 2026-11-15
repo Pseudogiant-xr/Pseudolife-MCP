@@ -63,6 +63,8 @@ struct Fake {
     answer: Answer,
     /// The serve state someone else leaves while the question waits.
     meanwhile: Option<Value>,
+    /// The serve state someone else leaves just after a removal.
+    meanwhile_off: Option<Value>,
     interrupt_during_change: bool,
     holding: Cell<bool>,
     interrupted: Cell<bool>,
@@ -99,6 +101,7 @@ impl Fake {
             terminal: false,
             answer: Answer::No,
             meanwhile: None,
+            meanwhile_off: None,
             interrupt_during_change: false,
             holding: Cell::new(false),
             interrupted: Cell::new(false),
@@ -174,6 +177,7 @@ impl Fake {
             err: step.err.clone(),
             unreadable: false,
             timed_out: step.timed_out,
+            err_before: String::new(),
         }
     }
 }
@@ -210,7 +214,13 @@ impl Host for Fake {
             ["serve", "--bg", "--tcp=8443", "tcp://127.0.0.1:8443"] => {
                 self.apply(&self.bg.clone(), true)
             }
-            ["serve", "--tcp=8443", "off"] => self.apply(&self.off.clone(), false),
+            ["serve", "--tcp=8443", "off"] => {
+                let proc = self.apply(&self.off.clone(), false);
+                if let Some(serve) = &self.meanwhile_off {
+                    *self.serve.borrow_mut() = serve.clone();
+                }
+                proc
+            }
             other => panic!("unexpected tailscale call {other:?}"),
         }
     }
@@ -574,6 +584,88 @@ fn a_permission_refusal_names_the_fix() {
             permission_fix()
         )
     );
+}
+
+#[test]
+fn a_permission_refusal_whose_forward_appeared_is_undone_not_called_unchanged() {
+    let mut fake = Fake::free();
+    fake.bg = Step {
+        code: 1,
+        err: "applied\nAccess denied: later step\n".into(),
+        ..Step::default()
+    };
+    let (_, stderr, code) = drive(&fake, &["tailscale", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_UNDONE);
+    assert!(
+        stderr.contains("although the forward appeared; it was removed again"),
+        "{stderr}"
+    );
+    assert_eq!(fake.serve_state(), json!({}));
+    // off: a refusal whose forward is gone anyway is the removal.
+    let mut fake = Fake::ours();
+    fake.off = Step {
+        code: 1,
+        err: "Access denied: later step\n".into(),
+        ..Step::default()
+    };
+    let (stdout, _, code) = drive(&fake, &["off", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_OK);
+    assert!(
+        stdout.ends_with("no longer forwards to this daemon\n"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn an_interrupted_serve_says_so_rather_than_refused() {
+    let mut fake = Fake::free();
+    fake.interrupt_during_change = true;
+    fake.bg = Step {
+        code: -2,
+        effect: Effect::Nothing,
+        ..Step::default()
+    };
+    let (_, stderr, code) = drive(&fake, &["tailscale", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_INTERRUPTED);
+    assert!(
+        stderr.ends_with("expose: `tailscale serve` was interrupted (exit -2); nothing changed\n"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_undo_that_leaves_something_else_on_the_port_names_it_and_leaves_it() {
+    let mut fake = Fake::free();
+    fake.bg.code = 1;
+    let theirs = json!({"TCP": {PORT: {"HTTPS": true}}});
+    fake.meanwhile_off = Some(theirs.clone());
+    let (_, stderr, code) = drive(&fake, &["tailscale", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_UNDONE);
+    assert_eq!(
+        stderr,
+        "expose: `tailscale serve` failed (exit 1) although the forward appeared; after removing it, tailnet port 8443 serves HTTPS, which this command did not create; left alone. Check `tailscale serve status`\n"
+    );
+    assert_eq!(fake.serve_state(), theirs);
+}
+
+#[test]
+fn a_link_a_wedged_serve_wrote_to_stderr_is_named() {
+    let proc = Proc {
+        code: 124,
+        err: "timed out after 30s".into(),
+        timed_out: true,
+        err_before: "To enable, visit:\n  https://login.example.com/f/serve?node=n2\n".into(),
+        ..Proc::default()
+    };
+    assert_eq!(
+        printed(&proc).as_deref(),
+        Some("https://login.example.com/f/serve?node=n2")
+    );
+    let quiet = Proc {
+        err_before: "\n waiting \n".into(),
+        ..proc
+    };
+    assert_eq!(printed(&quiet).as_deref(), Some("waiting"));
 }
 
 #[test]

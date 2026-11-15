@@ -179,8 +179,11 @@ impl Host for Real {
         fetch_health(origin, timeout).await
     }
 
+    /// A character device that is also a terminal: on Windows `NUL` is the
+    /// first but not the second, and nobody can answer a question there.
     fn interactive(&self) -> bool {
-        super::connect::stdin_is_tty()
+        use std::io::IsTerminal;
+        super::connect::stdin_is_tty() && io::stdin().is_terminal()
     }
 
     fn show(&self, stdout: &[u8], stderr: &[u8]) -> bool {
@@ -520,6 +523,7 @@ fn permission_fix() -> &'static str {
     }
 }
 
+/// Said only once the serve state was read back unchanged.
 fn permission_message(proc: &Proc) -> String {
     format!(
         "tailscale refused the change for this user ({}); nothing changed: {}",
@@ -551,17 +555,22 @@ fn ran_fully(proc: &Proc) -> String {
     }
 }
 
-/// The link a wedged serve printed (Serve not enabled for the tailnet
-/// prints the page that enables it, then waits), else its first line.
+/// The link a wedged serve printed on either stream (Serve not enabled for
+/// the tailnet prints the page that enables it, then waits), else its
+/// first line.
 fn printed(proc: &Proc) -> Option<String> {
     let link = proc
         .out
         .split(pyjson::py_space)
+        .chain(proc.err_before.split(pyjson::py_space))
         .find(|word| word.starts_with("https://"));
-    match link {
-        Some(link) => Some(link.to_owned()),
-        None => Some(tailscale::first_line(&proc.out)).filter(|line| !line.is_empty()),
+    if let Some(link) = link {
+        return Some(link.to_owned());
     }
+    [&proc.out, &proc.err_before]
+        .into_iter()
+        .map(|text| tailscale::first_line(text))
+        .find(|line| !line.is_empty())
 }
 
 fn words(items: &[String]) -> Vec<&str> {
@@ -621,9 +630,6 @@ async fn serve(
 ) -> Out {
     host.hold_interrupts();
     let proc = host.run(binary, &words(&serve_words(port))).await;
-    if permission_refused(&proc) {
-        return report.fail_text(EXIT_REFUSED, &permission_message(&proc));
-    }
     let after = read_back(host, binary, port).await;
     note_interrupt(host, &mut report);
     let (state, detail) = match after {
@@ -658,6 +664,18 @@ async fn serve(
             ]
             .concat();
             return report.fail(EXIT_UNDONE, &line);
+        }
+        (false, State::None) if permission_refused(&proc) => {
+            return report.fail_text(EXIT_REFUSED, &permission_message(&proc));
+        }
+        (false, State::None) if host.interrupted() => {
+            return report.fail_text(
+                EXIT_INTERRUPTED,
+                &format!(
+                    "`tailscale serve` was interrupted ({}); nothing changed",
+                    ran(&proc)
+                ),
+            );
         }
         (false, State::None) if proc.timed_out => {
             let said = printed(&proc).map_or_else(String::new, |said| format!(" ({said})"));
@@ -705,11 +723,20 @@ async fn undo(host: &impl Host, binary: &Binary, port: u16, proc: &Proc, report:
     let removal = host.run(binary, &words(&off_words(port))).await;
     let left = match read_back(host, binary, port).await {
         Ok((State::None, _)) => None,
-        Ok((_, Some(detail))) => Some(format!(
-            "port {port} still serves {}",
-            String::from_utf16_lossy(&detail)
-        )),
-        Ok((_, None)) => Some(format!("port {port} still forwards to 127.0.0.1:{port}")),
+        Ok((State::Foreign, detail)) => {
+            // Something else is on the port now: not this run's to remove.
+            let line = [
+                units(&format!(
+                    "`tailscale serve` failed ({}) although the forward appeared; after removing it, tailnet port {port} serves ",
+                    ran(proc)
+                )),
+                detail.unwrap_or_default(),
+                units(", which this command did not create; left alone. Check `tailscale serve status`"),
+            ]
+            .concat();
+            return report.fail(EXIT_UNDONE, &line);
+        }
+        Ok((_, _)) => Some(format!("port {port} still forwards to 127.0.0.1:{port}")),
         Err(why) => Some(why),
     };
     match left {
@@ -788,9 +815,6 @@ async fn probe(host: &impl Host, report: &mut Report, url: &str, bank: &J) {
 async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report) -> Out {
     host.hold_interrupts();
     let proc = host.run(binary, &words(&off_words(port))).await;
-    if permission_refused(&proc) {
-        return report.fail_text(EXIT_REFUSED, &permission_message(&proc));
-    }
     let after = read_back(host, binary, port).await;
     note_interrupt(host, &mut report);
     match after {
@@ -801,6 +825,9 @@ async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report
                 ran_fully(&proc)
             ),
         ),
+        Ok((State::Ours, _)) if permission_refused(&proc) => {
+            report.fail_text(EXIT_REFUSED, &permission_message(&proc))
+        }
         Ok((State::Ours, _)) => report.fail_text(
             EXIT_REFUSED,
             &format!(
@@ -810,9 +837,15 @@ async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report
         ),
         Ok((state, detail)) => {
             report.state = Some("removed");
-            report.say_text(&format!(
-                "removed: tailnet port {port} no longer forwards to this daemon"
-            ));
+            if state == State::Foreign {
+                report.say_text(&format!(
+                    "removed: this daemon's forward on tailnet port {port}"
+                ));
+            } else {
+                report.say_text(&format!(
+                    "removed: tailnet port {port} no longer forwards to this daemon"
+                ));
+            }
             if state == State::Foreign {
                 report.warn(
                     &[
