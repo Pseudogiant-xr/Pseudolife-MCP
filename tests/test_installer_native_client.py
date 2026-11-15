@@ -123,7 +123,7 @@ def _release(directory: Path, *, sums_override: str | None = None, extra_line: b
             asset = f"pseudolife-mcp-{VERSION}-{target}.tar.gz"
             with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
                 info = tarfile.TarInfo("pseudolife-mcp")
-                data = REAL.read_bytes()
+                data = native_client_stub.release_copy(REAL, directory.parent / "packed").read_bytes()
                 info.size = len(data)
                 info.mode = 0o755
                 archive.addfile(info, io.BytesIO(data))

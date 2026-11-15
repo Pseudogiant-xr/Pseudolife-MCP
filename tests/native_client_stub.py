@@ -239,6 +239,56 @@ def host_target() -> str | None:
         return "aarch64-unknown-linux-gnu" if arm else "x86_64-unknown-linux-gnu"
     return None
 
+
+def archive_binary_limit() -> int:
+    """``runtime install``'s limit on the one binary in a release archive
+    (``BINARY_LIMIT`` in ``rust/shim/src/runtime/install.rs``), read from the
+    source so a test never packs to a stale number."""
+    import re
+    source = (Path(__file__).resolve().parents[1] / "rust/shim/src/runtime/install.rs").read_text(encoding="utf-8")
+    match = re.search(r"const BINARY_LIMIT: u64 = ([0-9 *]+);", source)
+    assert match, "BINARY_LIMIT is no longer a product of integers in rust/shim/src/runtime/install.rs"
+    limit = 1
+    for factor in match.group(1).split("*"):
+        limit *= int(factor)
+    return limit
+
+
+def release_copy(binary: Path, folder: Path) -> Path:
+    """The built client as a release archive carries it: a copy in ``folder``
+    (the test's own temp folder; the built binary is never touched).
+
+    On Linux a debug build embeds its debug info (about 300 MB on the hosted
+    ``test`` lane), past ``archive_binary_limit()``, so the copy is stripped of
+    it with ``strip --strip-debug``, as a release binary ships. A macOS debug
+    build leaves its debug info in the object files and a Windows one in a
+    .pdb, so there the copy is the binary as built and no tool is needed."""
+    import os
+    import shutil
+    import subprocess
+
+    import pytest
+
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / binary.name
+    shutil.copyfile(binary, copy)
+    copy.chmod(0o755)
+    if sys.platform.startswith("linux"):
+        strip = shutil.which("strip")
+        if strip is None:
+            reason = ("strip (binutils) is needed to pack the debug-built native client the way a release "
+                      "ships it; install binutils")
+            if os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED") == "1":
+                pytest.fail(reason + " (PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, so this is not skipped)")
+            pytest.skip(reason)
+        subprocess.run([strip, "--strip-debug", str(copy)], check=True, capture_output=True, timeout=300)
+    size, limit = copy.stat().st_size, archive_binary_limit()
+    assert size <= limit, (
+        f"the native client packed for this test is {size} bytes (built: {binary.stat().st_size} bytes), "
+        f"past runtime install's {limit}-byte limit on a release binary (BINARY_LIMIT in "
+        "rust/shim/src/runtime/install.rs), so its install would be refused")
+    return copy
+
 # Harnesses whose fake shim sits in $FIXTURE_SHIM_BIN (test_codex_hooks.py).
 NATIVE_FROM_SHIM_BIN_SH = 'FAKE_LAUNCHER="$FIXTURE_SHIM_BIN/pseudolife-mcp"\nFAKE_KEEP_LAUNCHER=1\n' + BASH
 NATIVE_UNAVAILABLE_SH = (

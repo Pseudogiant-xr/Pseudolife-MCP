@@ -40,10 +40,20 @@ pytestmark = pytest.mark.skipif(PWSH is None, reason="needs pwsh")
 WINDOWS = os.name == "nt"
 _REAL = native_client_stub.real_binary()
 REAL = str(_REAL) if _REAL else ""
-# A real client runs only on its own target; the stub is the Linux one.
-TARGET = ("x86_64-pc-windows-msvc" if WINDOWS
-          else native_client_stub.host_target() if REAL else "x86_64-unknown-linux-gnu")
-ASSET = f"pseudolife-mcp-{VERSION}-{TARGET}." + ("zip" if WINDOWS else "tar.gz")
+# The client the install tests run: the built one when it is named, else the
+# shell stub (off Windows). A test whose assertion depends on a STUB_* answer
+# packs "stub" instead, whatever is named.
+INSTALL = "real" if REAL else "stub"
+
+
+def _asset(client: str) -> str:
+    # A real client runs only on its own target; the stub is the Linux one.
+    target = ("x86_64-pc-windows-msvc" if WINDOWS
+              else native_client_stub.host_target() if client == "real" else "x86_64-unknown-linux-gnu")
+    return f"pseudolife-mcp-{VERSION}-{target}." + ("zip" if WINDOWS else "tar.gz")
+
+
+ASSET = _asset(INSTALL)
 needs_client = pytest.mark.skipif(
     WINDOWS and not (REAL and Path(REAL).is_file()),
     reason="on Windows set PSEUDOLIFE_NATIVE_TEST_BINARY to a built native pseudolife-mcp.exe",
@@ -77,7 +87,16 @@ def _block(start: str, end: str) -> str:
     return start + text.split(start, 1)[1].split(end, 1)[0]
 
 
-def _release(directory: Path, *, digest_override: str | None = None, omit: bool = False) -> None:
+def _release(directory: Path, *, client: str, digest_override: str | None = None, omit: bool = False) -> None:
+    """A fake release in ``directory``. Every caller names its ``client``, so
+    no test inherits the real client by accident: ``"stub"`` is the shell
+    stand-in that answers the STUB_* variables, ``"real"`` the built client
+    (``PSEUDOLIFE_NATIVE_TEST_BINARY``), packed as a release ships it. On
+    Windows a script cannot stand in, so both pack the named client (or a
+    placeholder that never runs), and the stub-only tests skip there."""
+    if client not in ("stub", "real"):
+        raise ValueError(f"client is 'stub' or 'real', not {client!r}")
+    assert client == "stub" or REAL, "a real-client release needs PSEUDOLIFE_NATIVE_TEST_BINARY"
     directory.mkdir(parents=True, exist_ok=True)
     buffer = io.BytesIO()
     if WINDOWS:
@@ -85,19 +104,23 @@ def _release(directory: Path, *, digest_override: str | None = None, omit: bool 
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("pseudolife-mcp.exe", data)
     else:
-        data = Path(REAL).read_bytes() if REAL else STUB.encode()
+        data = (native_client_stub.release_copy(_REAL, directory.parent / "packed").read_bytes()
+                if client == "real" else STUB.encode())
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             info = tarfile.TarInfo("pseudolife-mcp")
             info.size = len(data)
             info.mode = 0o755
             archive.addfile(info, io.BytesIO(data))
-    (directory / ASSET).write_bytes(buffer.getvalue())
+    asset = _asset(client)
+    (directory / asset).write_bytes(buffer.getvalue())
     digest = digest_override or hashlib.sha256(buffer.getvalue()).hexdigest()
-    (directory / "SHA256SUMS").write_text("" if omit else f"{digest}  {ASSET}\n", encoding="utf-8")
+    (directory / "SHA256SUMS").write_text("" if omit else f"{digest}  {asset}\n", encoding="utf-8")
 
 
-def _run(tmp_path: Path, body: str, *, release: bool = True, extra_env: dict[str, str] | None = None,
-         **release_kwargs) -> subprocess.CompletedProcess:
+def _run(client: str, tmp_path: Path, body: str, *, release: bool = True,
+         extra_env: dict[str, str] | None = None, **release_kwargs) -> subprocess.CompletedProcess:
+    """``body`` run after the installer's native-client block; ``client``
+    ("stub" or "real") is the release ``_release`` packs."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     repo = tmp_path / "repo"
@@ -105,7 +128,7 @@ def _run(tmp_path: Path, body: str, *, release: bool = True, extra_env: dict[str
     (repo / "pyproject.toml").write_text(f'[project]\nversion = "{VERSION}"\n', encoding="utf-8")
     base = tmp_path / "release"
     if release:
-        _release(base, **release_kwargs)
+        _release(base, client=client, **release_kwargs)
     stubs = tmp_path / "bin"
     stubs.mkdir(exist_ok=True)
     forbidden = tmp_path / "forbidden-calls"
@@ -152,14 +175,14 @@ def _run(tmp_path: Path, body: str, *, release: bool = True, extra_env: dict[str
 @needs_client
 def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
     body = 'if (Install-ShimOnce) { Write-Host "OK $($script:shimInstallPath)" } else { Write-Host "FAILED" }'
-    first = _run(tmp_path, body)
+    first = _run(INSTALL, tmp_path, body)
     assert first.returncode == 0, first.stderr + first.stdout
     launcher = tmp_path / "home" / "bin" / ("pseudolife-mcp.exe" if WINDOWS else "pseudolife-mcp")
     assert f"OK {launcher}" in first.stdout, first.stdout
     assert f"Native client {VERSION} installed at" in first.stdout
     downloads = tmp_path / "home" / ".pseudolife-mcp" / "downloads" / VERSION
     assert (downloads / ASSET).is_file() and (downloads / "SHA256SUMS").is_file()
-    second = _run(tmp_path, body)
+    second = _run(INSTALL, tmp_path, body)
     assert second.returncode == 0, second.stderr + second.stdout
     assert f"Native client {VERSION} already installed at" in second.stdout, second.stdout
     assert "nothing changed" in second.stdout
@@ -182,7 +205,7 @@ def test_a_python_client_registration_moves_to_the_native_launcher(tmp_path):
     (claude / ".claude.json").write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
         "type": "stdio", "command": str(script), "args": [], "env": {"PSEUDOLIFE_MCP_NO_SPAWN": "1"}}}}),
         encoding="utf-8")
-    result = _run(tmp_path, 'if (Test-ShimRegistrationMigrates "claude-code") { Write-Host MOVED } else { Write-Host KEPT }')
+    result = _run(INSTALL, tmp_path, 'if (Test-ShimRegistrationMigrates "claude-code") { Write-Host MOVED } else { Write-Host KEPT }')
     assert result.returncode == 0, result.stderr + result.stdout
     assert "MOVED" in result.stdout, result.stdout
     moved = json.loads((claude / ".claude.json").read_text(encoding="utf-8"))
@@ -194,11 +217,11 @@ def test_a_python_client_registration_moves_to_the_native_launcher(tmp_path):
 @pytest.mark.parametrize("case, expected", [
     ("mismatch", "does not match the release's SHA256SUMS"),
     ("no-release", "has no SHA256SUMS"),
-    ("missing", "lists " + ASSET + " 0 times, not once"),
+    ("missing", "lists " + _asset("stub") + " 0 times, not once"),
 ])
 def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case, expected):
     kwargs = {"mismatch": {"digest_override": "f" * 64}, "missing": {"omit": True}}.get(case, {})
-    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=case != "no-release", **kwargs)
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=case != "no-release", **kwargs)
     assert result.returncode == 1, result.stdout + result.stderr
     assert expected in result.stderr
     # Nothing on the host; a download already verified is named as kept.
@@ -219,7 +242,7 @@ def test_a_bad_or_missing_release_refuses_before_anything_changes(tmp_path, case
     {"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol 0{LEVEL}"},  # a leading zero
 ])
 def test_a_release_older_than_this_installer_is_refused_before_anything_changes(tmp_path, answer):
-    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env=answer)
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env=answer)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
@@ -241,14 +264,14 @@ def test_a_release_older_than_this_installer_is_refused_before_anything_changes(
 
 @needs_client
 def test_a_release_with_this_installers_protocol_installs(tmp_path):
-    result = _run(tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }',
+    result = _run("real" if WINDOWS else "stub", tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }',
                   extra_env={"STUB_CAPABILITY": f"pseudolife-mcp installer-protocol {LEVEL + 1}"})
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK" in result.stdout.splitlines()
 
 
 def test_an_unsupported_platform_refuses(tmp_path):
-    result = _run(tmp_path, 'function Get-NativeTarget { return $null }; Initialize-NativeClient; Write-Host STAGED')
+    result = _run("stub", tmp_path, 'function Get-NativeTarget { return $null }; Initialize-NativeClient; Write-Host STAGED')
     assert result.returncode == 1
     assert "no native client is published for this platform" in result.stderr
     assert "-ClientOnly" in result.stderr
@@ -276,7 +299,7 @@ def test_a_rerun_over_a_python_client_keeps_the_old_client_readable(tmp_path):
     (home / "bin").mkdir(parents=True)
     old_launcher = home / "bin" / "pseudolife-mcp.json"
     old_launcher.write_text("{}", encoding="utf-8")
-    result = _run(tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }')
+    result = _run(INSTALL, tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }')
     assert result.returncode == 0, result.stderr + result.stdout
     assert "OK" in result.stdout, result.stdout
     for path in (old / "pyvenv.cfg", old / "Scripts" / "pseudolife-mcp.exe"):
@@ -286,7 +309,7 @@ def test_a_rerun_over_a_python_client_keeps_the_old_client_readable(tmp_path):
 def test_an_archive_url_with_credentials_refuses_without_printing_them(tmp_path):
     body = ('$env:PSEUDOLIFE_NATIVE_ARCHIVE_URL = "https://user:sekrit@mirror.example.com/v9"\n'
             "Initialize-NativeClient; Write-Host STAGED")
-    result = _run(tmp_path, body)
+    result = _run("stub", tmp_path, body)
     assert result.returncode == 1
     assert "carries a user name or password" in result.stderr
     assert "sekrit" not in result.stdout + result.stderr
@@ -298,7 +321,7 @@ def test_no_staged_copy_is_left_behind(tmp_path):
     body = ('Initialize-NativeClient; $stage = $script:nativeStageDir\n'
             'Install-ShimOnce | Out-Null\n'
             'Write-Host "STAGED=$([bool]$stage) LEFT=$(Test-Path -LiteralPath $stage)"')
-    result = _run(tmp_path, body)
+    result = _run(INSTALL, tmp_path, body)
     assert result.returncode == 0, result.stderr + result.stdout
     assert "STAGED=True LEFT=False" in result.stdout, result.stdout
     downloads = tmp_path / "home" / ".pseudolife-mcp" / "downloads" / VERSION
@@ -339,7 +362,7 @@ def test_a_download_folder_that_cannot_be_made_is_named_not_the_network(tmp_path
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     (home / ".pseudolife-mcp").write_text("a file, not a folder\n", encoding="utf-8")
-    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED')
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED')
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
@@ -371,7 +394,7 @@ def _serve(status: int) -> tuple[ThreadingHTTPServer, str]:
 def test_a_sums_file_that_cannot_be_fetched_names_the_status_not_a_missing_file(tmp_path, status):
     server, url = _serve(status)
     try:
-        result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=False,
+        result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=False,
                       extra_env={"PSEUDOLIFE_NATIVE_ARCHIVE_URL": url})
     finally:
         server.shutdown()
@@ -384,7 +407,7 @@ def test_a_sums_file_that_cannot_be_fetched_names_the_status_not_a_missing_file(
 @pytest.mark.skipif(WINDOWS, reason="the hanging stand-in is a shell script; on Windows the fixture is a real client")
 @pytest.mark.parametrize("hang", ["STUB_HANG_VERSION", "STUB_HANG_CAPABILITY"])
 def test_a_staged_client_that_does_not_answer_is_refused_in_time(tmp_path, hang):
-    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED',
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED',
                   extra_env={hang: "1", "PSEUDOLIFE_NATIVE_PROBE_SECONDS": "2"})
     assert result.returncode == 1, result.stdout + result.stderr
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
@@ -412,7 +435,7 @@ def test_a_question_after_the_install_does_not_stage_the_release_again(tmp_path)
         "Read-NativeBeforeAsking",
         'Write-Host "ASKED"',
     ])
-    result = _run(tmp_path, body)
+    result = _run(INSTALL, tmp_path, body)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ASKED" in result.stdout
     assert "cannot be installed" not in result.stderr
@@ -421,34 +444,35 @@ def test_a_question_after_the_install_does_not_stage_the_release_again(tmp_path)
 @needs_client
 def test_a_refusal_after_the_install_began_does_not_claim_nothing_changed(tmp_path):
     body = 'if (-not (Install-ShimOnce)) { Write-Host "INSTALL FAILED"; exit 3 }\nStop-NativeInstall "a cause" "A fix."'
-    result = _run(tmp_path, body)
+    result = _run(INSTALL, tmp_path, body)
     assert result.returncode == 1, result.stdout + result.stderr
     [line] = [text for text in result.stderr.splitlines() if "a cause" in text]
     assert "Nothing" not in line and "was changed" not in line
     assert "part way" in line and "rerun" in line.lower()
 
 
-def _rewrite_sums(tmp_path: Path, separator: str) -> None:
-    _release(tmp_path / "release")
-    digest = hashlib.sha256((tmp_path / "release" / ASSET).read_bytes()).hexdigest()
-    (tmp_path / "release" / "SHA256SUMS").write_text(f"{digest}{separator}{ASSET}\n", encoding="utf-8")
+def _rewrite_sums(tmp_path: Path, separator: str, client: str) -> None:
+    _release(tmp_path / "release", client=client)
+    asset = _asset(client)
+    digest = hashlib.sha256((tmp_path / "release" / asset).read_bytes()).hexdigest()
+    (tmp_path / "release" / "SHA256SUMS").write_text(f"{digest}{separator}{asset}\n", encoding="utf-8")
 
 
 @needs_client
 def test_a_binary_mode_checksum_line_is_accepted(tmp_path):
-    _rewrite_sums(tmp_path, " *")
-    result = _run(tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }', release=False)
+    _rewrite_sums(tmp_path, " *", INSTALL)
+    result = _run(INSTALL, tmp_path, 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "FAILED" }', release=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK" in result.stdout
 
 
 @pytest.mark.parametrize("separator", [" ", "\t", "   ", " * "])
 def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
-    _rewrite_sums(tmp_path, separator)
-    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=False)
+    _rewrite_sums(tmp_path, separator, "stub")
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', release=False)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
-    assert f"lists {ASSET} 0 times, not once" in result.stderr
+    assert f"lists {_asset('stub')} 0 times, not once" in result.stderr
 
 
 @pytest.mark.parametrize("value, used", [
@@ -456,7 +480,7 @@ def test_a_checksum_line_in_no_standard_form_is_refused(tmp_path, separator):
     ("", "30"), ("abc", "30"), ("1.5", "30"), ("-3", "30"), ("123456", "30"),
 ])
 def test_the_probe_deadline_is_read_as_a_decimal_number_of_seconds(tmp_path, value, used):
-    result = _run(tmp_path, 'Write-Host "SECONDS=$NativeProbeSeconds"', extra_env={"PSEUDOLIFE_NATIVE_PROBE_SECONDS": value})
+    result = _run("stub", tmp_path, 'Write-Host "SECONDS=$NativeProbeSeconds"', extra_env={"PSEUDOLIFE_NATIVE_PROBE_SECONDS": value})
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"SECONDS={used}" in result.stdout
     named = [line for line in (result.stdout + result.stderr).splitlines() if "PSEUDOLIFE_NATIVE_PROBE_SECONDS" in line]
@@ -468,14 +492,14 @@ def test_the_probe_deadline_is_read_as_a_decimal_number_of_seconds(tmp_path, val
 
 @pytest.mark.skipif(WINDOWS, reason="the v0.24.0 stand-in is a shell script; on Windows the fixture is a real client")
 def test_the_refusal_says_how_to_clear_the_variable_in_powershell(tmp_path):
-    result = _run(tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env={"STUB_V0240": "1"})
+    result = _run("stub", tmp_path, 'Initialize-NativeClient; Write-Host STAGED', extra_env={"STUB_V0240": "1"})
     assert result.returncode == 1
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert "Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE" in line
 
 
 def test_a_mismatched_archive_refusal_names_only_what_is_kept(tmp_path):
-    result = _run(tmp_path, "Initialize-NativeClient; Write-Host STAGED", digest_override="f" * 64)
+    result = _run("stub", tmp_path, "Initialize-NativeClient; Write-Host STAGED", digest_override="f" * 64)
     assert result.returncode == 1
     [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
     assert "was removed" in line
@@ -504,7 +528,7 @@ def test_the_staging_folder_is_gone_when_the_installer_returns_to_an_open_sessio
     from tests.test_installer_existing_upgrade import user_path_unchanged
 
     repo = _whole_repo(tmp_path)
-    _release(tmp_path / "release")
+    _release(tmp_path / "release", client=INSTALL)
     home = tmp_path / "home"
     home.mkdir()
     temp = tmp_path / "temp"
