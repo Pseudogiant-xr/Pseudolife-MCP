@@ -1132,13 +1132,13 @@ def _whole_client_only_run(bash, tmp_path, board_server, *, connect_report: str 
                        "PSEUDOLIFE_SHIM_LAUNCHER": shell.path(installed / "pseudolife-mcp"),
                        # The installer's own environment carries an older credential.
                        "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
-    return installed, proc, repo, shell, token
+    return installed, proc, python_calls, repo, shell, token
 
 
 @BASH
 def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path,
                                                                   board_server):
-    installed, proc, repo, shell, token = _whole_client_only_run(bash, tmp_path, board_server)
+    installed, proc, python_calls, repo, shell, token = _whole_client_only_run(bash, tmp_path, board_server)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert not python_calls.exists(), "the installer ran Python tooling: " + python_calls.read_text()
     calls = shell.logged()
@@ -1288,7 +1288,7 @@ def test_preflight_fails_without_the_buildx_plugin_the_image_build_needs(bash, t
 def test_an_exit_after_the_native_client_is_installed_says_the_run_stopped_part_way(bash, tmp_path, board_server):
     # connect's dry run refuses after the native client is installed: that exit
     # must not claim that nothing changed, and says what this run already did.
-    installed, proc, repo, shell, token = _whole_client_only_run(bash, tmp_path, board_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
+    installed, proc, python_calls, repo, shell, token = _whole_client_only_run(bash, tmp_path, board_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
     output = proc.stdout + proc.stderr
     assert proc.returncode == 1, output
     assert "could not check this machine's existing registrations" in output
