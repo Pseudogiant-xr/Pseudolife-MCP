@@ -648,6 +648,323 @@ function Get-ProviderList([string]$Spec) {
 
 Show-Banner
 
+# >>> native client >>>
+# How long the staged client may take to answer `version` and
+# `installer --capability` (seconds); PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
+$NativeProbeSeconds = 30
+if ("$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS" -match '^[1-9][0-9]{0,4}$') { $NativeProbeSeconds = [int]$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS }
+function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
+    # The staged client's answer, or TimedOut when it does not finish in time.
+    # Shares this console (no new window, and Ctrl-C still reaches it).
+    $info = [System.Diagnostics.ProcessStartInfo]::new($Exe)
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $out = $process.StandardOutput.ReadToEndAsync()
+    $err = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($NativeProbeSeconds * 1000)) {
+        try { $process.Kill($true) } catch { }
+        return [pscustomobject]@{ TimedOut = $true; Code = $null; Out = ""; Err = "" }
+    }
+    $process.WaitForExit()
+    return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
+}
+# How long the staged client may take to answer `version` and
+# `installer --capability` (seconds); PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
+$NativeProbeSeconds = 30
+if ("$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS" -match '^[1-9][0-9]{0,4}$') { $NativeProbeSeconds = [int]$env:PSEUDOLIFE_NATIVE_PROBE_SECONDS }
+function Invoke-NativeBounded([string]$Exe, [string[]]$Arguments) {
+    # The staged client's answer, or TimedOut when it does not finish in time.
+    # Shares this console (no new window, and Ctrl-C still reaches it).
+    $info = [System.Diagnostics.ProcessStartInfo]::new($Exe)
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $out = $process.StandardOutput.ReadToEndAsync()
+    $err = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($NativeProbeSeconds * 1000)) {
+        try { $process.Kill($true) } catch { }
+        return [pscustomobject]@{ TimedOut = $true; Code = $null; Out = ""; Err = "" }
+    }
+    $process.WaitForExit()
+    return [pscustomobject]@{ TimedOut = $false; Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
+}
+# The installer-protocol level the staged release must answer (Initialize-NativeClient).
+$NativeInstallerProtocol = 1
+# The client side (the stdio MCP shim every agent registers, and the
+# pseudolife-mcp CLI) is the native binary published with this checkout's
+# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
+# docs/dev/release-assets.md). It is fetched, verified against the release's
+# SHA256SUMS and run once from a private staging directory before anything on
+# this host changes; Install-ShimOnce then installs that exact archive with the
+# native runtime installer, which keeps every older runtime a running session
+# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
+# another http(s) directory URL, or a local directory, holding the archive and
+# SHA256SUMS.
+$script:nativeVersion = $null
+$script:nativeArchive = $null
+$script:nativeSums = $null
+$script:nativeStaged = $null
+$script:nativeStageDir = $null
+function Get-NativeTarget {
+    # This host's release target triple, or $null. PSEUDOLIFE_NATIVE_TARGET
+    # picks one of the five release targets instead (an emulated one, or a
+    # test's); any other value is $null.
+    if ($env:PSEUDOLIFE_NATIVE_TARGET) {
+        if ($env:PSEUDOLIFE_NATIVE_TARGET -cin @("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")) { return $env:PSEUDOLIFE_NATIVE_TARGET }
+        return $null
+    }
+    if ($IsWindows -or ($null -eq $IsWindows)) {
+        $arch = "$env:PROCESSOR_ARCHITEW6432$env:PROCESSOR_ARCHITECTURE"
+        if ($arch -match '^AMD64') { return "x86_64-pc-windows-msvc" }
+        return $null
+    }
+    $machine = (& uname -m 2>$null)
+    if ($IsLinux) {
+        if ($machine -in @("x86_64", "amd64")) { return "x86_64-unknown-linux-gnu" }
+        if ($machine -in @("aarch64", "arm64")) { return "aarch64-unknown-linux-gnu" }
+    }
+    if ($IsMacOS) {
+        if ($machine -eq "x86_64") { return "x86_64-apple-darwin" }
+        if ($machine -in @("arm64", "aarch64")) { return "aarch64-apple-darwin" }
+    }
+    return $null
+}
+function Stop-NativeInstall([string]$Cause, [string]$Fix) {
+    Remove-NativeStage
+    # A download already made is kept for a rerun, and the refusal says where.
+    $left = " Nothing was changed."
+    if ($script:nativeDownloads -and (Test-Path -LiteralPath $script:nativeDownloads) -and
+            @(Get-ChildItem -LiteralPath $script:nativeDownloads -Force -ErrorAction SilentlyContinue).Count) {
+        $left = " Nothing else was changed: the download in $($script:nativeDownloads) is kept for a rerun (delete it to free the space)."
+    }
+    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix$left")
+    exit 1
+}
+# The staging folder goes whatever way the run ends (an exit 1 or 2 from a
+# later refusal, or an error), not only on the paths that call Remove-NativeStage.
+$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    if ($global:PseudolifeNativeStageDir -and (Test-Path -LiteralPath $global:PseudolifeNativeStageDir)) {
+        Remove-Item -LiteralPath $global:PseudolifeNativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+# The staging folder goes whatever way the run ends (an exit 1 or 2 from a
+# later refusal, or an error), not only on the paths that call Remove-NativeStage.
+$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    if ($global:PseudolifeNativeStageDir -and (Test-Path -LiteralPath $global:PseudolifeNativeStageDir)) {
+        Remove-Item -LiteralPath $global:PseudolifeNativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+function Remove-NativeStage {
+    # This run's staging directory; the verified download is kept.
+    if ($script:nativeStageDir -and (Test-Path -LiteralPath $script:nativeStageDir)) {
+        Remove-Item -LiteralPath $script:nativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $script:nativeStageDir = $null
+}
+function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
+    # "ok", "missing" (no such file there: an HTTP 404 or an absent local
+    # file) or the failure's message.
+    try {
+        if ($Base -match '^https?://') {
+            $part = "$Destination.part"
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Name" -OutFile $part -TimeoutSec 900 -ErrorAction Stop
+            } catch {
+                Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
+                $status = $null
+                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+                if ($status -eq 404) { return "missing" }
+                if ($status) { return "HTTP $status" }
+                return "$($_.Exception.Message)"
+            }
+            Move-Item -LiteralPath $part -Destination $Destination -Force
+        } else {
+            $source = Join-Path $Base $Name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return "missing" }
+            Copy-Item -LiteralPath $source -Destination $Destination -Force
+        }
+        return "ok"
+    } catch { return "$($_.Exception.Message)" }
+}
+function Initialize-NativeClient {
+    # Fetch, verify, extract and run the release binary; refuses on any failure.
+    $pyproject = Get-Content -LiteralPath (Join-Path $repo "pyproject.toml") -Raw -ErrorAction SilentlyContinue
+    if ("$pyproject" -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+        Stop-NativeInstall "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    }
+    $script:nativeVersion = $Matches[1]
+    $target = Get-NativeTarget
+    if (-not $target) {
+        if ($env:PSEUDOLIFE_NATIVE_TARGET) {
+            Stop-NativeInstall "PSEUDOLIFE_NATIVE_TARGET names $($env:PSEUDOLIFE_NATIVE_TARGET), which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
+        }
+        Stop-NativeInstall "no native client is published for this platform ($env:PROCESSOR_ARCHITECTURE); releases carry Windows x86_64, Linux x86_64 and aarch64, and macOS Intel and Apple silicon" "Run this installer on one of those (a machine there can use a daemon elsewhere with -ClientOnly)."
+    }
+    $isZip = $target -like "*windows*"
+    $name = "pseudolife-mcp-$($script:nativeVersion)-$target." + $(if ($isZip) { "zip" } else { "tar.gz" })
+    $binaryName = if ($isZip) { "pseudolife-mcp.exe" } else { "pseudolife-mcp" }
+    $base = if ($env:PSEUDOLIFE_NATIVE_ARCHIVE_URL) { "$env:PSEUDOLIFE_NATIVE_ARCHIVE_URL".TrimEnd('/') } else { "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$($script:nativeVersion)" }
+    if ($base -match '^https?://([^/]*)') {
+        if ($Matches[1] -like '*@*') {
+            Stop-NativeInstall "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL."
+        }
+    }
+    $downloads = Join-Path (Join-Path (Join-Path $HOME ".pseudolife-mcp") "downloads") $script:nativeVersion
+    # A folder that could not be made is the cause, not the download after it.
+    try { New-Item -ItemType Directory -Force -Path $downloads -ErrorAction Stop | Out-Null; $script:nativeDownloads = $downloads }
+    catch { Stop-NativeInstall "the download folder $downloads could not be made ($($_.Exception.Message))" "Check that $(Join-Path $HOME '.pseudolife-mcp') is a folder you can write (free space, permissions, or a file in its place) and rerun." }
+    $script:nativeSums = Join-Path $downloads "SHA256SUMS"
+    $script:nativeArchive = Join-Path $downloads $name
+    $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums
+    if ($sumsFetch -eq "missing") {
+        Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
+    } elseif ($sumsFetch -ne "ok") {
+        if ($sumsFetch -like "HTTP *") {
+            Stop-NativeInstall "SHA256SUMS could not be fetched from $base ($sumsFetch)" "Retry in a few minutes; if it persists, check a proxy or firewall in between (or PSEUDOLIFE_NATIVE_ARCHIVE_URL)."
+        }
+        Stop-NativeInstall "SHA256SUMS could not be fetched from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry."
+    }
+    $pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($name) + '$'
+    $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
+    if ($lines.Count -ne 1) {
+        Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
+    $expected = $lines[0].Substring(0, 64)
+    $have = (Test-Path -LiteralPath $script:nativeArchive -PathType Leaf) -and ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $expected)
+    if (-not $have) {
+        $archiveFetch = Get-NativeAsset $base $name $script:nativeArchive
+        if ($archiveFetch -ne "ok") {
+            Stop-NativeInstall "the download of $name from $base failed ($archiveFetch)" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+        }
+    }
+    if ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+        Remove-Item -LiteralPath $script:nativeArchive -Force
+        Stop-NativeInstall "$name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+    }
+    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pseudolife-native-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $stage | Out-Null
+    $script:nativeStageDir = $stage
+    $global:PseudolifeNativeStageDir = $stage
+    try {
+        if ($isZip) {
+            Expand-Archive -LiteralPath $script:nativeArchive -DestinationPath $stage -Force
+        } else {
+            & tar -xzf $script:nativeArchive -C $stage $binaryName
+            if ($LASTEXITCODE -ne 0) { throw "tar exited $LASTEXITCODE" }
+        }
+    } catch {
+        Stop-NativeInstall "$name could not be unpacked ($($_.Exception.Message))" "Rerun; the verified archive is kept in $downloads."
+    }
+    $script:nativeStaged = Join-Path $stage $binaryName
+    if (-not (Test-Path -LiteralPath $script:nativeStaged -PathType Leaf)) {
+        Stop-NativeInstall "$name holds no $binaryName" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    }
+    if (-not $isZip) {
+        # tar keeps the archive's 0755; set it again without a PATH lookup.
+        try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
+    }
+    try {
+        $answer = Invoke-NativeBounded $script:nativeStaged @("version")
+        if ($answer.TimedOut) {
+            Stop-NativeInstall "the downloaded client did not answer version within $NativeProbeSeconds s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+        }
+        $says = "$($answer.Out)$($answer.Err)".Trim()
+        $ran = ($answer.Code -eq 0)
+    } catch { $says = $_.Exception.Message; $ran = $false }
+    if (-not $ran) {
+        $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
+        Stop-NativeInstall "the downloaded client does not run on this host ($(($says -split "`n")[0]))" $runFix
+    }
+    # The installer steps this script runs belong to the staged release
+    # (ops/install-native.sh, NATIVE_INSTALLER_PROTOCOL, says why): exactly
+    # `pseudolife-mcp installer-protocol <N>`, N at least this level.
+    $level = -1
+    try {
+        $probe = Invoke-NativeBounded $script:nativeStaged @("installer", "--capability")
+        if ($probe.TimedOut) {
+            Stop-NativeInstall "the downloaded client did not answer installer --capability within $NativeProbeSeconds s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+        }
+        $answer = @("$($probe.Out)" -split "`n" | ForEach-Object { $_.TrimEnd("`r") })
+        if ($answer.Count -gt 1 -and $answer[-1] -eq "") { $answer = $answer[0..($answer.Count - 2)] }
+        # Exactly one line, and a level of 1 to 9 digits with no leading zero.
+        if (($probe.Code -eq 0) -and ($answer.Count -eq 1) -and ($answer[0] -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
+    } catch { $level = -1 }
+    if ($level -lt $NativeInstallerProtocol) {
+        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only (PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'; pseudolife-mcp update --clients-only); this native installer itself works from a checkout of a release that carries it."
+    }
+}
+function Get-NativeLauncherPath {
+    # The stable launcher's path, whether or not it exists yet.
+    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $env:PSEUDOLIFE_SHIM_LAUNCHER }
+    if ($IsWindows -or ($null -eq $IsWindows)) { return (Join-Path $env:LOCALAPPDATA "pseudolife-mcp\bin\pseudolife-mcp.exe") }
+    $data = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME ".local/share" }
+    return (Join-Path $data "pseudolife-mcp/bin/pseudolife-mcp")
+}
+function Get-NativeInstalledLauncher {
+    # The stable launcher when it is the native client, else $null.
+    $candidate = Get-NativeLauncherPath
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
+    try {
+        $capability = (& $candidate update --native-capability 2>$null | Select-Object -Last 1)
+    } catch { return $null }
+    if (($LASTEXITCODE -eq 0) -and ("$capability".Trim() -eq "pseudolife-mcp native-update-v1")) { return $candidate }
+    return $null
+}
+function Add-NativeLauncherToUserPath([string]$Launcher) {
+    # The launcher's directory goes first on the user PATH (HKCU\Environment
+    # only, %VAR% entries kept as written; ops/add-user-path.ps1), so
+    # `pseudolife-mcp` in a new terminal reaches it; an older copy further
+    # down is left in place. This run's PATH gets it too. Returns the one
+    # line to show, or $null.
+    if (-not ($IsWindows -or ($null -eq $IsWindows))) { return $null }
+    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $null }
+    $dir = Split-Path -Parent $Launcher
+    $env:PATH = $dir + [IO.Path]::PathSeparator + $env:PATH
+    try {
+        $state = (& (Join-Path $repo "ops/add-user-path.ps1") -Dir $dir | Select-Object -Last 1)
+    } catch {
+        $script:shimPathState = "failed"
+        return "the user PATH could not be updated ($($_.Exception.Message)); run the launcher by its full path"
+    }
+    if ("$state" -eq "current") { return $null }
+    return "$dir is now first on your user PATH; new terminals run pseudolife-mcp from there"
+}
+function Install-NativeClient {
+    # Install-ShimOnce's install: the verified archive into a new side-by-side
+    # runtime behind the stable launcher. Returns the launcher path, or $null.
+    if (-not $script:nativeStaged) { Initialize-NativeClient }
+    $launcherPath = Get-NativeLauncherPath
+    $before = $null
+    if (Get-NativeInstalledLauncher) { $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash }
+    try {
+        $launcher = & $script:nativeStaged runtime install --archive $script:nativeArchive --sha256sums $script:nativeSums --version $script:nativeVersion | Select-Object -Last 1
+    } catch { Remove-NativeStage; return $null }
+    $installExit = $LASTEXITCODE
+    Remove-NativeStage
+    $script:nativeStaged = $null
+    if (($installExit -ne 0) -or (-not $launcher)) { return $null }
+    $launcher = "$launcher".Trim()
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
+    if ($before -and ($before -eq (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash)) {
+        Step "Native client $($script:nativeVersion) already installed at $launcher; nothing changed"
+    } else {
+        Step "Native client $($script:nativeVersion) installed at $launcher (running sessions keep the client they started with)"
+    }
+    $pathNote = Add-NativeLauncherToUserPath $launcher
+    if ($pathNote) {
+        if (-not $script:shimPathState) { $script:shimPathState = "linked" }
+        $script:shimPathNotes = @($pathNote)
+        Write-Host "  shim: $pathNote"
+    }
+    try { & $launcher installer expose 2>$null | Out-Null } catch { }
+    return $launcher
+}
+# <<< native client <<<
 # >>> bank location >>>
 # The installer's first question, for an interactive run that does not name
 # the daemon already (-DaemonUrl, -ClientOnly, or PSEUDOLIFE_MCP_DAEMON_URL in
@@ -668,8 +985,13 @@ Where does the memory bank live?
   3) On this machine, and other machines will connect to it
 '@
 }
+function Read-NativeBeforeAsking {
+    # The first question waits for the staged, verified and probed release.
+    if (-not $script:nativeStaged) { Initialize-NativeClient }
+}
 function Read-BankAnswer([string]$Prompt) {
     # The reply, or $null at the end of input.
+    Read-NativeBeforeAsking
     return (Read-Host $Prompt)
 }
 function Get-BankReply($reply) {
@@ -692,6 +1014,7 @@ function Invoke-BankLocationQuestion {
         return
     }
     if (-not $script:TokenFile -and -not $script:ReadToken -and -not $script:PairingCode) {
+        Read-NativeBeforeAsking
         Show-BankLocationQuestion
         $remote = $false
         while (-not $remote) {
@@ -935,6 +1258,7 @@ if (-not $Client) {
         $Client = if ($found) { $found -join "," } else { "generic" }
         Write-Host "Unattended default: clients=$Client (installed CLIs; generic when none are found)."
     } else {
+        Read-NativeBeforeAsking
         Write-Host ""
         Write-Host "Which coding agents should this install wire up?"
         Write-Host ""
@@ -981,250 +1305,10 @@ if ($interactive -and -not $script:installerRerun) {
 Invoke-BankTokenQuestion
 
 # -- 2. preflight --------------------------------------------------------------
-# >>> native client >>>
-# The installer-protocol level the staged release must answer (Initialize-NativeClient).
-$NativeInstallerProtocol = 1
-# The client side (the stdio MCP shim every agent registers, and the
-# pseudolife-mcp CLI) is the native binary published with this checkout's
-# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
-# docs/dev/release-assets.md). It is fetched, verified against the release's
-# SHA256SUMS and run once from a private staging directory before anything on
-# this host changes; Install-ShimOnce then installs that exact archive with the
-# native runtime installer, which keeps every older runtime a running session
-# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
-# another http(s) directory URL, or a local directory, holding the archive and
-# SHA256SUMS.
-$script:nativeVersion = $null
-$script:nativeArchive = $null
-$script:nativeSums = $null
-$script:nativeStaged = $null
-$script:nativeStageDir = $null
-function Get-NativeTarget {
-    # This host's release target triple, or $null. PSEUDOLIFE_NATIVE_TARGET
-    # picks one of the five release targets instead (an emulated one, or a
-    # test's); any other value is $null.
-    if ($env:PSEUDOLIFE_NATIVE_TARGET) {
-        if ($env:PSEUDOLIFE_NATIVE_TARGET -cin @("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")) { return $env:PSEUDOLIFE_NATIVE_TARGET }
-        return $null
-    }
-    if ($IsWindows -or ($null -eq $IsWindows)) {
-        $arch = "$env:PROCESSOR_ARCHITEW6432$env:PROCESSOR_ARCHITECTURE"
-        if ($arch -match '^AMD64') { return "x86_64-pc-windows-msvc" }
-        return $null
-    }
-    $machine = (& uname -m 2>$null)
-    if ($IsLinux) {
-        if ($machine -in @("x86_64", "amd64")) { return "x86_64-unknown-linux-gnu" }
-        if ($machine -in @("aarch64", "arm64")) { return "aarch64-unknown-linux-gnu" }
-    }
-    if ($IsMacOS) {
-        if ($machine -eq "x86_64") { return "x86_64-apple-darwin" }
-        if ($machine -in @("arm64", "aarch64")) { return "aarch64-apple-darwin" }
-    }
-    return $null
-}
-function Stop-NativeInstall([string]$Cause, [string]$Fix) {
-    Remove-NativeStage
-    [Console]::Error.WriteLine("The native pseudolife-mcp client cannot be installed: $Cause. $Fix Nothing was changed.")
-    exit 1
-}
-function Remove-NativeStage {
-    # This run's staging directory; the verified download is kept.
-    if ($script:nativeStageDir -and (Test-Path -LiteralPath $script:nativeStageDir)) {
-        Remove-Item -LiteralPath $script:nativeStageDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    $script:nativeStageDir = $null
-}
-function Get-NativeAsset([string]$Base, [string]$Name, [string]$Destination) {
-    # "ok", "missing" (no such file there: an HTTP 404 or an absent local
-    # file) or the failure's message.
-    try {
-        if ($Base -match '^https?://') {
-            $part = "$Destination.part"
-            try {
-                Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Name" -OutFile $part -TimeoutSec 900 -ErrorAction Stop
-            } catch {
-                Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
-                $status = $null
-                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
-                if ($status -eq 404) { return "missing" }
-                return "$($_.Exception.Message)"
-            }
-            Move-Item -LiteralPath $part -Destination $Destination -Force
-        } else {
-            $source = Join-Path $Base $Name
-            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return "missing" }
-            Copy-Item -LiteralPath $source -Destination $Destination -Force
-        }
-        return "ok"
-    } catch { return "$($_.Exception.Message)" }
-}
-function Initialize-NativeClient {
-    # Fetch, verify, extract and run the release binary; refuses on any failure.
-    $pyproject = Get-Content -LiteralPath (Join-Path $repo "pyproject.toml") -Raw -ErrorAction SilentlyContinue
-    if ("$pyproject" -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
-        Stop-NativeInstall "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
-    }
-    $script:nativeVersion = $Matches[1]
-    $target = Get-NativeTarget
-    if (-not $target) {
-        if ($env:PSEUDOLIFE_NATIVE_TARGET) {
-            Stop-NativeInstall "PSEUDOLIFE_NATIVE_TARGET names $($env:PSEUDOLIFE_NATIVE_TARGET), which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
-        }
-        Stop-NativeInstall "no native client is published for this platform ($env:PROCESSOR_ARCHITECTURE); releases carry Windows x86_64, Linux x86_64 and aarch64, and macOS Intel and Apple silicon" "Run this installer on one of those (a machine there can use a daemon elsewhere with -ClientOnly)."
-    }
-    $isZip = $target -like "*windows*"
-    $name = "pseudolife-mcp-$($script:nativeVersion)-$target." + $(if ($isZip) { "zip" } else { "tar.gz" })
-    $binaryName = if ($isZip) { "pseudolife-mcp.exe" } else { "pseudolife-mcp" }
-    $base = if ($env:PSEUDOLIFE_NATIVE_ARCHIVE_URL) { "$env:PSEUDOLIFE_NATIVE_ARCHIVE_URL".TrimEnd('/') } else { "https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$($script:nativeVersion)" }
-    if ($base -match '^https?://([^/]*)') {
-        if ($Matches[1] -like '*@*') {
-            Stop-NativeInstall "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL."
-        }
-    }
-    $downloads = Join-Path (Join-Path (Join-Path $HOME ".pseudolife-mcp") "downloads") $script:nativeVersion
-    # A folder that could not be made is the cause, not the download after it.
-    try { New-Item -ItemType Directory -Force -Path $downloads -ErrorAction Stop | Out-Null }
-    catch { Stop-NativeInstall "the download folder $downloads could not be made ($($_.Exception.Message))" "Check that $(Join-Path $HOME '.pseudolife-mcp') is a folder you can write (free space, permissions, or a file in its place) and rerun." }
-    $script:nativeSums = Join-Path $downloads "SHA256SUMS"
-    $script:nativeArchive = Join-Path $downloads $name
-    $sumsFetch = Get-NativeAsset $base "SHA256SUMS" $script:nativeSums
-    if ($sumsFetch -eq "missing") {
-        Stop-NativeInstall "release v$($script:nativeVersion) has no SHA256SUMS at $base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun."
-    } elseif ($sumsFetch -ne "ok") {
-        Stop-NativeInstall "SHA256SUMS could not be downloaded from $base ($sumsFetch)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
-    }
-    $pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($name) + '$'
-    $lines = @(Get-Content -LiteralPath $script:nativeSums | Where-Object { $_ -cmatch $pattern })
-    if ($lines.Count -ne 1) {
-        Stop-NativeInstall "SHA256SUMS of release v$($script:nativeVersion) lists $name $($lines.Count) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
-    }
-    $expected = $lines[0].Substring(0, 64)
-    $have = (Test-Path -LiteralPath $script:nativeArchive -PathType Leaf) -and ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $expected)
-    if (-not $have) {
-        $archiveFetch = Get-NativeAsset $base $name $script:nativeArchive
-        if ($archiveFetch -ne "ok") {
-            Stop-NativeInstall "the download of $name from $base failed ($archiveFetch)" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
-        }
-    }
-    if ((Get-FileHash -LiteralPath $script:nativeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
-        Remove-Item -LiteralPath $script:nativeArchive -Force
-        Stop-NativeInstall "$name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
-    }
-    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pseudolife-native-" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $stage | Out-Null
-    $script:nativeStageDir = $stage
-    try {
-        if ($isZip) {
-            Expand-Archive -LiteralPath $script:nativeArchive -DestinationPath $stage -Force
-        } else {
-            & tar -xzf $script:nativeArchive -C $stage $binaryName
-            if ($LASTEXITCODE -ne 0) { throw "tar exited $LASTEXITCODE" }
-        }
-    } catch {
-        Stop-NativeInstall "$name could not be unpacked ($($_.Exception.Message))" "Rerun; the verified archive is kept in $downloads."
-    }
-    $script:nativeStaged = Join-Path $stage $binaryName
-    if (-not (Test-Path -LiteralPath $script:nativeStaged -PathType Leaf)) {
-        Stop-NativeInstall "$name holds no $binaryName" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
-    }
-    if (-not $isZip) {
-        # tar keeps the archive's 0755; set it again without a PATH lookup.
-        try { [System.IO.File]::SetUnixFileMode($script:nativeStaged, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute, GroupRead, GroupExecute, OtherRead, OtherExecute") } catch { }
-    }
-    try {
-        $says = (& $script:nativeStaged version 2>&1 | Out-String).Trim()
-        $ran = ($LASTEXITCODE -eq 0)
-    } catch { $says = $_.Exception.Message; $ran = $false }
-    if (-not $ran) {
-        $runFix = if ($target -like "*windows*") { "Check that nothing (an antivirus or an execution policy) blocks it, and rerun." } elseif ($target -like "*linux*") { "The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." } else { "The macOS client needs macOS 11 or newer." }
-        Stop-NativeInstall "the downloaded client does not run on this host ($(($says -split "`n")[0]))" $runFix
-    }
-    # The installer steps this script runs belong to the staged release
-    # (ops/install-native.sh, NATIVE_INSTALLER_PROTOCOL, says why): exactly
-    # `pseudolife-mcp installer-protocol <N>`, N at least this level.
-    $level = -1
-    try {
-        $global:LASTEXITCODE = 0
-        $answer = @(& $script:nativeStaged installer --capability 2>$null)
-        # Exactly one line, and a level of 1 to 9 digits with no leading zero.
-        if (($LASTEXITCODE -eq 0) -and ($answer.Count -eq 1) -and ("$($answer[0])".TrimEnd("`r") -cmatch '^pseudolife-mcp installer-protocol (0|[1-9][0-9]{0,8})$')) { $level = [int]$Matches[1] }
-    } catch { $level = -1 }
-    if ($level -lt $NativeInstallerProtocol) {
-        Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (rust/ci/release_assets.py package), since no published release carries them yet."
-    }
-}
-function Get-NativeLauncherPath {
-    # The stable launcher's path, whether or not it exists yet.
-    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $env:PSEUDOLIFE_SHIM_LAUNCHER }
-    if ($IsWindows -or ($null -eq $IsWindows)) { return (Join-Path $env:LOCALAPPDATA "pseudolife-mcp\bin\pseudolife-mcp.exe") }
-    $data = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME ".local/share" }
-    return (Join-Path $data "pseudolife-mcp/bin/pseudolife-mcp")
-}
-function Get-NativeInstalledLauncher {
-    # The stable launcher when it is the native client, else $null.
-    $candidate = Get-NativeLauncherPath
-    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
-    try {
-        $capability = (& $candidate update --native-capability 2>$null | Select-Object -Last 1)
-    } catch { return $null }
-    if (($LASTEXITCODE -eq 0) -and ("$capability".Trim() -eq "pseudolife-mcp native-update-v1")) { return $candidate }
-    return $null
-}
-function Add-NativeLauncherToUserPath([string]$Launcher) {
-    # The launcher's directory goes first on the user PATH (HKCU\Environment
-    # only, %VAR% entries kept as written; ops/add-user-path.ps1), so
-    # `pseudolife-mcp` in a new terminal reaches it; an older copy further
-    # down is left in place. This run's PATH gets it too. Returns the one
-    # line to show, or $null.
-    if (-not ($IsWindows -or ($null -eq $IsWindows))) { return $null }
-    if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { return $null }
-    $dir = Split-Path -Parent $Launcher
-    $env:PATH = $dir + [IO.Path]::PathSeparator + $env:PATH
-    try {
-        $state = (& (Join-Path $repo "ops/add-user-path.ps1") -Dir $dir | Select-Object -Last 1)
-    } catch {
-        $script:shimPathState = "failed"
-        return "the user PATH could not be updated ($($_.Exception.Message)); run the launcher by its full path"
-    }
-    if ("$state" -eq "current") { return $null }
-    return "$dir is now first on your user PATH; new terminals run pseudolife-mcp from there"
-}
-function Install-NativeClient {
-    # Install-ShimOnce's install: the verified archive into a new side-by-side
-    # runtime behind the stable launcher. Returns the launcher path, or $null.
-    if (-not $script:nativeStaged) { Initialize-NativeClient }
-    $launcherPath = Get-NativeLauncherPath
-    $before = $null
-    if (Get-NativeInstalledLauncher) { $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash }
-    try {
-        $launcher = & $script:nativeStaged runtime install --archive $script:nativeArchive --sha256sums $script:nativeSums --version $script:nativeVersion | Select-Object -Last 1
-    } catch { Remove-NativeStage; return $null }
-    $installExit = $LASTEXITCODE
-    Remove-NativeStage
-    $script:nativeStaged = $null
-    if (($installExit -ne 0) -or (-not $launcher)) { return $null }
-    $launcher = "$launcher".Trim()
-    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
-    if ($before -and ($before -eq (Get-FileHash -LiteralPath $launcher -Algorithm SHA256).Hash)) {
-        Step "Native client $($script:nativeVersion) already installed at $launcher; nothing changed"
-    } else {
-        Step "Native client $($script:nativeVersion) installed at $launcher (running sessions keep the client they started with)"
-    }
-    $pathNote = Add-NativeLauncherToUserPath $launcher
-    if ($pathNote) {
-        if (-not $script:shimPathState) { $script:shimPathState = "linked" }
-        $script:shimPathNotes = @($pathNote)
-        Write-Host "  shim: $pathNote"
-    }
-    try { & $launcher installer expose 2>$null | Out-Null } catch { }
-    return $launcher
-}
-# <<< native client <<<
 # >>> native client stage >>>
 # Fetched and verified before anything here changes: a refusal leaves the
 # host as it was.
-Initialize-NativeClient
+if (-not $script:nativeStaged) { Initialize-NativeClient }
 # <<< native client stage <<<
 
 # The status field of an ops/client_credentials.py JSON report, or $null.

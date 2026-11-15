@@ -709,6 +709,307 @@ normalize_clients() {
 
 show_banner
 
+# >>> native client >>>
+# The client side (the stdio MCP shim every agent registers, and the
+# pseudolife-mcp CLI) is the native binary published with this checkout's
+# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
+# docs/dev/release-assets.md). It is fetched, verified against the release's
+# SHA256SUMS and run once from a private staging directory before anything on
+# this host changes; ensure_shim then installs that exact archive with the
+# native runtime installer, which keeps every older runtime a running session
+# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
+# another URL or a local directory holding the archive and SHA256SUMS, and
+# PSEUDOLIFE_NATIVE_TARGET names the release target to install.
+# The installer steps this script runs (`pseudolife-mcp installer <step>`)
+# belong to the staged release, so it must carry them: it answers
+# `installer --capability` with exactly `pseudolife-mcp installer-protocol
+# <N>`, and N must be at least this level
+# (rust/shim/src/cli/installer/mod.rs, INSTALLER_PROTOCOL). Anything else,
+# such as an older release's usage error, means the release predates this
+# installer and is refused before anything changes.
+# How long the staged client may take to answer `version` and
+# `installer --capability` (seconds) before the run refuses instead of
+# hanging; PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
+NATIVE_PROBE_SECONDS="${PSEUDOLIFE_NATIVE_PROBE_SECONDS:-30}"
+case "$NATIVE_PROBE_SECONDS" in ""|*[!0-9]*|0) NATIVE_PROBE_SECONDS=30 ;; esac
+# How long the staged client may take to answer `version` and
+# `installer --capability` (seconds) before the run refuses instead of
+# hanging; PSEUDOLIFE_NATIVE_PROBE_SECONDS overrides it.
+NATIVE_PROBE_SECONDS="${PSEUDOLIFE_NATIVE_PROBE_SECONDS:-30}"
+case "$NATIVE_PROBE_SECONDS" in ""|*[!0-9]*|0) NATIVE_PROBE_SECONDS=30 ;; esac
+NATIVE_INSTALLER_PROTOCOL=1
+NATIVE_VERSION=""
+NATIVE_TARGET=""
+NATIVE_ARCHIVE=""
+NATIVE_SUMS=""
+NATIVE_STAGED=""
+native_target() {  # echoes this host's release target triple, or nothing
+    # PSEUDOLIFE_NATIVE_TARGET picks one of the five release targets instead
+    # (an emulated one, or a test's).
+    case "${PSEUDOLIFE_NATIVE_TARGET:-}" in
+        x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|x86_64-pc-windows-msvc)
+            echo "$PSEUDOLIFE_NATIVE_TARGET"; return 0 ;;
+        "") ;;
+        *) return 0 ;;
+    esac
+    case "$(uname -s 2>/dev/null)" in
+        Linux)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-unknown-linux-gnu ;;
+                aarch64|arm64) echo aarch64-unknown-linux-gnu ;;
+            esac ;;
+        Darwin)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64) echo x86_64-apple-darwin ;;
+                arm64|aarch64) echo aarch64-apple-darwin ;;
+            esac ;;
+        MINGW*|MSYS*|CYGWIN*)
+            case "$(uname -m 2>/dev/null)" in
+                x86_64|amd64) echo x86_64-pc-windows-msvc ;;
+            esac ;;
+    esac
+}
+native_sha256() {  # $1 = file; echoes its lowercase SHA-256
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        return 1
+    fi
+}
+native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no such file there) or another failure
+    case "$native_base" in
+        http://*|https://*)
+            # A stalled transfer gives up instead of hanging an unattended run.
+            # 22 only for a 404 (no such file there); another HTTP error sets
+            # NATIVE_HTTP_STATUS and returns 23.
+            native_curl=0
+            NATIVE_HTTP_STATUS="$(curl -sSL --retry 2 --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 \
+                -w '%{http_code}' -o "$2.part" "$native_base/$1")" || native_curl=$?
+            if [ "$native_curl" = 0 ]; then
+                case "$NATIVE_HTTP_STATUS" in
+                    2??) mv -f "$2.part" "$2"; return 0 ;;
+                    404) native_curl=22 ;;
+                    *) native_curl=23 ;;
+                esac
+            fi
+            rm -f "$2.part"
+            return "$native_curl" ;;
+        *)
+            [ -f "$native_base/$1" ] || return 22
+            cp "$native_base/$1" "$2" ;;
+    esac
+}
+native_bounded() {  # $1 = both|out, then the command; its output on stdout; status 124 when it does not finish in time
+    native_bound_which="$1"; shift
+    native_bound_out="$(mktemp "${TMPDIR:-/tmp}/pseudolife-native-out.XXXXXX")" || return 125
+    if [ "$native_bound_which" = both ]; then "$@" >"$native_bound_out" 2>&1 & else "$@" >"$native_bound_out" 2>/dev/null & fi
+    native_bound_pid=$!
+    native_bound_ticks=$((NATIVE_PROBE_SECONDS * 10))
+    while kill -0 "$native_bound_pid" 2>/dev/null; do
+        if [ "$native_bound_ticks" -le 0 ]; then
+            kill "$native_bound_pid" 2>/dev/null
+            wait "$native_bound_pid" 2>/dev/null
+            rm -f "$native_bound_out"
+            return 124
+        fi
+        sleep 0.1
+        native_bound_ticks=$((native_bound_ticks - 1))
+    done
+    native_bound_status=0
+    wait "$native_bound_pid" || native_bound_status=$?
+    cat "$native_bound_out"
+    rm -f "$native_bound_out"
+    return "$native_bound_status"
+}
+native_bounded() {  # $1 = both|out, then the command; its output on stdout; status 124 when it does not finish in time
+    native_bound_which="$1"; shift
+    native_bound_out="$(mktemp "${TMPDIR:-/tmp}/pseudolife-native-out.XXXXXX")" || return 125
+    if [ "$native_bound_which" = both ]; then "$@" >"$native_bound_out" 2>&1 & else "$@" >"$native_bound_out" 2>/dev/null & fi
+    native_bound_pid=$!
+    native_bound_ticks=$((NATIVE_PROBE_SECONDS * 10))
+    while kill -0 "$native_bound_pid" 2>/dev/null; do
+        if [ "$native_bound_ticks" -le 0 ]; then
+            kill "$native_bound_pid" 2>/dev/null
+            wait "$native_bound_pid" 2>/dev/null
+            rm -f "$native_bound_out"
+            return 124
+        fi
+        sleep 0.1
+        native_bound_ticks=$((native_bound_ticks - 1))
+    done
+    native_bound_status=0
+    wait "$native_bound_pid" || native_bound_status=$?
+    cat "$native_bound_out"
+    rm -f "$native_bound_out"
+    return "$native_bound_status"
+}
+native_unstage() {  # removes this run's staging directory
+    if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
+    native_stage_dir=""
+}
+native_refuse() {  # $1 = cause, $2 = fix
+    # A download already made is kept for a rerun, and the refusal says where.
+    native_left=" Nothing was changed."
+    if [ -n "${native_dir:-}" ] && [ -d "$native_dir" ] && [ -n "$(ls -A "$native_dir" 2>/dev/null)" ]; then
+        native_left=" Nothing else was changed: the download in $native_dir is kept for a rerun (delete it to free the space)."
+    fi
+    echo "The native pseudolife-mcp client cannot be installed: $1. $2$native_left" >&2
+    exit 1
+}
+native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
+    NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
+    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
+    NATIVE_TARGET="$(native_target)"
+    if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
+        native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
+    fi
+    [ -n "$NATIVE_TARGET" ] || native_refuse "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only)."
+    case "$NATIVE_TARGET" in
+        *windows*) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.zip"; native_binary=pseudolife-mcp.exe ;;
+        *) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.tar.gz"; native_binary=pseudolife-mcp ;;
+    esac
+    native_base="${PSEUDOLIFE_NATIVE_ARCHIVE_URL:-https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$NATIVE_VERSION}"
+    native_base="${native_base%/}"
+    case "$native_base" in
+        http://*|https://*)
+            native_authority="${native_base#*://}"; native_authority="${native_authority%%/*}"
+            case "$native_authority" in
+                *@*) native_refuse "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL." ;;
+            esac ;;
+    esac
+    native_dir="$HOME/.pseudolife-mcp/downloads/$NATIVE_VERSION"
+    # Owner-only, but only for the directories this run creates.
+    for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
+        [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
+    done
+    # A folder that could not be made is the cause, not the download after it.
+    if [ ! -d "$native_dir" ] || [ ! -w "$native_dir" ]; then
+        native_refuse "the download folder $native_dir could not be made or written" "Check that $HOME/.pseudolife-mcp is a folder you can write (free space, permissions, or a file in its place) and rerun."
+    fi
+    NATIVE_SUMS="$native_dir/SHA256SUMS"
+    NATIVE_ARCHIVE="$native_dir/$native_name"
+    native_sums_status=0
+    native_download SHA256SUMS "$NATIVE_SUMS" || native_sums_status=$?
+    case "$native_sums_status" in
+        0) ;;
+        22) native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun." ;;
+        23) native_refuse "SHA256SUMS could not be fetched from $native_base (HTTP $NATIVE_HTTP_STATUS)" "Retry in a few minutes; if it persists, check a proxy or firewall in between (or PSEUDOLIFE_NATIVE_ARCHIVE_URL)." ;;
+        *) native_refuse "SHA256SUMS could not be fetched from $native_base (curl exit $native_sums_status: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and retry." ;;
+    esac
+    native_expected="$(grep -E "^[0-9a-f]{64}  $(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
+    case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
+        1) ;;
+        *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
+    esac
+    if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
+        native_download "$native_name" "$NATIVE_ARCHIVE" ||
+            native_refuse "the download of $native_name from $native_base failed" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
+    fi
+    native_actual="$(native_sha256 "$NATIVE_ARCHIVE")" ||
+        native_refuse "neither sha256sum nor shasum is installed to verify the download" "Install coreutils (sha256sum) and rerun."
+    if [ "$native_actual" != "$native_expected" ]; then
+        rm -f "$NATIVE_ARCHIVE"
+        native_refuse "$native_name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
+    fi
+    native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
+        chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."
+    # The staged copy is only for this run; the verified download is kept.
+    trap native_unstage EXIT
+    case "$native_name" in
+        *.zip)
+            if command -v unzip >/dev/null 2>&1; then
+                unzip -q -o "$NATIVE_ARCHIVE" "$native_binary" -d "$native_stage_dir"
+            else
+                powershell.exe -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '$(cygpath -w "$NATIVE_ARCHIVE")' -DestinationPath '$(cygpath -w "$native_stage_dir")' -Force"
+            fi ;;
+        *) tar -xzf "$NATIVE_ARCHIVE" -C "$native_stage_dir" "$native_binary" ;;
+    esac || native_refuse "$native_name could not be unpacked" "Rerun; the verified archive is kept in $native_dir."
+    NATIVE_STAGED="$native_stage_dir/$native_binary"
+    chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
+    native_says_status=0
+    native_says="$(native_bounded both "$NATIVE_STAGED" version)" || native_says_status=$?
+    [ "$native_says_status" != 124 ] ||
+        native_refuse "the downloaded client did not answer version within $NATIVE_PROBE_SECONDS s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    if [ "$native_says_status" != 0 ]; then
+        case "$NATIVE_TARGET" in
+            *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
+            *apple*) native_run_fix="The macOS client needs macOS 11 or newer." ;;
+            *) native_run_fix="Check that nothing (an antivirus or an execution policy) blocks it, and rerun." ;;
+        esac
+        native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
+    fi
+    native_protocol_status=0
+    native_protocol="$(native_bounded out "$NATIVE_STAGED" installer --capability)" || native_protocol_status=$?
+    [ "$native_protocol_status" != 124 ] ||
+        native_refuse "the downloaded client did not answer installer --capability within $NATIVE_PROBE_SECONDS s" "Rerun; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues."
+    [ "$native_protocol_status" = 0 ] || native_protocol=""
+    native_protocol="${native_protocol%$'\r'}"
+    native_level=""
+    case "$native_protocol" in
+        "pseudolife-mcp installer-protocol "*) native_level="${native_protocol#pseudolife-mcp installer-protocol }" ;;
+    esac
+    # Exactly one line, and a level of 1 to 9 digits with no leading zero, so
+    # `[ -lt ]` below never sees a number it cannot compare.
+    case "$native_level" in ""|*[!0-9]*|0?*|??????????*) native_level=-1 ;; esac
+    if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
+        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only; this native installer itself works from a checkout of a release that carries it."
+    fi
+}
+# ensure_shim's install: the verified archive into a new side-by-side runtime
+# behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
+native_install() {
+    [ -n "$NATIVE_STAGED" ] || native_stage
+    native_launcher_before="$(native_installed_launcher)"
+    native_sum_before=""
+    [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
+    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
+    native_launcher="${native_launcher%$'\r'}"
+    if command -v cygpath >/dev/null 2>&1; then
+        case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
+    fi
+    [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
+    SHIM_PATH="$native_launcher"
+    if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
+        step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
+    else
+        step "Native client $NATIVE_VERSION installed at $SHIM_PATH (running sessions keep the client they started with)"
+    fi
+    native_expose_line="$("$SHIM_PATH" installer expose 2>/dev/null)" || true
+    case "$native_expose_line" in *"not on PATH"*|*"kept as"*|*"left as it is"*) echo "  $native_expose_line" ;; esac
+    native_user_path
+    return 0
+}
+native_user_path() {  # Git Bash on Windows: the launcher's directory first on the user PATH, as install.ps1 does
+    case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
+    # A test's or a custom layout never touches PATH.
+    [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] || return 0
+    native_path_dir="$(cygpath -w "$(dirname "$SHIM_PATH")" 2>/dev/null)" || return 0
+    native_path_state="$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$repo/ops/add-user-path.ps1")" -Dir "$native_path_dir" 2>/dev/null | tr -d '\r')" || native_path_state=failed
+    case "$native_path_state" in
+        current) ;;
+        changed) echo "  shim: $native_path_dir is now first on your user PATH; new terminals run pseudolife-mcp from there" ;;
+        *) echo "  shim: the user PATH could not be updated; run $SHIM_PATH by its full path" ;;
+    esac
+    # This run's later steps find the launcher by name too.
+    PATH="$(dirname "$SHIM_PATH"):$PATH"
+    export PATH
+}
+native_installed_launcher() {  # echoes the stable launcher when it is the native client
+    native_candidate="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*)
+            if [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] && [ -n "${LOCALAPPDATA:-}" ]; then
+                native_candidate="$(cygpath -u "$LOCALAPPDATA")/pseudolife-mcp/bin/pseudolife-mcp.exe"
+            fi ;;
+    esac
+    [ -f "$native_candidate" ] || return 0
+    native_capability="$("$native_candidate" update --native-capability 2>/dev/null)" || return 0
+    [ "${native_capability%$'\r'}" = "pseudolife-mcp native-update-v1" ] || return 0
+    printf '%s\n' "$native_candidate"
+}
+# <<< native client <<<
 # >>> bank location >>>
 # The installer's first question, for an interactive run that does not name
 # the daemon already (--daemon-url, --client-only, or PSEUDOLIFE_MCP_DAEMON_URL
@@ -732,7 +1033,15 @@ PL_BANK_LOCATION
 bank_can_ask() {  # status 0 when there is a terminal to ask on
     [ -z "${INSTALLER_UNATTENDED:-}${INSTALLER_RERUN:-}" ] && [ -t 0 ]
 }
+native_before_asking() {  # the first question waits for the staged, verified and probed release
+    [ -n "${NATIVE_STAGED:-}" ] || native_stage
+}
+native_before_asking() {  # the first question waits for the staged, verified and probed release
+    [ -n "${NATIVE_STAGED:-}" ] || native_stage
+}
 bank_read() {  # $1 = the prompt; sets BANK_REPLY; fails at end of input
+    native_before_asking
+    native_before_asking
     printf '%s' "$1"
     BANK_REPLY=""
     IFS= read -r BANK_REPLY || [ -n "$BANK_REPLY" ] || return 1
@@ -759,6 +1068,7 @@ choose_bank_location() {
         return 0
     fi
     if [ -z "$TOKEN_FILE" ] && [ -z "$READ_TOKEN" ] && [ -z "${PAIRING_CODE:-}" ]; then
+        native_before_asking
         show_bank_location_question
         while :; do
             if ! bank_read "Choose 1-3 (Enter = 1): "; then
@@ -992,6 +1302,7 @@ if [ -z "$CLIENT" ]; then
         CLIENT="${CLIENT:-generic}"
         echo "Unattended default: clients=$CLIENT (installed CLIs; generic when none are found)."
     else
+        native_before_asking
         echo ""
         echo "Which coding agents should this install wire up?"
         echo ""
@@ -1004,6 +1315,7 @@ if [ -z "$CLIENT" ]; then
         echo ""
         while [ -z "$CLIENT" ]; do
             printf 'Select one or more - e.g. "1 2" or "1,3" (Enter = 1): '
+            native_before_asking
             read -r selection
             [ -z "$selection" ] && selection=1
             picked=""
@@ -1039,234 +1351,10 @@ fi
 choose_bank_token
 
 # ── 2. preflight ───────────────────────────────────────────────────────────
-# >>> native client >>>
-# The client side (the stdio MCP shim every agent registers, and the
-# pseudolife-mcp CLI) is the native binary published with this checkout's
-# release, so no Python is looked for or installed (docs/dev/native-runtimes.md,
-# docs/dev/release-assets.md). It is fetched, verified against the release's
-# SHA256SUMS and run once from a private staging directory before anything on
-# this host changes; ensure_shim then installs that exact archive with the
-# native runtime installer, which keeps every older runtime a running session
-# uses. PSEUDOLIFE_NATIVE_ARCHIVE_URL replaces the release download URL with
-# another URL or a local directory holding the archive and SHA256SUMS, and
-# PSEUDOLIFE_NATIVE_TARGET names the release target to install.
-# The installer steps this script runs (`pseudolife-mcp installer <step>`)
-# belong to the staged release, so it must carry them: it answers
-# `installer --capability` with exactly `pseudolife-mcp installer-protocol
-# <N>`, and N must be at least this level
-# (rust/shim/src/cli/installer/mod.rs, INSTALLER_PROTOCOL). Anything else,
-# such as an older release's usage error, means the release predates this
-# installer and is refused before anything changes.
-NATIVE_INSTALLER_PROTOCOL=1
-NATIVE_VERSION=""
-NATIVE_TARGET=""
-NATIVE_ARCHIVE=""
-NATIVE_SUMS=""
-NATIVE_STAGED=""
-native_target() {  # echoes this host's release target triple, or nothing
-    # PSEUDOLIFE_NATIVE_TARGET picks one of the five release targets instead
-    # (an emulated one, or a test's).
-    case "${PSEUDOLIFE_NATIVE_TARGET:-}" in
-        x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|x86_64-pc-windows-msvc)
-            echo "$PSEUDOLIFE_NATIVE_TARGET"; return 0 ;;
-        "") ;;
-        *) return 0 ;;
-    esac
-    case "$(uname -s 2>/dev/null)" in
-        Linux)
-            case "$(uname -m 2>/dev/null)" in
-                x86_64|amd64) echo x86_64-unknown-linux-gnu ;;
-                aarch64|arm64) echo aarch64-unknown-linux-gnu ;;
-            esac ;;
-        Darwin)
-            case "$(uname -m 2>/dev/null)" in
-                x86_64) echo x86_64-apple-darwin ;;
-                arm64|aarch64) echo aarch64-apple-darwin ;;
-            esac ;;
-        MINGW*|MSYS*|CYGWIN*)
-            case "$(uname -m 2>/dev/null)" in
-                x86_64|amd64) echo x86_64-pc-windows-msvc ;;
-            esac ;;
-    esac
-}
-native_sha256() {  # $1 = file; echoes its lowercase SHA-256
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" | cut -d' ' -f1
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$1" | cut -d' ' -f1
-    else
-        return 1
-    fi
-}
-native_download() {  # $1 = asset name, $2 = destination file; status 0, 22 (no such file there) or another failure
-    case "$native_base" in
-        http://*|https://*)
-            # A stalled transfer gives up instead of hanging an unattended run.
-            native_curl=0
-            curl -fsSL --retry 2 --connect-timeout 20 --max-time 900 --speed-limit 1024 --speed-time 60 \
-                -o "$2.part" "$native_base/$1" || native_curl=$?
-            if [ "$native_curl" = 0 ]; then mv -f "$2.part" "$2"; else rm -f "$2.part"; fi
-            return "$native_curl" ;;
-        *)
-            [ -f "$native_base/$1" ] || return 22
-            cp "$native_base/$1" "$2" ;;
-    esac
-}
-native_unstage() {  # removes this run's staging directory
-    if [ -n "${native_stage_dir:-}" ] && [ -d "$native_stage_dir" ]; then rm -rf "$native_stage_dir"; fi
-    native_stage_dir=""
-}
-native_refuse() {  # $1 = cause, $2 = fix
-    echo "The native pseudolife-mcp client cannot be installed: $1. $2 Nothing was changed." >&2
-    exit 1
-}
-native_stage() {  # fetch, verify, extract and run the release binary; refuses on any failure
-    NATIVE_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/pyproject.toml" 2>/dev/null | head -1)" || NATIVE_VERSION=""
-    [ -n "$NATIVE_VERSION" ] || native_refuse "this checkout's pyproject.toml names no version" "Check out a release tag (git checkout v<version>) and rerun."
-    NATIVE_TARGET="$(native_target)"
-    if [ -z "$NATIVE_TARGET" ] && [ -n "${PSEUDOLIFE_NATIVE_TARGET:-}" ]; then
-        native_refuse "PSEUDOLIFE_NATIVE_TARGET names $PSEUDOLIFE_NATIVE_TARGET, which no release publishes" "Set it to one of x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc, or unset it."
-    fi
-    [ -n "$NATIVE_TARGET" ] || native_refuse "no native client is published for this platform ($(uname -s 2>/dev/null) $(uname -m 2>/dev/null)); releases carry Linux x86_64 and aarch64, macOS Intel and Apple silicon, and Windows x86_64" "Run this installer on one of those (a machine there can use a daemon elsewhere with --client-only)."
-    case "$NATIVE_TARGET" in
-        *windows*) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.zip"; native_binary=pseudolife-mcp.exe ;;
-        *) native_name="pseudolife-mcp-$NATIVE_VERSION-$NATIVE_TARGET.tar.gz"; native_binary=pseudolife-mcp ;;
-    esac
-    native_base="${PSEUDOLIFE_NATIVE_ARCHIVE_URL:-https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/download/v$NATIVE_VERSION}"
-    native_base="${native_base%/}"
-    case "$native_base" in
-        http://*|https://*)
-            native_authority="${native_base#*://}"; native_authority="${native_authority%%/*}"
-            case "$native_authority" in
-                *@*) native_refuse "PSEUDOLIFE_NATIVE_ARCHIVE_URL carries a user name or password, which would be printed with any download error" "Serve the archives without credentials in the URL." ;;
-            esac ;;
-    esac
-    native_dir="$HOME/.pseudolife-mcp/downloads/$NATIVE_VERSION"
-    # Owner-only, but only for the directories this run creates.
-    for native_new in "$HOME/.pseudolife-mcp" "$HOME/.pseudolife-mcp/downloads" "$native_dir"; do
-        [ -d "$native_new" ] || { mkdir -p "$native_new" && chmod 700 "$native_new"; } 2>/dev/null || true
-    done
-    # A folder that could not be made is the cause, not the download after it.
-    if [ ! -d "$native_dir" ] || [ ! -w "$native_dir" ]; then
-        native_refuse "the download folder $native_dir could not be made or written" "Check that $HOME/.pseudolife-mcp is a folder you can write (free space, permissions, or a file in its place) and rerun."
-    fi
-    NATIVE_SUMS="$native_dir/SHA256SUMS"
-    NATIVE_ARCHIVE="$native_dir/$native_name"
-    native_sums_status=0
-    native_download SHA256SUMS "$NATIVE_SUMS" || native_sums_status=$?
-    case "$native_sums_status" in
-        0) ;;
-        22) native_refuse "release v$NATIVE_VERSION has no SHA256SUMS at $native_base (releases before the native client carry none)" "Update this checkout to a newer release (git pull, or git checkout of a newer tag) and rerun." ;;
-        *) native_refuse "SHA256SUMS could not be downloaded from $native_base (curl exit $native_sums_status: network, proxy or TLS)" "Check the connection (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun." ;;
-    esac
-    native_expected="$(grep -E "^[0-9a-f]{64}  $(printf '%s' "$native_name" | sed 's/[.]/[.]/g')$" "$NATIVE_SUMS" | cut -d' ' -f1)" || native_expected=""
-    case "$(printf '%s\n' "$native_expected" | grep -c . || true)" in
-        1) ;;
-        *) native_refuse "SHA256SUMS of release v$NATIVE_VERSION lists $native_name $(printf '%s\n' "$native_expected" | grep -c . || true) times, not once" "Rerun later; if it persists, report it at https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues." ;;
-    esac
-    if [ ! -f "$NATIVE_ARCHIVE" ] || [ "$(native_sha256 "$NATIVE_ARCHIVE" 2>/dev/null)" != "$native_expected" ]; then
-        native_download "$native_name" "$NATIVE_ARCHIVE" ||
-            native_refuse "the download of $native_name from $native_base failed" "Check the network (or PSEUDOLIFE_NATIVE_ARCHIVE_URL) and rerun."
-    fi
-    native_actual="$(native_sha256 "$NATIVE_ARCHIVE")" ||
-        native_refuse "neither sha256sum nor shasum is installed to verify the download" "Install coreutils (sha256sum) and rerun."
-    if [ "$native_actual" != "$native_expected" ]; then
-        rm -f "$NATIVE_ARCHIVE"
-        native_refuse "$native_name does not match the release's SHA256SUMS (the download was removed)" "Rerun to download it again."
-    fi
-    native_stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/pseudolife-native.XXXXXX")" &&
-        chmod 700 "$native_stage_dir" || native_refuse "no private staging directory could be made" "Free space in ${TMPDIR:-/tmp} and rerun."
-    # The staged copy is only for this run; the verified download is kept.
-    trap native_unstage EXIT
-    case "$native_name" in
-        *.zip)
-            if command -v unzip >/dev/null 2>&1; then
-                unzip -q -o "$NATIVE_ARCHIVE" "$native_binary" -d "$native_stage_dir"
-            else
-                powershell.exe -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '$(cygpath -w "$NATIVE_ARCHIVE")' -DestinationPath '$(cygpath -w "$native_stage_dir")' -Force"
-            fi ;;
-        *) tar -xzf "$NATIVE_ARCHIVE" -C "$native_stage_dir" "$native_binary" ;;
-    esac || native_refuse "$native_name could not be unpacked" "Rerun; the verified archive is kept in $native_dir."
-    NATIVE_STAGED="$native_stage_dir/$native_binary"
-    chmod 755 "$NATIVE_STAGED" 2>/dev/null || true
-    if ! native_says="$("$NATIVE_STAGED" version 2>&1)"; then
-        case "$NATIVE_TARGET" in
-            *linux*) native_run_fix="The Linux client needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12); run this installer on such a system." ;;
-            *apple*) native_run_fix="The macOS client needs macOS 11 or newer." ;;
-            *) native_run_fix="Check that nothing (an antivirus or an execution policy) blocks it, and rerun." ;;
-        esac
-        native_refuse "the downloaded client does not run on this host ($(printf '%s' "$native_says" | head -1))" "$native_run_fix"
-    fi
-    native_protocol="$("$NATIVE_STAGED" installer --capability 2>/dev/null)" || native_protocol=""
-    native_protocol="${native_protocol%$'\r'}"
-    native_level=""
-    case "$native_protocol" in
-        "pseudolife-mcp installer-protocol "*) native_level="${native_protocol#pseudolife-mcp installer-protocol }" ;;
-    esac
-    # Exactly one line, and a level of 1 to 9 digits with no leading zero, so
-    # `[ -lt ]` below never sees a number it cannot compare.
-    case "$native_level" in ""|*[!0-9]*|0?*|??????????*) native_level=-1 ;; esac
-    if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
-        native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Point PSEUDOLIFE_NATIVE_ARCHIVE_URL at archives built from this checkout (rust/ci/release_assets.py package), since no published release carries them yet."
-    fi
-}
-# ensure_shim's install: the verified archive into a new side-by-side runtime
-# behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
-native_install() {
-    [ -n "$NATIVE_STAGED" ] || native_stage
-    native_launcher_before="$(native_installed_launcher)"
-    native_sum_before=""
-    [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
-    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
-    native_launcher="${native_launcher%$'\r'}"
-    if command -v cygpath >/dev/null 2>&1; then
-        case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
-    fi
-    [ -n "$native_launcher" ] && [ -f "$native_launcher" ] || return 1
-    SHIM_PATH="$native_launcher"
-    if [ -n "$native_sum_before" ] && [ "$native_sum_before" = "$(native_sha256 "$SHIM_PATH" 2>/dev/null)" ]; then
-        step "Native client $NATIVE_VERSION already installed at $SHIM_PATH; nothing changed"
-    else
-        step "Native client $NATIVE_VERSION installed at $SHIM_PATH (running sessions keep the client they started with)"
-    fi
-    native_expose_line="$("$SHIM_PATH" installer expose 2>/dev/null)" || true
-    case "$native_expose_line" in *"not on PATH"*|*"kept as"*|*"left as it is"*) echo "  $native_expose_line" ;; esac
-    native_user_path
-    return 0
-}
-native_user_path() {  # Git Bash on Windows: the launcher's directory first on the user PATH, as install.ps1 does
-    case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
-    # A test's or a custom layout never touches PATH.
-    [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] || return 0
-    native_path_dir="$(cygpath -w "$(dirname "$SHIM_PATH")" 2>/dev/null)" || return 0
-    native_path_state="$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(cygpath -w "$repo/ops/add-user-path.ps1")" -Dir "$native_path_dir" 2>/dev/null | tr -d '\r')" || native_path_state=failed
-    case "$native_path_state" in
-        current) ;;
-        changed) echo "  shim: $native_path_dir is now first on your user PATH; new terminals run pseudolife-mcp from there" ;;
-        *) echo "  shim: the user PATH could not be updated; run $SHIM_PATH by its full path" ;;
-    esac
-    # This run's later steps find the launcher by name too.
-    PATH="$(dirname "$SHIM_PATH"):$PATH"
-    export PATH
-}
-native_installed_launcher() {  # echoes the stable launcher when it is the native client
-    native_candidate="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
-    case "$(uname -s 2>/dev/null)" in
-        MINGW*|MSYS*|CYGWIN*)
-            if [ -z "${PSEUDOLIFE_SHIM_LAUNCHER:-}" ] && [ -n "${LOCALAPPDATA:-}" ]; then
-                native_candidate="$(cygpath -u "$LOCALAPPDATA")/pseudolife-mcp/bin/pseudolife-mcp.exe"
-            fi ;;
-    esac
-    [ -f "$native_candidate" ] || return 0
-    native_capability="$("$native_candidate" update --native-capability 2>/dev/null)" || return 0
-    [ "${native_capability%$'\r'}" = "pseudolife-mcp native-update-v1" ] || return 0
-    printf '%s\n' "$native_candidate"
-}
-# <<< native client <<<
 # >>> native client stage >>>
 # Fetched and verified before anything here changes: a refusal leaves the
-# host as it was.
-native_stage
+# host as it was. A run that asked a question has staged already.
+[ -n "${NATIVE_STAGED:-}" ] || native_stage
 # <<< native client stage <<<
 
 # >>> client-only preflight >>>
