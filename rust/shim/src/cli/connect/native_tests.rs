@@ -601,6 +601,7 @@ struct FakeScheduler {
     /// Set on every schedule installed.
     overridden: Option<&'static str>,
     differs: Option<&'static str>,
+    encoded: bool,
     /// Why the re-read before writing fails, when it does.
     reread_error: Option<String>,
     made: RefCell<Vec<(bool, String, String)>>,
@@ -620,6 +621,7 @@ impl schedule::Scheduler for FakeScheduler {
                     why: why.map(str::to_owned),
                     overridden: self.overridden.map(str::to_owned),
                     differs: self.differs.map(str::to_owned),
+                    encoded: self.encoded,
                     remove: format!("schtasks /Delete /TN \"{task}\" /F"),
                 }
             })
@@ -1000,7 +1002,7 @@ fn a_schedule_removed_or_changed_after_the_plan_is_left_as_it_now_is() {
 
 #[test]
 fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_daemon() {
-    let clause = "the systemd drop-in /home/u/.config/systemd/user/pseudolife-client-update.service.d/override.conf sets ExecStart=";
+    let clause = "the systemd drop-in /home/u/.config/systemd/user/pseudolife-client-update.service.d/override.conf sets ExecStart=, which takes precedence over the files `update --schedule` writes; remove it and reload";
     // The base unit names the new daemon (what following `--schedule` leaves)
     // and the old one: neither is current or re-created.
     for base in [NEW, OLD] {
@@ -1011,12 +1013,10 @@ fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_dae
         });
         let rows = schedule_rows(&fake, NEW, true);
         assert_eq!(rows[0].state, "manual", "{base}");
+        // The row is the place and the sentence discovery built, cause and
+        // next step, with no `--schedule` (which rewrites only the base files).
         let detail = &rows[0].detail;
-        assert!(detail.contains(clause), "{detail}");
-        assert!(
-            detail.ends_with("edit or remove that drop-in, run `systemctl --user daemon-reload`, then re-run connect"),
-            "{detail}"
-        );
+        assert_eq!(detail, &format!("the scheduled task 'client': {clause}"));
         assert!(!detail.contains("update --schedule 04:30"), "{detail}");
         schedule::apply(&rows, NEW, true, fake.as_ref());
         assert!(fake.made.borrow().is_empty());
@@ -1028,6 +1028,26 @@ fn a_drop_in_override_is_a_manual_row_naming_it_even_when_the_base_names_the_dae
         ..FakeScheduler::default()
     });
     assert_eq!(schedule_rows(&fake, NEW, true)[0].state, "current");
+    // The daemon's own schedule after the daemon moved away: `--unschedule`
+    // resolves it whatever the drop-in says, so that row comes first.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(false, Some(OLD), Some("04:30"), false, None)],
+        overridden: Some(clause),
+        ..FakeScheduler::default()
+    });
+    let moved = schedule_rows(&fake, NEW, true);
+    assert_eq!(moved[0].state, "manual");
+    assert!(
+        moved[0]
+            .detail
+            .contains("pseudolife-mcp update --unschedule"),
+        "{}",
+        moved[0].detail
+    );
+    assert!(!moved[0].detail.contains(clause), "{}", moved[0].detail);
+    // Near miss: with the daemon still on this machine, the drop-in row.
+    let here = schedule_rows(&fake, LOCAL_NEW, false);
+    assert!(here[0].detail.ends_with(clause), "{}", here[0].detail);
 }
 
 #[test]
@@ -1048,4 +1068,16 @@ fn a_task_setting_schedule_would_drop_is_named_with_both_ways_on() {
     );
     schedule::apply(&rows, NEW, true, fake.as_ref());
     assert!(fake.made.borrow().is_empty());
+    // A task registered through the `-EncodedCommand` layout wrapper has no
+    // `--daemon-url` argument to edit, so the row says how it can be kept.
+    let fake = Rc::new(FakeScheduler {
+        installed: vec![(true, Some(OLD), Some("04:30"), false, None)],
+        differs: Some("an end date"),
+        encoded: true,
+        ..FakeScheduler::default()
+    });
+    let detail = &schedule_rows(&fake, NEW, true)[0].detail;
+    assert!(detail.contains("re-register the task by hand with the new daemon URL (its URL is inside the task's `-EncodedCommand` script"), "{detail}");
+    assert!(!detail.contains("argument to"), "{detail}");
+    assert!(detail.ends_with(&format!("to drop it, re-schedule it: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`")), "{detail}");
 }

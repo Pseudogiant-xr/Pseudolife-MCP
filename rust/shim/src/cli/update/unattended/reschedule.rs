@@ -22,25 +22,73 @@ pub(crate) struct Installed {
     /// Why that cannot be told (no launcher to compare with, a description
     /// that cannot be read), when it cannot.
     pub why: Option<String>,
-    /// A systemd drop-in that sets a key the run depends on, or one connect
-    /// cannot read or parse, as a clause ("the systemd drop-in X sets
-    /// ExecStart"). The effective schedule is then not the base files, so
-    /// it is never current and never re-created.
+    /// Why `connect` leaves it as it is because of what systemd reads beyond
+    /// the base files (a drop-in that sets what the run depends on, one it
+    /// cannot read or parse, a unit file loaded from elsewhere) or because
+    /// the unit itself cannot be read, as the whole sentence a row prints:
+    /// the cause, then the next step that resolves it. The schedule is then
+    /// never current and never re-created.
     pub overridden: Option<String>,
     /// A task setting `--schedule` never writes, named ("an end date"):
     /// re-registering the task would drop it.
     pub differs: Option<String>,
+    /// The task's command is `--schedule`'s `-EncodedCommand` layout
+    /// wrapper, so Task Scheduler shows its daemon URL only as base64.
+    pub encoded: bool,
     /// The one command that removes exactly this schedule.
     pub remove: String,
 }
 
-/// The daemon and client schedules installed on this machine. One that
-/// cannot be read is left out, as it always was.
+/// What discovery reads the schedules through: the platform, the unit
+/// directory `--schedule` writes to, the environment and home the drop-in
+/// search path is built from, and the commands it runs (`schtasks`,
+/// `systemctl`). `Host::here` is this machine; tests pass a fake one.
+struct Host<'a> {
+    windows: bool,
+    linux: bool,
+    dir: PathBuf,
+    env: &'a dyn Fn(&str) -> Option<String>,
+    home: PathBuf,
+    run: &'a dyn Fn(&[String]) -> (i32, String),
+}
+
+fn run_here(argv: &[String]) -> (i32, String) {
+    seams::run_cli(argv, None, 30, false)
+}
+
+fn env_here(key: &str) -> Option<String> {
+    std::env::var(key).ok()
+}
+
+impl Host<'static> {
+    fn here() -> Self {
+        Host {
+            windows: cfg!(windows),
+            linux: cfg!(target_os = "linux"),
+            dir: systemd_dir(),
+            env: &env_here,
+            home: seams::home(),
+            run: &run_here,
+        }
+    }
+}
+
+/// The daemon and client schedules installed on this machine. On Linux one
+/// that exists but cannot be read is shown with that cause; on Windows one
+/// whose query failed is left out, as it always was.
 pub(crate) fn installed(names: &Names) -> Vec<Installed> {
     installed_with(names, &|url: &str| command(url))
 }
 
 fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>) -> Vec<Installed> {
+    installed_on(&Host::here(), names, expected)
+}
+
+fn installed_on(
+    host: &Host,
+    names: &Names,
+    expected: &dyn Fn(&str) -> Result<Vec<String>>,
+) -> Vec<Installed> {
     [false, true]
         .into_iter()
         .filter_map(|client| {
@@ -50,9 +98,9 @@ fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>)
                 names.unit
             };
             discovered(
-                installed_kind_with(names, client, expected),
-                cfg!(target_os = "linux"),
-                &systemd_dir(),
+                installed_kind_on(host, names, client, expected),
+                host.linux,
+                &host.dir,
                 name,
                 client,
             )
@@ -62,7 +110,8 @@ fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>)
 
 /// What discovery reports for one kind's read. On Linux a unit or timer
 /// that exists but cannot be read stays visible, as a schedule connect
-/// cannot vouch for, with the read error as its cause, so a move never
+/// cannot vouch for, with the read error and the real fix (repair or remove
+/// the file: `--schedule` would fail on the same read), so a move never
 /// leaves it behind unreported. On Windows a failed query cannot be told
 /// from a task that does not exist (schtasks exits 1 for both), so it is
 /// left out, as it always was.
@@ -78,20 +127,24 @@ fn discovered(
         Err(cause) if linux => {
             let file =
                 |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
+            let remove = format!(
+                "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
+                file("service"),
+                file("timer")
+            );
             Some(Installed {
                 client,
                 place: dir.join(format!("{name}.service")).display().to_string(),
                 time: None,
                 url: None,
                 shaped: false,
-                why: Some(cause),
-                overridden: None,
+                why: None,
+                overridden: Some(format!(
+                    "{cause}, so connect cannot read the schedule and leaves it as it is (`update --schedule` would fail on the same read): repair that file's permissions or contents, or remove the schedule with `{remove}`, then re-run connect"
+                )),
                 differs: None,
-                remove: format!(
-                    "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
-                    file("service"),
-                    file("timer")
-                ),
+                encoded: false,
+                remove,
             })
         }
         Err(_) => None,
@@ -113,24 +166,28 @@ fn installed_kind_with(
     client: bool,
     expected: &dyn Fn(&str) -> Result<Vec<String>>,
 ) -> std::result::Result<Option<Installed>, String> {
-    if cfg!(windows) {
+    installed_kind_on(&Host::here(), names, client, expected)
+}
+
+fn installed_kind_on(
+    host: &Host,
+    names: &Names,
+    client: bool,
+    expected: &dyn Fn(&str) -> Result<Vec<String>>,
+) -> std::result::Result<Option<Installed>, String> {
+    if host.windows {
         let task = if client {
             names.client_task
         } else {
             names.task
         };
-        let (code, xml) = seams::run_cli(
-            &[
-                "schtasks".into(),
-                "/Query".into(),
-                "/TN".into(),
-                task.into(),
-                "/XML".into(),
-            ],
-            None,
-            30,
-            false,
-        );
+        let (code, xml) = (host.run)(&[
+            "schtasks".into(),
+            "/Query".into(),
+            "/TN".into(),
+            task.into(),
+            "/XML".into(),
+        ]);
         if code != 0 {
             // schtasks exits 1 both for a task that is gone and for a query
             // that failed or timed out, so the cause names all of them.
@@ -141,37 +198,35 @@ fn installed_kind_with(
         Ok(Some(windows_parse(task, client, &xml, &|url| {
             schedule_windows(&expected(url)?)
         })))
-    } else if cfg!(target_os = "linux") {
+    } else if host.linux {
         let name = if client {
             names.client_unit
         } else {
             names.unit
         };
-        let dir = systemd_dir();
-        let roots = systemd_roots(&dir, &|key| std::env::var(key).ok(), &seams::home());
+        let roots = systemd_roots(&host.dir, host.env, &host.home);
+        let systemctl = |args: &[&str]| {
+            let mut argv: Vec<String> = vec!["systemctl".into(), "--user".into()];
+            argv.extend(args.iter().map(|arg| (*arg).to_owned()));
+            let result = (host.run)(&argv);
+            if crate::cli::update::schedules::cancelled() {
+                return Err("interrupted".to_owned());
+            }
+            Ok(result)
+        };
         systemd_installed(
-            &dir,
+            &host.dir,
             &roots,
             name,
             client,
-            &|| {
-                let code = seams::run_cli(
-                    &[
-                        "systemctl".into(),
-                        "--user".into(),
-                        "is-enabled".into(),
-                        "--quiet".into(),
-                        format!("{name}.timer"),
-                    ],
-                    None,
-                    30,
-                    false,
-                )
-                .0;
-                if crate::cli::update::schedules::cancelled() {
-                    return Err("interrupted".to_owned());
+            &|| Ok(systemctl(&["is-enabled", "--quiet", &format!("{name}.timer")])?.0 == 0),
+            &|unit| {
+                let (code, out) =
+                    systemctl(&["show", "--property=FragmentPath,DropInPaths", unit])?;
+                if code != 0 {
+                    return Err(format!("`systemctl --user show {unit}` exited {code}"));
                 }
-                Ok(code == 0)
+                Ok(out)
             },
             &|url| service_body(name, &expected(url)?, &environment_lines(client, false)?),
         )
@@ -181,13 +236,18 @@ fn installed_kind_with(
 }
 
 /// A systemd unit `name` in `dir`, its timer, whether the timer is enabled
-/// and the drop-ins under `roots` that apply to either, read back.
+/// and what systemd reads beyond the base files for either: the drop-ins
+/// under `roots` (`systemd_dropins`), checked against what systemd's own
+/// user manager reports for each unit (`show`: its `FragmentPath` and
+/// `DropInPaths`), so a file systemd applies that this search did not read
+/// leaves the schedule alone rather than passing.
 fn systemd_installed(
     dir: &Path,
     roots: &[PathBuf],
     name: &str,
     client: bool,
     enabled: &dyn Fn() -> std::result::Result<bool, String>,
+    show: &dyn Fn(&str) -> std::result::Result<String, String>,
     expected: &dyn Fn(&str) -> Result<String>,
 ) -> std::result::Result<Option<Installed>, String> {
     let unit = dir.join(format!("{name}.service"));
@@ -207,10 +267,71 @@ fn systemd_installed(
         }
     };
     let enabled = enabled()?;
-    let overridden = systemd_override(roots, name);
+    let overridden = match systemd_dropins(roots, name) {
+        Err(blocked) => Some(blocked),
+        Ok(read) => ["service", "timer"].into_iter().find_map(|kind| {
+            let unit = format!("{name}.{kind}");
+            match show(&unit) {
+                Err(cause) => Some(unasked(&cause)),
+                Ok(out) => systemd_disagrees(dir, &unit, &out, &read),
+            }
+        }),
+    };
     Ok(Some(systemd_parse(
         dir, name, client, &service, &timer, enabled, overridden, expected,
     )))
+}
+
+fn unasked(cause: &str) -> String {
+    format!(
+        "connect could not ask systemd's user manager which files make up the unit ({cause}), so it cannot tell whether a drop-in changes the run and leaves the schedule as it is: re-run connect where the user manager runs (a login session), or manage this schedule by hand"
+    )
+}
+
+/// The path as systemd would name it (`chase`, which resolves symlinks),
+/// or as given when it cannot be resolved.
+fn canonical(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Where systemd's report for `unit` (`show --property=FragmentPath,
+/// DropInPaths`) disagrees with this search: a unit file loaded from
+/// anywhere but `dir`, or a drop-in it applies that `read` (the files this
+/// search read as applying) does not hold. Either leaves the schedule alone.
+fn systemd_disagrees(
+    dir: &Path,
+    unit: &str,
+    out: &str,
+    read: &std::collections::BTreeSet<PathBuf>,
+) -> Option<String> {
+    let mut fragment = None;
+    let mut dropins = Vec::new();
+    for line in out.lines() {
+        if let Some(value) = line.strip_prefix("FragmentPath=") {
+            fragment = Some(value.trim().to_owned());
+        } else if let Some(value) = line.strip_prefix("DropInPaths=") {
+            dropins.extend(value.split_whitespace().map(PathBuf::from));
+        }
+    }
+    let written = canonical(&dir.join(unit));
+    match fragment.as_deref() {
+        Some(path) if !path.is_empty() && canonical(Path::new(path)) == written => {}
+        other => {
+            let loaded = other.filter(|path| !path.is_empty()).unwrap_or("nowhere");
+            return Some(format!(
+                "systemd's user manager loads {unit} from {loaded}, not from {} that `update --schedule` writes, so connect leaves the schedule as it is: remove the other unit file and run `systemctl --user daemon-reload`, or manage this schedule by hand",
+                written.display()
+            ));
+        }
+    }
+    let read: std::collections::BTreeSet<PathBuf> =
+        read.iter().map(|path| canonical(path)).collect();
+    dropins.into_iter().find(|path| !read.contains(&canonical(path))).map(|path| {
+        format!(
+            "systemd's user manager applies the drop-in {}, which connect's own search did not read (the manager's search path can differ from this shell's), so connect cannot tell whether it changes the run and leaves the schedule as it is: if it should not apply, remove it and run `systemctl --user daemon-reload`, then re-run connect; otherwise manage this schedule by hand",
+            path.display()
+        )
+    })
 }
 
 /// The user unit search path of systemd.unit(5) ("User Unit Search Path"),
@@ -314,128 +435,232 @@ fn blocking_key(kind: &str, section: &str, key: &str) -> bool {
     }
 }
 
-/// The first blocking key `text`, a drop-in for a unit of `kind`, sets, or
-/// the 1-based line systemd's syntax cannot read.
-/// As systemd.syntax(7) reads a file: a line starting with `#` or `;` is a
-/// comment, skipped whole (a trailing backslash on it continues nothing),
-/// also inside a continued line; a trailing backslash on any other line
-/// continues it onto the next.
-fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, usize> {
-    let comment = |line: &str| line.starts_with('#') || line.starts_with(';');
-    let mut section = String::new();
-    let mut lines = text.lines().enumerate();
-    while let Some((index, raw)) = lines.next() {
-        let mut line = raw.trim().to_owned();
-        if line.is_empty() || comment(&line) {
+/// `text` split into lines as systemd's `read_line` splits a file
+/// (src/basic/fileio.c, v259): a line ends at `\n`, `\r` or NUL, and at a
+/// run of them in which no marker repeats (`\r\n`, `\n\r`, each optionally
+/// followed by NUL), so a lone CR ends a line too.
+fn systemd_lines(text: &str) -> Vec<&str> {
+    const NUL: u8 = 1;
+    const LF: u8 = 2;
+    const CR: u8 = 4;
+    let marker = |byte: u8| match byte {
+        b'\0' => NUL,
+        b'\n' => LF,
+        b'\r' => CR,
+        _ => 0,
+    };
+    let bytes = text.as_bytes();
+    let (mut lines, mut start, mut at) = (Vec::new(), 0, 0);
+    while at < bytes.len() {
+        if marker(bytes[at]) == 0 {
+            at += 1;
             continue;
         }
-        while line.ends_with('\\') {
-            line.pop();
-            let next = loop {
-                match lines.next() {
-                    Some((_, next)) if comment(next.trim()) => continue,
-                    other => break other,
-                }
-            };
-            match next {
-                Some((_, next)) => {
-                    line.push(' ');
-                    line.push_str(next.trim());
-                }
-                None => break,
+        lines.push(&text[start..at]);
+        let mut seen = 0u8;
+        while at < bytes.len() {
+            let eol = marker(bytes[at]);
+            if eol == 0 || seen & NUL != 0 || seen & eol != 0 {
+                break;
             }
+            seen |= eol;
+            at += 1;
         }
-        if let Some(name) = line
-            .strip_prefix('[')
-            .and_then(|rest| rest.strip_suffix(']'))
-        {
-            section = name.to_owned();
+        start = at;
+    }
+    if start < bytes.len() {
+        lines.push(&text[start..]);
+    }
+    lines
+}
+
+/// Why a drop-in cannot be read as systemd reads it.
+enum Unreadable {
+    /// systemd itself rejects the line (an unterminated section header, or
+    /// one with characters it refuses), so the unit does not load as
+    /// `--schedule` wrote it.
+    Rejected(usize, &'static str),
+}
+
+/// The first blocking key `text`, a drop-in for a unit of `kind`, sets,
+/// read exactly as systemd's `config_parse` and `parse_line` read a file
+/// (src/shared/conf-parser.c, v259):
+/// - a line whose first non-whitespace character is `#` or `;` is a
+///   comment, skipped whole, also in the middle of a continuation, before
+///   anything else is decided about it;
+/// - a UTF-8 byte-order mark is dropped from the first line that has one;
+/// - a line continues onto the next when the text so far ends in an
+///   unescaped backslash (an odd run of trailing backslashes, nothing after
+///   it, decided on the raw line: `x \` followed by a space does not
+///   continue, nor does `x\\`); the backslash becomes a space;
+/// - the joined line is trimmed; a `[...]` line opens a section (an
+///   unterminated one, or one with unsafe characters, makes systemd reject
+///   the file); a line with no `=`, or an empty key, is ignored, as is a key
+///   outside any section;
+/// - a continuation still open at the end of the file is a last line.
+fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Unreadable> {
+    let whitespace = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
+    let mut section: Option<String> = None;
+    let mut continuation: Option<String> = None;
+    let mut bom_seen = false;
+    let mut line_number = 0;
+    let mut handle =
+        |line: &str, number: usize| -> std::result::Result<Option<String>, Unreadable> {
+            let line = line.trim_matches(whitespace);
+            if line.is_empty() {
+                return Ok(None);
+            }
+            if let Some(rest) = line.strip_prefix('[') {
+                let Some(name) = rest.strip_suffix(']') else {
+                    return Err(Unreadable::Rejected(
+                        number,
+                        "an unterminated section header",
+                    ));
+                };
+                // systemd's string_is_safe: no control characters, quotes or
+                // backslashes in a section name.
+                if name
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, '"' | '\'' | '\\'))
+                {
+                    return Err(Unreadable::Rejected(
+                        number,
+                        "a section header with characters systemd refuses",
+                    ));
+                }
+                section = Some(name.to_owned());
+                return Ok(None);
+            }
+            let Some(section) = &section else {
+                return Ok(None);
+            };
+            let Some((key, _)) = line.split_once('=') else {
+                return Ok(None);
+            };
+            let key = key.trim_matches(whitespace);
+            if key.is_empty() {
+                return Ok(None);
+            }
+            Ok(blocking_key(kind, section, key).then(|| format!("{key}=")))
+        };
+    for raw in systemd_lines(text) {
+        line_number += 1;
+        if raw.trim_start_matches(whitespace).starts_with(['#', ';']) {
             continue;
         }
-        let Some((key, _)) = line.split_once('=') else {
-            return Err(index + 1);
-        };
-        let key = key.trim();
-        if blocking_key(kind, &section, key) {
-            return Ok(Some(format!("{key}=")));
+        let mut line = raw;
+        if !bom_seen && let Some(rest) = raw.strip_prefix('\u{feff}') {
+            line = rest;
+            bom_seen = true;
         }
+        let mut joined = continuation.take().unwrap_or_default();
+        joined.push_str(line);
+        let mut escaped = false;
+        for c in joined.chars() {
+            escaped = if escaped { false } else { c == '\\' };
+        }
+        if escaped {
+            joined.pop();
+            joined.push(' ');
+            continuation = Some(joined);
+            continue;
+        }
+        if let Some(key) = handle(&joined, line_number)? {
+            return Ok(Some(key));
+        }
+    }
+    if let Some(rest) = continuation {
+        return handle(&rest, line_number + 1);
     }
     Ok(None)
 }
 
-/// A drop-in for the unit or its timer that sets a blocking key, or that
-/// connect cannot read or parse, as a clause. It looks at every `.conf` in
-/// the unit's own `<name>.<kind>.d`, its dash-prefix ones
-/// (`pseudolife-.service.d`) and the top-level `<kind>.d`, under each of
-/// `roots`. Of files sharing a name, only the first applies in systemd's
-/// order (`unit_file_find_dirs`, then `conf_files_list_strv`): the most
-/// specific directory first, and within it the highest-priority root, so an
-/// empty or masking file there hides a same-named one anywhere after it.
-fn systemd_override(roots: &[PathBuf], name: &str) -> Option<String> {
+/// The drop-ins systemd applies to the unit and its timer, as its own
+/// lookup finds them (src/shared/dropin.c, v259): for each of `roots` in
+/// priority order, the unit's own `<name>.<kind>.d` and then its dash-prefix
+/// ones, longest first (`pseudolife-update.service.d`,
+/// `pseudolife-.service.d`); then, as a last pass, the top-level
+/// `<kind>.d` under each root. Of `.conf` files sharing a name, only the
+/// first in that order applies (`conf_files_list_strv`), so an empty or
+/// masking file earlier hides a same-named one later; a hidden name
+/// (`.x.conf`) is skipped, as systemd skips it. The files read as applying,
+/// or the sentence that leaves the schedule alone: a blocking key set, or
+/// a directory or file that cannot be read or that systemd rejects.
+fn systemd_dropins(
+    roots: &[PathBuf],
+    name: &str,
+) -> std::result::Result<std::collections::BTreeSet<PathBuf>, String> {
     let mut stems: Vec<String> = name
         .match_indices('-')
         .map(|(at, _)| name[..=at].to_owned())
         .collect();
     stems.push(name.to_owned());
+    let mut applied = std::collections::BTreeSet::new();
     for kind in ["service", "timer"] {
-        let directories = stems
-            .iter()
-            .rev()
-            .map(|stem| format!("{stem}.{kind}.d"))
-            .chain([format!("{kind}.d")]);
+        let specific = roots.iter().flat_map(|root| {
+            stems
+                .iter()
+                .rev()
+                .map(move |stem| root.join(format!("{stem}.{kind}.d")))
+        });
+        let generic = roots.iter().map(|root| root.join(format!("{kind}.d")));
         let mut seen = std::collections::BTreeSet::new();
-        for directory in directories {
-            for root in roots {
-                let path = root.join(&directory);
-                let entries = match fs::read_dir(&path) {
-                    Ok(entries) => entries,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+        for directory in specific.chain(generic) {
+            let entries = match fs::read_dir(&directory) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "connect cannot read the systemd drop-in directory {} ({error}), so it cannot tell whether a drop-in there changes the run and leaves the schedule as it is: fix that directory's permissions or remove it, then re-run connect",
+                        directory.display()
+                    ));
+                }
+            };
+            let mut files: Vec<_> = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|file| {
+                    file.extension().is_some_and(|ext| ext == "conf")
+                        && !file
+                            .file_name()
+                            .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+                })
+                .collect();
+            files.sort();
+            for file in files {
+                if !seen.insert(file.file_name().map(|n| n.to_owned())) {
+                    continue;
+                }
+                let text = match fs::read_to_string(&file) {
+                    Ok(text) => text,
                     Err(error) => {
-                        return Some(format!(
-                            "connect cannot read the systemd drop-in directory {} ({error})",
-                            path.display()
+                        return Err(format!(
+                            "connect cannot read the systemd drop-in {} ({error}), so it cannot tell whether that file changes the run and leaves the schedule as it is: fix or remove the file, then re-run connect",
+                            file.display()
                         ));
                     }
                 };
-                let mut files: Vec<_> = entries
-                    .flatten()
-                    .map(|entry| entry.path())
-                    .filter(|file| file.extension().is_some_and(|ext| ext == "conf"))
-                    .collect();
-                files.sort();
-                for file in files {
-                    if !seen.insert(file.file_name().map(|n| n.to_owned())) {
-                        continue;
+                match dropin_sets(kind, &text) {
+                    Ok(None) => {
+                        applied.insert(file);
                     }
-                    let text = match fs::read_to_string(&file) {
-                        Ok(text) => text,
-                        Err(error) => {
-                            return Some(format!(
-                                "connect cannot read the systemd drop-in {} ({error})",
-                                file.display()
-                            ));
-                        }
-                    };
-                    match dropin_sets(kind, &text) {
-                        Ok(None) => {}
-                        Ok(Some(key)) => {
-                            return Some(format!(
-                                "the systemd drop-in {} sets {key}",
-                                file.display()
-                            ));
-                        }
-                        Err(line) => {
-                            return Some(format!(
-                                "connect cannot parse the systemd drop-in {} (line {line})",
-                                file.display()
-                            ));
-                        }
+                    Ok(Some(key)) => {
+                        return Err(format!(
+                            "the systemd drop-in {} sets {key}, which takes precedence over the files `update --schedule` writes, so connect cannot tell which daemon the run targets, and re-scheduling would not change it. The schedule stays hand-managed while that drop-in sets it: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or keep it and point it at the new daemon yourself",
+                            file.display()
+                        ));
+                    }
+                    Err(Unreadable::Rejected(line, what)) => {
+                        return Err(format!(
+                            "systemd rejects the drop-in {} (line {line}: {what}), so the unit does not load as `update --schedule` writes it, and connect leaves the schedule as it is: fix or remove that file, run `systemctl --user daemon-reload`, then re-run connect",
+                            file.display()
+                        ));
                     }
                 }
             }
         }
     }
-    None
+    Ok(applied)
 }
 
 fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -600,6 +825,9 @@ fn windows_parse(
         why,
         overridden: None,
         differs,
+        encoded: arguments
+            .as_deref()
+            .is_some_and(|arguments| arguments.contains("-EncodedCommand ")),
         remove: format!("schtasks /Delete /TN \"{task}\" /F"),
     }
 }
@@ -654,6 +882,7 @@ fn systemd_parse(
         why,
         overridden,
         differs: None,
+        encoded: false,
         remove: format!(
             "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
             file("service"),
@@ -736,6 +965,10 @@ pub(crate) fn reschedule(
 ) -> std::result::Result<Vec<String>, Stop> {
     let mut update = options(url);
     update.o.schedule = Some(when.to_owned());
+    // The kind is worked out once: `same_kind` asks `client_kind`, and the
+    // verified answer is what `schedule_for` writes (`schedule_checked` would
+    // ask again, and a daemon container started or stopped in between would
+    // make it write the other kind).
     same_kind(&update, client).map_err(|refusal| Stop::Failed(refusal.reason))?;
     let changed = std::cell::RefCell::new(None);
     let gate = || -> Result<()> {
@@ -745,7 +978,7 @@ pub(crate) fn reschedule(
             error
         })
     };
-    match schedule_checked(&mut update, when, names, &gate) {
+    match schedule_for(&mut update, when, names, client, &command, &gate) {
         Ok(()) => Ok(update.report.steps),
         Err(error) => Err(match changed.take() {
             Some(cause) => Stop::Changed(cause),
@@ -1095,6 +1328,19 @@ mod tests {
         );
     }
 
+    /// The cause clause of `systemd_dropins`'s refusal (up to its ", which"
+    /// or ", so"), or `None` when it reads every drop-in as harmless.
+    fn systemd_override(roots: &[PathBuf], name: &str) -> Option<String> {
+        systemd_dropins(roots, name).err().map(|text| {
+            let cut = [", which", ", so"]
+                .iter()
+                .filter_map(|mark| text.find(mark))
+                .min()
+                .unwrap_or(text.len());
+            text[..cut].to_owned()
+        })
+    }
+
     /// A throwaway directory under the system temp directory.
     fn scratch() -> PathBuf {
         let root =
@@ -1237,16 +1483,24 @@ mod tests {
         );
         assert_eq!(systemd_override(&roots, name), None);
         fs::remove_file(&file).unwrap();
-        // A line systemd's syntax cannot read blocks, naming the line.
+        // A line with no `=`, which systemd ignores, is ignored here too.
         let file = put(
             "pseudolife-update.service.d",
             "50-test.conf",
-            "[Service]\nnot a key\n",
+            "[Service]\nnot a key\n=no key\n",
+        );
+        assert_eq!(systemd_override(&roots, name), None);
+        fs::remove_file(&file).unwrap();
+        // A section header systemd rejects blocks, naming the line.
+        let file = put(
+            "pseudolife-update.service.d",
+            "50-test.conf",
+            "[Service\nNice=5\n",
         );
         assert_eq!(
             systemd_override(&roots, name),
             Some(format!(
-                "connect cannot parse the systemd drop-in {} (line 2)",
+                "systemd rejects the drop-in {} (line 1: an unterminated section header)",
                 file.display()
             ))
         );
@@ -1265,6 +1519,243 @@ mod tests {
                 ))
         );
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_drop_in_is_read_line_by_line_as_systemd_reads_it() {
+        let sets = |text: &str| match dropin_sets("service", text) {
+            Ok(key) => key,
+            Err(Unreadable::Rejected(line, what)) => Some(format!("rejected {line}: {what}")),
+        };
+        let post = "ExecStartPost=/x --daemon-url http://OLD";
+        // A backslash followed by a space, or an escaped backslash, does not
+        // continue the line in systemd: the next line is read on its own.
+        assert_eq!(
+            sets(&format!("[Service]\nNice=5 \\ \n{post}\n")).as_deref(),
+            Some("ExecStartPost=")
+        );
+        assert_eq!(
+            sets(&format!("[Service]\nNice=5\\\\\n{post}\n")).as_deref(),
+            Some("ExecStartPost=")
+        );
+        // Near miss: an odd trailing backslash continues it, so the next line
+        // is part of `Nice=` and sets nothing.
+        assert_eq!(sets(&format!("[Service]\nNice=5 \\\n{post}\n")), None);
+        assert_eq!(sets(&format!("[Service]\nNice=5 \\\\\\\n{post}\n")), None);
+        // A lone CR ends a line, as systemd's read_line ends one.
+        assert_eq!(
+            sets(&format!("[Service]\rNice=5\r{post}\r")).as_deref(),
+            Some("ExecStartPost=")
+        );
+        assert_eq!(
+            systemd_lines("a\r\nb\n\rc\n\nd\re\0f"),
+            ["a", "b", "c", "", "d", "e", "f"]
+        );
+        // A byte-order mark is dropped, so a harmless file stays harmless and
+        // a blocking one still blocks.
+        assert_eq!(sets("\u{feff}[Service]\nNice=5\n"), None);
+        assert_eq!(
+            sets(&format!("\u{feff}[Service]\n{post}\n")).as_deref(),
+            Some("ExecStartPost=")
+        );
+        // A continuation still open at the end of the file is a last line.
+        assert_eq!(
+            sets("[Service]\nExecStart=/x \\").as_deref(),
+            Some("ExecStart=")
+        );
+        // A key before any section, or in another section, is not the
+        // service's.
+        assert_eq!(sets(&format!("{post}\n[Unit]\n{post}\n")), None);
+    }
+
+    #[test]
+    fn masking_follows_systemds_root_major_order() {
+        let (high, low) = (scratch(), scratch());
+        let roots = [high.clone(), low.clone()];
+        let name = "pseudolife-update";
+        let put = |root: &Path, dir: &str, text: &str| {
+            fs::create_dir_all(root.join(dir)).unwrap();
+            fs::write(root.join(dir).join("override.conf"), text).unwrap();
+        };
+        let post = "[Service]\nExecStartPost=/x --daemon-url http://OLD\n";
+        // The higher-priority root's prefix directory comes before the lower
+        // root's exact directory, so its file applies and the empty one
+        // below does not hide it.
+        put(&high, "pseudolife-.service.d", post);
+        put(&low, "pseudolife-update.service.d", "");
+        assert!(systemd_override(&roots, name).is_some());
+        fs::remove_dir_all(high.join("pseudolife-.service.d")).unwrap();
+        fs::remove_dir_all(low.join("pseudolife-update.service.d")).unwrap();
+        // Near miss: within one root the exact directory comes first, so an
+        // empty file there hides the prefix one in the lower root.
+        put(&high, "pseudolife-update.service.d", "");
+        put(&low, "pseudolife-.service.d", post);
+        assert_eq!(systemd_override(&roots, name), None);
+        fs::remove_dir_all(low.join("pseudolife-.service.d")).unwrap();
+        // The top-level `service.d` comes after every root's unit
+        // directories: a lower root's exact-name file hides a higher
+        // root's top-level one.
+        fs::remove_dir_all(high.join("pseudolife-update.service.d")).unwrap();
+        put(&high, "service.d", post);
+        put(&low, "pseudolife-update.service.d", "");
+        assert_eq!(systemd_override(&roots, name), None);
+        fs::remove_dir_all(&high).unwrap();
+        fs::remove_dir_all(&low).unwrap();
+    }
+
+    #[test]
+    fn what_systemd_reports_beyond_this_search_leaves_the_schedule_alone() {
+        let dir = scratch();
+        let unit = "pseudolife-update.service";
+        fs::write(dir.join(unit), "").unwrap();
+        let fragment = format!("FragmentPath={}", dir.join(unit).display());
+        let read: std::collections::BTreeSet<PathBuf> = [dir.join("a.conf")].into();
+        fs::write(dir.join("a.conf"), "").unwrap();
+        // Near miss: the unit from `dir`, and only drop-ins this search read.
+        assert_eq!(
+            systemd_disagrees(&dir, unit, &format!("{fragment}\nDropInPaths=\n"), &read),
+            None
+        );
+        let listed = format!("{fragment}\nDropInPaths={}\n", dir.join("a.conf").display());
+        assert_eq!(systemd_disagrees(&dir, unit, &listed, &read), None);
+        // A drop-in systemd applies that this search did not read.
+        let unseen = format!(
+            "{fragment}\nDropInPaths={} /opt/x/pseudolife-update.service.d/b.conf\n",
+            dir.join("a.conf").display()
+        );
+        assert!(
+            systemd_disagrees(&dir, unit, &unseen, &read)
+                .unwrap()
+                .starts_with("systemd's user manager applies the drop-in /opt/x/pseudolife-update.service.d/b.conf")
+        );
+        // The unit loaded from another file, or from nowhere.
+        let shadowed = "FragmentPath=/run/user/1000/systemd/transient/pseudolife-update.service\nDropInPaths=\n";
+        assert!(
+            systemd_disagrees(&dir, unit, shadowed, &read)
+                .unwrap()
+                .contains("loads pseudolife-update.service from /run/user/1000/systemd/transient/")
+        );
+        assert!(
+            systemd_disagrees(&dir, unit, "FragmentPath=\nDropInPaths=\n", &read)
+                .unwrap()
+                .contains("from nowhere")
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discovery_builds_its_search_from_the_host_it_reads() {
+        let home = scratch();
+        let dir = home.join("config/systemd/user");
+        fs::create_dir_all(&dir).unwrap();
+        let data = home.join("data").display().to_string();
+        let env = move |key: &str| (key == "XDG_DATA_HOME").then(|| data.clone());
+        let listed = std::cell::RefCell::new(String::new());
+        let run = |argv: &[String]| -> (i32, String) {
+            match argv.get(2).map(String::as_str) {
+                Some("is-enabled") => (0, String::new()),
+                Some("show") => {
+                    let unit = argv.last().unwrap();
+                    (
+                        0,
+                        format!(
+                            "FragmentPath={}\nDropInPaths={}\n",
+                            dir.join(unit).display(),
+                            listed.borrow()
+                        ),
+                    )
+                }
+                _ => (1, String::new()),
+            }
+        };
+        let host = Host {
+            windows: false,
+            linux: true,
+            dir: dir.clone(),
+            env: &env,
+            home: home.clone(),
+            run: &run,
+        };
+        let names = Names {
+            task: "unused",
+            client_task: "unused",
+            unit: NAME,
+            client_unit: "pseudolife-client-update-absent",
+        };
+        let environment = environment_lines(false, false).unwrap();
+        let expected = |url: &str| argv(url);
+        fs::write(
+            dir.join(format!("{NAME}.service")),
+            service_body(NAME, &argv(URL).unwrap(), &environment).unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{NAME}.timer")), timer_body(NAME, 3, 7)).unwrap();
+        // Near miss: as `--schedule` writes it, with nothing beyond it.
+        let found = installed_on(&host, &names, &expected);
+        assert_eq!(found.len(), 1);
+        assert!(
+            found[0].shaped && found[0].overridden.is_none(),
+            "{:?} {:?}",
+            found[0].why,
+            found[0].overridden
+        );
+        // A drop-in under $XDG_DATA_HOME, which only the host's environment
+        // names, is found.
+        let data_dropins = home.join("data/systemd/user/pseudolife-update.service.d");
+        fs::create_dir_all(&data_dropins).unwrap();
+        fs::write(
+            data_dropins.join("override.conf"),
+            "[Service]\nExecStart=\nExecStart=/x\n",
+        )
+        .unwrap();
+        let found = installed_on(&host, &names, &expected);
+        assert!(
+            found[0]
+                .overridden
+                .as_deref()
+                .unwrap()
+                .contains("override.conf sets ExecStart=")
+        );
+        fs::remove_dir_all(home.join("data")).unwrap();
+        // A drop-in systemd reports that this search did not read.
+        *listed.borrow_mut() = "/somewhere/else/pseudolife-update.service.d/x.conf".to_owned();
+        let found = installed_on(&host, &names, &expected);
+        assert!(
+            found[0]
+                .overridden
+                .as_deref()
+                .unwrap()
+                .starts_with("systemd's user manager applies the drop-in /somewhere/else/")
+        );
+        listed.borrow_mut().clear();
+        // The host's Linux flag decides whether an unreadable timer is shown.
+        fs::remove_file(dir.join(format!("{NAME}.timer"))).unwrap();
+        fs::create_dir(dir.join(format!("{NAME}.timer"))).unwrap();
+        let shown = installed_on(&host, &names, &expected);
+        assert_eq!(shown.len(), 1);
+        assert!(
+            shown[0]
+                .overridden
+                .as_deref()
+                .unwrap()
+                .contains("repair that file")
+        );
+        let other = Host {
+            linux: false,
+            ..host
+        };
+        assert!(installed_on(&other, &names, &expected).is_empty());
+        fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn this_machine_is_read_as_the_platform_it_is() {
+        let here = Host::here();
+        assert_eq!(
+            (here.windows, here.linux),
+            (cfg!(windows), cfg!(target_os = "linux"))
+        );
+        assert_eq!(here.dir, systemd_dir());
     }
 
     #[test]
@@ -1373,7 +1864,13 @@ mod tests {
         let environment: Vec<String> = Vec::new();
         let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
         let enabled = || Ok(true);
-        let read = || systemd_installed(&dir, &roots, NAME, false, &enabled, &expected);
+        let show = |unit: &str| {
+            Ok(format!(
+                "FragmentPath={}\nDropInPaths=\n",
+                dir.join(unit).display()
+            ))
+        };
+        let read = || systemd_installed(&dir, &roots, NAME, false, &enabled, &show, &expected);
         // Not installed: no unit file.
         assert!(matches!(read(), Ok(None)));
         fs::write(
@@ -1403,7 +1900,7 @@ mod tests {
             found
                 .overridden
                 .unwrap()
-                .ends_with("override.conf sets ExecStart=")
+                .contains("override.conf sets ExecStart=, which takes precedence")
         );
         // A timer that exists but cannot be read (here a directory) is a read
         // failure for the re-read, and stays visible to discovery on Linux
@@ -1418,7 +1915,14 @@ mod tests {
         );
         let shown = discovered(read(), true, &dir, NAME, false).expect("visible on Linux");
         assert!(!shown.shaped);
-        assert_eq!(shown.why.as_deref(), Some(cause.as_str()));
+        // The real fix: `--schedule` would fail on the same read.
+        let said = shown.overridden.unwrap();
+        assert!(said.starts_with(&cause), "{said}");
+        assert!(
+            said.contains("repair that file's permissions or contents"),
+            "{said}"
+        );
+        assert!(!said.contains("update --schedule HH:MM"), "{said}");
         assert!(
             shown
                 .remove
@@ -1429,10 +1933,22 @@ mod tests {
         assert!(discovered(Ok(None), true, &dir, NAME, false).is_none());
         fs::remove_dir(dir.join(format!("{NAME}.timer"))).unwrap();
         fs::write(dir.join(format!("{NAME}.timer")), timer_body(NAME, 3, 7)).unwrap();
+        // A `systemctl show` that failed leaves the schedule alone.
+        let failed = |_: &str| Err("`systemctl --user show` exited 1".to_owned());
+        let found = systemd_installed(&dir, &roots, NAME, false, &enabled, &failed, &expected)
+            .unwrap()
+            .unwrap();
+        assert!(!found.shaped);
+        assert!(
+            found
+                .overridden
+                .unwrap()
+                .starts_with("connect could not ask systemd's user manager")
+        );
         // An enabled-check that was interrupted is a read failure.
         let interrupted = || Err("interrupted".to_owned());
         assert_eq!(
-            systemd_installed(&dir, &roots, NAME, false, &interrupted, &expected)
+            systemd_installed(&dir, &roots, NAME, false, &interrupted, &show, &expected)
                 .err()
                 .as_deref(),
             Some("interrupted")

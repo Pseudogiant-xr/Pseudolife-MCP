@@ -22,6 +22,8 @@ pub(super) struct Found {
     pub overridden: Option<String>,
     /// A task setting `--schedule` never writes, named.
     pub differs: Option<String>,
+    /// The task's command is the `-EncodedCommand` layout wrapper.
+    pub encoded: bool,
     pub remove: String,
 }
 
@@ -84,6 +86,7 @@ fn found(installed: crate::cli::update::schedules::Installed) -> Found {
         why: installed.why,
         overridden: installed.overridden,
         differs: installed.differs,
+        encoded: installed.encoded,
         remove: installed.remove,
     }
 }
@@ -171,17 +174,25 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
         // A URL the plan cannot hold (hand-edited) is a manual row, never a
         // deferral of the whole run.
         if let Some(overridden) = &found.overridden {
-            // The drop-in, not the base unit `--schedule` writes, decides
-            // what runs, so neither "current" nor `--schedule` is true.
+            // What systemd reads beyond the base files, not the base unit
+            // `--schedule` writes, decides what runs, so neither "current"
+            // nor `--schedule` is true. The one exception acts first: the
+            // daemon's own schedule after the daemon moved away is removed
+            // with `--unschedule` whatever a drop-in says.
+            let detail = if !found.client && ctx.remote {
+                format!(
+                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule` (which disables it whatever its drop-ins say), and schedule it on the daemon's host",
+                    found.place
+                )
+            } else {
+                format!("{}: {overridden}", found.place)
+            };
             rows.push(discover::manual(
                 "unattended-update",
                 place,
                 None,
                 None,
-                format!(
-                    "{}: {overridden}, which takes precedence over what `update --schedule` writes, so connect cannot tell which daemon it runs against, and re-scheduling it would not change that; edit or remove that drop-in, run `systemctl --user daemon-reload`, then re-run connect",
-                    found.place
-                ),
+                detail,
             )?);
             continue;
         }
@@ -226,9 +237,19 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
                 "connect cannot tell whether it is the one `update --schedule` writes ({why}), so it leaves it as it is; re-schedule it"
             ))?
         } else if let Some(differs) = &found.differs {
+            // A task registered through the `-EncodedCommand` layout wrapper
+            // shows its daemon URL only as base64, so it cannot be edited
+            // in Task Scheduler's argument field.
+            let keep = if found.encoded {
+                "to keep it, re-register the task by hand with the new daemon URL (its URL is inside the task's `-EncodedCommand` script, which Task Scheduler shows only as base64)".to_owned()
+            } else {
+                format!(
+                    "to keep it, change the task's `--daemon-url` argument to {} in Task Scheduler",
+                    ctx.url
+                )
+            };
             manual(format!(
-                "it has {differs}, which `update --schedule` does not write, so re-scheduling it would drop that, and connect leaves it as it is: to keep it, change the task's `--daemon-url` argument to {} in Task Scheduler; to drop it, re-schedule it: {fix}",
-                ctx.url
+                "it has {differs}, which `update --schedule` does not write, so re-scheduling it would drop that, and connect leaves it as it is: {keep}; to drop it, re-schedule it: {fix}"
             ))?
         } else if found.url.is_none() {
             leave(

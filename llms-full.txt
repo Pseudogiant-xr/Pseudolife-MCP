@@ -13108,7 +13108,10 @@ first, and if one write fails the files already written are restored.
     task with a setting `--schedule` would drop (an end date, a repetition,
     a delay, highest privileges), whose row names it, and a systemd
     schedule with a drop-in that sets its command, environment or timer,
-    whose row names the drop-in to edit or remove. `connect` never creates
+    whose row names the drop-in to edit or remove (the schedule stays
+    hand-managed while a drop-in sets it). `connect` also asks systemd's
+    user manager which unit file and drop-ins it applies, and leaves the
+    schedule alone when that differs from what it read. `connect` never creates
     or removes a schedule. The Python client re-creates none: it
     reports only the daemon's schedule, and names the `--schedule` command
     to re-run (`--unschedule` once the daemon is on another machine).
