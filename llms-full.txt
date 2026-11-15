@@ -13107,9 +13107,12 @@ first, and if one write fails the files already written are restored.
     machine, is a `manual` row naming the command to run. So is a scheduled
     task with a setting `--schedule` would drop (an end date, a repetition,
     a delay, highest privileges), whose row names it, and a systemd
-    schedule with a drop-in that sets its command, environment or timer,
-    whose row names the drop-in to edit or remove (the schedule stays
-    hand-managed while a drop-in sets it). `connect` also asks systemd's
+    schedule with a drop-in that sets anything not known to be harmless
+    (its command, environment, timer, a `[Unit]` dependency), whose row
+    names the drop-in to edit or remove (the schedule stays hand-managed
+    while a drop-in sets it). A schedule is reported current only when it
+    is exactly what `--schedule` writes, and a re-created one is read back
+    before the move is reported. `connect` also asks systemd's
     user manager which unit file and drop-ins it applies, and leaves the
     schedule alone when that differs from what it read. `connect` never creates
     or removes a schedule. The Python client re-creates none: it

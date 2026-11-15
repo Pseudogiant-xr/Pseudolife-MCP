@@ -18,8 +18,10 @@ pub(super) struct Found {
     pub url: Option<String>,
     pub shaped: bool,
     pub why: Option<String>,
-    /// A systemd drop-in that overrides the run, as a clause.
-    pub overridden: Option<String>,
+    /// Why connect cannot vouch for it beyond the base files (a drop-in, a
+    /// unit file systemd loads from elsewhere, an unreadable unit), with the
+    /// step that resolves it.
+    pub overridden: Option<crate::cli::update::schedules::Blocker>,
     /// A task setting `--schedule` never writes, named.
     pub differs: Option<String>,
     /// The task's command is the `-EncodedCommand` layout wrapper.
@@ -171,26 +173,28 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
         } else {
             "schedule"
         };
-        // A URL the plan cannot hold (hand-edited) is a manual row, never a
-        // deferral of the whole run.
-        if let Some(overridden) = &found.overridden {
+        if let Some(blocker) = &found.overridden {
             // What systemd reads beyond the base files, not the base unit
             // `--schedule` writes, decides what runs, so neither "current"
-            // nor `--schedule` is true. The one exception acts first: the
-            // daemon's own schedule after the daemon moved away is removed
-            // with `--unschedule` whatever a drop-in says.
-            let overridden = overridden.replace(crate::cli::update::schedules::TARGET, &ctx.url);
-            // The daemon's own schedule after the daemon moved away is
-            // removed with `--unschedule`, but what was found here (a
-            // drop-in that refuses a manual stop, a unit file elsewhere) can
-            // stop that, so the row keeps it.
+            // nor `--schedule` is true. The daemon's own schedule after the
+            // daemon moved away is the exception: its next step is
+            // `--unschedule`, so the row names that, and the cause found
+            // without the fix (which would promise a re-creation connect will
+            // not make there); some causes (a directory at the unit path, an
+            // unreachable user manager) can also make `--unschedule` fail.
             let detail = if !found.client && ctx.remote {
                 format!(
-                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host. What connect found here may stop `--unschedule` from removing it, so deal with that first: {overridden}",
-                    found.place
+                    "{}: the daemon now runs on another machine, and an unattended update only updates a daemon on this one, so connect does not re-run the schedule step: remove it here with `pseudolife-mcp update --unschedule`, and schedule it on the daemon's host. Also found here: {}; if `--unschedule` reports an error, deal with that first",
+                    found.place, blocker.cause
                 )
             } else {
-                format!("{}: {overridden}", found.place)
+                format!(
+                    "{}: {}",
+                    found.place,
+                    blocker
+                        .sentence()
+                        .replace(crate::cli::update::schedules::TARGET, &ctx.url)
+                )
             };
             rows.push(discover::manual(
                 "unattended-update",
@@ -201,15 +205,15 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             )?);
             continue;
         }
-        let target = found
-            .url
-            .as_deref()
-            .and_then(|value| match url::validated(value) {
-                Ok(Ok(valid)) => Some(valid),
-                Ok(Err(())) => Some(value.to_owned()),
-                Err(Defer) => None,
-            });
-        if target.as_deref() == Some(ctx.url.as_str()) {
+        // A URL the plan cannot hold (hand-edited) is a manual row, never a
+        // deferral of the whole run.
+        let target = named(found.url.as_deref());
+        // "current" needs the schedule to be exactly what `--schedule`
+        // writes: a hand edit that keeps the new URL first can add a second
+        // `--daemon-url` (the run takes the last), an `ExecStartPost=` or a
+        // second task action naming another daemon.
+        let current = target.as_deref() == Some(ctx.url.as_str());
+        if current && found.shaped {
             let mut row = discover::row("unattended-update", place, None, None, "current")?;
             row.detail = found.place;
             rows.push(row);
@@ -241,6 +245,15 @@ pub(super) fn rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
             leave(&format!(
                 "connect cannot tell whether it is the one `update --schedule` writes ({why}), so it leaves it as it is; re-schedule it"
             ))?
+        } else if current && found.differs.is_some() {
+            manual(format!(
+                "it names this daemon but has {}, which `update --schedule` does not write, so connect leaves it as it is: it needs no change for this move if nothing else in it was edited; for connect to manage it, re-schedule it (which drops that): {fix}",
+                found.differs.as_deref().unwrap_or_default()
+            ))?
+        } else if current && found.why.is_none() && found.url.is_some() && !found.shaped {
+            leave(
+                "it names this daemon but is not exactly the schedule `update --schedule` writes (a hand edit can add a second command, `--daemon-url` or task action naming another daemon), so connect cannot vouch that it runs against this daemon and leaves it as it is; re-schedule it",
+            )?
         } else if let Some(differs) = &found.differs {
             // A task registered through the `-EncodedCommand` layout wrapper
             // shows its daemon URL only as base64, so it cannot be edited
@@ -332,13 +345,24 @@ pub(super) fn apply(
         // never revived or overwritten.
         let check = || unchanged(plan, backend.reread(plan.client));
         match backend.recreate(plan.client, &plan.time, url, &check) {
-            Ok(()) => notes.push(format!(
-                "{} now runs against {url}, daily at {}, as `update --schedule` writes it",
-                row.detail, plan.time
-            )),
+            // Read back what was written before saying it runs against the
+            // new daemon: the write's own `daemon-reload` can load a unit file
+            // from a higher-priority directory connect never read.
+            Ok(()) => match written(plan, url, backend.reread(plan.client)) {
+                Ok(()) => notes.push(format!(
+                    "{} now runs against {url}, daily at {}, as `update --schedule` writes it",
+                    row.detail, plan.time
+                )),
+                Err(cause) => failures.push(format!(
+                    "{prefix}{} was re-created for {url}, but {}",
+                    row.detail,
+                    cause.replace(crate::cli::update::schedules::TARGET, url)
+                )),
+            },
             Err(Stop::Changed(cause)) => failures.push(format!(
-                "{prefix}{} was not re-created: {cause}, so connect leaves it as it is; re-run connect to plan it again",
+                "{prefix}{} was not re-created: {}, so connect leaves it as it is; re-run connect to plan it again",
                 row.detail,
+                cause.replace(crate::cli::update::schedules::TARGET, url)
             )),
             Err(Stop::Failed(cause)) => failures.push(format!(
                 "{prefix}{} was not re-created ({cause}); finish it with {}",
@@ -350,6 +374,49 @@ pub(super) fn apply(
     (notes, failures)
 }
 
+/// The daemon URL a schedule names, as the plan compares it.
+fn named(value: Option<&str>) -> Option<String> {
+    value.and_then(|value| match url::validated(value) {
+        Ok(Ok(valid)) => Some(valid),
+        Ok(Err(())) => Some(value.to_owned()),
+        Err(Defer) => None,
+    })
+}
+
+/// Whether the schedule read back after the write (`read`) is what was
+/// written for `url` at the planned time, with nothing systemd loads beyond
+/// it; why not, as the rest of the failure line ("… was re-created for
+/// URL, but …").
+pub(super) fn written(
+    plan: &Plan,
+    url: &str,
+    read: Result<Option<Found>, String>,
+) -> Result<(), String> {
+    match read {
+        Err(cause) => Err(format!(
+            "connect could not read it back ({cause}), so it cannot confirm the run uses the new daemon; re-run connect to check it"
+        )),
+        Ok(None) => Err(
+            "it is not installed when connect reads it back, so it cannot confirm the run uses the new daemon; re-run connect to check it".to_owned(),
+        ),
+        Ok(Some(found)) => match &found.overridden {
+            Some(blocker) => Err(format!(
+                "when connect reads it back, {}, so connect cannot confirm the run uses the new daemon: {}",
+                blocker.cause, blocker.fix
+            )),
+            None if found.shaped
+                && found.time.as_deref() == Some(plan.time.as_str())
+                && named(found.url.as_deref()).as_deref() == Some(url) =>
+            {
+                Ok(())
+            }
+            None => Err(
+                "it does not read back as what `update --schedule` writes for this daemon at the planned time, so connect cannot confirm the run uses the new daemon; re-run connect to check it".to_owned(),
+            ),
+        },
+    }
+}
+
 /// Whether the schedule read again (`read`) is still the one `plan` was
 /// made from; why not, as the cause a failure line states.
 pub(super) fn unchanged(plan: &Plan, read: Result<Option<Found>, String>) -> Result<(), String> {
@@ -358,6 +425,15 @@ pub(super) fn unchanged(plan: &Plan, read: Result<Option<Found>, String>) -> Res
             "connect could not read it again immediately before writing ({cause})"
         )),
         Ok(None) => Err("it was removed after connect read it".to_owned()),
+        // Something beyond the base files is new since the plan (a drop-in,
+        // a reload pending, an unreachable user manager): that is the cause.
+        Ok(Some(Found {
+            overridden: Some(blocker),
+            ..
+        })) => Err(format!(
+            "{} (found when connect read it again immediately before writing)",
+            blocker.cause
+        )),
         Ok(Some(found))
             if found.client == plan.client
                 && found.shaped

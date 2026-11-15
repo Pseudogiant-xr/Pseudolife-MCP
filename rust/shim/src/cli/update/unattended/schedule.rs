@@ -25,7 +25,7 @@ pub(crate) const NAMES: Names<'static> = Names {
 #[path = "reschedule.rs"]
 mod reschedule;
 pub(crate) use reschedule::{
-    Installed, Stop, TARGET, installed, installed_kind, preflight, reschedule,
+    Blocker, Installed, Stop, TARGET, installed, installed_kind, preflight, reschedule,
 };
 
 const LAYOUT: &[&str] = &[

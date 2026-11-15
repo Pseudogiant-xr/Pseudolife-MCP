@@ -23,12 +23,12 @@ pub(crate) struct Installed {
     /// that cannot be read), when it cannot.
     pub why: Option<String>,
     /// Why `connect` leaves it as it is because of what systemd reads beyond
-    /// the base files (a drop-in that sets what the run depends on, one it
-    /// cannot read or parse, a unit file loaded from elsewhere) or because
-    /// the unit itself cannot be read, as the whole sentence a row prints:
-    /// the cause, then the next step that resolves it. The schedule is then
-    /// never current and never re-created.
-    pub overridden: Option<String>,
+    /// the base files (a drop-in that sets anything not known to be
+    /// harmless, one it cannot read or parse, a unit file loaded from
+    /// elsewhere) or because the unit itself cannot be read: the cause and
+    /// the step that resolves it. The schedule is then never current and
+    /// never re-created.
+    pub overridden: Option<Blocker>,
     /// A task setting `--schedule` never writes, named ("an end date"):
     /// re-registering the task would drop it.
     pub differs: Option<String>,
@@ -37,6 +37,32 @@ pub(crate) struct Installed {
     pub encoded: bool,
     /// The one command that removes exactly this schedule.
     pub remove: String,
+}
+
+/// Why `connect` cannot vouch for a schedule, and the step that resolves it,
+/// kept apart so a row that has its own next step (the daemon moved away)
+/// can name the cause without a fix that does not apply there.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Blocker {
+    pub cause: String,
+    pub fix: String,
+}
+
+impl Blocker {
+    pub(crate) fn new(cause: impl Into<String>, fix: impl Into<String>) -> Self {
+        Blocker {
+            cause: cause.into(),
+            fix: fix.into(),
+        }
+    }
+
+    /// The whole sentence a row prints.
+    pub(crate) fn sentence(&self) -> String {
+        format!(
+            "{}, so connect cannot vouch for it and leaves it as it is: {}",
+            self.cause, self.fix
+        )
+    }
 }
 
 /// Where a row's repair command names the daemon URL `connect` moves to,
@@ -129,8 +155,11 @@ fn discovered(
     match read {
         Ok(found) => found,
         Err(cause) if linux => Some(unvouched(dir, name, client, &|remove| {
-            format!(
-                "{cause}, so connect cannot read the schedule and leaves it as it is (`update --schedule` would fail on the same read): repair that file's permissions, or remove the schedule with `{remove}`, then re-run connect"
+            Blocker::new(
+                format!("{cause} (`update --schedule` would fail on the same read)"),
+                format!(
+                    "repair that file's permissions, or remove the schedule with `{remove}`, then re-run connect"
+                ),
             )
         })),
         Err(_) => None,
@@ -139,7 +168,7 @@ fn discovered(
 
 /// A systemd schedule connect cannot vouch for, shown with `said`, which is
 /// given the command that removes it.
-fn unvouched(dir: &Path, name: &str, client: bool, said: &dyn Fn(&str) -> String) -> Installed {
+fn unvouched(dir: &Path, name: &str, client: bool, said: &dyn Fn(&str) -> Blocker) -> Installed {
     let file = |suffix: &str| format!("'{}'", dir.join(format!("{name}.{suffix}")).display());
     let remove = format!(
         "systemctl --user disable --now {name}.timer && rm {} {} && systemctl --user daemon-reload",
@@ -268,9 +297,14 @@ fn systemd_installed(
     // is not.
     let not_text = |path: &Path| {
         Ok(Some(unvouched(dir, name, client, &|remove| {
-            format!(
-                "{} is not UTF-8 text, so connect cannot compare it with what `update --schedule` writes and leaves the schedule as it is: re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect",
-                path.display()
+            Blocker::new(
+                format!(
+                    "{} is not UTF-8 text, so connect cannot compare it with what `update --schedule` writes",
+                    path.display()
+                ),
+                format!(
+                    "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time (which replaces the file), or remove it with `{remove}`, then re-run connect"
+                ),
             )
         })))
     };
@@ -280,10 +314,15 @@ fn systemd_installed(
     for path in [&unit, &timer_file] {
         if path.is_dir() {
             return Ok(Some(unvouched(dir, name, client, &|_| {
-                format!(
-                    "{} is a directory, not a unit file, so connect cannot read the schedule and leaves it as it is: remove that directory (`rm -r '{}'`) and run `systemctl --user daemon-reload`, then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
-                    path.display(),
-                    path.display()
+                Blocker::new(
+                    format!(
+                        "{} is a directory, not a unit file, so connect cannot read the schedule",
+                        path.display()
+                    ),
+                    format!(
+                        "remove that directory (`rm -r '{}'`) and run `systemctl --user daemon-reload`, then re-create the schedule with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, then re-run connect",
+                        path.display()
+                    ),
                 )
             })));
         }
@@ -322,9 +361,12 @@ fn systemd_installed(
     )))
 }
 
-fn unasked(cause: &str) -> String {
-    format!(
-        "connect could not ask systemd's user manager which files make up the unit ({cause}), so it cannot tell whether a drop-in changes the run and leaves the schedule as it is: re-run connect where the user manager runs (a login session), or manage this schedule by hand"
+fn unasked(cause: &str) -> Blocker {
+    Blocker::new(
+        format!(
+            "connect could not ask systemd's user manager which files make up the unit ({cause}), so it cannot tell whether a drop-in changes the run"
+        ),
+        "re-run connect where the user manager runs (a login session), or manage this schedule by hand",
     )
 }
 
@@ -343,7 +385,7 @@ fn systemd_disagrees(
     unit: &str,
     out: &str,
     read: &std::collections::BTreeSet<PathBuf>,
-) -> Option<String> {
+) -> Option<Blocker> {
     let mut fragment = None;
     let mut dropins = Vec::new();
     let mut stale = true;
@@ -354,8 +396,11 @@ fn systemd_disagrees(
             match show_paths(value) {
                 Some(paths) => dropins.extend(paths),
                 None => {
-                    return Some(format!(
-                        "connect cannot decode the drop-in paths systemd's user manager reports for {unit} (`{value}`), so it cannot tell whether one changes the run and leaves the schedule as it is: manage this schedule by hand, or move its drop-ins to a path without unusual characters and run `systemctl --user daemon-reload`"
+                    return Some(Blocker::new(
+                        format!(
+                            "connect cannot decode the drop-in paths systemd's user manager reports for {unit} (`{value}`), so it cannot tell whether one changes the run"
+                        ),
+                        "move its drop-ins to a path without unusual characters and run `systemctl --user daemon-reload`, then re-run connect, or manage this schedule by hand",
                     ));
                 }
             }
@@ -367,38 +412,59 @@ fn systemd_disagrees(
     // since then (or a report that does not say) is not yet in force, so
     // what connect read is not what runs.
     if stale {
-        return Some(format!(
-            "systemd's user manager has not loaded {unit}'s files as they are on disk (it reports NeedDaemonReload), so what runs may differ from what connect reads and it leaves the schedule as it is: run `systemctl --user daemon-reload`, then re-run connect"
+        return Some(Blocker::new(
+            format!(
+                "systemd's user manager has not loaded {unit}'s files as they are on disk (it reports NeedDaemonReload), so what runs may differ from what connect reads"
+            ),
+            "run `systemctl --user daemon-reload`, then re-run connect",
         ));
     }
     let written = canonical(&dir.join(unit));
     match fragment.as_deref() {
         Some(path) if !path.is_empty() && canonical(Path::new(path)) == written => {}
         Some(path) if !path.is_empty() => {
-            return Some(format!(
-                "systemd's user manager loads {unit} from {path}, not from {} that `update --schedule` writes, so connect leaves the schedule as it is: remove the other unit file and run `systemctl --user daemon-reload`, or manage this schedule by hand",
-                written.display()
+            return Some(Blocker::new(
+                format!(
+                    "systemd's user manager loads {unit} from {path}, not from {} that `update --schedule` writes",
+                    written.display()
+                ),
+                "remove the other unit file and run `systemctl --user daemon-reload`, or manage this schedule by hand",
             ));
         }
         _ if dir.join(unit).exists() => {
-            return Some(format!(
-                "systemd's user manager does not find {unit} although {} exists, so it searches other directories than this shell's environment names (its `XDG_CONFIG_HOME` differs; `systemctl --user show-environment` shows it), and connect leaves the schedule as it is: re-run connect with the manager's environment, or move the schedule's files to a directory the manager searches and run `systemctl --user daemon-reload`",
-                dir.join(unit).display()
+            return Some(Blocker::new(
+                format!(
+                    "systemd's user manager does not find {unit} although {} exists, so it searches other directories than this shell's environment names (its `XDG_CONFIG_HOME` differs; `systemctl --user show-environment` shows it)",
+                    dir.join(unit).display()
+                ),
+                "re-run connect with the manager's environment, or move the schedule's files to a directory the manager searches and run `systemctl --user daemon-reload`",
             ));
         }
         _ => {
-            return Some(format!(
-                "systemd's user manager has no unit file for {unit} ({} is gone), so the schedule is incomplete and connect leaves it as it is: re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, or remove what is left of it, then re-run connect",
-                written.display()
+            return Some(Blocker::new(
+                format!(
+                    "systemd's user manager has no unit file for {unit} ({} is gone), so the schedule is incomplete",
+                    written.display()
+                ),
+                format!(
+                    "re-create it with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` at your time, or remove what is left of it, then re-run connect"
+                ),
             ));
         }
     }
     let read: std::collections::BTreeSet<PathBuf> =
         read.iter().map(|path| canonical(path)).collect();
+    // A drop-in only the manager's search path reaches (a vendor,
+    // portable-service or `user.attached` directory) is one connect never
+    // reads: even a harmless one leaves the schedule hand-managed while it
+    // applies, and the row says so.
     dropins.into_iter().find(|path| !read.contains(&canonical(path))).map(|path| {
-        format!(
-            "systemd's user manager applies the drop-in {}, which connect's own search did not read (the manager's search path can differ from this shell's), so connect cannot tell whether it changes the run and leaves the schedule as it is: if it should not apply, remove it and run `systemctl --user daemon-reload`, then re-run connect; otherwise manage this schedule by hand",
-            path.display()
+        Blocker::new(
+            format!(
+                "systemd's user manager applies the drop-in {}, which connect's own search did not read (the manager's search path can differ from this shell's), so connect cannot tell whether it changes the run",
+                path.display()
+            ),
+            "if it should not apply, remove it and run `systemctl --user daemon-reload`, then re-run connect; if it must stay (a vendor or system file), connect cannot manage this schedule while it applies, so it stays hand-managed: re-schedule it yourself when the daemon moves",
         )
     })
 }
@@ -406,8 +472,12 @@ fn systemd_disagrees(
 /// A `show` value listing paths, as systemd v259 prints a string array
 /// (`bus-print-properties.c` through `shell_maybe_quote(…, 0)`, escape.c):
 /// space-separated, each either bare or in double quotes with `\`, `"`,
-/// `` ` `` and `$` backslash-escaped and control bytes C-escaped. `None`
-/// for anything else, which the caller treats as unknown.
+/// `` ` `` and `$` backslash-escaped and control bytes C-escaped by
+/// `cescape_char` (the named escapes `\a\b\f\n\r\t\v`, otherwise three
+/// octal digits: `c\001d.conf`, as a real `systemctl --user show` printed it
+/// on a Linux dev box, systemd 259, 15 November 2026). An octal byte of 0x80
+/// or more is part of a name that is not UTF-8, which a Rust string cannot
+/// hold. `None` for anything else, which the caller treats as unknown.
 fn show_paths(value: &str) -> Option<Vec<PathBuf>> {
     let mut paths = Vec::new();
     let mut chars = value.trim().chars().peekable();
@@ -432,16 +502,15 @@ fn show_paths(value: &str) -> Option<Vec<PathBuf>> {
                         'b' => path.push('\u{8}'),
                         'f' => path.push('\u{c}'),
                         'v' => path.push('\u{b}'),
-                        'x' => {
-                            let high = chars.next()?.to_digit(16)?;
-                            let low = chars.next()?.to_digit(16)?;
-                            let byte = (high * 16 + low) as u8;
-                            // A C-escaped byte above 0x7f is part of invalid
-                            // UTF-8, which a Rust path string cannot hold.
+                        first @ '0'..='3' => {
+                            let mut byte = first.to_digit(8)?;
+                            for _ in 0..2 {
+                                byte = byte * 8 + chars.next()?.to_digit(8)?;
+                            }
                             if byte > 0x7f {
                                 return None;
                             }
-                            path.push(byte as char);
+                            path.push(char::from(byte as u8));
                         }
                         _ => return None,
                     },
@@ -540,34 +609,21 @@ fn systemd_roots(dir: &Path, env: &dyn Fn(&str) -> Option<String>, home: &Path) 
     roots
 }
 
-/// The keys a drop-in may not set for `connect` to vouch for the schedule.
-/// In the service, what the run executes and with which environment: every
-/// command-running directive of systemd.service(5) (any of them may name a
-/// daemon URL) and `ExecSearchPath=`, which decides which executable runs;
-/// the environment carries the bearer
-/// file and layout variables the base unit's shape check compares. In the
-/// timer, any key: every `[Timer]` key decides when it runs or which unit
-/// it starts, and `connect` reports and keeps that daily time. Any other
-/// key (`Type=`, `TimeoutStopFailureMode=`, `[Unit]`, `[Install]`) changes
-/// neither, and survives a re-creation, which rewrites only the base files.
-fn blocking_key(kind: &str, section: &str, key: &str) -> bool {
-    match (kind, section) {
-        ("service", "Service") => matches!(
-            key,
-            "ExecCondition"
-                | "ExecStartPre"
-                | "ExecStart"
-                | "ExecStartPost"
-                | "ExecReload"
-                | "ExecStop"
-                | "ExecStopPost"
-                | "ExecSearchPath"
-                | "Environment"
-                | "EnvironmentFile"
-                | "UnsetEnvironment"
-                | "PassEnvironment"
-        ),
-        ("timer", "Timer") => true,
+/// The keys a drop-in may set while `connect` still vouches for the
+/// schedule: only keys that cannot change what runs, which daemon it
+/// targets, or when. Every other key, in any section (`[Unit]` keys such as
+/// `OnSuccess=` or `Wants=` that start other units, namespace keys such as
+/// `RootDirectory=` or `BindPaths=`, anything unknown), blocks, so the rule
+/// fails closed by construction. The list holds only what a known harmless
+/// vendor drop-in needs.
+fn harmless_key(kind: &str, section: &str, key: &str) -> bool {
+    match (kind, section, key) {
+        // Fedora ships /usr/lib/systemd/user/service.d/10-timeout-abort.conf
+        // (the reviewer's report, not verified here) with only this key: what
+        // systemd does when a stop times out (abort, which dumps core,
+        // instead of SIGKILL). It runs after the command and changes neither
+        // the command, its URL nor when it runs.
+        ("service", "Service", "TimeoutStopFailureMode") => true,
         _ => false,
     }
 }
@@ -619,8 +675,9 @@ enum Unreadable {
     Rejected(usize, &'static str),
 }
 
-/// The first blocking key `text`, a drop-in for a unit of `kind`, sets,
-/// read exactly as systemd's `config_parse` and `parse_line` read a file
+/// The first key `text`, a drop-in for a unit of `kind`, sets that is not
+/// harmless (`harmless_key`), read exactly as systemd's `config_parse` and
+/// `parse_line` read a file
 /// (src/shared/conf-parser.c, v259):
 /// - a line whose first non-whitespace character is `#` or `;` is a
 ///   comment, skipped whole, also in the middle of a continuation, before
@@ -679,7 +736,7 @@ fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Un
             if key.is_empty() {
                 return Ok(None);
             }
-            Ok(blocking_key(kind, section, key).then(|| format!("{key}=")))
+            Ok((!harmless_key(kind, section, key)).then(|| format!("{key}=")))
         };
     for raw in systemd_lines(text) {
         line_number += 1;
@@ -728,7 +785,7 @@ fn dropin_sets(kind: &str, text: &str) -> std::result::Result<Option<String>, Un
 fn systemd_dropins(
     roots: &[PathBuf],
     name: &str,
-) -> std::result::Result<[std::collections::BTreeSet<PathBuf>; 2], String> {
+) -> std::result::Result<[std::collections::BTreeSet<PathBuf>; 2], Blocker> {
     let mut stems: Vec<String> = name
         .match_indices('-')
         .map(|(at, _)| name[..=at].to_owned())
@@ -749,9 +806,12 @@ fn systemd_dropins(
                 Ok(entries) => entries,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => {
-                    return Err(format!(
-                        "connect cannot read the systemd drop-in directory {} ({error}), so it cannot tell whether a drop-in there changes the run and leaves the schedule as it is: fix that directory's permissions or remove it, then re-run connect",
-                        directory.display()
+                    return Err(Blocker::new(
+                        format!(
+                            "connect cannot read the systemd drop-in directory {} ({error}), so it cannot tell whether a drop-in there changes the run",
+                            directory.display()
+                        ),
+                        "fix that directory's permissions or remove it, then re-run connect",
                     ));
                 }
             };
@@ -781,9 +841,12 @@ fn systemd_dropins(
             let text = match fs::read_to_string(file) {
                 Ok(text) => text,
                 Err(error) => {
-                    return Err(format!(
-                        "connect cannot read the systemd drop-in {}{masked} ({error}), so it cannot tell whether that file changes the run and leaves the schedule as it is: fix or remove the file, then re-run connect",
-                        file.display()
+                    return Err(Blocker::new(
+                        format!(
+                            "connect cannot read the systemd drop-in {}{masked} ({error}), so it cannot tell whether that file changes the run",
+                            file.display()
+                        ),
+                        "fix or remove the file, then re-run connect",
                     ));
                 }
             };
@@ -791,16 +854,37 @@ fn systemd_dropins(
                 Ok(None) => {
                     read[index].insert(file.clone());
                 }
+                Ok(Some(key)) if kind == "timer" => {
+                    // A timer drop-in does not change which daemon the
+                    // service targets: it changes when the run happens, which
+                    // unit it starts or what runs with it, while connect keeps
+                    // and reports the daily time `--schedule` writes.
+                    return Err(Blocker::new(
+                        format!(
+                            "the systemd drop-in {}{masked} sets {key}, which can change when the run happens, which unit the timer starts or what runs with it, while connect keeps and reports the daily time `update --schedule` writes",
+                            file.display()
+                        ),
+                        format!(
+                            "remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or re-schedule it yourself with `pseudolife-mcp update --schedule HH:MM --daemon-url {TARGET}` and keep the drop-in"
+                        ),
+                    ));
+                }
                 Ok(Some(key)) => {
-                    return Err(format!(
-                        "the systemd drop-in {}{masked} sets {key}, which takes precedence over the files `update --schedule` writes, so connect cannot tell which daemon the run targets, and re-scheduling would not change it. The schedule stays hand-managed while that drop-in sets it: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or keep it and point it at the new daemon yourself",
-                        file.display()
+                    return Err(Blocker::new(
+                        format!(
+                            "the systemd drop-in {}{masked} sets {key}, which takes precedence over the files `update --schedule` writes and can change what the run executes or which daemon it targets",
+                            file.display()
+                        ),
+                        "the schedule stays hand-managed while that drop-in sets it: remove the drop-in and run `systemctl --user daemon-reload` for connect to re-create the schedule on its next run, or keep it and point it at the new daemon yourself",
                     ));
                 }
                 Err(Unreadable::Rejected(line, what)) => {
-                    return Err(format!(
-                        "systemd rejects the drop-in {}{masked} (line {line}: {what}), so the unit does not load as `update --schedule` writes it, and connect leaves the schedule as it is: fix or remove that file, run `systemctl --user daemon-reload`, then re-run connect",
-                        file.display()
+                    return Err(Blocker::new(
+                        format!(
+                            "systemd rejects the drop-in {}{masked} (line {line}: {what}), so the unit does not load as `update --schedule` writes it",
+                            file.display()
+                        ),
+                        "fix or remove that file, run `systemctl --user daemon-reload`, then re-run connect",
                     ));
                 }
             }
@@ -989,7 +1073,7 @@ fn systemd_parse(
     service: &str,
     timer: &str,
     enabled: bool,
-    overridden: Option<String>,
+    overridden: Option<Blocker>,
     expected: &dyn Fn(&str) -> Result<String>,
 ) -> Installed {
     let url = service
@@ -1463,13 +1547,16 @@ mod tests {
             &service,
             &timer,
             true,
-            Some("the systemd drop-in X sets ExecStart=".to_owned()),
+            Some(Blocker::new(
+                "the systemd drop-in X sets ExecStart=",
+                "remove it",
+            )),
             &expected,
         );
         assert!(!found.shaped);
         assert!(found.why.is_none());
         assert_eq!(
-            found.overridden.as_deref(),
+            found.overridden.map(|blocker| blocker.cause).as_deref(),
             Some("the systemd drop-in X sets ExecStart=")
         );
     }
@@ -1477,7 +1564,8 @@ mod tests {
     /// The cause clause of `systemd_dropins`'s refusal (up to its ", which"
     /// or ", so"), or `None` when it reads every drop-in as harmless.
     fn systemd_override(roots: &[PathBuf], name: &str) -> Option<String> {
-        systemd_dropins(roots, name).err().map(|text| {
+        systemd_dropins(roots, name).err().map(|blocker| {
+            let text = blocker.cause;
             let cut = [", which", ", so"]
                 .iter()
                 .filter_map(|mark| text.find(mark))
@@ -1508,6 +1596,16 @@ mod tests {
         quoted
     }
 
+    /// `systemd_disagrees`'s refusal as the sentence a row prints.
+    fn disagrees(
+        dir: &Path,
+        unit: &str,
+        out: &str,
+        read: &std::collections::BTreeSet<PathBuf>,
+    ) -> Option<String> {
+        systemd_disagrees(dir, unit, out, read).map(|blocker| blocker.sentence())
+    }
+
     /// A throwaway directory under the system temp directory.
     fn scratch() -> PathBuf {
         let root =
@@ -1528,9 +1626,9 @@ mod tests {
             path.join(file)
         };
         // Near misses: nothing; another unit's override; an empty directory;
-        // backups only; a vendor top-level drop-in that sets an unrelated key
-        // (Fedora's 10-timeout-abort.conf, as reported); a [Unit] key; a
-        // comment and a continuation line.
+        // backups only; a vendor top-level drop-in that sets only the listed
+        // key (Fedora's 10-timeout-abort.conf, as reported); a comment and a
+        // continuation line.
         assert_eq!(systemd_override(&roots, name), None);
         put(
             "pseudolife-other.service.d",
@@ -1556,7 +1654,7 @@ mod tests {
         put(
             "pseudolife-.service.d",
             "10-unit.conf",
-            "# a comment\n[Unit]\nDescription=x \\\n  continued\n",
+            "# a comment\n[Service]\nTimeoutStopFailureMode=abort \\\n  continued\n",
         );
         assert_eq!(systemd_override(&roots, name), None);
         // A comment ending in a backslash continues nothing: the key after
@@ -1574,7 +1672,7 @@ mod tests {
         let file = put(
             "pseudolife-update.service.d",
             "60-comment.conf",
-            "[Service]\nDescription=a \\\n# skipped\n  b\nExecStart=/x\n",
+            "[Service]\nTimeoutStopFailureMode=a \\\n# skipped\n  b\nExecStart=/x\n",
         );
         assert_eq!(
             systemd_override(&roots, name),
@@ -1632,6 +1730,21 @@ mod tests {
                 "Unit=",
             ),
             ("timer.d", "[Timer]\nOnBootSec=5min\n", "OnBootSec="),
+            (
+                "pseudolife-update.service.d",
+                "[Unit]\nOnFailure=old-update.service\n",
+                "OnFailure=",
+            ),
+            (
+                "pseudolife-update.service.d",
+                "[Service]\nBindPaths=/old:/opt\n",
+                "BindPaths=",
+            ),
+            (
+                "pseudolife-update.timer.d",
+                "[Service]\nExecStart=/x\n",
+                "ExecStart=",
+            ),
         ] {
             let file = put(dir, "50-test.conf", text);
             assert_eq!(
@@ -1641,15 +1754,6 @@ mod tests {
             );
             fs::remove_file(&file).unwrap();
         }
-        // A service key in a timer drop-in, or a timer key in a service one,
-        // is not read by systemd for that unit.
-        let file = put(
-            "pseudolife-update.timer.d",
-            "50-test.conf",
-            "[Service]\nExecStart=/x\n",
-        );
-        assert_eq!(systemd_override(&roots, name), None);
-        fs::remove_file(&file).unwrap();
         // A line with no `=`, which systemd ignores, is ignored here too.
         let file = put(
             "pseudolife-update.service.d",
@@ -1698,20 +1802,39 @@ mod tests {
         // A backslash followed by a space, or an escaped backslash, does not
         // continue the line in systemd: the next line is read on its own.
         assert_eq!(
-            sets(&format!("[Service]\nNice=5 \\ \n{post}\n")).as_deref(),
+            sets(&format!(
+                "[Service]\nTimeoutStopFailureMode=abort \\ \n{post}\n"
+            ))
+            .as_deref(),
             Some("ExecStartPost=")
         );
         assert_eq!(
-            sets(&format!("[Service]\nNice=5\\\\\n{post}\n")).as_deref(),
+            sets(&format!(
+                "[Service]\nTimeoutStopFailureMode=abort\\\\\n{post}\n"
+            ))
+            .as_deref(),
             Some("ExecStartPost=")
         );
         // Near miss: an odd trailing backslash continues it, so the next line
-        // is part of `Nice=` and sets nothing.
-        assert_eq!(sets(&format!("[Service]\nNice=5 \\\n{post}\n")), None);
-        assert_eq!(sets(&format!("[Service]\nNice=5 \\\\\\\n{post}\n")), None);
+        // is part of `TimeoutStopFailureMode=` and sets nothing that blocks.
+        assert_eq!(
+            sets(&format!(
+                "[Service]\nTimeoutStopFailureMode=abort \\\n{post}\n"
+            )),
+            None
+        );
+        assert_eq!(
+            sets(&format!(
+                "[Service]\nTimeoutStopFailureMode=abort \\\\\\\n{post}\n"
+            )),
+            None
+        );
         // A lone CR ends a line, as systemd's read_line ends one.
         assert_eq!(
-            sets(&format!("[Service]\rNice=5\r{post}\r")).as_deref(),
+            sets(&format!(
+                "[Service]\rTimeoutStopFailureMode=abort\r{post}\r"
+            ))
+            .as_deref(),
             Some("ExecStartPost=")
         );
         assert_eq!(
@@ -1720,7 +1843,10 @@ mod tests {
         );
         // A byte-order mark is dropped, so a harmless file stays harmless and
         // a blocking one still blocks.
-        assert_eq!(sets("\u{feff}[Service]\nNice=5\n"), None);
+        assert_eq!(
+            sets("\u{feff}[Service]\nTimeoutStopFailureMode=abort\n"),
+            None
+        );
         assert_eq!(
             sets(&format!("\u{feff}[Service]\n{post}\n")).as_deref(),
             Some("ExecStartPost=")
@@ -1733,19 +1859,49 @@ mod tests {
         // A section name with a non-ASCII control character (U+0085) is safe
         // to systemd; one with an ASCII control byte or a quote is not.
         assert_eq!(
-            sets(&format!("[X-\u{85}]\nNice=5\n[Service]\n{post}\n")).as_deref(),
+            sets(&format!("[X-\u{85}]\n[Service]\n{post}\n")).as_deref(),
             Some("ExecStartPost=")
         );
-        assert_eq!(sets("[X-\u{85}]\nNice=5\n"), None);
+        assert_eq!(sets("[X-\u{85}]\n"), None);
         assert!(
-            sets("[X-\u{1}]\nNice=5\n")
+            sets("[X-\u{1}]\nTimeoutStopFailureMode=abort\n")
                 .unwrap()
                 .starts_with("rejected 1")
         );
-        assert!(sets("[X-\"q]\nNice=5\n").unwrap().starts_with("rejected 1"));
+        assert!(
+            sets("[X-\"q]\nTimeoutStopFailureMode=abort\n")
+                .unwrap()
+                .starts_with("rejected 1")
+        );
         // A key before any section, or in another section, is not the
         // service's.
-        assert_eq!(sets(&format!("{post}\n[Unit]\n{post}\n")), None);
+        assert_eq!(sets(&format!("{post}\n")), None);
+        // Any key in any section that is not on the list blocks: a `[Unit]`
+        // key that starts another unit, a namespace key, an unknown key, and a
+        // listed key beside one that is not.
+        assert_eq!(
+            sets("[Unit]\nOnSuccess=old-update.service\n").as_deref(),
+            Some("OnSuccess=")
+        );
+        assert_eq!(
+            sets("[Service]\nRootDirectory=/old\n").as_deref(),
+            Some("RootDirectory=")
+        );
+        assert_eq!(
+            sets("[X-Vendor]\nAnything=1\n").as_deref(),
+            Some("Anything=")
+        );
+        assert_eq!(
+            sets("[Service]\nTimeoutStopFailureMode=abort\nNice=5\n").as_deref(),
+            Some("Nice=")
+        );
+        // Near miss: the listed key, and only it, does not block; a listed key
+        // in another section is not that key.
+        assert_eq!(sets("[Service]\nTimeoutStopFailureMode=abort\n"), None);
+        assert_eq!(
+            sets("[Unit]\nTimeoutStopFailureMode=abort\n").as_deref(),
+            Some("TimeoutStopFailureMode=")
+        );
     }
 
     #[test]
@@ -1849,35 +2005,37 @@ mod tests {
         fs::write(dir.join("a.conf"), "").unwrap();
         // Near miss: the unit from `dir`, and only drop-ins this search read.
         assert_eq!(
-            systemd_disagrees(&dir, unit, &format!("{fragment}\nDropInPaths=\n"), &read),
+            disagrees(&dir, unit, &format!("{fragment}\nDropInPaths=\n"), &read),
             None
         );
         let listed = format!(
             "{fragment}\nDropInPaths={}\n",
             show_quote(&dir.join("a.conf"))
         );
-        assert_eq!(systemd_disagrees(&dir, unit, &listed, &read), None);
+        assert_eq!(disagrees(&dir, unit, &listed, &read), None);
         // A drop-in systemd applies that this search did not read.
         let unseen = format!(
             "{fragment}\nDropInPaths={} /opt/x/pseudolife-update.service.d/b.conf\n",
             show_quote(&dir.join("a.conf"))
         );
-        assert!(
-            systemd_disagrees(&dir, unit, &unseen, &read)
-                .unwrap()
-                .starts_with("systemd's user manager applies the drop-in /opt/x/pseudolife-update.service.d/b.conf")
-        );
+        let said = disagrees(&dir, unit, &unseen, &read).unwrap();
+        assert!(said.starts_with(
+            "systemd's user manager applies the drop-in /opt/x/pseudolife-update.service.d/b.conf"
+        ));
+        // Such a file may not be the user's to remove: the row says the
+        // schedule stays hand-managed while it applies, and what to do.
+        assert!(said.contains("if it must stay (a vendor or system file), connect cannot manage this schedule while it applies, so it stays hand-managed: re-schedule it yourself when the daemon moves"), "{said}");
         // The unit loaded from another file, or from nowhere.
         let shadowed = "NeedDaemonReload=no\nFragmentPath=/run/user/1000/systemd/transient/pseudolife-update.service\nDropInPaths=\n";
         assert!(
-            systemd_disagrees(&dir, unit, shadowed, &read)
+            disagrees(&dir, unit, shadowed, &read)
                 .unwrap()
                 .contains("loads pseudolife-update.service from /run/user/1000/systemd/transient/")
         );
         // A unit file this search read but the manager does not find: its
         // search path differs, and re-scheduling into the same place would
         // not help.
-        let unfound = systemd_disagrees(
+        let unfound = disagrees(
             &dir,
             unit,
             "NeedDaemonReload=no\nFragmentPath=\nDropInPaths=\n",
@@ -1892,7 +2050,7 @@ mod tests {
         // No unit file at all: the cause is that it is gone, and the fix is
         // re-creating it, not removing another file.
         fs::remove_file(dir.join(unit)).unwrap();
-        let gone = systemd_disagrees(
+        let gone = disagrees(
             &dir,
             unit,
             "NeedDaemonReload=no\nFragmentPath=\nDropInPaths=\n",
@@ -1919,14 +2077,14 @@ mod tests {
         let quoted = format!("{fragment}\nDropInPaths={}\n", show_quote(&spaced));
         assert!(quoted.contains("DropInPaths=\""), "{quoted}");
         assert_eq!(
-            systemd_disagrees(&dir, unit, &quoted, &read_spaced),
+            disagrees(&dir, unit, &quoted, &read_spaced),
             None,
             "{quoted}"
         );
         // A report this decoder cannot read leaves the schedule alone, saying so.
         let odd = format!("{fragment}\nDropInPaths=$'x'\n");
         assert!(
-            systemd_disagrees(&dir, unit, &odd, &read)
+            disagrees(&dir, unit, &odd, &read)
                 .unwrap()
                 .starts_with("connect cannot decode the drop-in paths")
         );
@@ -1944,11 +2102,9 @@ mod tests {
             ),
         ] {
             assert!(
-                systemd_disagrees(&dir, unit, &report, &read)
-                    .unwrap()
-                    .contains(
-                        "has not loaded pseudolife-update.service's files as they are on disk"
-                    ),
+                disagrees(&dir, unit, &report, &read).unwrap().contains(
+                    "has not loaded pseudolife-update.service's files as they are on disk"
+                ),
                 "{report}"
             );
         }
@@ -1971,11 +2127,7 @@ mod tests {
         let timer_dropins = dir.join(format!("{NAME}.timer.d"));
         fs::create_dir(&timer_dropins).unwrap();
         let file = timer_dropins.join("override.conf");
-        fs::write(
-            &file,
-            "\u{feff}[Service]\nExecStart=\nExecStart=/x --daemon-url http://OLD\n",
-        )
-        .unwrap();
+        fs::write(&file, "\u{feff}# nothing to set\n").unwrap();
         let report = |listed: String| {
             let dir = dir.clone();
             move |unit: &str| {
@@ -2007,7 +2159,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(
-            found.shaped && found.overridden.is_none(),
+            found.shaped && found.overridden.as_ref().map(Blocker::sentence).is_none(),
             "{:?}",
             found.overridden
         );
@@ -2021,6 +2173,8 @@ mod tests {
         assert!(
             found
                 .overridden
+                .as_ref()
+                .map(Blocker::sentence)
                 .unwrap()
                 .starts_with("systemd's user manager applies the drop-in")
         );
@@ -2043,7 +2197,7 @@ mod tests {
             Some(vec!["/a/b.conf".to_owned(), "/c/d.conf".to_owned()])
         );
         assert_eq!(
-            paths("\"/home/u x/a.conf\" /c.conf \"/q\\\"\\$\\`\\\\.conf\" \"/t\\tz\\x01.conf\""),
+            paths("\"/home/u x/a.conf\" /c.conf \"/q\\\"\\$\\`\\\\.conf\" \"/t\\tz\\001.conf\""),
             Some(vec![
                 "/home/u x/a.conf".to_owned(),
                 "/c.conf".to_owned(),
@@ -2051,6 +2205,24 @@ mod tests {
                 "/t\tz\u{1}.conf".to_owned()
             ])
         );
+        // What `systemctl --user show -p DropInPaths` printed on a Linux dev
+        // box (systemd 259, 15 November 2026) for a throwaway unit's drop-ins
+        // named `a b.conf`, `c<0x01>d.conf`, `t<tab>d.conf` and `é.conf`
+        // (home replaced): quoted when needed, octal for the control byte,
+        // `\t`, and a non-ASCII name left bare.
+        let real = "\"/home/u/.config/systemd/user/w2probe.service.d/a b.conf\" \"/home/u/.config/systemd/user/w2probe.service.d/c\\001d.conf\" \"/home/u/.config/systemd/user/w2probe.service.d/t\\td.conf\" /home/u/.config/systemd/user/w2probe.service.d/\u{e9}.conf";
+        assert_eq!(
+            paths(real),
+            Some(vec![
+                "/home/u/.config/systemd/user/w2probe.service.d/a b.conf".to_owned(),
+                "/home/u/.config/systemd/user/w2probe.service.d/c\u{1}d.conf".to_owned(),
+                "/home/u/.config/systemd/user/w2probe.service.d/t\td.conf".to_owned(),
+                "/home/u/.config/systemd/user/w2probe.service.d/\u{e9}.conf".to_owned(),
+            ])
+        );
+        // An escape systemd does not print (`\x`), an octal byte of 0x80 or
+        // more (part of a name that is not UTF-8), a short octal, or an
+        // unknown form: unknown.
         for unknown in [
             "$'x'",
             "\"/a\\q.conf\"",
@@ -2058,6 +2230,9 @@ mod tests {
             "\"/unterminated",
             "/a'b",
             "\"/a\\xff\"",
+            "\"/a\\x01.conf\"",
+            "\"/a\\377.conf\"",
+            "\"/a\\00\"",
         ] {
             assert_eq!(paths(unknown), None, "{unknown}");
         }
@@ -2081,7 +2256,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(!found.shaped);
-        let said = found.overridden.unwrap();
+        let said = found.overridden.as_ref().map(Blocker::sentence).unwrap();
         assert!(said.contains("is not UTF-8 text"), "{said}");
         assert!(
             said.contains(&format!(
@@ -2144,7 +2319,12 @@ mod tests {
         let found = installed_on(&host, &names, &expected);
         assert_eq!(found.len(), 1);
         assert!(
-            found[0].shaped && found[0].overridden.is_none(),
+            found[0].shaped
+                && found[0]
+                    .overridden
+                    .as_ref()
+                    .map(Blocker::sentence)
+                    .is_none(),
             "{:?} {:?}",
             found[0].why,
             found[0].overridden
@@ -2162,6 +2342,8 @@ mod tests {
         assert!(
             found[0]
                 .overridden
+                .as_ref()
+                .map(Blocker::sentence)
                 .as_deref()
                 .unwrap()
                 .contains("override.conf sets ExecStart=")
@@ -2173,6 +2355,8 @@ mod tests {
         assert!(
             found[0]
                 .overridden
+                .as_ref()
+                .map(Blocker::sentence)
                 .as_deref()
                 .unwrap()
                 .starts_with("systemd's user manager applies the drop-in /somewhere/else/")
@@ -2186,6 +2370,8 @@ mod tests {
         assert!(
             shown[0]
                 .overridden
+                .as_ref()
+                .map(Blocker::sentence)
                 .as_deref()
                 .unwrap()
                 .contains("is a directory, not a unit file")
@@ -2298,7 +2484,7 @@ mod tests {
         // Near miss: the files as `--schedule` writes them, no drop-in.
         let found = read().unwrap().unwrap();
         assert!(
-            found.shaped && found.overridden.is_none(),
+            found.shaped && found.overridden.as_ref().map(Blocker::sentence).is_none(),
             "{:?}",
             found.why
         );
@@ -2315,6 +2501,8 @@ mod tests {
         assert!(
             found
                 .overridden
+                .as_ref()
+                .map(Blocker::sentence)
                 .unwrap()
                 .contains("override.conf sets ExecStart=, which takes precedence")
         );
@@ -2326,7 +2514,7 @@ mod tests {
         fs::create_dir(dir.join(format!("{NAME}.timer"))).unwrap();
         let found = read().unwrap().unwrap();
         assert!(!found.shaped);
-        let said = found.overridden.unwrap();
+        let said = found.overridden.as_ref().map(Blocker::sentence).unwrap();
         assert!(
             said.contains(&format!("{NAME}.timer is a directory, not a unit file")),
             "{said}"
@@ -2342,7 +2530,7 @@ mod tests {
         };
         let shown = discovered(unreadable(), true, &dir, NAME, false).expect("visible on Linux");
         assert!(!shown.shaped);
-        let said = shown.overridden.unwrap();
+        let said = shown.overridden.as_ref().map(Blocker::sentence).unwrap();
         assert!(
             said.starts_with(&format!("{NAME}.timer cannot be read")),
             "{said}"
@@ -2368,6 +2556,8 @@ mod tests {
         assert!(
             found
                 .overridden
+                .as_ref()
+                .map(Blocker::sentence)
                 .unwrap()
                 .starts_with("connect could not ask systemd's user manager")
         );
@@ -2380,6 +2570,82 @@ mod tests {
             Some("interrupted")
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_hand_edit_that_keeps_the_new_url_first_reads_back_unshaped() {
+        // The first `--daemon-url` names the daemon, but another command (or a
+        // second `--daemon-url`, which the run takes) names the old one: the
+        // URL read back is the new one, and the schedule is not shaped, which
+        // is what keeps `connect` from calling it current.
+        let old = "http://10.0.0.9:8765";
+        let environment: Vec<String> = Vec::new();
+        let service = service_body(NAME, &argv(URL).unwrap(), &environment).unwrap();
+        let timer = timer_body(NAME, 3, 7);
+        let expected = |url: &str| service_body(NAME, &argv(url)?, &environment);
+        let dir = Path::new("/home/u/.config/systemd/user");
+        for edited in [
+            format!("{service}ExecStartPost=/x update --unattended --daemon-url {old}\n"),
+            service.replace(
+                &format!("\"--daemon-url\" \"{URL}\""),
+                &format!("\"--daemon-url\" \"{URL}\" \"--daemon-url\" \"{old}\""),
+            ),
+        ] {
+            let found = systemd_parse(dir, NAME, false, &edited, &timer, true, None, &expected);
+            assert_eq!(found.url.as_deref(), Some(URL), "{edited}");
+            assert!(!found.shaped, "{edited}");
+        }
+        // A task whose first action names the daemon and a second the old one.
+        let (command, arguments) = windows_expected(URL).unwrap();
+        let (_, old_arguments) = windows_expected(old).unwrap();
+        let escape = |text: &str| text.replace('&', "&amp;").replace('"', "&quot;");
+        let xml = task_xml(&command, &arguments, |x| {
+            x.replace(
+                "</Actions>",
+                &format!(
+                    "<Exec><Command>{}</Command><Arguments>{}</Arguments></Exec></Actions>",
+                    escape(&command),
+                    escape(&old_arguments)
+                ),
+            )
+        });
+        let found = windows_parse("T", true, &xml, &windows_expected);
+        assert_eq!(found.url.as_deref(), Some(URL));
+        assert!(!found.shaped);
+    }
+
+    #[test]
+    fn a_timer_drop_in_says_what_it_changes_and_the_fix_that_works() {
+        let root = scratch();
+        let roots = [root.clone()];
+        fs::create_dir_all(root.join("pseudolife-update.timer.d")).unwrap();
+        fs::write(
+            root.join("pseudolife-update.timer.d/override.conf"),
+            "[Timer]\nRandomizedDelaySec=0\n",
+        )
+        .unwrap();
+        let blocker = systemd_dropins(&roots, "pseudolife-update").unwrap_err();
+        assert!(
+            blocker
+                .cause
+                .contains("sets RandomizedDelaySec=, which can change when the run happens"),
+            "{}",
+            blocker.cause
+        );
+        assert!(!blocker.cause.contains("which daemon"), "{}", blocker.cause);
+        assert!(
+            blocker.fix.contains(&format!(
+                "update --schedule HH:MM --daemon-url {TARGET}` and keep the drop-in"
+            )),
+            "{}",
+            blocker.fix
+        );
+        assert!(
+            !blocker.fix.contains("point it at the new daemon"),
+            "{}",
+            blocker.fix
+        );
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -2481,7 +2747,14 @@ mod real_tests {
             assert!(found[0].shaped, "{} {:?}", found[0].place, found[0].why);
             assert_eq!(found[0].url.as_deref(), Some("http://127.0.0.1:18765"));
             assert_eq!(found[0].time.as_deref(), Some("04:09"));
-            assert!(found[0].differs.is_none() && found[0].overridden.is_none());
+            assert!(
+                found[0].differs.is_none()
+                    && found[0]
+                        .overridden
+                        .as_ref()
+                        .map(Blocker::sentence)
+                        .is_none()
+            );
             if cfg!(windows) {
                 // The shape the real export has, for the record (its user id
                 // is the caller's to redact).
