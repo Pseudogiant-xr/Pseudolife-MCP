@@ -14,9 +14,9 @@ import pytest
 from pseudolife_memory.credentials import CredentialProvider
 from tests import native_client_stub as native_stub
 from tests.test_client_install_ux import _heredoc_payload, _marker_block
-from tests.test_installer_client_only import BASH, CRED_READY, FIXTURE_TOKEN, HEALTH_ON, REMOTE, _stub, _block as _sh_block, _q as _sh_q, _token as _sh_token
+from tests.test_installer_client_only import BASH, CRED_READY, FIXTURE_TOKEN, HEALTH_ON, REMOTE, _stub, _q as _sh_q, _token as _sh_token
 from tests.test_installer_client_only_native import _Shell
-from tests.test_installer_client_only_ps import _block as _ps_block, _output, _q as _ps_q, _token as _ps_token
+from tests.test_installer_client_only_ps import _output, _q as _ps_q, _token as _ps_token
 from tests.test_installer_client_only_ps_native import _PowerShell
 from tests.test_installer_existing_upgrade import _bash_fixture_path
 

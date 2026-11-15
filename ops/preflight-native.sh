@@ -4,7 +4,7 @@
 # each prerequisite and prints the exact remediation for anything missing;
 # never installs or changes anything. Exit 0 = ready to install.
 #
-#   ops/preflight.sh --client claude|claude-desktop|codex|gemini|generic
+#   ops/preflight-native.sh --client claude|claude-desktop|codex|gemini|generic
 #   (comma/space list; aliases: both = claude,codex — all = claude,codex,gemini)
 set -u
 
@@ -146,6 +146,6 @@ echo
 if [ "$fails" -eq 0 ]; then
     echo "All checks passed — follow the README Quickstart."
 else
-    echo "$fails check(s) failed — run the fix line(s) above, then re-run ops/preflight.sh."
+    echo "$fails check(s) failed — run the fix line(s) above, then re-run ops/preflight-native.sh."
     exit 1
 fi

@@ -189,29 +189,6 @@ def test_sh_native_without_the_native_installer_refuses(tmp_path):
     assert "install-native.sh" in proc.stderr and "Nothing was changed" in proc.stderr
 
 
-def test_ps_native_without_the_native_installer_refuses(tmp_path):
-    if PWSH is None:
-        pytest.skip("needs pwsh")
-    repo = _repo(tmp_path, "install.ps1", _ps_stub(), "install-native.ps1")
-    (repo / "ops" / "install-native.ps1").unlink()
-    proc = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), "-NoArt"],
-                          env=_env(tmp_path, "native"), capture_output=True, text=True, timeout=120, check=False,
-                          stdin=subprocess.DEVNULL)
-    assert proc.returncode == 1
-    assert "install-native.ps1" in proc.stderr and "Nothing was changed" in proc.stderr
-
-
-def test_sh_native_without_the_native_installer_refuses(tmp_path):
-    if BASH is None:
-        pytest.skip("needs bash")
-    repo = _repo(tmp_path, "install.sh", SH_STUB, "install-native.sh")
-    (repo / "ops" / "install-native.sh").unlink()
-    proc = subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), "--yes"], env=_env(tmp_path, "native"),
-                          capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
-    assert proc.returncode == 1
-    assert "install-native.sh" in proc.stderr and "Nothing was changed" in proc.stderr
-
-
 @pytest.mark.parametrize("engine", ["rust", "Native", "pip"])
 def test_ps_any_other_engine_is_refused_before_anything_changes(tmp_path, engine):
     proc = _ps(tmp_path, engine, "-ClientOnly", "-DaemonUrl", "http://pl.example.invalid:8765", "-NoArt")
@@ -258,3 +235,21 @@ def test_the_native_installer_says_a_rerun_needs_the_variable(native, line):
     usage = text.split("# >>> usage >>>", 1)[1].split("# <<< usage <<<", 1)[0] if "# >>> usage >>>" in text \
         else text.split("param(", 1)[0]
     assert "PSEUDOLIFE_SHIM_ENGINE=native" in usage
+
+
+@pytest.mark.parametrize("rel", sorted(str(path.relative_to(ROOT)).replace("\\", "/")
+                                      for path in (ROOT / "ops").glob("*-native.ps1")))
+def test_the_native_powershell_scripts_parse(rel):
+    # tests/test_client_install_ux.py::test_installer_ps1_parses parses the
+    # default installer's scripts; the native ones are only run, so a parse
+    # error in a branch no test reaches would ship.
+    if PWSH is None:
+        pytest.skip("needs pwsh")
+    path = str(ROOT / rel).replace("'", "''")
+    script = ("$e=$null;"
+              "[System.Management.Automation.Language.Parser]::ParseFile("
+              f"'{path}',[ref]$null,[ref]$e)|Out-Null;"
+              "if($e){$e|ForEach-Object{[Console]::Error.WriteLine($_.Message)};exit 1}")
+    proc = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+                          capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, f"{rel} failed to parse: {proc.stderr}"

@@ -3,10 +3,10 @@
 # Codex SessionStart hooks, ALONGSIDE (never replacing) existing hooks.
 # Bash port of ops/install-hook.ps1 for Linux/macOS hosts.
 #
-#   ops/install-hook.sh
-#   ops/install-hook.sh --client codex
-#   ops/install-hook.sh /path/to/settings.json
-#   ops/install-hook.sh --remove-legacy [--dry-run] [/path/to/settings.json]
+#   ops/install-hook-native.sh
+#   ops/install-hook-native.sh --client codex
+#   ops/install-hook-native.sh /path/to/settings.json
+#   ops/install-hook-native.sh --remove-legacy [--dry-run] [/path/to/settings.json]
 #
 # Backs up settings.json first; re-running is a no-op once installed. The
 # JSON edit is the native client's (no jq or Python dependency).

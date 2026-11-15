@@ -1,9 +1,10 @@
-"""The installers look up and start no Python on the host.
+"""The native installers (``PSEUDOLIFE_SHIM_ENGINE=native``) look up and start no
+Python on the host.
 
 Every step they used to run through Python is a step of the native client
 (``pseudolife-mcp installer ...``). Two guards hold that:
 
-- ``test_installer_client_only.py::test_a_client_only_install_wires_clients_to_the_remote_daemon``
+- ``test_installer_client_only_native.py::test_a_client_only_install_wires_clients_to_the_remote_daemon``
   runs a whole ``ops/install-native.sh`` client-only install with ``python``,
   ``python3``, ``py``, ``pip``, ``pip3`` and ``pipx`` on PATH as stubs that
   record any call and fail it, and asserts none was made;

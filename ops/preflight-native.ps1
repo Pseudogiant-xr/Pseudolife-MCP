@@ -4,7 +4,7 @@
 # each prerequisite and prints the exact remediation for anything missing;
 # never installs or changes anything. Exit 0 = ready to install.
 #
-#   ops\preflight.ps1 -Client claude|claude-desktop|codex|gemini|generic
+#   ops\preflight-native.ps1 -Client claude|claude-desktop|codex|gemini|generic
 #   (comma/space list; aliases: both = claude,codex — all = claude,codex,gemini)
 
 param(
@@ -143,6 +143,6 @@ if ($script:fails -eq 0) {
     # native probe above set.
     exit 0
 } else {
-    Write-Host "$($script:fails) check(s) failed - run the fix line(s) above, then re-run ops\preflight.ps1."
+    Write-Host "$($script:fails) check(s) failed - run the fix line(s) above, then re-run ops\preflight-native.ps1."
     exit 1
 }
