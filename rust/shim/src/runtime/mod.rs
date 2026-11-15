@@ -22,6 +22,7 @@ pub use launch::maybe_launch;
 #[cfg(windows)]
 pub(crate) use launch::windows_job;
 pub use prune::{Evidence, Process, collect_evidence, remove_unused};
+pub(crate) use prune::{record_keeps_runtime, record_processes};
 
 pub const MARKER: &str = "runtime.json";
 pub const BINARY: &str = if cfg!(windows) {

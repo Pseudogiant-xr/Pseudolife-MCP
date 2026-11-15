@@ -185,6 +185,47 @@ fn verify_process_evidence(_: &mut Vec<Process>) -> Result<()> {
     Err("process image inspection is unavailable; no runtime was removed".into())
 }
 
+/// One process a tunnel record (`<name>.process.json`) or refresh request
+/// names: its pid and, where the record kept them, its image and argv[0].
+#[derive(Debug, PartialEq)]
+pub(crate) struct RecordProcess<'a> {
+    pub pid: u64,
+    pub exe: Option<&'a str>,
+    pub argv0: Option<&'a str>,
+}
+
+/// The processes a tunnel record names: the tunnel itself (`pid`), its
+/// supervisor and a refresh request's target. Both readers share this:
+/// pruning keeps a runtime while any of these pids is in the process table,
+/// and `tunnel status` and `tunnel update` also match the recorded image, so
+/// a record they read as alive is one pruning keeps.
+pub(crate) fn record_processes(record: &Value) -> Vec<RecordProcess<'_>> {
+    [Some(record), record.get("supervisor"), record.get("target")]
+        .into_iter()
+        .flatten()
+        .filter_map(|identity| {
+            Some(RecordProcess {
+                pid: identity.get("pid")?.as_u64()?,
+                exe: identity.get("exe").and_then(Value::as_str),
+                argv0: identity
+                    .get("argv")
+                    .and_then(|argv| argv.get(0))
+                    .and_then(Value::as_str),
+            })
+        })
+        .collect()
+}
+
+/// Pruning's liveness test: any pid the record names is in the process
+/// table, whatever image it runs. It over-approximates on purpose (pruning
+/// deletes), so a record `tunnel status` reads as running, which also needs
+/// the recorded image, always keeps its runtime here.
+pub(crate) fn record_keeps_runtime(record: &Value, processes: &[Process]) -> bool {
+    record_processes(record)
+        .iter()
+        .any(|named| processes.iter().any(|p| u64::from(p.0) == named.pid))
+}
+
 pub fn tunnel_runtimes(
     layout: &Layout,
     root: &Path,
@@ -221,22 +262,11 @@ pub fn tunnel_runtimes(
         if !record.is_object() {
             return Err("tunnel record is not an object; no runtime was removed".into());
         }
-        let ids: Vec<_> = [
-            record.get("pid"),
-            record.get("supervisor").and_then(|v| v.get("pid")),
-            record.get("target").and_then(|v| v.get("pid")),
-        ]
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_u64)
-        .collect();
+        let ids: Vec<_> = record_processes(&record).iter().map(|p| p.pid).collect();
         if ids.is_empty() && record.get("snapshot").is_some_and(|v| !v.is_null()) {
             return Err("tunnel snapshot has no process identity; no runtime was removed".into());
         }
-        if !ids
-            .iter()
-            .any(|pid| processes.iter().any(|p| u64::from(p.0) == *pid))
-        {
+        if !record_keeps_runtime(&record, processes) {
             continue;
         }
         // Native supervisors may pin a runtime directly. No profile credentials

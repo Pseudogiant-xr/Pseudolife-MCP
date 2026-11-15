@@ -19,17 +19,22 @@ flowchart TD
     H -. changed credentials or connection .-> F
 ```
 
-**With the native client**, tunnels are not available yet. It answers
-`tunnel status` for a profile with no running tunnel, `tunnel update` when
-no saved profile is ready, and the refusals of `tunnel verify` and `tunnel
-setup` before they would change anything. Every other step (setup itself,
-`start`, `run`, `stop`, `doctor`, `service`, the cloud verification and
-`update` of a ready profile) stops with `pseudolife-stdio: mode 'tunnel' is
-deferred in this candidate` and exit 1, having changed nothing. On a host
-that runs a tunnel, keep the Python client, which an update does unless
-you opt in with `PSEUDOLIFE_SHIM_ENGINE=native`. With a running tunnel and
-a ready profile, every native `update` that runs the client steps also ends
-with exit 5, the opting-in run included, because its tunnel step defers (see
+**With the native client**, tunnels are not available yet: it cannot set
+up, start, stop or refresh one. It answers `tunnel status`, which reads a
+tunnel's process record and says whether the tunnel runs, and `tunnel
+update`, which starts, stops and signals nothing. `tunnel update` reports a
+tunnel that is not running, names a process record left by a stopped tunnel
+as a file you can delete, and reports a running tunnel as `stale`: it is
+left running on its current runtime, because this client cannot refresh it
+yet. The native client also answers the refusals of `tunnel verify` and
+`tunnel setup` before they would change anything. Every other step stops
+with `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and
+exit 1, having changed nothing. That covers setup itself, `start`, `run`,
+`stop`, `doctor`, `service`, the cloud verification, and `verify` while a
+process record exists. On a host that runs a tunnel, keep the Python
+client, which an update does unless you opt in with
+`PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
+tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
 to go back).
 

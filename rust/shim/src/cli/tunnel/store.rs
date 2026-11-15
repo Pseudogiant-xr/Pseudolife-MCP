@@ -227,6 +227,67 @@ pub(super) fn load(root: &Path, name: &str) -> Result<Profile, Fail> {
     Ok(profile)
 }
 
+/// The profile file a person would look for, even when its path cannot be
+/// checked.
+pub(super) fn profile_file(root: &Path, name: &str) -> PathBuf {
+    root.join(format!("{name}.profile.json"))
+}
+
+/// `run` could not open the store root: an empty `--profile-dir`, no home
+/// directory to resolve, or a link or junction on its path.
+pub(super) const UNSAFE_ROOT: &str = "the tunnel directory cannot be opened safely (an empty --profile-dir, no home directory, or a link or junction on its path); point it at a plain directory your account owns, then retry";
+
+/// Why `load(root, name)` deferred, in plain words naming the file or field
+/// this client does not read (for a person; no field value is repeated).
+pub(super) fn unread_reason(root: &Path, name: &str) -> &'static str {
+    const FILE: &str = "the profile file cannot be opened safely here (a pipe, or a link or junction this client does not follow)";
+    let Ok(path) = profile_path(root, name) else {
+        return FILE;
+    };
+    let payload = match private_read(&path, 65536) {
+        Err(_) => return FILE,
+        Ok(data) => match json_loads(&data) {
+            Admit::Yes(Value::Object(payload)) => payload,
+            _ => {
+                return "the profile file uses JSON this client does not read (a byte-order mark, a UTF-16 or UTF-32 encoding, NaN or Infinity, or very deep nesting)";
+            }
+        },
+    };
+    let path_field = |key: &str| {
+        text(&payload, key)
+            .flatten()
+            .is_some_and(|value| match absolute_reference(value) {
+                Err(Fail::Defer) => true,
+                Ok(true) => checked_path(Path::new(value)) == Err(Fail::Defer),
+                _ => false,
+            })
+    };
+    if text(&payload, "daemon_url")
+        .flatten()
+        .is_some_and(|url| validate_url(url) == Err(Fail::Defer))
+    {
+        return "its daemon_url is a URL form this client does not read";
+    }
+    if path_field("token_file") {
+        return "its token_file is a path form this client does not read (a UNC or device path)";
+    }
+    if text(&payload, "runtime_version")
+        .flatten()
+        .is_some_and(|version| !version.is_ascii())
+    {
+        return "its runtime_version is not plain ASCII digits";
+    }
+    if let Some(Value::String(value)) = field(&payload, "runtime_key_expires_at")
+        && matches!(parse_expiry(value), Admit::Defer)
+    {
+        return "its runtime_key_expires_at uses a timestamp spelling this client does not read (a fraction of other than 3 or 6 digits, hour 24, or an unusual offset)";
+    }
+    if path_field("cloud_verification_file") {
+        return "its cloud_verification_file is a path form this client does not read (a UNC or device path)";
+    }
+    "it holds a value this client does not read"
+}
+
 fn field<'a>(payload: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     payload.get(key).filter(|value| !value.is_null())
 }
@@ -364,14 +425,20 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
 /// `_key_present`: `ProfileStore.read_key` succeeds. A Windows DPAPI key
 /// would need CryptUnprotectData, which this leaf does not call: deferred.
 pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
+    key_state(root, name)?.ok_or(Fail::Defer)
+}
+
+/// The private key's presence, `None` for a Windows DPAPI key, which only
+/// CryptUnprotectData could prove (not called here).
+pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
     let path = match checked_path(&root.join(format!("{name}.key"))) {
         Ok(path) => path,
-        Err(Fail::Tunnel(_)) => return Ok(false),
+        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let data = match private_read(&path, 16384) {
         Ok(data) => data,
-        Err(Fail::Tunnel(_)) => return Ok(false),
+        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let (prefix, encoded) = match data.iter().position(|b| *b == 0) {
@@ -379,14 +446,17 @@ pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
         None => (&data[..], &[][..]),
     };
     if cfg!(windows) {
-        return if prefix == b"DPAPI" {
-            Err(Fail::Defer)
-        } else {
-            Ok(false)
-        };
+        return Ok((prefix != b"DPAPI").then_some(false));
     }
-    Ok(prefix == b"PLAIN" && crate::credentials::decode_token(encoded).is_ok())
+    Ok(Some(
+        prefix == b"PLAIN" && crate::credentials::decode_token(encoded).is_ok(),
+    ))
 }
+
+/// The store's listing failed in a way no refusal above names (an entry
+/// that is not a regular file, a name this client cannot fold, an
+/// unreadable directory).
+pub(super) const UNREADABLE_STORE: &str = "the tunnel directory holds entries this client does not read; make it a directory only your account can access, holding only tunnel profile files, then retry";
 
 /// The root a command's `ProfileStore(args.profile_dir)` opens. Its checks
 /// run outside the oracle's error handler (a traceback): every failure defers.

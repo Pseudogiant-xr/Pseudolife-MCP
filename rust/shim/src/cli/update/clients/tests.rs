@@ -790,3 +790,101 @@ fn marketplace_migration_without_claude_says_no_cli() {
     assert_eq!(report["state"], "no-cli");
     assert_eq!(report["detail"], "the claude CLI is not on PATH");
 }
+
+/// A tunnel store holding one process record, as a Python-era tunnel left it.
+fn tunnel_store(fixture: &Fixture) -> PathBuf {
+    let root = fixture.path.join(".pseudolife-mcp/tunnel");
+    crate::board::state::private_dir(&root).unwrap();
+    crate::board::state::atomic_create(
+        &root.join("dot.process.json"),
+        br#"{"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}"#,
+    )
+    .unwrap();
+    root
+}
+
+fn launcher(fixture: &Fixture) -> impl FnOnce() -> Result<Option<PathBuf>, String> {
+    let path = fixture.path.join("pseudolife-mcp");
+    move || Ok(Some(path))
+}
+
+#[test]
+fn tunnel_step_accepts_a_running_tunnel_it_cannot_refresh_as_stale() {
+    let fixture = Fixture::new();
+    let root = tunnel_store(&fixture);
+    // `tunnel update`'s answer for a running Python-era tunnel.
+    let answer = r#"{"state": "stale", "needs_attention": false, "detail": "1 saved tunnel profiles checked; local client registrations preserved; tunnel dot keeps running on its current runtime (process record X); this client cannot refresh or stop it yet, so it was left as it is", "profiles": [{"profile": "dot", "state": "stale", "running": true, "detail": "..."}]}"#;
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(0, &format!("{answer}\n")));
+    let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
+    assert_eq!(runner.calls.borrow().as_slice(), [vec!["tunnel", "update"]]);
+    assert_eq!(step["state"], "stale");
+    assert_eq!(
+        step["detail"],
+        "1 saved tunnel profiles checked; local client registrations preserved; tunnel dot keeps running on its current runtime (process record X); this client cannot refresh or stop it yet, so it was left as it is; run by the installed native launcher"
+    );
+    // The ladder's verdict: a stale tunnel step is not a failed client step.
+    let report = json!({"shim": {"state": "current"}, "tunnel": step});
+    assert!(
+        report
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|r| r["state"] != "failed")
+    );
+    // A stale answer with a failing exit is not an answer.
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(1, answer));
+    let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
+    assert_eq!(step["state"], "failed");
+}
+
+#[test]
+fn tunnel_step_fails_an_invalid_store_with_its_cause() {
+    let fixture = Fixture::new();
+    let root = tunnel_store(&fixture);
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| {
+        output(2, "tunnel profile directory must be owner-only\n")
+    });
+    let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
+    assert_eq!(step["state"], "failed");
+    let detail = step["detail"].as_str().unwrap();
+    assert!(
+        detail.starts_with(
+            "installed tunnel update ended with exit 2: tunnel profile directory must be owner-only; tunnels in "
+        ),
+        "{detail}"
+    );
+    assert!(
+        detail.ends_with("were left as they are; fix that, then run pseudolife-mcp tunnel update"),
+        "{detail}"
+    );
+    assert!(!detail.contains("tunnel doctor"), "{detail}");
+    // No reason at all still names the next step.
+    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(124, ""));
+    let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
+    assert_eq!(step["state"], "failed");
+    assert!(
+        step["detail"]
+            .as_str()
+            .unwrap()
+            .contains("ended with exit 124 without a reason"),
+        "{step}"
+    );
+}
+
+#[test]
+fn tunnel_step_runs_only_for_a_record_and_an_installed_launcher() {
+    let fixture = Fixture::new();
+    let root = fixture.path.join(".pseudolife-mcp/tunnel");
+    crate::board::state::private_dir(&root).unwrap();
+    crate::board::state::atomic_create(&root.join("dot.profile.json"), b"{}").unwrap();
+    let never = Fake::new(|_: &[&str], _: Option<&Path>| -> Output { unreachable!() });
+    // Profiles alone, with no process record: the step does not appear.
+    assert!(tunnel_step(&root, None, launcher(&fixture), &never).is_none());
+    let root = tunnel_store(&fixture);
+    let failed = json!({"state": "failed"});
+    let step = tunnel_step(&root, Some(&failed), launcher(&fixture), &never).unwrap();
+    assert_eq!(step["state"], "skipped");
+    let step = tunnel_step(&root, None, || Ok(None), &never).unwrap();
+    assert_eq!(step["state"], "skipped");
+    assert!(never.calls.borrow().is_empty());
+}
