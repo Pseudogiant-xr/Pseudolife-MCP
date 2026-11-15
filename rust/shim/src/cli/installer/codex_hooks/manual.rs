@@ -586,7 +586,7 @@ pub fn install(
         let mut data = python_json(&value);
         data.push('\n');
         if let Some(backup) = replace_snapshot(&path, original.as_deref(), data.as_bytes())? {
-            report.backups.push(backup);
+            report.backed_up(backup);
         }
     }
     if let Some(current) = current {

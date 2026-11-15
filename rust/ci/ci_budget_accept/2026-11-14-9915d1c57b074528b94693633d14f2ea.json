@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "f18af06d339169a0",
+  "fingerprint": "fd5439bfcc64d4dd",
+  "reason": "Merge of #1550 (with master c768b67bf, batch 6) into #1559: master's lane (with #1537's tests/test_update_bridge.py) minus its frozen files, plus this branch's native-client build already in the minutes (14.6); re-measure with test from the first batches that carry all three."
+}
