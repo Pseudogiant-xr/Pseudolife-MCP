@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_installer_existing_upgrade import user_path_unchanged
+
 from tests.ops_harness import find_bash
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,8 +73,9 @@ def _sh(tmp_path: Path, engine: str | None, *args: str) -> subprocess.CompletedP
         pytest.skip("needs bash")
     repo = _repo(tmp_path, "install.sh", SH_STUB, "install-native.sh")
     env = _env(tmp_path, engine)
-    return subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), *args], env=env,
-                          capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
+    with user_path_unchanged(tmp_path):
+        return subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), *args], env=env,
+                              capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
 
 
 def _ps_stub(ending: str = "exit 7\n") -> str:
@@ -92,9 +95,10 @@ def _ps(tmp_path: Path, engine: str | None, *args: str, ending: str = "exit 7\n"
         pytest.skip("needs pwsh")
     repo = _repo(tmp_path, "install.ps1", _ps_stub(ending), "install-native.ps1")
     env = _env(tmp_path, engine)
-    return subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), *args],
-                          env=env, capture_output=True, text=True, timeout=120, check=False,
-                          stdin=subprocess.DEVNULL)
+    with user_path_unchanged(tmp_path):
+        return subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), *args],
+                              env=env, capture_output=True, text=True, timeout=120, check=False,
+                              stdin=subprocess.DEVNULL)
 
 
 def _native_args(tmp_path: Path) -> list[str] | None:
@@ -171,9 +175,10 @@ def test_ps_native_without_the_native_installer_refuses(tmp_path):
         pytest.skip("needs pwsh")
     repo = _repo(tmp_path, "install.ps1", _ps_stub(), "install-native.ps1")
     (repo / "ops" / "install-native.ps1").unlink()
-    proc = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), "-NoArt"],
-                          env=_env(tmp_path, "native"), capture_output=True, text=True, timeout=120, check=False,
-                          stdin=subprocess.DEVNULL)
+    with user_path_unchanged(tmp_path):
+        proc = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"), "-NoArt"],
+                              env=_env(tmp_path, "native"), capture_output=True, text=True, timeout=120, check=False,
+                              stdin=subprocess.DEVNULL)
     assert proc.returncode == 1
     assert "install-native.ps1" in proc.stderr and "Nothing was changed" in proc.stderr
 
@@ -183,8 +188,9 @@ def test_sh_native_without_the_native_installer_refuses(tmp_path):
         pytest.skip("needs bash")
     repo = _repo(tmp_path, "install.sh", SH_STUB, "install-native.sh")
     (repo / "ops" / "install-native.sh").unlink()
-    proc = subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), "--yes"], env=_env(tmp_path, "native"),
-                          capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
+    with user_path_unchanged(tmp_path):
+        proc = subprocess.run([BASH, _bash_path(repo / "ops" / "install.sh"), "--yes"], env=_env(tmp_path, "native"),
+                              capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
     assert proc.returncode == 1
     assert "install-native.sh" in proc.stderr and "Nothing was changed" in proc.stderr
 

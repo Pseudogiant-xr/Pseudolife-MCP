@@ -619,3 +619,17 @@ def test_another_names_line_never_supplies_the_digest(tmp_path):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "STAGED" not in result.stdout
     assert f"lists pseudolife-mcp-{LOCAL}-{TARGET}.tar.gz 0 times, not once" in result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="an unreadable file needs POSIX permissions")
+def test_a_local_release_file_that_cannot_be_copied_names_the_copy_not_curl(tmp_path):
+    _release(tmp_path / "release")
+    (tmp_path / "release" / "SHA256SUMS").chmod(0)
+    try:
+        result = _run(tmp_path, "native_stage; echo STAGED", release=False)
+    finally:
+        (tmp_path / "release" / "SHA256SUMS").chmod(0o644)
+    assert result.returncode == 1, result.stdout + result.stderr
+    [line] = [text for text in result.stderr.splitlines() if "cannot be installed" in text]
+    assert "curl" not in line
+    assert "could not be copied" in line and "release" in line

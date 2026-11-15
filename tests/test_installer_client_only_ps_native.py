@@ -345,11 +345,12 @@ def test_a_pairing_code_with_a_remote_daemon_url_is_client_only(tmp_path):
 
 def test_the_script_itself_refuses_client_only_without_a_url(tmp_path):
     ps = _PowerShell(tmp_path)
-    proc = installer_sandbox.run(
-        [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
-         "-ClientOnly", "-NoArt"],
-        capture_output=True, text=True, timeout=120, env=installer_sandbox.layout(ps.env, tmp_path), root=tmp_path, check=False,
-        stdin=subprocess.DEVNULL)
+    with user_path_unchanged(ps.home):
+        proc = installer_sandbox.run(
+            [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(ROOT / INSTALL),
+             "-ClientOnly", "-NoArt"],
+            capture_output=True, text=True, timeout=120, env=installer_sandbox.layout(ps.env, tmp_path), root=tmp_path, check=False,
+            stdin=subprocess.DEVNULL)
     assert proc.returncode == 2
     assert "-ClientOnly needs" in _output(proc)
 
@@ -1038,11 +1039,12 @@ def _script_stub(bin_dir: Path, calls: Path, name: str, body: str = "exit 0") ->
         + body + "\n", encoding="utf-8")
 
 
-@pytest.mark.skipif(os.name == "nt", reason=(
-    "the installer runs the staged native client before anything else, and a "
-    "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
-    "that stage with a real binary"))
-def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daemon_server):
+FRESH_CONNECT = '{"url": null, "rows": [], "exit": 3, "error": "none"}'
+
+
+def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRESH_CONNECT, connect_exit: int = 3):
+    """The whole client-only run; the staged client answers connect's dry run with
+    ``connect_report`` and exit ``connect_exit`` (a fresh machine's: no registration, 3)."""
     ps = _PowerShell(tmp_path)
     token = _token(ps)
     repo = _copy_repo(tmp_path)
@@ -1063,7 +1065,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
         f"  shift; exec '{sys.executable}' '{standin}' '{ROOT}' \"$@\"\nfi\n"
         f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
         "if [ \"$1\" = connect ]; then\n"
-        "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+        f"  echo '{connect_report}'; exit {connect_exit}\nfi\n"
         "exit 0\n")
     calls = ps.calls
     # docker and codex must not run; neither may any Python tooling (the
@@ -1101,6 +1103,15 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
              "-NoArt"],
             capture_output=True, text=True, timeout=300, env=env, root=tmp_path, check=False,
             stdin=subprocess.DEVNULL)
+    return env, installed, proc, ps, repo, shim, token
+
+
+@pytest.mark.skipif(os.name == "nt", reason=(
+    "the installer runs the staged native client before anything else, and a "
+    "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
+    "that stage with a real binary"))
+def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daemon_server):
+    env, installed, proc, ps, repo, shim, token = _whole_client_only_run(tmp_path, daemon_server)
     output = _output(proc)
     assert proc.returncode == 0, output
     logged = ps.logged()
@@ -1144,3 +1155,16 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     else:
         assert len(connects) == 1 and "--dry-run" in connects[0]
         assert "not checked" not in output
+
+
+@pytest.mark.skipif(os.name == "nt", reason=(
+    "the installer runs the staged native client before anything else, and a "
+    "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
+    "that stage with a real binary"))
+def test_an_exit_after_the_native_client_is_installed_says_the_run_stopped_part_way(tmp_path, daemon_server):
+    env, installed, proc, ps, repo, shim, token = _whole_client_only_run(tmp_path, daemon_server, connect_report='{"url": null, "rows": [], "exit": 1, "error": "the fixture refuses"}', connect_exit=1)
+    output = _output(proc)
+    assert proc.returncode == 1, output
+    assert "could not check this machine's existing registrations" in output
+    assert "Nothing was changed" not in output and "nothing was changed" not in output
+    assert "stopped part way" in output and "the native client" in output and "Rerun the installer" in output
