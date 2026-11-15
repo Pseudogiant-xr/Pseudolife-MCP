@@ -160,11 +160,6 @@ Every deferral below happens before any request, except the last item.
 - Pairing (`--code`, `--read-code`).
 - A readable Codex `config.toml` with `codex` selected (its app-server owns
   Codex's config).
-- A question or token prompt on a terminal (Python's `isatty`, so a Windows
-  character device such as `NUL` too).
-- A Windows User-scope `PSEUDOLIFE_MCP_DAEMON_URL` (`reg query`); an
-  unattended-update schedule (`schtasks /Query` on Windows, the systemd user
-  unit on Linux) when every client is selected.
 - A target URL with a space, a control character, DEL or any non-ASCII
   character (urllib's lstrip/tab-removal and NFKC netloc check are not
   reproduced), an IPvFuture or zoned IPv6 host, or userinfo.

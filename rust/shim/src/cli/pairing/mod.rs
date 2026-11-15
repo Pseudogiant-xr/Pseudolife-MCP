@@ -5,7 +5,7 @@ mod invite;
 mod invite_db;
 mod net;
 mod pair;
-mod prompt;
+pub(in crate::cli) mod prompt;
 use super::pyjson;
 mod sqlstate;
 mod token_file;
