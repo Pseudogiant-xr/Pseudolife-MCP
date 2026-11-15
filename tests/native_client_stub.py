@@ -281,7 +281,11 @@ def release_copy(binary: Path, folder: Path) -> Path:
             if os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED") == "1":
                 pytest.fail(reason + " (PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, so this is not skipped)")
             pytest.skip(reason)
-        subprocess.run([strip, "--strip-debug", str(copy)], check=True, capture_output=True, timeout=300)
+        stripped = subprocess.run([strip, "--strip-debug", str(copy)], capture_output=True, text=True,
+                                  timeout=300, check=False)
+        if stripped.returncode != 0:
+            pytest.fail(f"{strip} --strip-debug {copy} exited {stripped.returncode}: "
+                        f"{(stripped.stderr or stripped.stdout).strip()}")
     size, limit = copy.stat().st_size, archive_binary_limit()
     assert size <= limit, (
         f"the native client packed for this test is {size} bytes (built: {binary.stat().st_size} bytes), "

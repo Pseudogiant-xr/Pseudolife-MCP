@@ -3,11 +3,12 @@
 These dot-source the installer's native-client block and shim helpers
 (``ops/install-native.ps1``) in ``pwsh`` with a throwaway home and a fake release
 directory (``PSEUDOLIFE_NATIVE_ARCHIVE_URL``). The refusal tests run
-everywhere. The install tests need an executable client: off Windows a
-shell stub; on Windows a real native ``pseudolife-mcp.exe`` named by
-``PSEUDOLIFE_NATIVE_TEST_BINARY`` (a Windows stub cannot be a script), and
-they skip without one. ``python``, ``py``, ``pip`` and ``pipx`` on PATH are
-stubs that fail the test if anything calls them.
+everywhere. The install tests need an executable client: the built one
+named by ``PSEUDOLIFE_NATIVE_TEST_BINARY`` when it is set (required on
+Windows, where a stub cannot be a script; they skip there without one), else
+off Windows the shell stub. Tests whose assertions depend on a ``STUB_*``
+answer always pack the stub. ``python``, ``py``, ``pip`` and ``pipx`` on PATH
+are stubs that fail the test if anything calls them.
 """
 from __future__ import annotations
 
@@ -47,9 +48,11 @@ INSTALL = "real" if REAL else "stub"
 
 
 def _asset(client: str) -> str:
-    # A real client runs only on its own target; the stub is the Linux one.
+    # Named for the target Get-NativeTarget asks for on this host; the shell
+    # stub runs on any of them, a real client only on its own.
+    assert client in ("stub", "real"), client
     target = ("x86_64-pc-windows-msvc" if WINDOWS
-              else native_client_stub.host_target() if client == "real" else "x86_64-unknown-linux-gnu")
+              else native_client_stub.host_target() or "x86_64-unknown-linux-gnu")
     return f"pseudolife-mcp-{VERSION}-{target}." + ("zip" if WINDOWS else "tar.gz")
 
 
