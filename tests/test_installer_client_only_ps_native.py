@@ -329,9 +329,11 @@ def _script_stub(bin_dir: Path, calls: Path, name: str, body: str = "exit 0") ->
 FRESH_CONNECT = '{"url": null, "rows": [], "exit": 3, "error": "none"}'
 
 
-def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRESH_CONNECT, connect_exit: int = 3):
+def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRESH_CONNECT, connect_exit: int = 3,
+                           gemini_body: str | None = None):
     """The whole client-only run; the staged client answers connect's dry run with
-    ``connect_report`` and exit ``connect_exit`` (a fresh machine's: no registration, 3)."""
+    ``connect_report`` and exit ``connect_exit`` (a fresh machine's: no registration, 3).
+    ``gemini_body`` replaces the gemini CLI stub's answers."""
     ps = _PowerShell(tmp_path)
     token = _token(ps)
     repo = _copy_repo(tmp_path)
@@ -357,9 +359,9 @@ def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRE
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'get')) { exit 1 }\n"
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'add') -and ($args -contains '--help')) "
                  "{ Write-Output '  -e, --env <env...>' }\nexit 0")
-    _script_stub(fake_bin, calls, "gemini",
+    _script_stub(fake_bin, calls, "gemini", gemini_body or (
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'add') -and ($args -contains '--help')) "
-                 "{ Write-Output '  -e, --env <env...>' }\nexit 0")
+                 "{ Write-Output '  -e, --env <env...>' }\nexit 0"))
     # An earlier local install left its own file and loopback URL for the hooks.
     settings_path = ps.home / ".claude" / "settings.json"
     settings_path.parent.mkdir(parents=True)
@@ -447,3 +449,22 @@ def test_an_exit_after_the_native_client_is_installed_says_the_run_stopped_part_
     assert "could not check this machine's existing registrations" in output
     assert "Nothing was changed" not in output and "nothing was changed" not in output
     assert "stopped part way" in output and "the native client" in output and "Rerun the installer" in output
+
+
+@pytest.mark.skipif(os.name == "nt", reason=(
+    "the installer runs the staged native client before anything else, and a "
+    "Windows stub cannot be a script; test_installer_native_client_ps.py covers "
+    "that stage with a real binary"))
+def test_a_thrown_error_after_the_native_client_is_installed_says_the_run_stopped_part_way(tmp_path, daemon_server):
+    # PowerShell displays a thrown error after the finally block's line, so
+    # that line must not point "above" at a cause that comes below it.
+    env, installed, proc, ps, repo, shim, token = _whole_client_only_run(
+        tmp_path, daemon_server,
+        gemini_body="if ($args -contains '--help') { throw 'the fixture gemini CLI broke' }\nexit 0")
+    output = _output(proc)
+    assert proc.returncode == 1, output
+    assert "the fixture gemini CLI broke" in output
+    assert "Nothing was changed" not in output and "nothing was changed" not in output
+    [part_way] = [line for line in output.splitlines() if "stopped part way" in line]
+    assert "the native client" in part_way and "Rerun the installer" in part_way
+    assert "above is fixed" not in part_way and "once the cause this run reports is fixed" in part_way
