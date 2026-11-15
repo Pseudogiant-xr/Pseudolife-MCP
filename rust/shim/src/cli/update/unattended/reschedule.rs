@@ -78,7 +78,7 @@ fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>)
                     false,
                 )
                 .0 == 0;
-                let dropin = systemd_dropin(&dir, name);
+                let dropin = systemd_dropin(&systemd_roots(&dir), name);
                 systemd_parse(
                     &dir,
                     name,
@@ -98,19 +98,51 @@ fn installed_with(names: &Names, expected: &dyn Fn(&str) -> Result<Vec<String>>)
     found
 }
 
-/// A drop-in directory for the unit or its timer, in the user's unit
-/// directory or systemd's other user unit directories: it can change the
-/// effective command or timer while the base files still match.
-fn systemd_dropin(dir: &Path, name: &str) -> Option<PathBuf> {
-    [
-        dir,
-        Path::new("/etc/systemd/user"),
-        Path::new("/run/systemd/user"),
-        Path::new("/usr/lib/systemd/user"),
-    ]
-    .iter()
-    .flat_map(|root| ["service", "timer"].map(|kind| root.join(format!("{name}.{kind}.d"))))
-    .find(|path| path.exists())
+/// The user unit directories systemd reads drop-ins from, the user's own
+/// (`dir`) first.
+fn systemd_roots(dir: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![dir.to_path_buf()];
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
+        roots.push(PathBuf::from(runtime).join("systemd/user"));
+    }
+    roots.extend(
+        [
+            "/etc/systemd/user",
+            "/run/systemd/user",
+            "/usr/local/lib/systemd/user",
+            "/usr/lib/systemd/user",
+        ]
+        .map(PathBuf::from),
+    );
+    roots
+}
+
+/// A drop-in that applies to the unit or its timer: a `.conf` entry in its
+/// `<name>.<kind>.d`, in a dash-prefix one (`pseudolife-.service.d`) or in
+/// the top-level `<kind>.d`, under any of `roots`. It can change the
+/// effective command or timer while the base files still match; a directory
+/// with no `.conf` entry (emptied, or only backups) changes nothing.
+fn systemd_dropin(roots: &[PathBuf], name: &str) -> Option<PathBuf> {
+    let mut stems: Vec<String> = name
+        .match_indices('-')
+        .map(|(at, _)| name[..=at].to_owned())
+        .collect();
+    stems.push(name.to_owned());
+    let stems = &stems;
+    roots
+        .iter()
+        .flat_map(|root| {
+            ["service", "timer"].into_iter().flat_map(move |kind| {
+                stems
+                    .iter()
+                    .map(move |stem| root.join(format!("{stem}.{kind}.d")))
+                    .chain([root.join(format!("{kind}.d"))])
+                    .collect::<Vec<_>>()
+            })
+        })
+        .flat_map(|dir| fs::read_dir(dir).into_iter().flatten().flatten())
+        .map(|entry| entry.path())
+        .find(|path| path.extension().is_some_and(|ext| ext == "conf"))
 }
 
 fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
@@ -224,7 +256,10 @@ fn windows_parse(
             .iter()
             .any(|element| triggers.contains(element))
         && !xml.contains("<Enabled>false</Enabled>")
-        && xml.contains("<LogonType>InteractiveToken</LogonType>");
+        && xml.contains("<LogonType>InteractiveToken</LogonType>")
+        // `--schedule` registers it limited; re-registering would drop an
+        // elevation set since.
+        && xml.contains("<RunLevel>LeastPrivilege</RunLevel>");
     let mut why = None;
     // schtasks writes its XML in the console code page; a path outside it
     // arrives as replacement characters and cannot be compared.
@@ -257,6 +292,7 @@ fn windows_parse(
 /// A systemd unit and its timer, as `--schedule` installs them: the service
 /// file exactly as it writes it for the URL it names (`expected` gives it),
 /// the timer exactly as it writes it for the time it names, enabled.
+#[allow(clippy::too_many_arguments)]
 fn systemd_parse(
     dir: &Path,
     name: &str,
@@ -496,6 +532,10 @@ mod tests {
                 Box::new(|x: String| x.replace("InteractiveToken", "Password")),
             ),
             (
+                "run with highest privileges",
+                Box::new(|x: String| x.replace("LeastPrivilege", "HighestAvailable")),
+            ),
+            (
                 "an end date",
                 Box::new(|x: String| {
                     x.replace(
@@ -648,19 +688,33 @@ mod tests {
         let name = format!("pseudolife-test-{}", uuid::Uuid::new_v4().simple());
         let root = std::env::temp_dir().join(&name);
         fs::create_dir(&root).unwrap();
-        let dir = &root;
-        // Near miss: another unit's drop-in is not this one's.
-        fs::create_dir(dir.as_path().join("pseudolife-other.service.d")).unwrap();
-        assert_eq!(systemd_dropin(dir.as_path(), &name), None);
-        for kind in ["service", "timer"] {
-            let path = dir.as_path().join(format!("{name}.{kind}.d"));
+        let roots = [root.clone()];
+        // Near misses: another unit's drop-in, an empty directory, and one
+        // holding only a backup change nothing.
+        let other = root.join("pseudolife-other.service.d");
+        fs::create_dir(&other).unwrap();
+        fs::write(other.join("override.conf"), "[Service]").unwrap();
+        let own = root.join(format!("{name}.service.d"));
+        fs::create_dir(&own).unwrap();
+        assert_eq!(systemd_dropin(&roots, &name), None);
+        fs::write(own.join("override.conf~"), "[Service]").unwrap();
+        fs::write(own.join("override.conf.bak"), "[Service]").unwrap();
+        assert_eq!(systemd_dropin(&roots, &name), None);
+        fs::remove_dir_all(&own).unwrap();
+        for dir in [
+            format!("{name}.service.d"),
+            format!("{name}.timer.d"),
+            "pseudolife-.service.d".to_owned(),
+            "pseudolife-test-.timer.d".to_owned(),
+            "service.d".to_owned(),
+            "timer.d".to_owned(),
+        ] {
+            let path = root.join(&dir);
             fs::create_dir(&path).unwrap();
-            assert_eq!(
-                systemd_dropin(dir.as_path(), &name),
-                Some(path.clone()),
-                "{kind}"
-            );
-            fs::remove_dir(&path).unwrap();
+            let conf = path.join("10-url.conf");
+            fs::write(&conf, "[Service]").unwrap();
+            assert_eq!(systemd_dropin(&roots, &name), Some(conf), "{dir}");
+            fs::remove_dir_all(&path).unwrap();
         }
         fs::remove_dir_all(&root).unwrap();
     }
