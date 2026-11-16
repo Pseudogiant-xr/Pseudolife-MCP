@@ -682,9 +682,9 @@ class OwnershipRepairOnRealEngineTest(unittest.TestCase):
     # The users and capabilities of cli::ownership's probe_argv, list_argv
     # and repair_argv, by mode.
     USERS = {"--probe-access": ["--user", "10001:10001", "--cap-drop", "ALL"],
-             "--list-root-owned": ["--user", "0:0", "--cap-drop", "ALL", "--cap-add", "DAC_READ_SEARCH"],
+             "--list-root-owned": ["--user", "0:0", "--cap-drop", "ALL", "--cap-add", "DAC_OVERRIDE"],
              "--repair-ownership": ["--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN",
-                                    "--cap-add", "DAC_READ_SEARCH"]}
+                                    "--cap-add", "DAC_OVERRIDE"]}
 
     def helper(self, image, mode, *roots):
         user = self.USERS[mode]
@@ -802,7 +802,7 @@ class OwnershipRepairOnRealEngineTest(unittest.TestCase):
                 self.assertEqual(used.returncode, 0, used.stderr)
                 self.assertIn(b"usable", used.stdout)
 
-    def test_without_dac_read_search_the_walk_fails_visibly(self):
+    def test_with_chown_alone_the_walk_fails_visibly(self):
         image = self.IMAGES[0]
         self.docker("pull", "-q", image)
         self.docker("run", "--rm", *self.mounts(), "--entrypoint", "/bin/sh", image, "-euc",

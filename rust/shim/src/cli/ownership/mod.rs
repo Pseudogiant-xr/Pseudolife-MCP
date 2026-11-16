@@ -15,9 +15,9 @@
 //! First a uid-0 helper WITHOUT CHOWN lists every uid-0 entry with its
 //! group, and that list is written to a private log: the undo list exists
 //! before anything changes. Then the same image as uid 0 with only CHOWN and
-//! [`SEARCH_CAP`] (both are needed, measured on Docker 29.9 on 16 November
-//! 2026: with CHOWN alone a chowned 0700 directory can no longer be
-//! traversed), no network and a read-only root filesystem gives those
+//! [`SEARCH_CAP`] (DAC_OVERRIDE; both are needed, measured on Docker 29.9 on
+//! 16 November 2026: with CHOWN alone a chowned 0700 directory can no longer
+//! be traversed), no network and a read-only root filesystem gives those
 //! entries to 10001:10001, following no link and entering no other mount:
 //! it walks only the top-level state or model mount. Mounts the user added
 //! below them are probed but never repaired.
@@ -45,7 +45,13 @@ const ARGV0: &str = "provision-daemon-models";
 pub(crate) const DAEMON_USER: &str = "10001:10001";
 /// The capability that lets uid 0 enter the 0700 directories it does not
 /// own (and the ones it has just given away) while listing and repairing.
-pub(crate) const SEARCH_CAP: &str = "DAC_READ_SEARCH";
+/// DAC_OVERRIDE, not DAC_READ_SEARCH (maintainer ruling, 17 November 2026):
+/// DAC_READ_SEARCH unlocks open_by_handle_at, which moby's default seccomp
+/// profile allows once that capability is granted; DAC_OVERRIDE cannot
+/// reach it and is a subset of what the release-N daemon already holds.
+/// It also bypasses write permission, so the listing's "changes nothing"
+/// rests on the script and on that helper having no CHOWN.
+pub(crate) const SEARCH_CAP: &str = "DAC_OVERRIDE";
 /// The state volume's mount point.
 pub(crate) const STATE_DIR: &str = "/data";
 /// The model cache's mount point when the container does not name one.

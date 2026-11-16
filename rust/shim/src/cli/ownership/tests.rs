@@ -310,14 +310,16 @@ fn the_uid_0_helpers_get_only_their_capabilities_and_their_own_parts_mounts() {
         }
         head
     };
-    let mut state = head(&["CHOWN", SEARCH_CAP]);
+    // Spelled out: the ruled pair, not whatever the constant holds.
+    assert_eq!(SEARCH_CAP, "DAC_OVERRIDE");
+    let mut state = head(&["CHOWN", "DAC_OVERRIDE"]);
     state.extend(tail("--repair-ownership", &STATE_MOUNTS, &["/data"]));
     assert_eq!(repair_argv(&found, Part::State, "n"), state);
-    let mut models = head(&["CHOWN", SEARCH_CAP]);
+    let mut models = head(&["CHOWN", "DAC_OVERRIDE"]);
     models.extend(tail("--repair-ownership", &MODEL_MOUNTS, &["/models"]));
     assert_eq!(repair_argv(&found, Part::Models, "n"), models);
     // The listing that writes the undo list first cannot chown anything.
-    let mut list = head(&[SEARCH_CAP]);
+    let mut list = head(&["DAC_OVERRIDE"]);
     list.extend(tail("--list-root-owned", &STATE_MOUNTS, &["/data"]));
     assert_eq!(list_argv(&found, Part::State, "n"), list);
 }
