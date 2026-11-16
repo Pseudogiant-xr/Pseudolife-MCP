@@ -122,6 +122,38 @@ A cache root that contains a git worktree, or sits inside one, is skipped
 whole. A drive root, the home dir or any of its ancestors is never used as
 a root, whatever the configuration says.
 
+### Rules every new class shares
+
+- **One run at a time.** A second run (a scheduled sweep beside a hand run,
+  or a WSL leg seeing the same drive) refuses while
+  `~/.pseudolife-mcp/locks/retention.lock` (beside the ledger) is held.
+- **Absolute roots only.** An empty or relative root refuses the run, so an
+  unset variable cannot sweep the current dir.
+- **No link, junction or mount point.** One anywhere in a candidate keeps
+  it whole. On Linux the mount list (`/proc/self/mountinfo`) is read too,
+  because a bind mount on the same filesystem looks like a plain dir.
+- **No process uses it.** No process names it on its command line or runs
+  an executable from inside it (the CIM `ExecutablePath` on Windows,
+  `/proc/<pid>/exe` on Linux). On Linux, no process may work in it either.
+  When the process list cannot be read, or `/proc` hides other users'
+  processes (`hidepid`), nothing is removed. A process whose command line
+  and executable both live elsewhere, or one the sweep cannot see (an
+  elevated Windows process), is not seen. On Windows the rename aside then
+  fails while any file inside is open, which keeps it.
+- **No inherited git environment.** The script clears every variable that
+  points git elsewhere (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+  `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`,
+  `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`,
+  `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`) for every
+  git call. It sets `GIT_NO_LAZY_FETCH=1`, and passes
+  `-c core.fsmonitor=false -c log.showSignature=false`.
+- **Rename aside, then delete.** A candidate is renamed to
+  `.<name>.retention-<pid>-<epoch-seconds>` in its own parent, then
+  deleted. A delete that stops part-way leaves that dir, and the row says
+  `partial` and names it. Remove it by hand after a look. No rule treats a
+  dir with a similar name specially, so the name cannot be used to make
+  anything deletable.
+
 ### Target rule (cargo targets judged by their owners)
 
 A child of a `--target-root` is a candidate only when it carries cargo's
@@ -135,40 +167,61 @@ deleted when all of these hold:
   counts as finished when one of these is true:
   - **Gone:** the source path no longer exists, and no existing ancestor of
     it is a checkout.
-  - **Merged:** it is a worktree whose HEAD, or a clone whose every ref
-    and reflog entry, is a commit of the main repository on `origin/master`.
+  - **Merged:** it is a worktree whose HEAD, or a clone whose every commit
+    (rule below), is a commit of the main repository on `origin/master`.
 
-  The main checkout is never finished. Paths under the cargo or rustup
-  home, inside the target itself, or on a drive this machine does not have
-  name no owner, and neither do relative paths, a path with no drive read
-  on Windows (a WSL path), or a path gone below a mount point or an empty
-  dir on Linux (the drive may be absent). rustc writes workspace
-  sources relative to the workspace root; the absolute ones come from a
-  top-level profile `.d` file and from `# env-dep:CARGO_MANIFEST_DIR=` lines,
-  which name a crate's dir exactly. Every dep-info file is read; one that
-  cannot be read whole keeps the target, since every owner must be finished.
-  A finished owner's own `.cargo/config.toml` pin also keeps it.
+  The main checkout is never finished. Some paths name no owner:
+  - a path under the cargo or rustup home, or inside the target itself;
+  - a path on a drive this machine does not have;
+  - a relative path;
+  - a path with no drive read on Windows (a WSL path);
+  - a path gone below a mount point or an empty dir on Linux (the drive
+    may be absent).
+
+  rustc writes workspace sources relative to the workspace root. The
+  absolute ones come from a top-level profile `.d` file and from
+  `# env-dep:CARGO_MANIFEST_DIR=` lines, which name a crate's dir exactly.
+
+  Every dep-info file is read. A file that cannot be read whole, or a path
+  that cannot be looked at (permission denied), keeps the target, since
+  every owner must be finished. A finished owner's own `.cargo/config.toml`
+  pin also keeps it.
+
+  A live owner that appears only through relative paths is not found, so a
+  target used only by `cargo check` or `cargo test` from a live checkout
+  can be deleted after its grace period. That costs a rebuild.
 - **Grace:** nothing in it, file or dir, was written within
   `--target-grace-hours` (default 24).
 - **No owner found:** a target whose dep-info names no owner is deleted
   only after `--unowned-target-days` (default 14) idle.
-- **No build holds it:** no build holds cargo's lock on any profile's
-  `.cargo-lock`. The script takes the lock without waiting and releases it
-  at once. A lock file it cannot open (another user's build, a read-only
-  file, a sharing violation) counts as held, and a target with no lock file
-  in any profile is kept.
-- **No process uses it:** no running process names it on its command line
-  or (on Linux) works in it; when the process list cannot be read, it is
-  kept. A server started from `target/release` days ago and idle since is
-  exactly the case.
-- **The usual cache checks:** it is not pinned by a `.cargo/config.toml`,
-  and it holds no link, junction or mount point.
+- **No build holds it:**
+  - No build holds cargo's lock on any profile's `.cargo-lock`.
+  - A lock file the script cannot open (another user's build, a read-only
+    file, a sharing violation) counts as held.
+  - A target with no lock file in any profile is kept.
+  - On Linux and macOS the script holds every profile's lock across the
+    rename and the delete, so a build that starts meanwhile waits.
+  - On Windows it takes each lock without waiting and releases it at once,
+    because an open lock file would make the rename fail every time; there
+    the rename itself fails while any file in the tree is open.
+- **The usual cache checks:** it is not pinned by a `.cargo/config.toml`
+  (the `[build]` table form or the dotted `build.target-dir` form).
 
-Only the entries cargo's layout explains are deleted: profile dirs (which
-carry `.fingerprint` or `.cargo-lock`), target-triple dirs of profiles,
-`tmp`, `doc`, `package`, `CACHEDIR.TAG` and `.rustc_info.json`. Anything
-else, such as copied candidate binaries or mutation-test sources, stays,
-and the row names it.
+**What is deleted:**
+- Only the entries cargo's layout explains:
+  - profile dirs (which carry `.fingerprint` or `.cargo-lock`);
+  - target-triple dirs of profiles;
+  - `tmp`, `doc` and `package`.
+- A profile dir counts only when its own dep-info names outputs inside it.
+  A copy (`cp -r release release-pr1234`, a kept candidate build) still
+  names the original, so it stays as a foreign entry.
+- Anything else, such as copied candidate binaries or mutation-test
+  sources, stays, and the row names it.
+- When anything stays, `CACHEDIR.TAG` and `.rustc_info.json` stay too, so
+  the dir remains a target. Once nothing of cargo's own is left, later
+  sweeps keep it and name what is there.
+- When nothing foreign is there, the whole target is renamed aside and
+  deleted.
 
 The home dir may be a target root, because WSL workers leave targets
 directly in it and only marked children are ever candidates. A drive root
@@ -179,76 +232,112 @@ or anything above the home never is.
 A child of a `--clone-root` with its own `.git` dir, and not a registered
 worktree, is deleted (renamed aside, then removed) when all of these hold:
 
-- Every ref (branches, tags, remote-tracking refs, notes) and every reflog
-  entry is a commit of the main repository on `origin/master`. A commit left
-  on a detached HEAD lives only in the reflog; one held by a tag only in the
-  tag. A clone's remote may be a bundle or another machine's
-  path, so "pushed" means nothing here; a commit the main repository lacks
-  exists only in that clone.
-- It has no stash, and it is clean by the worktree rule's whitelist, with
-  submodule changes shown. A clone holding submodules (`.git/modules`) or a
-  file marked assume-unchanged or skip-worktree is kept, since status can
-  hide their changes.
-- It holds no link, has no keep marker, and nothing in it was written for
-  the worktree grace period.
-- No running process names it or (on Linux) works in it, and it is not
-  the checkout this run works from.
-- Git resolves its work tree to this very dir, and it owns no linked
-  worktree (their commits and index live in its `.git`).
-- Its own `.git/config` sets nothing under which git runs a program or
-  reads another file (`core.fsmonitor`, `core.hooksPath`, filters, diff
-  textconv or command, `diff.external`, merge drivers, `include`,
-  `credential`, `gpg.*`, `log.showSignature`, `core.alternateRefsCommand`,
-  `core.worktree`, `core.bare = true`, `extensions.worktreeConfig`), and it
-  has no `config.worktree`. A clone that sets one is kept and never
-  inspected further. Every git call the script makes also turns
-  `core.fsmonitor` and `log.showSignature` off.
+- **Every commit object in the clone is a commit of the main repository on
+  `origin/master`.** That covers every ref (branches, tags,
+  remote-tracking refs, notes) and every reflog entry. It also covers every
+  commit the object store holds (`git cat-file --batch-all-objects`), so a
+  commit left on a detached HEAD with logging off, or one whose reflog
+  entry expired, still keeps the clone. A clone's remote may be a bundle or
+  another machine's path, so "pushed" means nothing here.
+- **It has no stash, and it is clean by the worktree rule's whitelist.**
+  Untracked files are always shown (`--untracked-files=all`, whatever the
+  clone's config says), and so are submodule changes. A clone holding
+  submodules (`.git/modules`) or a file marked assume-unchanged or
+  skip-worktree is kept, since status can hide their changes.
+- **It holds no link, has no keep marker, and nothing in it was written for
+  the worktree grace period.**
+- **It is not the checkout this run works from.**
+- **Git resolves its work tree to this very dir, and it owns no linked
+  worktree** (their commits and index live in its `.git`).
+- **Its own `.git` names no other dir (`commondir`), and its config sets
+  nothing under which git runs a program or reads another file.** The keys
+  that keep it:
+  - `core.fsmonitor`, `core.hooksPath`, `core.alternateRefsCommand`;
+  - filters, diff textconv or command, `diff.external`, merge drivers;
+  - `include`, `credential`, `gpg.*`, `log.showSignature`;
+  - `core.worktree`, `core.bare = true`, `extensions.worktreeConfig`.
+
+  A clone with a `config.worktree` file is kept too. Such a clone is never
+  inspected further.
 
 The home dir may be a clone root for the same reason as a target root.
 
 ### Scratch rule
 
-Each direct child of a `--scratch-root` is deleted when all of these hold:
+**A scratch root must hold a `.pseudolife-scratch-root` file its user
+created on purpose.** Without it the whole run refuses and says how to opt
+in. That covers the temp dir too, because a misnamed root (the temp dir's
+parent, which holds WSL's disk image) would otherwise put data in reach.
+Name only dirs that hold nothing but scratch: a dev machine's work dir,
+never a dir that also holds tools, data or checkouts. The Windows dev VM's
+first dry run, with `C:\dev` named a scratch root, offered its `.rustup`
+toolchain.
 
-- It has been idle (no file or dir written) for `--scratch-grace-days`
-  (default 14).
-- It holds no link.
-- No running process names it.
-- It holds nothing kept for ever: no `.git` (a checkout), no git repository
-  (a dir holding `HEAD`, `objects` and `refs`, such as a bare mirror), no `pyvenv.cfg`
-  (a virtual environment), no `*.log` or `*.jsonl` file, nothing named for
-  evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included, no
-  results, database, model or program (`*.json`, `*.csv`, `*.tsv`,
-  `*.parquet`, `*.db`, `*.sqlite*`, `*.gguf`, `*.safetensors`, `*.onnx`,
-  `*.pt`, `*.pth`, `*.ckpt`, `*.exe`, `*.dll`, `*.so`, `*.dylib`, an
-  executable file on Linux and macOS, a `PG_VERSION`), no socket, pipe or
-  device, and no other user's file.
+**The system temp dir is list only:** even with the marker and `--apply`,
+its candidates are reported as `list only` and nothing there is removed. It
+holds too many things whose names say nothing, so removal waits for exact
+name shapes of what to remove.
+
+Each direct child of any other marked scratch root is deleted when all of
+these hold:
+
+- It has been idle for `--scratch-grace-days` (default 14). Idle means no
+  file or dir under it written, created or moved in: its arrival time
+  counts (the creation time on Windows, the change time on POSIX), so a
+  folder moved or extracted into the root with old times is not idle on
+  arrival.
+- It holds at least one byte. An empty dir may be a lock dir some process
+  made with `mkdir`.
+- It holds nothing kept for ever:
+  - **Checkouts and repositories:** a `.git`; a git repository (a dir
+    holding `HEAD`, `objects` and `refs`, such as a bare mirror); a
+    `pyvenv.cfg` (a virtual environment).
+  - **Logs and evidence:** a `*.log` or `*.jsonl` file; anything named for
+    evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included.
+  - **Results, databases, models and programs:** `*.json`, `*.csv`,
+    `*.tsv`, `*.parquet`, `*.db`, `*.sqlite*`, `*.gguf`, `*.safetensors`,
+    `*.onnx`, `*.pt`, `*.pth`, `*.ckpt`, `*.exe`, `*.dll`, `*.so`,
+    `*.dylib`, an executable file on Linux and macOS, a `PG_VERSION`.
+  - **Disk images, archives and backups, bundles, patches and keys:**
+    `*.vhdx`, `*.vhd`, `*.img`, `*.iso`, `*.qcow2`, `*.vmdk`, `*.tar`,
+    `*.tgz`, `*.gz`, `*.zip`, `*.7z`, `*.bak`, `*.dump`, `*.sql`,
+    `*.bundle`, `*.patch`, `*.diff`, `*.pem`, `*.key`.
+  - **Special files:** a socket, pipe or device, and another user's file.
+
   Logs and evidence are kept for ever by the maintainer's ruling of
   16 November 2026.
-- It is not `claude` (the Claude Code scratchpad root), `bin`, `scripts` or
-  `tools`, not a hidden dir (name starting with `.`), and not a rustup home
-  (`toolchains/` with `settings.toml`) or cargo home (`registry/` with
-  `bin/`). A name may only keep.
+- Its name does not keep it. These keep it:
+  - a name starting with `claude`, `codex` or `t3`;
+  - `bin`, `scripts` or `tools`;
+  - a hidden dir (name starting with `.`);
+  - a name ending in a dot or space on Windows;
+  - a rustup home (`toolchains/` with `settings.toml`) or a cargo home
+    (`registry/` with `bin/`).
 
-Name only dirs that hold nothing but scratch as scratch roots: a dev
-machine's work dir and the system temp dir, never a dir that also holds
-tools or checkouts. The Windows dev VM's first dry run, with `C:\dev` named a
-scratch root, offered its `.rustup` toolchain until the rules above kept it.
+  A name may only keep.
+- It neither holds nor sits inside a registered worktree.
 
-The system temp dir may be named as a scratch root on purpose. It stays
-protected for every other class.
+Every period, in the config and on the command line, must be a finite
+number, 0 or more.
 
-When the process list cannot be read, no target, clone or scratch dir is
-deleted. Every period, in the config and on the command line, must be a
-finite number, 0 or more.
+### Deviations from the approved design (for the maintainer)
+
+- **The merged rule's part (b), "the checkout did work of its own", and the
+  `gh` merged-PR lookup are not implemented.** Every commit must already be
+  on `origin/master` and the checkout clean and idle, so nothing unique can
+  be lost without them. Part (b) would also have kept every merged review
+  checkout, whose HEAD is its creation commit, for ever. A fresh checkout
+  is protected by the grace period.
+- **The system temp dir is list only** (conductor's ruling on the review
+  of 16 November 2026), and every scratch root needs the marker file.
 
 ### Never touched
 
 The script touches nothing outside a configured root. It never touches
 harness-managed checkouts (`.claude/worktrees`, `.t3/worktrees`,
-`.codex/worktrees`) or temp dirs, even when one is configured as a root,
-except a temp dir named as a scratch root. The report only counts what it
-left alone there.
+`.codex/worktrees`) or temp dirs, even when one is configured as a root.
+The only exception is a temp dir named as a marked scratch root, which is
+listed and nothing more. The report only counts what it left alone there.
 
 ## Configuration
 
