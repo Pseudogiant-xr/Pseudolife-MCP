@@ -8,8 +8,7 @@
 //! first pairs this machine (the native `pair` transport), only on an
 //! applying run.
 //!
-//! Deferred before any effect: every input whose Python reading this module
-//! cannot reproduce exactly (see `pyjson`, `url`, `paths`).
+//! Unsupported input is refused with its cause before any configuration write.
 //!
 //! A refused stdout (a closed pipe) changes only the final status: the
 //! oracle's stdout is block-buffered, so its prints succeed, every step
@@ -71,10 +70,25 @@ pub(super) fn interactive() -> bool {
         && std::io::stdout().is_terminal()
 }
 
-/// This run is outside the native domain: nothing has been printed or
-/// written, and the dispatcher reports the deferral.
+/// A native refusal. Messages identify the input but never its secret value.
+#[derive(Debug)]
+pub(super) struct Refusal(String);
+
+/// Compatibility marker for the schedule module's unchanged interface.
 #[derive(Debug)]
 pub(super) struct Defer;
+
+impl From<Refusal> for Defer {
+    fn from(_: Refusal) -> Self {
+        Self
+    }
+}
+
+impl From<Defer> for Refusal {
+    fn from(_: Defer) -> Self {
+        Self("the unattended-update schedule could not be read; repair the schedule and re-run connect (nothing was changed)".into())
+    }
+}
 
 const URL_KEY: &str = "PSEUDOLIFE_MCP_DAEMON_URL";
 const FILE_KEY: &str = "PSEUDOLIFE_MCP_TOKEN_FILE";
@@ -275,10 +289,17 @@ fn places(count: usize) -> String {
 }
 
 /// `runtimes.home`-relative `--token-file` as `os.path.abspath(os.path.expanduser(...))`.
-fn token_file_path(value: &str) -> Result<String, Defer> {
+fn token_file_path(value: &str) -> Result<String, Refusal> {
     let path =
-        crate::credentials::absolute_expanded(std::path::Path::new(value)).map_err(|_| Defer)?;
-    path.to_str().map(str::to_owned).ok_or(Defer)
+        crate::credentials::absolute_expanded(std::path::Path::new(value)).map_err(|_| {
+            Refusal("--token-file could not be resolved; pass an absolute Unicode file path".into())
+        })?;
+    path.to_str().map(str::to_owned).ok_or_else(|| {
+        Refusal(
+            "--token-file resolves to a non-Unicode path; pass an absolute Unicode file path"
+                .into(),
+        )
+    })
 }
 
 /// `_clients(value)`: `Ok(None)` is the usage refusal.
@@ -303,20 +324,38 @@ fn clients(value: &str) -> Option<Vec<&'static str>> {
     )
 }
 
-/// Run the canonical shapes natively; `None` defers before any effect.
+/// Every connect invocation is handled natively, including usage errors.
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
-    let args = args::parse(&values)?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let json = values.iter().any(|value| value == "--json");
+    let args = match args::parse(&values) {
+        Ok(args) => args,
+        Err(error) => return Some(ExitCode::from(Report::new(json).fail(EXIT_USAGE, error.0))),
+    };
+    if args.help {
+        return Some(ExitCode::from(
+            if emit(&mut std::io::stdout().lock(), args::HELP) {
+                EXIT_OK
+            } else {
+                EXIT_STDOUT_REFUSED
+            },
+        ));
+    }
+    let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .ok()?;
+    {
+        Ok(runtime) => runtime,
+        Err(error) => return Some(ExitCode::from(Report::new(json).fail(EXIT_FAILED, format!("connect could not start its I/O runtime ({error}); resolve that system error and re-run (nothing was changed)")))),
+    };
     let result = runtime.block_on(interruptible(args));
     // A question's stdin read may still be pending after an interrupt; the
     // process ends now rather than waiting for its line.
     runtime.shutdown_background();
     match result {
         Ok(code) => Some(ExitCode::from(code)),
-        Err(Defer) => None,
+        Err(error) => Some(ExitCode::from(
+            Report::new(json).fail(EXIT_USAGE, format!("{}; nothing was changed", error.0)),
+        )),
     }
 }
 
@@ -329,12 +368,12 @@ static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 /// `connect`, still stopped by Ctrl-C after a prompt without echo: on POSIX
 /// the prompt's SIGINT listener leaves Tokio's handler installed for the
 /// rest of the process, which would otherwise swallow every later Ctrl-C.
-async fn interruptible(args: args::Args) -> Result<u8, Defer> {
+async fn interruptible(args: args::Args) -> Result<u8, Refusal> {
     #[cfg(unix)]
     if (args.read_code || args.read_token) && terminal::interactive() {
         let mut interrupt =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-                .map_err(|_| Defer)?;
+                .map_err(|error| Refusal(format!("connect could not listen for interrupts ({error}); re-run from a terminal with working signal support")))?;
         let listen = async move {
             loop {
                 interrupt.recv().await;
@@ -354,25 +393,34 @@ async fn interruptible(args: args::Args) -> Result<u8, Defer> {
     connect(args).await
 }
 
-/// urllib sends a DEL (0x7F) inside a bearer; reqwest's header type refuses
-/// it, so a real run whose credentials hold one defers. Reading a token
-/// file early is unobservable; a file that fails the oracle's own check
-/// is left to verification, which reports it exactly.
-fn tokens_sendable(rows: &[Row]) -> bool {
-    rows.iter()
+/// Validate transport compatibility without exposing the credential. Files that
+/// fail the existing credential checks remain subject to normal verification.
+fn tokens_sendable(rows: &[Row]) -> Result<(), Refusal> {
+    for row in rows
+        .iter()
         .filter(|row| matches!(row.state, "current" | "change"))
-        .filter_map(|row| row.credential.clone().flatten())
-        .all(|credential| match credential {
-            Cred::Literal(token) => !token.contains('\u{7f}'),
-            Cred::File(path) => {
+    {
+        let Some(Some(credential)) = &row.credential else {
+            continue;
+        };
+        let (del, setting) = match credential {
+            Cred::Literal(token) => (token.contains('\u{7f}'), TOKEN_KEY),
+            Cred::File(path) => (
                 crate::credentials::CredentialProvider::new(None, Some(path.into()))
                     .and_then(|provider| provider.snapshot())
-                    .map_or(true, |snapshot| {
-                        !snapshot.token().unwrap_or_default().contains('\u{7f}')
-                    })
-            }
-            Cred::None => true,
-        })
+                    .is_ok_and(|snapshot| snapshot.token().unwrap_or_default().contains('\u{7f}')),
+                FILE_KEY,
+            ),
+            Cred::None => (false, TOKEN_KEY),
+        };
+        if del {
+            return Err(Refusal(format!(
+                "{} {setting} contains a DEL control character; replace that credential with a valid token from the daemon host",
+                row.client
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn shown_credential(credential: &Cred, label: &str) -> String {
@@ -510,7 +558,7 @@ fn read_back(path: &std::path::Path, data: &pyjson::Dict) -> Result<Option<Strin
         Ok(files::Read::Error(message)) => Err(files::Fail::Helper(message)),
         // A missing file reads as {}; Python's reading of what this reader
         // cannot hold (a lone surrogate, deep nesting) is not what was written.
-        Ok(files::Read::Missing) | Err(Defer) => differs(),
+        Ok(files::Read::Missing) | Err(_) => differs(),
     }
 }
 
@@ -546,7 +594,7 @@ fn apply_json(row: &mut Row, steps: &mut Vec<Step>) -> Result<(), WriteFailed> {
             Ok(files::Read::Ok(data)) => data,
             Ok(files::Read::Error(message)) => return Err(files::Fail::Helper(message)),
             Ok(files::Read::Missing) => Vec::new(),
-            Err(Defer) => return Err(files::Fail::Name("ValueError")),
+            Err(_) => return Err(files::Fail::Name("ValueError")),
         };
         let (last, parents) = pointer.split_last().expect("a pointer");
         let mut node = &mut data;
@@ -804,7 +852,7 @@ fn files_moved(rows: &[Row]) -> bool {
 
 /// Discovery with the Codex rows, read from Codex's app-server when Codex
 /// is selected and its registration exists.
-async fn discover_rows(ctx: &Ctx) -> Result<Vec<Row>, Defer> {
+async fn discover_rows(ctx: &Ctx) -> Result<Vec<Row>, Refusal> {
     let codex = if ctx.clients.contains(&"codex") {
         codex::rows(ctx, &codex::AppServer).await?
     } else {
@@ -829,9 +877,9 @@ fn stdin_token() -> Vec<u8> {
     data
 }
 
-async fn connect(args: args::Args) -> Result<u8, Defer> {
+async fn connect(args: args::Args) -> Result<u8, Refusal> {
     let pairing = args.code.is_some() || args.read_code;
-    // ---- the plan: nothing below may defer once anything is printed ----
+    // Validate input and discover all write targets before any mutation.
     let url = match url::validated(&args.url)? {
         Ok(url) => url,
         Err(()) => {
@@ -924,7 +972,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         None
     };
     let remote = !url::is_loopback(&url)?;
-    // Discovery prints nothing, so it runs (and may defer) before any
+    // Discovery prints nothing, so it runs before any
     // request; the oracle runs it after /health.
     let mut ctx = Ctx {
         url: url.clone(),
@@ -941,17 +989,21 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         return Ok(130);
     }
     // `_bytes` raises on anything but FileNotFoundError; read every target
-    // now so such a file defers before any effect.
+    // now so an unreadable target is refused before any effect.
     for row in rows.iter().filter(|row| row.state == "change") {
-        if let Some(spec) = &row.json
-            && files::bytes(&spec.path).is_err()
-        {
-            return Err(Defer);
+        if let Some(spec) = &row.json {
+            files::bytes(&spec.path).map_err(|error| {
+                Refusal(format!(
+                    "cannot back up {} ({}); restore read access before running connect",
+                    spec.path.display(),
+                    files::os_error_name(&error)
+                ))
+            })?;
         }
     }
 
-    if !args.dry_run && !tokens_sendable(&rows) {
-        return Err(Defer);
+    if !args.dry_run {
+        tokens_sendable(&rows)?;
     }
 
     let mut report = Report::new(args.json);
@@ -998,7 +1050,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         _ => "unknown".to_owned(),
     };
 
-    // ---- from here on the run prints, and never defers ----
+    // ---- report the plan before any mutation ----
     report.daemon = Some((version.unwrap_or(J::Null), auth.clone().unwrap_or(J::Null)));
     if remote
         && url.starts_with("http://")
@@ -1204,7 +1256,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
         ctx.token_file = Some(paired_file);
         rows = match discover_rows(&ctx).await {
             Ok(rows) => rows,
-            Err(Defer) => {
+            Err(_) => {
                 return Ok(report.fail(
                     EXIT_REFUSED,
                     format!("the client registrations could not be read again after pairing. Nothing was written.{kept}"),
@@ -1372,7 +1424,7 @@ async fn connect(args: args::Args) -> Result<u8, Defer> {
                 )
             })
             .collect(),
-        Err(Defer) => vec!["the post-apply re-read".to_owned()],
+        Err(_) => vec!["the post-apply re-read".to_owned()],
     };
     let after = net::probe_health(&url).await.unwrap_or(None);
     if !pending.is_empty() || !health_ok(&after) {

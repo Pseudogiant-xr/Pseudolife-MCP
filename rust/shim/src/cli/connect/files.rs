@@ -1,6 +1,6 @@
 //! `client_config`'s private file IO: JSON reads, owner-only atomic writes,
 //! backups beside the file, and `write_token_file`.
-use super::Defer;
+use super::Refusal;
 use super::pyjson::{self, Dict, J};
 use std::{
     fs,
@@ -63,30 +63,45 @@ fn ignored_by_pathlib(error: &io::Error) -> bool {
     errno == 2 || errno == 20 || errno == 9 || (!cfg!(windows) && errno == ELOOP)
 }
 
-/// `Path.exists()`; any error pathlib would raise defers.
-pub(in crate::cli) fn exists(path: &Path) -> Result<bool, Defer> {
+fn inspect_error(path: &Path, error: &io::Error) -> Refusal {
+    let remedy = if error.kind() == io::ErrorKind::PermissionDenied {
+        "restore read/search permissions on the file and its parent directories"
+    } else {
+        "resolve that filesystem error and re-run connect"
+    };
+    Refusal(format!(
+        "cannot inspect {} ({}: {error}); {remedy}",
+        path.display(),
+        os_error_name(error)
+    ))
+}
+
+/// `Path.exists()`, preserving inspection failures as native refusals.
+pub(in crate::cli) fn exists(path: &Path) -> Result<bool, Refusal> {
     match fs::metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if ignored_by_pathlib(&error) => Ok(false),
-        Err(_) => Err(Defer),
+        Err(error) => Err(inspect_error(path, &error)),
     }
 }
 
-/// `Path.is_file()`; any error pathlib would raise defers.
-pub(in crate::cli) fn is_file(path: &Path) -> Result<bool, Defer> {
+/// `Path.is_file()`, preserving inspection failures as native refusals.
+pub(in crate::cli) fn is_file(path: &Path) -> Result<bool, Refusal> {
     match fs::metadata(path) {
         Ok(info) => Ok(info.is_file()),
         Err(error) if ignored_by_pathlib(&error) => Ok(false),
-        Err(_) => Err(Defer),
+        Err(error) => Err(inspect_error(path, &error)),
     }
 }
 
-fn name(path: &Path) -> Result<&str, Defer> {
-    path.file_name().and_then(|n| n.to_str()).ok_or(Defer)
+fn name(path: &Path) -> Result<&str, Refusal> {
+    path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+        Refusal("a client configuration file name is not Unicode; use a Unicode file name".into())
+    })
 }
 
 /// `client_config._load_json`.
-pub(in crate::cli) fn load_json(path: &Path) -> Result<Read, Defer> {
+pub(in crate::cli) fn load_json(path: &Path) -> Result<Read, Refusal> {
     if !exists(path)? {
         return Ok(Read::Ok(Vec::new()));
     }
@@ -101,18 +116,26 @@ pub(in crate::cli) fn load_json(path: &Path) -> Result<Read, Defer> {
     if pyjson::py_strip(text).is_empty() {
         return Ok(Read::Ok(Vec::new()));
     }
-    Ok(match pyjson::loads(text)? {
-        None => Read::Error(unreadable),
-        Some(J::Dict(data)) => Read::Ok(data),
-        Some(_) => Read::Error(format!(
-            "{} is not a JSON object; fix it, then re-run",
-            name(path)?
-        )),
-    })
+    Ok(
+        match pyjson::loads(text).map_err(|cause| {
+            Refusal(format!(
+                "{}: {}; repair that JSON file and re-run",
+                path.display(),
+                cause.0
+            ))
+        })? {
+            None => Read::Error(unreadable),
+            Some(J::Dict(data)) => Read::Ok(data),
+            Some(_) => Read::Error(format!(
+                "{} is not a JSON object; fix it, then re-run",
+                name(path)?
+            )),
+        },
+    )
 }
 
 /// `connect_cli._read_json`.
-pub(in crate::cli) fn read_json(path: &Path) -> Result<Read, Defer> {
+pub(in crate::cli) fn read_json(path: &Path) -> Result<Read, Refusal> {
     if !exists(path)? {
         return Ok(Read::Missing);
     }
@@ -256,6 +279,11 @@ pub(in crate::cli) fn write_token_file(target: &Path, data: &[u8]) -> Result<(),
         return Err(TokenFail::Helper(
             "the token read on stdin is empty, too long, or holds whitespace or control characters"
                 .to_owned(),
+        ));
+    }
+    if token.contains('\u{7f}') {
+        return Err(TokenFail::Helper(
+            "the token read on stdin (--read-token) contains a DEL control character; supply a valid token from the daemon host".to_owned(),
         ));
     }
     crate::credentials::reject_ancestor_redirects(target)

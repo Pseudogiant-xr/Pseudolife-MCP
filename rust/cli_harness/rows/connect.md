@@ -20,12 +20,12 @@ connect: the shim only runs it after a first frame with
 | `connect URL --token-file F` | `move_cli.py` 1708 |
 | `connect URL --code CODE` / `--read-code` | `remote-bank.md` 239, 393-394 |
 
-Native: the URL first, then `--token-file V`, `--client V`, `--read-token`,
-`--code V`, `--read-code`, `--dry-run`, `--yes`, `--json`, each at most
-once, a value never empty and never starting with `-`, the URL never empty
-and never starting with `-`, and every argument valid Unicode. Help,
-abbreviations, `--opt=value`, `--` and every other shape defer before any
-effect. Pairing (`--code`, `--read-code`) has been native since #1563, and
+Native: options may come before or after the URL. `--token-file`, `--client`
+and `--code` accept a separate value or `--option=value`; `--` ends options.
+`--help` and `-h` print help, and repeated boolean flags are harmless.
+Repeated value options, missing values, abbreviations, unknown options,
+extra positional arguments and non-Unicode arguments receive a native usage
+refusal that names the fix without echoing a possible credential. Pairing (`--code`, `--read-code`) has been native since #1563, and
 Codex's `config.toml` is parsed as text only to find the shim's
 registration (and to classify a file without one); the env plan is read
 from, and the write made through, Codex's own app-server. #1568 made the terminal native too: a run with changes to apply at a
@@ -167,43 +167,54 @@ Python daemon emits from the same MCP models `model_dump` reads). Pinned by
 bytes captured from the oracle's own writer) and compared byte for byte by
 every apply case of this row.
 
-## Deferred before any effect
+## Native input handling
 
-`connect` writes nothing and no request reaches the daemon before any
-deferral below except the last two items, which follow the unauthenticated
-`GET /health`. Discovery runs first and can itself defer, so by then a
-`--read-code` prompt may have been answered, Codex's app-server may have
-been asked for its configuration and the scheduler queried for the
-unattended-update schedules. The list groups the `Defer` sites in
-`rust/shim/src/cli/connect/`; the last group before the two `/health` items
-is not exhaustive.
+The inventory below was made against `f91ec4071`. `Defer` mentions in result
+signatures and infallible `J::py_str` calls are propagation sites, not additional
+input conditions. The command now always returns a native status. The legacy
+marker remains only to keep `schedule.rs` and its URL helper interface source
+compatible; the URL helper no longer constructs that marker. Pairing's
+`redeem_for_connect` error arm remains unchanged and belongs to the pairing
+workstream.
 
-- An argv outside the native shapes above.
-- A target URL with a space, a control character, DEL or any non-ASCII
-  character (urllib's lstrip/tab-removal and NFKC netloc check are not
-  reproduced), or a bracketed host that is neither an IPv6 nor an IPv4
-  address (an IPvFuture or zoned IPv6 host included). The same holds for a
-  daemon URL connect reads and shows: one a registration or Codex's
-  connection file records, `PSEUDOLIFE_MCP_DAEMON_URL` in this shell, or
-  Windows' User- or Machine-scope value.
-- Neither `USERPROFILE` nor `HOME` set; an environment base directory not
-  already in `str(pathlib.Path(...))` form (`CODEX_HOME` excepted, which is
-  used as given), or a current directory not in that form or unreadable; an
-  environment value, path or file name that is not valid Unicode; a
-  `--token-file` that cannot be made absolute; a stat error pathlib would
-  raise; a read error other than FileNotFoundError on a file the plan would
-  write.
-- JSON the Python reader holds but this one cannot: a lone surrogate,
-  nesting past 100, an integer past 4300 digits (CPython raises ValueError).
-- A real run whose credentials hold DEL (urllib sends it; the `http`
-  crate's header type refuses it).
-- Rare shapes of what discovery reads or of the process itself, for example
-  a shim registration whose `command` is not a string, or a runtime or
-  Ctrl-C listener that cannot be set up.
-- After `GET /health`: a health body with one of the JSON inputs above.
-- After `GET /health`: a redirect urllib would follow and this client does
-  not (an `ftp:` target, or a `Location` or `URI` header that is not text
-  or cannot be resolved).
+Unless noted, tests are in `rust/shim/tests/cli_connect_contract.rs`; `native_`
+regressions were run against the baseline as well as the changed binary. Error
+messages never include the token or an unrecognized argument's value. A refusal
+before application writes no configuration or token. Post-apply failures retain
+the existing rollback and verification handling.
+
+| File / condition | Native result or refusal | Regression |
+|---|---|---|
+| `args.rs`: `--help`, `-h` | Print usage, exit 0 | `native_help`, `native_short_help` |
+| `args.rs`: options before URL, `=`, repeated flags, `--`, dash-leading value | Parse natively | `native_option_before_url`, `native_equals_option`, `native_repeated_flag`, `native_separator`, `native_dash_value` |
+| `args.rs`: missing URL / value, empty value, extra positional argument | `a daemon URL is required`, `<option> needs a value`, or `give exactly one daemon URL`, with syntax to use | `native_missing_url`, `native_missing_value`, `native_option_as_value`, `native_empty_value`, `native_empty_url`, `native_extra_url` |
+| `args.rs`: unknown or abbreviated option, repeated value option, flag with a value | `unknown option; use the full option names`, `<option> was given more than once; pass it once`, or `<option> takes no value` | `native_unknown_option`, `native_duplicate_value`, `native_flag_with_value` |
+| `args.rs`: non-Unicode argv | `an argument is not Unicode; pass Unicode arguments` | `native_non_unicode_arguments_are_named_without_echoing_them` |
+| `url.rs`: Unicode host | IDNA hostname, after checking the original origin boundaries | `url::native_url_regressions::unicode_host_is_idna_without_changing_origin_boundaries` (unit) |
+| `url.rs`: whitespace/control/DEL, invalid bracketed host, IPvFuture or zoned IPv6 | Native daemon-origin usage refusal; give a plain http(s) origin without path, query, fragment or credentials | `native_url_control`, `native_invalid_ipv6`, `native_invalid_ipvfuture`, `native_invalid_zone`; ordinary IPv6 remains covered by the URL unit tests |
+| `url.rs`, `discover.rs`, `codex.rs`: unsupported saved/environment URL to show or compare | Redacted `<unreadable URL>`; preserve existing manual/change-row rules | `native_unsupported_saved_url_is_redacted_in_the_plan`, `native_unsupported_process_url_is_a_manual_row`, `an_unsupported_user_scope_url_is_redacted_and_planned` (unit) |
+| `paths.rs`: non-Unicode environment setting | `<setting> is not Unicode; set <setting> to a Unicode value` | `native_non_unicode_environment_is_named_without_echoing_it` with a Unicode-directory control |
+| `paths.rs`: no USERPROFILE or HOME | `USERPROFILE and HOME are unset or empty; set HOME to your absolute home directory` | `native_missing_home_has_a_remedy` |
+| `paths.rs`: trailing/repeated separators, `.` components, Windows forward slashes | Normalize equivalent absolute components without resolving links | `native_trailing_path_separator_selects_the_same_registration`, `paths::tests::equivalent_absolute_spellings_keep_the_same_path` |
+| `paths.rs`: relative HOME/USERPROFILE, CLAUDE_CONFIG_DIR, XDG_CONFIG_HOME, XDG_DATA_HOME, APPDATA, LOCALAPPDATA, explicit shim layout paths | `<setting> must be an absolute path; set <setting> to the full directory path` | `native_relative_*`, each with an absolute-path control |
+| `paths.rs`: parent components / NUL, Windows UNC/device paths | Name the setting and require an absolute path without those components, or a local drive-absolute path | `native_parent_components_name_the_directory_setting`, `paths::tests::equivalent_absolute_spellings_keep_the_same_path`; the existing absolute-path boundary is retained |
+| `paths.rs`: non-Unicode MSIX package name | Ignore unrelated packages; name `LOCALAPPDATA/Packages` and repair the Claude Desktop installation for a matching Claude package | `native_non_unicode_package_names_only_block_claude_packages` (Windows) |
+| `discover.rs`, `paths.rs`: non-Unicode current directory / displayed file path | Name the current directory or client path and require a Unicode location | `native_non_unicode_working_directory_has_a_remedy` |
+| `mod.rs`: `--token-file` cannot become an absolute Unicode path | Name `--token-file`; pass an absolute Unicode file path | `native_non_unicode_token_path_has_a_remedy` with a readable relative-path control |
+| `files.rs`: stat failure other than the existing missing-path cases | Name the file, OS error class and access repair | `native_inaccessible_config_names_the_path_and_permissions` with a permission-restored control |
+| `files.rs`, `pyjson.rs`: lone surrogate, depth over 100, integer over 4300 digits | Name the JSON file and exact limit; repair that JSON file | `native_json_surrogate`, `native_json_depth`, `native_json_integer_limit`, with valid surrogate-pair / at-limit controls |
+| `mod.rs`: literal/file credential contains DEL | Name client and `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`; replace the invalid credential | `native_del_token_is_refused_without_disclosure_or_writes`, `native_del_in_token_file_names_the_setting` |
+| `files.rs`: DEL read from stdin | Name `--read-token`; supply a valid token before any directory/file creation | `read_token_del_is_refused_before_creating_a_directory` (unit), with `~` control |
+| `net.rs`: unsupported /health JSON | Name `/health` and the exact JSON limit; repair the daemon or proxy response | `native_health_json_limit_has_a_remedy`; valid health responses are exercised throughout the contracts |
+| `net.rs`: unsupported redirect | `/health response redirects to an unsupported URL; use its direct http(s) daemon origin` | `native_unsupported_health_redirect_has_a_remedy`; existing `health-redirect` golden pins ordinary HTTP redirects |
+| `mod.rs`: preflight backup read fails after discovery | Name the target and OS error; restore read access before running connect | Existing rollback/read-only-file contracts; this read-after-discovery race is not separately fault-injected |
+| `discover.rs`: missing string command after `is_shim` admitted it | Defensive named registration refusal | Unreachable for an unchanged parsed registration: `is_shim` already requires a string; non-shim rows remain manual |
+| `files.rs`: missing/non-Unicode basename; `pyjson.rs`: float parser fails on a scanner-admitted number | Defensive named file/number refusal | Fixed configuration basenames and the scanner make these unreachable through ordinary input; parser-domain unit tests retained |
+| `mod.rs`, `discover.rs`: runtime/signal setup or current-directory lookup fails | Name the system failure and the retry/remedy | Runtime/signal failures are not fault-injected: an exhausted-descriptor process currently fails in shared startup before connect dispatch; current-directory Unicode failure is covered above |
+
+No source-mutant entry points at a removed connect branch. The existing connect
+mutants continue to protect writes, backups, credentials, ordering and transport.
+No new harness file or hosted job is added.
 
 ## Declared divergences
 

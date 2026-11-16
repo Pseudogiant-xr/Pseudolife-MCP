@@ -12,6 +12,37 @@ use std::rc::Rc;
 const NEW: &str = "http://10.0.0.7:8765";
 const OLD: &str = "http://10.0.0.5:8765";
 
+#[test]
+fn an_unsupported_user_scope_url_is_redacted_and_planned() {
+    let rows = env_rows(FakeEnv {
+        user: Some(value(
+            "REG_SZ",
+            "http://fixture-user:fixture-secret@[v1.x]:9",
+        ))
+        .into(),
+        ..FakeEnv::default()
+    });
+    assert_eq!(rows[0].state, "change");
+    assert_eq!(rows[0].changes[0].1.as_deref(), Some("<unreadable URL>"));
+}
+
+#[test]
+fn read_token_del_is_refused_before_creating_a_directory() {
+    let root = std::env::temp_dir().join(format!("connect-del-{}", uuid::Uuid::new_v4()));
+    let path = root.join("client.token");
+    let result = files::write_token_file(&path, b"fixture-secret\x7f");
+    let absent = !root.exists();
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(
+        matches!(result, Err(files::TokenFail::Helper(ref reason)) if reason.contains("DEL") && reason.contains("--read-token"))
+    );
+    assert!(absent);
+    files::write_token_file(&path, b"fixture-secret~")
+        .unwrap_or_else(|_| panic!("valid token was refused"));
+    assert!(path.is_file());
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn ctx(clients: Vec<&'static str>, url: &str) -> Ctx {
     Ctx {
         url: url.to_owned(),
@@ -907,8 +938,7 @@ fn a_schedule_of_the_other_kind_names_its_removal_before_any_schedule_step() {
 
 #[test]
 fn a_hand_edited_url_is_a_manual_row_not_a_deferral() {
-    // URLs the oracle's urlsplit would treat in ways the native port defers
-    // on: an IPvFuture host, a character outside printable ASCII.
+    // Unsupported saved URLs remain manual: an IPvFuture host or an invalid port.
     for url in ["http://[v1.fe]:8765", "http://10.0.0.5:8765\u{e9}"] {
         let fake = Rc::new(FakeScheduler {
             installed: vec![(true, Some(url), Some("04:30"), false, None)],
@@ -917,7 +947,7 @@ fn a_hand_edited_url_is_a_manual_row_not_a_deferral() {
         let rows = schedule_rows(&fake, NEW, true);
         assert_eq!(rows[0].state, "manual", "{url}");
         assert!(
-            rows[0].detail.contains("a daemon URL connect cannot show"),
+            rows[0].detail.contains("<unreadable URL>"),
             "{}",
             rows[0].detail
         );
