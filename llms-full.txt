@@ -634,6 +634,11 @@ covers saved-instance checks and an explicitly disposable mail proof.
 dormant ([Turning the board on](docs/guide/configuration.md#turning-the-board-on)).
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
+Membership of the `docker` group is equivalent to root on that machine:
+that is how Docker works, not something Pseudolife adds. To avoid granting
+it, run the installer from an account that already uses Docker; rootless
+Docker and Podman are not supported yet
+([#1642](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1642)).
 Docker Engine also needs the buildx plugin, which Docker Desktop bundles:
 the Dockerfiles' `RUN --mount` caches need BuildKit, and without buildx the
 build dies with "the --mount option requires BuildKit". The preflight
@@ -12602,10 +12607,14 @@ the checks around it:
   asks before running it; `--yes` skips the question, and a run with no
   terminal and no `--yes` exits 2 without changing anything.
 - A user Tailscale does not let change the serve config is refused with
-  the fix for the OS: on Linux, `sudo tailscale set --operator=$USER` (or
-  run as root); on Windows, run it as the user logged in to Tailscale or
-  from an elevated shell; on macOS, as the user logged in to the Tailscale
-  app.
+  the fix for the OS. Forwarding a port needs neither root nor an
+  administrator shell; it needs a user Tailscale trusts. On Linux, make your
+  user Tailscale's operator once with `sudo tailscale set --operator=$USER`
+  (the one privileged step; afterwards you change serves without sudo). On
+  Windows, run it as the user that owns the device's Tailscale
+  configuration (the one signed in to the Tailscale app, or the one that
+  turned on unattended mode). On macOS, run it as the user logged in to the
+  Tailscale app.
 - Afterwards it checks that the serve status shows the forward (if not, it
   removes it again and exits 5; if the status cannot be read back, it exits
   5 and says to check `tailscale serve status`), then fetches `<url>/health` through the
@@ -13336,11 +13345,11 @@ without one, move uses the target's installed CLI and needs its clone-free
 on that host. Both target containers must belong to the same compose stack.
 
 ```bash
-pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
-pseudolife-mcp move --to root@box             # confirms the move and any new exposure
+pseudolife-mcp move --to user@box --dry-run   # the plan; changes nothing
+pseudolife-mcp move --to user@box             # confirms the move and any new exposure
 ```
 
-`--to` is anything `ssh` accepts (`root@box`, or a `~/.ssh/config` alias).
+`--to` is anything `ssh` accepts (`user@box`, or a `~/.ssh/config` alias).
 Key-based ssh is required: every remote command runs as `ssh -o
 BatchMode=yes` with keepalives (`ServerAliveInterval=15`,
 `ServerAliveCountMax=4`), and nothing ever types a password. A dropped
@@ -13372,7 +13381,7 @@ environment onto the target host first (Portainer: **Stacks > your stack >
 Editor**), then name those paths:
 
 ```bash
-pseudolife-mcp move --to root@box --target-release \
+pseudolife-mcp move --to user@box --target-release \
   --target-compose-file /srv/stack.yml --target-env-file /srv/stack.env \
   --target-url http://100.64.0.9:8765 --dry-run
 ```

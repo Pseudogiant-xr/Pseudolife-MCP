@@ -42,7 +42,8 @@ from ..mutants import Mutant
 
 DEFERRAL = "pseudolife-stdio: mode 'move' is deferred in this candidate\n"
 STUB_MARKER = "move row: the oracle was not run for this argv\n"
-BAD_TO = "move: --to takes an ssh target such as root@box or a ~/.ssh/config alias\n"
+# The native text (the frozen oracle still says root@box).
+BAD_TO = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n"
 FILE = "shim/src/cli/move_cli.rs"
 
 

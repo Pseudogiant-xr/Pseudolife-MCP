@@ -241,8 +241,15 @@ mod modes {
         };
         let content = fs::read(&path).unwrap();
         let error = write_config(&path, &content, b"after").unwrap_err();
+        // As root the fixture's folder is this user's, so the fix is a copy
+        // this user owns; /etc is root's, so there only root can fix it.
+        let fix = if rustix::process::getuid().as_raw() == 0 {
+            "mv -f"
+        } else {
+            "sudo chown"
+        };
         assert!(
-            error.contains("is owned by another account") && error.contains("sudo chown"),
+            error.contains("is owned by another account") && error.contains(fix),
             "{error}"
         );
         assert_eq!(fs::read(&path).unwrap(), content);
@@ -498,5 +505,41 @@ mod windows {
         assert!(write_config(&path, b"before", b"after").is_err());
         assert_eq!(fs::read(&path).unwrap(), b"before");
         assert_eq!(fs::read(&link).unwrap(), b"before");
+    }
+}
+
+#[test]
+fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
+    let file = "/home/u/.codex/config.toml";
+    let folder = "/home/u/.codex";
+    let replace = "cp '/home/u/.codex/config.toml' '/home/u/.codex/config.toml.mine' && mv -f '/home/u/.codex/config.toml.mine' '/home/u/.codex/config.toml'";
+    // A folder this user can write: a copy it owns replaces the file.
+    let writable = foreign_owner_refusal(file, file, folder, FolderAccess::Writable);
+    assert!(
+        writable.ends_with(&format!("(no root needed): {replace}")),
+        "{writable}"
+    );
+    // A folder it owns but cannot write: it makes it writable first.
+    let read_only = foreign_owner_refusal(file, file, folder, FolderAccess::OwnedNotWritable);
+    assert!(
+        read_only.ends_with(&format!(
+            "(no root needed): chmod u+wx '{folder}' && {replace}"
+        )),
+        "{read_only}"
+    );
+    for line in [&writable, &read_only] {
+        assert!(!line.contains("sudo"), "{line}");
+    }
+    // Only another account's folder it cannot write leaves root as the one
+    // fix: of the folder too, where the write makes its recovery files, and
+    // the line says why root is needed.
+    let foreign = foreign_owner_refusal(file, file, folder, FolderAccess::Foreign);
+    assert!(
+        foreign.contains("only root can change who owns them")
+            && foreign.ends_with(&format!("sudo chown \"$USER\" '{folder}' '{file}'")),
+        "{foreign}"
+    );
+    for line in [&writable, &read_only, &foreign] {
+        assert!(!line.contains("run this as its owner"), "{line}");
     }
 }

@@ -1038,7 +1038,7 @@ fn argv_refusals_come_before_any_effect_in_order() {
         };
         assert_eq!(
             argv::refusal(&request).as_deref(),
-            Some("--to takes an ssh target such as root@box or a ~/.ssh/config alias"),
+            Some("--to takes an ssh target such as user@box or a ~/.ssh/config alias"),
             "{to:?}"
         );
     }

@@ -713,8 +713,9 @@ fn icacls_line(folder: &str, calls: &[Vec<(&str, bool)>]) -> String {
 /// account (by SID, inheritable) full control, because an entry like that can
 /// also come from a parent, and a folder under one that passes nothing on is
 /// left with no entries by `/reset` alone. The owner keeps WRITE_DAC however
-/// empty the list is, so the second call always runs (from an elevated
-/// prompt when Administrators owns the folder).
+/// empty the list is, so the second call always runs (see
+/// [`ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER`] for when that owner needs an
+/// elevated prompt).
 #[cfg(windows)]
 fn unreadable_folder_command(folder: &str) -> String {
     let grant = format!("*{}:(OI)(CI)F", this_account_sid());
@@ -772,7 +773,7 @@ fn folder_refusal_windows(
         // icacls cannot name an entry it does not read; /reset replaces the
         // folder's explicit entries, that one included, with inherited ones.
         MarkerDistrust::Unreadable => format!(
-            "pseudolife-mcp: not using {shown}: its access list holds an entry this client cannot read (a callback or object entry), which could let another account change what is in it. Fix: drop its own entries and give this account full control of it and what is in it ({}; from an elevated prompt if Administrators owns it), then retry.",
+            "pseudolife-mcp: not using {shown}: its access list holds an entry this client cannot read (a callback or object entry), which could let another account change what is in it. Fix: drop its own entries and give this account full control of it and what is in it ({}), then retry. {ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER}",
             unreadable_folder_command(&shown.to_string())
         ),
         MarkerDistrust::NoDacl => format!(
@@ -793,6 +794,22 @@ fn report_folder_once(path: &Path, line: &str) {
     {
         eprintln!("{line}");
     }
+}
+/// When the repair of a folder's access list needs elevation, and why: its
+/// owner always holds the right to change that list, and an elevated process
+/// creates folders owned by Administrators, whose rights, like SYSTEM's, an
+/// ordinary token does not carry. A folder this account owns needs no
+/// elevation.
+#[cfg(windows)]
+const ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER: &str = "An ordinary prompt is enough when this account owns the folder; a folder owned by Administrators (as one an elevated process created is) or by SYSTEM needs an elevated prompt, because an ordinary token holds neither owner's right to change its access list.";
+/// The line for a file an earlier client's folder protection emptied, with
+/// the repair of `folder`. Git Bash rewrites the /reset and /T switches, so
+/// the command is given for PowerShell or cmd.
+#[cfg(windows)]
+fn empty_access_list_line(error: &str, path: &str, folder: &str) -> String {
+    format!(
+        "{error}: {path} has an empty access list (an earlier native client's folder protection removed the access it inherited); restore it as its owner, in PowerShell or cmd, with: icacls \"{folder}\" /reset /T. {ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER}"
+    )
 }
 /// `error` from opening, reading or moving `path`, with its cause when that
 /// is an earlier native client's folder protection: on Windows a file this
@@ -815,11 +832,10 @@ pub fn denied_cause(path: &Path, error: &std::io::Error) -> String {
             .or(path.parent())
             .unwrap_or(path)
             .display();
-        // Git Bash rewrites the /reset and /T switches, so the command is
-        // given for PowerShell or cmd.
-        return format!(
-            "{error}: {} has an empty access list (an earlier native client's folder protection removed the access it inherited); restore it as its owner (from an elevated prompt if Administrators owns it), in PowerShell or cmd, with: icacls \"{folder}\" /reset /T",
-            path.display()
+        return empty_access_list_line(
+            &error.to_string(),
+            &path.display().to_string(),
+            &folder.to_string(),
         );
     }
     let _ = path;
@@ -1738,6 +1754,33 @@ mod tests {
                 && !line.contains("uid")
                 && line.contains("Fix: remove it"),
             "{line}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_access_list_repairs_say_when_elevation_is_needed_and_why() {
+        use crate::credentials::windows_security::MarkerDistrust;
+        let unreadable =
+            folder_refusal_windows(Path::new(r"C:\state"), &MarkerDistrust::Unreadable);
+        let emptied = empty_access_list_line("Access is denied.", r"C:\state\a.json", r"C:\state");
+        for line in [&unreadable, &emptied] {
+            // Elevation is conditional on the owner, and the line says why.
+            assert!(
+                line.contains("An ordinary prompt is enough when this account owns the folder")
+                    && line.contains("an ordinary token holds neither owner's right"),
+                "{line}"
+            );
+            assert!(!line.contains("from an elevated prompt if"), "{line}");
+        }
+        assert!(
+            emptied.contains(r#"icacls "C:\state" /reset /T"#)
+                && emptied.contains("in PowerShell or cmd"),
+            "{emptied}"
+        );
+        assert!(
+            unreadable.contains(&unreadable_folder_command(r"C:\state")),
+            "{unreadable}"
         );
     }
 

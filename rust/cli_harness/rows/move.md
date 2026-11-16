@@ -48,7 +48,7 @@ not compared either.
 | `--help` / `-h` alone: argparse help on stdout, exit 0; only `COLUMNS=80` (wrap 78) is reproduced | `_parser` 1807-1829, `main` 1833-1836 |
 | No `--to` (every other token canonical): usage (3 lines) + `pseudolife-mcp move: error: the following arguments are required: --to`, stderr, exit 2; only at `COLUMNS=80` | `_parser` 1816 (`required=True`) |
 | `--target-url` given and not an origin: `move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 (no path, query or credentials)`, stderr, exit 2, before any `--to` check | `main` 1837-1844; `codex_connection.py:104-117` |
-| `--to` empty, or any `str.isspace` character: `move: --to takes an ssh target such as root@box or a ~/.ssh/config alias`, stderr, exit 2 (also under `--json`) | `main` 1848-1850 |
+| `--to` empty, or any `str.isspace` character: `move: --to takes an ssh target such as user@box or a ~/.ssh/config alias` (the frozen Python says `root@box`; the native text, since 16 November 2026, does not teach a root login), stderr, exit 2 (also under `--json`) | `main` 1848-1850 |
 | `--to` holding a C0 character that is not whitespace (U+0000-U+0008, U+000E-U+001B): the same text, stderr, exit 2 | `Mover.run` 619-620, `fail` 555-559 |
 | `--target-checkout` holding CR or LF (after `rstrip("/") or DEFAULT`): `move: --target-checkout holds a control character`, stderr, exit 2 | `Mover.__init__` 498, `Mover.run` 621-622 |
 | Order: argparse, `--target-url`, `--to` (main), `--to` (Mover.run), `--target-checkout` | as above |
