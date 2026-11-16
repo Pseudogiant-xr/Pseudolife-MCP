@@ -1702,10 +1702,10 @@ def test_a_failed_partial_target_delete_keeps_cargos_markers(env, targets_root, 
     _backdate(target)
     real = prune.delete_cache
 
-    def debug_in_use(path):
+    def debug_in_use(path, **kw):
         if os.path.basename(path) == "debug":
             return "in use or access denied, skipped: held open"
-        return real(path)
+        return real(path, **kw)
 
     monkeypatch.setattr(prune, "delete_cache", debug_in_use)
     rc, out = run_targets(env, "--apply")
@@ -1952,6 +1952,9 @@ def test_a_running_program_from_a_target_keeps_it(env, targets_root, monkeypatch
     target = _target(env, "server", gone, age=None)
     (target / "debug" / "app").write_bytes(Path(shutil.which("sleep")).read_bytes())
     os.chmod(target / "debug" / "app", 0o755)
+    # An output cargo names in the profile's own dep-info, so the profile
+    # stays cargo's own and only the process keeps it.
+    (target / "debug" / "app.d").write_text(f"{target / 'debug' / 'app'}: {gone}\n")
     _backdate(target)
     monkeypatch.setattr(prune, "list_processes", REAL_LIST_PROCESSES)
     child = subprocess.Popen(["renamed-argv0", "60"], executable=str(target / "debug" / "app"))
