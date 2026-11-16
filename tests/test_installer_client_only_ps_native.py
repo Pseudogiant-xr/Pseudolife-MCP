@@ -1070,7 +1070,9 @@ def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRE
         f"  echo '{connect_report}'; exit {connect_exit}\nfi\n"
         "exit 0\n")
     calls = ps.calls
-    for name in ("docker", "codex"):
+    # docker and codex must not run; neither may any Python tooling (the
+    # installer runs every step through the native client).
+    for name in ("docker", "codex", "python", "python3", "py", "pip", "pip3", "pipx"):
         _script_stub(fake_bin, calls, name, "exit 99")
     _script_stub(fake_bin, calls, "claude",
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'get')) { exit 1 }\n"
@@ -1092,7 +1094,7 @@ def _whole_client_only_run(tmp_path, daemon_server, *, connect_report: str = FRE
     env.update({"PSEUDOLIFE_SHIM_RUNTIMES": str(installed / "runtimes"),
                 "PSEUDOLIFE_SHIM_LAUNCHER": str(shim)})
     env.update({"PATH": os.pathsep.join([str(fake_bin), *system_dirs]),
-                "PYTHONPATH": str(ROOT), "NO_COLOR": "1", "TERM": "dumb",
+                "NO_COLOR": "1", "TERM": "dumb",
                 # The installer's own environment carries an older credential.
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     with user_path_unchanged(ps.home):
@@ -1116,6 +1118,8 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     assert proc.returncode == 0, output
     logged = ps.logged()
     assert not any(call.startswith(("docker|", "codex|")) for call in logged)
+    assert not [call for call in logged
+                if call.split("|", 1)[0] in ("python", "python3", "py", "pip", "pip3", "pipx")], logged
     assert not (repo / "ops" / ".env").exists()
     assert not (repo / "ops" / "docker-compose.override.yml").exists()
     assert FIXTURE_TOKEN not in output

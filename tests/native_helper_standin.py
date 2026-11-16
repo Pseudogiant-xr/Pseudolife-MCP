@@ -100,6 +100,13 @@ def main(argv: list[str]) -> int:
         if step == "codex-hooks" and args[:1] == ["--checkout"]:
             args = args[2:]  # the Python helper reads the checkout it sits in
         return subprocess.call([sys.executable, str(repo / script), *fixed, *args])
+    if step == "hook-settings":
+        # The script's former heredocs, kept verbatim as the reference.
+        reference = Path(__file__).resolve().parent / "install_hook_reference.py"
+        return subprocess.call([sys.executable, str(reference), *args])
+    if step == "preflight-check":
+        options = dict(zip(args[::2], args[1::2]))
+        return subprocess.call([sys.executable, str(repo / "ops/preflight.py"), "--env-file", options["--env-file"]])
     if step == "volume-names":
         options = dict(zip(args[::2], args[1::2]))
         # The checkout's own helper, as every other step runs (in the

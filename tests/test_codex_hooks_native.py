@@ -926,3 +926,83 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
     result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,
                             timeout=HOOK_PROCESS_TIMEOUT, check=True)
     return result.stdout.decode("utf-8")
+
+
+DOCKER_BRIEFING = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+
+
+def _install_hooks(shell, client, settings, command):
+    # A disposable home beside the settings, so neither installer reads or
+    # runs anything of the developer's; install-hook-native.sh edits through the
+    # native client (the real one, or the stand-in running its old heredocs).
+    from tests import installer_sandbox
+    from tests import native_client_stub as native_stub
+    root = Path(settings).parent.parent
+    keep = ("PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "COMSPEC", "PATHEXT")
+    env = installer_sandbox.environment(root / "hook-home", {k: v for k, v in os.environ.items() if k in keep})
+    env["PSEUDOLIFE_NATIVE_CLI"] = native_stub.native_cli(root / "hook-cli").as_posix()
+    if shell == "bash":
+        installer_sandbox.run([bash_exe(), str(ROOT / "ops/install-hook-native.sh"), "--client", client,
+                               settings.as_posix(), command], env=installer_sandbox.layout(env, root), root=root,
+                              capture_output=True, text=True, timeout=HOOK_PROCESS_TIMEOUT, check=True)
+    else:
+        installer_sandbox.require(env, root)
+        pwsh_run("-File", ROOT / "ops/install-hook.ps1", "-Client", client,
+                 "-SettingsPath", settings, "-Command", command, env=env)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_hook_installers_gate_the_coordination_checkin(tmp_path, shell, client):
+    """The check-in comes from the daemon, which serves it only where the
+    board works; an older install's unconditional echo is replaced in place
+    and nothing else is touched (2026-09-25)."""
+    legacy_line = re.search(r'^COORDINATION_LINE="(.*)"$',
+                            (ROOT / "ops/install-hook-native.sh").read_text(encoding="utf-8"), re.M)[1]
+    legacy = {"type": "command", "command": f"echo '{legacy_line}'"}
+    if client == "codex":
+        legacy.update(commandWindows=f"Write-Output '{legacy_line}'", timeout=5)
+    unrelated = {"type": "command", "command": "echo user-owned"}
+    # A user's own hook that merely mentions the phrase is not ours to remove.
+    lookalike = {"type": "command", "command": "echo 'Pseudolife coordination: my own reminder'"}
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"hooks": {"SessionStart": [
+        {"hooks": [legacy, unrelated, lookalike]}]}}), encoding="utf-8")
+    for _ in range(2):
+        _install_hooks(shell, client, settings, DOCKER_BRIEFING)
+    starts = [h for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+              for h in g["hooks"]]
+    commands = [h["command"] for h in starts]
+    gated = DOCKER_BRIEFING + " --coordination"
+    assert commands.count(gated) == 1
+    assert commands.count(DOCKER_BRIEFING) == 1
+    assert legacy["command"] not in commands
+    assert unrelated in starts and lookalike in starts
+    if client == "codex" and shell == "powershell":  # the Windows override
+        hook = next(h for h in starts if h["command"] == gated)
+        assert hook["commandWindows"] == gated and hook["timeout"] == 5
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_hook_installers_add_a_missing_briefing_beside_the_checkin(tmp_path, shell):
+    """The check-in command also names `pseudolife-mcp briefing`; it must
+    not pass for the memory briefing itself."""
+    settings = tmp_path / "settings.json"
+    gated = "pseudolife-mcp briefing --hook-json --coordination"
+    settings.write_text(json.dumps({"hooks": {"SessionStart": [
+        {"hooks": [{"type": "command", "command": gated}]}]}}), encoding="utf-8")
+    _install_hooks(shell, "claude", settings, "pseudolife-mcp briefing --hook-json")
+    commands = [h["command"] for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+                for h in g["hooks"]]
+    assert sorted(commands) == ["pseudolife-mcp briefing --hook-json", gated]
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_hook_installers_fresh_install_gets_one_briefing_and_one_checkin(tmp_path, shell):
+    settings = tmp_path / "settings.json"
+    for _ in range(2):
+        _install_hooks(shell, "claude", settings, "pseudolife-mcp briefing --hook-json")
+    commands = [h["command"] for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+                for h in g["hooks"]]
+    assert commands == ["pseudolife-mcp briefing --hook-json",
+                        "pseudolife-mcp briefing --hook-json --coordination"]

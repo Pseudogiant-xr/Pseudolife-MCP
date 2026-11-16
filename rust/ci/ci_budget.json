@@ -171,8 +171,8 @@
         "minutes": 0.2
       },
       "guards": {
-        "minutes": 9.0,
-        "estimate": "2026-11-14: a Rust-only batch or push now also runs the 20 live tests that read rust/ files, with a PostgreSQL service. That step took 12.3 min on two workers on a Windows desktop (1,532 passed, 7 platform skips); about 6 is expected on hosted ubuntu-latest, plus the 1.9 measured for the tree-wide guards and about 0.5 for the service. An ordinary pull request skips the step (about 2.4). Re-measure from the first Rust-only batch's run."
+        "minutes": 9.3,
+        "estimate": "2026-11-15: a Rust-only batch or push also runs the 20 live tests that read rust/ files, with a PostgreSQL service. That step took 12.3 min on two workers on a Windows desktop (1,532 passed, 7 platform skips); about 6 is expected on hosted ubuntu-latest, plus the 1.9 measured for the tree-wide guards and about 0.5 for the service. The step also runs tests/test_installer_legacy_hooks_native.py since #1560 (the legacy-hooks tests that reach the native client's hook-settings): 26 cases in 30.9 s serially in WSL at e78826f72, so about 0.3 more on two workers. An ordinary pull request skips the step (about 2.4). Re-measure from the first Rust-only batch's run."
       },
       "lock-resolve": {
         "minutes": 0.5
@@ -187,7 +187,7 @@
       },
       "test-lite-macos": {
         "minutes": 21.3,
-        "estimate": "2026-11-15: the 21.1 estimated for #1541 (18.6 before the stack plus 2.5 for its files) plus 0.2 for tests/test_installer_native_goldens.py (4.4 s) and tests/test_installer_sandbox.py (under 0.1 s), serially in WSL at e78826f72, doubled for the hosted macOS runner."
+        "estimate": "2026-11-15: the 21.1 estimated for #1541 (18.6 before the stack plus 2.5 for its files) plus 0.2 for tests/test_installer_native_goldens.py (4.4 s), tests/test_installer_sandbox.py (under 0.1 s) and tests/test_installer_no_python.py (0.1 s), serially in WSL at e78826f72, doubled for the hosted macOS runner."
       },
       "frontend": {
         "minutes": 0.5
