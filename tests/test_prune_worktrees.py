@@ -2217,6 +2217,8 @@ def test_an_old_user_file_in_a_profile_still_keeps_it(env, targets_root):
     build's fingerprints is still not cargo's, so its profile stays."""
     gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
     target = _target(env, "old-user-file", gone, age=None)
+    (target / "debug" / ".fingerprint" / "thing-1").mkdir()
+    (target / "debug" / ".fingerprint" / "thing-1" / "lib-thing").write_text("x")
     (target / "debug" / "server-good.exe").write_bytes(b"kept build")
     _backdate(target)                       # as old as everything else
     rc, out = run_targets(env, "--apply")

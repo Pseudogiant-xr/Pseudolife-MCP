@@ -684,6 +684,24 @@ def _rmtree(path: str) -> None:
         shutil.rmtree(path, onerror=retry)
 
 
+def _newest_dir_fresh(root: str) -> float:
+    """The newest mtime of ``root``'s subdirs, each read by its own lstat
+    (never following a link); +inf when any cannot be read."""
+    newest = 0.0
+    stack = [_long(root)]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                subdirs = [e.path for e in it if e.is_dir(follow_symlinks=False)]
+            for sub in subdirs:
+                newest = max(newest, os.lstat(sub).st_mtime)
+        except OSError:
+            return float("inf")
+        stack.extend(subdirs)
+    return newest
+
+
 def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
     """Rename aside (fails atomically while cargo holds a file open on
     Windows), then delete. Returns an error text, or None.
@@ -714,11 +732,15 @@ def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
             root_moved = os.lstat(trash).st_mtime > before_root
         except OSError:
             root_moved = True
+        # Read every dir's own time fresh: on Windows a listing gives a
+        # subdir's time from its parent's index, which can be stale.
+        fresh_dirs = _newest_dir_fresh(trash)
         procs = list_processes()
         user = process_in(trash, procs) if procs is not None else -1
         why = (late.error and f"cannot scan it again ({late.error})"
                or (late.links and f"a link appeared ({late.links[0]})")
-               or ((late.newest > checked_at or late.newest_dir > checked_at or root_moved)
+               or ((late.newest > checked_at or late.newest_dir > checked_at
+                    or fresh_dirs > checked_at or root_moved)
                    and "a file or dir in it was written during the checks")
                or (user is not None and (f"process {user} uses it" if user != -1
                                          else "the process list cannot be read")))
