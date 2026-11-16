@@ -611,6 +611,25 @@ mod windows {
     }
 
     #[test]
+    fn a_link_is_remembered_by_its_exact_name_and_one_key_per_object() {
+        use std::os::windows::ffi::OsStringExt;
+        let base = std::path::absolute(std::env::temp_dir()).unwrap();
+        // An unpaired surrogate and its U+FFFD look-alike are different
+        // names: a lossy key let one junction's check stand in for the
+        // other's (Codex review of 59ca1fe7c, P1).
+        let lone = base.join(std::ffi::OsString::from_wide(&[u16::from(b'x'), 0xD800]));
+        let look_alike = PathBuf::from(format!(r"\\?\{}", base.join("x\u{FFFD}").display()));
+        assert_ne!(link_key(&lone), link_key(&look_alike));
+        // The same object by its DOS and its verbatim spelling: one key.
+        let plain = base.join("same");
+        let verbatim = PathBuf::from(format!(r"\\?\{}", plain.display()));
+        assert_eq!(link_key(&plain), link_key(&verbatim));
+        // Names Win32 normalises into another object stay distinct.
+        let dotted = PathBuf::from(format!(r"\\?\{}", base.join("same.").display()));
+        assert_ne!(link_key(&dotted), link_key(&plain));
+    }
+
+    #[test]
     fn nested_junctions_reached_by_both_spellings_are_counted_once_each() {
         // Each junction's target runs through the junctions before it, so the
         // walk meets each one by the path as given (a DOS path) and again in

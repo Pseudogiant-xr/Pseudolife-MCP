@@ -406,7 +406,7 @@ impl Walk {
 /// it) counts once against [`MAX_LINKS`], while names Win32 would normalise
 /// into another object (`state.` and `state`) stay distinct. Elsewhere a
 /// path is its own name.
-fn link_key(path: &Path) -> PathBuf {
+pub(crate) fn link_key(path: &Path) -> PathBuf {
     #[cfg(windows)]
     {
         use std::path::Component;
@@ -417,14 +417,22 @@ fn link_key(path: &Path) -> PathBuf {
         if verbatim {
             return path.to_path_buf();
         }
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
         let Ok(full) = std::path::absolute(path) else {
             return path.to_path_buf();
         };
-        let text = full.to_string_lossy();
-        match text.strip_prefix(r"\\") {
-            Some(unc) => PathBuf::from(format!(r"\\?\UNC\{unc}")),
-            None => PathBuf::from(format!(r"\\?\{text}")),
-        }
+        // Built from the UTF-16 units, never a lossy string: a name with an
+        // unpaired surrogate must not share a key with its U+FFFD look-alike,
+        // or one junction's check would stand in for another's.
+        let wide: Vec<u16> = full.as_os_str().encode_wide().collect();
+        let backslash = u16::from(b'\\');
+        let (lead, rest): (&str, &[u16]) = match wide.as_slice() {
+            [a, b, rest @ ..] if *a == backslash && *b == backslash => (r"\\?\UNC\", rest),
+            all => (r"\\?\", all),
+        };
+        let mut key: Vec<u16> = lead.encode_utf16().collect();
+        key.extend_from_slice(rest);
+        PathBuf::from(std::ffi::OsString::from_wide(&key))
     }
     #[cfg(not(windows))]
     {
