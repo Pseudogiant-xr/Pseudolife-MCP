@@ -82,9 +82,14 @@ const HELD_LIMIT: usize = 64;
 const GATE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the child shim gets to exit once its input closed.
 const CHILD_EXIT: Duration = Duration::from_secs(5);
-/// How long a shim that does not take its input is waited for once the
-/// client is gone: past a held listing's wait and the exit above.
+/// How long the relay outlives the client's leaving: past a held listing's
+/// wait and the shim's exit above. It bounds a shim that never takes its
+/// input and a client that stopped reading without closing.
 const CLIENT_GONE: Duration = Duration::from_secs(30);
+/// How long the shim may take none of its waiting input before it is
+/// treated as hung and the session ends. A working shim reads its input
+/// continuously; this only ends one that stopped.
+const SHIM_STALL: Duration = Duration::from_secs(60);
 /// Lines a direction queues before its reader waits for its writer.
 const QUEUE: usize = 64;
 
@@ -300,9 +305,14 @@ impl Relay {
             (Some(observer), Some(message)) => observer.response(&message),
             _ => None,
         };
-        let _ = queue.send(Out::Line(line)).await;
-        if let Some(proof) = proof {
-            let _ = queue.send(Out::Settle(Box::new(proof))).await;
+        let proof = proof.map(|proof| Out::Settle(Box::new(proof)));
+        for item in std::iter::once(Out::Line(line)).chain(proof) {
+            // A client that stopped reading never holds the relay past its
+            // shutdown.
+            tokio::select! {
+                _ = queue.send(item) => {}
+                () = self.stopping.cancelled() => return,
+            }
         }
     }
 
@@ -358,12 +368,20 @@ where
             write_shim(&relay, shim_in, gate_queue, shim_queue),
         )
     };
-    tokio::pin!(outbound, rest);
+    // Once the client has left, the relay ends within CLIENT_GONE however
+    // either side behaves.
+    let gone = async {
+        relay.client_ended.cancelled().await;
+        tokio::time::sleep(CLIENT_GONE).await;
+    };
+    tokio::pin!(outbound, rest, gone);
     // `rest` ends only after the client's queue closes, which needs
     // `outbound` to have ended first.
     let (result, finished) = tokio::select! {
         result = &mut outbound => (result, false),
-        _ = &mut rest => ((&mut outbound).await, true),
+        _ = &mut rest => (Ok(()), true),
+        () = &mut gone => (Ok(()), false),
+        () = relay.stopping.cancelled() => (Ok(()), false),
     };
     relay.stopping.cancel();
     if !finished {
@@ -383,7 +401,7 @@ async fn inbound<CI: AsyncRead + Unpin>(
     let mut reader = BufReader::new(client_in);
     // Kept across select! rounds: a partly read line stays in its buffer.
     let mut buffer = Vec::new();
-    loop {
+    'read: loop {
         let read = tokio::select! {
             read = reader.read_until(b'\n', &mut buffer) => read,
             () = relay.client_ended.cancelled() => break,
@@ -406,9 +424,16 @@ async fn inbound<CI: AsyncRead + Unpin>(
             relay.gate_changed.notify_waiters();
             for action in actions {
                 match action {
-                    Action::ToShim(bytes) => {
-                        let _ = to_shim.send(bytes).await;
-                    }
+                    Action::ToShim(bytes) => tokio::select! {
+                        _ = to_shim.send(bytes) => {}
+                        () = relay.stopping.cancelled() => break 'read,
+                        () = tokio::time::sleep(SHIM_STALL) => {
+                            // The shim has taken nothing for a minute while
+                            // its input waits: it is hung.
+                            relay.stopping.cancel();
+                            break 'read;
+                        }
+                    },
                     Action::ToClient(bytes) => relay.to_client(&to_client, bytes).await,
                 }
             }
@@ -444,22 +469,14 @@ async fn outbound<SO: AsyncRead + Unpin>(
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(shim_out);
     let mut buffer = Vec::new();
-    // Once the shim's input has closed, it must end its output in time; and
-    // a shim that never takes its input once the client is gone is not
-    // waited for without end.
+    // Once the shim's input has closed, it must end its output in time.
     let mut closing: Option<tokio::time::Instant> = None;
-    let mut abandoned: Option<tokio::time::Instant> = None;
     loop {
-        let now = tokio::time::Instant::now();
         if closing.is_none() && relay.shim_closed.is_cancelled() {
-            closing = Some(now + CHILD_EXIT);
-        }
-        if abandoned.is_none() && relay.client_ended.is_cancelled() {
-            abandoned = Some(now + CLIENT_GONE);
+            closing = Some(tokio::time::Instant::now() + CHILD_EXIT);
         }
         let changed = relay.gate_change();
         let deadline = relay.lock().1.deadline;
-        let ending = [closing, abandoned].into_iter().flatten().min();
         let mut done = None;
         let actions = tokio::select! {
             read = reader.read_until(b'\n', &mut buffer) => {
@@ -483,9 +500,9 @@ async fn outbound<SO: AsyncRead + Unpin>(
                 relay.gate_changed.notify_waiters();
                 actions
             },
-            () = sleep_until(ending), if ending.is_some() => return Ok(()),
+            () = sleep_until(closing), if closing.is_some() => return Ok(()),
             () = relay.shim_closed.cancelled(), if closing.is_none() => Vec::new(),
-            () = relay.client_ended.cancelled(), if abandoned.is_none() => Vec::new(),
+            () = relay.stopping.cancelled() => return Ok(()),
             () = changed => Vec::new(),
         };
         for action in actions {

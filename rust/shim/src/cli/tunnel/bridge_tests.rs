@@ -765,6 +765,64 @@ async fn a_slow_shim_answers_everything_queued_before_the_client_left() {
     assert_eq!(out, expected.as_bytes());
 }
 
+/// A client that closes its input but never reads its output again does
+/// not keep the bridge alive: the relay ends within CLIENT_GONE.
+#[tokio::test(start_paused = true)]
+async fn a_client_that_left_without_reading_is_given_up_on() {
+    let Wired {
+        client_writer,
+        client_reader,
+        fake_reader,
+        mut fake_writer,
+        relayed,
+    } = wired(256, None, Gate::new(false));
+    let fake = tokio::spawn(async move {
+        let note = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"pad\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\"}}\n";
+        for _ in 0..1000 {
+            if fake_writer.write_all(note.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+        drop(fake_reader);
+    });
+    drop(client_writer);
+    let ended = tokio::time::timeout(CLIENT_GONE * 3, relayed).await;
+    assert!(ended.is_ok(), "the relay outlived a client that left");
+    fake.abort();
+    drop(client_reader);
+}
+
+/// A shim that never takes its input, with requests waiting for it, is
+/// treated as hung: the relay ends within SHIM_STALL.
+#[tokio::test(start_paused = true)]
+async fn a_shim_that_takes_no_input_is_given_up_on() {
+    let Wired {
+        mut client_writer,
+        client_reader,
+        fake_reader,
+        fake_writer,
+        relayed,
+    } = wired(256, None, Gate::new(false));
+    let client = tokio::spawn(async move {
+        for n in 0..1000 {
+            if client_writer
+                .write_all(search(n, "x").as_bytes())
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    let ended = tokio::time::timeout(SHIM_STALL * 3, relayed).await;
+    assert!(
+        ended.is_ok(),
+        "the relay waited for a hung shim without end"
+    );
+    client.abort();
+    drop((client_reader, fake_reader, fake_writer));
+}
+
 /// A fake daemon's toolset: answers `memory_toolset` status and expand from
 /// `tier`, records the order of what it is asked, and answers the rest.
 fn toolset(start: &'static str, log: Arc<Mutex<Vec<String>>>) -> Script {
