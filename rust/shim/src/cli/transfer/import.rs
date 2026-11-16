@@ -1,8 +1,6 @@
 //! `perform_import` with the daemon's native schema initialization.
-//! A dry pass over the archive runs
-//! before the transaction and defers every unported value; the transaction
-//! pass then issues the oracle's statements in its order, so a refusal lands
-//! at the same row with the same rolled-back work.
+//! Archive-only validation precedes any connection. Schema initialization,
+//! database validation and row insertion commit together or roll back together.
 use super::json::{self, Value};
 use super::{EXPORTED_TABLES, Outcome, skip_meta_key, sql};
 use crate::pg::{Client, Dsn, Session};
@@ -10,7 +8,7 @@ use std::{
     collections::HashSet,
     fmt::Write as _,
     fs::File,
-    io::{BufReader, Read},
+    io::{BufReader, Read, Seek, SeekFrom},
     path::Path,
 };
 use zip::{CompressionMethod, ZipArchive};
@@ -35,7 +33,6 @@ const ENTRY_HIGHWATER: &str = "SELECT GREATEST(\
     COALESCE((SELECT MAX(entry_id) FROM entry_reinstatement_decisions), 0))";
 
 enum Stop {
-    Defer,
     Refuse(String),
     SchemaRefuse(String),
     Fail,
@@ -65,35 +62,137 @@ struct Archive {
 }
 
 impl Archive {
-    fn open(path: &Path) -> Option<Self> {
-        let mut zip = ZipArchive::new(BufReader::new(File::open(path).ok()?)).ok()?;
+    fn open(path: &Path) -> Result<Self, Stop> {
+        let file = File::open(path).map_err(|e| {
+            refuse(
+                format!("cannot open archive {}: {e}", path.display()),
+                "choose a readable archive file",
+            )
+        })?;
+        let mut zip = ZipArchive::new(BufReader::new(file)).map_err(|e| {
+            refuse(
+                format!("invalid ZIP archive: {e}"),
+                "use an intact pseudolife-mcp export",
+            )
+        })?;
+        // ZipArchive indexes by name and collapses duplicates. Count the raw
+        // central-directory records as well, before trusting that index.
+        let start = zip.central_directory_start();
+        let unique = zip.len();
+        let mut reader = zip.into_inner();
+        let mut count = 0;
+        let counted = (|| -> std::io::Result<()> {
+            reader.seek(SeekFrom::Start(start))?;
+            loop {
+                let mut signature = [0; 4];
+                reader.read_exact(&mut signature)?;
+                if signature != *b"PK\x01\x02" {
+                    break;
+                }
+                let mut header = [0; 42];
+                reader.read_exact(&mut header)?;
+                let length = |at| u16::from_le_bytes([header[at], header[at + 1]]) as i64;
+                reader.seek(SeekFrom::Current(length(24) + length(26) + length(28)))?;
+                count += 1;
+            }
+            Ok(())
+        })();
+        counted.map_err(|_| {
+            refuse(
+                "ZIP central directory is truncated",
+                "use an intact export archive",
+            )
+        })?;
+        if count != unique {
+            return Err(refuse(
+                "duplicate ZIP member names",
+                "use an archive with unique member names",
+            ));
+        }
+        zip = ZipArchive::new(reader).map_err(|_| {
+            refuse(
+                "ZIP central directory changed while reading",
+                "retry with an intact export archive",
+            )
+        })?;
         let mut names = HashSet::new();
         for index in 0..zip.len() {
-            let member = zip.by_index_raw(index).ok()?;
-            if member.encrypted()
-                || !matches!(
-                    member.compression(),
-                    CompressionMethod::Stored | CompressionMethod::Deflated
+            let member = zip.by_index_raw(index).map_err(|e| {
+                refuse(
+                    format!("cannot read ZIP member {index}: {e}"),
+                    "use an intact export archive",
                 )
-                || !names.insert(member.name().ok()?.into_owned())
-            {
-                return None;
+            })?;
+            if member.encrypted() {
+                return Err(refuse(
+                    "ZIP member is encrypted",
+                    "decrypt the archive before importing",
+                ));
+            }
+            if !matches!(
+                member.compression(),
+                CompressionMethod::Stored | CompressionMethod::Deflated
+            ) {
+                return Err(refuse(
+                    "ZIP member compression is not Stored or Deflated",
+                    "repack the archive with Deflate compression",
+                ));
+            }
+            let name = member
+                .name()
+                .map_err(|_| {
+                    refuse(
+                        "ZIP member name is not valid Unicode",
+                        "repack the archive with Unicode member names",
+                    )
+                })?
+                .into_owned();
+            if !names.insert(name.clone()) {
+                return Err(refuse(
+                    format!("duplicate ZIP member {name:?}"),
+                    "use an archive with unique member names",
+                ));
             }
         }
-        Some(Self { zip, names })
+        Ok(Self { zip, names })
     }
 
-    fn read(&mut self, name: &str) -> Option<Vec<u8>> {
-        let mut member = self.zip.by_name(name).ok()?;
+    fn read(&mut self, name: &str) -> Result<Vec<u8>, Stop> {
+        let mut member = self.zip.by_name(name).map_err(|e| {
+            refuse(
+                format!("cannot read archive member {name}: {e}"),
+                "use an intact export archive",
+            )
+        })?;
         let mut bytes = Vec::new();
-        member.read_to_end(&mut bytes).ok()?;
-        Some(bytes)
+        member.read_to_end(&mut bytes).map_err(|e| {
+            refuse(
+                format!("cannot decompress archive member {name}: {e}"),
+                "use an intact export archive",
+            )
+        })?;
+        Ok(bytes)
     }
 
-    /// A member as `TextIOWrapper(encoding="utf-8", newline="\n")` lines.
-    fn text(&mut self, name: &str) -> Option<String> {
-        String::from_utf8(self.read(name)?).ok()
+    fn text(&mut self, name: &str) -> Result<String, Stop> {
+        String::from_utf8(self.read(name)?).map_err(|_| {
+            refuse(
+                format!("archive member {name} is not UTF-8"),
+                "encode this member as UTF-8",
+            )
+        })
     }
+}
+
+fn refuse(cause: impl std::fmt::Display, fix: &str) -> Stop {
+    Stop::Refuse(format!("{cause} — {fix}."))
+}
+
+fn query_refusal(operation: &str) -> Stop {
+    refuse(
+        format!("PostgreSQL could not {operation} for PSEUDOLIFE_MCP_DATABASE_URL"),
+        "restore database access and retry",
+    )
 }
 
 fn list_repr(names: &[&String]) -> String {
@@ -115,7 +214,12 @@ fn format_refusal(value: Option<&Value>) -> Result<Option<String>, Stop> {
         Some(Value::Float(value)) if *value == 1.0 => return Ok(None),
         Some(Value::Float(value)) => json::float_repr(*value),
         Some(Value::Str(text)) => crate::cli::mode_repr(text),
-        Some(_) => return Err(Stop::Defer),
+        Some(_) => {
+            return Err(refuse(
+                "manifest.json format_version must be a scalar format number",
+                "use format_version 1",
+            ));
+        }
     };
     Ok(Some(format!(
         "export format {spelled} is not the format 1 this build reads — upgrade pseudolife-mcp and retry."
@@ -139,7 +243,12 @@ fn dim_refusal(value: Option<&Value>, live: Option<i64>) -> Result<Option<String
         ),
         Some(Value::Str(text)) if text.is_empty() => return Ok(None),
         Some(Value::Str(text)) => (text.clone(), false),
-        Some(_) => return Err(Stop::Defer),
+        Some(_) => {
+            return Err(refuse(
+                "manifest.json embedding_dim must be a scalar dimension",
+                "use the source bank's embedding dimension",
+            ));
+        }
     };
     Ok(match live {
         Some(live) if !equal => Some(format!(
@@ -161,7 +270,12 @@ fn legacy_entries(value: Option<&Value>) -> Result<bool, Stop> {
         Some(Value::Str(text)) if text.is_empty() => true,
         Some(Value::Array(items)) if items.is_empty() => true,
         Some(Value::Object(members)) if members.is_empty() => true,
-        Some(_) => return Err(Stop::Defer),
+        Some(_) => {
+            return Err(refuse(
+                "manifest.json schema_version is not a finite schema number",
+                "use the source bank's numeric schema_version",
+            ));
+        }
     })
 }
 
@@ -171,19 +285,19 @@ fn manifest(archive: &mut Archive, display: &str) -> Result<Value, Stop> {
             "{display} carries no manifest.json — not a pseudolife-mcp export."
         )));
     }
-    let bytes = archive.read("manifest.json").ok_or(Stop::Defer)?;
-    // json.loads(bytes) sniffs BOMs and UTF-16/32; only plain UTF-8 is ported.
-    if bytes.starts_with(&[0xef, 0xbb, 0xbf])
-        || bytes.starts_with(&[0xff, 0xfe])
-        || bytes.starts_with(&[0xfe, 0xff])
-        || bytes.iter().take(4).any(|byte| *byte == 0)
-    {
-        return Err(Stop::Defer);
-    }
-    let text = String::from_utf8(bytes).map_err(|_| Stop::Defer)?;
-    let value = json::loads(&text).ok_or(Stop::Defer)?;
+    let text = archive.text("manifest.json")?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let value = json::read(text).map_err(|reason| {
+        refuse(
+            format!("manifest.json: {reason}"),
+            "correct the manifest JSON",
+        )
+    })?;
     if !matches!(value, Value::Object(_)) {
-        return Err(Stop::Defer);
+        return Err(refuse(
+            "manifest.json must be a JSON object",
+            "use the manifest from a pseudolife-mcp export",
+        ));
     }
     Ok(value)
 }
@@ -294,16 +408,24 @@ fn lines(text: &str) -> impl Iterator<Item = &str> {
 }
 
 fn record(line: &str) -> Result<Vec<(String, Value)>, Stop> {
-    match json::loads(line) {
-        Some(Value::Object(members)) => Ok(members),
-        _ => Err(Stop::Defer),
+    match json::read(line).map_err(|reason| refuse(reason, "correct the JSONL row"))? {
+        Value::Object(members) => Ok(members),
+        _ => Err(refuse(
+            "archive row must be a JSON object",
+            "correct the JSONL row",
+        )),
     }
 }
 
-async fn import_meta(pass: Pass<'_>, text: &str) -> Result<u64, Stop> {
-    let mut count = 0;
-    for line in lines(text) {
-        let rec = record(line)?;
+fn validate_record(table: &str, rec: &[(String, Value)]) -> Result<(), Stop> {
+    if rec.is_empty() {
+        return Err(refuse(
+            format!("{table} has an empty row"),
+            "supply the row's required columns",
+        ));
+    }
+    let field = |name: &str| rec.iter().find(|(key, _)| key == name).map(|(_, v)| v);
+    if table == "meta" {
         let mut unknown: Vec<&String> = rec
             .iter()
             .map(|(key, _)| key)
@@ -316,16 +438,116 @@ async fn import_meta(pass: Pass<'_>, text: &str) -> Result<u64, Stop> {
                 list_repr(&unknown)
             )));
         }
+        let Some(Value::Str(key)) = field("key") else {
+            return Err(refuse(
+                "meta.key must be a string",
+                "supply the metadata key as a string",
+            ));
+        };
+        if skip_meta_key(key) {
+            return Ok(());
+        }
+        let value = field("value").ok_or_else(|| {
+            refuse(
+                "meta.value is missing",
+                "include a value for the metadata key",
+            )
+        })?;
+        if key.contains('\0') {
+            return Err(refuse(
+                "meta.key contains U+0000",
+                "remove U+0000 from the key",
+            ));
+        }
+        if json::jsonb_unloadable(value) {
+            return Err(refuse(
+                "meta.value requires finite JSON numbers and strings without U+0000",
+                "correct the metadata value",
+            ));
+        }
+    }
+    if table == "relations"
+        && let Some(inverse) = field("inverse_of")
+        && *inverse != Value::Null
+    {
+        let Value::Str(target) = inverse else {
+            return Err(refuse(
+                "relations.inverse_of must be a string or null",
+                "supply the inverse relation name",
+            ));
+        };
+        let Some(Value::Str(name)) = field("name") else {
+            return Err(refuse(
+                "relations.name must be a string when inverse_of is set",
+                "supply the relation name",
+            ));
+        };
+        if target.contains('\0') || name.contains('\0') {
+            return Err(refuse(
+                "relations.name or inverse_of contains U+0000",
+                "remove U+0000 from the relation names",
+            ));
+        }
+    }
+    for (key, value) in rec {
+        let invalid = key.contains('\0')
+            || matches!(value, Value::Str(text) if text.contains('\0'))
+            || (matches!(value, Value::Array(_) | Value::Object(_))
+                && json::jsonb_unloadable(value));
+        if invalid {
+            return Err(refuse(
+                format!("{table}.{key} contains U+0000 or a non-finite nested JSON number"),
+                "use strings without U+0000 and finite nested JSON numbers",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn preflight(archive: &mut Archive) -> Result<(), Stop> {
+    for table in EXPORTED_TABLES {
+        let member = format!("{table}.jsonl");
+        if archive.names.contains(&member) {
+            for (index, line) in lines(&archive.text(&member)?).enumerate() {
+                let checked = record(line).and_then(|rec| validate_record(table, &rec));
+                checked.map_err(|stop| match stop {
+                    Stop::Refuse(message) => {
+                        Stop::Refuse(format!("{member} row {}: {message}", index + 1))
+                    }
+                    other => other,
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn import_meta(pass: Pass<'_>, text: &str) -> Result<u64, Stop> {
+    let mut count = 0;
+    for line in lines(text) {
+        let rec = record(line)?;
+        validate_record("meta", &rec)?;
         let field = |name: &str| rec.iter().find(|(key, _)| key == name).map(|(_, v)| v);
         let Some(Value::Str(key)) = field("key") else {
-            return Err(Stop::Defer);
+            return Err(refuse(
+                "meta.key must be a string",
+                "supply the metadata key as a string",
+            ));
         };
         if skip_meta_key(key) {
             continue;
         }
-        let value = field("value").ok_or(Stop::Defer)?;
+        let value = field("value").ok_or_else(|| {
+            refuse(
+                "meta.value is missing",
+                "include a value for the metadata key",
+            )
+        })?;
         if key.contains('\0') || json::jsonb_unloadable(value) {
-            return Err(Stop::Defer);
+            return Err(refuse(
+                "meta.value requires finite JSON numbers and strings without U+0000",
+                "correct the metadata value",
+            ));
         }
         let statement = format!(
             "INSERT INTO meta (key, value) VALUES ({}, {}::jsonb) \
@@ -342,14 +564,22 @@ async fn import_meta(pass: Pass<'_>, text: &str) -> Result<u64, Stop> {
 /// Dry pass: every string headed for an input function that can refuse it
 /// (`vector(n)`, uuid, timestamptz in this session) is cast by the server
 /// first, so the transaction never meets a value error.
-async fn check(pass: Pass<'_>, checks: &mut Vec<String>) -> Result<(), Stop> {
-    if let Pass::Dry(client) = pass
-        && !checks.is_empty()
-    {
-        for chunk in checks.chunks(STATEMENTS_PER_MESSAGE) {
-            sql::execute(client, &chunk.join("; "))
-                .await
-                .map_err(|_| Stop::Defer)?;
+async fn check(pass: Pass<'_>, checks: &mut Vec<(String, String)>) -> Result<(), Stop> {
+    if let Pass::Dry(client) = pass {
+        for (statement, column) in checks.iter() {
+            client.batch_execute(statement).await.map_err(|error| {
+                if let Some(db) = error.as_db_error() {
+                    refuse(
+                        format!(
+                            "{column} value was rejected by PostgreSQL (SQLSTATE {})",
+                            db.code().code()
+                        ),
+                        "correct that archive field for the target column type",
+                    )
+                } else {
+                    Stop::Refuse(sql::refusal(error, "validate archive field types"))
+                }
+            })?;
         }
     }
     checks.clear();
@@ -398,6 +628,7 @@ async fn import_table(
     }
     for line in lines(text) {
         let mut rec = record(line)?;
+        validate_record(table, &rec)?;
         if table == "entries" && legacy {
             match rec.iter_mut().find(|(key, _)| key == "dream_state") {
                 Some((_, value)) => *value = Value::Null,
@@ -422,13 +653,22 @@ async fn import_table(
             && *inverse != Value::Null
         {
             let Value::Str(target) = std::mem::replace(inverse, Value::Null) else {
-                return Err(Stop::Defer);
+                return Err(refuse(
+                    "relations.inverse_of must be a string or null",
+                    "supply the inverse relation name",
+                ));
             };
             let Some((_, Value::Str(name))) = rec.iter().find(|(key, _)| key == "name") else {
-                return Err(Stop::Defer);
+                return Err(refuse(
+                    "relations.name must be a string",
+                    "supply the relation name",
+                ));
             };
             if target.contains('\0') || name.contains('\0') {
-                return Err(Stop::Defer);
+                return Err(refuse(
+                    "relations.name or inverse_of contains U+0000",
+                    "remove U+0000 from the relation names",
+                ));
             }
             inverses.push(format!(
                 "UPDATE relations SET inverse_of = {} WHERE name = {}",
@@ -437,20 +677,35 @@ async fn import_table(
             ));
         }
         if rec.is_empty() {
-            return Err(Stop::Defer);
+            return Err(refuse(
+                format!("{table} has an empty row"),
+                "supply the row's required columns",
+            ));
         }
         rec.sort_by(|a, b| a.0.cmp(&b.0));
         let mut values = Vec::with_capacity(rec.len());
         for (key, value) in &rec {
-            let target = column(key).ok_or(Stop::Defer)?;
-            values.push(literal(value, &target.udt).ok_or(Stop::Defer)?);
+            let target = column(key).ok_or_else(|| {
+                refuse(
+                    format!("unknown column {table}.{key}"),
+                    "use a build supporting this column",
+                )
+            })?;
+            values.push(literal(value, &target.udt).ok_or_else(|| {
+                refuse(
+                    format!(
+                        "{table}.{key} value cannot be represented as {}",
+                        target.udt
+                    ),
+                    "correct the archive field to match the target column type",
+                )
+            })?);
             if let Value::Str(text) = value
                 && matches!(target.udt.as_str(), "uuid" | "vector" | "timestamptz")
             {
-                checks.push(format!(
-                    "SELECT CAST({} AS {})",
-                    sql::text(text),
-                    target.full
+                checks.push((
+                    format!("SELECT CAST({} AS {})", sql::text(text), target.full),
+                    format!("{table}.{key}"),
                 ));
                 if checks.len() >= STATEMENTS_PER_MESSAGE {
                     check(pass, &mut checks).await?;
@@ -488,7 +743,7 @@ async fn process(
         if !archive.names.contains(&member) {
             continue;
         }
-        let text = archive.text(&member).ok_or(Stop::Defer)?;
+        let text = archive.text(&member)?;
         let count = if *table == "meta" {
             import_meta(pass, &text).await?
         } else {
@@ -509,7 +764,7 @@ async fn transaction(
     sql::execute(
         client,
         &format!(
-            "BEGIN; SET LOCAL lock_timeout = '5s'; LOCK TABLE {} IN EXCLUSIVE MODE",
+            "SET LOCAL lock_timeout = '5s'; LOCK TABLE {} IN EXCLUSIVE MODE",
             EXPORTED_TABLES.join(", ")
         ),
     )
@@ -541,12 +796,7 @@ async fn transaction(
     .await
     .map_err(fail)?;
     let mut counts = Vec::new();
-    process(Pass::Real(client), archive, columns, legacy, &mut counts)
-        .await
-        .map_err(|stop| match stop {
-            Stop::Defer => Stop::Fail,
-            other => other,
-        })?;
+    process(Pass::Real(client), archive, columns, legacy, &mut counts).await?;
     if !archive.names.contains("memory_trace_invalidations.jsonl") {
         let count = sql::affected(client, BACKFILL).await.map_err(fail)?;
         counts.push(("memory_trace_invalidations", count));
@@ -591,8 +841,8 @@ async fn transaction(
     Ok(counts)
 }
 
-/// Guard connections first, initialize and commit the native schema, then
-/// check dimensions and dry-read the archive before its import transaction.
+/// Guard connections first, then initialize the schema and validate values
+/// inside the transaction that will also commit the imported rows.
 async fn admit(
     client: &Client,
     archive: &mut Archive,
@@ -600,35 +850,38 @@ async fn admit(
     force: bool,
     legacy: bool,
 ) -> Result<Vec<Vec<Column>>, Stop> {
-    let defer = |_| Stop::Defer;
+    let fail = |error| Stop::Refuse(sql::refusal(error, "inspect the import target"));
     sql::execute(client, "RESET lock_timeout")
         .await
-        .map_err(defer)?;
+        .map_err(fail)?;
     let others = sql::scalar(client, GUARD)
         .await
-        .map_err(defer)?
-        .ok_or(Stop::Defer)?;
+        .map_err(fail)?
+        .ok_or_else(|| query_refusal("read import target metadata"))?;
     if others != "0" && !force {
         return Err(Stop::Refuse(format!(
             "{others} other connection(s) hold this database — a running daemon? Stop it first (Docker tier: `docker compose -f ops/docker-compose.yml stop pseudolife-daemon`; pip tiers: stop the serve process), then retry. Pass --force only if you know the connections are inert."
         )));
     }
     // psycopg uses the server encoding; the native client decodes UTF-8.
-    // Defer before ensure_schema can commit migrations or compatibility repairs.
+    // Encoding admission precedes the schema transaction.
     if sql::scalar(client, "SHOW server_encoding")
         .await
-        .map_err(defer)?
+        .map_err(fail)?
         .as_deref()
         != Some("UTF8")
     {
-        return Err(Stop::Defer);
+        return Err(refuse(
+            "server_encoding is not UTF8",
+            "migrate this database to UTF8 before importing",
+        ));
     }
+    sql::execute(client, "BEGIN").await.map_err(fail)?;
     super::schema::ensure(client)
         .await
         .map_err(|error| match error {
             super::schema::Error::Refused(message) => Stop::SchemaRefuse(message),
             super::schema::Error::Db => Stop::Fail,
-            super::schema::Error::CommitUnknown => Stop::CommitUnknown,
         })?;
     let live = sql::scalar(
         client,
@@ -637,10 +890,10 @@ async fn admit(
          AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped",
     )
     .await
-    .map_err(defer)?
+    .map_err(fail)?
     .map(|text| text.parse::<i64>())
     .transpose()
-    .map_err(|_| Stop::Defer)?;
+    .map_err(|_| query_refusal("read import target metadata"))?;
     if let Some(message) =
         dim_refusal(manifest.get("embedding_dim"), live.filter(|live| *live > 0))?
     {
@@ -658,35 +911,33 @@ async fn admit(
             ),
         )
         .await
-        .map_err(defer)?;
+        .map_err(fail)?;
         let mut found = Vec::new();
         for row in rows {
-            let [Some(name), Some(udt), Some(full)] =
-                <[Option<String>; 3]>::try_from(row).map_err(|_| Stop::Defer)?
+            let [Some(name), Some(udt), Some(full)] = <[Option<String>; 3]>::try_from(row)
+                .map_err(|_| query_refusal("read import target metadata"))?
             else {
-                return Err(Stop::Defer);
+                return Err(query_refusal("read import column metadata"));
             };
             found.push(Column { name, udt, full });
         }
         columns.push(found);
     }
-    match process(
+    process(
         Pass::Dry(client),
         archive,
         &columns,
         legacy,
         &mut Vec::new(),
     )
-    .await
-    {
-        Ok(()) | Err(Stop::Refuse(_)) => Ok(columns),
-        Err(other) => Err(other),
-    }
+    .await?;
+    Ok(columns)
 }
 
 pub(super) async fn run(dsn: &Dsn, path: &Path, display: &str, force: bool) -> Outcome {
-    let Some(mut archive) = Archive::open(path) else {
-        return Outcome::Deferred;
+    let mut archive = match Archive::open(path) {
+        Ok(archive) => archive,
+        Err(stop) => return outcome(stop),
     };
     let manifest = match manifest(&mut archive, display) {
         Ok(value) => value,
@@ -709,8 +960,12 @@ pub(super) async fn run(dsn: &Dsn, path: &Path, display: &str, force: bool) -> O
     } else {
         false
     };
-    let Ok(session) = Session::open(dsn).await else {
-        return Outcome::Deferred;
+    if let Err(stop) = preflight(&mut archive) {
+        return outcome(stop);
+    }
+    let session = match Session::open(dsn).await {
+        Ok(session) => session,
+        Err(error) => return Outcome::Refused(super::database_refusal(error)),
     };
     let result = match admit(session.client(), &mut archive, &manifest, force, legacy).await {
         Ok(columns) => {
@@ -720,7 +975,10 @@ pub(super) async fn run(dsn: &Dsn, path: &Path, display: &str, force: bool) -> O
             }
             result
         }
-        Err(stop) => Err(stop),
+        Err(stop) => {
+            let _ = sql::execute(session.client(), "ROLLBACK").await;
+            Err(stop)
+        }
     };
     let _ = session.close().await;
     match result {
@@ -739,7 +997,6 @@ pub(super) async fn run(dsn: &Dsn, path: &Path, display: &str, force: bool) -> O
 
 fn outcome(stop: Stop) -> Outcome {
     match stop {
-        Stop::Defer => Outcome::Deferred,
         Stop::Refuse(message) => Outcome::Refused(message),
         Stop::SchemaRefuse(message) => Outcome::SchemaRefused(message),
         Stop::Fail => Outcome::Failed,
