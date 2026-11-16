@@ -1433,7 +1433,7 @@ def test_a_scratch_tree_of_new_empty_dirs_is_not_idle(env):
 
 def test_tool_dirs_under_a_scratch_root_are_kept(env):
     """The Windows dev VM's dry run (16 November 2026) offered its .rustup
-    toolchain as scratch when C:\dev was named a scratch root. Hidden dirs,
+    toolchain as scratch when the VM's dev dir was named a scratch root. Hidden dirs,
     tool dir names and rustup or cargo homes are kept; a name may only keep."""
     kept = [_scratch(env, ".rustup"),
             _scratch(env, "bin", "uv.exe"),
