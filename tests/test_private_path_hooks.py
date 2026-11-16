@@ -156,7 +156,22 @@ def _client(file: Path) -> bool:
 
 def _hook(hook: str, file: Path, home: Path, launcher: str) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home),
-           "PSEUDOLIFE_SHIM_LAUNCHER": launcher, "PSEUDOLIFE_TEST_FILE": str(file)}
+           "PSEUDOLIFE_TEST_FILE": str(file)}
+    if REAL is not None and launcher == str(REAL):
+        # Where an install puts the client: the layout's default launcher,
+        # here a stand-in that runs the built client as the installed one
+        # runs its active runtime. (Naming the built client itself in
+        # PSEUDOLIFE_SHIM_LAUNCHER would make it a launcher without
+        # PSEUDOLIFE_SHIM_RUNTIMES, which it refuses.)
+        data = home / "xdg-data"
+        stable = data / "pseudolife-mcp" / "bin" / "pseudolife-mcp"
+        if not stable.exists():
+            stable.parent.mkdir(parents=True)
+            stable.write_text(f'#!/bin/sh\nexec "{REAL}" "$@"\n')
+            stable.chmod(0o700)
+        env["XDG_DATA_HOME"] = str(data)
+    else:
+        env["PSEUDOLIFE_SHIM_LAUNCHER"] = launcher
     return subprocess.run(
         [BASH, "-c", _hook_functions(hook) + '\nprivate_regular "$PSEUDOLIFE_TEST_FILE" 4096'],
         env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
