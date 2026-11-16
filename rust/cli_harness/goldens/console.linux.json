@@ -456,15 +456,30 @@
   },
   "defer-int-digits": {
    "home": null,
-   "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW0Vycm5vIDExMV0gQ29ubmVjdGlvbiByZWZ1c2VkKTsgY2hlY2sgaXQgcnVucyAoYHBzZXVkb2xpZmUtbWNwIGRvY3RvcmApCg==",
+   "utc_offset": 0,
+   "exit": 0,
+   "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4K",
+   "stderr": "",
    "window": [
-    1794545180.0654938,
-    1794545180.3034184
+    1794849374.183874,
+    1794849374.1885352
    ],
-   "arm": "python",
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "rust",
    "files": {
     "cwd": "dir"
    },
@@ -5370,6 +5385,12 @@
    "rust_tree": "clean",
    "platform": "linux",
    "candidate_sha256": "02c6bd275f63795b539376415011be3209d18812a26530ebfb1f6e6d91ff783f"
+  },
+  "defer-int-digits": {
+   "commit": "9425601aadde65d67171be5a80bab31fd158b332",
+   "rust_tree": "modified",
+   "platform": "linux",
+   "candidate_sha256": "d8669926f8c1eb970396e05950e3fc7ea3e0e2ecbc4797dcf62ec284d4bbae23"
   },
   "open-generic": {
    "commit": "ec81404c683e60f903242e3570c2b8e684d18472",

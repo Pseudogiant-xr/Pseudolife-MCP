@@ -266,43 +266,30 @@ def _settle(arm, obs, launches=0):
 
 # --- cases -----------------------------------------------------------------------
 
-def _reaches_browser(argv: list[str]) -> bool:
-    """The oracle reaches ``open_browser`` only on the sign-in path (no
-    ``--list``, no ``--revoke``: an empty one is a usage error) without
-    ``--no-open``."""
-    words = argv[1:]
-    if "--list" in words or "--no-open" in words:
-        return False
-    return not any(word == "--revoke" or word.startswith("--revoke=") for word in words)
-
-
-def _check_browser_env(case_id: str, env: dict, served: bool) -> None:
+def _check_browser_env(case_id: str, env: dict) -> None:
     """The environment that keeps every default launcher out, asserted when
     the row loads, before any arm runs: a BROWSER whose first entry decides
     (``os.startfile``, ``/usr/bin/open`` and the ``xdg-open`` family run only
     without one), naming as a program only the stand-in's interpreter or a
     path in the home, and a PATH of the home's ``bin`` alone (so no
-    ``which`` lookup finds a real browser). On POSIX every entry starts a
-    program (the native client), and a bare name is allowed, since
-    ``execve`` finds it only through that PATH; on Windows only a ``%s``
-    entry starts one, and never a bare name, since ``CreateProcess`` also
-    searches the interpreter's directory, the current directory and the
-    system directories."""
+    ``which`` lookup finds a real browser). POSIX bare names can resolve
+    only through that PATH. Windows bare names without a placeholder are
+    refusal cases; executable starts must name the stand-in interpreter or
+    a path inside the disposable home."""
     entries = [entry for entry in (env.get("BROWSER") or "").split(os.pathsep) if entry]
     if not entries or not entries[0].strip():
         raise AssertionError(f"{case_id}: BROWSER must decide the controller")
-    if served:
-        try:
-            words = shlex.split(entries[0])
-        except ValueError:
-            words = [BIN]  # webbrowser.get() raises: nothing starts
-        program = words[0] if words else BIN
-        bare = not core.WINDOWS and "/" not in program
-        # Windows starts a BROWSER entry only in the `%s ... &` form; any
-        # other is a GenericBrowser neither arm runs there.
-        started = not core.WINDOWS or "%s" in entries[0]
-        if started and program != _interpreter() and not program.startswith(BIN) and not bare:
-            raise AssertionError(f"{case_id}: BROWSER may run only the stand-in")
+    try:
+        words = shlex.split(entries[0])
+    except ValueError:
+        words = [BIN]  # webbrowser.get() raises: nothing starts
+    program = words[0] if words else BIN
+    bare = (not core.WINDOWS or "%s" not in entries[0]) and not any(
+        char in program for char in "/\\:")
+    # Bare Windows names without %s are refused by the native client and
+    # cannot resolve through the oracle's isolated PATH.
+    if program != _interpreter() and not program.startswith(BIN) and not bare:
+        raise AssertionError(f"{case_id}: BROWSER may run only the stand-in")
     if env.get("PATH") != BIN:
         raise AssertionError(f"{case_id}: PATH must hold only the home's bin")
     if env.get("WAYLAND_DISPLAY") is not None:
@@ -311,9 +298,9 @@ def _check_browser_env(case_id: str, env: dict, served: bool) -> None:
 
 # The BROWSER every case without its own runs with: no program by that
 # name exists, so a candidate that reaches a launcher where the oracle does
-# not prints the link (Windows: a refused ``GenericBrowser``; POSIX: a start
-# that fails) instead of opening the machine's default browser (#1509).
-NO_BROWSER = "pl-console-harness-no-browser"
+# not prints the link after a failed start instead of opening the
+# machine's default browser (#1509).
+NO_BROWSER = f"'{BIN}{SEP}no-browser.exe' %s &"
 
 
 def case(case_id: str, argv: list[str], *, routes=None, env=None, rules=(), setup=None,
@@ -321,12 +308,11 @@ def case(case_id: str, argv: list[str], *, routes=None, env=None, rules=(), setu
          expect_output=False, during=None, after=_arm, programs=()) -> Case:
     full = ["console", *argv]
     own = env or {}
-    if "BROWSER" in own or (routes is not None and _reaches_browser(full)):
-        _check_browser_env(case_id, own, routes is not None)
-    env = {**TOKEN, "BROWSER": NO_BROWSER, **own}
+    env = {**TOKEN, "BROWSER": NO_BROWSER, "PATH": BIN, **own}
+    _check_browser_env(case_id, env)
     return Case(case_id, full, env=env, rules=rules, setup=setup, during=during,
                 after=after, platforms=platforms, timeout=timeout,
-                expect_output=expect_output, programs=programs,
+                expect_output=expect_output, programs=tuple(dict.fromkeys((*PROGRAMS, *programs))),
                 daemon=factory(routes, tls) if routes is not None else None)
 
 
@@ -348,11 +334,6 @@ def browser_case(case_id: str, argv: list[str], *, browser: str | None = None,
 def deferred(case_id: str, argv: list[str], **kwargs) -> Case:
     # Never a daemon: the oracle answers these on its own path.
     return case(case_id, argv, rules=("console-deferral",), **kwargs)
-
-
-def deferred_browser(case_id: str, argv: list[str], **kwargs) -> Case:
-    # The closed port as well: the oracle makes no link, so opens nothing.
-    return browser_case(case_id, argv, rules=("console-deferral",), **kwargs)
 
 
 def _claude_registration(env: dict):
@@ -401,8 +382,8 @@ def cases() -> list[Case]:
     add(deferred("defer-double-dash", ["--"]))
     add(deferred("defer-help-explicit", ["--help=x"]))
     add(deferred("defer-help-width", ["--help"], env={"COLUMNS": "100"}))
-    # json.loads' integer digit limit moves with this variable.
-    add(deferred("defer-int-digits", ["--list"], env={"PYTHONINTMAXSTRDIGITS": "640"}))
+    # The native command ignores Python-only interpreter settings.
+    add(case("defer-int-digits", ["--list"], routes=sessions([]), env={"PYTHONINTMAXSTRDIGITS": "640"}))
 
     # Credentials: none, unusable, or a URL that is no origin.
     add(case("no-token", ["--list"], env=NO_TOKEN))
@@ -690,14 +671,14 @@ def browser_cases() -> list[Case]:
     add(case("unless-no-open-signed-in", ["--no-open", "--unless-signed-in", "--json"],
              routes=signed_in([1], **signin)))
 
-    # Windows defers before any request: a launcher this port does not start.
-    add(deferred_browser("defer-browser-standard-name", [], browser="firefox",
+    # Former Windows deferrals now print the link and a useful cause.
+    add(browser_case("defer-browser-standard-name", [], browser="firefox", routes=signin,
                          platforms=("windows",)))
-    add(deferred_browser("defer-browser-clone", ["--json"], browser=f"{BIN}{SEP}Lynx -dump",
+    add(browser_case("defer-browser-clone", ["--json"], routes=signin, browser=f"{BIN}{SEP}Lynx -dump",
                          platforms=("windows",)))
-    # After the session read (a read), before the sign-in request.
+    # A refusal after the session read still produces a usable sign-in link.
     add(browser_case("defer-browser-unless", ["--unless-signed-in"], browser="w3m",
-                     routes=signed_in([], **signin), rules=("console-deferral-after-read",),
+                     routes=signed_in([], **signin),
                      platforms=("windows",)))
     # The native POSIX client (recorded from it, 16 November 2026): any
     # BROWSER entry is a command line started in the background, the URL
@@ -712,9 +693,9 @@ def browser_cases() -> list[Case]:
                      browser=f"{BIN}{SEP}Lynx -dump", platforms=("linux",)))
     add(browser_case("browser-terminal-unless", ["--unless-signed-in"], browser="w3m",
                      routes=signed_in([], **signin), platforms=("linux",)))
-    add(deferred_browser("defer-browser-bare-name", [], browser="pythonw.exe -I x %s &",
+    add(browser_case("defer-browser-bare-name", [], routes=signin, browser=f"'{BIN}{SEP}relative.exe' %s &",
                          platforms=("windows",)))
-    add(deferred_browser("defer-browser-batch", [], browser=f"'{BIN}{SEP}b.cmd' %s &",
+    add(browser_case("defer-browser-batch", [], routes=signin, browser=f"'{BIN}{SEP}b.cmd' %s &",
                          platforms=("windows",)))
     return c
 
@@ -727,12 +708,13 @@ def browser_cases() -> list[Case]:
 # cases, `open-no-display`, the Linux `open-generic*`) cannot catch a
 # mutant: any difference would count. Those answers are guarded by the
 # golden replay and the unit tests instead.
-BROWSER_FILE = "shim/src/cli/console/browser.rs"
 LAUNCH_FILE = "shim/src/cli/console/launch.rs"
 MUTANTS = [
+    # Retain the running-launch regression across the native result refactor.
     Mutant("console-exited-counts-as-opened", "console", LAUNCH_FILE,
-           "    matches!(child.try_wait(), Ok(None))",
-           "    matches!(child.try_wait(), Ok(Some(_)))", ("open",), platforms=("windows",)),
+           "        Ok(None) => Ok(()),",
+           '        Ok(None) => Err(format!("{program} still running")),',
+           ("open",), platforms=("windows",)),
     Mutant("console-running-counts-as-failed", "console", LAUNCH_FILE,
            "Ok(None) if std::time::Instant::now() >= deadline => return Ok(()),",
            "Ok(None) if std::time::Instant::now() >= deadline => return Err(String::new()),",
@@ -743,11 +725,6 @@ MUTANTS = [
     Mutant("console-unsafe-link-launched", "console", FILE,
            "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin, to);",
            "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_)));", ("open-unsafe-link",)),
-    # Only Windows refuses a `%s` entry without `&`.
-    Mutant("console-generic-launched", "console", BROWSER_FILE,
-           'if words.last().map(String::as_str) != Some("&") {',
-           'if words.last().map(String::as_str) == Some("") {', ("open-generic",),
-           platforms=("windows",)),
     Mutant("console-expiry-refusal-swallowed", "console", FILE,
            "    let Ok(minutes) = pyint::minutes(expires_in) else {",
            '    let Ok(minutes) = pyint::minutes(expires_in).or(Ok::<_, ()>("5".to_owned())) else {',

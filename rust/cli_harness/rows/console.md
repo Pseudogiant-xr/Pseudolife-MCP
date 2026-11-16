@@ -18,9 +18,8 @@ signed-in browsers and signs one out. The first slice (2026-11-12) ported
 every shape that opens no browser; this one ports the sign-in that opens a
 browser (with or without `--to` and `--json`) and `--unless-signed-in` (the
 session-list read, then that sign-in). Which browser `open_browser` would
-start is decided before the code is minted, so on Windows a launcher this
-port does not reproduce defers before any effect but `--unless-signed-in`'s
-read (macOS and Linux never defer on the browser); once the
+start is decided before the code is minted. Browser choices never defer:
+unsupported values print the link with their cause and recovery. Once the
 daemon answers the sign-in with a 200 object the candidate answers every
 branch itself. Since issue #1497's fixes the oracle refuses each malformed
 answer it used to die on (a traceback, exit 1), so no case is a declared
@@ -80,15 +79,13 @@ environment and the file system:
   non-empty `DISPLAY` or `WAYLAND_DISPLAY`, else the link is printed and no
   browser is consulted. The native candidate reads the display only for
   the Linux default launchers below: a set `BROWSER` decides without one.
-- Windows reproduces `webbrowser.get()`: `BROWSER`, split on `;`, every
-  non-empty entry to the front, the first one first; an entry that is only
-  whitespace raises IndexError in `_synthesize` (printed). The first entry
-  decides: with `%s`, `shlex.split` (POSIX mode, reproduced; its ValueError
-  prints) and a last word `&` give a `BackgroundBrowser` (launched), any
-  other a `GenericBrowser` (refused, printed); without `%s`, a
-  `GenericBrowser` (printed) unless the first word's basename is a standard
-  browser name, which `_synthesize` may clone (deferred). No usable
-  `BROWSER`: `WindowsDefault` (`os.startfile`).
+- Windows uses its default browser without `BROWSER`. Otherwise its first
+  non-empty `;`-separated entry is a command line: single and double quotes
+  group words, backslashes stay literal, a trailing `&` is optional, and
+  the URL is appended when no argument contains `%s`. Only drive-absolute
+  `.exe` paths are admitted, avoiding implicit executable lookup and batch
+  shells. Every refused value has a cause and recovery, including invalid
+  Unicode, unmatched quotes, bare names, relative paths and scripts.
 - macOS and Linux follow the native rules since 16 November 2026, not
   `webbrowser`'s (the maintainer's ruling of 14 November: the systems work,
   not match Python). The first non-empty `BROWSER` entry (split on `:`)
@@ -100,7 +97,8 @@ environment and the file system:
   `links`, `links2`, `elinks`, `lynx`, `w3m`, `browsh` by basename), a
   `shlex` error, an entry naming no program and a value that is not UTF-8
   print the link with the cause. Without `BROWSER`, macOS runs
-  `/usr/bin/open URL`; Linux with no display prints the link with that
+  `/usr/bin/open URL`, except over SSH, where it prints the link with its
+  cause (a set `BROWSER` still wins); Linux with no display prints the link with that
   cause, and with one runs the first of `xdg-open`, `gio open --`,
   `x-www-browser`, `firefox`, `google-chrome`, `chromium`,
   `chromium-browser` that `PATH` holds (`xdg-settings` is no longer read:
@@ -119,18 +117,22 @@ prints:
   that is not ENOENT/ENOTDIR reported; never execvp's `/bin/sh` fallback.
   The launcher then has two seconds to exit: a zero exit, or a program
   still running (the browser itself), is opened; a non-zero exit or a start
-  that fails prints the link with the cause (a launcher the caller's
-  ignored SIGCHLD reaps before its status is read counts as opened).
+  that fails prints the link with the cause. On Linux, `explorer.exe`
+  exiting 1 is a WSL hand-off; no other program or failure code is exempt.
+  A launcher the caller's
+  ignored SIGCHLD reaps before its status is read counts as opened.
   Windows: std's `CreateProcess`
   with nothing redirected, so the browser gets this command's own standard
   handles, as CPython's child does (Windows copies a parent's redirected
   standard handles to a child started with none named), and opened when it
-  is still running right after the start (`p.poll() is None`); there a
+  is still running or has exited zero right after the start; a failed start
+  or observed non-zero exit prints the link with its cause. There a
   pipe this command writes to stays open until the browser exits.
 - `WindowsDefault.open`: `ShellExecuteW(NULL, NULL, url, NULL, NULL,
   SW_SHOWNORMAL)`, the default verb `os.startfile` uses; True unless it
   returns 32 or less; a URL past 32767 UTF-16 units is `path_converter`'s
-  ValueError (False).
+  refusal. The native launcher names every ShellExecute failure code with
+  recovery rather than discarding it.
 - A test build of the candidate starts nothing but a stub its own test
   registered (`launch::intercept`, #1509): any other launch, and every
   `ShellExecuteW`, panics before the call.
@@ -146,7 +148,7 @@ one argv element (`execve` on POSIX; on Windows a `.exe` started by
 `CreateProcess`, whose command line std quotes as `list2cmdline` does, never
 a batch file or `cmd.exe`) or the one file `ShellExecuteW` opens, which can
 only be an `http`/`https` URL; no shell reads it. The oracle starts a batch
-file named by `BROWSER` through `cmd.exe` (the candidate defers it), where a
+file named by `BROWSER` through `cmd.exe` (the candidate refuses it with the link), where a
 legitimate `&to=<page>` still splits the command line.
 
 ## Exact contract items
@@ -174,16 +176,6 @@ legitimate `&to=<page>` still splits the command line.
 
 ## Deferred before any request (the dispatcher's `mode 'console' is deferred` line, exit 1)
 
-- On Windows only, a launcher this port does not start (`browser.rs`): a
-  `BROWSER` entry without `%s` whose first word's basename is a standard
-  browser name (`_synthesize` may clone that controller); a
-  `BackgroundBrowser` whose program is not a drive-absolute `.exe` path
-  without a quote (`CreateProcess(NULL, ...)` searches the interpreter's
-  own directory and the current directory for a bare name, where std does
-  not; a batch file runs through `cmd.exe`); a `BROWSER` value that is not
-  valid Unicode. With `--unless-signed-in` the session read comes first (a
-  read; case `defer-browser-unless`). macOS and Linux never defer on the
-  browser.
 - argparse corners: abbreviations, `--`, a value starting with `-`, any
   other token starting with `-`, `--help=x`; help or usage at a width other
   than `COLUMNS=80` or with `FORCE_COLOR` / `PYTHON_COLORS` / `NO_COLOR` set
@@ -196,8 +188,9 @@ legitimate `&to=<page>` still splits the command line.
   connect failure but a refused one (a timeout, an unreachable network:
   their text is not compared); a TLS handshake failure (case
   `defer-https-untrusted`).
-- `PYTHONINTMAXSTRDIGITS` set: `json.loads`' integer digit limit moves
-  (case `defer-int-digits`).
+
+`PYTHONINTMAXSTRDIGITS` is ignored by the native Console; the retained
+`defer-int-digits` case now checks a successful session list.
 
 ## Deferred after a request
 
@@ -224,7 +217,9 @@ its deferral line (exit 1) after sending the same request. None is cased.
   (checked when the row loads, and by `check_programs` before each arm for
   the names a launcher lookup reads) and no `WAYLAND_DISPLAY` (`DISPLAY`
   only where a case needs `has_display`); every other case runs with
-  `BROWSER` naming no program (`NO_BROWSER`), so a candidate that wrongly
+  `BROWSER` naming a nonexistent executable under its home (`NO_BROWSER`)
+  and the same isolated `PATH`; validation applies to every case, served or
+  not, so a candidate that wrongly
   signs in prints the link (#1509). Their decision logic is covered by the
   unit tests in `browser_tests.rs` against a fake machine (the order, each
   refusal's cause, `which` and the `PATH` candidates against a temporary
