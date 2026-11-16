@@ -71,8 +71,10 @@ these cases are recorded from the candidate, not the oracle:
   process id out of range),
   `runtime.process_record`
   names the file and what it means, and a running tunnel's cloud
-  verification is `"not_checked"`. A Windows `DPAPI` key is reported
-  `"not_verified"` (present on disk; CryptUnprotectData is not called).
+  verification is `"not_checked"`. A Windows `DPAPI` key is unsealed with
+  CryptUnprotectData and reported present only when it unseals to a valid
+  key; one this session cannot unseal (another account's, a damaged blob,
+  or a logon without the account's credentials) is `"not_verified"`.
 - `update` never stops on a record or a key and starts, stops or signals
   nothing: a ready profile without a running record is `not-running`, a
   running one is `stale` (left running; this client cannot refresh it
@@ -95,8 +97,9 @@ these cases are recorded from the candidate, not the oracle:
 
 ## Deferred (before any effect)
 
-- `verify` with a process record present, or with a Windows key with the
-  `DPAPI` prefix (CryptUnprotectData would need a new unsafe module).
+- `verify` with a process record present, or with a Windows `DPAPI` key
+  this session cannot unseal. With a key that unseals and no record it
+  refuses as on POSIX (`verify-ready-key-no-record`, both platforms).
 - `service install` without `--accept-autostart`: the refusal follows
   `shim_command()` (`tunnel_cli.py:344`), so whether it or the launcher
   refusal prints depends on the host install. All of `service` defers.
