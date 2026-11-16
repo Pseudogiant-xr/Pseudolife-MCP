@@ -4439,10 +4439,10 @@
    "utc_offset": 39600,
    "exit": 0,
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gYnJvd3NlciBvcGVuZWQ6IGNvdWxkIG5vdCBzdGFydCB7SE9NRX1cYmluXHJlbGF0aXZlLmV4ZSAoVGhlIHN5c3RlbSBjYW5ub3QgZmluZCB0aGUgZmlsZSBzcGVjaWZpZWQuIChvcyBlcnJvciAyKSk7IHNldCBCUk9XU0VSIHRvIGEgZnVsbCAuZXhlIHBhdGggKHF1b3RlIHBhdGhzIHdpdGggc3BhY2VzKSwgb3Igb3BlbiB0aGUgcHJpbnRlZCBsaW5rIHlvdXJzZWxmDQo=",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gYnJvd3NlciBvcGVuZWQ6IEJST1dTRVIgbXVzdCBuYW1lIGEgZHJpdmUtYWJzb2x1dGUgLmV4ZSwgbm90IGEgYmFyZSBuYW1lLCByZWxhdGl2ZSBwYXRoIG9yIHNjcmlwdDsgc2V0IEJST1dTRVIgdG8gYSBmdWxsIC5leGUgcGF0aCAocXVvdGUgcGF0aHMgd2l0aCBzcGFjZXMpLCBvciBvcGVuIHRoZSBwcmludGVkIGxpbmsgeW91cnNlbGYNCg==",
    "window": [
-    1794852280.8312643,
-    1794852280.8685696
+    1794861364.4577012,
+    1794861364.5131888
    ],
    "requests": [
     {
@@ -4784,10 +4784,10 @@
  },
  "recorded_from_candidate": {
   "defer-browser-bare-name": {
-   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "commit": "794623444e2960aa6003a01429482d35dd46de6c",
    "rust_tree": "clean",
    "platform": "windows",
-   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+   "candidate_sha256": "9dcf68b5fa32b7b391b10bfe5b2fafb5a30778c0316eaa52276c70fc22a84c48"
   },
   "defer-browser-batch": {
    "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
