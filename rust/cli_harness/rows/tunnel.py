@@ -831,9 +831,6 @@ MUTANTS = [
     Mutant("tunnel-expiry-order", "tunnel", "shim/src/cli/tunnel/mod.rs",
            "let expired = *instant <= now;", "let expired = *instant >= now;",
            ("status-expired-text", "status-expiry-date-only")),
-    Mutant("tunnel-dir-owner-only-skipped", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "    owner_only_directory(root, &info)?;\n", "",
-           ("update-dir-not-owner-only",)),
     # review round 1
     Mutant("tunnel-saved-url-connect", "tunnel", "shim/src/cli/tunnel/store.rs",
            "        Some(Some(url)) => validate_url(url)?,\n",

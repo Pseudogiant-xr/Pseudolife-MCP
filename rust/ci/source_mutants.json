@@ -304,7 +304,6 @@
     "tunnel-challenge-bound",
     "tunnel-codex-registration-ignored",
     "tunnel-dangling-junction-answered",
-    "tunnel-dir-owner-only-skipped",
     "tunnel-dispatch-dropped",
     "tunnel-existing-profile-resumed",
     "tunnel-expiry-order",

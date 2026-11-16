@@ -903,6 +903,19 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
         "{detail}"
     );
     assert!(!detail.contains("without a reason"), "{detail}");
+    // A last line too long to show is not "printed nothing".
+    let long: &'static str = Box::leak("x".repeat(2000).into_boxed_str());
+    let detail = detail_of(2, long);
+    assert!(
+        detail.contains("printed a line too long to show here"),
+        "{detail}"
+    );
+    // A JSON answer whose exit code disagrees with its state says so.
+    let detail = detail_of(1, r#"{"state": "stale", "detail": "d", "profiles": []}"#);
+    assert!(
+        detail.contains("answered stale with exit 1, a pairing this step does not accept"),
+        "{detail}"
+    );
 }
 
 #[test]

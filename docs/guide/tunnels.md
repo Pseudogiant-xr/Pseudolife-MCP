@@ -28,14 +28,16 @@ process record left by a stopped tunnel as a file you can delete (a
 `leftover` when no saved profile is beside it). It reports a tunnel that
 runs, or may run, as `stale`: it is left as it is, because this client
 cannot refresh it yet. A record it cannot judge (unreadable, or naming no
-process id) is reported as unknown and never called deletable. The native
+process id) is reported as unknown and never called deletable, and a saved
+profile it cannot read is named as `unread` with the field at fault. The native
 client also answers the refusals of `tunnel verify` and `tunnel setup`
 before they would change anything. Every other step stops with
 `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,
 having changed nothing. That covers setup itself, `start`, `run`, `stop`,
 `doctor`, `service`, the cloud verification, `status` of a profile in a
-form it does not read, and `verify` while a process record exists or with
-a Windows (DPAPI) key. On a host that runs a tunnel, keep the Python
+form it does not read or beside a verification or refresh file in a form
+it does not read, and `verify` while a process record exists or with a
+Windows (DPAPI) key. On a host that runs a tunnel, keep the Python
 client, which an update does unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see

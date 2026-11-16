@@ -64,7 +64,9 @@ these cases are recorded from the candidate, not the oracle:
   unreadable record or process table is unknown, with that one cause, and is
   never called deletable.
 - `status` reads the record: `runtime.running` is `true`, `false` or
-  `"unknown"` (an unreadable record or process table), `runtime.process_record`
+  `"unknown"` (one cause: an unreadable record, no usable process id, an
+  unreadable process table, or a process that cannot be inspected),
+  `runtime.process_record`
   names the file and what it means, and a running tunnel's cloud
   verification is `"not_checked"`. A Windows `DPAPI` key is reported
   `"not_verified"` (present on disk; CryptUnprotectData is not called).
@@ -73,15 +75,20 @@ these cases are recorded from the candidate, not the oracle:
   running one is `stale` (left running; this client cannot refresh it
   yet; also an unknown one), and a record with no profile beside it is
   listed by file name, `leftover` when its process is gone, `stale` when it
-  runs or may run. The top-level state is `stale` when any entry is, else `current`,
+  runs or may run. A profile `load` does not read is `unread` (named with
+  the field at fault), or `stale` when its tunnel runs or may run. The top-level state is `stale` when any entry is, else `current`,
   exit 0; the top-level `detail` carries one sentence per record. A store
   `list` cannot read is refused (exit 2) naming the directory or the entry
-  it stopped on, instead of deferring.
+  it stopped on, instead of deferring; so are a directory that is not
+  owner-only and an invalid profile file name.
   Cases: `status-process-record`, `status-process-record-text`,
   `status-dpapi-key`, `status-dpapi-key-json`, `update-ready-key`, `update-dead-record`,
   `update-orphan-record`, and `update-pending-only` / `update-ready-wrong-key`
-  (a ready profile is `not-running`, no longer `pending`), and
-  `update-corrupt-profile` (the refusal names the profile file).
+  (a ready profile is `not-running`, no longer `pending`),
+  `update-corrupt-profile`, `update-dir-not-owner-only`,
+  `update-invalid-file-name` and, on Windows, `update-case-folded-suffix`
+  (each refusal names its file or directory), and `status-dpapi-key-json`
+  (Windows).
 
 ## Deferred (before any effect)
 

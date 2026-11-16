@@ -327,12 +327,14 @@ fn unknown_cause(why: Option<record::Why>) -> &'static str {
             "is not an owner-only JSON record this client can read; check that file"
         }
         Some(Why::NoProcessId) => {
-            "names no process id; look at that file, and keep it while a tunnel of this profile may run"
+            "names no process id; look at that file, and keep it while a tunnel may still run"
         }
         Some(Why::NoTable) => {
-            "cannot be checked, because this machine's process table cannot be read"
+            "cannot be checked, because this machine's process table cannot be read; run the command again once it can"
         }
-        Some(Why::Uninspectable) => "names a process that exists but this account cannot inspect",
+        Some(Why::Uninspectable) => {
+            "names a process that exists but this account cannot inspect; check which account runs it"
+        }
     }
 }
 
@@ -532,15 +534,18 @@ fn update(root: &Path) -> Answer {
                 continue;
             }
             (None, Ok(unread)) => (
-                "stale",
+                "unread",
                 "false",
                 format!("{unread}; it has no tunnel process record, so no tunnel of it runs"),
             ),
             (Some(record), unread) => {
                 // A stopped tunnel of a readable profile needs nothing; an
                 // unread profile always needs the user's eye.
+                // `stale`: a tunnel that runs or may run; `unread`: a profile
+                // this client cannot read, whose tunnel does not run.
                 let state = match (&unread, record.liveness) {
                     (Err(_), Liveness::Gone) => "not-running",
+                    (Ok(_), Liveness::Gone) => "unread",
                     _ => "stale",
                 };
                 let sentence = record_sentence(name, record, true);
@@ -1079,6 +1084,18 @@ mod tests {
                 && refused.ends_with("then retry"),
             "{refused}"
         );
+        // Windows folds the suffix but `list` takes the stem case-sensitively:
+        // `dot.PROFILE.JSON` is refused as a whole name, and named.
+        #[cfg(windows)]
+        {
+            let store = Store::new();
+            store.put("dot.PROFILE.JSON", b"{}");
+            let refused = update(&store.0).unwrap_err();
+            assert!(
+                refused.contains("dot.PROFILE.JSON is not a valid tunnel profile name"),
+                "{refused}"
+            );
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1213,10 +1230,12 @@ mod tests {
                 Fail::Defer,
                 "{shape}: the shape must be one load defers on"
             );
+            // Named `unread`; nothing runs, so the update is `current`.
             let report = report_of(update(&store.0));
-            assert_eq!(report["state"], "stale", "{shape}: {report}");
+            assert_eq!(report["state"], "current", "{shape}: {report}");
             let entry = &report["profiles"][0];
             assert_eq!(entry["profile"], "dot", "{shape}");
+            assert_eq!(entry["state"], "unread", "{shape}");
             assert_eq!(entry["running"], false, "{shape}");
             let detail = entry["detail"].as_str().unwrap();
             assert!(
@@ -1238,6 +1257,12 @@ mod tests {
                 detail.contains(reason) && detail.contains("is left from a tunnel that stopped"),
                 "{shape}: {detail}"
             );
+            assert_eq!(report["profiles"][0]["state"], "unread", "{shape}");
+            // A running tunnel of an unread profile is `stale`, left as it is.
+            std::fs::remove_file(store.0.join("dot.process.json")).unwrap();
+            store.record("dot", u64::from(std::process::id()), &own_exe());
+            let report = report_of(update(&store.0));
+            assert_eq!(report["state"], "stale", "{shape}: {report}");
             assert_eq!(report["profiles"][0]["state"], "stale", "{shape}");
         }
     }

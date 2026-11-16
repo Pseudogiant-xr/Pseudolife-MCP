@@ -465,8 +465,10 @@ pub(super) fn invalid_profile_entry(root: &Path) -> Option<PathBuf> {
         } else {
             text.to_owned()
         };
-        let stem = folded.strip_suffix(".profile.json")?;
-        let stem = &text[..stem.len()];
+        folded.strip_suffix(".profile.json")?;
+        // The stem exactly as `list` takes it: case-sensitively, so a
+        // Windows `dot.PROFILE.JSON` keeps its whole name and is refused.
+        let stem = text.strip_suffix(".profile.json").unwrap_or(text);
         (!valid_name(stem)).then(|| entry.path())
     })
 }
@@ -474,9 +476,10 @@ pub(super) fn invalid_profile_entry(root: &Path) -> Option<PathBuf> {
 /// Why listing `root` deferred, naming the root or the one entry it stopped
 /// on, with its fix: a root that cannot be inspected, is not a directory or
 /// cannot be listed; a file name that is not UTF-8 (or, on Windows, not
-/// ASCII); a `*.profile.json` that is not a regular file. Every entry `list`
-/// reads is checked here in the same order, so the first one named is the
-/// one `list` stopped on.
+/// ASCII); a `*.profile.json` that is not a regular file. Each entry named
+/// blocks `list`; with several, fixing one may reveal the next. With none,
+/// the deferral came from the owner-only permission check itself (Windows:
+/// the directory's access control could not be read).
 pub(super) fn list_refusal(root: &Path) -> String {
     let root_shown = root.display();
     let keep = "keeping every .key and .process.json file, then retry";
@@ -531,7 +534,7 @@ pub(super) fn list_refusal(root: &Path) -> String {
         }
     }
     format!(
-        "the tunnel directory {root_shown} holds an entry this client does not read; make it a directory only your account can access, {keep}"
+        "the permissions of the tunnel directory {root_shown} cannot be checked; make it a directory only your account can access, then retry"
     )
 }
 
