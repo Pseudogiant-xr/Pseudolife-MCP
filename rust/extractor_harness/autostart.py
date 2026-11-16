@@ -316,7 +316,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                 assert len(run.journal_rows(journal)) == initial_calls, "re-enabling restarted its provider"
             with config_file.open("a") as settings:
                 settings.write("\nUNRELATED_PASSWORD=synthetic-only\n")
-            assert not checked(args, env=env, step=f"{kind} unrelated setting").stdout.strip(), "unrelated setting forced reinstall"
+            unrelated = checked(args, env=env, step=f"{kind} unrelated setting")
+            assert unrelated.stdout.decode().strip().splitlines() == expected, ("unrelated setting forced reinstall", unrelated.stdout)
             assert len(run.journal_rows(journal)) == initial_calls, "unrelated settings restarted its provider"
             if not windows:
                 checked(["systemctl", "--user", "disable", registration])
@@ -360,7 +361,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                     pass
                 assert time.monotonic() < deadline, "previous registration was not restarted"
                 time.sleep(.1)
-            assert not checked(args, env=env, step=f"{kind} restored registration").stdout.strip(), "restored registration differs from the original"
+            restored = checked(args, env=env, step=f"{kind} restored registration")
+            assert restored.stdout.decode().strip().splitlines() == expected, ("restored registration differs from the original", restored.stdout)
             model += "-next"
             checked(args + [model_flag, model], env=env, step=f"{kind} final replacement")
             status, body = run.call(port, "GET", "/models")
