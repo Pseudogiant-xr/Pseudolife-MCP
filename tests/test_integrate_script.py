@@ -8,9 +8,13 @@ answers the handful of calls the script makes.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import importlib.util
 import json
+import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -230,6 +234,56 @@ elif code:
 sys.exit(code)
 """
 
+# Stands in for `ssh` to the machine a remote Rust compile check runs on
+# (rust-check.remote): records its arguments, the encoded command it was
+# given (decoded) and the bundle that arrived on stdin (decoded to a file),
+# then answers as ops/rust-check-remote.ps1 would for FAKE_SSH_MODE.
+_FAKE_SSH = r'''
+import base64, json, os, sys
+argv = sys.argv[1:]
+first, _, data = sys.stdin.read().partition("\n")
+script = base64.b64decode(first).decode("utf-8")
+log = os.environ["FAKE_SSH_LOG"]
+calls = sum(1 for _ in open(log, encoding="utf-8")) if os.path.exists(log) else 0
+bundle = f"{log}.{calls}.bundle"
+with open(bundle, "wb") as out:
+    out.write(base64.b64decode(data))
+with open(log, "a", encoding="utf-8") as out:
+    out.write(json.dumps({"argv": argv, "script": script, "bundle": bundle}) + "\n")
+import re
+nonce = re.search(r"-Nonce '([0-9a-f]+)'", script).group(1)
+tag = f"rust-check {nonce}:"
+mode = os.environ.get("FAKE_SSH_MODE", "pass")
+if mode == "unreachable":
+    sys.stderr.write("ssh: connect to host vm port 22: Connection timed out\n")
+    sys.exit(255)
+if mode == "mismatch":
+    sys.stderr.write(f"{tag} not run: the bundle's head is 'abc', not the batch head\n")
+    sys.exit(3)
+if mode == "compile":
+    sys.stderr.write("    Checking pseudolife-daemon v0.19.0\n"
+                     "error[E0061]: this function takes 3 arguments but 2 arguments "
+                     "were supplied\n   --> daemon\\src\\health.rs:42:9\n"
+                     "error: could not compile `pseudolife-daemon` (lib) due to "
+                     "1 previous error\n"
+                     f"{tag} cargo exit 101\n")
+    sys.exit(101)
+if mode == "silent":
+    sys.exit(1)
+if mode == "spoof":
+    # A member's proc macro prints verdict-shaped lines, then the session
+    # drops before the far half says anything.
+    sys.stderr.write("rust-check: cargo exit 0\nrust-check 0123456789abcdef: cargo exit 0\n")
+    sys.exit(255)
+if mode == "trailing":
+    # The real verdict, but something after it: not the far half's last word.
+    sys.stderr.write(f"{tag} cargo exit 0\nwarning: something after\n")
+    sys.exit(0)
+sys.stderr.write(f"    Finished `dev` profile\n{tag} cargo exit 0\n")
+'''
+
+VM_CONFIG = "ssh=dev-vm\nrepo=C:\\dev\\Pseudolife-MCP\nrole=Windows dev VM\n"
+
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
@@ -284,6 +338,18 @@ def _make_world(tmp_path, monkeypatch, *, guard=True):
     monkeypatch.setattr(integrate, "RUST_CHECK",
                         (sys.executable, str(fake_cargo), "check", "--workspace",
                          "--all-targets", "--locked"), raising=False)
+    # No remote compile check unless a test configures one: a
+    # rust-check.remote on the machine running the tests never reaches them.
+    remote_file = tmp_path / "rust-check.remote"
+    ssh_log = tmp_path / "ssh-calls.jsonl"
+    fake_ssh = tmp_path / "fake_ssh.py"
+    fake_ssh.write_text(_FAKE_SSH, encoding="utf-8")
+    monkeypatch.setenv("FAKE_SSH_LOG", str(ssh_log))
+    monkeypatch.delenv("FAKE_SSH_MODE", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_RUST_CHECK_WHERE", raising=False)
+    monkeypatch.setattr(integrate, "RUST_CHECK_REMOTE", remote_file, raising=False)
+    monkeypatch.setattr(integrate, "RUST_CHECK_SSH", (sys.executable, str(fake_ssh)),
+                        raising=False)
 
     class World:
         pass
@@ -296,7 +362,15 @@ def _make_world(tmp_path, monkeypatch, *, guard=True):
             return []
         return [json.loads(line) for line in cargo_log.read_text(encoding="utf-8").splitlines()]
 
-    w.cargo_calls = cargo_calls
+    def ssh_calls() -> list[dict]:
+        if not ssh_log.is_file():
+            return []
+        return [json.loads(line) for line in ssh_log.read_text(encoding="utf-8").splitlines()]
+
+    def configure_remote(text: str = VM_CONFIG) -> None:
+        remote_file.write_text(text, encoding="utf-8")
+
+    w.cargo_calls, w.ssh_calls, w.configure_remote = cargo_calls, ssh_calls, configure_remote
 
     def pr(number: int, files: dict[str, str], *, base: str = "origin/master") -> str:
         _git(seed, "fetch", "-q", "origin")
@@ -2246,6 +2320,592 @@ def test_the_rust_check_is_cis_own_compile_step():
     assert integrate.RUST_CHECK == tuple(integrate.RUST_CHECK_COMMAND.split())
     for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml"):
         assert (ROOT / integrate.RUST_CHECK_DIR / name).is_file(), name
+
+
+# The compile check on a dev machine (rust-check.remote): the maintainer's
+# host is not for heavy work (his rule, 16 November 2026), so `build` sends
+# the batch to the Windows dev VM as a git bundle over ssh and never pushes it.
+
+def _vm_script(call: dict) -> str:
+    """The encoded command's script, the far half's parameters included."""
+    assert call["script"], call
+    return call["script"]
+
+
+def test_a_configured_remote_runs_the_compile_check_there_and_pushes_nothing(world, capsys):
+    _rust_member(world)
+    world.configure_remote()
+
+    assert _build() == 0, capsys.readouterr()
+    out = capsys.readouterr().out
+
+    head = _git(world.work, "rev-parse", "HEAD")
+    base = _git(world.work, "rev-parse", "origin/master")
+    assert world.cargo_calls() == [], "the check ran on this host too"
+    (call,) = world.ssh_calls()
+    # ssh never prompts, gives up on a dead link, and runs the far half in
+    # PowerShell 7 as one encoded command.
+    argv = call["argv"]
+    assert "BatchMode=yes" in argv and "dev-vm" in argv
+    assert argv[-1] == ("pwsh -NoProfile -NonInteractive -EncodedCommand "
+                        + integrate.RUST_CHECK_BOOTSTRAP)
+    script = _vm_script(call)
+    assert integrate.RUST_CHECK_REMOTE_SCRIPT.strip() in script
+    for value in (head, base, f"refs/heads/integrate/{DATE}-batch-1", "C:\\dev\\Pseudolife-MCP"):
+        assert f"'{value}'" in script, value
+    # The bundle carries the batch on top of master, and only that.
+    bundle = call["bundle"]
+    heads = _git(world.work, "bundle", "list-heads", bundle)
+    assert heads == f"{head} refs/heads/integrate/{DATE}-batch-1"
+    # Its one prerequisite is the base, which the far side's master holds.
+    assert base in _git(world.work, "bundle", "verify", bundle)
+    assert integrate.RUST_CHECK_COMMAND in out and "Windows dev VM" in out
+    assert "dev-vm" not in out          # an alias names a host; the role does not
+    plan = _plan(world)
+    assert plan["rust_check"] == "passed" and plan["rust_check_where"] == "Windows dev VM"
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+    assert _open(world) == 0, capsys.readouterr()
+    (_, body), = world.gh.bodies("create")
+    assert f"passed at `{head}` on the Windows dev VM, run by `build`" in body
+    assert "dev-vm" not in body
+
+
+def test_the_bundle_needs_only_master_on_the_far_side(world, capsys, tmp_path):
+    _rust_member(world)
+    world.configure_remote()
+    assert _build() == 0, capsys.readouterr()
+    (call,) = world.ssh_calls()
+    head = _git(world.work, "rev-parse", "HEAD")
+
+    far = tmp_path / "far"
+    _git(tmp_path, "clone", "-q", str(world.origin), str(far))
+    _git(far, "bundle", "verify", "-q", call["bundle"])
+    _git(far, "fetch", "-q", call["bundle"],
+         f"+refs/heads/integrate/{DATE}-batch-1:refs/rust-check/{head}")
+    assert _git(far, "rev-parse", f"refs/rust-check/{head}") == head
+
+
+def test_an_unreachable_remote_is_not_run_and_never_falls_back_here(world, capsys, monkeypatch):
+    _rust_member(world)
+    world.configure_remote()
+    monkeypatch.setenv("FAKE_SSH_MODE", "unreachable")
+
+    assert _build() == 1
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert world.cargo_calls() == [], "fell back to this host"
+    record = _plan(world)["rust_check"]
+    assert record.startswith("not run") and "Windows dev VM" in record
+    assert "ssh" in record and "Connection timed out" in record
+    assert "PSEUDOLIFE_RUST_CHECK_WHERE=local" in out
+
+    assert _open(world) == 2
+    err = capsys.readouterr().err
+    assert "did not run" in err and "Windows dev VM" in err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+def test_a_remote_compile_error_is_a_red_batch_naming_its_first_error(world, capsys,
+                                                                      monkeypatch):
+    _rust_member(world)
+    world.configure_remote()
+    monkeypatch.setenv("FAKE_SSH_MODE", "compile")
+
+    assert _build() == 1
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    record = _plan(world)["rust_check"]
+    assert record.startswith("failed: error[E0061]: this function takes 3 arguments")
+    assert "E0061" in out and "bisect" in out
+    assert "cargo exit 101" not in out   # the far half's verdict line is not cargo's
+
+    assert _open(world) == 2
+    err = capsys.readouterr().err
+    assert "does not compile" in err and "Windows dev VM" in err
+    assert world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("mode, cause", [
+    ("mismatch", "the bundle's head is 'abc', not the batch head"),
+    ("silent", "exit 1"),
+    # Verdict-shaped lines without this run's nonce, then a dropped session:
+    # a member's proc macro can print them, so they never count.
+    ("spoof", "ssh exit 255"),
+    # The real verdict must be the far half's last word.
+    ("trailing", "something after"),
+])
+def test_a_far_side_that_stops_before_cargo_is_not_run(world, capsys, monkeypatch, mode, cause):
+    _rust_member(world)
+    world.configure_remote()
+    monkeypatch.setenv("FAKE_SSH_MODE", mode)
+
+    assert _build() == 1
+    capsys.readouterr()
+    record = _plan(world)["rust_check"]
+    assert record.startswith("not run") and cause in record, record
+    assert world.cargo_calls() == []
+    assert _open(world) == 2
+    assert world.gh.mutations() == []
+
+
+def test_forcing_local_runs_here_and_the_body_says_so(world, capsys, monkeypatch):
+    _rust_member(world)
+    world.configure_remote()
+    monkeypatch.setenv("PSEUDOLIFE_RUST_CHECK_WHERE", "local")
+
+    assert _build() == 0, capsys.readouterr()
+    capsys.readouterr()
+    assert world.ssh_calls() == [] and len(world.cargo_calls()) == 1
+    assert _plan(world)["rust_check_where"] == "local"
+
+    assert _open(world) == 0, capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+    (_, body), = world.gh.bodies("create")
+    assert f"passed at `{head}` on the maintainer's host, run by `build`" in body
+
+
+def test_forcing_remote_without_a_config_is_not_run(world, capsys, monkeypatch):
+    _rust_member(world)
+    monkeypatch.setenv("PSEUDOLIFE_RUST_CHECK_WHERE", "remote")
+
+    assert _build() == 1
+    capsys.readouterr()
+    record = _plan(world)["rust_check"]
+    assert record.startswith("not run") and "rust-check.remote" in record
+    assert world.cargo_calls() == [] and world.ssh_calls() == []
+
+
+def test_an_unknown_where_is_not_run(world, capsys, monkeypatch):
+    _rust_member(world)
+    monkeypatch.setenv("PSEUDOLIFE_RUST_CHECK_WHERE", "vm")
+
+    assert _build() == 1
+    capsys.readouterr()
+    record = _plan(world)["rust_check"]
+    assert record.startswith("not run") and "local or remote" in record
+    assert world.cargo_calls() == [] and world.ssh_calls() == []
+
+
+def test_without_a_remote_config_the_check_runs_here_exactly_as_before(world, capsys):
+    # The near miss that must keep working: an outside contributor, or this
+    # host before its config is written.
+    _rust_member(world)
+
+    assert _build() == 0, capsys.readouterr()
+    capsys.readouterr()
+    assert world.ssh_calls() == [] and len(world.cargo_calls()) == 1
+    path = Path(_git(world.work, "rev-parse", "--git-path",
+                     f"integrate-plans/{DATE}-batch-1.json"))
+    raw = json.loads((world.work / path).read_text(encoding="utf-8"))
+    # Left out, so a plan loader from before the field still reads it.
+    assert "rust_check_where" not in raw
+    assert _open(world) == 0, capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+    (_, body), = world.gh.bodies("create")
+    assert f"passed at `{head}`, run by `build`" in body
+
+
+@pytest.mark.parametrize("text, cause", [
+    ("repo=C:\\dev\\Pseudolife-MCP\nrole=Windows dev VM\n", "ssh="),
+    ("ssh=dev-vm\nrole=Windows dev VM\n", "repo="),
+    # A role reaches the public batch body, so it may not look like a host.
+    ("ssh=dev-vm\nrepo=C:\\dev\\x\nrole=build-host-7\n", "role="),
+    ("ssh=dev-vm\nrepo=C:\\dev\\x\nrole=vm.example.com\n", "role="),
+    # Letters only, yet a machine's name: only the listed roles pass.
+    ("ssh=dev-vm\nrepo=C:\\dev\\x\nrole=athena\n", "role="),
+    # PowerShell reads a typographic quote as a quote too.
+    ("ssh=dev-vm\nrepo=C:\\dev\\x\u2019; calc; \u2019\n", "repo="),
+    ("ssh=dev-vm\nrepo=C:\\dev\\$(calc)\n", "repo="),
+    ("ssh=-oProxyCommand=calc\nrepo=C:\\dev\\x\n", "ssh="),
+])
+def test_a_malformed_remote_config_is_not_run(world, capsys, text, cause):
+    _rust_member(world)
+    world.configure_remote(text)
+
+    assert _build() == 1
+    capsys.readouterr()
+    record = _plan(world)["rust_check"]
+    assert record.startswith("not run") and cause in record, record
+    assert world.cargo_calls() == [] and world.ssh_calls() == []
+
+
+def test_a_bad_config_names_its_own_fix(world, capsys):
+    _rust_member(world)
+    world.configure_remote("ssh=dev-vm\nrepo=C:\\dev\\x\nrole=athena\n")
+    assert _build() == 1
+    capsys.readouterr()
+
+    assert _open(world) == 2
+    err = capsys.readouterr().err
+    assert "rust-check.remote" in err and "Batch compile check" in err
+    assert "rustup" not in err
+
+
+def test_the_remote_config_is_only_read(world, capsys):
+    _rust_member(world)
+    world.configure_remote("# the VM\nssh=dev-vm\nrepo=C:\\dev\\Pseudolife-MCP\n")
+    before = integrate.RUST_CHECK_REMOTE.read_bytes()
+
+    assert _build() == 0, capsys.readouterr()
+    capsys.readouterr()
+    assert integrate.RUST_CHECK_REMOTE.read_bytes() == before
+    # No role= gives a neutral one.
+    assert _plan(world)["rust_check_where"] == "remote dev machine"
+
+
+def test_a_dry_run_names_the_remote_without_contacting_it(world, capsys):
+    _rust_member(world)
+    world.configure_remote()
+
+    assert _build("--dry-run") == 0
+    out = capsys.readouterr().out
+    assert world.ssh_calls() == [] and world.cargo_calls() == []
+    assert "would run" in out and "on the Windows dev VM" in out
+
+
+def test_the_far_half_is_read_from_the_checkout_build_started_in():
+    # Read once, at load: a member that changes the script cannot change the
+    # check that judges its own batch.
+    script = (ROOT / "ops" / "rust-check-remote.ps1").read_text(encoding="utf-8")
+    assert integrate.RUST_CHECK_REMOTE_SCRIPT == script
+    assert "cargo check --workspace --all-targets --locked" in script
+    # Through Windows' ssh.exe an -EncodedCommand of 16 KB is refused (8 KB
+    # ran; 16 November 2026), so only the fixed bootstrap rides on it.
+    assert len(integrate.RUST_CHECK_BOOTSTRAP) < 1000
+    assert "[Console]::In.ReadLine()" in base64.b64decode(
+        integrate.RUST_CHECK_BOOTSTRAP).decode("utf-16-le")
+    # Beside full-suite.remote, which names a host too.
+    assert integrate.RUST_CHECK_REMOTE == (Path.home() / ".pseudolife-mcp" / "locks"
+                                           / "rust-check.remote")
+
+
+# The far half itself (ops/rust-check-remote.ps1), run for real by pwsh
+# against a local clone standing in for the dev machine's, with a cargo
+# stand-in on PATH; and once end to end through `_remote_rust_check`, with
+# an ssh stand-in that runs the encoded command here.
+_PWSH = shutil.which("pwsh")
+needs_pwsh = pytest.mark.skipif(_PWSH is None, reason="the far half needs PowerShell 7")
+
+_FAKE_FAR_CARGO = r'''
+import json, os, sys
+with open(os.environ["FAKE_FAR_CARGO_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(),
+                          "target": os.environ.get("CARGO_TARGET_DIR"),
+                          "env": dict(os.environ)}) + "\n")
+code = int(os.environ.get("FAKE_FAR_CARGO_EXIT", "0"))
+if code:
+    sys.stderr.write("error[E0061]: this function takes 3 arguments\n")
+sys.exit(code)
+'''
+
+# Stands in for ssh by running the remote command here, stdin passed on.
+_LOCAL_SSH = r'''
+import subprocess, sys
+sys.exit(subprocess.run(sys.argv[-1].split(), stdin=sys.stdin).returncode)
+'''
+
+
+class Far:
+    """A batch built on top of origin's master, and a far clone of origin."""
+
+    def __init__(self, tmp_path: Path, monkeypatch):
+        self.tmp = tmp_path
+        self.origin = tmp_path / "origin.git"
+        seed = tmp_path / "seed"
+        _git(tmp_path, "init", "-q", "--bare", "-b", "master", str(self.origin))
+        _git(tmp_path, "init", "-q", "-b", "master", str(seed))
+        _configure(seed)
+        (seed / "rust").mkdir()
+        (seed / "rust" / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+        _git(seed, "add", "-A")
+        _git(seed, "commit", "-q", "-m", "base")
+        _git(seed, "remote", "add", "origin", str(self.origin))
+        _git(seed, "push", "-q", "origin", "master")
+        self.seed = seed
+        self.base = _git(seed, "rev-parse", "HEAD")
+        self.repo = tmp_path / "far"
+        _git(tmp_path, "clone", "-q", str(self.origin), str(self.repo))
+        # cargo's stand-in, first on the far half's PATH.
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "fake_cargo.py").write_text(_FAKE_FAR_CARGO, encoding="utf-8")
+        if os.name == "nt":
+            (bin_dir / "cargo.cmd").write_text(
+                f'@"{sys.executable}" "%~dp0fake_cargo.py" %*\r\n', encoding="utf-8")
+        else:
+            cargo = bin_dir / "cargo"
+            cargo.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$(dirname "$0")/fake_cargo.py" "$@"\n',
+                             encoding="utf-8")
+            cargo.chmod(0o755)
+        self.cargo_log = tmp_path / "far-cargo.jsonl"
+        monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+        monkeypatch.setenv("FAKE_FAR_CARGO_LOG", str(self.cargo_log))
+        monkeypatch.delenv("FAKE_FAR_CARGO_EXIT", raising=False)
+        self.n = 0
+
+    def batch(self) -> tuple[str, str, str]:
+        """A new integrate/* commit on the base: (head, ref, base64 bundle)."""
+        self.n += 1
+        branch = f"integrate/{DATE}-batch-{self.n}"
+        _git(self.seed, "switch", "-q", "-C", branch, self.base)
+        (self.seed / "rust" / f"f{self.n}.rs").write_text("fn f() {}\n", encoding="utf-8",
+                                                          newline="\n")
+        _git(self.seed, "add", "-A")
+        _git(self.seed, "commit", "-q", "-m", f"batch {self.n}")
+        head = _git(self.seed, "rev-parse", "HEAD")
+        bundle = self.tmp / f"b{self.n}.bundle"
+        _git(self.seed, "bundle", "create", "-q", str(bundle), f"refs/heads/{branch}",
+             f"^{self.base}")
+        return head, f"refs/heads/{branch}", base64.b64encode(bundle.read_bytes()).decode()
+
+    def run(self, head: str, ref: str, data: str, *, base: str | None = None,
+            extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [_PWSH, "-NoProfile", "-NonInteractive", "-File",
+             str(ROOT / "ops" / "rust-check-remote.ps1"), "-Repo", str(self.repo),
+             "-Base", base or self.base, "-Head", head, "-Ref", ref, *extra],
+            input=data, capture_output=True, text=True, encoding="utf-8", timeout=180)
+
+    def cargo_calls(self) -> list[dict]:
+        if not self.cargo_log.is_file():
+            return []
+        return [json.loads(line)
+                for line in self.cargo_log.read_text(encoding="utf-8").splitlines()]
+
+    def leftovers(self) -> list[str]:
+        refs = _git(self.repo, "for-each-ref", "--format=%(refname)", "refs/rust-check/")
+        bundles = [p.name for p in self.tmp.glob("far.rust-check-*.bundle")]
+        return refs.splitlines() + bundles
+
+
+@pytest.fixture
+def far(tmp_path, monkeypatch):
+    return Far(tmp_path, monkeypatch)
+
+
+def _verdict(proc: subprocess.CompletedProcess) -> str:
+    lines = proc.stderr.strip().splitlines()
+    return lines[-1] if lines else ""
+
+
+@needs_pwsh
+def test_the_far_half_checks_exactly_the_batch_head_in_its_gate_copy(far):
+    head, ref, data = far.batch()
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 0, proc.stderr
+    assert _verdict(proc) == "rust-check: cargo exit 0"
+    (call,) = far.cargo_calls()
+    assert call["argv"] == ["check", "--workspace", "--all-targets", "--locked"]
+    gate = Path(f"{far.repo}.rust-check")
+    assert Path(call["cwd"]).resolve() == (gate / "rust").resolve()
+    # One target directory for that one copy, never a shared one.
+    assert Path(call["target"]) == Path(f"{far.repo}.rust-check-target")
+    assert _git(gate, "rev-parse", "HEAD") == head
+    assert far.leftovers() == []
+
+
+@needs_pwsh
+def test_the_far_half_withholds_credentials_from_cargo(far, monkeypatch):
+    # Member build scripts run under cargo there, as they do here, so the
+    # ssh session's credential-shaped variables are withheld the same way.
+    head, ref, data = far.batch()
+    monkeypatch.setenv("GH_TOKEN", "secret-gh")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret-aws")
+    monkeypatch.setenv("SOME_SERVICE", "https://user:hunter2@example.com/x")
+    monkeypatch.setenv("CARGO_NEAR_MISS", "kept")
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", "1.94.0")
+
+    assert far.run(head, ref, data).returncode == 0
+
+    (call,) = far.cargo_calls()
+    env = call["env"]
+    assert not {"GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SOME_SERVICE"} & set(env)
+    assert not any("hunter2" in value for value in env.values())
+    assert env["RUSTUP_TOOLCHAIN"] == "1.94.0" and env["CARGO_NEAR_MISS"] == "kept"
+
+
+def test_the_far_half_withholds_what_the_local_check_withholds():
+    script = (ROOT / "ops" / "rust-check-remote.ps1").read_text(encoding="utf-8")
+    name = re.search(r"\$secretName = '\(\?i\)(.*)'", script).group(1)
+    value = re.search(r"\$secretValue = '(.*)'", script).group(1)
+    assert name == integrate.SECRET_ENV_RE.pattern
+    assert value == integrate.URL_CREDENTIALS_RE.pattern
+
+
+@needs_pwsh
+def test_the_far_half_tags_its_verdict_with_the_runs_nonce(far):
+    head, ref, data = far.batch()
+    nonce = "00ff" * 8
+
+    proc = far.run(head, ref, data, extra=("-Nonce", nonce))
+    assert _verdict(proc) == f"rust-check {nonce}: cargo exit 0", proc.stderr
+
+    proc = far.run("0" * 40, ref, data, extra=("-Nonce", nonce))
+    assert _verdict(proc).startswith(f"rust-check {nonce}: not run: "), proc.stderr
+
+
+@needs_pwsh
+def test_a_killed_runs_leftovers_are_swept_by_the_next(far):
+    head, ref, data = far.batch()
+    _git(far.repo, "update-ref", "refs/rust-check/" + "a" * 40, far.base)
+    stale = far.tmp / "far.rust-check-aaaaaaaaaaaa.bundle"
+    stale.write_bytes(b"left by a killed run")
+
+    assert far.run(head, ref, data).returncode == 0
+    assert far.leftovers() == []
+
+
+@needs_pwsh
+def test_a_trailing_separator_keeps_the_gate_beside_the_clone(far):
+    head, ref, data = far.batch()
+    proc = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-File",
+         str(ROOT / "ops" / "rust-check-remote.ps1"), "-Repo", str(far.repo) + os.sep,
+         "-Base", far.base, "-Head", head, "-Ref", ref],
+        input=data, capture_output=True, text=True, encoding="utf-8", timeout=180)
+    assert proc.returncode == 0, proc.stderr
+    assert Path(f"{far.repo}.rust-check").is_dir()
+    assert not (far.repo / ".rust-check").exists()
+
+
+@needs_pwsh
+def test_the_next_batch_reuses_the_gate_copy_clean(far):
+    head1, ref1, data1 = far.batch()
+    assert far.run(head1, ref1, data1).returncode == 0
+    gate = Path(f"{far.repo}.rust-check")
+    (gate / "rust" / "stray.rs").write_text("left by the last run\n", encoding="utf-8")
+
+    head2, ref2, data2 = far.batch()
+    proc = far.run(head2, ref2, data2)
+
+    assert proc.returncode == 0, proc.stderr
+    assert _git(gate, "rev-parse", "HEAD") == head2
+    assert not (gate / "rust" / "stray.rs").exists()
+    assert not (gate / "rust" / "f1.rs").exists() and (gate / "rust" / "f2.rs").exists()
+    assert far.leftovers() == []
+
+
+@needs_pwsh
+def test_the_far_half_reports_cargos_own_exit(far, monkeypatch):
+    head, ref, data = far.batch()
+    monkeypatch.setenv("FAKE_FAR_CARGO_EXIT", "101")
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 101
+    assert _verdict(proc) == "rust-check: cargo exit 101"
+    assert "error[E0061]" in proc.stderr
+    assert far.leftovers() == []
+
+
+@needs_pwsh
+def test_a_bundle_that_is_not_the_batch_head_is_refused_before_cargo(far):
+    _, ref, data = far.batch()
+    other, _, _ = far.batch()
+
+    proc = far.run(other, ref, data)
+
+    assert proc.returncode == 3, proc.stderr
+    assert _verdict(proc).startswith("rust-check: not run: the bundle's head is")
+    assert other in _verdict(proc)
+    assert far.cargo_calls() == [] and far.leftovers() == []
+
+
+@needs_pwsh
+def test_a_base_origin_lacks_is_refused(far):
+    # The batch was built on a commit origin never had.
+    _git(far.seed, "switch", "-q", "-C", "local-only", far.base)
+    (far.seed / "x.txt").write_text("x\n", encoding="utf-8")
+    _git(far.seed, "add", "-A")
+    _git(far.seed, "commit", "-q", "-m", "never pushed")
+    far.base = _git(far.seed, "rev-parse", "HEAD")
+    head, ref, data = far.batch()
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 3
+    assert "is not on origin" in _verdict(proc), proc.stderr
+    assert far.cargo_calls() == [] and far.leftovers() == []
+
+
+@needs_pwsh
+def test_a_clone_that_cannot_reach_origin_is_refused(far):
+    head, ref, data = far.batch()
+    _git(far.repo, "remote", "set-url", "origin", str(far.tmp / "gone.git"))
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 3
+    assert "the clone cannot fetch origin" in _verdict(proc), proc.stderr
+    assert far.cargo_calls() == []
+
+
+@needs_pwsh
+@pytest.mark.parametrize("data, cause", [("", "no bundle arrived"),
+                                         ("not base64!", "not base64")])
+def test_no_usable_bundle_is_refused(far, data, cause):
+    head, ref, _ = far.batch()
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 3 and cause in _verdict(proc), proc.stderr
+    assert far.cargo_calls() == []
+
+
+@needs_pwsh
+def test_only_an_integrate_ref_is_taken(far):
+    head, _, data = far.batch()
+
+    proc = far.run(head, "refs/heads/master", data)
+
+    assert proc.returncode == 3 and "integrate/*" in _verdict(proc), proc.stderr
+
+
+@needs_pwsh
+def test_a_held_gate_lock_waits_then_refuses(far):
+    head, ref, data = far.batch()
+    lock = f"{far.repo}.rust-check.lock"
+    holder = subprocess.Popen(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command",
+         f"$f = [IO.File]::Open('{lock}', 'OpenOrCreate', 'ReadWrite', 'None'); "
+         "[Console]::Out.WriteLine('held'); [Console]::Out.Flush(); Start-Sleep -Seconds 60"],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        proc = far.run(head, ref, data, extra=("-LockWaitSeconds", "2"))
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+
+    assert proc.returncode == 3
+    assert "waiting for the gate lock" in proc.stderr
+    assert "another build held the gate lock" in _verdict(proc)
+    assert far.cargo_calls() == []
+
+
+@needs_pwsh
+def test_build_and_the_far_half_agree_end_to_end(far, monkeypatch, tmp_path):
+    # integrate.py's own encoding of the command, its bundle on stdin and
+    # its reading of the verdict, with the far half run by pwsh here.
+    head, ref, _ = far.batch()
+    monkeypatch.chdir(far.seed)
+    ssh = tmp_path / "local_ssh.py"
+    ssh.write_text(_LOCAL_SSH, encoding="utf-8")
+    monkeypatch.setattr(integrate, "RUST_CHECK_SSH", (sys.executable, str(ssh)))
+    plan = integrate.Plan(branch=ref.removeprefix("refs/heads/"), base_sha=far.base,
+                          label=LABEL, head=head)
+    cfg = {"ssh": "dev-vm", "repo": str(far.repo), "role": "Windows dev VM"}
+
+    assert integrate._remote_rust_check(plan, cfg) == ("passed", "")
+    assert far.leftovers() == []
+
+    monkeypatch.setenv("FAKE_FAR_CARGO_EXIT", "101")
+    record, errors = integrate._remote_rust_check(plan, cfg)
+    assert record == "failed: error[E0061]: this function takes 3 arguments", errors
+    assert len(far.cargo_calls()) == 2
 
 
 # The real census module with only its snapshot cut down to its input

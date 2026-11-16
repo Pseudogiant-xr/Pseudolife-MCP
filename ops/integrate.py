@@ -43,6 +43,7 @@ is an admin bypass, so this is the check GitHub does not make. Needs git
 from __future__ import annotations
 
 import argparse
+import base64
 import ast
 import copy
 import datetime as dt
@@ -51,6 +52,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -148,6 +150,48 @@ RUST_CHECK = tuple(RUST_CHECK_COMMAND.split())
 # passes through (CARGO_TARGET_DIR, the toolchain's and the linker's
 # variables), since an allowlist would break builds on hosts it was not
 # written on; it still runs as the operator, as the full suite does.
+# Where the check runs. The maintainer's host is not for heavy work (his
+# rule, 16 November 2026), so a private config beside full-suite.remote
+# sends it to a dev machine: `ssh=` (an ~/.ssh/config alias), `repo=` (a clone
+# there) and `role=` (what the batch body calls the machine, never its
+# name). `build` sends the batch as a git bundle over ssh, so nothing is
+# pushed before the operator's publication check, and the far half
+# (RUST_CHECK_REMOTE_SCRIPT) runs the check in one locked gate worktree
+# there. Without the file the check runs here, as before; with it, only
+# PSEUDOLIFE_RUST_CHECK_WHERE=local runs it here, and an unreachable machine
+# is a check that did not run, never a fall back. The tool only reads the
+# file (docs/dev/dev-machines.md).
+RUST_CHECK_REMOTE = Path.home() / ".pseudolife-mcp" / "locks" / "rust-check.remote"
+RUST_CHECK_WHERE_ENV = "PSEUDOLIFE_RUST_CHECK_WHERE"
+RUST_CHECK_SSH = ("ssh",)
+# Read once, when the tool starts on master's checkout: a member that edits
+# the far half cannot change the check that judges its own batch.
+# Missing only from a stripped copy of ops/: then only the remote check
+# refuses, never `status`, `open` or `merge`.
+try:
+    RUST_CHECK_REMOTE_SCRIPT: str | None = (
+        Path(__file__).resolve().with_name("rust-check-remote.ps1").read_text(encoding="utf-8"))
+except OSError:
+    RUST_CHECK_REMOTE_SCRIPT = None
+# The command ssh runs there: read the script from stdin's first line and
+# run it, leaving the rest of stdin (the bundle) to the script. Measured
+# 16 November 2026: through Windows' ssh.exe an -EncodedCommand of 8 KB ran
+# and one of 16 KB was refused as "not properly encoded", so the far half
+# (17 KB encoded) cannot ride on the command line itself.
+RUST_CHECK_BOOTSTRAP = base64.b64encode(
+    ("& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString("
+     "[Convert]::FromBase64String([Console]::In.ReadLine()))))").encode("utf-16-le")
+).decode("ascii")
+# A cold check on the Windows dev VM is minutes, a warm one seconds; this
+# only ends a hung connection, as the keepalives end a dropped one.
+RUST_CHECK_REMOTE_TIMEOUT = 3600
+# The role reaches the public batch body, so it is one of these, never a
+# machine's name (CLAUDE.md "Dev machines": cite a machine by role).
+RUST_CHECK_ROLES = ("Windows dev VM", "Linux dev box", "remote dev machine")
+RUST_CHECK_DEFAULT_ROLE = "remote dev machine"
+# A path PowerShell reads as one single-quoted literal: no quote of any kind
+# (it takes the typographic ones as quotes too), no `$` or backtick.
+RUST_CHECK_REPO_RE = re.compile(r"[A-Za-z0-9 _.:\\/~-]+")
 SECRET_ENV_RE = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|DSN|DATABASE_URL"
                            r"|(^|_)PAT$|(^|_)(API_)?KEY(_ID)?$", re.IGNORECASE)
 URL_CREDENTIALS_RE = re.compile(r"://[^/@\s]+:[^/@\s]*@")
@@ -234,6 +278,9 @@ class Plan:
     # `passed` or `not needed`, which `open` accepts, or `failed: ...` or
     # `not run: ...`; empty for a plan built before the check existed.
     rust_check: str = ""
+    # Where it ran: empty for this host with no remote configured (as before),
+    # `local` when forced here, else the remote machine's role.
+    rust_check_where: str = ""
 
     @property
     def title(self) -> str:
@@ -257,6 +304,8 @@ class Plan:
         # added it, landed as a batch, runs that loader at `open`.
         if not data["carried"]:
             del data["carried"]
+        if not data["rust_check_where"]:
+            del data["rust_check_where"]
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @staticmethod
@@ -2087,27 +2136,143 @@ def _rust_check_env() -> dict[str, str]:
     return env
 
 
+def _rust_check_remote() -> tuple[dict[str, str] | None, str]:
+    """Where the check runs: (None, "") for this host, (config, "") for the
+    remote in rust-check.remote, or (None, cause) when it cannot run."""
+    where = os.environ.get(RUST_CHECK_WHERE_ENV, "")
+    if where not in ("", "local", "remote"):
+        return None, f"{RUST_CHECK_WHERE_ENV} must be local or remote, not {where!r}"
+    if where == "local":
+        return None, ""
+    if not RUST_CHECK_REMOTE.is_file():
+        if where == "remote":
+            return None, (f"{RUST_CHECK_WHERE_ENV}=remote, but there is no "
+                          f"{RUST_CHECK_REMOTE.name} (docs/dev/dev-machines.md)")
+        return None, ""
+    try:
+        text = RUST_CHECK_REMOTE.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        return None, f"cannot read {RUST_CHECK_REMOTE.name}: {exc}"
+    cfg: dict[str, str] = {}
+    for line in text.splitlines():
+        m = re.match(r"\s*([a-z_]+)\s*=\s*(.*?)\s*$", line)
+        if m and not line.lstrip().startswith("#"):
+            cfg[m.group(1)] = m.group(2)
+    bad = f"{RUST_CHECK_REMOTE.name} needs"
+    # An ssh destination that starts with "-" would be read as an option.
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@-]*", cfg.get("ssh", "")):
+        return None, f"{bad} ssh=<an ~/.ssh/config alias>"
+    if not RUST_CHECK_REPO_RE.fullmatch(cfg.get("repo", "")):
+        return None, (f"{bad} repo=<the path of a clone there>, in letters, digits, "
+                      "spaces and _ . : \\ / ~ - only")
+    cfg.setdefault("role", RUST_CHECK_DEFAULT_ROLE)
+    if cfg["role"] not in RUST_CHECK_ROLES:
+        return None, (f"{bad} role= to be one of {', '.join(RUST_CHECK_ROLES)}: the batch "
+                      "body prints it, so never a machine's name")
+    return cfg, ""
+
+
+def _cargo_verdict(code: int, lines: list[str]) -> tuple[str, str]:
+    """The plan's record and the errors to print, from cargo's exit and output."""
+    if code == 0:
+        return "passed", ""
+    errors = [line for line in lines if line.startswith("error")]
+    first = errors[0].strip() if errors else f"exit {code}"
+    start = lines.index(errors[0]) if errors else max(len(lines) - 40, 0)
+    return f"failed: {first[:300]}", "\n".join(lines[start:start + 60])
+
+
+def _ps_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _remote_rust_check(plan: Plan, cfg: dict[str, str]) -> tuple[str, str]:
+    """RUST_CHECK on the remote dev machine: the batch goes there as a git
+    bundle on ssh's stdin (`<branch> ^<base>`: everything master lacks), and
+    RUST_CHECK_REMOTE_SCRIPT checks it out and runs cargo."""
+    role = cfg["role"]
+    if RUST_CHECK_REMOTE_SCRIPT is None:
+        return "not run: ops/rust-check-remote.ps1 is missing from this checkout", ""
+    ref = f"refs/heads/{plan.branch}"
+    if _out("rev-parse", ref) != plan.head:
+        return f"not run: {plan.branch} is not at {plan.head[:12]}", ""
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle = Path(tmp) / "batch.bundle"
+        try:
+            git("bundle", "create", "-q", str(bundle), ref, f"^{plan.base_sha}")
+            data = base64.b64encode(bundle.read_bytes()).decode("ascii")
+        except (Refusal, OSError) as exc:
+            return f"not run: the batch bundle could not be made: {exc}", ""
+    # The verdict line carries a nonce no member code sees (it travels on
+    # stdin, not argv), so a line cargo passes through cannot stand in for it.
+    nonce = secrets.token_hex(16)
+    script = ("& {\n" + RUST_CHECK_REMOTE_SCRIPT + "\n} -Repo " + _ps_literal(cfg["repo"])
+              + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
+              + " -Ref " + _ps_literal(ref) + " -Nonce " + _ps_literal(nonce))
+    # stdin carries the script (its first line) and then the bundle; the
+    # command line carries only RUST_CHECK_BOOTSTRAP, since an encoded
+    # command past about 8 KB is refused through Windows' ssh.exe.
+    data = base64.b64encode(script.encode("utf-8")).decode("ascii") + "\n" + data
+    argv = [*RUST_CHECK_SSH, "-o", "BatchMode=yes", "-o", "ConnectTimeout=20",
+            "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4", cfg["ssh"],
+            f"pwsh -NoProfile -NonInteractive -EncodedCommand {RUST_CHECK_BOOTSTRAP}"]
+    print(f"  running `{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/ on {plan.head[:12]} "
+          f"on the {role} (the batch goes there as a git bundle; nothing is pushed)")
+    try:
+        proc = _run(argv, input=data, check=False, timeout=RUST_CHECK_REMOTE_TIMEOUT)
+    except Refusal as exc:
+        return f"not run: on the {role}: {exc}", ""
+    except subprocess.TimeoutExpired:
+        return (f"not run: the {role} gave no verdict in {RUST_CHECK_REMOTE_TIMEOUT} s", "")
+    lines = [line for line in (proc.stdout + proc.stderr).splitlines() if line.strip()]
+    last = lines[-1].strip() if lines else ""
+    # Only the far half's own last line decides; a run cut short has none.
+    tag = f"rust-check {nonce}: "
+    said = last.removeprefix(tag) if last.startswith(tag) else None
+    exited = re.fullmatch(r"cargo exit (-?\d+)", said) if said is not None else None
+    if exited:
+        cargo = [line for line in lines if not line.startswith("rust-check")]
+        return _cargo_verdict(int(exited.group(1)), cargo)
+    if said is not None and said.startswith("not run: "):
+        return f"not run: on the {role}: {said.removeprefix('not run: ')[:300]}", ""
+    last = last[:300] or "no output"
+    how = "ssh" if proc.returncode == 255 else "the far half"
+    return f"not run: on the {role}: {how} exit {proc.returncode}: {last}", ""
+
+
 def _rust_check(plan: Plan) -> tuple[str, str]:
     """Run RUST_CHECK on the batch head when the batch changes anything
-    under rust/. Returns the plan's record and cargo's errors to print."""
+    under rust/: on the remote dev machine when rust-check.remote names one,
+    else here. Returns the plan's record and cargo's errors to print, and
+    records in the plan where it ran."""
     if not _touches_rust(plan.base_sha, plan.head):
         return "not needed", ""
     root = Path(_out("rev-parse", "--show-toplevel"))
     if not (root / RUST_CHECK_DIR / "Cargo.toml").is_file():
         return f"not run: the batch head has no {RUST_CHECK_DIR}/Cargo.toml", ""
+    cfg, cause = _rust_check_remote()
+    if cause:
+        plan.rust_check_where = "unconfigured"
+        return f"not run: {cause}", ""
+    if cfg:
+        plan.rust_check_where = cfg["role"]
+        return _remote_rust_check(plan, cfg)
+    if os.environ.get(RUST_CHECK_WHERE_ENV) == "local":
+        plan.rust_check_where = "local"
     print(f"  running `{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/ on {plan.head[:12]}")
     try:
         proc = _run(list(RUST_CHECK), check=False, cwd=root / RUST_CHECK_DIR,
                     env=_rust_check_env())
     except Refusal as exc:
         return f"not run: {exc}", ""
-    if proc.returncode == 0:
-        return "passed", ""
-    lines = proc.stderr.strip().splitlines()
-    errors = [line for line in lines if line.startswith("error")]
-    first = errors[0].strip() if errors else f"exit {proc.returncode}"
-    start = lines.index(errors[0]) if errors else max(len(lines) - 40, 0)
-    return f"failed: {first[:300]}", "\n".join(lines[start:start + 60])
+    return _cargo_verdict(proc.returncode, proc.stderr.strip().splitlines())
+
+
+def _rust_check_machine(plan: Plan) -> str:
+    """The machine the plan's check ran on, as the refusals name it."""
+    if plan.rust_check_where in ("", "local", "unconfigured"):
+        return "this machine"
+    return f"the {plan.rust_check_where}"
 
 
 RUST_CHECK_OK = ("passed", "not needed")
@@ -2126,12 +2291,25 @@ def _rust_check_refusal(plan: Plan) -> str:
     if plan.rust_check.startswith("failed"):
         return (f"the batch does not compile at {plan.head[:12]}: `{RUST_CHECK_COMMAND}` "
                 f"in {RUST_CHECK_DIR}/ {plan.rust_check}. Run the same command on "
-                f"{REMOTE}/{BASE} ({plan.base_sha[:12]}): if it fails there too, the "
-                "cause is master or this machine (cargo's network, disk, linker or "
+                f"{REMOTE}/{BASE} ({plan.base_sha[:12]}) on {_rust_check_machine(plan)}: "
+                f"if it fails there too, the cause is master or {_rust_check_machine(plan)} "
+                "(cargo's network, disk, linker or "
                 "memory; a proxy with a password in its URL is withheld), so fix that "
                 f"and {again}. Otherwise it is a red batch and nothing is fixed inside "
                 "it: bisect it (docs/dev/merge-batches.md, \"Validating it\", step 3), "
                 f"drop the culprit with a comment and remove its label, then {again}")
+    if plan.rust_check_where == "unconfigured":
+        return (f"the Rust compile check did not run at {plan.head[:12]} "
+                f"({plan.rust_check.removeprefix('not run: ')}); fix {RUST_CHECK_REMOTE.name} "
+                f"or {RUST_CHECK_WHERE_ENV} (docs/dev/dev-machines.md, \"Batch compile "
+                f"check\"), then {again}")
+    if plan.rust_check_where not in ("", "local"):
+        return (f"the Rust compile check did not run at {plan.head[:12]} "
+                f"({plan.rust_check.removeprefix('not run: ')}), and the batch changes "
+                f"{RUST_CHECK_DIR}/; fix that on the {plan.rust_check_where} (ssh to it, "
+                f"its clone, its cargo; docs/dev/dev-machines.md), then {again}. "
+                f"{RUST_CHECK_WHERE_ENV}=local runs the check on this host instead, "
+                "only where this host may take the load")
     return (f"the Rust compile check did not run at {plan.head[:12]} "
             f"({plan.rust_check.removeprefix('not run: ')}), and the batch changes "
             f"{RUST_CHECK_DIR}/; fix that (rustup's cargo on PATH), then {again}")
@@ -2146,7 +2324,9 @@ def _rust_check_cell(plan: Plan) -> str:
     """The body's Rust compile check result; `open` publishes only these two
     (a failure's cargo output, with this machine's paths, never reaches it)."""
     if plan.rust_check == "passed":
-        return f"passed at `{plan.head}`, run by `build`"
+        where = {"": "", "local": " on the maintainer's host"}.get(
+            plan.rust_check_where, f" on the {plan.rust_check_where}")
+        return f"passed at `{plan.head}`{where}, run by `build`"
     if plan.rust_check == "not needed":
         return (f"not needed, the batch changes nothing under `{RUST_CHECK_DIR}/` "
                 "but the generated census")
@@ -2274,7 +2454,10 @@ def build(args: argparse.Namespace) -> int:
         _report_drops(plan, None, args.dry_run)
         return 0
     if args.dry_run:
-        rust = (f"would run `{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/ on the batch head"
+        cfg, cause = _rust_check_remote()
+        on = (f", on the {cfg['role']}" if cfg else
+              f", but it would not run: {cause}" if cause else "")
+        rust = (f"would run `{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/ on the batch head{on}"
                 if _touches_rust(base_sha, plan.head) else
                 f"no Rust compile check: the batch changes nothing under {RUST_CHECK_DIR}/ "
                 "but the census")
@@ -2296,7 +2479,9 @@ def build(args: argparse.Namespace) -> int:
               f"integrate: {_rust_check_refusal(plan)}. Skip the suite on this head.",
               file=sys.stderr)
         return 1
-    rust = (f"passed at {plan.head[:8]}" if plan.rust_check == "passed" else
+    rust = (f"passed at {plan.head[:8]}"
+            + (f" on the {plan.rust_check_where}" if plan.rust_check_where not in ("", "local")
+               else "") if plan.rust_check == "passed" else
             f"not needed, nothing under {RUST_CHECK_DIR}/ but the census changed")
     print(f"\nRust compile check (`{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/): {rust}.")
     print(f"built {plan.branch} at {plan.head[:12]}; nothing is pushed, so no CI "

@@ -475,6 +475,28 @@ file) other than the generated census, `build` runs CI's own compile step on
 the batch head, `cargo check --workspace --all-targets --locked` from
 `rust/` (where rustup reads `rust-toolchain.toml`), after the census. It
 took 48 s cold and under a second warm on the maintainer's Windows host.
+
+**Where it runs.** The maintainer's host is not for heavy work (his rule,
+16 November 2026). When the private `rust-check.remote` beside
+`full-suite.remote` names a dev machine (`docs/dev/dev-machines.md`, "Batch
+compile check"), `build` runs the check there and not on the host that runs
+`build`. The batch reaches the machine as a git bundle over ssh, so nothing
+is pushed before the publication check. The far half,
+`ops/rust-check-remote.ps1`, does three things before cargo starts: it
+fetches master into its clone, refuses a bundle whose head is not the batch
+head, and forces one locked gate worktree to that head. The plan records
+the machine's role and the batch body names it ("passed at `<head>` on the
+Windows dev VM"). Several outcomes are each a check that **did not run**,
+and `open` refuses them as above: an unreachable machine, a held gate lock
+(another build, waited for up to 20 minutes), a clone that cannot fetch
+origin, a missing cargo, or a malformed config. None of them falls back to
+the local host. Only `PSEUDOLIFE_RUST_CHECK_WHERE=local` runs the check
+here, and the body then says it ran on the maintainer's host.
+`PSEUDOLIFE_RUST_CHECK_WHERE=remote` refuses to run without the file.
+Without the file the check runs locally, as it always has, which is what an
+outside contributor gets. `build --dry-run` names the machine without
+contacting it.
+
 A failure drops nothing and leaves the branch and plan as they are, and
 `open` refuses the plan. cargo's output cannot tell the batch from the machine (a lock file two
 members left inconsistent fails like a download; a missing linker or
@@ -487,18 +509,24 @@ like a red suite ("Validating it", step 3). A check that could not start
 run. Once the batch pull request is open, `open` resumes it whatever its
 plan says. Notes:
 
-- It honours `CARGO_TARGET_DIR`, so point that at the machine's shared
-  target directory to keep it warm; a cold check in a fresh worktree
-  otherwise fills its own `rust/target`, so mind the 8 GB free-disk floor.
-  If another cargo holds that directory, the check waits for its lock
-  ("Blocking waiting for file lock").
+- Run locally, it honours `CARGO_TARGET_DIR`, so point that at the
+  machine's shared target directory to keep it warm; a cold check in a
+  fresh worktree otherwise fills its own `rust/target`, so mind the 8 GB
+  free-disk floor. If another cargo holds that directory, the check waits
+  for its lock ("Blocking waiting for file lock"). On a dev machine the gate
+  worktree keeps its own target directory beside the clone, one per source
+  copy, because a target shared between copies hands back another copy's
+  units.
+- Run remotely, it runs in that machine's own environment; nothing from
+  the operator's environment is sent.
 - It runs member build scripts and proc macros, as the full suite runs
   member code, with the operator's environment minus credential-shaped
   variables, as the census script runs without tokens: names with `TOKEN`,
   `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `DSN` or `DATABASE_URL`, or
   ending in `KEY`, `KEY_ID` or `PAT`, and any value with credentials in a
   URL (a database DSN with its password, or a proxy with one).
-- It compiles default features on this machine's platform only. Feature- and
+- It compiles default features on the platform of the machine that runs it
+  only. Feature- and
   platform-gated code, clippy and fmt stay CI's, as do the crates under
   `evals/rust_port/` (outside the workspace) and a non-`rust/` change that
   breaks an `include_str!` there (`ops/requirements.lock.txt`,
