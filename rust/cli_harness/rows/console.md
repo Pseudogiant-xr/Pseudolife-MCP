@@ -117,17 +117,16 @@ prints:
   that is not ENOENT/ENOTDIR reported; never execvp's `/bin/sh` fallback.
   The launcher then has two seconds to exit: a zero exit, or a program
   still running (the browser itself), is opened; a non-zero exit or a start
-  that fails prints the link with the cause. On Linux, `explorer.exe`
-  exiting 1 is a WSL hand-off; no other program or failure code is exempt.
+  that fails prints the link with the cause. On Linux with a non-empty
+  `WSL_DISTRO_NAME` (the installer's WSL signal), `explorer.exe` exiting 1
+  is treated as a hand-off; no other program or failure code is exempt.
+  Explorer's exit 1 does not independently confirm that a page appeared.
   A launcher the caller's
   ignored SIGCHLD reaps before its status is read counts as opened.
-  Windows: std's `CreateProcess`
-  with nothing redirected, so the browser gets this command's own standard
-  handles, as CPython's child does (Windows copies a parent's redirected
-  standard handles to a child started with none named), and opened when it
+  Windows: std's `CreateProcess` with stdin, stdout and stderr set to null,
+  so the browser cannot retain the caller's captured streams, and opened when it
   is still running or has exited zero right after the start; a failed start
-  or observed non-zero exit prints the link with its cause. There a
-  pipe this command writes to stays open until the browser exits.
+  or observed non-zero exit prints the link with its cause and exit code.
 - `WindowsDefault.open`: `ShellExecuteW(NULL, NULL, url, NULL, NULL,
   SW_SHOWNORMAL)`, the default verb `os.startfile` uses; True unless it
   returns 32 or less; a URL past 32767 UTF-16 units is `path_converter`'s
@@ -146,7 +145,8 @@ pairing-code alphabet (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`) and `-`, and
 `cmd.exe` reads as syntax passes but that one `&`. The candidate's URL is
 one argv element (`execve` on POSIX; on Windows a `.exe` started by
 `CreateProcess`, whose command line std quotes as `list2cmdline` does, never
-a batch file or `cmd.exe`) or the one file `ShellExecuteW` opens, which can
+a batch file or a known command shell (`cmd.exe`, `powershell.exe`, `pwsh.exe`))
+or the one file `ShellExecuteW` opens, which can
 only be an `http`/`https` URL; no shell reads it. The oracle starts a batch
 file named by `BROWSER` through `cmd.exe` (the candidate refuses it with the link), where a
 legitimate `&to=<page>` still splits the command line.

@@ -8,11 +8,10 @@
 //!   reporting the first error that is not ENOENT/ENOTDIR. The launcher is
 //!   then given [`SETTLE`] to exit: a zero exit or a program still running
 //!   (a browser in the foreground of its own session) is opened, a non-zero
-//!   exit is a failure with its status. Windows: `CreateProcess` with
-//!   nothing redirected, so the browser gets this command's own standard
-//!   handles, as CPython's child does (measured 2026-11-13, a program
-//!   CPython 3.11.9 started this way wrote into its parent's stdout pipe),
-//!   and opened when still running or successfully exited after the start.
+//!   exit is a failure with its status. Windows: `CreateProcess` with all
+//!   three standard streams set to null, so the browser cannot keep the
+//!   caller's captured pipes open. Opened when still running or successfully
+//!   exited after the start; an observed non-zero exit reports its code.
 //! - Windows `os.startfile(url)`: `ShellExecuteW(NULL, NULL, url, NULL,
 //!   NULL, SW_SHOWNORMAL)` (the default verb), opened unless it returns 32
 //!   or less.
@@ -153,14 +152,25 @@ fn start_file(_url: &str) -> Launched {
 #[cfg(windows)]
 fn background(program: &str, args: &[String]) -> Launched {
     spawn_result(program, || {
-        let mut child = std::process::Command::new(program)
-            .args(args)
+        let mut child = browser_command(program, args)
             .spawn()
             .map_err(|error| format!("could not start {program} ({error})"))?;
         child
             .try_wait()
             .map_err(|error| format!("could not check {program} ({error})"))
     })
+}
+
+#[cfg(any(windows, test))]
+fn browser_command(program: &str, args: &[String]) -> std::process::Command {
+    use std::process::Stdio;
+    let mut command = std::process::Command::new(program);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
 }
 
 #[cfg(any(windows, test))]
@@ -421,6 +431,17 @@ mod posix {
     /// given [`super::SETTLE`] to exit. `Err` is the cause, worded for the
     /// user.
     pub(super) fn background(program: &str, args: &[String]) -> Result<(), String> {
+        // Same signal as installer::preflight's host_path; an empty value
+        // does not identify WSL. Injected below so tests never change env.
+        let wsl = std::env::var_os("WSL_DISTRO_NAME").is_some_and(|value| !value.is_empty());
+        background_with_wsl(program, args, wsl)
+    }
+
+    pub(super) fn background_with_wsl(
+        program: &str,
+        args: &[String],
+        wsl: bool,
+    ) -> Result<(), String> {
         let argv: Vec<&[u8]> = std::iter::once(program.as_bytes())
             .chain(args.iter().map(|arg| arg.as_bytes()))
             .collect();
@@ -440,6 +461,7 @@ mod posix {
                 Ok(Some(status))
                     if status.success()
                         || (cfg!(target_os = "linux")
+                            && wsl
                             && Path::new(program).file_name().is_some_and(|name| {
                                 name.as_encoded_bytes()
                                     .eq_ignore_ascii_case(b"explorer.exe")

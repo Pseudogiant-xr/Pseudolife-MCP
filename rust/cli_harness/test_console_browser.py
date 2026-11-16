@@ -24,6 +24,35 @@ def test_browser_guard_rejects_real_program_even_without_a_daemon():
         })
 
 
+@pytest.mark.parametrize("value", [
+    r"{HOME}\..\outside.exe",
+    r"'{HOME}\bin\..\outside.exe' %s &",
+    "windows-default",
+])
+def test_windows_browser_guard_rejects_escape_and_default(monkeypatch, value):
+    monkeypatch.setattr(console.core, "WINDOWS", True)
+    monkeypatch.setattr(console, "BIN", r"{HOME}\bin")
+    monkeypatch.setattr(console, "SEP", "\\")
+    with pytest.raises(AssertionError, match="stand-in"):
+        console._check_browser_env("escape", {"BROWSER": value, "PATH": console.BIN})
+
+
+def test_windows_browser_guard_preserves_unquoted_backslashes(monkeypatch):
+    monkeypatch.setattr(console.core, "WINDOWS", True)
+    monkeypatch.setattr(console, "BIN", r"{HOME}\bin")
+    monkeypatch.setattr(console, "SEP", "\\")
+    console._check_browser_env("safe", {
+        "BROWSER": r"{HOME}\bin\standin.exe %s &", "PATH": console.BIN,
+    })
+
+
+def test_bare_browser_case_really_names_a_bare_program():
+    case = next(case for case in console.cases() if case.id == "defer-browser-bare-name")
+    assert "{HOME}" not in case.env["BROWSER"]
+    assert "%s" in case.env["BROWSER"]
+    assert not any(char in case.env["BROWSER"].split()[0] for char in "/\\:")
+
+
 def test_console_goldens_with_standin_browsers(tmp_path):
     """The hosted stress entry: replay all Console cases, never a real browser."""
     binary = os.environ.get("PSEUDOLIFE_RUST_BINARY")

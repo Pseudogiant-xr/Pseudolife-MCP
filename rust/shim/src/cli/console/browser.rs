@@ -130,9 +130,7 @@ fn choose_posix(host: &dyn Host, platform: Platform) -> Plan {
             .iter()
             .any(|key| host.var(key).is_some_and(|value| !value.is_empty()))
         {
-            return refused(format!(
-                "this is an SSH session; the Mac's browser is on its own screen; {SET_BROWSER}"
-            ));
+            return refused("this is an SSH session; the Mac's browser is on its own screen; open the printed link on the machine in front of you. Set BROWSER only to explicitly choose an opener for this session".to_owned());
         }
         return Plan::Background {
             program: MAC_OPEN.to_owned(),
@@ -253,9 +251,34 @@ fn choose_windows(host: &dyn Host) -> Plan {
     }
     let program = words.remove(0);
     if !launchable(&program) {
+        let path = program.replace('\\', "/");
+        if path.starts_with("//?/") || path.starts_with("//./") {
+            return refused("BROWSER names a Windows device path; use a drive-letter path to the browser executable, or open the printed link yourself".to_owned());
+        }
+        if path.starts_with("//") {
+            return refused("BROWSER names a UNC path; use a drive-letter path to the browser executable, or open the printed link yourself".to_owned());
+        }
+        let bytes = path.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1..3] == *b":/"
+            && !entry.trim_start().starts_with(['\'', '"'])
+            && words
+                .iter()
+                .any(|word| word.to_ascii_lowercase().ends_with(".exe"))
+        {
+            return refused("BROWSER contains an unquoted executable path with spaces; quote the executable path, or open the printed link yourself".to_owned());
+        }
         return refused(format!(
             "BROWSER must name a drive-absolute .exe, not a bare name, relative path or script; {SET_WINDOWS_BROWSER}"
         ));
+    }
+    if ["cmd.exe", "powershell.exe", "pwsh.exe"].contains(
+        &basename(&program, Platform::Windows)
+            .to_ascii_lowercase()
+            .as_str(),
+    ) {
+        return refused("BROWSER names a command shell; set BROWSER to the browser executable directly, or open the printed link yourself".to_owned());
     }
     if !words.iter().any(|word| word.contains("%s")) {
         words.push("%s".to_owned());

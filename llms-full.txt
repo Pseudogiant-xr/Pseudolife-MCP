@@ -6391,16 +6391,20 @@ On macOS and Linux, words and quotes follow shell quoting, so
 `BROWSER=firefox` and `BROWSER='firefox --new-window %s'` both work.
 Terminal browsers (`lynx`, `w3m`, `elinks`, `links`, `links2`, `browsh`,
 `www-browser`) print the link instead, since they would compete for the
-terminal. Under WSL, `BROWSER=explorer.exe` treats Explorer's exit code 1
-as a hand-off to Windows; other programs and other non-zero codes still
-report a failure.
+terminal. Under WSL (a non-empty `WSL_DISTRO_NAME`), `BROWSER=explorer.exe`
+treats Explorer's exit code 1 as a hand-off to Windows; other programs and
+other non-zero codes still report a failure. That exit code does not prove
+that Windows displayed the page.
 
 On Windows, `BROWSER` must name a drive-absolute `.exe` path. Backslashes
 stay literal, so `C:\Tools\browser.exe %s &` works, as does
 `C:/Tools/browser.exe`. Single or double quotes group a path with spaces,
 for example `'C:\Program Files\Mozilla Firefox\firefox.exe' %s`.
 Bare names, relative paths and scripts print the link with a message asking
-for a full `.exe` path. No browser choice defers to the Python client.
+for a full `.exe` path. An unquoted path with spaces asks you to quote it;
+a UNC or device path asks for a drive-letter path. Known command shells
+(`cmd.exe`, `powershell.exe`, `pwsh.exe`) are refused: name the browser
+executable directly. No browser choice defers to the Python client.
 
 When no browser opens, `console` prints the link and code just as
 `--no-open` does, and says why on stderr as
@@ -6410,7 +6414,9 @@ that cannot start and Windows default-browser errors. On macOS and Linux,
 a launcher has two seconds to report failure; one still running counts as
 the browser. On Windows, the command checks once just after starting it:
 a running process or a zero exit counts as opened. `--no-open` never
-starts a browser and prints the link and code on every system.
+starts a browser and prints the link and code on every system. On Windows,
+the chosen browser's input and output are disconnected from this command,
+so a caller capturing its output does not wait for the browser to close.
 
 `pseudolife-mcp console --list` shows the signed-in browsers (an operator
 sees all of them, a paired machine its own) and `--revoke <id>` signs one

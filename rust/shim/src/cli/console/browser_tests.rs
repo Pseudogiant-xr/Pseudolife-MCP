@@ -55,7 +55,12 @@ use Platform::{Mac, Posix, Windows};
 fn mac_ssh_prints_the_link_unless_browser_is_explicit() {
     for key in ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] {
         let remote = Fake::default().with(key, "remote");
-        assert!(cause(choose(&remote, Mac)).contains("SSH"));
+        let Plan::Refused(Some(reason)) = choose(&remote, Mac) else {
+            panic!("SSH should print the link")
+        };
+        assert!(reason.contains("SSH"));
+        assert!(reason.contains("machine in front of you"));
+        assert!(!reason.contains("firefox"));
         assert_eq!(
             choose(&remote.with("BROWSER", "stub %s"), Mac),
             background("stub", &["%s"])
@@ -63,6 +68,69 @@ fn mac_ssh_prints_the_link_unless_browser_is_explicit() {
         assert_eq!(
             choose(&Fake::default().with(key, ""), Mac),
             background(MAC_OPEN, &["%s"])
+        );
+    }
+}
+
+#[test]
+fn windows_refusals_explain_unquoted_spaces() {
+    for (value, cause, fix) in [
+        (
+            r"C:\Program Files\Mozilla Firefox\firefox.exe",
+            "unquoted",
+            "quote the executable path",
+        ),
+        (
+            r"C:\Program Files\browser.exe %s &",
+            "unquoted",
+            "quote the executable path",
+        ),
+    ] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(
+            matches!(plan, Plan::Refused(Some(ref why)) if why.contains(cause) && why.contains(fix)),
+            "{value}: {plan:?}"
+        );
+    }
+}
+
+#[test]
+fn windows_refusals_explain_network_and_device_paths() {
+    for (value, cause, fix) in [
+        (r"\\server\share\browser.exe", "UNC", "drive-letter path"),
+        (r"\\?\C:\browser.exe", "device path", "drive-letter path"),
+    ] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(
+            matches!(plan, Plan::Refused(Some(ref why)) if why.contains(cause) && why.contains(fix)),
+            "{value}: {plan:?}"
+        );
+    }
+}
+
+#[test]
+fn windows_refuses_command_shells() {
+    for (value, cause, fix) in [
+        (
+            r"C:\Windows\System32\cmd.exe /c start %s",
+            "command shell",
+            "browser executable directly",
+        ),
+        (
+            r"C:\Tools\PowerShell.exe %s",
+            "command shell",
+            "browser executable directly",
+        ),
+        (
+            r"C:\Tools\pwsh.exe %s",
+            "command shell",
+            "browser executable directly",
+        ),
+    ] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(
+            matches!(plan, Plan::Refused(Some(ref why)) if why.contains(cause) && why.contains(fix)),
+            "{value}: {plan:?}"
         );
     }
 }

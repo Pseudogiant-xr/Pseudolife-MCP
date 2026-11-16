@@ -1,4 +1,5 @@
 //! Python-only settings cannot disable the native Console command.
+//! Unix process test; Windows covers the same values in test_console_browser.py.
 #![cfg(unix)]
 use std::process::Command;
 
@@ -9,10 +10,6 @@ fn python_integer_limit_never_defers_console() {
     for value in ["0", "640", "4300", "invalid"] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
         command.env_clear();
-        // Windows needs its system directory to load runtime libraries.
-        if let Some(root) = std::env::var_os("SystemRoot") {
-            command.env("SystemRoot", root);
-        }
         for key in ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"] {
             command.env(key, &home);
         }

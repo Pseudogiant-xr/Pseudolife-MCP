@@ -67,20 +67,6 @@ def console_deferral(obs: dict) -> None:
         obs["requests"] = []
 
 
-@normalize.rule("console-deferral-after-read")
-def console_deferral_after_read(obs: dict) -> None:
-    """A declared deferral that comes after ``--unless-signed-in``'s session
-    read and before the sign-in request: the candidate prints its deferral
-    line (exit 1) having sent only that GET. The oracle's observation is
-    replaced by that expectation, keeping its first request."""
-    if obs.get("arm") != "python":
-        return
-    reads = [request for request in obs.get("requests", [])
-             if request.get("target") == "/api/console/sessions"][:1]
-    console_deferral(obs)
-    obs["requests"] = reads
-
-
 def _arm(arm, obs):
     obs["arm"] = arm.name
 
@@ -158,6 +144,7 @@ open(os.path.join(state, "done-%d" % n), "w").close()
 """
 SEP = "\\" if core.WINDOWS else "/"
 BIN = "{HOME}" + SEP + "bin"
+MISSING_BROWSER = "console-test-missing-browser.exe"
 
 
 def _interpreter() -> str:
@@ -182,7 +169,7 @@ PROGRAMS = ("xdg-open", "xdg-settings", "gio", "gvfs-open", "x-www-browser", "kf
             "firefox", "iceweasel", "seamonkey", "mozilla", "netscape", "konqueror", "kfm",
             "galeon", "epiphany", "skipstone", "google-chrome", "chrome", "chromium",
             "chromium-browser", "opera", "mosaic", "grail", "www-browser", "links", "elinks",
-            "lynx", "w3m", "osascript", "open")
+            "lynx", "w3m", "osascript", "open", MISSING_BROWSER)
 # Variables that select a browser or a display: never inherited from the
 # harness's own environment, so only a case can set them.
 assert not {"BROWSER", "DISPLAY", "WAYLAND_DISPLAY", "TERM", "GNOME_DESKTOP_SESSION_ID",
@@ -271,24 +258,31 @@ def _check_browser_env(case_id: str, env: dict) -> None:
     the row loads, before any arm runs: a BROWSER whose first entry decides
     (``os.startfile``, ``/usr/bin/open`` and the ``xdg-open`` family run only
     without one), naming as a program only the stand-in's interpreter or a
-    path in the home, and a PATH of the home's ``bin`` alone (so no
+    path in the home's bin without parent traversal, and a PATH of that ``bin`` alone (so no
     ``which`` lookup finds a real browser). POSIX bare names can resolve
-    only through that PATH. Windows bare names without a placeholder are
-    refusal cases; executable starts must name the stand-in interpreter or
-    a path inside the disposable home."""
+    only through that PATH. Windows bare names are known refusal cases or
+    the deliberately missing stand-in; executable starts must name the
+    stand-in interpreter or a path inside the disposable home."""
     entries = [entry for entry in (env.get("BROWSER") or "").split(os.pathsep) if entry]
     if not entries or not entries[0].strip():
         raise AssertionError(f"{case_id}: BROWSER must decide the controller")
     try:
-        words = shlex.split(entries[0])
+        lexer = shlex.shlex(entries[0], posix=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        if core.WINDOWS:
+            lexer.escape = ""  # Native Windows quotes group; backslashes stay literal.
+        words = list(lexer)
     except ValueError:
         words = [BIN]  # webbrowser.get() raises: nothing starts
     program = words[0] if words else BIN
-    bare = (not core.WINDOWS or "%s" not in entries[0]) and not any(
-        char in program for char in "/\\:")
-    # Bare Windows names without %s are refused by the native client and
-    # cannot resolve through the oracle's isolated PATH.
-    if program != _interpreter() and not program.startswith(BIN) and not bare:
+    parts = (program.replace("\\", "/") if core.WINDOWS else program).split("/")
+    bare = not any(char in program for char in "/\\:")
+    if core.WINDOWS:
+        bare = bare and (program == MISSING_BROWSER or
+                         (program in PROGRAMS and "%s" not in entries[0]))
+    inside = program == BIN or program.startswith(BIN + SEP)
+    if ".." in parts or (program != _interpreter() and not inside and not bare):
         raise AssertionError(f"{case_id}: BROWSER may run only the stand-in")
     if env.get("PATH") != BIN:
         raise AssertionError(f"{case_id}: PATH must hold only the home's bin")
@@ -615,7 +609,8 @@ def browser_cases() -> list[Case]:
     add(browser_case("open-hours", [], routes={"/api/console/link": link(
         lambda _o: {"expires_in": 7200})}))
     add(browser_case("open-to-board-text", ["--to", "board"], routes=signin))
-    # open_browser returns False: the link is printed.
+    # Native command lines launch without a trailing &, while missing or
+    # malformed programs print the link with a cause.
     add(browser_case("open-generic", [], routes=signin, browser=f"{interpreter} %s"))
     add(browser_case("open-generic-name", ["--json"], routes=signin,
                      browser=f"{BIN}{SEP}my-browser --flag"))
@@ -693,7 +688,7 @@ def browser_cases() -> list[Case]:
                      browser=f"{BIN}{SEP}Lynx -dump", platforms=("linux",)))
     add(browser_case("browser-terminal-unless", ["--unless-signed-in"], browser="w3m",
                      routes=signed_in([], **signin), platforms=("linux",)))
-    add(browser_case("defer-browser-bare-name", [], routes=signin, browser=f"'{BIN}{SEP}relative.exe' %s &",
+    add(browser_case("defer-browser-bare-name", [], routes=signin, browser=f"{MISSING_BROWSER} %s &",
                          platforms=("windows",)))
     add(browser_case("defer-browser-batch", [], routes=signin, browser=f"'{BIN}{SEP}b.cmd' %s &",
                          platforms=("windows",)))
