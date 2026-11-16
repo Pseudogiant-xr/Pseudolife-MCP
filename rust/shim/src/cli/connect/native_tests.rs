@@ -34,13 +34,38 @@ fn read_token_del_is_refused_before_creating_a_directory() {
     let absent = !root.exists();
     let _ = std::fs::remove_dir_all(&root);
     assert!(
-        matches!(result, Err(files::TokenFail::Helper(ref reason)) if reason.contains("DEL") && reason.contains("--read-token"))
+        matches!(result, Err(files::TokenFail::Helper(ref reason)) if reason.contains("DEL") && reason.contains("write-token-file") && !reason.contains("--read-token") && !reason.contains("fixture-secret"))
     );
     assert!(absent);
+    let result = files::write_token_file_for(&path, b"fixture-secret\x7f", "stdin (--read-token)");
+    assert!(
+        matches!(result, Err(files::TokenFail::Helper(ref reason)) if reason.contains("--read-token") && !reason.contains("fixture-secret"))
+    );
+    assert!(!root.exists());
     files::write_token_file(&path, b"fixture-secret~")
         .unwrap_or_else(|_| panic!("valid token was refused"));
     assert!(path.is_file());
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_config_filename_names_the_location() {
+    use std::os::unix::ffi::OsStringExt;
+    let root = std::env::temp_dir().join(format!("connect-name-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join(std::ffi::OsString::from_vec(b"fixture-\xff.json".to_vec()));
+    std::fs::write(&path, "{}").unwrap();
+    let error = files::load_json(&path).err().unwrap().0;
+    let _ = std::fs::remove_dir_all(root);
+    assert!(error.contains("fixture-"), "{error}");
+}
+
+#[test]
+fn schedule_compatibility_refusal_does_not_repeat_no_changes() {
+    let error = Refusal::from(Defer);
+    let message = format!("{}; nothing was changed", error.0);
+    assert_eq!(message.matches("nothing was changed").count(), 1);
 }
 
 fn ctx(clients: Vec<&'static str>, url: &str) -> Ctx {

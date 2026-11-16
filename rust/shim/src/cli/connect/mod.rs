@@ -86,7 +86,7 @@ impl From<Refusal> for Defer {
 
 impl From<Defer> for Refusal {
     fn from(_: Defer) -> Self {
-        Self("the unattended-update schedule could not be read; repair the schedule and re-run connect (nothing was changed)".into())
+        Self("the unattended-update schedule could not be read; repair the schedule and re-run connect".into())
     }
 }
 
@@ -395,7 +395,7 @@ async fn interruptible(args: args::Args) -> Result<u8, Refusal> {
 
 /// Validate transport compatibility without exposing the credential. Files that
 /// fail the existing credential checks remain subject to normal verification.
-fn tokens_sendable(rows: &[Row]) -> Result<(), Refusal> {
+fn tokens_sendable(rows: &[Row], token_file: Option<&str>) -> Result<(), Refusal> {
     for row in rows
         .iter()
         .filter(|row| matches!(row.state, "current" | "change"))
@@ -409,7 +409,11 @@ fn tokens_sendable(rows: &[Row]) -> Result<(), Refusal> {
                 crate::credentials::CredentialProvider::new(None, Some(path.into()))
                     .and_then(|provider| provider.snapshot())
                     .is_ok_and(|snapshot| snapshot.token().unwrap_or_default().contains('\u{7f}')),
-                FILE_KEY,
+                if token_file.is_some_and(|selected| selected == path) {
+                    "the file --token-file names"
+                } else {
+                    "the file PSEUDOLIFE_MCP_TOKEN_FILE names"
+                },
             ),
             Cred::None => (false, TOKEN_KEY),
         };
@@ -1003,10 +1007,15 @@ async fn connect(args: args::Args) -> Result<u8, Refusal> {
     }
 
     if !args.dry_run {
-        tokens_sendable(&rows)?;
+        tokens_sendable(&rows, token_file.as_deref())?;
     }
 
     let mut report = Report::new(args.json);
+    for warning in paths::xdg_warnings() {
+        if !report.warn(warning) {
+            return Ok(EXIT_STDERR_REFUSED);
+        }
+    }
     report.url = Some(url.clone());
     report.remote = Some(remote);
     report.dry_run = args.dry_run;
@@ -1178,7 +1187,11 @@ async fn connect(args: args::Args) -> Result<u8, Refusal> {
         } else {
             stdin_token()
         };
-        match files::write_token_file(std::path::Path::new(token_file), &data) {
+        match files::write_token_file_for(
+            std::path::Path::new(token_file),
+            &data,
+            "stdin (--read-token)",
+        ) {
             Ok(()) => created.push(PathBuf::from(token_file)),
             Err(files::TokenFail::Helper(message)) => {
                 return Ok(report.fail(EXIT_USAGE, format!("{message}; nothing was changed")));

@@ -96,7 +96,10 @@ pub(in crate::cli) fn is_file(path: &Path) -> Result<bool, Refusal> {
 
 fn name(path: &Path) -> Result<&str, Refusal> {
     path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
-        Refusal("a client configuration file name is not Unicode; use a Unicode file name".into())
+        Refusal(format!(
+            "the client configuration file name {} is not Unicode; use a Unicode file name",
+            path.display()
+        ))
     })
 }
 
@@ -263,6 +266,14 @@ fn already_exists(target: &Path) -> TokenFail {
 
 /// `client_config.write_token_file(path, stdin)` with stdin's first bytes.
 pub(in crate::cli) fn write_token_file(target: &Path, data: &[u8]) -> Result<(), TokenFail> {
+    write_token_file_for(target, data, "write-token-file stdin")
+}
+
+pub(super) fn write_token_file_for(
+    target: &Path,
+    data: &[u8],
+    setting: &str,
+) -> Result<(), TokenFail> {
     if fs::symlink_metadata(target).is_ok() {
         return Err(already_exists(target));
     }
@@ -282,9 +293,9 @@ pub(in crate::cli) fn write_token_file(target: &Path, data: &[u8]) -> Result<(),
         ));
     }
     if token.contains('\u{7f}') {
-        return Err(TokenFail::Helper(
-            "the token read on stdin (--read-token) contains a DEL control character; supply a valid token from the daemon host".to_owned(),
-        ));
+        return Err(TokenFail::Helper(format!(
+            "the token read on {setting} contains a DEL control character; supply a valid token from the daemon host"
+        )));
     }
     crate::credentials::reject_ancestor_redirects(target)
         .map_err(|_| TokenFail::Name("CredentialError"))?;

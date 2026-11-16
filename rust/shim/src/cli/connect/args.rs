@@ -120,10 +120,31 @@ pub(super) fn parse(values: &[OsString]) -> Result<Args, Refusal> {
                 }
             }
             _ => {
-                return Err(Refusal(
-                    "unknown option; use the full option names in `pseudolife-mcp connect --help`"
-                        .into(),
-                ));
+                // Only the option spelling is reported, never its inline or next value.
+                let name = if option.len() <= 40
+                    && option.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-')
+                {
+                    option
+                } else {
+                    "(unrecognized spelling)"
+                };
+                let hint = [
+                    "--token-file",
+                    "--read-token",
+                    "--read-code",
+                    "--dry-run",
+                    "--client",
+                    "--code",
+                    "--json",
+                    "--yes",
+                ]
+                .into_iter()
+                .find(|known| option.len() > 2 && known.starts_with(option));
+                let remedy = hint.map_or_else(
+                    || "see `pseudolife-mcp connect --help`".to_owned(),
+                    |known| format!("use {known}; see `pseudolife-mcp connect --help`"),
+                );
+                return Err(Refusal(format!("unknown option {name}; {remedy}")));
             }
         }
     }

@@ -392,13 +392,13 @@
     "rust/shim/src/cli/conductor_watch/start.rs": "90deef2dee73d98ca55bf6024a49d020c56d98a273b1a69c00ae13d748173f0d",
     "rust/shim/src/cli/conductor_watch/tests.rs": "3555dd9bb23701619ab83452bd47de76b7b3e8e5f1376de363506199040f81c6",
     "rust/shim/src/cli/conductor_watch/watch.rs": "dcf44ba5aef08e547c762ae7b6bd616f8eff0f0861c1a3979eb28b1671cc0772",
-    "rust/shim/src/cli/connect/args.rs": "67e3c37b9d1a1fff1b4f6f7d1d9b7c1b04a58b77862c583f63267f190a99fb85",
+    "rust/shim/src/cli/connect/args.rs": "a178308c697bc26dcd6ad29687153d1224540d37ad33f899b18a1af892b1dcee",
     "rust/shim/src/cli/connect/codex.rs": "7401076157c28d2a81615c5c99a996df30c75c124cd180c5ebda2d801291269f",
     "rust/shim/src/cli/connect/discover.rs": "d17b53e8df78293a1465481035595df694f398c9010042f903f38dc1cbf5099c",
-    "rust/shim/src/cli/connect/files.rs": "b1521a95ef36cc26a391eef081d2f84b428111c4f506b71409222bac3f670893",
-    "rust/shim/src/cli/connect/mod.rs": "cd58fa8162a6361824cfdf514edb05063fb4cd609b9fcd9628956eea30f6c1c7",
+    "rust/shim/src/cli/connect/files.rs": "e984336698ef3850683d56d2570891ba9de66545bc8c24db45a795b9dc46bbd4",
+    "rust/shim/src/cli/connect/mod.rs": "800bb18abdd43d7224b8b4f560e8c7e9d84120747573d4f505d74f598cf4a7b5",
     "rust/shim/src/cli/connect/net.rs": "1dc84813005e205d8cf2ee7e7e7f092b12185c68898bb290cb1b42bcc596d6c8",
-    "rust/shim/src/cli/connect/paths.rs": "a0fe06b1950e414e6a62d5ac8881e26ae778609b9610d9dd788a1202497c3441",
+    "rust/shim/src/cli/connect/paths.rs": "f70a4f9899bb94e4734bb9c70b2cec45f53c05705e4b2868ddb5c21f72996429",
     "rust/shim/src/cli/connect/procs.rs": "a3fb96f2e74ca08458529758cc854fe52c6e706825e937940a99aaf16b2aeaf7",
     "rust/shim/src/cli/connect/pyjson.rs": "9e7f79e8558908c610a63d8e39c96ccb71806289d425ac860fb33907dedb7042",
     "rust/shim/src/cli/connect/schedule.rs": "c5fb177cb50f54d71e1dfbf7f414412e5060ab5f8a67b8cb0378e609899fc86b",
@@ -2703,12 +2703,12 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/args.rs:124",
+          "location": "rust/shim/src/cli/connect/args.rs:144",
           "shape": {
-            "argv_source": "connect --help`\"",
+            "argv_source": "connect --help`\".to_owned(),",
             "channel": "argv",
             "complete": false,
-            "expression": "--help`\"",
+            "expression": "--help`\".to_owned(),",
             "omitted_optional": null,
             "parameters": {}
           }
@@ -2716,7 +2716,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/args.rs:132",
+          "location": "rust/shim/src/cli/connect/args.rs:145",
+          "shape": {
+            "argv_source": "connect --help`\"),",
+            "channel": "argv",
+            "complete": false,
+            "expression": "--help`\"),",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/connect/args.rs:153",
           "shape": {
             "argv_source": "connect [OPTIONS] URL`\".into(),",
             "channel": "argv",
@@ -56634,7 +56647,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/paths.rs:84",
+          "location": "rust/shim/src/cli/connect/paths.rs:134",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56647,7 +56660,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/paths.rs:86",
+          "location": "rust/shim/src/cli/connect/paths.rs:136",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56884,7 +56897,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/paths.rs:83",
+          "location": "rust/shim/src/cli/connect/paths.rs:133",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56897,7 +56910,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/connect/paths.rs:95",
+          "location": "rust/shim/src/cli/connect/paths.rs:145",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -121262,13 +121275,19 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/args.rs:124",
+      "location": "rust/shim/src/cli/connect/args.rs:144",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/args.rs:132",
+      "location": "rust/shim/src/cli/connect/args.rs:145",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:connect"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/connect/args.rs:153",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:connect"
     },
@@ -121400,25 +121419,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/paths.rs:83",
+      "location": "rust/shim/src/cli/connect/paths.rs:133",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/paths.rs:84",
+      "location": "rust/shim/src/cli/connect/paths.rs:134",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/paths.rs:86",
+      "location": "rust/shim/src/cli/connect/paths.rs:136",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/connect/paths.rs:95",
+      "location": "rust/shim/src/cli/connect/paths.rs:145",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },

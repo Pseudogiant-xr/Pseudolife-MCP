@@ -251,9 +251,113 @@ fn native_relative_layout_launcher() {
 }
 
 #[cfg(unix)]
-refused_environment! {
-    native_relative_xdg_config: "XDG_CONFIG_HOME";
-    native_relative_xdg_data: "XDG_DATA_HOME";
+#[test]
+fn native_relative_xdg_directories_use_defaults_and_report_once() {
+    let home = Home::new();
+    let health = Health::start();
+    let before = home.tree();
+    for key in ["XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
+        for json in [false, true] {
+            let mut command = home.command(DEAD);
+            command
+                .env(key, "relative-directory")
+                .args(["connect", DEAD, "--dry-run"]);
+            if json {
+                command.arg("--json");
+            }
+            let output = command.output().unwrap();
+            assert_eq!(output.status.code(), Some(4), "{output:?}");
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                text.matches(&format!("{key} is relative; ignored")).count(),
+                1,
+                "{text}"
+            );
+            assert!(text.contains("/health"), "{text}");
+        }
+        let output = home
+            .command(DEAD)
+            .env(key, &home.0)
+            .args(["connect", DEAD, "--dry-run"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(4), "{output:?}");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("ignored"));
+        let normal = home
+            .command(&health.url)
+            .env_remove(key)
+            .args(["connect", &health.url, "--dry-run", "--json"])
+            .output()
+            .unwrap();
+        let relative = home
+            .command(&health.url)
+            .env(key, "relative-directory")
+            .args(["connect", &health.url, "--dry-run", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(relative.status.code(), normal.status.code());
+        let normal: serde_json::Value = serde_json::from_slice(&normal.stdout).unwrap();
+        let relative: serde_json::Value = serde_json::from_slice(&relative.stdout).unwrap();
+        assert_eq!(relative["rows"], normal["rows"]);
+    }
+    assert_eq!(home.tree(), before);
+}
+
+#[cfg(windows)]
+#[test]
+fn native_unc_settings_are_accepted_and_device_settings_are_named() {
+    let home = Home::new();
+    let before = home.tree();
+    for key in ["APPDATA", "LOCALAPPDATA", "USERPROFILE"] {
+        // A missing local share needs no network-share fixture or write.
+        for path in [
+            r"\\127.0.0.1\w38-missing-share\client",
+            r"\\?\UNC\127.0.0.1\w38-missing-share\client",
+        ] {
+            let output = home
+                .command(DEAD)
+                .env(key, path)
+                .args(["connect", DEAD, "--dry-run"])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(4), "{key}: {output:?}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("/health"),
+                "{output:?}"
+            );
+        }
+        let output = home
+            .command(DEAD)
+            .env(key, r"\\.\C:\client")
+            .args(["connect", DEAD, "--dry-run"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(text.contains(key) && text.contains("device"), "{text}");
+    }
+    assert_eq!(home.tree(), before);
+}
+
+#[test]
+fn native_unknown_options_name_only_the_option_and_suggest_the_spelling() {
+    let home = Home::new();
+    for (option, hint) in [
+        ("--token", "--token-file"),
+        ("--tok", "--token-file"),
+        ("--dry", "--dry-run"),
+        ("--mystery", "--help"),
+    ] {
+        let output = home.run(DEAD, &[DEAD, &format!("{option}=fixture-secret")]);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(text.contains(option) && text.contains(hint), "{text}");
+        assert!(!text.contains("fixture-secret"), "{text}");
+    }
 }
 #[cfg(windows)]
 refused_environment! {
@@ -518,6 +622,25 @@ fn native_del_in_token_file_names_the_setting() {
     let text = String::from_utf8_lossy(&output.stderr);
     assert!(
         text.contains("PSEUDOLIFE_MCP_TOKEN_FILE") && text.contains("DEL"),
+        "{text}"
+    );
+    assert!(!text.contains("fixture-secret"));
+    assert_eq!(home.tree(), before);
+    let output = home.run(
+        DEAD,
+        &[
+            DEAD,
+            "--client",
+            "claude-code",
+            "--token-file",
+            path.to_str().unwrap(),
+            "--yes",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("--token-file") && text.contains("DEL"),
         "{text}"
     );
     assert!(!text.contains("fixture-secret"));
