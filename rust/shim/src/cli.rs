@@ -22,6 +22,7 @@ pub mod lease;
 pub mod maintainer;
 mod migrate_flat;
 mod move_cli;
+mod ownership;
 mod pairing;
 pub(crate) mod program_lookup;
 mod pyjson;

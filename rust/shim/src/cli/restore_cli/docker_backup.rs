@@ -16,7 +16,7 @@ use super::{
     bank::{self, Bank, Selectors, Stop},
     docker::{self, Docker},
     execute::Host,
-    interrupt, pathlib,
+    interrupt, ownership_steps, pathlib,
     safety::{self, BACKUP_PREFIX, Target},
 };
 
@@ -129,17 +129,55 @@ fn listed(ran: &docker::Ran) -> Configured {
 
 /// Run the backup under the update lock; the exit code.
 pub(in crate::cli) fn run(request: &Request) -> u8 {
-    let mut host = super::RealHost;
+    run_with(request, &mut super::RealHost)
+}
+
+/// The same backup for a command whose standard output carries its own
+/// answer (the installer's `engine prepare`): every line goes to stderr.
+pub(in crate::cli) fn run_on_stderr(request: &Request) -> u8 {
+    run_with(request, &mut OnStderr(super::RealHost))
+}
+
+struct OnStderr<H: Host>(H);
+
+impl<H: Host> Host for OnStderr<H> {
+    fn info(&mut self, line: &str) {
+        self.0.error(line);
+    }
+    fn error(&mut self, line: &str) {
+        self.0.error(line);
+    }
+    fn health(&mut self, url: &str) -> Option<serde_json::Value> {
+        self.0.health(url)
+    }
+    fn sleep(&mut self, duration: Duration) {
+        self.0.sleep(duration);
+    }
+    fn stamp(&mut self) -> String {
+        self.0.stamp()
+    }
+    fn run_tag(&mut self) -> String {
+        self.0.run_tag()
+    }
+    fn now(&mut self) -> String {
+        self.0.now()
+    }
+    fn host_space(&mut self, directory: &str) -> bank::Step<()> {
+        self.0.host_space(directory)
+    }
+}
+
+fn run_with(request: &Request, host: &mut impl Host) -> u8 {
     let Some(directory) = super::data_dir() else {
         failed(
-            &mut host,
+            host,
             "cannot find your home directory for the update lock and the default backup directory; set HOME (USERPROFILE on Windows) or PSEUDOLIFE_MCP_DATA_DIR, then retry. No backup was written",
         );
         return 2;
     };
     let result = super::with_update_lock(&directory, || match docker::program() {
         Err(message) => {
-            failed(&mut host, &ours(message));
+            failed(host, &ours(message));
             2
         }
         Ok(program) => {
@@ -148,7 +186,7 @@ pub(in crate::cli) fn run(request: &Request) -> u8 {
                 program,
                 interruptible: true,
             };
-            let code = backup(&mut runner, &mut host, request, &directory);
+            let code = backup(&mut runner, host, request, &directory);
             if code != 0 && interrupt::requested() && code != 130 {
                 130
             } else {
@@ -160,7 +198,7 @@ pub(in crate::cli) fn run(request: &Request) -> u8 {
         Ok(code) => code,
         Err(super::LockRefusal::Busy(pid)) => {
             failed(
-                &mut super::RealHost,
+                host,
                 &format!(
                     "another pseudolife-mcp update, restore or backup is running (pid {pid}); nothing was changed. Run this again when it has finished"
                 ),
@@ -169,7 +207,7 @@ pub(in crate::cli) fn run(request: &Request) -> u8 {
         }
         Err(super::LockRefusal::Unavailable(error)) => {
             failed(
-                &mut super::RealHost,
+                host,
                 &format!(
                     "cannot take the update lock in {} ({error}); make that directory writable, then retry. No backup was written",
                     directory.display()
@@ -278,6 +316,22 @@ pub(super) fn backup<D: Docker, H: Host>(
         return refusal(host, stop);
     }
     let stamp = host.stamp();
+    // Before anything is written: can the daemon account use its volumes?
+    // A model cache it cannot use is repaired now; the state after its pair.
+    // A check that cannot run never costs the backup itself: the pair is
+    // written, and the cause is reported with it.
+    let mut unchecked = None;
+    let ownership = match ownership_steps::preflight(&mut bank, &chosen.running, data_dir, &stamp) {
+        Ok(checked) => checked,
+        Err(Stop(_, 130)) => return refusal(host, Stop("interrupted".into(), 130)),
+        Err(Stop(message, _)) => {
+            unchecked = Some(message);
+            None
+        }
+    };
+    if let Some(models) = ownership.as_ref().and_then(|c| c.models.as_ref()) {
+        host.info(&models.line());
+    }
     let target = Target {
         pg: chosen.pg.clone(),
         port: chosen.port,
@@ -333,6 +387,37 @@ pub(super) fn backup<D: Docker, H: Host>(
     }
     host.info(&format!("bank dump:     {}", dump.display()));
     host.info(&format!("state archive: {}", pair.state.display()));
+    if let Some(message) = unchecked {
+        host.error(&format!(
+            "warning: the backup above is complete, but {message}"
+        ));
+    }
+    // The state's repair waits for the verified pair that holds it as it
+    // was. A failed one is reported, but rotation still runs: a scheduled
+    // backup on such a host must not pile up pairs.
+    let mut repair_failed = 0;
+    if let Some(checked) = ownership.as_ref().filter(|c| !c.state_usable()) {
+        match ownership_steps::repair_state(&mut bank, checked, data_dir, &stamp) {
+            Ok(repaired) => host.info(&repaired.line()),
+            // An interrupt stops here: nothing is rotated after a Ctrl-C.
+            Err(Stop(message, 130)) => {
+                failed(
+                    host,
+                    &format!(
+                        "the backup above is complete, but its ownership repair was {message}; nothing was rotated. Run the backup again to finish the repair"
+                    ),
+                );
+                return 130;
+            }
+            Err(Stop(message, code)) => {
+                failed(
+                    host,
+                    &format!("the backup above is complete, but {message}"),
+                );
+                repair_failed = code.max(1);
+            }
+        }
+    }
     if !pair.archive_retries.is_empty() {
         host.info(&format!(
             "state archive taken on attempt {}: tar reported a file in /data changing while it read the earlier attempts ({})",
@@ -347,7 +432,7 @@ pub(super) fn backup<D: Docker, H: Host>(
             host.error(&format!(
                 "warning: rotation was skipped: {reason}, so the files a restore journal names are unknown and nothing was rotated (the new backup is complete)"
             ));
-            return 0;
+            return repair_failed;
         }
     };
     let rotation = rotate(
@@ -379,7 +464,7 @@ pub(super) fn backup<D: Docker, H: Host>(
             path.display()
         ));
     }
-    0
+    repair_failed
 }
 
 /// A killed backup's partial files stop changing; one changed this recently
@@ -692,6 +777,188 @@ mod tests {
             .unwrap_or_default();
         names.sort();
         names
+    }
+
+    fn volume_fake() -> Fake {
+        let pg = json!([{"State": {"Running": true}}]).to_string();
+        Fake {
+            docs: [
+                (
+                    "d".to_owned(),
+                    json!([super::super::execute_tests::volume_daemon()]).to_string(),
+                ),
+                ("p".to_owned(), pg),
+            ]
+            .into_iter()
+            .collect(),
+            ..Fake::default()
+        }
+    }
+
+    #[test]
+    fn an_unusable_state_volume_is_repaired_only_after_its_verified_pair() {
+        let dir = Dir::new();
+        let out = dir.0.join("backups");
+        let mut docker = volume_fake();
+        docker.unusable = vec![("0", "/data/old")];
+        let mut host = ready_host();
+        let code = backup(&mut docker, &mut host, &request(&out), &dir.0);
+        assert_eq!(code, 0, "{:?}", host.errors);
+        let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+        let at = |wanted: &str| {
+            labels
+                .iter()
+                .position(|l| l == wanted)
+                .unwrap_or(usize::MAX)
+        };
+        assert!(at("probe") < at("safety-dump"), "{labels:?}");
+        assert!(
+            at("create safety-helper") < at("repair /data"),
+            "{labels:?}"
+        );
+        assert_eq!(labels[at("repair /data") + 1], "probe", "{labels:?}");
+        // Named by the run's stamp, a unique token and the part.
+        let logs: Vec<PathBuf> = fs::read_dir(dir.0.join("ownership-repair"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        let log = logs[0].clone();
+        let name = log.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with(&format!("ownership-repair-{STAMP}-")) && name.ends_with("-state.log"),
+            "{name}"
+        );
+        assert!(
+            fs::read_to_string(&log)
+                .unwrap()
+                .ends_with("0:0\t/data/old\n")
+        );
+        assert!(
+            host.info
+                .iter()
+                .any(|l| l.contains(&log.display().to_string())),
+            "{:?}",
+            host.info
+        );
+    }
+
+    #[test]
+    fn an_interrupted_state_repair_rotates_nothing() {
+        // Where the repair falls in the calls, from one uninterrupted run.
+        let at = {
+            let dir = Dir::new();
+            let mut docker = volume_fake();
+            docker.unusable = vec![("0", "/data/old")];
+            backup(
+                &mut docker,
+                &mut ready_host(),
+                &request(&dir.0.join("b")),
+                &dir.0,
+            );
+            docker
+                .calls
+                .iter()
+                .position(|c| label(c) == "repair /data")
+                .unwrap()
+        };
+        let dir = Dir::new();
+        let out = dir.0.join("backups");
+        fs::create_dir_all(&out).unwrap();
+        for day in 1..=4 {
+            pair(&out, day, 0, 30);
+        }
+        let before = names(&out).len();
+        let mut docker = volume_fake();
+        docker.unusable = vec![("0", "/data/old")];
+        docker.interrupt_at = Some(at);
+        docker.interruptible = true;
+        let mut host = ready_host();
+        let code = backup(&mut docker, &mut host, &request(&out), &dir.0);
+        assert_eq!(code, 130, "{:?}", host.errors);
+        assert!(
+            !host.info.iter().any(|l| l.starts_with("rotated out:")),
+            "{:?}",
+            host.info
+        );
+        // It names the undo list it wrote before the change, and the step left.
+        let errors = host.errors.join("\n");
+        let logs: Vec<_> = fs::read_dir(dir.0.join("ownership-repair"))
+            .unwrap()
+            .collect();
+        assert_eq!(logs.len(), 1);
+        let log = logs[0].as_ref().unwrap().path();
+        assert!(errors.contains(&log.display().to_string()), "{errors}");
+        assert!(
+            errors.contains("Run the backup again to finish the repair"),
+            "{errors}"
+        );
+        assert_eq!(
+            names(&out).len(),
+            before + 2,
+            "the old pairs stay, the new pair too"
+        );
+    }
+
+    #[test]
+    fn a_healthy_backup_runs_one_probe_and_no_repair_helper() {
+        let dir = Dir::new();
+        let out = dir.0.join("backups");
+        let mut docker = volume_fake();
+        let mut host = ready_host();
+        assert_eq!(
+            backup(&mut docker, &mut host, &request(&out), &dir.0),
+            0,
+            "{:?}",
+            host.errors
+        );
+        let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+        assert_eq!(
+            labels.iter().filter(|l| *l == "probe").count(),
+            1,
+            "{labels:?}"
+        );
+        assert!(
+            !docker
+                .calls
+                .iter()
+                .any(|c| c.iter().any(|a| a == "--cap-add"))
+        );
+        assert!(!dir.0.join("ownership-repair").exists());
+    }
+
+    #[test]
+    fn a_state_the_repair_cannot_fix_fails_after_naming_the_complete_backup() {
+        let dir = Dir::new();
+        let out = dir.0.join("backups");
+        let mut docker = volume_fake();
+        docker.unusable = vec![("999", "/data/theirs")];
+        // A scheduled backup on such a host must still rotate.
+        fs::create_dir_all(&out).unwrap();
+        for day in 1..=4 {
+            pair(&out, day, 0, 30);
+        }
+        let mut host = ready_host();
+        let code = backup(&mut docker, &mut host, &request(&out), &dir.0);
+        assert_ne!(code, 0);
+        assert!(
+            host.info.iter().any(|l| l.starts_with("rotated out:")),
+            "{:?}",
+            host.info
+        );
+        let errors = host.errors.join("\n");
+        assert!(
+            errors.contains("the backup above is complete, but"),
+            "{errors}"
+        );
+        assert!(
+            errors.contains("/data/theirs") && errors.contains("Give it to 10001:10001"),
+            "{errors}"
+        );
+        assert!(
+            names(&out).contains(&format!("pseudolife_state-{STAMP}.tgz")),
+            "the pair stays"
+        );
     }
 
     #[test]
