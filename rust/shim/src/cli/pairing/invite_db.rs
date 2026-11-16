@@ -17,6 +17,8 @@ pub(super) enum DbError {
     Refused(String),
     /// Another `psycopg.Error`, by its class name.
     Failed(&'static str),
+    /// COMMIT was sent but its outcome could not be established.
+    CommitUnknown,
     /// A client-side failure no server error explains (a value this client
     /// cannot decode); `prepare` rules it out before an invite's request.
     Invalid(Refusal),
@@ -37,17 +39,19 @@ const ROW_ERROR: DbError = DbError::Invalid(Refusal::new(
 /// connection (`OperationalError`).
 fn classify(error: &tokio_postgres::Error) -> DbError {
     let Some(db) = error.as_db_error() else {
-        return if error.is_closed() || std::error::Error::source(error).is_some() {
-            DbError::Failed("OperationalError")
-        } else {
-            DbError::Invalid(Refusal::new(
-                "the PostgreSQL invite request failed without a server error; check PSEUDOLIFE_MCP_DATABASE_URL and run invite --list before retrying",
-            ))
-        };
+        return DbError::Failed("OperationalError");
     };
     match db.code().code() {
         "42P01" => DbError::UndefinedTable,
         code => DbError::Failed(super::sqlstate::class_name(code)),
+    }
+}
+
+fn classify_commit(error: &tokio_postgres::Error) -> DbError {
+    if error.as_db_error().is_none() {
+        DbError::CommitUnknown
+    } else {
+        classify(error)
     }
 }
 
@@ -402,7 +406,7 @@ pub(super) async fn revoke(client: &mut Client, name: &str) -> Result<bool, DbEr
     transaction
         .commit()
         .await
-        .map_err(|error| classify(&error))?;
+        .map_err(|error| classify_commit(&error))?;
     Ok(row.is_some())
 }
 
@@ -569,7 +573,7 @@ async fn attempt(
                     transaction
                         .commit()
                         .await
-                        .map_err(|error| classify(&error))?;
+                        .map_err(|error| classify_commit(&error))?;
                     return Ok(Attempt::Done(created));
                 }
                 // Leaving the transaction rolls it back, as the raise does.
@@ -634,7 +638,7 @@ async fn attempt(
     match transaction.commit().await {
         Ok(()) => Ok(Attempt::Done(created)),
         Err(error) if unique_violation(&error) => Ok(Attempt::Collision),
-        Err(error) => Err(classify(&error)),
+        Err(error) => Err(classify_commit(&error)),
     }
 }
 

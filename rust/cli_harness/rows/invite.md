@@ -52,6 +52,12 @@ may sit anywhere among the options; `--` ends option parsing. The bank is reache
 
 ## Native refusals
 
+Connection and session failures use the database-failure exit 1. A COMMIT
+without a server reply also uses exit 1 and state `unknown`: a code may
+already exist, so its diagnostic names `invite --list` and `invite --revoke
+<principal>`. The lost-reply test commits against the disposable test bank
+and drops the reply in a loopback proxy before the client can read it.
+
 There is no Python fallback. Argument errors name the parameter and its repair,
 without echoing its value. Invalid expiry/port values, token or tier maps,
 non-Unicode input, unsupported DSN/TLS policy, connection failures, incompatible

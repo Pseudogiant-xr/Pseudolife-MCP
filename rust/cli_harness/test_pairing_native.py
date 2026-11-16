@@ -189,6 +189,161 @@ def test_valid_schema_still_creates_code_with_requested_grants(candidate, tmp_pa
         daemon.close()
 
 
+@pytest.fixture
+def healthy_daemon():
+    fingerprint = hashlib.sha256(b"pairing-native-fixture").hexdigest()[:16]
+    daemon = FixtureDaemon({"/health": json_body({"status": "ok", "auth": True, "schema": 59, "bank": fingerprint})})
+    try:
+        yield daemon.server.server_address[1]
+    finally:
+        daemon.close()
+
+
+def test_forwarded_invite_url_placeholder_reaches_creation(candidate, tmp_path, bank, healthy_daemon):
+    import json
+    result = invoke(candidate, tmp_path, bank, ["laptop", "--url", "<daemon-url>"], port=healthy_daemon)
+    succeeded = result.returncode == 0
+    assert succeeded, "forwarded placeholder was refused"
+    report = json.loads(result.stdout)
+    placeholder_preserved = report.get("url") == "<daemon-url>"
+    assert placeholder_preserved, "forwarded placeholder was replaced"
+    note_present = any("put its URL in place of <daemon-url>" in note
+                       for note in report.get("notes", []))
+    assert note_present, "forwarded invite omitted its placeholder instruction"
+
+
+@pytest.mark.parametrize("setting", ["PGAPPNAME", "PGCONNECT_TIMEOUT", "PGCLIENTENCODING", "PGDATESTYLE", "PGTZ", "PGGEQO"])
+def test_nonpolicy_pg_setting_can_be_unset(candidate, tmp_path, bank, setting):
+    env = environment(tmp_path)
+    env.update(PSEUDOLIFE_MCP_DATABASE_URL=_bank.url(bank))
+    env[setting] = "fixture-private-secret"
+    result = subprocess.run([candidate, "invite", "--list", "--json"], env=env,
+                            cwd=tmp_path, input=b"", capture_output=True, timeout=20)
+    assert_refusal(result, "unset " + setting)
+    assert invoke(candidate, tmp_path, bank, ["--list"]).returncode == 0
+
+
+@pytest.mark.parametrize("option", ["application_name", "connect_timeout", "client_encoding"])
+def test_nonpolicy_dsn_setting_can_be_removed(candidate, tmp_path, bank, option):
+    env = environment(tmp_path)
+    env["PSEUDOLIFE_MCP_DATABASE_URL"] = _bank.url(bank) + "?" + option + "=fixture-private-secret"
+    result = subprocess.run([candidate, "invite", "--list", "--json"], env=env,
+                            cwd=tmp_path, input=b"", capture_output=True, timeout=20)
+    assert_refusal(result, "remove " + option)
+    assert invoke(candidate, tmp_path, bank, ["--list"]).returncode == 0
+
+
+def test_database_connection_failure_uses_database_exit(candidate, tmp_path):
+    env = environment(tmp_path)
+    env["PSEUDOLIFE_MCP_DATABASE_URL"] = "host=127.0.0.1 port=9 dbname=fixture user=fixture password=fixture-private-secret"
+    result = subprocess.run([candidate, "invite", "--list", "--json"], env=env,
+                            cwd=tmp_path, input=b"", capture_output=True, timeout=20)
+    assert_refusal(result, "connection", code=1)
+
+
+def test_lost_commit_reply_reports_possible_live_code(candidate, tmp_path, bank, healthy_daemon):
+    """Forward the real COMMIT, then discard its success reply before the CLI sees it."""
+    import select
+    import socket
+    import struct
+    import threading
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    connection = conninfo_to_dict(_bank.url(bank))
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    listener.settimeout(20)
+    committed = threading.Event()
+    failed = threading.Event()
+
+    def relay():
+        try:
+            with listener.accept()[0] as client, socket.create_connection(
+                    (connection["host"], int(connection["port"])), timeout=20) as server:
+                # Startup has no message tag; later frontend frames do.
+                startup = True
+                pending = b""
+                dropping = False
+                replies = b""
+                while True:
+                    readable, _, _ = select.select([client, server], [], [], 20)
+                    if not readable:
+                        raise TimeoutError
+                    for source in readable:
+                        chunk = source.recv(65536)
+                        if not chunk:
+                            return
+                        if source is client:
+                            pending += chunk
+                            while len(pending) >= (4 if startup else 5):
+                                offset = 0 if startup else 1
+                                size = struct.unpack("!I", pending[offset:offset + 4])[0] + offset
+                                if len(pending) < size:
+                                    break
+                                frame, pending = pending[:size], pending[size:]
+                                if not startup and frame[:1] == b"Q" and frame[5:].rstrip(b"\0").upper() == b"COMMIT":
+                                    dropping = True
+                                server.sendall(frame)
+                                startup = False
+                        elif not dropping:
+                            client.sendall(chunk)
+                        else:
+                            replies += chunk
+                            while len(replies) >= 5:
+                                size = struct.unpack("!I", replies[1:5])[0] + 1
+                                if len(replies) < size:
+                                    break
+                                frame, replies = replies[:size], replies[size:]
+                                if frame[:1] == b"C" and frame[5:] == b"COMMIT\0":
+                                    committed.set()
+                                    return
+        except (OSError, ValueError):
+            failed.set()
+
+    worker = threading.Thread(target=relay, daemon=True)
+    worker.start()
+    env = environment(tmp_path)
+    env["PSEUDOLIFE_MCP_DATABASE_URL"] = make_conninfo(
+        _bank.url(bank), host="127.0.0.1", port=listener.getsockname()[1], sslmode="disable")
+    try:
+        result = subprocess.run([candidate, "invite", "laptop", "--port", str(healthy_daemon), "--json"],
+                                env=env, cwd=tmp_path, input=b"", capture_output=True, timeout=25)
+    finally:
+        listener.close()
+        worker.join(timeout=25)
+    assert not worker.is_alive() and not failed.is_set(), "commit fault injector failed"
+    assert committed.is_set(), "fault did not occur after a real COMMIT"
+    with _bank.connect(bank) as conn:
+        live = conn.execute("SELECT code_hash IS NOT NULL FROM principals WHERE principal='laptop'").fetchone()
+    assert live == (True,), "test did not leave the committed code in its disposable bank"
+    assert_refusal(result, "a pairing code may have been created", code=1)
+    actionable = b"invite --list" in result.stdout and b"invite --revoke" in result.stdout
+    assert actionable, "ambiguous COMMIT has no check or revocation step"
+    not_unchanged = b"Nothing was changed" not in result.stdout
+    assert not_unchanged, "ambiguous COMMIT falsely promises no change"
+
+
+@pytest.mark.parametrize("matches", [True, False])
+def test_cleanup_fixture_recording_redacts_only_proven_file_token(matches):
+    import base64
+    import json
+    from .rows import pair
+    token = "a" * 43
+    digest = hashlib.sha256((token if matches else "different").encode()).hexdigest()
+    def encode(value):
+        return base64.b64encode(value.encode()).decode()
+    observation = {"files": {"pairing-12345678.token": "file:" + encode(token)},
+                   "stdout": encode(token), "stderr": "",
+                   "requests": [{"method": "POST", "body": json.dumps({"token_sha256": digest}),
+                                 "headers": {"x-fixture-digest-of-a-token-file": "matches"}}]}
+    # A leaked command-output token must remain visible to comparison, not be hidden.
+    pair.cleanup_fixture_token(observation)
+    expected = "<token>" if matches else token
+    assert observation["files"]["pairing-12345678.token"] == "file:" + encode(expected)
+    assert observation["stdout"] == encode(token)
+
+
 @pytest.mark.parametrize("setting,representable", [
     ("PGHOST", True), ("PGPORT", True), ("PGDATABASE", True), ("PGUSER", True),
     ("PGSSLMODE", True), ("PGSSLROOTCERT", True),

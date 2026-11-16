@@ -51829,12 +51829,12 @@
   "defer-refused-login": {
    "home": null,
    "utc_offset": 0,
-   "exit": 4,
+   "exit": 1,
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgUG9zdGdyZVNRTCBjb25uZWN0aW9uIHNlbGVjdGVkIGJ5IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBmYWlsZWQ7IHZlcmlmeSB0aGF0IGNvbm5lY3Rpb24gYW5kIGl0cyBjcmVkZW50aWFscyBiZWZvcmUgcmV0cnlpbmcK",
    "window": [
-    1794858335.3740242,
-    1794858335.4308302
+    1794866425.3608532,
+    1794866425.426999
    ],
    "requests": [],
    "arm": "rust",
@@ -51844,7 +51844,7 @@
    "before_modes": {
     "cwd": "0o755"
    },
-   "argv_port": "42637",
+   "argv_port": "37789",
    "ttl": 900,
    "seed_rows": [
     {
@@ -51852,64 +51852,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1794858305.037922,
+     "paired_at": 1794866425.087671,
      "principal": "bravo",
-     "created_at": 1794858305.030986,
+     "created_at": 1794866425.077934,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "8f7cf66136d7e1b76ac6d9c5235cb2a3e3ccf98191e3cd9f64bbb931424d1f5e"
+     "paired_code_hash": "9490405443716adebedc07081fc294fa7ef4b1b4b83b4ef7608ea17d72fb13dc"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "b878245dd01fb596af24049db08d4e3968639467cc805f021feb3f37e25ea196",
+     "code_hash": "f3b3480e854b2ae84bc05f235ebde203afcdd99f45787f924bbc9f847b3ee349",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1794858305.046958,
+     "created_at": 1794866425.098881,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794861905.046956,
+     "code_expires_at": 1794870025.098879,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "289e1a2e82cb03a976990fcb5fbf77c6735c6142b4ff1e9886a76e6c43fef285",
+     "code_hash": "c9961482e3e692bc3940212852016519d2d301f0035fb96fe39a1fd1c087c1cd",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1794858305.04586,
+     "created_at": 1794866425.097785,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794858245.045857,
+     "code_expires_at": 1794866365.097783,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "ed60dfad0dc98743490211085fd3f08468bfe1d83d64f1dc2a772d763eec5d0d",
+     "code_hash": "21de722cfbe2ad0ad72eaaed31f9c7aad4c5943e56395aa9bb29c0fced455042",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1794858305.04898,
+     "created_at": 1794866425.100647,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794859205.048978,
+     "code_expires_at": 1794867325.100645,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "cf371517ab503297c609d363b0d876d9dedd324ba44acc84c0ebae88daecc394",
+     "code_hash": "21cb9808341963222c64a50a5da2cff4696c61bbeb2e6e687283e602dd1bd5a6",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1794858305.029824,
+     "created_at": 1794866425.076611,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794859205.029789,
+     "code_expires_at": 1794867325.076565,
      "paired_code_hash": null
     },
     {
@@ -51919,8 +51919,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1794858305.043466,
-     "revoked_at": 1794858305.044312,
+     "created_at": 1794866425.095139,
+     "revoked_at": 1794866425.096104,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -73687,10 +73687,10 @@
    "candidate_sha256": "209efe72f65588b9b6e4ebf1241a991ab589d174652ad9515079b4b8821a07c4"
   },
   "defer-refused-login": {
-   "commit": "f91ec40712985cca84d7a7a4af4835251b17ed02",
+   "commit": "15327cede1ada6b242946ff375ea41d1f6a03aac",
    "rust_tree": "modified",
    "platform": "linux",
-   "candidate_sha256": "209efe72f65588b9b6e4ebf1241a991ab589d174652ad9515079b4b8821a07c4"
+   "candidate_sha256": "ba281f370a09969bd67c9ca4d338cbb4d5ee0657ab32be7a4e220e78dcafaaa3"
   },
   "defer-repeated-option": {
    "commit": "f91ec40712985cca84d7a7a4af4835251b17ed02",

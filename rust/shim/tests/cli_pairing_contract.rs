@@ -751,7 +751,7 @@ fn native_refusal_cleanup_keeps_token_and_names_recovery() {
     let hook_held = Arc::clone(&held);
     let fixture = daemon_with_hook(
         r#"{"status":"ok","auth":true}"#,
-        vec!["400"],
+        vec!["429"],
         Some(Box::new(move || {
             #[cfg(windows)]
             {
@@ -778,7 +778,8 @@ fn native_refusal_cleanup_keeps_token_and_names_recovery() {
     );
     let mut cmd = command(&home.0, "pair");
     cmd.args([fixture.url.as_str(), "abcd-efgh-jkmn", "--token-file"])
-        .arg(&target);
+        .arg(&target)
+        .arg("--json");
     let output = run(cmd, b"");
     #[cfg(unix)]
     {
@@ -787,6 +788,20 @@ fn native_refusal_cleanup_keeps_token_and_names_recovery() {
     }
     held.lock().unwrap().take();
     let token = std::fs::read_to_string(&target).unwrap();
+    assert_eq!(output.status.code(), Some(5));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["state"] == "cleanup_failed",
+        "cleanup state was lost"
+    );
+    assert!(
+        report["refusal_state"] == "rate_limited",
+        "original refusal state was lost"
+    );
+    assert!(
+        report["token_file"] == target.to_str().unwrap(),
+        "JSON lost token path"
+    );
     let combined = [output.stdout, output.stderr].concat();
     let diagnostic = String::from_utf8_lossy(&combined);
     assert!(

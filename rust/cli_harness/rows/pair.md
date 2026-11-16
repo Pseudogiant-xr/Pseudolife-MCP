@@ -62,10 +62,16 @@ validation, authenticated health checks, redemption and grants remain unchanged.
 
 A `/health` response past the nesting limit refuses before creating a token.
 If a refused redemption cannot remove its token file, the file remains and the
-report has state `cleanup_failed`, exit 5, the exact path and the instruction
+report has state `cleanup_failed`, exit 5, the original `refusal_state`, the exact path and the instruction
 to remove that unused file before retrying. The error never includes its token
 or the pairing code. `native_refusal_cleanup_keeps_token_and_names_recovery`
 checks the locked-file path on Windows and a non-writable directory on Unix.
+
+The `pair-cleanup-fixture-token` recording rule redacts only the retained
+fixture file's contents, after its hash matches the recorded POST and the
+daemon's in-flight file check. It never redacts stdout or stderr, so a token
+printed by the command remains a failure. The existing `pair-token` rule
+still validates the candidate's file and normalizes its random name on replay.
 
 ## Other platform differences
 

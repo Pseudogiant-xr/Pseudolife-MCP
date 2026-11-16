@@ -104,6 +104,7 @@ pub(super) fn refusal(error: Refusal, json: bool) -> u8 {
 struct Report {
     url: Option<String>,
     state: &'static str,
+    refusal_state: Option<&'static str>,
     principal: Option<String>,
     tier: Option<String>,
     bank: Option<String>,
@@ -118,6 +119,7 @@ impl Report {
         Self {
             url: url.map(str::to_owned),
             state: "",
+            refusal_state: None,
             principal: None,
             tier: None,
             bank: None,
@@ -137,7 +139,7 @@ impl Report {
 
     fn json(&self) -> J {
         let text = |value: &Option<String>| value.clone().map_or(J::Null, J::Str);
-        J::Dict(vec![
+        let mut fields = vec![
             ("url".into(), text(&self.url)),
             ("state".into(), J::Str(self.state.into())),
             ("principal".into(), text(&self.principal)),
@@ -150,7 +152,11 @@ impl Report {
             ),
             ("error".into(), text(&self.error)),
             ("exit".into(), J::Int(self.exit.to_string())),
-        ])
+        ];
+        if let Some(state) = self.refusal_state {
+            fields.push(("refusal_state".into(), J::Str(state.into())));
+        }
+        J::Dict(fields)
     }
 
     /// `_emit`.
@@ -507,8 +513,9 @@ async fn redeem(
     let refused = |mut report: Report, state: &'static str, error: String| {
         match std::fs::remove_file(&target) {
             Err(problem) if problem.kind() != std::io::ErrorKind::NotFound => {
+                report.refusal_state = Some(state);
                 let message = format!(
-                    "{error}. The unused token file {shown} could not be removed ({}); remove that file before retrying pairing",
+                    "pairing was {state}: {error}. The unused token file {shown} could not be removed ({}); remove that file before retrying pairing",
                     token_file::os_class(&problem)
                 );
                 Ok(report.done("cleanup_failed", EXIT_UNKNOWN, Some(message)))

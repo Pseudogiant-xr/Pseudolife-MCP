@@ -322,6 +322,34 @@ def pair_token(obs: dict) -> None:
         _swap_all(obs, next(iter(names)), b"pairing-<hex>.token")
 
 
+@normalize.rule("pair-cleanup-fixture-token")
+def cleanup_fixture_token(obs: dict) -> None:
+    """Record a retained fixture file without its token; never redact output.
+
+    The POST digest and the daemon's in-flight file check must both agree.
+    Replay still checks token contents against that digest on the candidate.
+    """
+    posts = [r for r in obs.get("requests", []) if r.get("method") == "POST"]
+    if not posts or any(p["headers"].get("x-fixture-digest-of-a-token-file") != "matches"
+                        for p in posts):
+        return
+    try:
+        hashes = {json.loads(p["body"])["token_sha256"] for p in posts}
+    except (ValueError, KeyError, TypeError):
+        return
+    if len(hashes) != 1:
+        return
+    digest = next(iter(hashes))
+    for rel, value in obs.get("files", {}).items():
+        if rel.endswith(".token") and value.startswith("file:"):
+            token = base64.b64decode(value[5:]).decode("utf-8", "replace")
+            if _TOKEN.fullmatch(token) and hashlib.sha256(token.encode()).hexdigest() == digest:
+                obs["files"][rel] = "file:" + base64.b64encode(b"<token>").decode()
+
+
+normalize.RECORD_RULES.add("pair-cleanup-fixture-token")
+
+
 # ── cases ───────────────────────────────────────────────────────────────────
 
 def _owner_only(home: Path) -> dict:
@@ -534,7 +562,7 @@ def cases() -> list[core.Case]:
     # A refused redemption whose token file is held without delete sharing:
     # preserve it and report the recovery path.
     live("refusal-cleanup-fails", [CODE], default=400, hold_on_post=True,
-         rules=("pair-token",), platforms=("windows",))
+         rules=("pair-cleanup-fixture-token", "pair-token"), platforms=("windows",))
 
     # Former fallback inputs now have native outcomes; retain their case IDs.
     add(case("defer-https", [core.DEAD_DAEMON_URL.replace("http:", "https:"), CODE]))

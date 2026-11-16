@@ -765,7 +765,15 @@ const NO_TABLE: &str = "this bank has no principals table yet (schema v53): upda
 
 fn database_error(error: crate::pg::Error) -> Refusal {
     use crate::pg::Error;
-    Refusal::new(match error {
+    let exit = if matches!(
+        &error,
+        Error::Connection | Error::SessionSetup | Error::Shutdown
+    ) {
+        EXIT_FAILED
+    } else {
+        EXIT_REFUSED
+    };
+    let message = match error {
         Error::InvalidDsn => {
             "PSEUDOLIFE_MCP_DATABASE_URL is not a valid PostgreSQL connection string; supply a PostgreSQL URL or libpq keyword connection string"
         }
@@ -780,6 +788,15 @@ fn database_error(error: crate::pg::Error) -> Refusal {
         }
         Error::UnsupportedOption(option) if option == "sslcrl" => {
             "PSEUDOLIFE_MCP_DATABASE_URL requires an unsupported sslcrl revocation policy; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        Error::UnsupportedOption(option) if option == "application_name" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has unsupported application_name; remove application_name from that connection string and retry"
+        }
+        Error::UnsupportedOption(option) if option == "connect_timeout" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has unsupported connect_timeout; remove connect_timeout from that connection string and retry"
+        }
+        Error::UnsupportedOption(option) if option == "client_encoding" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has unsupported client_encoding; remove client_encoding from that connection string and retry"
         }
         Error::UnsupportedOption(_) => {
             "PSEUDOLIFE_MCP_DATABASE_URL contains an unsupported connection option; keep the required setting and ask the maintainer to add support before retrying"
@@ -812,7 +829,8 @@ fn database_error(error: crate::pg::Error) -> Refusal {
         Error::Shutdown => {
             "the PostgreSQL connection could not close cleanly; run invite --list to verify the outcome before retrying"
         }
-    })
+    };
+    Refusal { message, exit }
 }
 
 // Only known setting names enter diagnostics: a driver-supplied name can
@@ -826,6 +844,22 @@ fn ambient_error(control: &str) -> &'static str {
             }
         };
     }
+    macro_rules! removable {
+        ($($name:literal),* $(,)?) => {
+            match control.to_ascii_uppercase().as_str() {
+                $($name => return concat!($name, " is unsupported by this invite client; unset ", $name, " for this command and retry"),)*
+                _ => {},
+            }
+        };
+    }
+    removable!(
+        "PGAPPNAME",
+        "PGCONNECT_TIMEOUT",
+        "PGCLIENTENCODING",
+        "PGDATESTYLE",
+        "PGTZ",
+        "PGGEQO"
+    );
     match control.to_ascii_uppercase().as_str() {
         "PGHOST" => {
             "PGHOST is unsupported as an ambient setting for invite; move its required value to host in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
@@ -861,9 +895,6 @@ fn ambient_error(control: &str) -> &'static str {
             "PGSERVICEFILE",
             "PGSYSCONFDIR",
             "PGOPTIONS",
-            "PGAPPNAME",
-            "PGCONNECT_TIMEOUT",
-            "PGCLIENTENCODING",
             "PGCHANNELBINDING",
             "PGTARGETSESSIONATTRS",
             "PGLOADBALANCEHOSTS",
@@ -877,9 +908,6 @@ fn ambient_error(control: &str) -> &'static str {
             "PGMAXPROTOCOLVERSION",
             "PGREQUIRESSL",
             "PGREALM",
-            "PGDATESTYLE",
-            "PGTZ",
-            "PGGEQO",
             "PGSSLCERT",
             "PGSSLKEY",
             "PGSSLCRL",
@@ -898,6 +926,10 @@ fn database_failure(report: &mut Report, error: DbError) -> u8 {
         DbError::UndefinedTable => report.fail(EXIT_REFUSED, NO_TABLE),
         DbError::Refused(message) => report.fail(EXIT_REFUSED, &format!("{message}. Nothing was changed")),
         DbError::Failed(class) => report.fail(EXIT_FAILED, &format!("the database refused or lost the invite operation ({class}); check PSEUDOLIFE_MCP_DATABASE_URL and run invite --list before retrying")),
+        DbError::CommitUnknown => {
+            report.set("state", J::Str("unknown".into()));
+            report.fail(EXIT_FAILED, "the PostgreSQL COMMIT reply was lost: a pairing code may have been created, or the requested revocation or ownership change may have committed; run invite --list to check the principal, and use invite --revoke <principal> to invalidate its code and token before retrying")
+        }
         DbError::Invalid(error) => report.fail(error.exit, error.message),
     }
 }
