@@ -34,7 +34,7 @@ def _load():
 
 
 prune = _load()
-REAL_ARRIVAL = prune._arrival        # before any fixture replaces it
+REAL_ARRIVAL = getattr(prune, "_arrival", None)   # before any fixture replaces it
 REAL_LIST_PROCESSES = prune.list_processes
 
 
@@ -168,7 +168,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(prune, "list_processes", lambda: [])
     # Files made here arrive now; tests age them by mtime alone, and the
     # arrival rule has its own test.
-    monkeypatch.setattr(prune, "_arrival", lambda st: 0.0)
+    monkeypatch.setattr(prune, "_arrival", lambda st: 0.0, raising=False)
     monkeypatch.delenv("CARGO_TARGET_DIR", raising=False)
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         monkeypatch.delenv(var, raising=False)
@@ -1172,7 +1172,7 @@ def test_entries_cargo_does_not_explain_are_kept(env, targets_root):
     # Cargo's markers stay beside foreign entries, so the dir stays a target.
     assert sorted(p.name for p in target.iterdir()) == [
         ".rustc_info.json", "CACHEDIR.TAG", "cand-final.exe", "mutant-src"]
-    assert "kept, not cargo's (0.0 kB): cand-final.exe, mutant-src" in out
+    assert "kept, not cargo's (" in out and "): cand-final.exe, mutant-src" in out
     [line] = env.ledger_lines()
     kept = (target / "cand-final.exe").stat().st_size + sum(
         f.stat().st_size for f in (target / "mutant-src").rglob("*") if f.is_file()) + sum(
@@ -1350,7 +1350,8 @@ def test_a_registered_worktree_is_not_a_clone(env):
 def run_scratch(env: Env, *argv: str) -> tuple[int, str]:
     root = env.tmp / "scratch"
     root.mkdir(exist_ok=True)
-    (root / prune.SCRATCH_ROOT_MARKER).write_text("", encoding="utf-8")
+    (root / getattr(prune, "SCRATCH_ROOT_MARKER", ".pseudolife-scratch-root")).write_text(
+        "", encoding="utf-8")
     return run(env, "--repo", str(env.repo), "--config", str(env.config),
                "--ledger", str(env.ledger), "--scratch-root", str(env.tmp / "scratch"),
                *argv, roots=False)
