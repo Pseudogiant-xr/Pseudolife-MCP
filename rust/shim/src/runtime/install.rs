@@ -312,7 +312,7 @@ impl Drop for Activation {
         }
     }
 }
-fn rename_retry(source: &Path, target: &Path) -> Result<()> {
+pub(crate) fn rename_retry(source: &Path, target: &Path) -> Result<()> {
     for attempt in 0..5 {
         match fs::rename(source, target) {
             Ok(()) => return Ok(()),
