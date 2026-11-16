@@ -717,7 +717,10 @@ pass it.
 itself (or, on a Rust-only head, to be skipped by a successful `scope`,
 below). A job still running on the new head is not waited for when it
 concluded `SUCCESS` on the closed batch's head. A job that was skipped,
-neutral, failed, cancelled or missing there must pass on the new head. A
+neutral, failed, cancelled or missing there must pass on the new head,
+where a skipped or neutral result counts as a pass as it does for any
+merge (scope skips a lane once the dropped change that triggered it is
+gone; the tool's `AFTER_DROP_SKIP_PASSES` demands a success instead). A
 required lane the new head never reported counts as carried only once
 every workflow run on the new head has finished. A job that did not pass on
 the closed head and has not appeared on the new one is waited for; once

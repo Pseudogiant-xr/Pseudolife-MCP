@@ -2643,6 +2643,14 @@ def _after_drop_lines(record: dict) -> list[str]:
 
 
 AFTER_DROP_SCOPE = AFTER_DROP_SCOPE_KEY[-1]
+# Whether a job that did not succeed on the closed head passes on the new
+# one by a skipped or neutral conclusion, as `merge` counts a pass anywhere
+# (scope skips a lane once the dropped change that triggered it is gone),
+# and whether one skipped or neutral there carries when absent here
+# (condition 2 of the conductor's plan). False demands a success on the new
+# head for both. Raised with the conductor, 17 November 2026, after Codex
+# asked for False.
+AFTER_DROP_SKIP_PASSES = True
 
 
 def _after_drop_standing(rollup: list[dict] | None) -> list[dict]:
@@ -2774,6 +2782,13 @@ def _after_drop_merge(plan: Plan, view: dict) -> tuple[list[str], list[str], lis
     for key, check in sorted(new.items(), key=lambda kv: _check_name(kv[1])):
         name = _check_name(check)
         if not _unfinished(check):
+            if (not AFTER_DROP_SKIP_PASSES and _check_state(check) != "SUCCESS"
+                    and passed_old(key) is None and key != AFTER_DROP_TEST_KEY):
+                raise Refusal(f"{name} was {_check_state(check).lower()} on #{plan.pr}'s head "
+                              f"and did not succeed on #{record['batch']}'s, so neither head "
+                              "shows it passing; a batch built after a drop needs a success "
+                              f"here ({AFTER_DROP_DOC}). Close it and build again without "
+                              "--after-drop")
             anew.append(f"{name}: {(check.get('conclusion') or check.get('state') or '').lower()} "
                         f"on this head ({url(check)})")
             continue
@@ -2808,7 +2823,7 @@ def _after_drop_merge(plan: Plan, view: dict) -> tuple[list[str], list[str], lis
         if key in new or name in REQUIRED_CHECKS:
             continue
         state = "" if _unfinished(check) else _check_state(check)
-        if state in PASSING:
+        if state == "SUCCESS" or (AFTER_DROP_SKIP_PASSES and state in PASSING):
             continue
         if not settled:
             waiting.append(f"{name} (not reported here yet; it did not pass on "

@@ -6133,3 +6133,51 @@ def test_after_drop_merge_holds_any_non_pass_until_a_success(world, capsys, firs
 
     assert "no finished rerun has replaced the failure" in capsys.readouterr().err
     assert _merge_calls(world) == []
+
+
+def _skipped_lane_after_a_failure(world, capsys) -> str:
+    """#901's head skips `test-lite-windows`, which failed on #900's."""
+    return _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest"),
+        _run("test-lite-windows", "SKIPPED")],
+        rollup=[_run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), _run("test-lite-windows", "FAILURE")])
+
+
+def test_after_drop_counts_a_skip_as_a_pass_as_merge_does(world, capsys):
+    # AFTER_DROP_SKIP_PASSES (True, pending the conductor): scope skips a
+    # lane once the dropped change that triggered it is gone.
+    _skipped_lane_after_a_failure(world, capsys)
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+
+
+def test_after_drop_demands_a_success_when_skips_do_not_pass(world, capsys, monkeypatch):
+    # Codex review of f68d07e7 (P1): with the flag off, a lane that failed
+    # on the closed head and was skipped here refuses.
+    monkeypatch.setattr(integrate, "AFTER_DROP_SKIP_PASSES", False)
+    _skipped_lane_after_a_failure(world, capsys)
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "test-lite-windows was skipped on #901's head and did not succeed on #900's" in err
+    assert _merge_calls(world) == []
+
+
+@pytest.mark.parametrize("skips_pass", [True, False])
+def test_after_drop_carries_an_absent_job_skipped_on_the_closed_head_only_by_the_flag(
+        world, capsys, monkeypatch, skips_pass):
+    monkeypatch.setattr(integrate, "AFTER_DROP_SKIP_PASSES", skips_pass)
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest")],
+        rollup=[_run("scope"), _run("test", "FAILURE"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), _run("test-lite-macos", "SKIPPED")])
+
+    code = integrate.main(["merge"])
+
+    err = capsys.readouterr().err
+    if skips_pass:
+        assert code == 0, err
+    else:
+        assert code == 2 and "test-lite-macos did not pass on #900's head (skipped)" in err
