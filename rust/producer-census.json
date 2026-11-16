@@ -20,7 +20,7 @@
     "docs/dev/python-retirement.md": "d830ecf284b1a24a328b255b14291f59a2f0d10724ecfe6511dfb96a5551acb0",
     "docs/dev/release-assets.md": "ecabfc6658aba8208b37f4e41c4fa5a060eca3985ba432fba0828b22056aaec5",
     "docs/dev/run-rust-beside-python.md": "12d52aa9774f05ae699cd67277173b04ff1b837b1772c2c96700b2fb0b110b15",
-    "docs/dev/worktree-retention.md": "23464a303672be4f546ecbf7c8e357c41c4bd2c684202e05cfebec6df78d7355",
+    "docs/dev/worktree-retention.md": "3a20b61f9927cbecedb3ec3f960e57922663daf1f7e82a111c61e3673a794e6e",
     "docs/evidence/rust-stream-c-episode-20261009.json": "6dda143104a5b745eb322041190496caa9af3b61a219620c41633f6477d15079",
     "docs/guide/agent-isolation.md": "e8509e0c6567426a88fad7c301b0f06ac8d69d19f9724ffe9a4643ece7f7d6e4",
     "docs/guide/benchmarks.md": "577a6a8230de0d57351e3e57262bb2b5385b27e6292bfc131c21c3522330fb97",
@@ -286,7 +286,7 @@
     "ops/prune-build-cache.sh": "eb94cec1e95b37b10441b1b8ef1a81ca42a75629f5f9ce6e0343bf8bd3fe70a2",
     "ops/prune-rollbacks.ps1": "d4652ccdfda2dad5f57c526f75f58a0d88c1de6407b442e369d18d9ccfab6e69",
     "ops/prune-rollbacks.sh": "8c126a14674839c891048cab020d9bf637c09387e516f08e9614067eddbe78e5",
-    "ops/prune_worktrees.py": "f6d640160c7e48a60890e029046bbc83ddc39d3d167b05873e928babe2766bc3",
+    "ops/prune_worktrees.py": "016b40fd98f652d2a46b281602f7796ef1b9d7000b7a3c6c672958d19e6f8f3b",
     "ops/pytest_failure_lines.py": "e95e13a47e8f12bb4ddf15246f7da2920aedd2fd38018307894c184155a48ec6",
     "ops/pytest_retry_once.py": "213f6297068459a9296bbba26fc7e4d19fbce78b85819e61b70349b7e86b5e2a",
     "ops/register_claude_desktop.py": "a653438874cb1af0ec859083239ba35adc5e74747d3aceae055640f80ee37534",
@@ -561,10 +561,11 @@
     "rust/shim/src/cli/transfer/sql.rs": "faeeb860b38a10be0a29158c06630d814b0339df350d015611bccd62976fb717",
     "rust/shim/src/cli/tunnel/doctor_section.rs": "81f8198ff7788c460483c7cf72e9b49a7cea3a47207ccd5f478e8142b5330225",
     "rust/shim/src/cli/tunnel/dpapi.rs": "2084fe2306db68a3477538618a7ab85b1b5df92e7d338fe6f465a0caaeec7227",
-    "rust/shim/src/cli/tunnel/mod.rs": "e186d9cb45b6dea0d2a0d98f8c5c0effa6b122d2d7f74fe5c5ed6dbb8ba3eba5",
+    "rust/shim/src/cli/tunnel/mod.rs": "1da68ec57ae6dfa27bce71ff2829c546b8bc9770dbeee42b6edc2ab526316de3",
     "rust/shim/src/cli/tunnel/record.rs": "4ed2e3bddf63e8c30638c5d615381a43818622b408d69528fa4068546cfb63bb",
-    "rust/shim/src/cli/tunnel/store.rs": "1843b2e217b6c9762af3280d56558fd74aa4299fbb7ebda1e680cd51338506e8",
+    "rust/shim/src/cli/tunnel/store.rs": "2c7129dcd2bac9d4a964f86e00924fc431e32ce8892152a49cfd5c01fb99d9f5",
     "rust/shim/src/cli/tunnel/syntax.rs": "bafbf6307fdd29df5be69c3c4f42296284480e3cef37f92147b36101c38353de",
+    "rust/shim/src/cli/tunnel/vendor.rs": "ab958959516c0977d7e3eff35e552658c08cc1ccdf8c4042acb0b5fcd8e45f38",
     "rust/shim/src/cli/update/backup.rs": "3223732ac30afc87c6bc41e001f7604734662af4cdacf6e13201073af9ac35d6",
     "rust/shim/src/cli/update/clients/codex.rs": "27166a7a27d10c3911ddda3a11207dfe9395f090b07b29b8a43f03a1d24db631",
     "rust/shim/src/cli/update/clients/command.rs": "081f499c99d3b1cc789716319075509681af78e3d7794dc8a4490d404d0a8db2",
@@ -623,9 +624,9 @@
     "rust/shim/src/recovery.rs": "51d7b040f8000e61e5cb22dbea7e7a0c1db8cd5d6481e0445fa670c93db7c201",
     "rust/shim/src/runtime/cli.rs": "3a1e78edd8c7f5d500733df5f9338f01a0f414046660293f202fb62235f0ff5f",
     "rust/shim/src/runtime/config_file.rs": "7d67d1c55137efc804ffa0867d352eab4b534ca017bf76aadb482acc0bebe1ab",
-    "rust/shim/src/runtime/install.rs": "ceadd5900d68789af75b7a668558babcb3b00a863755239e92b953bb3354beb9",
+    "rust/shim/src/runtime/install.rs": "5e0270ce65e84031fff598d55e5f677e1219f3d4f0ec5549665a17fdc9fee8e2",
     "rust/shim/src/runtime/launch.rs": "b199f086eddcb7ebacef42ef05737256c4f3a18e0aadf770aee1a8d54c874847",
-    "rust/shim/src/runtime/mod.rs": "b932f846efd5e72d65f6a28cbc68a3b794aaf52e05208709b7d13b12bf0d1235",
+    "rust/shim/src/runtime/mod.rs": "414f24c840cf4e8196008046715351b8d610bb59c9bddea707c4a9e39fead7eb",
     "rust/shim/src/runtime/prune.rs": "6209d890a782596e70d9e8bb48c01ba519476d7af89dc36a859f61cce45611f5",
     "rust/shim/src/runtime/registrations.rs": "5d678ce803acf8e785c9e84d7adae9d28764d1ae89ace339826254f731dc9d3a",
     "rust/shim/src/runtime/tests.rs": "ef2f61182b352120e08e4c512df7115e5e1acb66d8095960ceff3eb8fb488c94",
@@ -40560,7 +40561,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:747",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:748",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49428,7 +49429,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:723",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:724",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53495,7 +53496,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/tunnel/mod.rs:722",
+          "location": "rust/shim/src/cli/tunnel/mod.rs:723",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -117562,17 +117563,17 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/prune_worktrees.py:240",
+      "location": "ops/prune_worktrees.py:2122",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/prune_worktrees.py:790",
+      "location": "ops/prune_worktrees.py:2408",
       "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
-      "location": "ops/prune_worktrees.py:959",
+      "location": "ops/prune_worktrees.py:332",
       "reason": "request target supplied dynamically or external"
     },
     {
@@ -124653,21 +124654,26 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:722",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:723",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:723",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:724",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/tunnel/mod.rs:747",
+      "location": "rust/shim/src/cli/tunnel/mod.rs:748",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/tunnel/vendor.rs:331",
+      "reason": "request target supplied dynamically or external"
     },
     {
       "dynamic": "unresolved",
