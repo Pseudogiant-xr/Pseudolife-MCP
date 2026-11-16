@@ -1730,3 +1730,36 @@ def test_every_git_call_turns_fsmonitor_off(env):
     rc, out = run(env)
     assert rc == 0, out
     assert not marker.exists()
+
+
+# --- final Codex review ------------------------------------------------------
+
+def test_a_clone_whose_config_names_a_signature_program_is_kept(env):
+    """log.showSignature makes git log and reflog run gpg.program."""
+    clone = _clone(env, "signing")
+    marker = env.tmp / "gpg-ran.txt"
+    _git(clone, "config", "log.showSignature", "true")
+    _git(clone, "config", "gpg.program", f"touch {marker.as_posix()}")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists() and not marker.exists()
+    assert "which can run a program" in out
+
+
+def test_a_bare_repository_in_a_scratch_dir_is_kept(env):
+    bare = env.tmp / "scratch" / "mirror.git"
+    bare.parent.mkdir(parents=True, exist_ok=True)
+    _git(env.tmp, "init", "-q", "--bare", str(bare))
+    _backdate(bare)
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert bare.exists()
+    assert "holds a git repository" in out
+
+
+def test_many_commits_are_checked_without_a_long_command_line(env):
+    """Windows caps a command line near 32,000 characters; 900 commits in
+    argv overflowed it and aborted the sweep."""
+    sha = _git(env.repo, "rev-parse", "origin/master")
+    assert prune.all_on_master(str(env.repo), [sha] * 900) is None

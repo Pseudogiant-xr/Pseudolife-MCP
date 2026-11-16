@@ -197,11 +197,12 @@ worktree, is deleted (renamed aside, then removed) when all of these hold:
   worktree (their commits and index live in its `.git`).
 - Its own `.git/config` sets nothing under which git runs a program or
   reads another file (`core.fsmonitor`, `core.hooksPath`, filters, diff
-  textconv or command, merge drivers, `include`, `credential`,
+  textconv or command, `diff.external`, merge drivers, `include`,
+  `credential`, `gpg.*`, `log.showSignature`, `core.alternateRefsCommand`,
   `core.worktree`, `core.bare = true`, `extensions.worktreeConfig`), and it
-  has no `config.worktree`. A clone
-  that sets one is kept and never inspected further. Every git call the
-  script makes also turns `core.fsmonitor` off.
+  has no `config.worktree`. A clone that sets one is kept and never
+  inspected further. Every git call the script makes also turns
+  `core.fsmonitor` and `log.showSignature` off.
 
 The home dir may be a clone root for the same reason as a target root.
 
@@ -213,7 +214,8 @@ Each direct child of a `--scratch-root` is deleted when all of these hold:
   (default 14).
 - It holds no link.
 - No running process names it.
-- It holds nothing kept for ever: no `.git` (a checkout), no `pyvenv.cfg`
+- It holds nothing kept for ever: no `.git` (a checkout), no git repository
+  (a dir holding `HEAD`, `objects` and `refs`, such as a bare mirror), no `pyvenv.cfg`
   (a virtual environment), no `*.log` or `*.jsonl` file, nothing named for
   evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included, no
   results, database, model or program (`*.json`, `*.csv`, `*.tsv`,

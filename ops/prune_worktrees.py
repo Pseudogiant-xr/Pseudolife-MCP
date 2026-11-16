@@ -212,9 +212,10 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
 
 def git(cwd: str, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
     env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
-    # core.fsmonitor names a program git runs on status; never one here.
+    # core.fsmonitor and gpg.program (through log.showSignature) name
+    # programs git runs on status and on reflog or log; never one here.
     return subprocess.run(["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
-                           "-C", cwd, *args],
+                           "-c", "log.showSignature=false", "-C", cwd, *args],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env, timeout=timeout)
 
@@ -914,7 +915,11 @@ def all_on_master(repo: str, shas: list[str]) -> str | None:
     for sha, line in zip(shas, check.stdout.splitlines()):
         if not line.endswith(" commit"):
             return f"commit {sha[:10]} exists only in that checkout"
-    extra = git(repo, "rev-list", "--max-count=1", *shas, "--not", MASTER, timeout=600)
+    extra = subprocess.run(["git", "--no-optional-locks", "-C", repo, "rev-list",
+                            "--max-count=1", "--stdin"],
+                           input="".join(f"{sha}\n" for sha in shas) + f"^{MASTER}\n",
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=600)
     if extra.returncode:
         return f"merge check failed: {extra.stderr.strip()}"
     if extra.stdout.strip():
@@ -1101,7 +1106,8 @@ def _clone_newest(path: str, s: Scan) -> float:
 _RUNS_PROGRAMS = re.compile(
     r"^(core\.fsmonitor|core\.hookspath|core\.sshcommand|core\.pager|core\.editor"
     r"|filter\..*|diff\..*\.(textconv|command)|merge\..*\.driver|include\.path"
-    r"|includeif\..*|credential\..*|core\.worktree|extensions\.worktreeconfig)$")
+    r"|includeif\..*|credential\..*|core\.worktree|extensions\.worktreeconfig"
+    r"|gpg\..*|log\.showsignature|diff\.external|core\.alternaterefscommand)$")
 
 
 def clone_config_problem(path: str) -> str | None:
@@ -1231,6 +1237,9 @@ def scratch_reason(path: str) -> str | None:
                 entries = list(it)
         except OSError as exc:
             return f"walk error (failing closed): {exc.strerror or exc}"
+        names = {e.name.lower() for e in entries}
+        if {"head", "objects", "refs"} <= names:
+            return "holds a git repository (bare or a git dir)"
         for e in entries:
             low = e.name.lower()
             if low == ".git":
