@@ -39,6 +39,9 @@
 # PSEUDOLIFE_UNATTENDED=1 is the explicit agent-under-pty signal; redirected
 # stdin also enables it. Omitted -Client detects installed CLIs (else generic);
 # omitted -Extractor uses sidecar, the local CPU default.
+# PSEUDOLIFE_SHIM_ENGINE=native installs the native pseudolife-mcp client
+# (ops\install-native.ps1) instead of the Python client; python, the default,
+# installs the Python client, or brings it back over a native one.
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
 # -Engine rust|python: the Docker daemon. rust pulls the release's published
@@ -158,6 +161,33 @@ param(
     [ValidateSet("", "rust", "python")]
     [string]$Engine = ""
 )
+# >>> client engine >>>
+# Which client this installer installs, decided before anything changes: the
+# Python client (the rest of this script) by default and with
+# PSEUDOLIFE_SHIM_ENGINE=python, and the native client, which
+# ops\install-native.ps1 installs with these same parameters, only when
+# PSEUDOLIFE_SHIM_ENGINE=native asks for it (the variable pseudolife-mcp update
+# reads). Case-sensitive, as update reads it.
+$clientEngine = "$env:PSEUDOLIFE_SHIM_ENGINE"
+if ($clientEngine -ceq "native") {
+    # Exit as the native installer would run by itself: 0 when it ends
+    # normally (its last native command's code is not its result), its own
+    # code when it exits with one, 1 when it stops on an error.
+    $nativeInstaller = Join-Path $PSScriptRoot "install-native.ps1"
+    if (-not (Test-Path -LiteralPath $nativeInstaller -PathType Leaf)) {
+        [Console]::Error.WriteLine("PSEUDOLIFE_SHIM_ENGINE=native asks for the native client, but this checkout has no $nativeInstaller (it predates the native installer): update the checkout (git pull), or unset PSEUDOLIFE_SHIM_ENGINE for the Python client. Nothing was changed.")
+        exit 1
+    }
+    $global:LASTEXITCODE = 0
+    & $nativeInstaller @PSBoundParameters
+    if ($?) { exit 0 }
+    exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 })
+}
+if (($clientEngine -cne "") -and ($clientEngine -cne "python")) {
+    [Console]::Error.WriteLine("PSEUDOLIFE_SHIM_ENGINE=$clientEngine is not a client this installer installs: use python (the Python client, the default) or native (the native client), or unset it. Nothing was changed.")
+    exit 2
+}
+# <<< client engine <<<
 $ErrorActionPreference = "Stop"
 
 $repo = Split-Path -Parent $PSScriptRoot
