@@ -304,11 +304,11 @@ def key(name="dot", *, rel="tunnels", raw: bytes | None = None, plain_file=False
 
 def saved_key():
     """The key file as this platform's saved setup holds one, for cases
-    whose candidate decides from its form alone (``update`` reads no key;
-    ``status`` reports a ``DPAPI`` key unverified). On Windows the bytes are
-    a ``DPAPI``-prefixed stand-in: ``set_key``'s CryptProtectData needs the
-    account's logon credentials, which a key-authenticated SSH session (the
-    Windows dev VM, where these cases are recorded) does not hold."""
+    whose candidate does not need it to unseal (``update`` reads no key). On
+    Windows the bytes are a ``DPAPI``-prefixed stand-in that is no DPAPI
+    blob, so ``status`` reports no usable key, and these cases also record
+    in a key-authenticated SSH session, which cannot seal with
+    CryptProtectData."""
     return key(raw=b"DPAPI\0fixture-sealed-key") if core.WINDOWS else key()
 
 
@@ -683,10 +683,10 @@ def cases() -> list[core.Case]:
         status("status-process-record", ready(), private("tunnels/dot.process.json", DEAD_RECORD)),
         status("status-process-record-text", ready(),
                private("tunnels/dot.process.json", DEAD_RECORD), json_out=False),
-        # A Windows DPAPI key is present on disk, not verified (no unprotect).
+        # A Windows key file whose DPAPI blob is damaged: no usable key.
         case("status-dpapi-key", ["status", "--profile-dir", DIR], ready(), saved_key(),
              platforms=("windows",)),
-        # JSON pins the key's state: present on disk, not verified.
+        # JSON pins the key's state: false, the blob does not unseal.
         status("status-dpapi-key-json", ready(), saved_key(), platforms=("windows",)),
         case("update-ready-key", ["update", "--profile-dir", DIR], ready(), saved_key(),
              rules=("tunnel-dpapi-key",)),
@@ -711,9 +711,11 @@ def cases() -> list[core.Case]:
         case("verify-ready-wrong-key", ["verify", "--profile-dir", DIR], ready(),
              key(raw=WRONG_PREFIX)),
         # a finished profile without a launch record fails its identity read
-        # before begin_challenge writes (POSIX keys; a Windows key is DPAPI)
+        # before begin_challenge writes. On Windows ``set_key`` seals the key
+        # with DPAPI and the candidate unseals it, so the case records only
+        # in a logon that holds the account's credentials (not key-based SSH).
         case("verify-ready-key-no-record", ["verify", "--profile-dir", DIR], ready(), key(),
-             platforms=("linux",)),
+             rules=("tunnel-dpapi-key",)),
         case("verify-missing", ["verify", "--profile-dir", DIR], prepared()),
         case("verify-invalid-name", ["verify", "--profile-dir", DIR, "--profile", "x y"]),
         # setup: refusals before the daemon handshake
@@ -743,8 +745,6 @@ def cases() -> list[core.Case]:
         case("setup-invalid-name", ["setup", "--profile-dir", DIR, "--profile", "bad.name",
                                     *explicit()]),
         # declared deferrals: the candidate defers and changes nothing
-        defer("defer-verify-dpapi-key", ["verify", "--profile-dir", DIR], ready(), key(),
-              platforms=("windows",)),
         defer("defer-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),
               private("tunnels/dot.process.json", json.dumps(
                   {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode())),

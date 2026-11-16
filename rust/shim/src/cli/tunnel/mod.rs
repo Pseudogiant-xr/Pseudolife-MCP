@@ -13,10 +13,14 @@ use serde_json::{Map, Value};
 
 use super::hook_json::quoted;
 
+mod doctor_section;
+#[cfg(windows)]
+mod dpapi;
 mod record;
 mod store;
 mod syntax;
 
+pub(super) use doctor_section::doctor_section;
 use record::Liveness;
 use store::{Profile, exists, occupied};
 use syntax::{Admit, json_loads, refresh_id};
@@ -256,21 +260,37 @@ fn refresh_status(root: &Path, name: &str) -> Result<Refresh, Fail> {
     })
 }
 
-/// A challenge record nested near CPython's recursion limit would raise out
-/// of `verification_status`; this bound leaves only ordinary records.
-fn shallow_challenge(root: &Path, name: &str) -> Result<(), Fail> {
-    let path = root
-        .join(format!("{name}-verification"))
-        .join("challenge.json");
+/// Why `status` cannot read a profile's verification challenge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ChallengeIssue {
+    /// A form `private_read` does not open (a pipe, a link or a junction).
+    Form,
+    /// Nested near CPython's recursion limit, which would raise out of
+    /// `verification_status`; this bound leaves only ordinary records.
+    Deep,
+}
+
+fn challenge_path(root: &Path, name: &str) -> PathBuf {
+    root.join(format!("{name}-verification"))
+        .join("challenge.json")
+}
+
+/// What stops `status` reading the challenge record, if anything. Shared by
+/// `status` and `doctor`, so doctor never names `status` where it defers.
+fn challenge_issue(root: &Path, name: &str) -> Option<ChallengeIssue> {
     // `_challenge` reads through private_read: a redirect, an unsafe or
     // missing file, or one too large is no challenge at all (`{}`).
-    match store::private_read(&path, 65536) {
+    match store::private_read(&challenge_path(root, name), 65536) {
         Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 => {
-            Err(Fail::Defer)
+            Some(ChallengeIssue::Deep)
         }
-        Ok(_) | Err(Fail::Tunnel(_)) => Ok(()),
-        Err(Fail::Defer) => Err(Fail::Defer),
+        Ok(_) | Err(Fail::Tunnel(_)) => None,
+        Err(Fail::Defer) => Some(ChallengeIssue::Form),
     }
+}
+
+fn shallow_challenge(root: &Path, name: &str) -> Result<(), Fail> {
+    challenge_issue(root, name).map_or(Ok(()), |_| Err(Fail::Defer))
 }
 
 fn status(options: &Options, root: &Path) -> Output {
@@ -757,156 +777,6 @@ fn setup(options: &Options, root: &Path) -> Output {
     Err(Fail::Defer)
 }
 
-/// `doctor`'s saved-tunnel section, read-only: `None` when `root` holds no
-/// `*.profile.json` (absent, empty or unrelated files say nothing), else one
-/// entry per profile, where a profile or a store this client cannot read is
-/// a named `unavailable` entry, never a reason to stop. Key presence only:
-/// no key, token or credential path is reported.
-pub(super) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
-    use serde_json::json;
-    let unavailable = |profile: Option<&str>, reason: &str, recovery: String| {
-        let mut entry = Map::new();
-        if let Some(profile) = profile {
-            entry.insert("profile".into(), json!(profile));
-        }
-        entry.insert("state".into(), json!("unavailable"));
-        entry.insert("reason".into(), json!(reason));
-        entry.insert("recovery".into(), json!(recovery));
-        Value::Object(entry)
-    };
-    let store_recovery = format!(
-        "Make {} a directory only your account can access, holding only tunnel profile files, then retry.",
-        root.display()
-    );
-    match std::fs::symlink_metadata(root) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
-        Err(_) => {
-            return Some(vec![unavailable(
-                None,
-                "the tunnel directory cannot be inspected",
-                store_recovery,
-            )]);
-        }
-        Ok(_) => {}
-    }
-    // Profiles first, then the store's own checks: an empty or unrelated
-    // directory is not a store anyone set up.
-    let any_profile = std::fs::read_dir(root).ok().map(|entries| {
-        entries.flatten().any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .ends_with(".profile.json")
-        })
-    });
-    if any_profile == Some(false) {
-        return None;
-    }
-    let names = match store::checked_path(root).and_then(|root| store::list(&root)) {
-        Ok(names) if names.is_empty() => return None,
-        Ok(names) => names,
-        Err(Fail::Tunnel(reason)) => return Some(vec![unavailable(None, reason, store_recovery)]),
-        Err(Fail::Defer) => {
-            return Some(vec![unavailable(
-                None,
-                "the tunnel directory holds entries this client does not read",
-                store_recovery,
-            )]);
-        }
-    };
-    let entries = names
-        .iter()
-        .map(|name| {
-            let recovery = format!(
-                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside. Setting the profile up again needs pseudolife-mcp tunnel setup, which the native client does not run yet (it hands it to the Python client).",
-                root.join(format!("{name}.profile.json")).display()
-            );
-            let profile = match store::load(root, name) {
-                Ok(profile) => profile,
-                Err(Fail::Tunnel(reason)) => return unavailable(Some(name), reason, recovery),
-                Err(Fail::Defer) => {
-                    return unavailable(
-                        Some(name),
-                        "the profile is in a form this client does not read",
-                        recovery,
-                    );
-                }
-            };
-            let now = Utc::now();
-            let (key_expiry, expired) = match &profile.expires_at {
-                None => (json!({"known": false, "expired": null}), false),
-                Some((text, instant)) => (
-                    json!({"known": true, "expires_at": text, "expired": *instant <= now}),
-                    *instant <= now,
-                ),
-            };
-            let key_checked = store::key_present(root, name);
-            let key = match key_checked {
-                Ok(present) => json!(present),
-                // A Windows DPAPI key needs CryptUnprotectData to prove.
-                Err(_) => json!("not_verified"),
-            };
-            // `None` when the path cannot be inspected: not a claim either way.
-            let process_record = occupied(&root.join(format!("{name}.process.json"))).ok();
-            let mut next = Vec::new();
-            let update = match refresh_status(root, name) {
-                Ok(refresh) => {
-                    if refresh.needs_attention() {
-                        // Native `tunnel status` proves the key first, then
-                        // hands the run to Python on a process record or one
-                        // it cannot inspect.
-                        let python = |why: &str| {
-                            format!(
-                                "pseudolife-mcp tunnel status --profile {name} shows the outcome, but needs the Python client {why}"
-                            )
-                        };
-                        let inspect = match (key_checked.is_ok(), process_record) {
-                            (false, _) => python("because the key cannot be checked natively"),
-                            (true, Some(true)) => python("while a tunnel process record exists"),
-                            (true, None) => python("while the process record cannot be checked"),
-                            (true, Some(false)) => format!(
-                                "pseudolife-mcp tunnel status --profile {name} shows the outcome and the key's state"
-                            ),
-                        };
-                        next.push(format!(
-                            "Last tunnel refresh: {}; needs attention: {inspect}.",
-                            refresh.state()
-                        ));
-                    }
-                    let mut update = json!({"state": refresh.state(),
-                        "needs_attention": refresh.needs_attention()});
-                    if let Refresh::Done { rolled_back, .. } = refresh {
-                        update["rolled_back"] = json!(rolled_back);
-                    }
-                    update
-                }
-                Err(_) => json!("not_checked"),
-            };
-            if expired {
-                next.push(format!(
-                    "The tunnel key has expired. Renew it privately with pseudolife-mcp tunnel setup --profile {name} --read-key --key-expires-at <ISO timestamp>; the native client does not run tunnel setup yet, so this needs the Python client."
-                ));
-            }
-            let mut entry = json!({
-                "profile": profile.name,
-                "state": profile.state,
-                "catalog": profile.catalog,
-                "private_key_present": key,
-                "key_expiry": key_expiry,
-                "update": update,
-                "runtime": {"checked": false, "process_record": process_record},
-                "cloud": "not_checked",
-            });
-            if !next.is_empty() {
-                entry["next"] = json!(next);
-            }
-            entry
-        })
-        .collect();
-    Some(entries)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,7 +810,10 @@ mod tests {
                 format!("{{\"name\": \"{name}\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}{ready}}}").as_bytes(),
             );
         }
-        /// The private key as this platform's saved setup holds it.
+        /// A key file in this platform's saved format. On Windows the bytes
+        /// are a stand-in no account can unseal (CryptUnprotectData reads it
+        /// as damaged), so tests that only need a key file also run in a
+        /// key-based SSH logon, which cannot seal one.
         fn key(&self, name: &str) {
             let data: &[u8] = if cfg!(windows) {
                 b"DPAPI\0sealed-fixture"
@@ -1406,10 +1279,9 @@ mod tests {
         store.key("dot");
         let options = parse(&argv(&["status", "--json"])).unwrap();
         let report = report_of(status(&options, &store.0));
-        // A DPAPI key needs CryptUnprotectData, which this client does not
-        // call: present on disk, not verified.
+        // The Windows stand-in is no DPAPI blob: no usable key.
         let expected = if cfg!(windows) {
-            Value::from("not_verified")
+            Value::Bool(false)
         } else {
             Value::Bool(true)
         };
@@ -1458,5 +1330,232 @@ mod tests {
         ] {
             assert!(!ok(shape), "{shape:?}");
         }
+    }
+
+    /// The doctor entry for `dot`, as one JSON text and its `next` lines.
+    fn doctor_entry(store: &Store) -> (Value, Vec<String>) {
+        let entries = doctor_section(&store.0).expect("a tunnel section");
+        let entry = entries
+            .into_iter()
+            .find(|entry| entry["profile"] == "dot")
+            .expect("an entry for dot");
+        let next = entry["next"]
+            .as_array()
+            .map(|lines| {
+                lines
+                    .iter()
+                    .map(|l| l.as_str().unwrap().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(!entry.to_string().contains("Python"), "{entry}");
+        (entry, next)
+    }
+
+    const FAILED_REFRESH: &[u8] =
+        b"{\"id\": \"0123456789abcdef0123456789abcdef\", \"state\": \"failed\"}";
+
+    #[test]
+    fn doctor_names_tunnel_status_where_it_answers_beside_a_process_record() {
+        let store = Store::new();
+        store.profile("dot", true);
+        store.key("dot");
+        store.put("dot.reload.result.json", FAILED_REFRESH);
+        store.record("dot", DEAD_PID, Path::new("/nonexistent/tunnel-client"));
+        let (entry, next) = doctor_entry(&store);
+        assert_eq!(entry["runtime"]["process_record"], true, "{entry}");
+        assert_eq!(
+            next,
+            [
+                "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot --json shows the outcome and the key's state."
+            ]
+        );
+        // The advice is true: native `tunnel status --json` answers this
+        // store with both.
+        let options = parse(&argv(&["status", "--json"])).unwrap();
+        let report = report_of(status(&options, &store.0));
+        assert_eq!(report["update"]["state"], "failed", "{report}");
+        assert!(report.get("private_key_present").is_some(), "{report}");
+    }
+
+    #[test]
+    fn doctor_names_the_challenge_file_status_cannot_read_and_why() {
+        let store = Store::new();
+        store.profile("dot", true);
+        store.key("dot");
+        store.put("dot.reload.result.json", FAILED_REFRESH);
+        crate::board::state::private_dir(&store.0.join("dot-verification")).unwrap();
+        store.put("dot-verification/challenge.json", &[b'['; 150]);
+        let (_, next) = doctor_entry(&store);
+        assert_eq!(
+            next,
+            [format!(
+                "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot does not read the verification challenge {}, which is nested too deeply to be one this client wrote; move that file aside.",
+                challenge_path(&store.0, "dot").display()
+            )]
+        );
+        // Doctor names that file because `status` really does not answer.
+        let options = parse(&argv(&["status", "--json"])).unwrap();
+        assert_eq!(status(&options, &store.0).unwrap_err(), Fail::Defer);
+        // Moved aside, `status` answers and doctor names it instead.
+        std::fs::remove_file(challenge_path(&store.0, "dot")).unwrap();
+        assert!(status(&options, &store.0).is_ok());
+        let (_, next) = doctor_entry(&store);
+        assert!(
+            next[0].ends_with(
+                "tunnel status --profile dot --json shows the outcome and the key's state."
+            ),
+            "{next:?}"
+        );
+    }
+
+    #[test]
+    fn doctor_names_the_file_a_profile_could_not_be_read_from_without_naming_python() {
+        let store = Store::new();
+        store.put("bad.profile.json", b"{not json");
+        store.profile("dot", false);
+        let entries = doctor_section(&store.0).expect("a tunnel section");
+        let bad = &entries[0];
+        assert_eq!(bad["profile"], "bad");
+        let recovery = bad["recovery"].as_str().unwrap();
+        assert!(!recovery.contains("Python"), "{recovery}");
+        assert_eq!(
+            recovery,
+            format!(
+                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside; this client cannot set a tunnel up yet.",
+                store.0.join("bad.profile.json").display()
+            )
+        );
+    }
+
+    #[test]
+    fn doctor_names_the_expiry_date_and_where_to_create_a_new_key() {
+        let store = Store::new();
+        store.put(
+            "dot.profile.json",
+            format!(
+                "{{\"name\": \"dot\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {}, \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true, \"runtime_key_expires_at\": \"2020-01-01T00:00:00+00:00\"}}",
+                serde_json::to_string(&store.0.join("token")).unwrap()
+            )
+            .as_bytes(),
+        );
+        let (_, next) = doctor_entry(&store);
+        assert_eq!(
+            next,
+            [
+                "The tunnel key expired on 2020-01-01T00:00:00+00:00; create a new restricted key at https://platform.openai.com/settings/organization/api-keys; this client cannot save it yet."
+            ]
+        );
+    }
+
+    /// A key file as the Python client's `set_key` writes it on Windows, or
+    /// `None` in a key-based SSH logon, which cannot seal (said on stderr).
+    #[cfg(windows)]
+    fn sealed(key: &[u8]) -> Option<Vec<u8>> {
+        Some([&b"DPAPI\0"[..], &dpapi::seal(key)?].concat())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_protected_key_is_unsealed_and_checked() {
+        let Some(key) = sealed(b"fixture-tunnel-key") else {
+            return;
+        };
+        let store = Store::new();
+        store.profile("dot", true);
+        store.put("dot.key", &key);
+        assert_eq!(store::key_present(&store.0, "dot"), Ok(true));
+        let options = parse(&argv(&["status", "--json"])).unwrap();
+        let report = report_of(status(&options, &store.0));
+        assert_eq!(report["private_key_present"], true, "{report}");
+        let (entry, next) = doctor_entry(&store);
+        assert_eq!(entry["private_key_present"], true, "{entry}");
+        assert!(next.is_empty(), "{next:?}");
+        // Without a process record, verify refuses on the identity read
+        // instead of deferring.
+        let verify_options = parse(&argv(&["verify"])).unwrap();
+        assert_eq!(
+            verify(&verify_options, &store.0).unwrap_err(),
+            Fail::Tunnel(store::UNAVAILABLE)
+        );
+        let replace = |data: &[u8]| {
+            std::fs::remove_file(store.0.join("dot.key")).unwrap();
+            store.put("dot.key", data);
+        };
+        // It unseals, but not to a key.
+        replace(&sealed(b"two words").unwrap());
+        assert_eq!(store::key_state(&store.0, "dot"), Ok(Some(false)));
+        // Damaged ciphertext, a truncated blob, and bytes that are no blob:
+        // no usable key, never "unlock it elsewhere".
+        let mut flipped = key.clone();
+        let at = flipped.len() - 5;
+        flipped[at] ^= 1;
+        replace(&flipped);
+        assert_eq!(store::key_state(&store.0, "dot"), Ok(Some(false)));
+        replace(&key[..key.len() - 20]);
+        assert_eq!(store::key_state(&store.0, "dot"), Ok(Some(false)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_key_file_holding_no_blob_is_no_key() {
+        // Needs no sealing, so it also runs in a key-based SSH logon.
+        let store = Store::new();
+        store.profile("dot", true);
+        // No DPAPI blob, an empty blob after the prefix, a prefix without
+        // its separator, and another host's protection.
+        for data in [
+            &b"DPAPI\0sealed-fixture"[..],
+            b"DPAPI\0",
+            b"DPAPI",
+            b"PLAIN\0fixture-tunnel-key",
+        ] {
+            let _ = std::fs::remove_file(store.0.join("dot.key"));
+            store.put("dot.key", data);
+            assert_eq!(
+                store::key_state(&store.0, "dot"),
+                Ok(Some(false)),
+                "{data:?}"
+            );
+            let (entry, next) = doctor_entry(&store);
+            assert_eq!(entry["private_key_present"], false, "{data:?}");
+            // No key is no unlock problem: doctor adds no line for it.
+            assert!(next.is_empty(), "{data:?}: {next:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_key_this_session_cannot_unseal_is_named_not_guessed() {
+        let Some(mut key) = sealed(b"fixture-tunnel-key") else {
+            return;
+        };
+        // A blob naming a master key this account does not hold, as another
+        // account's key does (CryptUnprotectData: NTE_BAD_KEY_STATE). The
+        // GUID sits after the 6-byte prefix and the blob's version and
+        // provider fields.
+        for byte in &mut key[6 + 24..6 + 40] {
+            *byte ^= 0x5a;
+        }
+        let store = Store::new();
+        store.profile("dot", true);
+        store.put("dot.key", &key);
+        assert_eq!(store::key_state(&store.0, "dot"), Ok(None));
+        let options = parse(&argv(&["status", "--json"])).unwrap();
+        let report = report_of(status(&options, &store.0));
+        assert_eq!(report["private_key_present"], "not_verified", "{report}");
+        // verify cannot tell whether the key is finished: it defers,
+        // never "finish tunnel setup".
+        let verify_options = parse(&argv(&["verify"])).unwrap();
+        assert_eq!(verify(&verify_options, &store.0).unwrap_err(), Fail::Defer);
+        let (entry, next) = doctor_entry(&store);
+        assert_eq!(entry["private_key_present"], "not_verified", "{entry}");
+        assert_eq!(
+            next,
+            [format!(
+                "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, in a logon signed in with its password (not a key-based SSH logon), so run this check from such a logon.",
+                store.0.join("dot.key").display()
+            )]
+        );
     }
 }
