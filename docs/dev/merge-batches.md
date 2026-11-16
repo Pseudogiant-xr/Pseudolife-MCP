@@ -744,7 +744,8 @@ refuses, naming the one that failed and building nothing, unless all hold:
 - no file a dropped pull request changes is changed by a remaining member;
 - a dropped pull request changes no code every test or job shares: anything
   under `tests/` but `tests/test_*.py`, any `conftest.py`, Python under
-  `rust/` other than `test_*.py`, `.github/`, `ops/integrate.py`,
+  `rust/` other than `test_*.py`, anything in a folder under a Rust crate's
+  `tests/` (`tests/common/mod.rs`, which many test binaries compile in), `.github/`, `ops/integrate.py`,
   dependency manifests and lock files (`pyproject.toml`, `uv.lock`,
   requirements files, any `Cargo.toml` or `Cargo.lock`, the Rust toolchain
   file, `package.json` and the npm lock files), JSON under `rust/ci/`, the

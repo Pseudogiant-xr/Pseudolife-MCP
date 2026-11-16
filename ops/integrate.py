@@ -2417,6 +2417,10 @@ def _after_drop_shared(path: str) -> bool:
         (path.startswith("tests/") and not re.fullmatch(r"tests/test_[^/]*\.py", path))
         or name == "conftest.py"
         or (path.startswith("rust/") and path.endswith(".py") and not name.startswith("test_"))
+        # A Rust crate's tests/<folder>/ holds modules its test binaries
+        # share (tests/common/mod.rs); a top-level tests/*.rs is one binary.
+        or (path.startswith("rust/") and "/tests/" in path
+            and "/" in path.split("/tests/", 1)[1])
         or path.startswith(".github/")
         or "/.cargo/" in f"/{path}" or "/.config/" in f"/{path}"
         or name in AFTER_DROP_TOOL_CONFIG or bool(AFTER_DROP_TOOL_CONFIG_RE.fullmatch(name))
@@ -2633,8 +2637,9 @@ def _after_drop_standing(rollup: list[dict] | None) -> list[dict]:
            and (_check_state(c) in FAILED or _check_state(c) == CANCELLED)]
 
     def replaced(failure: dict) -> bool:
+        # Only a later success clears it: a skipped rerun passed nothing.
         return any(other is not failure and _check_key(other) == _check_key(failure)
-                   and not _unfinished(other) and _check_state(other) in PASSING
+                   and not _unfinished(other) and _check_state(other) == "SUCCESS"
                    and _when(other)[0] > _when(failure)[0] for other in runs)
 
     return [c for c in bad if not replaced(c)]

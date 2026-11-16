@@ -6053,3 +6053,40 @@ def test_after_drop_merge_reads_every_check_again_after_the_comment(world, capsy
 
     assert "Rust / windows-latest (FAILURE)" in capsys.readouterr().err
     assert _merge_calls(world) == []
+
+
+@pytest.mark.parametrize("path", ["rust/shim/tests/common/mod.rs", "rust/shim/tests/common/cli.rs",
+                                  "rust/daemon/tests/support/fixtures.json"])
+def test_after_drop_refuses_a_dropped_member_changing_a_shared_rust_test_module(world, capsys,
+                                                                               path):
+    # Codex review of 1a47d8cb (P1): tests/common/ is compiled into many
+    # Rust test binaries.
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"}, 11: {path: "x\n"}, 12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 2
+
+    err = capsys.readouterr().err
+    assert "changes code every test or job shares" in err and path in err
+
+
+def test_after_drop_takes_a_dropped_member_changing_one_rust_test_binary(world, capsys):
+    # The near miss: a top-level tests/*.rs is one test binary of its own.
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"}, 11: {"rust/shim/tests/one_case.rs": "x\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+
+
+def test_after_drop_merge_does_not_take_a_skipped_rerun_for_a_success(world, capsys):
+    # Codex review of 1a47d8cb (P1): a failure followed by a skipped run of
+    # the same check passed nothing.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+        _run("Parity / windows-latest"),
+        _run("Rust / windows-latest", "FAILURE", started="2026-10-21T10:00:00Z"),
+        _run("Rust / windows-latest", "SKIPPED", started="2026-10-21T11:00:00Z")])
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "no finished rerun has replaced the failure" in capsys.readouterr().err
+    assert _merge_calls(world) == []
