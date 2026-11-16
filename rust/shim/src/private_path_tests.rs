@@ -611,22 +611,44 @@ mod windows {
     }
 
     #[test]
-    fn a_link_is_remembered_by_its_exact_name_and_one_key_per_object() {
+    fn a_target_name_with_an_unpaired_surrogate_is_kept_as_it_is() {
+        use crate::credentials::windows_security::target_path_wide_for_test;
         use std::os::windows::ffi::OsStringExt;
-        let base = std::path::absolute(std::env::temp_dir()).unwrap();
-        // An unpaired surrogate and its U+FFFD look-alike are different
-        // names: a lossy key let one junction's check stand in for the
-        // other's (Codex review of 59ca1fe7c, P1).
-        let lone = base.join(std::ffi::OsString::from_wide(&[u16::from(b'x'), 0xD800]));
-        let look_alike = PathBuf::from(format!(r"\\?\{}", base.join("x\u{FFFD}").display()));
-        assert_ne!(link_key(&lone), link_key(&look_alike));
-        // The same object by its DOS and its verbatim spelling: one key.
-        let plain = base.join("same");
-        let verbatim = PathBuf::from(format!(r"\\?\{}", plain.display()));
-        assert_eq!(link_key(&plain), link_key(&verbatim));
-        // Names Win32 normalises into another object stay distinct.
-        let dotted = PathBuf::from(format!(r"\\?\{}", base.join("same.").display()));
-        assert_ne!(link_key(&dotted), link_key(&plain));
+        // A valid Windows name may hold an unpaired surrogate, which no
+        // string conversion keeps: the target is parsed on its UTF-16 units
+        // and carried through unchanged (Codex review of de08bccdd, P2).
+        let mut name: Vec<u16> = r"\??\C:\data\x".encode_utf16().collect();
+        name.push(0xD800);
+        let mut expected: Vec<u16> = r"\\?\C:\data\x".encode_utf16().collect();
+        expected.push(0xD800);
+        assert_eq!(
+            target_path_wide_for_test(&name, false),
+            Some(PathBuf::from(std::ffi::OsString::from_wide(&expected)))
+        );
+    }
+
+    #[test]
+    fn a_link_met_by_differently_cased_paths_is_counted_once() {
+        // Windows folders are case-insensitive: each junction's target names
+        // the junctions before it in upper case, so the walk meets every one
+        // by two spellings. Links are told apart by filesystem identity, so
+        // each still counts once (Codex review of de08bccdd, P2).
+        let scratch = Scratch::new("cased-junctions");
+        let mut folder = scratch.0.clone();
+        let mut made = 0;
+        for level in 0..40 {
+            let real = folder.join(format!("r{level}"));
+            if fs::create_dir(&real).is_err() {
+                break;
+            }
+            let link = folder.join(format!("l{level}"));
+            let shouted = PathBuf::from(real.display().to_string().to_uppercase());
+            make_junction_for_test(&link, &shouted).unwrap();
+            folder = link;
+            made += 1;
+        }
+        assert!(made >= 7, "only {made} nested junctions could be made");
+        assert_eq!(links_followed(&folder.join("token")), Ok(made));
     }
 
     #[test]

@@ -58,6 +58,9 @@ pub(crate) enum PathEntry {
     Link {
         target: std::path::PathBuf,
         distrust: Option<LinkDistrust>,
+        /// The link entry's own (volume serial, file index): one object
+        /// however its path is spelled or cased.
+        identity: (u64, u64),
     },
     /// Any other reparse point, by tag.
     Other(u32),
@@ -172,6 +175,16 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
         Ok(target) => target,
         Err(error) => return Ok(PathEntry::Uncheckable(error.to_string())),
     };
+    // SAFETY: the handle stays live for the call; the output structure is
+    // exactly sized and initialized before Win32 fills it.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(entry.as_raw_handle() as HANDLE, &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let identity = (
+        info.dwVolumeSerialNumber as u64,
+        ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+    );
     // SAFETY: token_user returns an owned, usize-aligned TOKEN_USER buffer;
     // it outlives every use of its SID below.
     let user =
@@ -181,6 +194,7 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
         return Ok(PathEntry::Link {
             target,
             distrust: Some(LinkDistrust::Link(why)),
+            identity,
         });
     }
     let Some(holder_path) = path.parent() else {
@@ -203,7 +217,11 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
     };
     let distrust = security_distrust(&holder, user_sid, Rule::LinkHolder)?
         .map(|why| LinkDistrust::Holder(holder_path.to_path_buf(), why));
-    Ok(PathEntry::Link { target, distrust })
+    Ok(PathEntry::Link {
+        target,
+        distrust,
+        identity,
+    })
 }
 
 /// The path `file`'s handle names once every link is followed
@@ -380,18 +398,36 @@ fn target_path(wide: &[u16], relative: bool) -> Option<std::path::PathBuf> {
     if relative {
         return None;
     }
-    let text = String::from_utf16(wide).ok()?;
-    let rest = text.strip_prefix("\\??\\")?;
-    if let Some(share) = rest.strip_prefix("UNC\\") {
-        return (!share.is_empty()).then(|| format!("\\\\?\\UNC\\{share}").into());
+    use std::os::windows::ffi::OsStringExt;
+    // Parsed on the UTF-16 units: a valid Windows name may hold an unpaired
+    // surrogate, which no string conversion keeps, so the rest is carried
+    // through as it is.
+    let units = |text: &str| text.encode_utf16().collect::<Vec<u16>>();
+    let rest = wide.strip_prefix(units("\\??\\").as_slice())?;
+    let verbatim = |lead: &str, tail: &[u16]| {
+        let mut out = units(lead);
+        out.extend_from_slice(tail);
+        std::path::PathBuf::from(std::ffi::OsString::from_wide(&out))
+    };
+    if let Some(share) = rest.strip_prefix(units("UNC\\").as_slice()) {
+        return (!share.is_empty()).then(|| verbatim("\\\\?\\UNC\\", share));
     }
-    if rest.starts_with("Volume{") {
-        return Some(format!("\\\\?\\{rest}").into());
+    if rest.starts_with(units("Volume{").as_slice()) {
+        return Some(verbatim("\\\\?\\", rest));
     }
-    let bytes = rest.as_bytes();
-    let drive =
-        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\';
-    drive.then(|| format!("\\\\?\\{rest}").into())
+    let drive = rest.len() >= 3
+        && u8::try_from(rest[0]).is_ok_and(|letter| letter.is_ascii_alphabetic())
+        && rest[1] == u16::from(b':')
+        && rest[2] == u16::from(b'\\');
+    drive.then(|| verbatim("\\\\?\\", rest))
+}
+
+#[cfg(test)]
+pub(crate) fn target_path_wide_for_test(
+    wide: &[u16],
+    relative: bool,
+) -> Option<std::path::PathBuf> {
+    target_path(wide, relative)
 }
 
 #[cfg(test)]

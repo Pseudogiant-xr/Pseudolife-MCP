@@ -336,8 +336,8 @@ pub fn hook_command(arguments: Vec<std::ffi::OsString>) -> u8 {
 /// check has followed.
 #[derive(Default)]
 struct Walk {
-    accepted: HashSet<PathBuf>,
-    resolving: HashSet<PathBuf>,
+    accepted: HashSet<(u64, u64)>,
+    resolving: HashSet<(u64, u64)>,
     links: usize,
 }
 
@@ -365,18 +365,24 @@ impl Walk {
                 cause: Box::new(cause),
             })
         };
-        let key = link_key(prefix);
-        if self.accepted.contains(&key) {
-            return Ok(());
-        }
         match inspect(prefix) {
             Ok(Entry::Plain) => Ok(()),
-            Ok(Entry::Link { target, distrust }) => {
+            Ok(Entry::Link {
+                target,
+                distrust,
+                identity,
+            }) => {
+                // Every link is inspected each time it is met; one already
+                // accepted in this check (the same object, however its path
+                // was spelled or cased) is not walked or counted again.
                 if let Some(cause) = distrust {
                     return refuse(cause);
                 }
+                if self.accepted.contains(&identity) {
+                    return Ok(());
+                }
                 self.links += 1;
-                if self.links > MAX_LINKS || !self.resolving.insert(key.clone()) {
+                if self.links > MAX_LINKS || !self.resolving.insert(identity) {
                     return refuse(Cause::TooManyLinks);
                 }
                 // Where the link leads: absolute, or relative to the folder
@@ -388,8 +394,8 @@ impl Walk {
                     None => target.clone(),
                 };
                 self.walk(&resolved)?;
-                self.resolving.remove(&key);
-                self.accepted.insert(key);
+                self.resolving.remove(&identity);
+                self.accepted.insert(identity);
                 Ok(())
             }
             Ok(Entry::Other(tag)) => refuse(Cause::NotALink { tag }),
@@ -400,53 +406,15 @@ impl Walk {
     }
 }
 
-/// The one name a link is remembered by within a check. On Windows it is
-/// the verbatim form of the path Win32 opens, so a link met once by a DOS
-/// path (as callers give it) and once in a verbatim target (as links store
-/// it) counts once against [`MAX_LINKS`], while names Win32 would normalise
-/// into another object (`state.` and `state`) stay distinct. Elsewhere a
-/// path is its own name.
-pub(crate) fn link_key(path: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        use std::path::Component;
-        let verbatim = matches!(
-            path.components().next(),
-            Some(Component::Prefix(prefix)) if prefix.kind().is_verbatim()
-        );
-        if verbatim {
-            return path.to_path_buf();
-        }
-        use std::os::windows::ffi::{OsStrExt, OsStringExt};
-        let Ok(full) = std::path::absolute(path) else {
-            return path.to_path_buf();
-        };
-        // Built from the UTF-16 units, never a lossy string: a name with an
-        // unpaired surrogate must not share a key with its U+FFFD look-alike,
-        // or one junction's check would stand in for another's.
-        let wide: Vec<u16> = full.as_os_str().encode_wide().collect();
-        let backslash = u16::from(b'\\');
-        let (lead, rest): (&str, &[u16]) = match wide.as_slice() {
-            [a, b, rest @ ..] if *a == backslash && *b == backslash => (r"\\?\UNC\", rest),
-            all => (r"\\?\", all),
-        };
-        let mut key: Vec<u16> = lead.encode_utf16().collect();
-        key.extend_from_slice(rest);
-        PathBuf::from(std::ffi::OsString::from_wide(&key))
-    }
-    #[cfg(not(windows))]
-    {
-        path.to_path_buf()
-    }
-}
-
 enum Entry {
     /// A plain folder or file, a missing one, or a cloud placeholder.
     Plain,
-    /// A link, where it leads, and why it is not trusted (if it is not).
+    /// A link, where it leads, why it is not trusted (if it is not), and
+    /// the link entry's own filesystem identity.
     Link {
         target: PathBuf,
         distrust: Option<Cause>,
+        identity: (u64, u64),
     },
     /// A Windows reparse point of another kind.
     #[cfg_attr(not(windows), allow(dead_code))]
@@ -494,7 +462,11 @@ fn inspect(path: &Path) -> io::Result<Entry> {
                 },
             },
         );
-    Ok(Entry::Link { target, distrust })
+    Ok(Entry::Link {
+        target,
+        distrust,
+        identity: (meta.dev(), meta.ino()),
+    })
 }
 
 #[cfg(unix)]
@@ -523,8 +495,13 @@ fn inspect(path: &Path) -> io::Result<Entry> {
         PathEntry::Uncheckable(detail) => Entry::Link {
             target: PathBuf::new(),
             distrust: Some(Cause::UncheckableTarget { detail }),
+            identity: (0, 0),
         },
-        PathEntry::Link { target, distrust } => {
+        PathEntry::Link {
+            target,
+            distrust,
+            identity,
+        } => {
             let shown = target.clone();
             let distrust = distrust.map(|distrust| match distrust {
                 LinkDistrust::Link(why) => match named(&why) {
@@ -551,7 +528,11 @@ fn inspect(path: &Path) -> io::Result<Entry> {
                     },
                 },
             });
-            Entry::Link { target, distrust }
+            Entry::Link {
+                target,
+                distrust,
+                identity,
+            }
         }
     })
 }
