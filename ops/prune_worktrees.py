@@ -166,8 +166,10 @@ def _mount_points() -> set[str] | None:
                 for line in fh:
                     fields = line.split()
                     if len(fields) > 4:
-                        found.add(os.path.normpath(
-                            fields[4].replace("\\040", " ").replace("\\011", "\t")))
+                        # mountinfo escapes space, tab, newline and backslash
+                        # as three octal digits.
+                        found.add(os.path.normpath(re.sub(
+                            r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), fields[4])))
         except OSError:
             found = None
         _MOUNTS.append(found)
@@ -262,7 +264,14 @@ def scan(root: str, *, skip_mtime=lambda rel: False, arrival: bool = False) -> S
 _GIT_REDIRECTS = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
                   "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
                   "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
-                  "GIT_DISCOVERY_ACROSS_FILESYSTEM"}
+                  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+                  # Config from the caller: GIT_CONFIG alone hides a
+                  # pseudolife.keep marker (verified on review), and a
+                  # parent's `git -c` arrives as the PARAMETERS or COUNT
+                  # family; the user's own global and system files are read
+                  # from their usual places instead.
+                  "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+                  "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"}
 # core.fsmonitor and gpg.program (through log.showSignature) name programs
 # git runs on status and on reflog or log; never one here.
 GIT_SAFE = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
@@ -270,9 +279,13 @@ GIT_SAFE = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
 
 
 def git_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k.upper() not in _GIT_REDIRECTS}
+    env = {k: v for k, v in os.environ.items()
+           if k.upper() not in _GIT_REDIRECTS
+           and not k.upper().startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))}
     # A partial clone would otherwise fetch from its promisor remote.
-    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1")
+    # replace refs would make a commit look like another one.
+    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1",
+               GIT_NO_REPLACE_OBJECTS="1")
     return env
 
 
@@ -671,15 +684,45 @@ def _rmtree(path: str) -> None:
         shutil.rmtree(path, onerror=retry)
 
 
-def delete_cache(path: str) -> str | None:
+def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
     """Rename aside (fails atomically while cargo holds a file open on
-    Windows), then delete. Returns an error text, or None."""
+    Windows), then delete. Returns an error text, or None.
+
+    With ``checked_at`` (when the last checks began), the process list is
+    taken just before the rename, and after it the aside copy is scanned
+    again: a file written since ``checked_at`` or a process using the copy
+    means something started there during the checks, and the copy is
+    renamed back and kept. If renaming back fails, nothing is deleted and
+    the error says where the copy is."""
     parent, name = os.path.split(os.path.abspath(path))
     trash = os.path.join(parent, f".{name}.retention-{os.getpid()}-{int(time.time())}")
+    if checked_at is not None:
+        procs = list_processes()
+        if procs is None:
+            return "in use or access denied, skipped: the process list cannot be read"
+        pid = process_in(path, procs)
+        if pid is not None:
+            return f"in use or access denied, skipped: process {pid} uses it"
     try:
         os.rename(path, trash)
     except OSError as exc:
         return f"in use or access denied, skipped: {exc.strerror or exc}"
+    if checked_at is not None:
+        late = scan(trash)
+        procs = list_processes()
+        user = process_in(trash, procs) if procs is not None else -1
+        why = (late.error and f"cannot scan it again ({late.error})"
+               or (late.links and f"a link appeared ({late.links[0]})")
+               or (late.newest > checked_at and "a file in it was written during the checks")
+               or (user is not None and (f"process {user} uses it" if user != -1
+                                         else "the process list cannot be read")))
+        if why:
+            try:
+                os.rename(trash, path)
+            except OSError as exc:
+                return (f"kept aside at {trash}, nothing deleted: {why}, and renaming it back "
+                        f"failed ({exc.strerror or exc}); move it back by hand")
+            return f"in use or access denied, skipped: {why}; renamed back"
     try:
         _rmtree(_long(trash))
     except OSError as exc:
@@ -701,19 +744,24 @@ def delete_cache(path: str) -> str | None:
 #   idle for the unowned period. A build holding cargo's lock keeps it.
 #   Entries cargo's layout does not explain stay, listed.
 # * A **clone** is a standalone git checkout (its own .git dir, not a
-#   worktree). It is removed when HEAD and every local branch are in the
-#   main repository and on origin/master, it has no stash, is clean, holds
-#   no link and has been idle for the worktree grace period.
-# * A **scratch** dir is a direct child of a configured scratch root (the
-#   system temp dir, or a dev machine's work dir). It is removed when it has
-#   been idle for the scratch grace period and holds no checkout, virtual
-#   environment, log or evidence and no link.
+#   worktree). It is removed when every commit it holds is in the main
+#   repository and on origin/master, it has no stash, is clean, holds no
+#   link and has been idle for the worktree grace period.
+# * A **scratch** dir is a direct child of a scratch root its user marked
+#   with a .pseudolife-scratch-root file. Scratch is list only: each row says
+#   which keep rule holds the dir, or that none does, and when it was last
+#   written; nothing under a scratch root is removed.
 
 CARGO_TAG_SIGNATURE = "Signature: 8a477f597d28d172789f06886806bc55"
 # Inside a verified target, the names the Cargo book's build-cache layout
 # gives (target/tmp is CARGO_TARGET_TMPDIR); a profile dir proves itself by
 # its own .fingerprint or .cargo-lock.
 CARGO_NAMED_DIRS = {"tmp", "doc", "package"}
+# Suffixes of the files cargo uplifts beside an output it names in the
+# profile's top-level dep-info (debug info, import libraries, metadata).
+CARGO_OUTPUT_SUFFIXES = ("", ".exe", ".pdb", ".dll", ".lib", ".dll.lib", ".exp", ".dll.exp",
+                         ".rlib", ".rmeta", ".so", ".dylib", ".a", ".d", ".dwp", ".wasm",
+                         ".js")
 CARGO_FILES = {"CACHEDIR.TAG", ".rustc_info.json"}
 HOUR = 3600.0
 DEFAULT_TARGET_GRACE_HOURS = 24.0
@@ -739,7 +787,10 @@ SCRATCH_KEEP_SUFFIXES = (".json", ".csv", ".tsv", ".parquet", ".db", ".sqlite", 
                          # disk images, archives and backups, bundles, patches, keys
                          ".vhdx", ".vhd", ".img", ".iso", ".qcow2", ".vmdk",
                          ".tar", ".tgz", ".gz", ".zip", ".7z", ".bak", ".dump", ".sql",
-                         ".bundle", ".patch", ".diff", ".pem", ".key")
+                         ".bundle", ".patch", ".diff", ".pem", ".key",
+                         ".pfx", ".p12", ".kdbx", ".xz", ".zst", ".bz2", ".rar", ".vdi", ".ova")
+# Keys and other files known by their whole name.
+SCRATCH_KEEP_FILES_EXTRA = {"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"}
 SCRATCH_KEEP_FILES = {"pg_version"}             # a PostgreSQL data dir
 DEP_INFO_MAX_BYTES = 4 * 1024 * 1024
 
@@ -771,6 +822,55 @@ def _real_dir(path: str) -> bool:
     except OSError:
         return False
     return stat.S_ISDIR(st.st_mode) and not is_link(st)
+
+
+def _profile_user_file(prof: str) -> str | None:
+    """A file at the top of a profile dir that cargo did not write there
+    and that is newer than the profile's newest fingerprint (a copied
+    server-good.exe or notes kept beside the build), or None."""
+    outputs: set[str] = set()
+    try:
+        with os.scandir(prof) as it:
+            entries = [e for e in it if e.is_file(follow_symlinks=False)]
+    except OSError:
+        return None
+    for e in entries:
+        if e.name.endswith(".d"):
+            try:
+                with open(e.path, encoding="utf-8", errors="replace") as fh:
+                    first = fh.readline(65536)
+            except OSError:
+                continue
+            tokens = _dep_tokens(first)
+            if tokens:
+                outputs.add(os.path.basename(tokens[0]).lower())
+    stems = {o.split(".", 1)[0] for o in outputs}
+    newest_fp = 0.0
+    fp = os.path.join(prof, ".fingerprint")
+    try:
+        with os.scandir(fp) as it:
+            for unit in it:
+                if not unit.is_dir(follow_symlinks=False):
+                    continue
+                with os.scandir(unit.path) as files:
+                    for f in files:
+                        if f.is_file(follow_symlinks=False):
+                            newest_fp = max(newest_fp, f.stat(follow_symlinks=False).st_mtime)
+    except OSError:
+        pass
+    for e in entries:
+        low = e.name.lower()
+        if low == ".cargo-lock" or low in outputs or low.endswith(".d"):
+            continue
+        if any(low == stem + suffix or low == "lib" + stem + suffix
+               for stem in stems for suffix in CARGO_OUTPUT_SUFFIXES):
+            continue
+        try:
+            if e.stat(follow_symlinks=False).st_mtime > newest_fp:
+                return e.name
+        except OSError:
+            return e.name
+    return None
 
 
 def _profile_built_here(prof: str) -> bool:
@@ -812,7 +912,7 @@ def target_layout(path: str) -> tuple[list[str], list[str], list[str], list[str]
         if _real_dir(full):
             if _is_profile_dir(full):
                 lock_dirs.append(full)
-                if _profile_built_here(full):
+                if _profile_built_here(full) and _profile_user_file(full) is None:
                     cargo.append(name)
                     profiles.append(full)
                 else:
@@ -824,7 +924,8 @@ def target_layout(path: str) -> tuple[list[str], list[str], list[str], list[str]
             inner = [os.path.join(full, n) for n in os.listdir(full)]
             if inner and all(_real_dir(p) and _is_profile_dir(p) for p in inner):
                 lock_dirs.extend(inner)
-                if all(_profile_built_here(p) for p in inner):
+                if all(_profile_built_here(p) and _profile_user_file(p) is None
+                       for p in inner):
                     cargo.append(name)
                     profiles.extend(inner)
                     continue
@@ -914,8 +1015,11 @@ def source_owner(src: str, target: str, tool_homes: list[str]) -> tuple[str, str
         return None
     probe = cur if _real_dir(cur) else os.path.dirname(cur)
     while True:
-        if os.path.lexists(os.path.join(probe, ".git")):
+        try:
+            os.lstat(os.path.join(probe, ".git"))
             return "checkout", probe
+        except (FileNotFoundError, NotADirectoryError):
+            pass                        # no .git here; any other error is raised
         parent = os.path.dirname(probe)
         if parent == probe:
             break
@@ -1033,8 +1137,11 @@ def checkout_unfinished(repo: str, root: str, main: str) -> str | None:
         logs = git(root, "reflog", "show", "--all", "--format=%H")
         # Every commit object too: one no ref and no reflog holds (logging
         # off, or an expired reflog) is still unique work.
-        objects = git(root, "cat-file", "--batch-all-objects",
-                      "--batch-check=%(objecttype) %(objectname)", timeout=600)
+        try:
+            objects = git(root, "cat-file", "--batch-all-objects",
+                          "--batch-check=%(objecttype) %(objectname)", timeout=600)
+        except subprocess.TimeoutExpired:
+            return "listing its commits took over 10 minutes; kept"
         if refs.returncode or logs.returncode or objects.returncode:
             return ("cannot list its refs and commits: "
                     f"{(refs.stderr or logs.stderr or objects.stderr).strip()}")
@@ -1207,7 +1314,7 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
     return v
 
 
-def delete_target(path: str) -> str | None:
+def delete_target(path: str, *, checked_at: float | None = None) -> str | None:
     """Delete the entries cargo's layout explains; anything else stays.
     Whole when nothing else is there (renamed aside first)."""
     try:
@@ -1215,14 +1322,14 @@ def delete_target(path: str) -> str | None:
     except OSError as exc:
         return f"in use or access denied, skipped: {exc.strerror or exc}"
     if not foreign:
-        return delete_cache(path)
+        return delete_cache(path, checked_at=checked_at)
     # With foreign entries, cargo's markers stay: the dir remains a target
     # (with nothing of cargo's own left, a later sweep keeps it and names
     # the rest), and a delete that stopped part-way is finished later.
     dirs = [n for n in cargo if n not in CARGO_FILES]
     errors, deleted = [], 0
     for name in dirs:
-        err = delete_cache(os.path.join(path, name))
+        err = delete_cache(os.path.join(path, name), checked_at=checked_at)
         if err:
             errors.append(f"{name}: {err}")
         else:
@@ -1344,6 +1451,25 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
     if hidden:
         v.failure = f"a file is marked assume-unchanged or skip-worktree ({hidden[0]}), so status may hide its changes"
         return v
+    gitdir = os.path.join(path, ".git")
+    for state in ("rebase-apply", "rebase-merge", "sequencer", "MERGE_HEAD", "CHERRY_PICK_HEAD",
+                  "REVERT_HEAD", "BISECT_LOG"):
+        if os.path.lexists(os.path.join(gitdir, state)):
+            v.failure = f"an operation is in progress or left over ({state}), with work only in .git"
+            return v
+    try:
+        hooks = [h for h in os.listdir(os.path.join(gitdir, "hooks"))
+                 if not h.endswith(".sample")]
+    except FileNotFoundError:
+        hooks = []
+    if hooks:
+        v.failure = f"it has a hook script of its own ({hooks[0]})"
+        return v
+    for dirpath, dirnames, _files in os.walk(os.path.join(path, "rust", "target")):
+        if "criterion" in dirnames:
+            v.failure = "its rust/target holds criterion measurements, which are not a cache"
+            return v
+        dirnames[:] = [d for d in dirnames if d not in ("deps", "build", "incremental", ".fingerprint")]
     linked = git(path, "worktree", "list", "--porcelain")
     if linked.returncode:
         v.failure = f"cannot list its worktrees: {linked.stderr.strip()}"
@@ -1444,7 +1570,8 @@ def scratch_reason(path: str) -> str | None:
                 return f"holds another user's file ({e.name})"
             if low.endswith(SCRATCH_LOG_SUFFIXES):
                 return f"holds a log ({e.name})"
-            if low.endswith(SCRATCH_KEEP_SUFFIXES) or low in SCRATCH_KEEP_FILES:
+            if (low.endswith(SCRATCH_KEEP_SUFFIXES) or low in SCRATCH_KEEP_FILES
+                    or low in SCRATCH_KEEP_FILES_EXTRA):
                 return f"holds results, a database, a model or a program ({e.name})"
             if sys.platform != "win32" and st.st_mode & 0o111:
                 return f"holds a program ({e.name})"
@@ -1520,52 +1647,14 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
     return v
 
 
-# --- scratch sightings -------------------------------------------------------
-
-class Sightings:
-    """When a run first saw each scratch dir, kept beside the ledger. Times
-    on disk cannot show every arrival (a move within one Windows volume
-    keeps the creation time), so a scratch dir goes only a grace period
-    after a run first saw it. A dry run records sightings too, so a week of
-    dry runs counts. A file that cannot be read keeps every scratch dir."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.seen: dict[str, float] = {}
-        self.error: str | None = None
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or not all(
-                    isinstance(k, str) and isinstance(v, (int, float)) and math.isfinite(v)
-                    for k, v in data.items()):
-                raise ValueError("not a map of paths to times")
-            self.seen = {k: float(v) for k, v in data.items()}
-        except FileNotFoundError:
-            pass
-        except (OSError, ValueError) as exc:
-            self.error = f"{path} cannot be read ({exc}); no scratch dir is removed"
-
-    def first_seen(self, path: str, now: float) -> float:
-        return self.seen.setdefault(path, now)
-
-    def save(self, present: set[str]) -> str | None:
-        # Only dirs still there are remembered.
-        kept = {k: v for k, v in self.seen.items() if k in present}
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(self.path.name + ".tmp")
-            tmp.write_text(json.dumps(kept, indent=0, sort_keys=True), encoding="utf-8")
-            os.replace(tmp, self.path)
-        except OSError as exc:
-            return f"could not write {self.path}: {exc.strerror or exc}"
-        return None
-
-
 # --- one run at a time -------------------------------------------------------
 
 class RunLock:
-    """One retention run at a time per state dir: a second run (a scheduled
-    sweep beside a hand run, or a WSL leg seeing the same drive) refuses."""
+    """One retention run at a time per OS home: a second run there (a
+    scheduled sweep beside a hand run) refuses. A Windows run and a WSL run
+    lock different files, so they can judge one drive at once; the second
+    rename aside of a dir then fails, which keeps that dir, so the cost is
+    a partial row, not lost data."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -1847,11 +1936,11 @@ def run_sweep(args, cfg: dict) -> int:
                 out.append(n)
         return out
 
-    def usable_scratch(roots: list[str]) -> list[tuple[str, bool]]:
-        """(root, list only) per scratch root. A root must carry the marker
-        file its user put there on purpose, the temp dir included; without
-        it the whole run refuses and says how to opt in. The temp dir is
-        list only: it holds too many things whose names say nothing."""
+    def usable_scratch(roots: list[str]) -> list[str]:
+        """The scratch roots to list. A root must carry the marker file its
+        user put there on purpose, the temp dir included; without it the
+        whole run refuses and says how to opt in. Every scratch root is
+        list only (conductor's ruling of 16 November 2026)."""
         out = []
         temps = protected_temp_roots()
         for root in roots:
@@ -1863,12 +1952,18 @@ def run_sweep(args, cfg: dict) -> int:
             if n not in temps and harness_managed(root):
                 print(f"note: {root} is harness-managed; its contents are left alone")
                 continue
-            if not os.path.isfile(os.path.join(n, SCRATCH_ROOT_MARKER)):
-                raise Refusal(f"scratch root {root} has no {SCRATCH_ROOT_MARKER} file, so it is "
-                              "not known to hold only scratch; if every dir in it may go after "
-                              f"its idle period, create {os.path.join(root, SCRATCH_ROOT_MARKER)} "
+            try:
+                mst = os.lstat(os.path.join(n, SCRATCH_ROOT_MARKER))
+                marked = stat.S_ISREG(mst.st_mode) and (
+                    not hasattr(os, "getuid") or mst.st_uid == os.getuid())
+            except OSError:
+                marked = False
+            if not marked:
+                raise Refusal(f"scratch root {root} has no {SCRATCH_ROOT_MARKER} file of yours "
+                              "(a regular file, not a link), so it is not known to hold only "
+                              f"scratch; to list it, create {os.path.join(root, SCRATCH_ROOT_MARKER)} "
                               "and run again; nothing was changed")
-            out.append((n, n in temps))
+            out.append(n)
         return out
 
     wt_norm, cache_norm = usable(wt_roots), usable(cache_roots)
@@ -1962,29 +2057,21 @@ def run_sweep(args, cfg: dict) -> int:
                                                now=now, procs=procs))
             elif _real_dir(child) and norm(child) not in seen:
                 left["not a clone"] = left.get("not a clone", 0) + 1
-    list_only: set[str] = set()
-    sightings = Sightings(args.ledger.parent / "scratch-sightings.json") if scratch_norm else None
-    present: set[str] = set()
-    for root, only_list in scratch_norm:
+    # Scratch is list only: every row says what holds it (or that nothing
+    # does) and when it was last written; nothing under a scratch root is
+    # ever removed by this script.
+    for root in scratch_norm:
         for child in _children(root):
             if _real_dir(child) and candidate(child):
                 v = evaluate_scratch(child, grace_days=sgrace, now=now, procs=procs,
                                      registered=registered)
-                key = norm(child)
-                present.add(key)
-                seen_at = sightings.first_seen(key, now)
-                if v.ok and sightings.error:
-                    v.failure = sightings.error
-                elif v.ok and now - seen_at < sgrace * DAY:
-                    v.failure = (f"first seen {(now - seen_at) / DAY:.1f} days ago; a scratch dir "
-                                 f"goes only {sgrace:g} days after a run first saw it")
-                if only_list:
-                    list_only.add(key)
+                age = (f"last write {(now - v.newest) / DAY:.1f} days ago"
+                       if v.newest else "no write time")
+                if v.ok:
+                    v.note = f"list only; nothing keeps it; {age}"
+                else:
+                    v.failure = f"{v.failure}; {age}"
                 verdicts.append(v)
-    if sightings is not None and not sightings.error:
-        note = sightings.save(present)
-        if note:
-            print(f"warning: {note}")
 
     rows: list[tuple[Verdict, str]] = []
     ledger_ok = [True]
@@ -2012,6 +2099,7 @@ def run_sweep(args, cfg: dict) -> int:
         return again, state
 
     def apply_marked(v: Verdict) -> tuple[Verdict, str]:
+        checked_at = time.time()
         if v.kind == "target":
             again = evaluate_target(v.path, repo=repo, main=main, grace_hours=tgrace,
                                     unowned_days=unowned, now=time.time(), pins=current_pins(),
@@ -2020,22 +2108,23 @@ def run_sweep(args, cfg: dict) -> int:
             again = evaluate_clone(v.path, repo=repo, main=main, grace_days=wgrace,
                                    now=time.time(), procs=list_processes())
         else:
-            again = evaluate_scratch(v.path, grace_days=sgrace, now=time.time(),
-                                     procs=list_processes(),
-                                     registered=[norm(w.path) for w in list_worktrees(repo)])
+            raise Refusal(f"a {v.kind} row reached the delete path")    # never: scratch is list only
         if not again.ok:
             again.failure = f"changed since scan: {again.failure}"
             return again, "keep"
         if v.kind == "target":
             _c, _p, _f, lock_dirs = target_layout(v.path)
             with _BuildLocks(lock_dirs) as free:
-                err = (delete_target(v.path) if free else
+                err = (delete_target(v.path, checked_at=checked_at) if free else
                        "in use or access denied, skipped: a build took cargo's lock")
         else:
-            err = delete_cache(v.path)
+            err = delete_cache(v.path, checked_at=checked_at)
         if err and err.startswith("in use"):
             again.failure = err
             return again, "keep"
+        if err and err.startswith("kept aside"):
+            again.failure = err
+            return again, "failed"
         extra = {"note": again.note} if again.note else {}
         record(again, extra | ({"complete": True} if err is None
                                else {"complete": False, "state": "partial"}))
@@ -2058,8 +2147,7 @@ def run_sweep(args, cfg: dict) -> int:
     for i, v in enumerate(verdicts):
         if not v.ok:
             rows.append((v, "keep"))
-        elif v.kind == "scratch" and norm(v.path) in list_only:
-            v.note = "the temp dir is list only"
+        elif v.kind == "scratch":
             rows.append((v, "list only"))
         elif not args.apply:
             rows.append((v, "would remove"))

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import os
 import stat
 import subprocess
@@ -36,7 +37,6 @@ def _load():
 prune = _load()
 REAL_ARRIVAL = getattr(prune, "_arrival", None)   # before any fixture replaces it
 REAL_LIST_PROCESSES = prune.list_processes
-REAL_FIRST_SEEN = getattr(getattr(prune, "Sightings", None), "first_seen", None)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -170,10 +170,6 @@ def env(tmp_path, monkeypatch):
     # Files made here arrive now; tests age them by mtime alone, and the
     # arrival rule has its own test.
     monkeypatch.setattr(prune, "_arrival", lambda st: 0.0, raising=False)
-    # Scratch dirs count as first seen long ago; the sightings rule has its
-    # own tests.
-    if hasattr(prune, "Sightings"):
-        monkeypatch.setattr(prune.Sightings, "first_seen", lambda self, path, now: 0.0)
     monkeypatch.delenv("CARGO_TARGET_DIR", raising=False)
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         monkeypatch.delenv(var, raising=False)
@@ -1373,13 +1369,17 @@ def _scratch(env: Env, name: str, *files: str, age: float | None = OLD) -> Path:
     return path
 
 
-def test_an_idle_scratch_dir_is_removed(env):
+def test_an_idle_scratch_dir_is_listed_not_removed(env):
+    """Conductor's ruling of 16 November 2026: the scratch class is list
+    only, with or without --apply; a row says that nothing keeps the dir."""
     old = _scratch(env, "w3runnertemp", "a/b.bin")
     fresh = _scratch(env, "today", age=None)
     rc, out = run_scratch(env, "--apply")
     assert rc == 0, out
-    assert not old.exists() and fresh.exists()
-    assert [l["kind"] for l in env.ledger_lines()] == ["scratch"]
+    assert old.exists() and fresh.exists()
+    assert "list only; nothing keeps it; last write 30.0 days ago" in out
+    assert "in grace period" in out
+    assert env.ledger_lines() == []
 
 
 def test_scratch_holding_logs_evidence_checkouts_or_venvs_is_kept(env):
@@ -1805,11 +1805,12 @@ def test_an_unmarked_scratch_root_refuses_the_run(env):
     assert prune.SCRATCH_ROOT_MARKER in out and "create" in out
 
 
-def test_a_marked_scratch_root_is_swept(env):
+def test_a_marked_scratch_root_is_listed(env):
     old = _scratch(env, "w3runnertemp", "a/b.bin")
     rc, out = run_scratch(env, "--apply")
     assert rc == 0, out
-    assert not old.exists()
+    assert old.exists()
+    assert "list only" in out
 
 
 def test_the_temp_dir_as_a_scratch_root_is_list_only(env, monkeypatch):
@@ -1849,7 +1850,8 @@ def test_harness_name_prefixes_are_kept_and_the_near_miss_is_not(env):
     rc, out = run_scratch(env, "--apply")
     assert rc == 0, out
     assert all(p.exists() for p in kept), out
-    assert not near.exists(), out
+    assert near.exists(), out
+    assert re.search(r"list only; nothing keeps it.*notclaude", out), out
 
 
 def test_an_inherited_git_dir_cannot_make_a_clone_read_as_merged(env, monkeypatch):
@@ -2029,29 +2031,177 @@ def test_a_keep_marker_keeps_a_scratch_dir(env):
     assert "keep marker" in out
 
 
-def test_a_scratch_dir_goes_only_a_grace_period_after_it_was_first_seen(env, monkeypatch):
-    """A move within one Windows volume keeps a dir's creation time, so no
-    time on disk shows its arrival; the first sighting does."""
-    monkeypatch.setattr(prune.Sightings, "first_seen", REAL_FIRST_SEEN)
-    moved = _scratch(env, "moved-in", "data.bin")          # 30 days old on disk
-    rc, out = run_scratch(env, "--apply")
-    assert rc == 0, out
-    assert moved.exists()
-    assert "first seen 0.0 days ago" in out
-    sightings = json.loads((env.tmp / "scratch-sightings.json").read_text(encoding="utf-8"))
-    assert sightings == {prune.norm(moved): pytest.approx(time.time(), abs=600)}
-    sightings[prune.norm(moved)] = OLD
-    (env.tmp / "scratch-sightings.json").write_text(json.dumps(sightings), encoding="utf-8")
-    rc, out = run_scratch(env, "--apply")
-    assert rc == 0, out
-    assert not moved.exists()
+# --- conductor's round 2 on #1654 --------------------------------------------
 
-
-def test_an_unreadable_sightings_file_keeps_every_scratch_dir(env, monkeypatch):
-    monkeypatch.setattr(prune.Sightings, "first_seen", REAL_FIRST_SEEN)
-    old = _scratch(env, "old")
-    (env.tmp / "scratch-sightings.json").write_text("{not json", encoding="utf-8")
+def test_scratch_is_list_only_with_apply_under_any_root_spelling(env):
+    """V1 and V2 are moot: no scratch row is ever removed, whatever the
+    root is called, and a run writes no sightings and no ledger line."""
+    old = _scratch(env, "anything", "a/b.bin")
     rc, out = run_scratch(env, "--apply")
     assert rc == 0, out
     assert old.exists()
-    assert "cannot be read" in out
+    assert env.ledger_lines() == []
+    assert not (env.tmp / "scratch-sightings.json").exists()
+
+
+def test_a_marker_that_is_a_dir_does_not_mark_a_root(env):
+    root = env.tmp / "dir-marker"
+    (root / ".pseudolife-scratch-root").mkdir(parents=True)
+    rc, out = run(env, "--scratch-root", str(root), roots=False)
+    assert rc == 2 and "has no .pseudolife-scratch-root file" in out, out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_a_marker_that_is_a_link_does_not_mark_a_root(env):
+    root = env.tmp / "link-marker"
+    root.mkdir()
+    real = env.tmp / "elsewhere-marker"
+    real.write_text("", encoding="utf-8")
+    os.symlink(real, root / ".pseudolife-scratch-root")
+    rc, out = run(env, "--scratch-root", str(root), roots=False)
+    assert rc == 2 and "not a link" in out, out
+
+
+def test_an_inherited_git_config_cannot_hide_a_keep_marker(env, monkeypatch):
+    """S-b: GIT_CONFIG pointing at an empty file made git read no other
+    config, so `pseudolife.keep true` read as unset (verified on review)."""
+    clone = _clone(env, "kept-by-config")
+    _git(clone, "config", "pseudolife.keep", "true")
+    _backdate(clone)
+    empty = env.tmp / "empty.gitconfig"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG", str(empty))
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "keep marker" in out
+
+
+def test_a_users_file_in_a_profile_keeps_that_profile(env, targets_root):
+    """S-c: a copied server-good.exe or notes beside a build, newer than the
+    profile's fingerprints, make the profile foreign; it stays."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "with-user-file", gone, age=None)
+    (target / "debug" / ".fingerprint" / "thing-1234").mkdir()
+    (target / "debug" / ".fingerprint" / "thing-1234" / "lib-thing").write_text("x")
+    _backdate(target)
+    user = target / "debug" / "server-good.exe"
+    user.write_bytes(b"kept build")
+    os.utime(user, (OLD + 86400, OLD + 86400))      # after the last build, still old
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert user.exists()
+    assert "nothing of cargo's own" in out
+
+
+def test_cargos_own_outputs_in_a_profile_still_go(env, targets_root):
+    """The near miss: an output cargo names in the profile's own dep-info,
+    with its debug info, is cargo's and goes with the profile."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "with-outputs", gone, age=None)
+    prof = target / "debug"
+    (prof / "app.exe").write_bytes(b"binary")
+    (prof / "app.pdb").write_bytes(b"debug info")
+    (prof / "app.d").write_text(f"{prof / 'app.exe'}: {gone}\n", encoding="utf-8")
+    (prof / ".fingerprint" / "app-1").mkdir()
+    (prof / ".fingerprint" / "app-1" / "bin-app").write_text("x")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+
+
+def test_criterion_measurements_in_a_target_are_kept(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "benches", gone, age=None)
+    (target / "criterion" / "parse" / "base").mkdir(parents=True)
+    (target / "criterion" / "parse" / "base" / "estimates.json").write_text("{}")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "criterion" / "parse" / "base" / "estimates.json").exists()
+    assert not (target / "debug").exists()
+
+
+def test_criterion_measurements_in_a_clone_keep_it(env):
+    clone = _clone(env, "benched")
+    (clone / "rust" / "target" / "criterion" / "x").mkdir(parents=True)
+    (clone / "rust" / "target" / "criterion" / "x" / "estimates.json").write_text("{}")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "criterion measurements" in out
+
+
+def test_a_write_during_the_checks_renames_the_dir_back(env, targets_root, monkeypatch):
+    """S-d: a file written after the checks began, found in the aside copy,
+    puts the dir back and keeps it."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "written-late", gone)
+    real_rename = prune.os.rename
+
+    def rename_then_write(src, dst, *a, **kw):
+        real_rename(src, dst, *a, **kw)
+        if ".retention-" in os.path.basename(str(dst)):
+            (Path(dst) / "late.txt").write_text("written during the checks")
+
+    monkeypatch.setattr(prune.os, "rename", rename_then_write)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "late.txt").exists() and (target / "debug").exists()
+    assert "written during the checks; renamed back" in out
+    assert env.ledger_lines() == []
+
+
+def test_a_process_that_appears_before_the_delete_keeps_it(env, targets_root, monkeypatch):
+    """S-d: the process list is taken again just before each delete."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "started-late", gone)
+    calls = []
+
+    def listing():
+        calls.append(1)
+        # Empty for the scan and the re-check, then a process using it.
+        return [] if len(calls) < 3 else [(999997, 1, f"{target}/debug/app --serve")]
+
+    monkeypatch.setattr(prune, "list_processes", listing)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "process 999997 uses it" in out
+
+
+def test_a_clone_with_an_operation_in_progress_is_kept(env):
+    """T4: an interrupted merge, rebase or am keeps work only in .git."""
+    clone = _clone(env, "mid-merge")
+    (clone / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "MERGE_HEAD" in out
+
+
+def test_a_clone_with_a_hook_of_its_own_is_kept(env):
+    clone = _clone(env, "hooked")
+    (clone / ".git" / "hooks").mkdir(exist_ok=True)
+    (clone / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\nexit 0\n")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "hook script of its own" in out
+
+
+def test_a_target_whose_profiles_hold_no_dep_info_is_kept(env, targets_root):
+    """T7: with no dep-info nothing shows a profile is cargo's own."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "no-dep-info", gone, age=None)
+    for d in (target / "debug" / "deps").glob("*.d"):
+        d.unlink()
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "nothing of cargo's own" in out
