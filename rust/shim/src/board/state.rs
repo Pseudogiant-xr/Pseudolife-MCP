@@ -323,26 +323,30 @@ type FolderPass = ((u64, u64), std::time::Instant);
 fn marker_folder_trusted(folder: &Path) -> Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     const FRESH: Duration = Duration::from_secs(30);
-    // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse point,
-    // sharing read and write but not delete: while the caller holds this
-    // handle the folder cannot be renamed or removed.
+    // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse point
+    // unless it is a link the private-path rule accepted (the caller checked
+    // the marker's folders), sharing read and write but not delete: while
+    // the caller holds this handle the folder cannot be renamed or removed.
     let directory = OpenOptions::new()
         .access_mode(0x0002_0000 | 0x80)
         .share_mode(0x1 | 0x2)
-        .custom_flags(0x02000000 | 0x00200000)
+        .custom_flags(0x02000000 | no_follow_unless_link(folder))
         .open(folder)
         .map_err(|_| "state_unavailable")?;
     // The pass is cached for the folder object it was made on (volume and
     // file index, read through this same handle), not its name: a folder
     // swapped in under the same name is checked afresh.
     let Ok(identity) = crate::credentials::windows_security::folder_identity(&directory) else {
-        report_folder_once(
-            folder,
-            &format!(
-                "pseudolife-mcp: not reading board markers in {}: it is not a plain folder (a symlink or junction, which private state never follows). Fix: point the digest folder at a plain folder, then retry.",
+        // The private-path rule names a link it does not follow; anything
+        // else is a folder that could not be read as one.
+        let line = match crate::private_path::check_path(folder) {
+            Err(refusal) => refusal.to_string(),
+            Ok(()) => format!(
+                "pseudolife-mcp: not reading board markers in {}: it could not be opened as a plain folder. Fix: point the digest folder at a plain folder you own, then retry.",
                 folder.display()
             ),
-        );
+        };
+        report_folder_once(folder, &line);
         return Err("invalid_state");
     };
     let fresh = MARKER_FOLDERS
@@ -502,7 +506,8 @@ pub fn private_dir(path: &Path) -> Result<()> {
     private_dir_at(path, true)
 }
 fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
-    crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+    // The folder itself too: in its place a link is followed below.
+    crate::credentials::reject_redirects(path).map_err(|_| "invalid_state")?;
     // Whether this call made the folder, or another task did meanwhile.
     let mut created = false;
     let mut appeared = false;
@@ -569,7 +574,7 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
             let directory = OpenOptions::new()
                 .access_mode(0x00120089 | 0x000c0000)
                 .share_mode(0x1 | 0x2)
-                .custom_flags(0x02000000 | 0x00200000)
+                .custom_flags(0x02000000 | no_follow_unless_link(path))
                 .open(path)
                 .map_err(|_| "state_unavailable")?;
             // An existing empty folder another account owns is refused, not
@@ -594,12 +599,13 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
             }
         } else {
             // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse
-            // point: enough to read the owner and DACL, which the owner can
-            // always do.
+            // point unless the folder is a link the check above trusted:
+            // enough to read the owner and DACL, which the owner can always
+            // do.
             let directory = OpenOptions::new()
                 .access_mode(0x0002_0000 | 0x80)
                 .share_mode(0x1 | 0x2 | 0x4)
-                .custom_flags(0x02000000 | 0x00200000)
+                .custom_flags(0x02000000 | no_follow_unless_link(path))
                 .open(path)
                 .map_err(|_| "state_unavailable")?;
             match crate::credentials::windows_security::validate_folder(&directory) {
@@ -623,6 +629,23 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+/// `FILE_FLAG_OPEN_REPARSE_POINT`, unless `path` is a link: a private folder
+/// in whose place the private-path rule accepted a link is opened where the
+/// link leads, and any other reparse point is opened as itself (and refused).
+///
+/// The rule is applied again here, not taken from the caller's earlier
+/// check, so a link made in between (where the folder was missing then) is
+/// never followed unchecked.
+#[cfg(windows)]
+fn no_follow_unless_link(path: &Path) -> u32 {
+    if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+        && crate::private_path::check_path(path).is_ok()
+    {
+        0
+    } else {
+        0x0020_0000
+    }
 }
 /// The icacls command that makes `folder` private to this account while
 /// keeping access for what is in it, and removes `writer`'s own grants
@@ -830,14 +853,13 @@ pub fn denied_cause(path: &Path, error: &std::io::Error) -> String {
 /// prints. `None` when nothing is wrong now, or the cause is not a
 /// permission or redirect one.
 pub fn diagnose(path: &Path) -> Option<String> {
-    if crate::credentials::reject_ancestor_redirects(path).is_err() {
-        return Some(
-            "a folder on its path is a symlink or junction, which private state never follows"
-                .into(),
-        );
+    if let Err(refusal) = crate::private_path::check_ancestors(path) {
+        return Some(refusal.to_string());
     }
     let folder = path.parent()?;
-    let meta = fs::symlink_metadata(folder).ok()?;
+    // A folder that is itself a link passed the check above: read where it
+    // leads.
+    let meta = fs::metadata(folder).ok()?;
     if !meta.is_dir() {
         return Some(format!("{} is not a plain folder", folder.display()));
     }
@@ -870,10 +892,10 @@ pub fn diagnose(path: &Path) -> Option<String> {
             OpenOptions::new()
                 .access_mode(0x0002_0000 | 0x80)
                 .share_mode(0x1 | 0x2)
-                .custom_flags(flags | 0x0020_0000)
+                .custom_flags(flags)
                 .open(target)
         };
-        let Ok(directory) = opened(folder, 0x0200_0000) else {
+        let Ok(directory) = opened(folder, 0x0200_0000 | no_follow_unless_link(folder)) else {
             return Some(format!(
                 "this user cannot read the permissions of {}",
                 folder.display()
@@ -891,7 +913,7 @@ pub fn diagnose(path: &Path) -> Option<String> {
             ));
         }
         if exists(path) {
-            let Ok(file) = opened(path, 0) else {
+            let Ok(file) = opened(path, 0x0020_0000) else {
                 return Some("this user cannot read the file's permissions".into());
             };
             if crate::credentials::windows_security::validate(&file).is_err() {
