@@ -484,11 +484,26 @@ mod windows {
     fn substitute_names_map_to_paths_this_process_can_open() {
         assert_eq!(
             target_path_for_test(r"\??\C:\Users\<user>", false),
-            Some(PathBuf::from(r"C:\Users\<user>"))
+            Some(PathBuf::from(r"\\?\C:\Users\<user>"))
         );
         assert_eq!(
             target_path_for_test(r"\??\UNC\server\share\home", false),
-            Some(PathBuf::from(r"\\server\share\home"))
+            Some(PathBuf::from(r"\\?\UNC\server\share\home"))
+        );
+        // Verbatim, so Win32 cannot normalise the name into another object:
+        // `state.` stays `state.`, never the plain folder `state` (Codex
+        // review of 5645e025a).
+        assert_eq!(
+            target_path_for_test(r"\??\C:\data\state.", false),
+            Some(PathBuf::from(r"\\?\C:\data\state."))
+        );
+        assert_eq!(
+            target_path_for_test(r"\??\C:\data\state ", false),
+            Some(PathBuf::from(r"\\?\C:\data\state "))
+        );
+        assert_eq!(
+            target_path_for_test(r"\??\UNC\server\share\home.", false),
+            Some(PathBuf::from(r"\\?\UNC\server\share\home."))
         );
         assert_eq!(
             target_path_for_test(r"\??\Volume{0b6d2f44-0000-0000-0000-100000000000}\", false),
@@ -593,6 +608,42 @@ mod windows {
         let file = state.join("record.json");
         drop(crate::board::state::create(&file).unwrap());
         crate::board::state::open(&file).unwrap();
+    }
+
+    #[test]
+    fn a_junction_to_a_trailing_dot_name_is_checked_at_that_name() {
+        // `state.` and `state` are different objects, but Win32 normalises a
+        // plain `...\state.` to `...\state`. The trusted outer junction leads
+        // to `state.`, a junction another account may rewrite; the walk must
+        // inspect `state.` (verbatim), not the plain folder `state` beside it
+        // (Codex review of 5645e025a, P1).
+        let scratch = Scratch::new("trailing-dot");
+        let verbatim = |path: &Path| PathBuf::from(format!(r"\\?\{}", path.display()));
+        let plain = scratch.0.join("state");
+        fs::create_dir(&plain).unwrap();
+        let real = scratch.0.join("real");
+        fs::create_dir(&real).unwrap();
+        let dotted = verbatim(&scratch.0).join("state.");
+        make_junction_for_test(&dotted, &real).unwrap();
+        let me = current_user_sid().unwrap();
+        set_link_dacl_sddl(
+            &dotted,
+            &format!("D:(A;;FA;;;{me})(A;;0x1301bf;;;AU)"),
+            true,
+        )
+        .unwrap();
+        let outer = scratch.0.join("outer");
+        make_junction_for_test(&outer, &scratch.0.join("state.")).unwrap();
+        let refusal = check_ancestors(&outer.join("token")).unwrap_err();
+        assert!(
+            refusal.element.to_string_lossy().ends_with(r"\state."),
+            "{refusal}"
+        );
+        assert!(
+            matches!(*refusal.cause, Cause::LinkWriter { .. }),
+            "{refusal}"
+        );
+        fs::remove_dir(&dotted).unwrap(); // the junction itself, not its target
     }
 
     #[test]

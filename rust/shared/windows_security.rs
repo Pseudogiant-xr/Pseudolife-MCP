@@ -296,9 +296,9 @@ fn security_distrust(
 }
 
 /// Where the symlink or junction open on `entry` (not followed) leads, from
-/// its substitute name, as a path this process can open: `\??\C:\x` is
-/// `C:\x`, `\??\UNC\server\share` is `\\server\share` and
-/// `\??\Volume{...}\` is `\\?\Volume{...}\`. A relative symlink's name is
+/// its substitute name, as a verbatim path this process can open:
+/// `\??\C:\x` is `\\?\C:\x`, `\??\UNC\server\share` is
+/// `\\?\UNC\server\share` and `\??\Volume{...}\` is `\\?\Volume{...}\`. A relative symlink's name is
 /// returned as it is, for the caller to join to the link's folder. Any
 /// other form is an error, so the path is refused rather than guessed at.
 fn reparse_target(entry: &File, tag: u32) -> io::Result<std::path::PathBuf> {
@@ -371,6 +371,11 @@ fn reparse_target(entry: &File, tag: u32) -> io::Result<std::path::PathBuf> {
 /// forms the walk can check, `\??\X:\...`, `\??\UNC\server\share...` and
 /// `\??\Volume{...}\...`; `None` (refused) for anything else, the
 /// `\??\GLOBALROOT\Device\...` form an ordinary user can store included.
+///
+/// Each is returned as a verbatim (`\\?\`) path, never a plain DOS one: the
+/// link follows its NT name literally, while Win32 would normalise a plain
+/// path (dropping a trailing `.` or space, collapsing `..`) and so inspect a
+/// different object from the one the link leads to.
 fn target_path(wide: &[u16], relative: bool) -> Option<std::path::PathBuf> {
     if relative {
         return None;
@@ -378,7 +383,7 @@ fn target_path(wide: &[u16], relative: bool) -> Option<std::path::PathBuf> {
     let text = String::from_utf16(wide).ok()?;
     let rest = text.strip_prefix("\\??\\")?;
     if let Some(share) = rest.strip_prefix("UNC\\") {
-        return (!share.is_empty()).then(|| format!("\\\\{share}").into());
+        return (!share.is_empty()).then(|| format!("\\\\?\\UNC\\{share}").into());
     }
     if rest.starts_with("Volume{") {
         return Some(format!("\\\\?\\{rest}").into());
@@ -386,7 +391,7 @@ fn target_path(wide: &[u16], relative: bool) -> Option<std::path::PathBuf> {
     let bytes = rest.as_bytes();
     let drive =
         bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\';
-    drive.then(|| rest.into())
+    drive.then(|| format!("\\\\?\\{rest}").into())
 }
 
 #[cfg(test)]
