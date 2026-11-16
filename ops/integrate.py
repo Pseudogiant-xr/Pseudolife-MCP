@@ -10,6 +10,7 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py status            # labelled PRs, CI, mergeability
     python ops/integrate.py build --dry-run   # what a build would do
     python ops/integrate.py build             # merge the batch locally
+    python ops/integrate.py suite             # its full suite on the remote machine
     python ops/integrate.py open --suite <result.json> --harness-note "<result>"
                                               # push it, open its PR
     python ops/integrate.py merge             # merge the open batch PR, once green
@@ -21,7 +22,9 @@ number when unknown) onto a new local branch, and drops a member that
 conflicts, aborting that merge. It pushes nothing, so the local full suite
 runs on the batch head before any CI, with the Python tests under rust/ the
 suite does not collect (`RUST_HARNESS`). `open` then checks the suite passed
-on that exact head, records both results, pushes the branch, opens the batch pull request, and
+on that exact head with the real native client built from it (the launcher
+builds it on an integrate/* branch; #1634), records both results, pushes the
+branch, opens the batch pull request, and
 comments on each dropped member naming what it collided with (removing its
 label). `build` then regenerates the producer census
 (`rust/producer-census.json`) on the batch head with the head's own
@@ -2301,8 +2304,9 @@ def build(args: argparse.Namespace) -> int:
     print(f"\nRust compile check (`{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/): {rust}.")
     print(f"built {plan.branch} at {plan.head[:12]}; nothing is pushed, so no CI "
           "has started. Next, on this checkout:\n"
-          "  1. PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1   "
-          "(the local WSL full suite; writes ~/.pseudolife-mcp/suite-results/*.json)\n"
+          f"  1. {SUITE_COMMAND}   (the full suite on the remote machine, the batch "
+          "head carried as a bundle; writes ~/.pseudolife-mcp/suite-results/*.json;\n"
+          f"     {REAL_CLIENT_NOTE}; {SUITE_LOCAL_NOTE})\n"
           f"  2. {RUST_HARNESS_COMMAND}   (the Rust harness Python tests the "
           "suite does not collect; natively is fine, with the project's dev "
           "dependencies)\n"
@@ -2314,12 +2318,100 @@ def build(args: argparse.Namespace) -> int:
     return 0
 
 
+# The local gate runs the tests that need the real native client, as the
+# hosted `test` lane does: a batch whose local suite used their stand-in
+# passed and then failed 18 of them hosted (#1634), and "this batch cannot
+# break them" is not something a tool can judge, so there is no escape
+# (conductor ruling, 16 November 2026). ops/remote-suite.ps1 turns the
+# build on by itself on an integrate/* branch and records it in the result.
+SUITE_COMMAND = "python ops/integrate.py suite"
+REAL_CLIENT_NOTE = ("on this integrate/* branch it also builds the native client there "
+                    "(cargo build --locked -p pseudolife-stdio, the dev profile, as the "
+                    "hosted test lane does; needs 8 GB free there) and runs the "
+                    "real-client tests, which `open` requires")
+SUITE_LOCAL_NOTE = ("only while this PC is declared available may it run here instead: "
+                    "PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1")
+# The batch head is not on origin before `open`, so ops/remote-suite.ps1
+# carries it to the remote machine as a git bundle: nothing is pushed for
+# the suite.
+REAL_CLIENT_SAID = "real client: yes"
+
+
+def _real_client_refusal(why: str, head: str) -> Refusal:
+    return Refusal(f"{why}, so the tests that need the native client used their "
+                   "stand-in or skipped, which the hosted `test` lane does not "
+                   f"(#1634); rerun on this checkout: `{SUITE_COMMAND}` (it builds "
+                   f"the client from {head[:8]}; a run by hand needs "
+                   "PSEUDOLIFE_SUITE_NATIVE_CLIENT unset or 1 on this integrate/* "
+                   "branch), then `open` with its new result. A build that cannot run "
+                   "(under 8 GB free, cargo failing) is fixed first: the batch does "
+                   "not open without it")
+
+
+def _suite_results_dir() -> Path:
+    return Path.home() / ".pseudolife-mcp" / "suite-results"
+
+
+def _run_remote_suite(head: str) -> int:
+    """The batch's full suite on the remote machine (ops/remote-suite.ps1,
+    this checkout's own), with the real native client; its output streams."""
+    env = {**os.environ, "PSEUDOLIFE_SUITE_WHERE": "remote",
+           "PSEUDOLIFE_SUITE_NATIVE_CLIENT": "1"}
+    script = Path(_out("rev-parse", "--show-toplevel")) / "ops" / "remote-suite.ps1"
+    try:
+        return subprocess.run(["pwsh", "-NoProfile", "-File", str(script)], env=env).returncode
+    except FileNotFoundError:
+        raise Refusal("pwsh is not on PATH; ops/remote-suite.ps1 needs PowerShell 7") from None
+
+
+def suite(args: argparse.Namespace) -> int:
+    """Run the built batch's full suite on the remote machine (its head
+    travels there as a bundle; nothing is pushed) and name the result for
+    `open --suite`."""
+    if _out("status", "--porcelain", "--untracked-files=no"):
+        raise Refusal("the checkout has uncommitted changes to tracked files; "
+                      "nothing is fixed inside a batch")
+    branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
+    plan = Plan.load(branch) if BATCH_RE.match(branch) else None
+    if plan is None:
+        raise Refusal(f"this checkout is not on a batch `build` left here "
+                      f"({branch or 'detached HEAD'}); run `python ops/integrate.py "
+                      "build` first")
+    head = _out("rev-parse", "HEAD")
+    if head != plan.head:
+        raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
+                      "build; nothing is fixed inside a batch, so rebuild it")
+    started = time.time()
+    print(f"integrate: running {head[:12]}'s full suite on the remote machine, with the "
+          "real native client; the batch head travels as a bundle, nothing is pushed",
+          flush=True)
+    code = _run_remote_suite(head)
+    results = sorted((p for p in _suite_results_dir().glob(f"*-remote-{head[:8]}.json")
+                      if p.stat().st_mtime >= started - 1), key=lambda p: p.stat().st_mtime)
+    if not results:
+        print(f"integrate: the suite wrote no result for {head[:12]} (exit {code}); "
+              "nothing to give `open`", file=sys.stderr)
+        return code or 1
+    print(f"integrate: suite exit {code}; its result is {results[-1]}")
+    if code == 0:
+        print(f"next: python ops/integrate.py open --suite {results[-1]} "
+              f"--harness-note \"<count> passed at {head[:8]}\"")
+    return code
+
+
 def _suite_line(args: argparse.Namespace, head: str) -> str:
-    """The "Local full suite" line, from a passing result for exactly `head`."""
+    """The "Local full suite" line, from a passing result for exactly `head`
+    that ran the real native client built from it."""
     if args.suite_note:
         if head[:8] not in args.suite_note:
             raise Refusal(f"a --suite-note must name the batch head it ran on "
                           f"(at least `{head[:8]}`) with its machine and result")
+        said = args.suite_note.lower()
+        if REAL_CLIENT_SAID not in said or "given by the caller" in said:
+            raise _real_client_refusal(
+                f"a --suite-note must say `{REAL_CLIENT_SAID}` for a client the run "
+                "built (the run's own `wsl-suite: real client:` line), and this one "
+                "does not", head)
         return f"{args.suite_note} (stated by the operator, not checked)"
     if not args.suite:
         raise Refusal("give the local full suite's result for this head: "
@@ -2346,8 +2438,18 @@ def _suite_line(args: argparse.Namespace, head: str) -> str:
     if result.get("exit_code") != 0:
         raise Refusal(f"the suite failed on this head (exit {result.get('exit_code')}: "
                       f"{result.get('summary')}); bisect locally and drop the culprit")
-    return (f"passed at `{head}` on {result.get('machine', 'an unnamed machine')}: "
-            f"{result.get('summary', '')}")
+    real = result.get("real_client")
+    if real is not True:
+        raise _real_client_refusal(
+            "the suite result does not record the real native client"
+            if real is None else "the suite result ran without the real native client", head)
+    if result.get("real_client_commit") != head:
+        raise _real_client_refusal(
+            f"the suite result's native client was built from "
+            f"{str(result.get('real_client_commit'))[:12]}, not this batch head "
+            f"{head[:12]}", head)
+    return (f"passed at `{head}` on {result.get('machine', 'an unnamed machine')}, "
+            f"with the real native client built from it: {result.get('summary', '')}")
 
 
 def _harness_line(args: argparse.Namespace, head: str) -> str:
@@ -2837,11 +2939,13 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--harness-note",
                    help="the Rust harness Python tests' result in words, naming "
                         "this head (the command `build` printed)")
+    sub.add_parser("suite", help="run the built batch's full suite on the remote "
+                                 "machine (its head travels as a bundle)")
     sub.add_parser("merge", help="merge the published batch pull request once every "
                                  "check on its built head passed; the one path to "
                                  "master")
     args = parser.parse_args(argv)
-    commands = {"status": status, "build": build, "open": open_, "merge": merge}
+    commands = {"status": status, "build": build, "suite": suite, "open": open_, "merge": merge}
     try:
         return commands[args.command](args)
     except Refusal as exc:

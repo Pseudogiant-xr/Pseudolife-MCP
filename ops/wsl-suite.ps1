@@ -11,6 +11,21 @@
 #   $env:PSEUDOLIFE_SUITE_PROFILE='1'           # also profile the run (the
 #                                               # profile stays in WSL's
 #                                               # ~/.pseudolife-mcp/suite-profiles)
+#   $env:PSEUDOLIFE_SUITE_NATIVE_CLIENT='1'     # also build the native client
+#                                               # in WSL and run the tests that
+#                                               # need it, as the hosted `test`
+#                                               # lane does (Linux only: not the
+#                                               # macOS or Windows lanes)
+#
+# Every run says before pytest starts whether it used the real native client
+# (`wsl-suite: real client: yes|no`); off by default here, while
+# ops/remote-suite.ps1 turns it on for an integrate/* batch branch. The
+# build runs in WSL from the tested copy into one cache per machine that
+# only these runs write (PSEUDOLIFE_SUITE_CARGO_TARGET_DIR, a Linux path, else
+# WSL's ~/.cache/pseudolife-suite/cargo-target; never a general
+# CARGO_TARGET_DIR) and refuses under 8 GB free there; a failed build fails
+# the run. ops/wsl-suite.sh, after "PSEUDOLIFE_SUITE_NATIVE_CLIENT=1: build",
+# has the rest.
 #
 # A full suite on native Windows starts Git Bash processes in bursts that
 # stalled mouse input on the maintainer's host (tests/suite_lock.py carries
@@ -34,6 +49,19 @@
 # PSEUDOLIFE_WSL_DISTRO picks the distribution (default: WSL's default
 # one). The exit code is pytest's.
 #
+# A host with a second machine configured for full suites
+# (~/.pseudolife-mcp/locks/full-suite.remote ssh=, or PSEUDOLIFE_SUITE_REMOTE)
+# runs them there, and in WSL here only while its owner has said this PC is
+# available (~/.pseudolife-mcp/locks/pc-available; ops/suite-availability.ps1
+# has the format), so a FULL run started here directly is refused with the
+# command that runs it remotely; targeted runs are untouched (ops/wsl-suite.sh
+# refuses the default full run, and tests/conftest.py any arguments that
+# still select the whole suite, with the suite lock's own classifier).
+# PSEUDOLIFE_SUITE_WHERE=local overrides
+# that, and says so; ops/remote-suite.ps1 marks a local run it chose by that
+# rule (PSEUDOLIFE_SUITE_CHOSEN=local). With no remote configured nothing
+# changes.
+#
 # The run logs in to the test Postgres with the test login file
 # (PSEUDOLIFE_TEST_PG_LOGIN_FILE, else ~/.pseudolife-mcp/test-pg.env, written
 # by `pseudolife-mcp test-login create`) when there is one; only without it
@@ -42,6 +70,7 @@
 $ErrorActionPreference = 'Stop'
 # Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
 function Fail([string]$message) { [Console]::Error.WriteLine("wsl-suite: $message"); exit 2 }
+. (Join-Path $PSScriptRoot 'suite-availability.ps1')
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $distro = @()
@@ -63,7 +92,8 @@ $forward = @(@(
     'PSEUDOLIFE_SUITE_LOCK', 'PSEUDOLIFE_SUITE_SLOTS', 'PSEUDOLIFE_TEST_CUDA',
     'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'PSEUDOLIFE_SUITE_PRUNE',
     'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP', 'PSEUDOLIFE_SUITE_WORKERS',
-    'PSEUDOLIFE_SUITE_PROFILE', 'PSEUDOLIFE_SUITE_PROFILE_INTERVAL', 'HF_HUB_OFFLINE'
+    'PSEUDOLIFE_SUITE_PROFILE', 'PSEUDOLIFE_SUITE_PROFILE_INTERVAL', 'HF_HUB_OFFLINE',
+    'PSEUDOLIFE_SUITE_NATIVE_CLIENT', 'PSEUDOLIFE_SUITE_CARGO_TARGET_DIR'
 ) | Where-Object { Test-Path "env:$_" })
 # The token file only when there is no token value: under /mnt/c it shows
 # loose permissions, and the board client refuses a credential file that is
@@ -73,6 +103,26 @@ if (-not $env:PSEUDOLIFE_MCP_TOKEN -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
     $paths = @('PSEUDOLIFE_MCP_TOKEN_FILE/p')
 }
 $copy = @{}
+# Whether a full run may use this PC (the header): while
+# PSEUDOLIFE_SUITE_PC_UNAVAILABLE carries the reason, ops/wsl-suite.sh refuses
+# the default full run and tests/conftest.py any other full one.
+$userHome = [Environment]::GetFolderPath('UserProfile')
+if ((Get-SuiteRemote $userHome) -and $env:PSEUDOLIFE_SUITE_CHOSEN -eq 'local') {
+    # Never silent: set by hand, this skips the availability rule.
+    Write-Host ("wsl-suite: PSEUDOLIFE_SUITE_CHOSEN=local: ops/remote-suite.ps1 chose this PC by the " +
+        "availability rule, so it is not checked again here (set by hand, it overrides the rule)")
+} elseif (Get-SuiteRemote $userHome) {
+    $availability = Get-SuiteAvailability $userHome
+    if (-not $availability.Available) {
+        if ($env:PSEUDOLIFE_SUITE_WHERE -eq 'local') {
+            Write-Host ("wsl-suite: PSEUDOLIFE_SUITE_WHERE=local overrides the availability rule: a full run " +
+                "goes ahead on this PC although it is not available for full suites ($($availability.Why))")
+        } else {
+            $copy['PSEUDOLIFE_SUITE_PC_UNAVAILABLE'] = $availability.Why
+            $forward += @('PSEUDOLIFE_SUITE_PC_UNAVAILABLE')
+        }
+    }
+}
 # The test login (`pseudolife-mcp test-login create`): a Postgres role that
 # cannot open the bank, in a file outside the checkout. The run reads it in
 # place over /mnt/c, and then needs no ops/.env, which holds the bank owner's

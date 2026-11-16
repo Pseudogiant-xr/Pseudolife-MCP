@@ -339,6 +339,55 @@ def test_session_kind_classifies_what_the_lock_sees():
         kind(_config(["tests"]), {"PSEUDOLIFE_SUITE_LOCK": "maybe"}, TESTS)
 
 
+@pytest.mark.parametrize("config, refused", [
+    (_config(["tests"]), True),
+    (_config([str(TESTS)]), True),
+    (_config(["tests"], keyword="not slow"), True),     # excludes only: still the whole suite
+    (_config(["tests"], markexpr="not real_model"), True),
+    (_config(["tests/test_bm25.py"]), False),          # a targeted run is fine
+    (_config(["tests"], keyword="graph"), False),
+    (_config(["tests"], collectonly=True), False),
+    (_config(["tests"], worker=True), False),          # its controller decided
+])
+def test_a_full_run_is_refused_while_this_pc_is_not_available(config, refused):
+    # ops/wsl-suite.ps1 sets the marker; the lock's classifier decides, so a
+    # selection ops/wsl-suite.sh passed through unchanged cannot slip by.
+    environ = {suite_lock.PC_UNAVAILABLE_ENV: "no ~/.pseudolife-mcp/locks/pc-available"}
+    refusal = suite_lock.pc_unavailable_refusal(config, environ, TESTS)
+    assert (refusal is not None) is refused
+    if refused:
+        assert "no ~/.pseudolife-mcp/locks/pc-available" in refusal
+        assert "pwsh -NoProfile -File ops/remote-suite.ps1" in refusal
+        assert "python ops/integrate.py suite" in refusal
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the marker is only ever set inside WSL or on Linux (ops/wsl-suite.ps1 sends "
+                           "it over WSLENV), so a native-Windows run adds no coverage, and this spawns "
+                           "a real pytest")
+@pytest.mark.parametrize("args, refused", [(["tests", "-x"], True), (["tests/test_ci_native_client.py", "--co", "-q"], False)])
+def test_conftest_applies_the_availability_refusal_before_anything_runs(args, refused):
+    # The wiring in tests/conftest.py: a real pytest with the marker refuses
+    # a full run at configure time and lets a targeted one through.
+    env = {**os.environ, suite_lock.PC_UNAVAILABLE_ENV: "no ~/.pseudolife-mcp/locks/pc-available",
+           "PSEUDOLIFE_SUITE_LOCK": "off"}
+    proc = subprocess.run([sys.executable, "-m", "pytest", *args, "-p", "no:cacheprovider"],
+                          cwd=ROOT, capture_output=True, text=True, timeout=300, env=env)
+    said = "a full suite runs on the remote machine while this PC is not available"
+    if refused:
+        assert proc.returncode == 4 and said in proc.stderr, proc.stdout + proc.stderr
+    else:
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert said not in proc.stdout + proc.stderr
+
+
+def test_the_availability_refusal_holds_with_the_lock_off_and_needs_the_marker():
+    full = _config(["tests"])
+    assert suite_lock.pc_unavailable_refusal(full, {}, TESTS) is None
+    assert suite_lock.pc_unavailable_refusal(
+        full, {suite_lock.PC_UNAVAILABLE_ENV: "x", "PSEUDOLIFE_SUITE_LOCK": "off"}, TESTS)
+
+
 def test_the_preflight_runs_for_gated_runs_only_and_before_the_lock(tmp_path):
     # conftest's PG password check hangs on this hook: it must see a full run
     # before that run queues (a refusal that had already taken the lock, or
