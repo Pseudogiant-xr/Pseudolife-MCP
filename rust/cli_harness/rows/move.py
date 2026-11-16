@@ -27,6 +27,7 @@ from __future__ import annotations
 import atexit
 import base64
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -211,6 +212,30 @@ def declared_deferral(obs: dict) -> None:
     obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
 
 
+# The native client's example target is user@box; the frozen oracle still
+# says root@box in its --to help and refusal. Only those two phrases, with
+# whatever whitespace argparse wraps them at: an argv that passes root@box
+# is echoed the same by both arms and stays compared.
+NATIVE_WORDING = [
+    (re.compile(rb"such as root@box(\s+)or a"), rb"such as user@box\1or a"),
+    (re.compile(rb"\(root@box,(\s+)or a"), rb"(user@box,\1or a"),
+]
+
+
+@normalize.rule("move-native-wording")
+def native_wording(obs: dict) -> None:
+    """The oracle's root@box example becomes the native user@box (the two
+    phrases of ``NATIVE_WORDING``), so a live or mutant comparison compares
+    everything else byte for byte."""
+    if obs.get("arm") != "python":
+        return
+    for field in ("stdout", "stderr"):
+        data = normalize._get(obs, field)
+        for pattern, native in NATIVE_WORDING:
+            data = pattern.sub(native, data)
+        normalize._put(obs, field, data)
+
+
 # --- cases -----------------------------------------------------------------------
 
 def _case(case_id: str, argv: list[str], *, rules: tuple[str, ...] = (), columns: str = "80",
@@ -223,7 +248,8 @@ def _case(case_id: str, argv: list[str], *, rules: tuple[str, ...] = (), columns
         env["PYTHONPATH"] = str(_STUB_ROOT)
     # Only valid argv reaches docker or ssh, and the stub answers those; core's
     # preflight proves PATH finds neither outside the home anyway.
-    case = Case(case_id, ["move", *argv], env=env, daemon=_Recorder, rules=rules,
+    case = Case(case_id, ["move", *argv], env=env, daemon=_Recorder,
+                rules=("move-native-wording", *rules),
                 platforms=platforms, programs=("docker", "ssh"))
 
     def setup(arm) -> None:

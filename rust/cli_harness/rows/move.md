@@ -121,6 +121,11 @@ the exit is 1, or 120 when the final flush fails. Unit-tested only
 (`a_failed_answer_write_defers_only_when_nothing_left`): the harness has no
 stderr-on-`/dev/full` arm.
 
+The `--to` help and refusal give `user@box` as the example target, where
+the frozen oracle says `root@box`. Every case applies `move-native-wording`,
+which rewrites those two oracle phrases (and only those, so an argv that
+passes `root@box` stays compared) before a live or mutant comparison.
+
 ## Safety of the harness
 
 The oracle runs only argv that refuse before any effect, with `PATH` set to
