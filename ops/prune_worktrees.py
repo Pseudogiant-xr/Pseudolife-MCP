@@ -1454,6 +1454,34 @@ def clone_config_problem(path: str) -> str | None:
     return None
 
 
+def _git_dirs(place: str) -> list[str]:
+    """The git dirs whose objects ``place`` uses: its own .git dir, or, when
+    .git is a file (a linked worktree), the dir it points to and that dir's
+    commondir, where a worktree's alternates live; and ``place`` itself,
+    for a bare repository."""
+    dirs = [place]
+    dotgit = os.path.join(place, ".git")
+    if os.path.isdir(dotgit):
+        dirs.append(dotgit)
+    elif os.path.isfile(dotgit):
+        try:
+            text = Path(dotgit).read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            text = ""
+        if text.startswith("gitdir:"):
+            gitdir = text.split(":", 1)[1].strip()
+            gitdir = gitdir if os.path.isabs(gitdir) else os.path.join(place, gitdir)
+            dirs.append(gitdir)
+            try:
+                common = Path(gitdir, "commondir").read_text(
+                    encoding="utf-8", errors="replace").strip()
+            except OSError:
+                common = ""
+            if common:
+                dirs.append(common if os.path.isabs(common) else os.path.join(gitdir, common))
+    return dirs
+
+
 def borrowed_object_dirs(places: list[str]) -> dict[str, str]:
     """Object dirs other checkouts borrow (``git clone --shared`` or
     ``--reference`` writes them to objects/info/alternates): normalized
@@ -1461,7 +1489,7 @@ def borrowed_object_dirs(places: list[str]) -> dict[str, str]:
     the configured roots can be seen; one elsewhere is not."""
     out: dict[str, str] = {}
     for place in places:
-        for gitdir in (os.path.join(place, ".git"), place):
+        for gitdir in _git_dirs(place):
             alt = os.path.join(gitdir, "objects", "info", "alternates")
             try:
                 with open(alt, encoding="utf-8", errors="replace") as fh:

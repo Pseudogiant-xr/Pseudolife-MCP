@@ -2333,3 +2333,19 @@ def test_a_scratch_listing_shows_a_registered_worktree_and_what_keeps_it(env):
     assert rc == 0, out
     row = next(line for line in out.splitlines() if "listed-wt" in line)
     assert "registered worktree" in row, row
+
+
+def test_a_lent_clone_is_kept_when_only_a_linked_worktree_of_the_borrower_is_seen(env):
+    """The borrower clone is outside every root, and only its linked
+    worktree sits under one; its alternates live in the borrower's common
+    git dir, which the worktree's .git file points to."""
+    lender = _clone(env, "lender-2")
+    outside = env.tmp / "outside" / "borrower"
+    outside.parent.mkdir()
+    _git(env.tmp, "clone", "-q", "--shared", str(lender), str(outside))
+    _git(outside, "worktree", "add", "-q", "--detach", str(env.tmp / "clones" / "borrower-wt"))
+    _backdate(lender)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert lender.exists()
+    assert "another checkout borrows its objects" in out
