@@ -454,8 +454,9 @@ comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
 To keep an open-loopback install with the board dormant, pass `--no-token`
 (`-NoToken`). `--transport http` mints no token either, nor does a host that
 cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
-pipx), since its registrations fall back to HTTP. None of these removes a
-token that is already configured.
+pipx), since its registrations fall back to HTTP; the native installer
+(`PSEUDOLIFE_SHIM_ENGINE=native`) needs no Python to mint one. None of
+these removes a token that is already configured.
 
 ### Coordination diagnostic quickstart
 
@@ -3650,6 +3651,19 @@ is changed unless `PSEUDOLIFE_SHIM_USER_BIN` names the directory to link
 from (on POSIX it also moves the default `~/.local/bin`). A host whose Python cannot make a virtualenv falls back to the
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
+
+To install the native `pseudolife-mcp` client instead, run the installer
+with `PSEUDOLIFE_SHIM_ENGINE=native` (`PSEUDOLIFE_SHIM_ENGINE=native
+ops/install.sh ...`, or `$env:PSEUDOLIFE_SHIM_ENGINE = "native"` before
+`.\ops\install.ps1 ...`). The installer then hands its arguments to
+`ops/install-native.sh` / `ops\install-native.ps1`, which download the
+native client from the release the checkout names, verify it against
+that release's `SHA256SUMS`, and move each client's registration to the
+native launcher (`docs/dev/native-runtimes.md`, "Installers"). Without the
+variable, or with `PSEUDOLIFE_SHIM_ENGINE=python`, the installer installs
+the Python client as described above, and a rerun with `python` brings a
+machine on the native client back to it. Any other value is refused
+before anything changes.
 
 ### The native client
 

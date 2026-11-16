@@ -1,0 +1,617 @@
+"""The installers' shell files stay runnable by bash 3.2, macOS's /bin/bash.
+
+Pull requests run on Linux, whose bash is 5.x, and only an integration batch
+reaches the macOS lane. So this file checks, on any host, the constructs bash
+3.2 gets wrong, by a static scan:
+
+- bash 3.2 finds the end of a command substitution ``$( ... )`` by counting
+  parentheses, and it parses the body only when the substitution runs. An
+  unparenthesised ``case`` pattern's ``)`` therefore ends the substitution
+  early: ``bash -n`` passes, and the run fails or, inside double quotes,
+  silently computes something else. A here-document inside ``$( )`` whose
+  text holds an unbalanced quote or parenthesis is misread the same way.
+- ``"${name[@]}"`` of an empty array is an unbound-variable error under
+  ``set -u`` before bash 4.4.
+- The syntax bash 4 added (``|&``, ``&>>``, ``;&``, ``mapfile``, ``declare
+  -A`` and the rest of ``BASH4_ONLY``) is a parse error or an unknown command.
+
+When a bash 3.2 is available (``PSEUDOLIFE_TEST_BASH32`` names one, or the
+``bash`` on PATH is 3.2, as on macOS), each file also has to pass its
+``bash -n``. That catches what 3.2 rejects at parse time; the command
+substitution class above it does not catch, which is why the scan exists.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+INSTALLER_SHELL_FILES = sorted({*ROOT.glob("ops/install*.sh"), *ROOT.glob("ops/preflight*.sh")})
+
+# Syntax and builtins bash 3.2 does not have; each a regex and what it is.
+# A match counts only where it starts in code (``bash32_problems``).
+BASH4_ONLY = [
+    (r"(?:declare|local|typeset)\s+-[a-zA-Z]*A", "an associative array (declare -A)"),
+    (r"(?:declare|local|typeset)\s+-[a-zA-Z]*n\b", "a name reference (declare -n)"),
+    (r"(?:declare|local|typeset)\s+-[a-zA-Z]*g\b", "declare -g"),
+    (r"\b(?:mapfile|readarray)\b", "mapfile / readarray"),
+    (r"\bcoproc\b", "coproc"),
+    (r"\$\{[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?(?:,,?|\^\^?)\}", "a case-changing expansion (${x,,} / ${x^^})"),
+    (r"\$\{[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?@[QEPAa]\}", "a transformation expansion (${x@Q})"),
+    (r"\$\{[A-Za-z_][A-Za-z0-9_]*\[-[0-9]+\]\}", "a negative array subscript"),
+    (r"&>>", "&>> (append both streams)"),
+    (r"\|&", "|& (pipe both streams)"),
+    (r";;&|(?<!;);&", "a case fall-through terminator (;& / ;;&)"),
+    (r"\bwait\s+-n\b", "wait -n"),
+    (r"\bexec\s+\{[A-Za-z_]", "exec {fd}> (an allocated descriptor)"),
+    (r"\[\[\s+-v\b|\btest\s+-v\b|\[\s+-v\b", "-v (is the variable set)"),
+    (r"\$\{?(?:BASHPID|EPOCHSECONDS|EPOCHREALTIME)\b", "a bash 4+ variable"),
+    (r"\bshopt\s+-s\s+(?:globstar|lastpipe|autocd|direxpand)\b", "a bash 4+ shell option"),
+]
+
+# A printf format bash 3.2 does not have. It is quoted text by nature, so it
+# counts inside the arguments of a printf command (``_printf_arguments``).
+PRINTF_ONLY = [
+    (r"%\([^)]*\)T", "printf %(...)T"),
+]
+
+
+def _word_start(text: str, i: int) -> bool:
+    return i == 0 or text[i - 1] in " \t\n;&|()"
+
+
+def _skip_single(text: str, i: int) -> int:
+    """``text[i]`` is ``'``: the index after its closing quote."""
+    end = text.find("'", i + 1)
+    return len(text) if end < 0 else end + 1
+
+
+def _skip_double(text: str, i: int, found: list) -> int:
+    """``text[i]`` is ``"``: the index after its closing quote, recording any
+    command substitution inside it."""
+    k = i + 1
+    while k < len(text):
+        c = text[k]
+        if c == "\\":
+            k += 2
+        elif c == '"':
+            return k + 1
+        elif text.startswith("$(", k) and not text.startswith("$((", k):
+            k = _comsub(text, k, found)
+        elif c == "`":
+            end = text.find("`", k + 1)
+            k = len(text) if end < 0 else end + 1
+        else:
+            k += 1
+    return k
+
+
+def _comsub(text: str, start: int, found: list) -> int:
+    """``text[start:]`` opens ``$(``. Finds its end the way bash 3.2 does (the
+    first unquoted ``)`` that balances, comments skipped, a here-document's
+    text read as code), records ``(start, body)`` and every substitution nested
+    in it, and returns the index after the ``)``."""
+    depth, k = 1, start + 2
+    while k < len(text):
+        c = text[k]
+        if c == "\\":
+            k += 2
+            continue
+        if c == "'":
+            k = _skip_single(text, k)
+            continue
+        if c == '"':
+            k = _skip_double(text, k, found)
+            continue
+        if c == "`":
+            end = text.find("`", k + 1)
+            k = len(text) if end < 0 else end + 1
+            continue
+        if c == "#" and _word_start(text, k):
+            end = text.find("\n", k)
+            k = len(text) if end < 0 else end
+            continue
+        if text.startswith("$(", k) and not text.startswith("$((", k):
+            k = _comsub(text, k, found)
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                found.append((start, text[start + 2:k]))
+                return k + 1
+        k += 1
+    found.append((start, text[start + 2:]))
+    return k
+
+
+# A here-document operator (never part of a here-string's <<<) and its
+# delimiter word: <<EOF, <<-EOF, <<'EOF', <<"EOF", <<\EOF, <<END-OF-TEXT.
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)(?P<strip>-?)[ \t]*(?P<escape>\\?)(?P<quote>['\"]?)"
+                      r"(?P<word>[A-Za-z0-9_][^\s'\"\\<>|&;()]*)(?P=quote)")
+
+
+def command_substitutions(text: str, kinds: "_Kinds | None" = None) -> list[tuple[int, str]]:
+    """Every ``$( ... )`` in a shell file as ``(offset, body)``, each body cut
+    where bash 3.2 cuts it. Single-quoted text, comments and here-document
+    text outside a substitution are skipped; given ``kinds``, a ``<<`` is a
+    here-document only where it found one (not a shift inside ``$(( ))``)."""
+    found: list[tuple[int, str]] = []
+    pending: list[tuple[str, bool]] = []
+    k = 0
+    while k < len(text):
+        c = text[k]
+        if c == "\n" and pending:
+            # Skip each pending here-document's text up to its delimiter line.
+            k += 1
+            for delimiter, strip_tabs in pending:
+                while k < len(text):
+                    end = text.find("\n", k)
+                    line = text[k:len(text) if end < 0 else end]
+                    k = len(text) if end < 0 else end + 1
+                    if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                        break
+            pending = []
+            continue
+        if c == "\\":
+            k += 2
+        elif c == "'":
+            k = _skip_single(text, k)
+        elif c == '"':
+            k = _skip_double(text, k, found)
+        elif c == "`":
+            end = text.find("`", k + 1)
+            k = len(text) if end < 0 else end + 1
+        elif c == "#" and _word_start(text, k):
+            end = text.find("\n", k)
+            k = len(text) if end < 0 else end
+        elif text.startswith("$(", k) and not text.startswith("$((", k):
+            k = _comsub(text, k, found)
+        elif text.startswith("<<", k):
+            match = _HEREDOC.match(text, k)
+            if match and (kinds is None or k in kinds.heredocs):
+                pending.append((match.group("word"), bool(match.group("strip"))))
+                k = match.end()
+            else:
+                k += 2
+        else:
+            k += 1
+    return sorted(found)
+
+
+CODE, TEXT, COMMENT = 0, 1, 2
+
+
+class _Kinds:
+    """Marks each character of a shell file as code, quoted or here-document
+    text, or a comment, so the checks below decide on code only.
+
+    Inside double quotes and unquoted here-documents, ``$( )``, ``$name``,
+    backquotes and a ``${ }``'s name and operator are code; everything else
+    there is text, as is the word in ``${x:-word}`` (its expansions aside, and
+    its own quotes followed). A quote, ``${``, backquote, ``$(`` or
+    here-document that never closes is recorded in ``unclosed``: bash would
+    refuse the file, and the checker cannot tell code from text after it."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.kind = [CODE] * len(text)
+        self.heredocs: set[int] = set()                    # offsets of here-document operators
+        self.unclosed: list[tuple[int, str]] = []          # (offset, what) never closed
+        self.pending: list[tuple[int, str, bool, bool]] = []   # offset, delimiter, <<-, quoted
+        self._code(0, close="")
+        if self.pending:
+            self._heredocs(len(text))
+
+    def _mark(self, start: int, end: int, kind: int) -> None:
+        # Newlines too: a quoted newline does not end a command.
+        for k in range(start, min(end, len(self.text))):
+            self.kind[k] = kind
+
+    def _code(self, k: int, close: str) -> int:
+        """Code from ``k`` up to and past ``close``: ``")"`` for a ``$(`` body
+        (the ``)`` that balances, as ``_comsub`` finds it), ``"`"`` for a
+        backquote body, ``""`` for the whole file. Returns the next index."""
+        text, depth, start = self.text, 1, k
+        while k < len(text):
+            c = text[k]
+            if c == "\n" and self.pending:
+                k = self._heredocs(k + 1)
+            elif c == "\\":
+                k += 2
+            elif text.startswith("$'", k):
+                k = self._single(k + 1, ansi=True)
+            elif c == "'":
+                k = self._single(k, ansi=False)
+            elif c == '"':
+                k = self._double(k)
+            elif text.startswith("${", k):
+                k = self._brace(k, in_double=False)
+            elif c == "`":
+                if close == "`":
+                    return k + 1
+                k = self._code(k + 1, close="`")
+            elif text.startswith("$((", k) or (text.startswith("((", k) and _word_start(text, k)):
+                k = self._arithmetic(k + (c == "$"))
+            elif c == "#" and _word_start(text, k):
+                end = text.find("\n", k)
+                end = len(text) if end < 0 else end
+                self._mark(k, end, COMMENT)
+                k = end
+            elif text.startswith("<<", k):
+                match = _HEREDOC.match(text, k)
+                if match:
+                    self.heredocs.add(k)
+                    quoted = bool(match.group("escape") or match.group("quote"))
+                    self.pending.append((k, match.group("word"), bool(match.group("strip")), quoted))
+                    k = match.end()
+                else:
+                    k += 2
+            else:
+                if close == ")" and c == "(":
+                    depth += 1
+                elif close == ")" and c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        return k + 1
+                k += 1
+        if close:
+            self.unclosed.append((start - (2 if close == ")" else 1), "$(" if close == ")" else "a backquote"))
+        return k
+
+    def _arithmetic(self, k: int) -> int:
+        """``text[k:]`` opens ``((``: code up to the ``))`` that balances, in
+        which ``<<`` is a shift, not a here-document."""
+        text, depth, start = self.text, 0, k
+        while k < len(text):
+            c = text[k]
+            if text.startswith("$(", k) and not text.startswith("$((", k):
+                k = self._code(k + 2, close=")")
+                continue
+            if text.startswith("${", k):
+                k = self._brace(k, in_double=False)
+                continue
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    return k + 1
+            k += 1
+        self.unclosed.append((start, "(("))
+        return k
+
+    def _single(self, k: int, ansi: bool) -> int:
+        """``text[k]`` is the ``'`` of ``'...'`` (or, with ``ansi``, of
+        ``$'...'``, where ``\\'`` does not close it): text up to its close."""
+        text, end = self.text, k + 1
+        while end < len(text) and text[end] != "'":
+            end += 2 if ansi and text[end] == "\\" else 1
+        if end >= len(text):
+            self.unclosed.append((k, "a single quote"))
+        self._mark(k, end + 1, TEXT)
+        return min(end + 1, len(text))
+
+    def _expansions(self, k: int, stop: str, in_double: bool, quotes: bool) -> int:
+        """Text from ``k`` with its expansions left as code, up to the
+        character ``stop`` (``"\\n"`` ends a here-document line); returns that
+        index. With ``quotes`` (a ``${ }`` word), its quotes are followed: a
+        double quote always, a single quote only outside double quotes."""
+        text = self.text
+        while k < len(text) and text[k] != stop:
+            c = text[k]
+            if c == "\\":
+                self._mark(k, k + 2, TEXT)
+                k += 2
+            elif quotes and c == '"':
+                k = self._double(k)
+            elif quotes and not in_double and text.startswith("$'", k):
+                k = self._single(k + 1, ansi=True)
+            elif quotes and not in_double and c == "'":
+                k = self._single(k, ansi=False)
+            elif text.startswith("$((", k):
+                k = self._arithmetic(k + 1)
+            elif text.startswith("$(", k):
+                k = self._code(k + 2, close=")")
+            elif text.startswith("${", k):
+                k = self._brace(k, in_double=in_double)
+            elif c == "$" and k + 1 < len(text) and (text[k + 1].isalnum() or text[k + 1] in "_?#@*!$-"):
+                k += 2
+                while k < len(text) and (text[k].isalnum() or text[k] == "_"):
+                    k += 1
+            elif c == "`":
+                k = self._code(k + 1, close="`")
+            else:
+                self._mark(k, k + 1, TEXT)
+                k += 1
+        return k
+
+    def _brace(self, k: int, in_double: bool) -> int:
+        """``text[k:]`` opens ``${``: its name, subscript and operator are code,
+        the word after the operator (``${x:-word}``) is text with its
+        expansions as code. Returns the index after the closing ``}``."""
+        text, start = self.text, k
+        k += 2
+        if k + 1 < len(text) and text[k] in "!#" and text[k + 1] != "}":
+            k += 1
+        if k < len(text) and (text[k].isalnum() or text[k] == "_"):
+            while k < len(text) and (text[k].isalnum() or text[k] == "_"):
+                k += 1
+        elif k < len(text) and text[k] in "@*#?$!-":
+            k += 1
+        if k < len(text) and text[k] == "[":
+            end = text.find("]", k)
+            k = len(text) if end < 0 else end + 1
+        while k < len(text) and text[k] in ":-=+?#%/^,@":
+            k += 1
+        end = self._expansions(k, "}", in_double=in_double, quotes=True)
+        if end >= len(text):
+            self.unclosed.append((start, "${"))
+        return min(end + 1, len(text))
+
+    def _double(self, k: int) -> int:
+        """``text[k]`` is ``"``: text up to its close, expansions as code."""
+        self._mark(k, k + 1, TEXT)
+        end = self._expansions(k + 1, '"', in_double=True, quotes=False)
+        if end >= len(self.text):
+            self.unclosed.append((k, "a double quote"))
+        self._mark(end, end + 1, TEXT)
+        return min(end + 1, len(self.text))
+
+    def _heredocs(self, k: int) -> int:
+        """``k`` starts the line after one or more ``<<`` operators: their
+        texts, each up to its delimiter line."""
+        text, pending = self.text, self.pending
+        self.pending = []
+        for start, delimiter, strip_tabs, quoted in pending:
+            while True:
+                if k >= len(text):
+                    self.unclosed.append((start, f"a here-document (no {delimiter} line)"))
+                    break
+                end = text.find("\n", k)
+                end = len(text) if end < 0 else end
+                line = text[k:end]
+                if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                    self._mark(k, end, TEXT)
+                    k = end + 1
+                    break
+                if quoted:
+                    self._mark(k, end, TEXT)
+                    k = end + 1
+                else:
+                    k = self._expansions(k, "\n", in_double=True, quotes=False) + 1
+        return k
+
+    def view(self, *keep: int) -> str:
+        """The file with every character not of a kind in ``keep`` blanked,
+        offsets and newlines unchanged."""
+        return "".join(c if c == "\n" or kind in keep else " " for c, kind in zip(self.text, self.kind))
+
+
+def _printf_arguments(kinds: _Kinds, code: str) -> list[tuple[int, int]]:
+    """The extent of each printf command in code: from the word to the first
+    unquoted ``;``, ``|`` or ``&``, or the first newline not escaped."""
+    text, spans = kinds.text, []
+    for match in re.finditer(r"(?<![\w-])printf\b", code):
+        k = match.end()
+        while k < len(text):
+            if text[k] == "\n" and kinds.kind[k] == CODE:
+                if text[k - 1] != "\\" or kinds.kind[k - 1] != CODE:
+                    break
+            elif text[k] in ";|&" and kinds.kind[k] == CODE:
+                break
+            k += 1
+        spans.append((match.start(), k))
+    return spans
+
+
+_CASE = re.compile(r"(?:^|[\s;&|(])case\s")
+_ESAC = re.compile(r"(?:^|[\s;&|])esac\b")
+
+
+def bash32_problems(text: str) -> list[str]:
+    """What in a shell file bash 3.2 would misread or refuse, one line each.
+    Only code counts: a keyword in quoted text, here-document text or a
+    comment is not one."""
+    problems = []
+    kinds = _Kinds(text)
+    for offset, what in kinds.unclosed:
+        problems.append(f"line {text.count(chr(10), 0, offset) + 1}: {what} that never closes: bash "
+                        "refuses the file, and this check cannot tell code from text after it")
+    code = kinds.view(CODE)
+    for start, body in command_substitutions(text, kinds):
+        line = text.count("\n", 0, start) + 1
+        # The body bash 3.2 cuts, with only its code left.
+        body_code = code[start + 2:start + 2 + len(body)]
+        for case in _CASE.finditer(body_code):
+            if not _ESAC.search(body_code, case.end()):
+                problems.append(
+                    f"line {line}: a case inside $( ) whose pattern has no leading '(': bash 3.2 ends "
+                    "the substitution at the pattern's ')'; write each pattern as (pattern), or move "
+                    "the case into a function")
+                break
+        for doc in _HEREDOC.finditer(body):
+            if start + 2 + doc.start() not in kinds.heredocs:
+                continue   # quoted text or a shift, not a here-document
+            # The document's text, read from the file (bash 3.2's cut may fall
+            # inside it), must leave bash 3.2's scan where it began: no quote
+            # left open, no parenthesis unbalanced.
+            strip_tabs = bool(doc.group("strip"))
+            newline = text.find("\n", start + 2 + doc.end())
+            content = []
+            for doc_line in ([] if newline < 0 else text[newline + 1:].split("\n")):
+                if (doc_line.lstrip("\t") if strip_tabs else doc_line) == doc.group("word"):
+                    break
+                content.append(doc_line)
+            seen: list = []
+            _comsub("$(" + "\n".join(content) + "\n)", 0, seen)
+            if seen[-1][1] != "\n".join(content) + "\n":
+                problems.append(
+                    f"line {line}: a here-document inside $( ) holds an unbalanced quote or parenthesis, "
+                    "which bash 3.2 reads as code; build the text outside the substitution")
+    # A construct counts where it starts in code; it may run on into quoted
+    # text, never into a comment.
+    uncommented = kinds.view(CODE, TEXT)
+    for pattern, what in BASH4_ONLY:
+        for match in re.finditer(pattern, uncommented):
+            if kinds.kind[match.start()] == CODE:
+                n = text.count("\n", 0, match.start()) + 1
+                problems.append(f"line {n}: {what} is bash 4 or later")
+    spans = _printf_arguments(kinds, code)
+    for pattern, what in PRINTF_ONLY:
+        for match in re.finditer(pattern, uncommented):
+            if any(start <= match.start() < end for start, end in spans):
+                n = text.count("\n", 0, match.start()) + 1
+                problems.append(f"line {n}: {what} is bash 4 or later")
+    if re.search(r"(?m)^\s*set\s+-[a-z]*u", code):
+        empty = set(re.findall(r"(?m)(?:^|[\s;])(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)=\(\)", code))
+        for name in sorted(empty):
+            for match in re.finditer(r"\$\{" + name + r"\[[@*]\]\}", uncommented):
+                if kinds.kind[match.start()] != CODE:
+                    continue
+                guard = "${" + name + "[@]+"
+                before = text[max(0, match.start() - len(guard) - 1):match.start()]
+                if guard not in before:
+                    n = text.count("\n", 0, match.start()) + 1
+                    problems.append(
+                        f"line {n}: ${{{name}[@]}} of an array that can be empty is an unbound "
+                        f"variable under set -u before bash 4.4; write ${{{name}[@]+\"${{{name}[@]}}\"}}")
+    return problems
+
+
+def test_the_installer_shell_files_are_found():
+    names = {path.name for path in INSTALLER_SHELL_FILES}
+    assert {"install.sh", "install-native.sh", "install-hook.sh", "preflight.sh"} <= names
+
+
+@pytest.mark.parametrize("path", INSTALLER_SHELL_FILES, ids=lambda p: p.name)
+def test_installer_shell_file_has_no_bash4_construct(path):
+    assert bash32_problems(path.read_text(encoding="utf-8")) == []
+
+
+# The checker against the constructs it decides on, and their near misses.
+@pytest.mark.parametrize("snippet", [
+    'x="$(printf a | while read -r l; do\n    case "$l" in\n        a|b) echo hit ;;\n    esac\ndone)"\n',
+    "x=$(case a in a) echo hit;; esac)\n",
+    'x="$(f "$(case a in a) echo y;; esac)")"\n',
+    "x=$(cat <<E\na ) b\nE\n)\n",
+    "x=$(cat <<'E'\nit's\nE\n)\n",
+    "set -u\nargs=()\ncmd \"${args[@]}\"\n",
+    "echo a |& cat\n",
+    "echo a &>> log\n",
+    "declare -A seen\n",
+    "mapfile -t lines < f\n",
+    'echo "${name,,}"\n',
+    "case $x in a) echo ;& b) echo ;; esac\n",
+    # Each still found next to the harmless text of the near misses below.
+    'x="$(echo "just in case"; case a in a) echo y;; esac)"\n',
+    "x=$(echo 'just in case'; case a in a) echo y;; esac)\n",
+    "x=$(\n  # in case the lookup fails\n  case a in a) echo y;; esac)\n",
+    # The cut falls after a quoted "esac", which is no esac at all.
+    'x=$(case a in "esac") echo y;; esac)\n',
+    'echo "use mapfile"; mapfile -t lines < f\n',
+    "mapfile -t lines < f  # mapfile\n",
+    "printf '%(%s)T' -1\n",
+    "printf '%s;%(%s)T' -1\n",
+    "printf \\\n  '%(%s)T' -1\n",
+    "printf 'at\n%(%s)T\n' -1\n",
+    "cat <<< text\nmapfile -t lines < f\n",
+    "x=$(cat <<< word; case a in a) echo y;; esac)\n",
+    # Code after each quoting form the checker follows is still read as code.
+    'echo "${cfg:-"{}"}"\nmapfile -t x < f\n',
+    'echo ${a:-"}"}\nmapfile -t x < f\n',
+    "cat <<\\EOF\ndon't\nEOF\nmapfile -t x < f\n",
+    "cat <<'END-OF-TEXT'\ndon't\nEND-OF-TEXT\nmapfile -t x < f\n",
+    "cat <<-E\n\tit's\n\tE\nmapfile -t x < f\n",
+    "n=$(( 1 << n ))\nmapfile -t x < f\n",
+    "echo \\$'a\\'\nmapfile -t x < f\n",
+    "x=`echo \"it's\"`\nmapfile -t x < f\n",
+    # A quote that never closes: bash refuses the file, and nothing after
+    # it can be told apart.
+    'echo "never closed\nmapfile -t x < f\n',
+    "cat <<E\nno delimiter line\n",
+    'x="$(echo "${msg:-in case}"; case a in a) echo y;; esac)"\n',
+    "echo ${name^^}\n",
+    "set -u\n# args=(a)\nargs=()\ncmd \"${args[@]}\"\n",
+])
+def test_the_check_refuses_what_bash32_misreads(snippet):
+    assert bash32_problems(snippet), snippet
+
+
+@pytest.mark.parametrize("snippet", [
+    'case "$(uname -s)" in Linux) echo l ;; esac\n',
+    'x="$(printf a | while read -r l; do\n    case "$l" in\n        (a|b) echo hit ;;\n    esac\ndone)"\n',
+    "x=$(case a in (a) echo hit;; esac)\n",
+    "f() { case $1 in a) echo hit ;; esac; }\nx=$(f a)\n",
+    "x=$(\n  # a ) comment, and it's fine\n  echo ok)\n",
+    "x=$(cat <<E\nplain text\nE\n)\n",
+    'x="$(cat <<E\n# a \\`quoted\\` (balanced) line\nkey: ["disabled"]\nE\n)"\n',
+    "cat <<EOF\nit's (fine) here: $(echo no case)\nEOF\n",
+    "echo 'a $(case x in' \n",
+    "y=$((1 + (2 * 3)))\n",
+    "set -u\nargs=()\ncmd ${args[@]+\"${args[@]}\"}\necho ${#args[@]}\n",
+    "args=()\ncmd \"${args[@]}\"\n",
+    'echo "${x%,}" "${x#^}"\n',
+    "# declare -A only in a comment\n",
+    # Only code decides: the same words in quoted text or a comment are text.
+    'x="$(echo "just in case it fails")"\n',
+    "x=$(echo 'just in case it fails')\n",
+    "x=$(\n  # in case the lookup fails\n  echo ok)\n",
+    "x=$(cat <<'E'\njust in case\nE\n)\n",
+    'echo "use mapfile"\n',
+    "echo 'a |& b' \"c &>> d\"\n",
+    "echo ok  # mapfile and declare -A would be bash 4\n",
+    'echo "%(%s)T"\n',
+    "printf a; echo '%(%s)T'\n",
+    'x="$(echo "${msg:-just in case it fails}")"\n',
+    "x=$(echo ${msg:-in case of rain})\n",
+    'echo "${1:-use mapfile}"\n',
+    'x=$(cat <<< "just in case it fails")\n',
+    "echo $'it\\'s mapfile'\n",
+    'echo "${cfg:-"{}"}" "use mapfile"\n',
+    "cat <<'E'\n$(mapfile -t x)\nE\n",
+    "cat <<-E\n\tit's mapfile\n\tE\necho ok\n",
+    "cat <<'END-OF-TEXT'\nit's mapfile\nEND-OF-TEXT\necho ok\n",
+    "cat <<\\EOF\nit's mapfile\nEOF\necho ok\n",
+    "x=`echo \"use mapfile\"`\n",
+    "n=$(( 1 << n ))\necho ok\n",
+    "cat <<'E'\nmapfile it's\nE\n",
+    "set -u\n# args=()\nargs=(a)\ncmd \"${args[@]}\"\n",
+])
+def test_the_check_passes_what_bash32_reads_correctly(snippet):
+    assert bash32_problems(snippet) == [], snippet
+
+
+def _bash32() -> str | None:
+    named = os.environ.get("PSEUDOLIFE_TEST_BASH32")
+    candidates = [named] if named else [shutil.which("bash")]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            version = subprocess.run([candidate, "-c", "echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"],
+                                     capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if version == "3.2":
+            return candidate
+        if named:
+            pytest.fail(f"PSEUDOLIFE_TEST_BASH32={named} is bash {version or 'unknown'}, not 3.2")
+    return None
+
+
+@pytest.mark.parametrize("path", INSTALLER_SHELL_FILES, ids=lambda p: p.name)
+def test_installer_shell_file_parses_under_bash32(path):
+    bash32 = _bash32()
+    if bash32 is None:
+        pytest.skip("no bash 3.2 here (set PSEUDOLIFE_TEST_BASH32 to one)")
+    result = subprocess.run([bash32, "-n", str(path)], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr

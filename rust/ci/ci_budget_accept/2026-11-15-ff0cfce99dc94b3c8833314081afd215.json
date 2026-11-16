@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-macos",
+  "before": "5b4d061c810fb586",
+  "fingerprint": "7f8f8876cb5e952c",
+  "reason": "The lane gains, beyond #1541's and #1556's files, tests/test_installer_no_python.py, a static scan of the native installer scripts (0.1 s serially in WSL); the estimate in ci_budget.json stays at 21.3 minutes, and nothing else in the job changed."
+}

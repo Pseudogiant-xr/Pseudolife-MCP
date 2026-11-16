@@ -36,10 +36,21 @@ pub fn archive_name(version: &str) -> Result<String> {
 pub fn checksum(sums: &str, name: &str) -> Result<String> {
     let mut matched = None;
     for line in sums.lines() {
-        let Some((digest, file)) = line.split_once("  ") else {
+        // Either standard form of a record: `<digest>  <name>`, or the
+        // binary-mode `<digest> *<name>` that `sha256sum` writes under Git
+        // Bash; nothing looser.
+        let Some((digest, file)) = line.split_once(' ').and_then(|(digest, rest)| {
+            rest.strip_prefix(' ')
+                .or_else(|| rest.strip_prefix('*'))
+                .map(|file| (digest, file))
+        }) else {
             return Err("invalid SHA256SUMS record".into());
         };
-        if !valid_digest(digest) || file.is_empty() || file.contains(['/', '\\']) {
+        if !valid_digest(digest)
+            || file.is_empty()
+            || file.starts_with([' ', '*'])
+            || file.contains(['/', '\\'])
+        {
             return Err("invalid SHA256SUMS record".into());
         }
         if file == name {

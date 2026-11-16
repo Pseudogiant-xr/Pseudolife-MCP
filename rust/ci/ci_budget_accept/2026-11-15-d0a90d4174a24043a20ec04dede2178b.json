@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "7ca301033cdff008",
+  "fingerprint": "7ce82757f2aa3aac",
+  "reason": "Master's forward merge (cd656c98f, parity-checks baseline 7ca301033cdff008) joins master's parity_scope rows (UPDATE_CYCLE for update, connect, backup and restore_cli) to this branch's installer entry, which maps to no rows (accept record 2026-11-15-0687d710): a diff only under rust/shim/src/cli/installer selects the floor shards, and every other diff selects what master's scope selects, so the job's cost is master's or lower."
+}
