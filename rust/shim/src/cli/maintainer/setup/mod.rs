@@ -6,6 +6,10 @@ mod config;
 mod system;
 mod tailnet;
 
+/// The least-privilege fix for a refused Tailscale serve, shared with
+/// `expose` so both commands word it once.
+pub(crate) use tailnet::permission_fix as tailscale_permission_fix;
+
 use crate::pg;
 use serde_json::{Value, json};
 use std::{

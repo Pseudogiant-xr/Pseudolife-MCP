@@ -241,10 +241,27 @@ mod modes {
         };
         let content = fs::read(&path).unwrap();
         let error = write_config(&path, &content, b"after").unwrap_err();
-        assert!(
-            error.contains("is owned by another account") && error.contains("sudo chown"),
-            "{error}"
-        );
+        // As root it is sent back to the file's owner, never told to copy the
+        // file as root; anyone else meets /etc, a folder outside their home,
+        // and is never told to take it over: that would hand them every
+        // other file in it.
+        let me = rustix::process::getuid().as_raw();
+        if me == 0 {
+            assert!(
+                error.contains("is owned by nobody")
+                    && error.ends_with("run this again as nobody, without sudo"),
+                "{error}"
+            );
+        } else {
+            let name = owner_label(me);
+            assert!(
+                error.contains("is owned by another account (root)")
+                    && error.contains(&format!("outside {name}'s home"))
+                    && !error.contains("chown")
+                    && !error.contains("sudo"),
+                "{error}"
+            );
+        }
         assert_eq!(fs::read(&path).unwrap(), content);
         assert!(
             !fs::read_dir(path.parent().unwrap()).unwrap().any(|e| e
@@ -499,4 +516,106 @@ mod windows {
         assert_eq!(fs::read(&path).unwrap(), b"before");
         assert_eq!(fs::read(&link).unwrap(), b"before");
     }
+}
+
+#[test]
+fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
+    let file = "/home/u/.codex/config.toml";
+    let folder = "/home/u/.codex";
+    let replace = "copy=$(mktemp '/home/u/.codex/config.toml.XXXXXX') && cp '/home/u/.codex/config.toml' \"$copy\" && mv -f \"$copy\" '/home/u/.codex/config.toml'";
+    let line = |case| foreign_owner_refusal(file, file, folder, case, "u", "root");
+    // A folder this user can write: a copy it owns replaces the file.
+    let writable = line(ForeignOwner::Writable);
+    assert!(
+        writable.ends_with(&format!("(no root needed): {replace}")),
+        "{writable}"
+    );
+    // A folder it owns but cannot write: it makes it writable first.
+    let read_only = line(ForeignOwner::OwnedNotWritable);
+    assert!(
+        read_only.ends_with(&format!(
+            "(no root needed): chmod u+wx '{folder}' && {replace}"
+        )),
+        "{read_only}"
+    );
+    for line in [&writable, &read_only] {
+        assert!(!line.contains("sudo"), "{line}");
+    }
+    // Only root can change who owns a file. The command is for an
+    // administrator, so it names this account, never `$USER` (which would be
+    // the administrator in their shell): in a shared sticky folder the file
+    // alone, otherwise the folder too, where the write makes its recovery
+    // files; and the line says why root is needed.
+    let shared = line(ForeignOwner::SharedSticky);
+    assert!(
+        shared.contains("only root can change who owns a file")
+            && shared.ends_with(&format!("sudo chown 'u' '{file}'")),
+        "{shared}"
+    );
+    let foreign = line(ForeignOwner::Foreign);
+    assert!(
+        foreign.contains("only root can change who owns them")
+            && foreign.contains("inside u's home")
+            && foreign.ends_with(&format!("sudo chown 'u' '{folder}' '{file}'")),
+        "{foreign}"
+    );
+    // A folder outside the home (a system folder such as /etc): taking it
+    // over would hand this user everything in it, so no command is offered.
+    let system = foreign_owner_refusal(
+        "/etc/x/config.toml",
+        "/etc/x/config.toml",
+        "/etc/x",
+        ForeignOwner::ForeignOutsideHome,
+        "u",
+        "root",
+    );
+    assert!(
+        system.contains("outside u's home")
+            && system.contains("every other file in it")
+            && !system.contains("chown")
+            && !system.contains("sudo"),
+        "{system}"
+    );
+    // A run as root is sent back to the file's owner: a copy made as root
+    // would leave that account's config owned by root.
+    let as_root = foreign_owner_refusal(file, file, folder, ForeignOwner::RunAsRoot, "root", "u");
+    assert!(
+        as_root.ends_with("run this again as u, without sudo") && !as_root.contains("cp '"),
+        "{as_root}"
+    );
+    for line in [&writable, &read_only, &shared, &foreign, &system, &as_root] {
+        assert!(!line.contains("$USER"), "{line}");
+        assert!(!line.contains("run this as its owner"), "{line}");
+    }
+    // An account name with a quote is escaped for the shell.
+    let odd = foreign_owner_refusal(file, file, folder, ForeignOwner::Foreign, "o'k", "root");
+    assert!(odd.contains("sudo chown 'o'\\''k' "), "{odd}");
+}
+
+#[test]
+fn only_a_folder_in_a_real_home_may_be_given_to_this_user() {
+    let home = Path::new("/home/u");
+    assert!(inside_home(Path::new("/home/u/.codex"), Some(home)));
+    assert!(inside_home(Path::new("/home/u"), Some(home)));
+    // Near misses: a sibling whose name starts the same, a system folder,
+    // an account whose home is `/`, and one with no home at all.
+    assert!(!inside_home(Path::new("/home/user2/.codex"), Some(home)));
+    assert!(!inside_home(Path::new("/etc"), Some(home)));
+    assert!(!inside_home(Path::new("/etc"), Some(Path::new("/"))));
+    assert!(!inside_home(Path::new("/home/u/.codex"), None));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_home_folder_comes_from_the_passwd_entry() {
+    assert!(home_of(0).is_some_and(|home| home.is_absolute()));
+    assert_eq!(home_of(3_999_999_999), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn owner_labels_resolve_and_fall_back_to_the_number() {
+    assert_eq!(owner_label(0), "root");
+    // A uid with no account (not -2, 4294967294, which macOS gives nobody).
+    assert_eq!(owner_label(3_999_999_999), "3999999999");
 }

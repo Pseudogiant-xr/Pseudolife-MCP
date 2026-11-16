@@ -491,9 +491,13 @@ like a red suite ("Validating it", step 3). A check that could not start
 run. Once the batch pull request is open, `open` resumes it whatever its
 plan says. Notes:
 
-- It honours `CARGO_TARGET_DIR`, so point that at the machine's shared
-  target directory to keep it warm; a cold check in a fresh worktree
-  otherwise fills its own `rust/target`, so mind the 8 GB free-disk floor.
+- It honours `CARGO_TARGET_DIR`. Leave it unset in the checkout that
+  builds batches, so the check keeps that checkout's own `rust/target`
+  warm from one batch to the next, and do not point it at a directory
+  other checkouts build into: cargo can reuse another checkout's units from
+  a shared one and report a check that never compiled this tree (CLAUDE.md,
+  "Disk space"). A cold check fills `rust/target`, so mind the 8 GB
+  free-disk floor.
   If another cargo holds that directory, the check waits for its lock
   ("Blocking waiting for file lock").
 - It runs member build scripts and proc macros, as the full suite runs
