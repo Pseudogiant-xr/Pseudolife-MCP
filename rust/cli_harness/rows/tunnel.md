@@ -73,8 +73,12 @@ these cases are recorded from the candidate, not the oracle:
   names the file and what it means, and a running tunnel's cloud
   verification is `"not_checked"`. A Windows `DPAPI` key is unsealed with
   CryptUnprotectData and reported present only when it unseals to a valid
-  key; one this session cannot unseal (another account's, a damaged blob,
-  or a logon without the account's credentials) is `"not_verified"`.
+  key. A damaged blob (`ERROR_INVALID_DATA`, or `ERROR_INVALID_PARAMETER`
+  for bytes that are no blob, as `saved_key()`'s stand-in) is `false`; any
+  other failure (another account's key, a logon without the account's
+  credentials) is `"not_verified"`. Cases seeded by `key()` call `set_key`,
+  which a key-based SSH logon cannot seal; record them in a logon signed in
+  at the machine.
 - `update` never stops on a record or a key and starts, stops or signals
   nothing: a ready profile without a running record is `not-running`, a
   running one is `stale` (left running; this client cannot refresh it

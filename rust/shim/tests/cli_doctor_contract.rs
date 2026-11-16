@@ -967,16 +967,24 @@ mod tunnel_profiles {
         section
     }
 
-    /// Native `tunnel status --profile dot` on the store doctor read: the
-    /// command doctor's advice names must answer it, not defer.
+    /// Native `tunnel status --profile dot --json` on the store doctor
+    /// read: the command doctor's advice names must answer it, with the
+    /// refresh outcome and the key's state, not defer.
     fn assert_tunnel_status_answers(home: &Home) {
-        let output = command(home)
-            .args(["tunnel", "status", "--profile", "dot"])
-            .output()
-            .unwrap();
+        let output = tunnel_status(home);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(0), "{stderr}");
         assert!(!stderr.contains("deferred"), "{stderr}");
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(report["update"]["state"].is_string(), "{report}");
+        assert!(report.get("private_key_present").is_some(), "{report}");
+    }
+
+    fn tunnel_status(home: &Home) -> Output {
+        command(home)
+            .args(["tunnel", "status", "--profile", "dot", "--json"])
+            .output()
+            .unwrap()
     }
 
     #[test]
@@ -1041,7 +1049,7 @@ mod tunnel_profiles {
         assert!(
             next.iter().any(|line| {
                 let line = line.as_str().unwrap();
-                line == "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot shows the outcome and the key's state."
+                line == "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot --json shows the outcome and the key's state."
             }),
             "{entry:?}"
         );
@@ -1085,11 +1093,16 @@ mod tunnel_profiles {
         assert_eq!(
             line,
             format!(
-                "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot cannot read the key file {}; check that it is an owner-only file.",
+                "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot cannot read the key file {}; check that it is a plain owner-only file, not a pipe or a link.",
                 root(&home).join("dot.key").display()
             )
         );
         assert!(!entry.to_string().contains("Python"), "{entry}");
+        // Doctor names the file because `tunnel status` really does not
+        // answer while it is a pipe.
+        let output = tunnel_status(&home);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("deferred"));
     }
 
     #[test]
@@ -1108,7 +1121,7 @@ mod tunnel_profiles {
         assert_eq!(
             entry["next"],
             json!([
-                "The tunnel key expired on 2020-01-01T00:00:00+00:00; create a new restricted key at https://platform.openai.com/settings/organization/api-keys."
+                "The tunnel key expired on 2020-01-01T00:00:00+00:00; create a new restricted key at https://platform.openai.com/settings/organization/api-keys; this client cannot save it yet."
             ])
         );
     }

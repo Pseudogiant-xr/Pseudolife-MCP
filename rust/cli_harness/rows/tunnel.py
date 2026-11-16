@@ -304,11 +304,11 @@ def key(name="dot", *, rel="tunnels", raw: bytes | None = None, plain_file=False
 
 def saved_key():
     """The key file as this platform's saved setup holds one, for cases
-    whose candidate does not need it to unseal (``update`` reads no key;
-    ``status`` reports a ``DPAPI`` key it cannot unseal as not verified). On
-    Windows the bytes are a ``DPAPI``-prefixed stand-in that no account can
-    unseal, so these cases also record in a key-authenticated SSH session,
-    which cannot seal with CryptProtectData."""
+    whose candidate does not need it to unseal (``update`` reads no key). On
+    Windows the bytes are a ``DPAPI``-prefixed stand-in that is no DPAPI
+    blob, so ``status`` reports no usable key, and these cases also record
+    in a key-authenticated SSH session, which cannot seal with
+    CryptProtectData."""
     return key(raw=b"DPAPI\0fixture-sealed-key") if core.WINDOWS else key()
 
 
@@ -683,10 +683,10 @@ def cases() -> list[core.Case]:
         status("status-process-record", ready(), private("tunnels/dot.process.json", DEAD_RECORD)),
         status("status-process-record-text", ready(),
                private("tunnels/dot.process.json", DEAD_RECORD), json_out=False),
-        # A Windows DPAPI key this session cannot unseal: not verified.
+        # A Windows key file whose DPAPI blob is damaged: no usable key.
         case("status-dpapi-key", ["status", "--profile-dir", DIR], ready(), saved_key(),
              platforms=("windows",)),
-        # JSON pins the key's state: present on disk, could not be unsealed.
+        # JSON pins the key's state: false, the blob does not unseal.
         status("status-dpapi-key-json", ready(), saved_key(), platforms=("windows",)),
         case("update-ready-key", ["update", "--profile-dir", DIR], ready(), saved_key(),
              rules=("tunnel-dpapi-key",)),

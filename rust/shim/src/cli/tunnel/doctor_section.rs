@@ -6,24 +6,40 @@ use std::{io, path::Path};
 use chrono::Utc;
 use serde_json::{Map, Value, json};
 
-use super::{Fail, Refresh, occupied, refresh_status, shallow_challenge, store};
+use super::{
+    ChallengeIssue, Fail, Refresh, challenge_issue, challenge_path, occupied, refresh_status, store,
+};
 
 /// Where a new restricted key is created (the Python client's `KEYS_URL`).
 const KEYS_URL: &str = "https://platform.openai.com/settings/organization/api-keys";
 
-/// The file native `tunnel status --profile <name>` cannot read, in the
-/// order it reads them after the profile, or `None` when it answers.
-fn status_blocker(root: &Path, name: &str) -> Option<(&'static str, std::path::PathBuf)> {
-    if store::key_state(root, name) == Err(Fail::Defer) {
-        return Some(("the key file", store::key_path(root, name)));
+/// Why native `tunnel status --profile <name>` would not answer, with the
+/// one fix, given the key's state it read first; `None` when it answers.
+/// It follows `status`'s reads after the profile loaded: the key, then the
+/// process record (never a refusal), then the challenge record (the same
+/// [`challenge_issue`] `status` uses).
+fn status_blocker(
+    root: &Path,
+    name: &str,
+    key_state: &Result<Option<bool>, Fail>,
+) -> Option<String> {
+    if *key_state == Err(Fail::Defer) {
+        return Some(format!(
+            "pseudolife-mcp tunnel status --profile {name} cannot read the key file {}; check that it is a plain owner-only file, not a pipe or a link",
+            store::key_path(root, name).display()
+        ));
     }
-    if shallow_challenge(root, name) == Err(Fail::Defer) {
-        let path = root
-            .join(format!("{name}-verification"))
-            .join("challenge.json");
-        return Some(("the verification challenge", path));
+    let path = challenge_path(root, name);
+    match challenge_issue(root, name)? {
+        ChallengeIssue::Form => Some(format!(
+            "pseudolife-mcp tunnel status --profile {name} cannot read the verification challenge {}; check that it is a plain owner-only file, not a pipe or a link",
+            path.display()
+        )),
+        ChallengeIssue::Deep => Some(format!(
+            "pseudolife-mcp tunnel status --profile {name} does not read the verification challenge {}, which is nested too deeply to be one this client wrote; move that file aside",
+            path.display()
+        )),
     }
-    None
 }
 
 /// Read-only: `None` when `root` holds no `*.profile.json` (absent, empty or
@@ -122,15 +138,11 @@ pub(in crate::cli) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
             let update = match refresh_status(root, name) {
                 Ok(refresh) => {
                     if refresh.needs_attention() {
-                        let inspect = match status_blocker(root, name) {
-                            Some((what, path)) => format!(
-                                "pseudolife-mcp tunnel status --profile {name} cannot read {what} {}; check that it is an owner-only file",
-                                path.display()
-                            ),
-                            None => format!(
-                                "pseudolife-mcp tunnel status --profile {name} shows the outcome and the key's state"
-                            ),
-                        };
+                        let inspect = status_blocker(root, name, &key_state).unwrap_or_else(|| {
+                            format!(
+                                "pseudolife-mcp tunnel status --profile {name} --json shows the outcome and the key's state"
+                            )
+                        });
                         next.push(format!(
                             "Last tunnel refresh: {}; needs attention: {inspect}.",
                             refresh.state()
@@ -147,13 +159,13 @@ pub(in crate::cli) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
             };
             if key_state == Ok(None) {
                 next.push(format!(
-                    "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, signed in with its password (not over a key-based SSH logon), so run this check from such a session.",
+                    "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, signed in at the machine (not over a key-based SSH logon), so run this check from that account's own sign-in.",
                     store::key_path(root, name).display()
                 ));
             }
             if let Some(date) = expired {
                 next.push(format!(
-                    "The tunnel key expired on {date}; create a new restricted key at {KEYS_URL}."
+                    "The tunnel key expired on {date}; create a new restricted key at {KEYS_URL}; this client cannot save it yet."
                 ));
             }
             let mut entry = json!({
