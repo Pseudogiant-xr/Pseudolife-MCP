@@ -6161,7 +6161,8 @@ def test_after_drop_demands_a_success_when_skips_do_not_pass(world, capsys, monk
     assert integrate.main(["merge"]) == 2
 
     err = capsys.readouterr().err
-    assert "test-lite-windows was skipped on #901's head and did not succeed on #900's" in err
+    assert "test-lite-windows did not pass on #900's head and was skipped on #901's head" in err
+    assert "not a pass for a job that failed before" in err
     assert _merge_calls(world) == []
 
 
@@ -6181,3 +6182,99 @@ def test_after_drop_carries_an_absent_job_skipped_on_the_closed_head_only_by_the
         assert code == 0, err
     else:
         assert code == 2 and "test-lite-macos did not pass on #900's head (skipped)" in err
+
+
+def _lane_after_a_failure(world, capsys, *new_checks: dict) -> str:
+    """#901's head with `new_checks` beside the required lanes; `test-lite-windows`
+    failed on #900's head."""
+    return _after_drop_opened(world, capsys, [
+        _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest"), *new_checks],
+        rollup=[_run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), _run("test-lite-windows", "FAILURE")])
+
+
+def test_after_drop_takes_a_lane_its_successful_scope_skipped_in_a_clean_run(world, capsys):
+    # The conductor's ruling: a skip stands for a pass only behind the
+    # workflow's own successful scope, in a run with nothing red.
+    _lane_after_a_failure(world, capsys, _run("scope"), _run("test-lite-windows", "SKIPPED"))
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+
+
+def test_after_drop_refuses_a_skip_while_its_scope_failed(world, capsys):
+    _lane_after_a_failure(world, capsys, _run("scope", "FAILURE"),
+                          _run("test-lite-windows", "SKIPPED"))
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "scope (FAILURE)" in capsys.readouterr().err and _merge_calls(world) == []
+
+
+def test_after_drop_refuses_a_skip_in_a_run_with_a_cancelled_job(world, capsys):
+    _lane_after_a_failure(world, capsys, _run("scope"), _run("test-lite-windows", "SKIPPED"),
+                          _run("test-lite-macos", "CANCELLED"))
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "test-lite-macos (CANCELLED)" in capsys.readouterr().err and _merge_calls(world) == []
+
+
+def test_after_drop_refuses_a_neutral_job_after_a_failure(world, capsys):
+    _lane_after_a_failure(world, capsys, _run("scope"), _run("test-lite-windows", "NEUTRAL"))
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "test-lite-windows did not pass on #900's head and was neutral" in err
+    assert "not a pass for a job that failed before" in err
+
+
+def test_after_drop_takes_a_job_neutral_on_both_heads(world, capsys):
+    # The near miss: neutral on the closed head too, so it did not fail before.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest"),
+        _run("CodeQL", "NEUTRAL")],
+        rollup=[_run("scope"), _run("test", "FAILURE"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), _run("CodeQL", "NEUTRAL")])
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+
+
+def _skip_plan() -> "integrate.Plan":
+    return integrate.Plan(branch=f"integrate/{DATE}-batch-2", base_sha="0" * 40, head="1" * 40,
+                          pr=901, after_drop={"batch": 900})
+
+
+def _keyed(*checks: dict) -> dict:
+    return {integrate._check_key(c): c for c in checks}
+
+
+@pytest.mark.parametrize("scope, cause", [
+    (_run("scope", "FAILURE"), "scope job did not succeed (failure)"),
+    (_run("scope", None, status="IN_PROGRESS"), "scope job did not succeed (unfinished)"),
+    (None, "scope job did not succeed (missing)")])
+def test_after_drop_names_the_scope_condition_a_skip_fails(scope, cause):
+    lane = _run("test-lite-windows", "SKIPPED")
+    new = _keyed(lane, *([scope] if scope else []))
+
+    assert cause in integrate._after_drop_skipped(lane, new, _skip_plan())
+
+
+def test_after_drop_names_the_red_job_that_voids_a_skip():
+    lane = _run("test-lite-windows", "SKIPPED")
+    new = _keyed(lane, _run("scope"), _run("test-lite-macos", "CANCELLED"))
+
+    why = integrate._after_drop_skipped(lane, new, _skip_plan())
+
+    assert "CI's run there has test-lite-macos red or cancelled" in why
+
+
+def test_after_drop_judges_a_rust_lane_skip_by_the_rust_workflows_scope():
+    lane = _run("Parity checks / ubuntu-latest", "SKIPPED", workflow="Rust shim")
+    plan = _skip_plan()
+
+    assert integrate._after_drop_skipped(lane, _keyed(lane, _run("Scope", workflow="Rust shim")),
+                                         plan) is None
+    # CI's `scope` is not the Rust workflow's.
+    assert "scope job did not succeed (missing)" in integrate._after_drop_skipped(
+        lane, _keyed(lane, _run("scope")), plan)

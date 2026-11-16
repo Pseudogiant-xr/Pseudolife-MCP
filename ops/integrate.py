@@ -2643,14 +2643,16 @@ def _after_drop_lines(record: dict) -> list[str]:
 
 
 AFTER_DROP_SCOPE = AFTER_DROP_SCOPE_KEY[-1]
-# Whether a job that did not succeed on the closed head passes on the new
-# one by a skipped or neutral conclusion, as `merge` counts a pass anywhere
-# (scope skips a lane once the dropped change that triggered it is gone),
-# and whether one skipped or neutral there carries when absent here
-# (condition 2 of the conductor's plan). False demands a success on the new
-# head for both. Raised with the conductor, 17 November 2026, after Codex
-# asked for False.
+# Whether a job that failed on the closed head passes on the new one by a
+# skip its workflow's scope job made (scope skips a lane once the dropped
+# change that triggered it is gone), and whether one skipped or neutral
+# there carries when absent here (condition 2 of the conductor's plan).
+# False demands a success on the new head for both. The conductor ruled
+# True on 17 November 2026, as for `test` on a Rust-only rebuild, after
+# Codex asked for False; it is the maintainer's to flip.
 AFTER_DROP_SKIP_PASSES = True
+# The scope job of each workflow whose skips can count (`_after_drop_skipped`).
+AFTER_DROP_WORKFLOW_SCOPES = {"CI": AFTER_DROP_SCOPE_KEY, "Rust shim": ("check", "Rust shim", "Scope")}
 
 
 def _after_drop_standing(rollup: list[dict] | None) -> list[dict]:
@@ -2708,6 +2710,39 @@ def _after_drop_rulings(test: str, scope: str | None, summaries: list[tuple[str,
             "again without --after-drop"), [], notes
 
 
+def _after_drop_skipped(check: dict, new: dict, plan: Plan) -> str | None:
+    """The refusal, or None, for a job that failed (or never finished) on
+    the closed head and finished other than SUCCESS on the new one. Only a
+    skip can stand for a pass there (AFTER_DROP_SKIP_PASSES), and only one
+    its workflow's scope job made: that scope job succeeded on the new head,
+    and nothing in that workflow's run there failed, was cancelled or timed
+    out, so GitHub did not skip it because a job it needs failed. A neutral
+    conclusion is never a pass for such a job."""
+    name, state = _check_name(check), _check_state(check)
+    batch = plan.after_drop.get("batch")
+    why = (f"{name} did not pass on #{batch}'s head and was {state.lower()} on "
+           f"#{plan.pr}'s head {plan.head[:12]}")
+    fix = (f"; a batch built after a drop needs it to succeed on the new head, or to be "
+           f"skipped by its workflow's successful scope in a clean run ({AFTER_DROP_DOC}). "
+           f"Rerun it, or close #{plan.pr} and build again without --after-drop")
+    if state != "SKIPPED" or not AFTER_DROP_SKIP_PASSES:
+        return f"{why}, which is not a pass for a job that failed before{fix}"
+    workflow = check.get("workflowName") or ""
+    scope_key = AFTER_DROP_WORKFLOW_SCOPES.get(workflow)
+    scope = new.get(scope_key) if scope_key else None
+    if scope is None or _unfinished(scope) or _check_state(scope) != "SUCCESS":
+        seen = ("no scope job" if scope_key is None else "missing" if scope is None
+                else "unfinished" if _unfinished(scope) else _check_state(scope).lower())
+        return f"{why}, and its workflow {workflow or '?'}'s scope job did not succeed ({seen}){fix}"
+    red = sorted(_check_name(c) for c in new.values()
+                 if c.get("workflowName") == workflow and not _unfinished(c)
+                 and (_check_state(c) in FAILED or _check_state(c) == CANCELLED))
+    if red:
+        return (f"{why}, and {workflow}'s run there has " + ", ".join(red)
+                + " red or cancelled, so the skip may be GitHub's for a failed need" + fix)
+    return None
+
+
 def _after_drop_summaries(new: dict, eligible: set) -> list[tuple[str, list[str]]]:
     """(name, carried inputs) of each unfinished check on the new head that
     is not carried itself but needs, in its workflow, a job whose run is
@@ -2761,6 +2796,12 @@ def _after_drop_merge(plan: Plan, view: dict) -> tuple[list[str], list[str], lis
     def url(check: dict | None) -> str:
         return (check or {}).get("detailsUrl") or (check or {}).get("targetUrl") or "no link"
 
+    def failed_old(key: tuple) -> bool:
+        """Did it fail, or never finish, on the closed head? (A job neutral
+        or skipped there, or not there at all, did not fail before.)"""
+        check = old.get(key)
+        return check is not None and (_unfinished(check) or _check_state(check) not in PASSING)
+
     def passed_old(key: tuple) -> dict | None:
         check = old.get(key)
         if check is None or _unfinished(check):
@@ -2782,13 +2823,11 @@ def _after_drop_merge(plan: Plan, view: dict) -> tuple[list[str], list[str], lis
     for key, check in sorted(new.items(), key=lambda kv: _check_name(kv[1])):
         name = _check_name(check)
         if not _unfinished(check):
-            if (not AFTER_DROP_SKIP_PASSES and _check_state(check) != "SUCCESS"
-                    and passed_old(key) is None and key != AFTER_DROP_TEST_KEY):
-                raise Refusal(f"{name} was {_check_state(check).lower()} on #{plan.pr}'s head "
-                              f"and did not succeed on #{record['batch']}'s, so neither head "
-                              "shows it passing; a batch built after a drop needs a success "
-                              f"here ({AFTER_DROP_DOC}). Close it and build again without "
-                              "--after-drop")
+            if (_check_state(check) != "SUCCESS" and key != AFTER_DROP_TEST_KEY
+                    and failed_old(key)):
+                refusal = _after_drop_skipped(check, new, plan)
+                if refusal:
+                    raise Refusal(refusal)
             anew.append(f"{name}: {(check.get('conclusion') or check.get('state') or '').lower()} "
                         f"on this head ({url(check)})")
             continue
