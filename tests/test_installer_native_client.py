@@ -359,7 +359,8 @@ def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     assert "STAGED" not in result.stdout
     assert "runtime install refused: this machine stays on the Python client" in result.stderr
     assert "a tunnel is registered to start by itself through this machine's Python client" in result.stderr
-    assert "Nothing was changed" in result.stderr
+    # The verified download is kept for the rerun; nothing else changed.
+    assert "Nothing else was changed: the download in" in result.stderr
     assert not any(c.startswith("runtime install --archive") for c in _calls(tmp_path))
     assert not (tmp_path / "home" / "runtimes").exists()
 

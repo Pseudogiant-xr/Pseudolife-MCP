@@ -176,7 +176,7 @@ impl Registered {
                 self.name
             ),
             Kind::SystemUnit => format!(
-                "(as root) systemctl disable --now {0}; rm {file}; systemctl daemon-reload",
+                "as root, systemctl disable --now {0}; rm {file}; systemctl daemon-reload",
                 self.name
             ),
             Kind::LaunchAgent => format!("launchctl bootout gui/$(id -u)/{}; rm {file}", self.name),
@@ -224,9 +224,13 @@ pub(crate) fn decide(
     if !native && !moves() {
         return Decision::Proceed(vec![]);
     }
-    if native && !home.join(".pseudolife-mcp").join("tunnel").exists() {
+    if native
+        && matches!(host, Host::Windows { .. })
+        && !home.join(".pseudolife-mcp").join("tunnel").exists()
+    {
         // Only warns, so no Task Scheduler query on a machine that never
-        // saved a tunnel profile in the default store.
+        // saved a tunnel profile in the default store; reading unit and
+        // plist files costs nothing, so those are always read.
         return Decision::Proceed(vec![]);
     }
     let (found, notes) = registered(host, home, runner);
@@ -292,8 +296,11 @@ fn native_magic(path: &Path) -> bool {
     }
     if cfg!(windows) {
         return magic.starts_with(b"MZ")
-            && zip::ZipArchive::new(file)
-                .map_or(true, |mut archive| archive.by_name("__main__.py").is_err());
+            && match zip::ZipArchive::new(file) {
+                Ok(archive) => archive.index_for_name("__main__.py").is_none(),
+                Err(zip::result::ZipError::InvalidArchive(_)) => true,
+                Err(_) => false,
+            };
     }
     magic == [0x7f, b'E', b'L', b'F']
         || [
@@ -687,7 +694,7 @@ fn quote(path: &str, powershell: bool) -> String {
     let safe = !path.is_empty()
         && path
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "/\\._-:+@,".contains(c));
+            .all(|c| c.is_ascii_alphanumeric() || "/\\._-:+@".contains(c));
     if safe {
         path.to_owned()
     } else if powershell {

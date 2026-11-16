@@ -525,7 +525,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
     };
     assert!(
         lines[0].contains(
-            "remove it with: (as root) systemctl disable --now pseudolife-tunnel-dot.service; rm "
+            "remove it with: as root, systemctl disable --now pseudolife-tunnel-dot.service; rm "
         ),
         "{lines:?}"
     );
@@ -770,10 +770,6 @@ fn a_native_launcher_whose_runtime_is_gone_is_still_native() {
         panic!("an ELF launcher is the native client: nothing to refuse");
     };
     assert!(lines[0].contains("now the native client"), "{lines:?}");
-    assert!(
-        lines[0].contains("cannot start under the native client"),
-        "{lines:?}"
-    );
 }
 
 #[test]

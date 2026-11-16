@@ -211,7 +211,8 @@ def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     assert result.returncode == 1, result.stderr + result.stdout
     assert "INSTALLED" not in result.stdout
     assert "runtime install refused: this machine stays on the Python client" in result.stderr
-    assert "Nothing was changed" in result.stderr
+    # The verified download is kept for the rerun; nothing else changed.
+    assert "Nothing else was changed: the download in" in result.stderr
     assert not (tmp_path / "home" / "runtimes").exists()
 
 
