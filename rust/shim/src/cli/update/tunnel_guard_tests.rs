@@ -1130,6 +1130,15 @@ fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
         None
     );
     assert_eq!(unit_command("ExecStart=/home/u/it's tunnel run\n"), None);
+    // A later word that does not decode leaves a known program known.
+    assert_eq!(
+        unit_command("ExecStart=/usr/bin/python3 /opt/tunnel\\x20runner/launch.py\n").unwrap()[0],
+        "/usr/bin/python3"
+    );
+    assert_eq!(
+        unit_command("ExecStart=/usr/bin/true \"unterminated\n").unwrap()[0],
+        "/usr/bin/true"
+    );
     let f = Fixture::new();
     f.python_launcher();
     let quoted = format!(

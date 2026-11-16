@@ -677,18 +677,31 @@ fn unit_command(text: &str) -> Option<Vec<String>> {
             .and_then(|rest| rest.strip_prefix('='))
             .map(|rest| rest.trim_start().trim_start_matches(['-', ':', '+', '!']))
     })?;
-    let mut words = Vec::new();
+    let mut words: Vec<String> = Vec::new();
     let mut chars = line.chars().peekable();
     loop {
         while chars.next_if(|c| c.is_whitespace()).is_some() {}
         let Some(first) = chars.next() else { break };
         let mut word = String::new();
+        // Only the program decides the match: a later word that does not
+        // decode is kept as it reads.
+        let mut clear = true;
         if first == '"' || first == '\'' {
             loop {
-                match chars.next()? {
-                    c if c == first => break,
-                    '\\' => word.push(chars.next()?),
-                    c => word.push(c),
+                match chars.next() {
+                    Some(c) if c == first => break,
+                    Some('\\') => match chars.next() {
+                        Some(c) => word.push(c),
+                        None => {
+                            clear = false;
+                            break;
+                        }
+                    },
+                    Some(c) => word.push(c),
+                    None => {
+                        clear = false;
+                        break;
+                    }
                 }
             }
         } else {
@@ -696,9 +709,10 @@ fn unit_command(text: &str) -> Option<Vec<String>> {
             while let Some(c) = chars.next_if(|c| !c.is_whitespace()) {
                 word.push(c);
             }
-            if word.contains(['"', '\'', '\\']) {
-                return None;
-            }
+            clear = !word.contains(['"', '\'', '\\']);
+        }
+        if !clear && words.is_empty() {
+            return None;
         }
         words.push(word.replace("%%", "%").replace("$$", "$"));
     }
