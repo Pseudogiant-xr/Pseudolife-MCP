@@ -51,16 +51,52 @@ reproduced (item 4 of the scope is deferred).
 | Errors: `TunnelError` text on stderr, exit 2 | `tunnel_cli.py:371-375` |
 | Streams: UTF-8, LF translated to CRLF on Windows | `cli.rs::text_bytes` |
 
+## Native departures (after the freeze)
+
+Process records are read natively (`shim/src/cli/tunnel/record.rs`), and
+these cases are recorded from the candidate, not the oracle:
+
+- A record runs while a pid it names (the tunnel, its supervisor) is in the
+  process table under the recorded image (normcase on Windows, the resolved
+  file on POSIX); process creation times are not compared. A pid that is
+  gone or runs another image is a record left from a stopped tunnel. A
+  record naming no usable pid, a pid out of range (0, or above u32), a
+  pid that cannot be inspected (Windows, or on Linux a live pid the table
+  skipped), an
+  unreadable record or process table is unknown, with that one cause, and is
+  never called deletable.
+- `status` reads the record: `runtime.running` is `true`, `false` or
+  `"unknown"` (one cause: an unreadable record, no usable process id, an
+  unreadable process table, a process that cannot be inspected, or a
+  process id out of range),
+  `runtime.process_record`
+  names the file and what it means, and a running tunnel's cloud
+  verification is `"not_checked"`. A Windows `DPAPI` key is reported
+  `"not_verified"` (present on disk; CryptUnprotectData is not called).
+- `update` never stops on a record or a key and starts, stops or signals
+  nothing: a ready profile without a running record is `not-running`, a
+  running one is `stale` (left running; this client cannot refresh it
+  yet; also an unknown one), and a record with no profile beside it is
+  listed by file name, `leftover` when its process is gone, `stale` when it
+  runs or may run. A profile `load` does not read is `unread` (named with
+  the reason, the field at fault where there is one), or `stale` when its tunnel runs or may run. The top-level state is `stale` when any entry is, else `current`,
+  exit 0; the top-level `detail` carries one sentence per record. A store
+  `list` cannot read is refused (exit 2) naming the directory or the entry
+  it stopped on, instead of deferring; so are a directory that is not
+  owner-only and an invalid profile file name.
+  Cases: `status-process-record`, `status-process-record-text`,
+  `status-dpapi-key`, `status-dpapi-key-json`, `update-ready-key`, `update-dead-record`,
+  `update-orphan-record`, and `update-pending-only` / `update-ready-wrong-key`
+  (a ready profile is `not-running`, no longer `pending`),
+  `update-corrupt-profile`, `update-dir-not-owner-only`,
+  `update-invalid-file-name` and, on Windows, `update-case-folded-suffix`
+  (each refusal names its file or directory), and `status-dpapi-key-json`
+  (Windows).
+
 ## Deferred (before any effect)
 
-- A `<name>.process.json` present (psutil live-process identity,
-  `tunnel_runtime.py:387-416`).
-- A Windows key with the `DPAPI` prefix (CryptUnprotectData would need a new
-  unsafe module).
-- `update` with a ready profile that has a key: `update_profile` first
-  resolves `stable_command()`, which depends on the installed interpreter
-  and launcher (`tunnel_runtime.py:946-954`); the result is `unchanged` or
-  `failed` by host install, not by saved state.
+- `verify` with a process record present, or with a Windows key with the
+  `DPAPI` prefix (CryptUnprotectData would need a new unsafe module).
 - `service install` without `--accept-autostart`: the refusal follows
   `shim_command()` (`tunnel_cli.py:344`), so whether it or the launcher
   refusal prints depends on the host install. All of `service` defers.

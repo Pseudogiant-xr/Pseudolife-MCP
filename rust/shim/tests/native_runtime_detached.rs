@@ -1,4 +1,7 @@
 //! Native fixture processes exercise ownership through an installed launcher.
+#[cfg(unix)]
+mod bounded_child;
+mod native_binary_fixture;
 use pseudolife_stdio::{
     lifecycle::DaemonLaunch,
     runtime::{self, BINARY, Evidence, Layout, UpdateLock},
@@ -8,8 +11,9 @@ use std::{
     fs,
     io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
@@ -17,24 +21,77 @@ const PARENT: &str = "native_runtime_parent_fixture";
 const DETACHED: &str = "native_detached_child_fixture";
 #[cfg(windows)]
 const ORDINARY: &str = "native_ordinary_child_fixture";
-const TIMEOUT: Duration = Duration::from_secs(20);
 
-struct Home(PathBuf);
+// Installing, launching and pruning SHA-256-verify the whole installed binary
+// 13 times per run, in an unoptimized build. Measured 16 November 2026 in
+// WSL on an 8-core host: installing the 196 MB debug test binary itself cost
+// one quiet run 36 s of CPU. Pinned to one core beside three busy loops, every
+// run failed "fixture readiness timed out" at 43-45 s (hosted #1605: 37 s);
+// on two cores beside six busy loops a run took 133 s, past nextest's 120 s
+// cap (hosted #1605: killed at 120 s), while every wait took under 25 ms.
+// The runtime is therefore a stripped copy (6 MB), and the budgets below were
+// measured with it: a whole run took 1.3 s quiet and 4.4-5.1 s on one core
+// beside three busy loops.
+
+/// Launcher start until every fixture has connected: the launcher and the
+/// runtime each pin and hash the runtime, then the runtime starts the
+/// detached child. Measured with the stripped copy (16 November 2026, WSL):
+/// 0.2 s quiet, 0.7 s on one core beside three busy loops.
+const READINESS: Duration = Duration::from_secs(20);
+/// One round trip to a running fixture, the launcher's exit after "exit",
+/// and the release of the old runtime's pin: no hashing, under 25 ms when
+/// measured under load in WSL. Kept at the 20 s these waits always had,
+/// since on Windows the pin's release waits for the launcher's job to end.
+const REPLY: Duration = Duration::from_secs(20);
+/// Draining every fixture connection when a session ends, in all.
+const DRAIN: Duration = Duration::from_secs(10);
+/// A one-shot runtime child: it pins and hashes the runtime, then exits.
+#[cfg(unix)]
+const CHILD: Duration = Duration::from_secs(60);
+/// A fixture's idle limit. A fixture whose test process is gone sees end of
+/// file at once; this bounds only a test that is alive but stuck, so it
+/// exceeds nextest's 120 s cap and never fires while the test can still ping.
+const FIXTURE_IDLE: Duration = Duration::from_secs(150);
+
+/// Names the step a run has reached, so a run that overruns nextest's cap
+/// says where it was: nextest prints a timed-out test's captured output.
+fn phase(started: Instant, step: &str) {
+    eprintln!(
+        "native_runtime_detached: {step} at {:.1} s",
+        started.elapsed().as_secs_f64()
+    );
+}
+
+struct Home {
+    root: PathBuf,
+    binary: OnceLock<PathBuf>,
+}
 impl Home {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("native-detach-{}", uuid::Uuid::new_v4()));
         pseudolife_stdio::board::state::private_dir(&root).unwrap();
-        Self(root)
+        Self {
+            root,
+            binary: OnceLock::new(),
+        }
     }
     fn layout(&self) -> Layout {
         Layout {
-            root: self.0.join("runtimes"),
-            launcher: self.0.join("bin").join(BINARY),
+            root: self.root.join("runtimes"),
+            launcher: self.root.join("bin").join(BINARY),
             user_bin: None,
             user_path: false,
         }
     }
-    fn command(&self, executable: &std::path::Path) -> Command {
+    /// This test executable without debug symbols, made once per home: the
+    /// runtime runs the same code, and verifying it no longer dominates the
+    /// budgets (see above).
+    fn runtime_binary(&self) -> &Path {
+        self.binary.get_or_init(|| {
+            native_binary_fixture::installable(&std::env::current_exe().unwrap(), &self.root)
+        })
+    }
+    fn command(&self, executable: &Path) -> Command {
         let mut command = Command::new(executable);
         command.env_clear();
         for name in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
@@ -44,17 +101,19 @@ impl Home {
         }
         let layout = self.layout();
         command
-            .env("HOME", &self.0)
-            .env("USERPROFILE", &self.0)
-            .env("LOCALAPPDATA", self.0.join("Local"))
-            .env("APPDATA", self.0.join("Roaming"))
-            .env("CODEX_HOME", self.0.join("codex"))
-            .env("CLAUDE_CONFIG_DIR", self.0.join("claude"))
-            .env("PATH", self.0.join("empty-path"))
+            .env("HOME", &self.root)
+            .env("USERPROFILE", &self.root)
+            .env("LOCALAPPDATA", self.root.join("Local"))
+            .env("APPDATA", self.root.join("Roaming"))
+            .env("CODEX_HOME", self.root.join("codex"))
+            .env("CLAUDE_CONFIG_DIR", self.root.join("claude"))
+            .env("PATH", self.root.join("empty-path"))
             .env("PSEUDOLIFE_SHIM_RUNTIMES", layout.root)
             .env("PSEUDOLIFE_SHIM_LAUNCHER", layout.launcher)
+            // The detached child runs Cargo's own executable, outside the
+            // runtime tree.
             .env("NATIVE_DETACH_EXECUTABLE", std::env::current_exe().unwrap())
-            .current_dir(&self.0)
+            .current_dir(&self.root)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -63,29 +122,21 @@ impl Home {
     fn install(&self, version: &str) -> runtime::Runtime {
         let layout = self.layout();
         let _guard = UpdateLock::acquire(&layout).unwrap();
-        runtime::install_binary(
-            &layout,
-            version,
-            "fixture",
-            None,
-            &std::env::current_exe().unwrap(),
-        )
-        .unwrap()
+        runtime::install_binary(&layout, version, "fixture", None, self.runtime_binary())
+            .unwrap_or_else(|error| panic!("install runtime {version}: {error}"))
     }
 }
 impl Drop for Home {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.root);
     }
 }
 
 fn fixture_connection(role: &str) -> Option<BufReader<TcpStream>> {
     let endpoint = std::env::var("NATIVE_DETACH_ENDPOINT").ok()?;
     let stream = TcpStream::connect(endpoint).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(60)))
-        .unwrap();
-    stream.set_write_timeout(Some(TIMEOUT)).unwrap();
+    stream.set_read_timeout(Some(FIXTURE_IDLE)).unwrap();
+    stream.set_write_timeout(Some(REPLY)).unwrap();
     let mut connection = BufReader::new(stream);
     writeln!(connection.get_mut(), "{role}").unwrap();
     Some(connection)
@@ -174,39 +225,68 @@ impl Session {
             child,
             connections: BTreeMap::new(),
         };
-        let deadline = Instant::now() + TIMEOUT;
-        let expected = if cfg!(windows) { 3 } else { 2 };
-        while session.connections.len() < expected {
+        let deadline = Instant::now() + READINESS;
+        let expected: &[&str] = if cfg!(windows) {
+            &["detached", "ordinary", "runtime"]
+        } else {
+            &["detached", "runtime"]
+        };
+        while session.connections.len() < expected.len() {
             match listener.accept() {
                 Ok((stream, _)) => {
                     // Windows inherits the listener's nonblocking mode; the
                     // framed fixture protocol uses bounded blocking reads.
                     stream.set_nonblocking(false).unwrap();
-                    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
-                    stream.set_write_timeout(Some(TIMEOUT)).unwrap();
+                    // A fixture that connected in time gets a full reply
+                    // budget for its role line, even near the deadline.
+                    stream.set_read_timeout(Some(REPLY)).unwrap();
+                    stream.set_write_timeout(Some(REPLY)).unwrap();
                     let mut connection = BufReader::new(stream);
                     let mut role = String::new();
-                    connection.read_line(&mut role).unwrap();
-                    assert!(["runtime", "detached", "ordinary"].contains(&role.trim()));
+                    match connection.read_line(&mut role) {
+                        Ok(0) => session.not_ready(
+                            expected,
+                            "a fixture connected and closed without a role line",
+                        ),
+                        Ok(_) => {}
+                        Err(error) => session.not_ready(
+                            expected,
+                            &format!(
+                                "a connected fixture sent no role line within {REPLY:?} ({error})"
+                            ),
+                        ),
+                    }
+                    let role = role.trim().to_owned();
+                    if !expected.contains(&role.as_str()) {
+                        session.not_ready(expected, &format!("unexpected fixture role {role:?}"));
+                    }
                     assert!(
                         session
                             .connections
-                            .insert(role.trim().to_owned(), connection)
-                            .is_none()
+                            .insert(role.clone(), connection)
+                            .is_none(),
+                        "fixture {role:?} connected twice"
                     );
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    assert!(Instant::now() < deadline, "fixture readiness timed out");
-                    assert!(
-                        session.child.try_wait().unwrap().is_none(),
-                        "launcher exited before readiness"
-                    );
+                    if Instant::now() >= deadline {
+                        session.not_ready(expected, &format!("timed out after {READINESS:?}"));
+                    }
+                    if let Some(status) = session.child.try_wait().unwrap() {
+                        session.not_ready(expected, &format!("the launcher exited ({status})"));
+                    }
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(error) => panic!("fixture accept failed: {error}"),
             }
         }
         session
+    }
+    fn not_ready(&self, expected: &[&str], reason: &str) -> ! {
+        panic!(
+            "fixture readiness failed: {reason}; connected {:?} of {expected:?}",
+            self.connections.keys().collect::<Vec<_>>()
+        )
     }
     fn stop_launcher(&mut self, terminate: bool) {
         if terminate {
@@ -216,30 +296,41 @@ impl Session {
                 self.connections.get_mut("runtime").unwrap().get_mut(),
                 "exit"
             )
-            .unwrap();
+            .unwrap_or_else(|error| panic!("could not ask the runtime fixture to exit: {error}"));
         }
-        let deadline = Instant::now() + TIMEOUT;
+        let deadline = Instant::now() + REPLY;
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
                 if !terminate {
-                    assert_eq!(status.code(), Some(37));
+                    assert_eq!(status.code(), Some(37), "runtime fixture exit status");
                 }
                 return;
             }
-            assert!(Instant::now() < deadline, "launcher did not exit");
+            assert!(
+                Instant::now() < deadline,
+                "launcher did not exit within {REPLY:?} of being stopped"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-    fn ping_detached(&mut self) {
+    fn ping_detached(&mut self, when: &str) {
         let connection = self.connections.get_mut("detached").unwrap();
-        writeln!(connection.get_mut(), "ping").unwrap();
+        writeln!(connection.get_mut(), "ping")
+            .unwrap_or_else(|error| panic!("could not ping the detached child {when}: {error}"));
         let mut reply = String::new();
-        connection.read_line(&mut reply).unwrap();
-        assert_eq!(
-            reply.trim(),
-            "pong:detached",
-            "detached child died with launcher"
-        );
+        match connection.read_line(&mut reply) {
+            Ok(0) => {
+                panic!("detached child closed its connection {when}: it died with the launcher")
+            }
+            Ok(_) => assert_eq!(
+                reply.trim(),
+                "pong:detached",
+                "detached child answered a ping {when} with something else"
+            ),
+            Err(error) => {
+                panic!("detached child did not answer a ping {when} within {REPLY:?}: {error}")
+            }
+        }
     }
 }
 impl Drop for Session {
@@ -247,10 +338,21 @@ impl Drop for Session {
         for connection in self.connections.values_mut() {
             let _ = writeln!(connection.get_mut(), "quit");
         }
+        // Each fixture closes on cancellation; wait for its socket to close,
+        // including a detached child no longer in the owned tree, but for no
+        // more than DRAIN in all, since this also runs while a test panics.
+        let deadline = Instant::now() + DRAIN;
         for connection in self.connections.values_mut() {
-            // Each fixture closes on cancellation; wait for its socket to
-            // close, including a detached child no longer in the owned tree.
             loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero()
+                    || connection
+                        .get_mut()
+                        .set_read_timeout(Some(remaining))
+                        .is_err()
+                {
+                    break;
+                }
                 match connection.read_line(&mut String::new()) {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {}
@@ -265,16 +367,21 @@ impl Drop for Session {
 }
 
 fn detached_survives_launcher(terminate: bool) {
+    let started = Instant::now();
     let home = Home::new();
     let old = home.install("1.0.0");
+    phase(started, "installed 1.0.0");
     let mut session = Session::start(&home);
-    session.ping_detached();
+    phase(started, "fixtures ready");
+    session.ping_detached("before the launcher stopped");
     let pin =
         pseudolife_stdio::board::state::open_with_write(&old.usage_lock_path(), true).unwrap();
     assert!(pin.file.try_lock().is_err(), "running runtime lost its pin");
     home.install("1.0.1");
+    phase(started, "installed 1.0.1");
     session.stop_launcher(terminate);
-    session.ping_detached();
+    phase(started, "launcher stopped");
+    session.ping_detached("after the launcher stopped");
     #[cfg(windows)]
     {
         let mut reply = String::new();
@@ -292,7 +399,7 @@ fn detached_survives_launcher(terminate: bool) {
             "ordinary child escaped the launcher's job: {ended:?}"
         );
     }
-    let deadline = Instant::now() + TIMEOUT;
+    let deadline = Instant::now() + REPLY;
     loop {
         if pin.file.try_lock().is_ok() {
             pin.file.unlock().unwrap();
@@ -300,11 +407,12 @@ fn detached_survives_launcher(terminate: bool) {
         }
         assert!(
             Instant::now() < deadline,
-            "detached grandchild retained old runtime pin"
+            "detached grandchild retained old runtime pin for {REPLY:?} after the launcher exited"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
     drop(pin);
+    phase(started, "old runtime unpinned");
     let layout = home.layout();
     let _guard = UpdateLock::acquire(&layout).unwrap();
     let report = runtime::remove_unused(
@@ -315,9 +423,14 @@ fn detached_survives_launcher(terminate: bool) {
             tunnels: BTreeSet::new(),
         }),
     );
-    assert_eq!(report["removed"].as_array().unwrap().len(), 1);
+    phase(started, "pruned");
+    assert_eq!(
+        report["removed"].as_array().unwrap().len(),
+        1,
+        "prune report: {report}"
+    );
     assert!(!old.path.exists());
-    session.ping_detached();
+    session.ping_detached("after the old runtime was removed");
 }
 
 #[test]
@@ -357,24 +470,23 @@ fn untrusted_usage_fd_does_not_change_unrelated_descriptor() {
     use std::os::fd::AsRawFd;
     let home = Home::new();
     let installed = home.install("1.0.0");
-    let unrelated = pseudolife_stdio::board::state::create(&home.0.join("unrelated")).unwrap();
+    let unrelated = pseudolife_stdio::board::state::create(&home.root.join("unrelated")).unwrap();
     let flags = rustix::io::fcntl_getfd(&unrelated.file).unwrap();
     rustix::io::fcntl_setfd(&unrelated.file, flags & !rustix::io::FdFlags::CLOEXEC).unwrap();
-    let output = home
-        .command(&installed.executable())
-        .args(["--exact", "native_unrelated_fd_fixture", "--nocapture"])
-        .env(
-            "NATIVE_UNRELATED_FD",
-            unrelated.file.as_raw_fd().to_string(),
-        )
-        .env(
-            "PSEUDOLIFE_NATIVE_USAGE_FD",
-            unrelated.file.as_raw_fd().to_string(),
-        )
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .unwrap();
+    let output = bounded_child::output_within(
+        home.command(&installed.executable())
+            .args(["--exact", "native_unrelated_fd_fixture", "--nocapture"])
+            .env(
+                "NATIVE_UNRELATED_FD",
+                unrelated.file.as_raw_fd().to_string(),
+            )
+            .env(
+                "PSEUDOLIFE_NATIVE_USAGE_FD",
+                unrelated.file.as_raw_fd().to_string(),
+            ),
+        CHILD,
+        "the installed runtime's unrelated-descriptor fixture",
+    );
     rustix::io::fcntl_setfd(&unrelated.file, flags).unwrap();
     assert!(
         output.status.success(),

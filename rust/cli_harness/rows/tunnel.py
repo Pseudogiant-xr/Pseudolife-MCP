@@ -59,6 +59,9 @@ def _home(rel: str) -> str:
 
 DIR = _home("tunnels")
 DAEMON = "{DAEMON}"  # replaced in setup by the arm's listener URL
+# A tunnel process record whose process is gone.
+DEAD_RECORD = json.dumps({"pid": 4294967001, "created": 0.0, "exe": "none",
+                          "argv": ["none"]}).encode()
 
 
 # --- guard: the caller's real ~/.pseudolife-mcp, by metadata only --------------
@@ -297,6 +300,16 @@ def key(name="dot", *, rel="tunnels", raw: bytes | None = None, plain_file=False
         else:
             m.private_write(store.key_path(name), raw)
     return seed
+
+
+def saved_key():
+    """The key file as this platform's saved setup holds one, for cases
+    whose candidate decides from its form alone (``update`` reads no key;
+    ``status`` reports a ``DPAPI`` key unverified). On Windows the bytes are
+    a ``DPAPI``-prefixed stand-in: ``set_key``'s CryptProtectData needs the
+    account's logon credentials, which a key-authenticated SSH session (the
+    Windows dev VM, where these cases are recorded) does not hold."""
+    return key(raw=b"DPAPI\0fixture-sealed-key") if core.WINDOWS else key()
 
 
 def private(rel: str, data: bytes):
@@ -722,6 +735,24 @@ def cases() -> list[core.Case]:
              private("tunnels/dot.PROFILE.JSON", b"{}")),
         case("update-corrupt-profile", ["update", "--profile-dir", DIR], profile("alpha"),
              private("tunnels/dot.profile.json", b"{")),
+        # process records: read for liveness (pid and image), never acted on.
+        # The pid fits a u32 but no host holds it (above Linux's pid_max, not
+        # a multiple of four for Windows), so every host reads the record as
+        # left from a tunnel that stopped.
+        status("status-process-record", ready(), private("tunnels/dot.process.json", DEAD_RECORD)),
+        status("status-process-record-text", ready(),
+               private("tunnels/dot.process.json", DEAD_RECORD), json_out=False),
+        # A Windows DPAPI key is present on disk, not verified (no unprotect).
+        case("status-dpapi-key", ["status", "--profile-dir", DIR], ready(), saved_key(),
+             platforms=("windows",)),
+        # JSON pins the key's state: present on disk, not verified.
+        status("status-dpapi-key-json", ready(), saved_key(), platforms=("windows",)),
+        case("update-ready-key", ["update", "--profile-dir", DIR], ready(), saved_key(),
+             rules=("tunnel-dpapi-key",)),
+        case("update-dead-record", ["update", "--profile-dir", DIR], ready(), saved_key(),
+             private("tunnels/dot.process.json", DEAD_RECORD), rules=("tunnel-dpapi-key",)),
+        case("update-orphan-record", ["update", "--profile-dir", DIR], prepared(),
+             private("tunnels/old.process.json", DEAD_RECORD)),
         # verify: refused before any challenge is written
         case("verify-pending", ["verify", "--profile-dir", DIR], profile()),
         # A refused stdout (review of #678 at 6447829f): the oracle's buffered
@@ -771,15 +802,6 @@ def cases() -> list[core.Case]:
         case("setup-invalid-name", ["setup", "--profile-dir", DIR, "--profile", "bad.name",
                                     *explicit()]),
         # declared deferrals: the candidate defers and changes nothing
-        defer("defer-status-process-record",
-              ["status", "--profile-dir", DIR, "--json"], ready(),
-              private("tunnels/dot.process.json", json.dumps(
-                  {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode())),
-        defer("defer-status-dpapi-key", ["status", "--profile-dir", DIR], ready(), key(),
-              platforms=("windows",)),
-        # update asks PATH for pseudolife-mcp (empty here: core's preflight).
-        defer("defer-update-ready-key", ["update", "--profile-dir", DIR], ready(), key(),
-              programs=("pseudolife-mcp",)),
         defer("defer-verify-dpapi-key", ["verify", "--profile-dir", DIR], ready(), key(),
               platforms=("windows",)),
         defer("defer-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),
@@ -849,7 +871,8 @@ MUTANTS = [
            ("status-pending-json-stdout-closed", "status-pending-text-stdout-closed",
             "update-no-dir-stdout-closed")),
     Mutant("tunnel-key-presence-inverted", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "            bool_text(key),\n", "            bool_text(!key),\n",
+           "        Some(present) => bool_text(present),\n",
+           "        Some(present) => bool_text(!present),\n",
            ("status-pending-json",)),
     Mutant("tunnel-owner-only-skipped", "tunnel", "shim/src/cli/tunnel/store.rs",
            "    if !owner_only_file(&file) {\n", "    if false && !owner_only_file(&file) {\n",
@@ -869,13 +892,6 @@ MUTANTS = [
     Mutant("tunnel-expiry-order", "tunnel", "shim/src/cli/tunnel/mod.rs",
            "let expired = *instant <= now;", "let expired = *instant >= now;",
            ("status-expired-text", "status-expiry-date-only")),
-    Mutant("tunnel-dir-owner-only-skipped", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "    owner_only_directory(root, &info)?;\n", "",
-           ("update-dir-not-owner-only",)),
-    Mutant("tunnel-process-record-ignored", "tunnel", "shim/src/cli/tunnel/mod.rs",
-           "(psutil): deferred.\n    if occupied(",
-           "(psutil): deferred.\n    if false && occupied(",
-           ("defer-status-process-record",)),
     # review round 1
     Mutant("tunnel-saved-url-connect", "tunnel", "shim/src/cli/tunnel/store.rs",
            "        Some(Some(url)) => validate_url(url)?,\n",

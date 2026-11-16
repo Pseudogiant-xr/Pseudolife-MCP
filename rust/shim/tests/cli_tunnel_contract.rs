@@ -376,7 +376,7 @@ mod seeded {
     }
 
     #[test]
-    fn verify_and_update_refuse_or_defer_by_profile_readiness() {
+    fn verify_refuses_by_readiness_and_update_reports_each_profile() {
         let home = Home::new();
         let dir = home.dir();
         profile(&home, "alpha", false);
@@ -387,18 +387,68 @@ mod seeded {
             &[],
             "finish tunnel setup before requesting cloud verification\n",
         );
-        let output = run(&home, &["update", "--profile-dir", &dir], &[]);
-        assert_eq!(output.status.code(), Some(0));
+        // A ready profile is not running with or without its key; only an
+        // unfinished one is pending.
+        let not_running = "{\"state\": \"current\", \"needs_attention\": false, \"detail\": \"2 saved tunnel profiles checked; local client registrations preserved\", \"profiles\": [{\"profile\": \"alpha\", \"state\": \"pending\"}, {\"profile\": \"dot\", \"state\": \"not-running\", \"running\": false}]}\n";
         assert_eq!(
-            String::from_utf8(output.stdout).unwrap(),
-            "{\"state\": \"current\", \"needs_attention\": false, \"detail\": \"2 saved tunnel profiles checked; local client registrations preserved\", \"profiles\": [{\"profile\": \"alpha\", \"state\": \"pending\"}, {\"profile\": \"dot\", \"state\": \"pending\"}]}\n"
+            answered(&home, &["update", "--profile-dir", &dir]),
+            not_running
         );
         private(&home.path("tunnels/dot.key"), b"PLAIN\0fixture-tunnel-key");
         assert_refused(&home, &["verify", "--profile-dir", &dir], &[], UNAVAILABLE);
-        assert_deferred(&home, &["update", "--profile-dir", &dir], &[]);
+        // With its key and no record: still not running, never a deferral.
+        assert_eq!(
+            answered(&home, &["update", "--profile-dir", &dir]),
+            not_running
+        );
         private(&home.path("tunnels/dot.process.json"), b"{}");
         assert_deferred(&home, &["verify", "--profile-dir", &dir], &[]);
-        assert_deferred(&home, &["status", "--profile-dir", &dir], &[]);
+        // A record naming no process id proves nothing: unknown, never
+        // called deletable, and status says so.
+        let status = answered(&home, &["status", "--profile-dir", &dir]);
+        assert!(
+            status.starts_with("Profile dot: ready; runtime running=unknown, ready=False; cloud verification not checked by this client.\nWhether tunnel dot runs is unknown: its process record ")
+                && status.contains("names no process id")
+                && !status.contains("can be deleted"),
+            "{status}"
+        );
+        let update = answered(&home, &["update", "--profile-dir", &dir]);
+        assert!(
+            update.contains("\"state\": \"stale\", \"running\": \"unknown\", \"detail\": \"whether tunnel dot runs is unknown: its process record ")
+                && !update.contains("can be deleted"),
+            "{update}"
+        );
+    }
+
+    /// A command that answers on stdout with exit 0 and changes nothing.
+    fn answered(home: &Home, args: &[&str]) -> String {
+        let before = tree(&home.0);
+        // The macOS process table is read through ps, found on PATH.
+        let output = run(home, args, &[("PATH", "/usr/bin:/bin")]);
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {output:?}");
+        assert!(output.stderr.is_empty(), "{args:?}: {output:?}");
+        assert_eq!(tree(&home.0), before, "{args:?} changed the home");
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    #[test]
+    fn a_dead_or_orphan_record_never_stops_update() {
+        let home = Home::new();
+        let dir = home.dir();
+        profile(&home, "dot", true);
+        private(&home.path("tunnels/dot.key"), b"PLAIN\0fixture-tunnel-key");
+        // A pid no process table holds (above Linux's pid_max ceiling).
+        let dead = br#"{"pid": 4294967001, "created": 0.0, "exe": "/nonexistent/tunnel-client", "argv": ["/nonexistent/tunnel-client"]}"#;
+        private(&home.path("tunnels/dot.process.json"), dead);
+        private(&home.path("tunnels/old.process.json"), dead);
+        let report = answered(&home, &["update", "--profile-dir", &dir]);
+        let report: serde_json::Value = serde_json::from_str(&report).unwrap();
+        // Nothing runs: the update is current; the orphan is a leftover.
+        assert_eq!(report["state"], "current", "{report}");
+        assert_eq!(report["profiles"][0]["state"], "not-running", "{report}");
+        assert_eq!(report["profiles"][1]["record"], "old.process.json");
+        assert_eq!(report["profiles"][1]["state"], "leftover", "{report}");
+        assert_eq!(report["profiles"][1]["running"], false, "{report}");
     }
 
     /// Run with a deadline; a hung child is killed by its own PID.
