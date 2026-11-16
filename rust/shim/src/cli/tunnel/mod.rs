@@ -1323,7 +1323,12 @@ mod tests {
             .expect("an entry for dot");
         let next = entry["next"]
             .as_array()
-            .map(|lines| lines.iter().map(|l| l.as_str().unwrap().to_owned()).collect())
+            .map(|lines| {
+                lines
+                    .iter()
+                    .map(|l| l.as_str().unwrap().to_owned())
+                    .collect()
+            })
             .unwrap_or_default();
         assert!(!entry.to_string().contains("Python"), "{entry}");
         (entry, next)
@@ -1383,7 +1388,9 @@ mod tests {
         let (_, next) = doctor_entry(&store);
         assert_eq!(
             next,
-            ["The tunnel key expired on 2020-01-01T00:00:00+00:00; create a new restricted key at https://platform.openai.com/settings/organization/api-keys."]
+            [
+                "The tunnel key expired on 2020-01-01T00:00:00+00:00; create a new restricted key at https://platform.openai.com/settings/organization/api-keys."
+            ]
         );
     }
 

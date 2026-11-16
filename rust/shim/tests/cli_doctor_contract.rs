@@ -960,7 +960,10 @@ mod tunnel_profiles {
         assert!(!text.contains("fixture-tunnel-key"), "{text}");
         let section = map["tunnels"].as_array().expect("a tunnel section").clone();
         // Every step doctor names is one this client runs.
-        assert!(!Value::Array(section.clone()).to_string().contains("Python"), "{section:?}");
+        assert!(
+            !Value::Array(section.clone()).to_string().contains("Python"),
+            "{section:?}"
+        );
         section
     }
 
