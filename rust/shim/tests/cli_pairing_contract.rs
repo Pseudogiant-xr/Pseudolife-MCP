@@ -805,7 +805,10 @@ fn native_refusal_cleanup_keeps_token_and_names_recovery() {
     let combined = [output.stdout, output.stderr].concat();
     let diagnostic = String::from_utf8_lossy(&combined);
     assert!(
-        diagnostic.contains(target.to_str().unwrap()),
+        report["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(target.to_str().unwrap()),
         "cleanup error lost token path"
     );
     assert!(
