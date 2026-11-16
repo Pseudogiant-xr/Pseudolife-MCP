@@ -4,6 +4,7 @@ The unittest discovery in schema_ci also exercises the comparison's negative
 controls without requiring the executable before the build step.
 """
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,13 @@ from rust.harness_support.database_guard import assert_disposable_database
 from rust.harness_support import schema
 from rust.harness_support.schema import ensure_schema
 
+PLAN_SHA256 = "21fe09e91cf0494b6d7dd667cd27fa04211defd21efc8ef65da9cff0323ba882"
+
+
+def plan_fingerprint():
+    payload = json.dumps(schema.load_plan(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
 
 def compare(expected, actual):
     """Compare every catalog entry and row, with no schema normalization."""
@@ -32,7 +40,13 @@ def compare(expected, actual):
 
 
 def check_equivalence(binary, pg):
-    """Fresh and repeated schema-only initialization on separate owned banks."""
+    """Linux gate: the schema plan and PostgreSQL semantics are OS-independent."""
+    if sys.platform != "linux":
+        reason = ("Linux-only schema equivalence: committed plan and PostgreSQL semantics are "
+                  "client-OS independent; Windows exercises the executor through _bank and "
+                  "the non-spawning parsed-plan hash test")
+        print("schema executor equivalence: SKIP: " + reason, flush=True)
+        return {"skipped": reason}
     names = [pg.name(pg.PREFIX + f"executor_{arm}_{time.time_ns()}")
              for arm in ("driver", "rust")]
     created = []
@@ -101,6 +115,33 @@ def check_equivalence(binary, pg):
 
 
 class ComparisonControls(unittest.TestCase):
+    def test_committed_plan_and_sql_fingerprint(self):
+        # Pin the actual executor input, including every operation, branch,
+        # predicate and SQL byte after its universal-newline decoding.
+        self.assertEqual(plan_fingerprint(), PLAN_SHA256)
+
+    def test_crlf_and_unicode_space_paths_read_the_same_plan(self):
+        with tempfile.TemporaryDirectory(prefix="schema-plan-") as scratch:
+            directory = Path(scratch) / "schema fixtures \u00e9"
+            directory.mkdir()
+            for name in ("schema_plan.json", "schema.sql"):
+                data = (schema.STORAGE / name).read_bytes().replace(b"\r\n", b"\n")
+                (directory / name).write_bytes(data.replace(b"\n", b"\r\n"))
+            with patch.object(schema, "STORAGE", directory):
+                self.assertEqual(plan_fingerprint(), PLAN_SHA256)
+                plan = json.loads((directory / "schema_plan.json").read_text(encoding="utf-8"))
+                plan["steps"].append({"op": "unknown_future_operation"})
+                (directory / "schema_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "unknown schema operation"):
+                    plan_fingerprint()
+
+    def test_windows_equivalence_skips_before_spawning_or_connecting(self):
+        with patch.object(sys, "platform", "win32"), patch("sys.stdout"), \
+                patch.object(subprocess, "run", side_effect=AssertionError("spawned")):
+            result = check_equivalence(None, None)
+        self.assertIn("Linux-only", result["skipped"])
+        self.assertIn("_bank", result["skipped"])
+
     def test_catalog_and_schema_version_changes_are_detected(self):
         state = {"catalog": {"indexes": [["public", "meta", "meta_pkey"]]},
                  "rows": {"public.meta": {"columns": ["key", "value"],

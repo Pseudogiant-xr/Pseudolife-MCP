@@ -46,17 +46,23 @@ def _validate(steps):
             _validate(step["else"])
 
 
-def ensure_schema(conn):
-    """Initialize/repair schema only; caller commits any existing transaction.
-
-The transaction context rolls back all our DDL on failure, or uses one
-savepoint when the caller already owns the transaction (as psycopg does).
-"""
+def load_plan():
+    """Read UTF-8 artifacts, using Python's universal-newline normalization."""
     plan = json.loads((STORAGE / "schema_plan.json").read_text(encoding="utf-8"))
     header, sql = (STORAGE / "schema.sql").read_text(encoding="utf-8").split("\n", 1)
     if plan["format"] != 1 or header != f'-- schema_version {plan["schema_version"]}':
         raise ValueError("unsupported or inconsistent schema artifacts")
     _validate(plan["steps"])
+    return plan, sql
+
+
+def ensure_schema(conn):
+    """Initialize/repair schema only; caller commits any existing transaction.
+
+    The transaction context rolls back all our DDL on failure, or uses one
+    savepoint when the caller already owns the transaction (as psycopg does).
+    """
+    plan, sql = load_plan()
     pending, variables, last = list(reversed(plan["steps"])), {}, None
     with conn.transaction():
         assert_disposable_database(conn)

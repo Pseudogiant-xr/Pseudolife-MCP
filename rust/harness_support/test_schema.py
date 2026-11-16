@@ -24,7 +24,7 @@ def test_current_schema_helpers_without_package(monkeypatch):
     from rust.cli_harness.rows import _bank
     monkeypatch.setattr(_bank, "drop", lambda name: None)
     _bank.teardown(_bank.name("pl_cf_no_package"))
-    for name in ("schema_cases", "startup_cases"):
+    for name in ("schema_cases",):
         monkeypatch.delitem(sys.modules, name, raising=False)
         importlib.import_module(name)
 

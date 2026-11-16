@@ -224,9 +224,6 @@ class GoldenChecking(unittest.TestCase):
             return {"ok": True, "startup": {}, "entries": []}, [0.0, 0.0]
 
         with patch.object(module, "invoke", invoke), \
-                patch.object(startup_cases, "rust_open"), \
-                patch.object(startup_cases.psycopg, "connect", lambda *args, **kwargs: Connection()), \
-                patch.object(startup_cases, "assert_disposable_database", lambda conn: None), \
                 patch.object(module.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
                 patch.object(module.pg, "drop", lambda name, *args: None), \
                 patch.object(module.dbstate, "dump", empty_state), \
