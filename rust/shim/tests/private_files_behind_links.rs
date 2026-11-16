@@ -38,9 +38,18 @@ impl Drop for Scratch {
     }
 }
 
+/// A folder only this user may write, whatever the umask (002 under
+/// Debian's user private groups makes new folders group-writable).
+fn dir(path: &Path) {
+    fs::create_dir(path).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+}
+
 fn token_in(folder: &Path) -> PathBuf {
     fs::create_dir_all(folder).unwrap();
-    fs::set_permissions(folder, fs::Permissions::from_mode(0o700)).unwrap();
+    for made in [folder, folder.parent().unwrap()] {
+        fs::set_permissions(made, fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let file = folder.join("token");
     fs::OpenOptions::new()
         .write(true)
@@ -66,7 +75,7 @@ fn the_token_file_is_read_through_a_home_behind_the_users_link() {
 #[test]
 fn the_board_keeps_its_state_under_a_home_behind_the_users_link() {
     let scratch = Scratch::new("board");
-    fs::create_dir(scratch.0.join("real-home")).unwrap();
+    dir(&scratch.0.join("real-home"));
     symlink(scratch.0.join("real-home"), scratch.0.join("home")).unwrap();
     let folder = scratch.0.join("home/.pseudolife-mcp/agents");
     state::private_dir(&folder).unwrap();
@@ -79,8 +88,8 @@ fn the_board_keeps_its_state_under_a_home_behind_the_users_link() {
 #[test]
 fn a_data_folder_moved_to_another_disk_with_a_link_works() {
     let scratch = Scratch::new("data");
-    fs::create_dir(scratch.0.join("big-disk")).unwrap();
-    fs::create_dir(scratch.0.join("home")).unwrap();
+    dir(&scratch.0.join("big-disk"));
+    dir(&scratch.0.join("home"));
     symlink(
         scratch.0.join("big-disk"),
         scratch.0.join("home/.pseudolife-mcp"),

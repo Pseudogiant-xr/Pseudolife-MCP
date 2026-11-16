@@ -239,9 +239,14 @@ private_path_trusted() {
             launcher=${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp} ;;
     esac
     if [ -n "$launcher" ] && [ -f "$launcher" ] && [ -x "$launcher" ]; then
-        answer=$("$launcher" private-path-check "$file" </dev/null) &&
-            [ "$answer" = "pseudolife-private-path: trusted" ] && return 0
-        [ -z "$answer" ] || return 1
+        answer=$("$launcher" private-path-check "$file" </dev/null 2>/dev/null)
+        case $?:$answer in
+            "0:pseudolife-private-path: trusted") return 0 ;;
+            "1:pseudolife-private-path: refused: "*)
+                # The client named the link, the cause and the fix.
+                printf '%s\n' "${answer#pseudolife-private-path: refused: }" >&2
+                return 1 ;;
+        esac
     fi
     printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a symlink or junction, and no native pseudolife-mcp client answered whether another account can change it; fix: install the native client (rerun the installer), or name the file by its real path." >&2
     return 1

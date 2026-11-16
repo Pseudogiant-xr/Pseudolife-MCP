@@ -3960,7 +3960,10 @@ files behind a symlink or junction when no other account could have made
 the link or can change it. Then a home reached through a link (a `/home`
 on another volume, macOS `/var` and `/tmp`, a Windows profile behind a
 junction) and a data folder moved to another disk with a link work with no
-setting. The folders a link leads to are checked the same way.
+setting. Any further link on the way to where a link leads is checked the
+same way; the plain folders there get the checks they would get if a
+setting named them directly, so a link into a folder other users may write
+is as exposed as naming that folder.
 
 | A link on the path to a private file | |
 |---|---|
@@ -3968,15 +3971,17 @@ setting. The folders a link leads to are checked the same way.
 | Owned by you or root, in a sticky folder such as `/tmp` | followed |
 | Owned by another account | refused |
 | In a folder its group or other users can write, without the sticky bit | refused: `chmod go-w '<folder>'` |
-| Windows: a symlink or junction owned by you, SYSTEM or Administrators, which no other account may delete or rewrite, in a folder where no other account may delete entries | followed |
+| Windows: a symlink or junction owned by you, SYSTEM or Administrators, which no other account may delete or rewrite, in a folder (owned by you, SYSTEM, Administrators or TrustedInstaller) where no other account may delete entries | followed |
+| Windows: a link whose target is a device path (`\\?\GLOBALROOT\Device\...`) | refused: the client cannot check where it leads |
 | Windows: a junction made directly in `C:\`, which inherits Authenticated Users' Modify there | refused: another account could replace it |
 | Windows: a OneDrive Files On-Demand (cloud-files) placeholder | a plain folder: it redirects nothing |
 | Windows: any other reparse point | refused |
 | More than 40 links on one path | refused as a loop |
 
 A refused path is named in one line, on stderr and in the error: the link,
-the cause and the one fix (`chmod go-w '<folder>'`, or the folder the link
-leads to). The frozen Python client refuses every link.
+the cause and the one fix (`chmod go-w '<folder>'` for a folder you own
+that others may write, otherwise replacing the link with a folder you
+own). The frozen Python client refuses every link.
 
 ### Where the plugin lives: one cache folder per commit
 

@@ -21,7 +21,10 @@
 //!   point is refused.
 //!
 //! An accepted link's target is checked the same way, itself and every
-//! folder above it, so a trusted link cannot lead through an untrusted one.
+//! folder above it, so a trusted link cannot lead through an untrusted link.
+//! The plain folders it leads to get no more checks than a path configured
+//! directly to them would: a link into a folder others may write is as
+//! exposed as naming that folder in a setting.
 //! Plain folders get no further checks than they always had: what was
 //! accepted before is still accepted. The leaf itself (the file, or the
 //! folder `check_path` is given) is never a link the caller follows: callers
@@ -87,35 +90,27 @@ impl fmt::Display for Refusal {
         let lead =
             "pseudolife-mcp keeps private files only behind links no other account can change";
         match &*self.cause {
-            Cause::LinkOwner { owner, target } => write!(
+            Cause::LinkOwner { owner, .. } => write!(
                 f,
-                "{lead}, and {element} is a link owned by {owner}; fix: use the folder it leads to, {}, in its place.",
-                target.display()
+                "{lead}, and {element} is a link owned by {owner}; fix: replace the link with a folder you own."
             ),
-            Cause::LinkWriter { writer, target } => write!(
+            Cause::LinkWriter { writer, .. } => write!(
                 f,
-                "{lead}, and {writer} may delete or rewrite the link {element}; fix: use the folder it leads to, {}, in its place.",
-                target.display()
+                "{lead}, and {writer} may delete or rewrite the link {element}; fix: replace the link with a folder you own."
             ),
-            Cause::HolderOwner {
-                holder,
-                owner,
-                target,
-            } => write!(
+            Cause::HolderOwner { holder, owner, .. } => write!(
                 f,
-                "{lead}, and the link {element} sits in {}, which {owner} owns and so can replace it; fix: use the folder it leads to, {}, in its place.",
-                holder.display(),
-                target.display()
+                "{lead}, and the link {element} sits in {}, which {owner} owns and so can replace it; fix: replace the link with a folder you own.",
+                holder.display()
             ),
             Cause::HolderWritable {
                 holder,
                 writer: Writer::Account(account),
-                target,
+                ..
             } => write!(
                 f,
-                "{lead}, and {account} may delete or replace entries in {}, which holds the link {element}; fix: use the folder it leads to, {}, in its place.",
-                holder.display(),
-                target.display()
+                "{lead}, and {account} may delete or replace entries in {}, which holds the link {element}; fix: replace the link with a folder you own.",
+                holder.display()
             ),
             Cause::HolderWritable { holder, writer, .. } => {
                 let (who, bits) = match writer {
@@ -261,11 +256,15 @@ pub fn report_once(refusal: &Refusal) {
 /// that is not native, answers an unknown command some other way).
 pub const HOOK_TRUSTED: &str = "pseudolife-private-path: trusted";
 
+/// What precedes the refusal line [`hook_command`] prints for the hooks.
+pub const HOOK_REFUSED: &str = "pseudolife-private-path: refused: ";
+
 /// `pseudolife-mcp private-path-check <absolute file path>`, hidden: the
 /// plugin hooks ask it whether the folders above a private file they read
 /// pass this rule, so the rule has one implementation. It reads nothing but
 /// the path's metadata and changes nothing. Exit 0 with [`HOOK_TRUSTED`] on
-/// stdout when they pass; 1 with the refusal on stderr; 2 on bad usage.
+/// stdout when they pass; 1 with [`HOOK_REFUSED`] and the refusal on stdout
+/// (the hooks relay it); 2 on bad usage.
 pub fn hook_command(arguments: Vec<std::ffi::OsString>) -> u8 {
     let [path] = arguments.as_slice() else {
         crate::stderrln!("usage: pseudolife-mcp private-path-check <absolute file path>");
@@ -282,7 +281,7 @@ pub fn hook_command(arguments: Vec<std::ffi::OsString>) -> u8 {
             0
         }
         Err(refusal) => {
-            crate::stderrln!("{refusal}");
+            println!("{HOOK_REFUSED}{refusal}");
             1
         }
     }

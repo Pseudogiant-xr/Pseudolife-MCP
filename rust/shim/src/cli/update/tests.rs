@@ -1194,6 +1194,9 @@ fn private_scratch_resolves_a_symlinked_temporary_folder() {
         .join(format!("pseudolife-scratch-test-{}", uuid::Uuid::new_v4()));
     let real = base.join("private-var");
     fs::create_dir_all(&real).unwrap();
+    // Only this user may write the folder holding the link, whatever the
+    // umask (#1639: a group-writable one could have the link replaced).
+    fs::set_permissions(&base, fs::Permissions::from_mode(0o700)).unwrap();
     let link = base.join("var");
     std::os::unix::fs::symlink(&real, &link).unwrap();
     // A link only this user can change no longer refuses private state (#1639).

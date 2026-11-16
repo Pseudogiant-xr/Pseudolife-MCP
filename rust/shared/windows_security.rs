@@ -162,9 +162,72 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
         .ok_or_else(|| io::Error::other("a link with no folder above it"))?;
     // Followed: the folders above it were checked first.
     let holder = open(holder_path, READ_CONTROL, true)?;
+    // Windows resolves a relative symlink against where its folder really
+    // is, after the links above it, not against the text of the path: so
+    // is the walk told where it leads.
+    let target = if target.is_absolute() {
+        target
+    } else {
+        lexical(&final_path(&holder)?.join(&target))
+    };
     let distrust = security_distrust(&holder, user_sid, Rule::LinkHolder)?
         .map(|why| LinkDistrust::Holder(holder_path.to_path_buf(), why));
     Ok(PathEntry::Link { target, distrust })
+}
+
+/// The path `file`'s handle names once every link is followed
+/// (`GetFinalPathNameByHandleW`, as `\\?\C:\...` or `\\?\UNC\...`).
+fn final_path(file: &File) -> io::Result<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+    let mut buffer = vec![0u16; 1024];
+    loop {
+        // SAFETY: the handle is live; the buffer is writable for the length
+        // passed, and only the returned count of units is read.
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle() as HANDLE,
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                0,
+            )
+        } as usize;
+        if written == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if written < buffer.len() {
+            return Ok(std::ffi::OsString::from_wide(&buffer[..written]).into());
+        }
+        if written > 32 * 1024 {
+            return Err(io::Error::other("a folder path too long to check"));
+        }
+        buffer.resize(written + 1, 0);
+    }
+}
+
+/// `path` with `.` dropped and each `..` taken against the part before it,
+/// as Windows itself reads a relative link's target joined to the real
+/// path of its folder (which has no links left in it).
+fn lexical(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    out.pop();
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+pub(crate) fn lexical_for_test(path: &Path) -> std::path::PathBuf {
+    lexical(path)
 }
 
 /// [`access_distrust`] over the owner and DACL read from `file`'s handle.
@@ -270,21 +333,26 @@ fn reparse_target(entry: &File, tag: u32) -> io::Result<std::path::PathBuf> {
         .ok_or_else(|| io::Error::other("a link target in a form this client cannot check"))
 }
 
-/// [`reparse_target`]'s mapping of a substitute name, `None` to keep it as
-/// written.
+/// [`reparse_target`]'s mapping of a substitute name: exactly the three
+/// forms the walk can check, `\??\X:\...`, `\??\UNC\server\share...` and
+/// `\??\Volume{...}\...`; `None` (refused) for anything else, the
+/// `\??\GLOBALROOT\Device\...` form an ordinary user can store included.
 fn target_path(wide: &[u16], relative: bool) -> Option<std::path::PathBuf> {
     if relative {
         return None;
     }
     let text = String::from_utf16(wide).ok()?;
     let rest = text.strip_prefix("\\??\\")?;
-    Some(if let Some(share) = rest.strip_prefix("UNC\\") {
-        format!("\\\\{share}").into()
-    } else if rest.starts_with("Volume{") {
-        format!("\\\\?\\{rest}").into()
-    } else {
-        rest.into()
-    })
+    if let Some(share) = rest.strip_prefix("UNC\\") {
+        return (!share.is_empty()).then(|| format!("\\\\{share}").into());
+    }
+    if rest.starts_with("Volume{") {
+        return Some(format!("\\\\?\\{rest}").into());
+    }
+    let bytes = rest.as_bytes();
+    let drive =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\';
+    drive.then(|| rest.into())
 }
 
 #[cfg(test)]
@@ -652,6 +720,9 @@ const LINK_HOLDER_RIGHTS: u32 = FOLDER_DELETE_CHILD
     | 0x0008_0000 // WRITE_OWNER
     | 0x1000_0000; // GENERIC_ALL
 
+/// `NT SERVICE\TrustedInstaller`, the owner of `C:\` and the system folders.
+const TRUSTED_INSTALLER: &str = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
 /// Which trust rule [`access_distrust`] applies.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Rule {
@@ -687,7 +758,11 @@ unsafe fn access_distrust(
         Rule::LinkHolder => LINK_HOLDER_RIGHTS,
     };
     unsafe {
-        if !trusted_marker_principal(owner, user)
+        // TrustedInstaller owns `C:\` and the system's folders; it can change
+        // anything this user can, so a link's folder it owns is trusted.
+        let installer =
+            rule == Rule::LinkHolder && sid_string(owner).as_deref() == Some(TRUSTED_INSTALLER);
+        if !(trusted_marker_principal(owner, user) || installer)
             || Security::IsWellKnownSid(owner, Security::WinCreatorOwnerRightsSid) != 0
         {
             return Some(MarkerDistrust::Owner(sid_name(owner)));
@@ -735,7 +810,9 @@ unsafe fn access_distrust(
             let creator = folder
                 && inherit_only
                 && Security::IsWellKnownSid(sid, Security::WinCreatorOwnerSid) != 0;
-            if !(trusted_marker_principal(sid, user) || creator) {
+            let installer =
+                rule == Rule::LinkHolder && sid_string(sid).as_deref() == Some(TRUSTED_INSTALLER);
+            if !(trusted_marker_principal(sid, user) || creator || installer) {
                 return Some(MarkerDistrust::Writer {
                     name: sid_name(sid),
                     sid: sid_string(sid).unwrap_or_default(),

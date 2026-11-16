@@ -593,6 +593,8 @@ fn redirected_tunnel_roots_and_missing_children_are_unknown_evidence() {
     // A tunnel root that is itself a link is still unknown evidence; a
     // missing child below a link only this user can change is just missing
     // (the private-path rule, #1639).
+    // Only this user may write the folder holding it, whatever the umask.
+    fs::set_permissions(&f.path, fs::Permissions::from_mode(0o700)).unwrap();
     let trusted = f.path.join("trusted");
     std::os::unix::fs::symlink(&real, &trusted).unwrap();
     assert!(prune::tunnel_runtimes(&f.layout, &trusted, &[]).is_err());

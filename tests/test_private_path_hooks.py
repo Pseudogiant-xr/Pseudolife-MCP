@@ -46,8 +46,19 @@ def _hook_functions(hook: str) -> str:
     return _function(text, "private_path_trusted") + "\n" + _function(text, "private_regular")
 
 
-def _token(folder: Path) -> Path:
+def _dir(folder: Path) -> Path:
+    """A folder only this user may write, whatever the umask (002 under
+    Debian's user private groups would make it group-writable)."""
     folder.mkdir(parents=True, exist_ok=True)
+    for made in [folder, *folder.parents]:
+        if made == made.parent or not str(made).startswith(str(_dir.base)):
+            break
+        made.chmod(0o700)
+    return folder
+
+
+def _token(folder: Path) -> Path:
+    _dir(folder)
     token = folder / "token"
     token.write_text("fixture-token")
     token.chmod(0o600)
@@ -68,14 +79,14 @@ def _own_link_home(base: Path) -> Path:
 
 def _relative_dotdot(base: Path) -> Path:
     _token(base / "real")
-    (base / "a").mkdir()
+    _dir(base / "a")
     (base / "a" / "up").symlink_to("../real")
     return base / "a" / "up" / "token"
 
 
 def _own_link_in_sticky(base: Path) -> Path:
     _token(base / "real")
-    (base / "tmp").mkdir()
+    _dir(base / "tmp")
     (base / "tmp" / "link").symlink_to(base / "real")
     (base / "tmp").chmod(0o1777)
     return base / "tmp" / "link" / "token"
@@ -83,7 +94,7 @@ def _own_link_in_sticky(base: Path) -> Path:
 
 def _link_in_writable_folder(base: Path) -> Path:
     _token(base / "real")
-    (base / "shared").mkdir()
+    _dir(base / "shared")
     (base / "shared" / "link").symlink_to(base / "real")
     (base / "shared").chmod(0o777)
     return base / "shared" / "link" / "token"
@@ -91,7 +102,7 @@ def _link_in_writable_folder(base: Path) -> Path:
 
 def _link_in_group_writable_folder(base: Path) -> Path:
     _token(base / "real")
-    (base / "shared").mkdir()
+    _dir(base / "shared")
     (base / "shared" / "link").symlink_to(base / "real")
     (base / "shared").chmod(0o775)
     return base / "shared" / "link" / "token"
@@ -99,7 +110,7 @@ def _link_in_group_writable_folder(base: Path) -> Path:
 
 def _trusted_link_into_untrusted(base: Path) -> Path:
     _token(base / "real")
-    (base / "shared").mkdir()
+    _dir(base / "shared")
     (base / "shared" / "inner").symlink_to(base / "real")
     (base / "shared").chmod(0o777)
     (base / "outer").symlink_to(base / "shared" / "inner")
@@ -120,7 +131,9 @@ TABLE = [
 @pytest.fixture
 def base(tmp_path):
     base = tmp_path / "layout"
-    base.mkdir(mode=0o700)
+    base.mkdir()
+    base.chmod(0o700)
+    _dir.base = base
     yield base
     # Restore modes so the temporary tree can be removed.
     for folder in [base, *base.rglob("*")]:
@@ -128,12 +141,16 @@ def base(tmp_path):
             folder.chmod(0o700)
 
 
+REFUSED = "pseudolife-private-path: refused: "
+
+
 def _client(file: Path) -> bool:
     result = subprocess.run([str(REAL), "private-path-check", str(file)],
                             stdin=subprocess.DEVNULL, capture_output=True, text=True,
                             timeout=60)
     trusted = result.returncode == 0 and result.stdout.strip() == MARKER
-    assert trusted or (result.returncode == 1 and "fix:" in result.stderr), result
+    assert trusted or (result.returncode == 1 and result.stdout.startswith(REFUSED)
+                       and "fix:" in result.stdout), result
     return trusted
 
 
@@ -153,6 +170,9 @@ def test_the_hooks_and_the_client_give_one_verdict(base, tmp_path, name, build, 
     assert _client(file) is expected, name
     result = _hook(hook, file, tmp_path, str(REAL))
     assert (result.returncode == 0) is expected, (name, result.stderr)
+    if not expected:
+        # The hook relays the client's own line: the link, the cause, the fix.
+        assert "fix:" in result.stderr and "no native" not in result.stderr, result.stderr
 
 
 @pytest.mark.parametrize("hook", HOOKS)

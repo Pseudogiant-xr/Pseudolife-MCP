@@ -192,6 +192,8 @@ fn test_unprotected_default_acl_is_rejected() {
 fn test_symlink_and_symlink_ancestor_are_rejected() {
     use std::os::unix::fs::symlink;
     let home = DisposableHome::new();
+    // Only this user may write the home, whatever the umask.
+    set_mode(&home.0, 0o700);
     let source = home.private_token("source", b"fixture-secret");
     symlink(source, home.path("symlink")).unwrap();
     assert_eq!(

@@ -154,7 +154,7 @@ fn each_refusal_names_the_element_and_one_fix() {
                 owner: "the account with uid 1001".into(),
                 target: target.clone(),
             },
-            "fix: use the folder it leads to, /data/state, in its place.",
+            "fix: replace the link with a folder you own.",
         ),
         (
             Cause::HolderOwner {
@@ -162,7 +162,7 @@ fn each_refusal_names_the_element_and_one_fix() {
                 owner: "the account with uid 1001".into(),
                 target: target.clone(),
             },
-            "fix: use the folder it leads to, /data/state, in its place.",
+            "fix: replace the link with a folder you own.",
         ),
         (
             Cause::HolderWritable {
@@ -185,7 +185,7 @@ fn each_refusal_names_the_element_and_one_fix() {
                 writer: "Everyone".into(),
                 target: target.clone(),
             },
-            "fix: use the folder it leads to, /data/state, in its place.",
+            "fix: replace the link with a folder you own.",
         ),
         (Cause::TooManyLinks, "fix: point it at the folder itself."),
         (
@@ -213,6 +213,12 @@ mod posix {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
 
+    /// A folder only this user may write, whatever the umask (002 under
+    /// Debian's user private groups makes new folders group-writable).
+    fn dir(path: &Path) {
+        fs::create_dir(path).unwrap();
+        mode(path, 0o700);
+    }
     fn mode(path: &Path, bits: u32) {
         fs::set_permissions(path, fs::Permissions::from_mode(bits)).unwrap();
     }
@@ -235,12 +241,12 @@ mod posix {
     fn a_home_behind_the_users_own_link_works_for_the_token_and_the_board() {
         let scratch = Scratch::new("home");
         let real = scratch.0.join("real-home");
-        fs::create_dir(&real).unwrap();
+        dir(&real);
         let home = scratch.0.join("home");
         symlink(&real, &home).unwrap();
         // The token file under the linked home.
         let data = home.join(".pseudolife-mcp");
-        fs::create_dir(&data).unwrap();
+        dir(&data);
         mode(&data, 0o700);
         let token = token_at(&data);
         let provider = crate::credentials::CredentialProvider::new(None, Some(token)).unwrap();
@@ -258,7 +264,7 @@ mod posix {
     fn a_private_folder_that_is_itself_the_users_link_works() {
         let scratch = Scratch::new("folder-link");
         let real = scratch.0.join("big-disk-state");
-        fs::create_dir(&real).unwrap();
+        dir(&real);
         let state = scratch.0.join("state");
         symlink(&real, &state).unwrap();
         crate::board::state::private_dir(&state).unwrap();
@@ -272,8 +278,8 @@ mod posix {
     fn relative_links_through_dotdot_and_chains_are_followed_and_checked() {
         let scratch = Scratch::new("chain");
         let real = scratch.0.join("real");
-        fs::create_dir_all(scratch.0.join("a")).unwrap();
-        fs::create_dir(&real).unwrap();
+        dir(&scratch.0.join("a"));
+        dir(&real);
         symlink("../real", scratch.0.join("a/up")).unwrap();
         symlink(scratch.0.join("a/up"), scratch.0.join("second")).unwrap();
         assert_eq!(check_ancestors(&scratch.0.join("a/up/file")), Ok(()));
@@ -285,8 +291,8 @@ mod posix {
         let scratch = Scratch::new("writable");
         let real = scratch.0.join("real");
         let shared = scratch.0.join("shared");
-        fs::create_dir(&real).unwrap();
-        fs::create_dir(&shared).unwrap();
+        dir(&real);
+        dir(&shared);
         symlink(&real, shared.join("state")).unwrap();
         mode(&shared, 0o777);
         let refusal = check_ancestors(&shared.join("state/token")).unwrap_err();
@@ -311,8 +317,8 @@ mod posix {
         let scratch = Scratch::new("sticky");
         let real = scratch.0.join("real");
         let sticky = scratch.0.join("tmp");
-        fs::create_dir(&real).unwrap();
-        fs::create_dir(&sticky).unwrap();
+        dir(&real);
+        dir(&sticky);
         symlink(&real, sticky.join("link")).unwrap();
         mode(&sticky, 0o1777);
         assert_eq!(check_ancestors(&sticky.join("link/file")), Ok(()));
@@ -325,8 +331,8 @@ mod posix {
         let scratch = Scratch::new("through");
         let real = scratch.0.join("real");
         let shared = scratch.0.join("shared");
-        fs::create_dir(&real).unwrap();
-        fs::create_dir(&shared).unwrap();
+        dir(&real);
+        dir(&shared);
         symlink(&real, shared.join("inner")).unwrap();
         mode(&shared, 0o777);
         symlink(shared.join("inner"), scratch.0.join("outer")).unwrap();
@@ -352,8 +358,8 @@ mod posix {
             let scratch = Scratch::new("suffix");
             let real = scratch.0.join("real");
             let shared = scratch.0.join("shared");
-            fs::create_dir(&real).unwrap();
-            fs::create_dir(&shared).unwrap();
+            dir(&real);
+            dir(&shared);
             symlink(&real, shared.join("inner")).unwrap();
             mode(&shared, 0o777);
             let target = format!("{}{suffix}", shared.join("inner").display());
@@ -375,7 +381,7 @@ mod posix {
         let scratch = Scratch::new("nested");
         let mut folder = scratch.0.clone();
         for level in 0..12 {
-            fs::create_dir(folder.join(format!("real{level}"))).unwrap();
+            dir(&folder.join(format!("real{level}")));
             symlink(format!("real{level}"), folder.join(format!("l{level}"))).unwrap();
             folder = folder.join(format!("l{level}"));
         }
@@ -401,12 +407,12 @@ mod posix {
     fn the_hook_command_prints_its_marker_only_when_the_folders_pass() {
         let scratch = Scratch::new("hook");
         let real = scratch.0.join("real");
-        fs::create_dir(&real).unwrap();
+        dir(&real);
         symlink(&real, scratch.0.join("home")).unwrap();
         let ok = scratch.0.join("home/token");
         assert_eq!(hook_command(vec![ok.into()]), 0);
         let shared = scratch.0.join("shared");
-        fs::create_dir(&shared).unwrap();
+        dir(&shared);
         symlink(&real, shared.join("home")).unwrap();
         mode(&shared, 0o777);
         assert_eq!(hook_command(vec![shared.join("home/token").into()]), 1);
@@ -442,20 +448,52 @@ mod windows {
                 r"\\?\Volume{0b6d2f44-0000-0000-0000-100000000000}\"
             ))
         );
-        // Relative symlinks are joined by the caller; NT paths stay as
-        // written and fail to open, so they are refused, not guessed at.
+        // Relative symlinks are resolved by the caller against their folder's
+        // real path. Every other form is refused, not walked as written:
+        // NT paths, and the \??\GLOBALROOT\Device form an ordinary user's
+        // `mklink /J` can store (security review of 14973a30d, finding 1).
         assert_eq!(target_path_for_test(r"..\real", true), None);
-        assert_eq!(
-            target_path_for_test(r"\Device\HarddiskVolume3\x", false),
-            None
-        );
+        for name in [
+            r"\Device\HarddiskVolume3\x",
+            r"\??\GLOBALROOT\Device\HarddiskVolume2\pl",
+            r"\??\GLOBALROOT\Device\HarddiskVolume2",
+            r"\??\UNC\",
+            r"\??\C:",
+            r"\??\pipe\x",
+            r"C:\plain",
+        ] {
+            assert_eq!(target_path_for_test(name, false), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_relative_target_is_read_against_its_folders_real_path() {
+        use crate::credentials::windows_security::lexical_for_test;
+        // The folder's real path (GetFinalPathNameByHandleW) joined to the
+        // link's text, `..` taken against that real path (security review of
+        // 14973a30d, finding 3).
+        for (joined, expected) in [
+            (r"\\?\E:\real\..\x", r"\\?\E:\x"),
+            (r"\\?\E:\real\.\a\..\..\x", r"\\?\E:\x"),
+            (r"\\?\E:\..\x", r"\\?\E:\x"),
+            (r"\\?\UNC\server\share\a\..\b", r"\\?\UNC\server\share\b"),
+        ] {
+            assert_eq!(
+                lexical_for_test(Path::new(joined)),
+                PathBuf::from(expected),
+                "{joined}"
+            );
+        }
     }
 
     #[test]
     fn the_link_holder_rule_ignores_add_rights_and_refuses_delete_child() {
         let me = current_user_sid().unwrap();
-        // C:\ as Windows ships it: Authenticated Users may add subfolders
-        // (AD = 0x4) and inherit Modify onto what they create (inherit-only).
+        // C:\ as Windows ships it: TrustedInstaller owns it, Authenticated
+        // Users may add subfolders (AD = 0x4) and inherit Modify onto what
+        // they create (inherit-only).
+        let root = "O:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464D:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)(A;OICIIO;SDGRGWGX;;;AU)(A;;0x4;;;AU)";
+        assert_eq!(link_holder_distrust_sddl(root, Some(&me)), None);
         let root = "O:SYD:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)(A;OICIIO;SDGRGWGX;;;AU)(A;;0x4;;;AU)";
         assert_eq!(link_holder_distrust_sddl(root, Some(&me)), None);
         // C:\Users: Users read only.
