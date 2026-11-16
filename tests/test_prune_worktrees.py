@@ -1295,7 +1295,7 @@ def test_a_clone_with_an_unmerged_branch_is_kept(env):
     rc, out = run_clones(env, "--apply")
     assert rc == 0, out
     assert clone.exists()
-    assert "a local branch" in out
+    assert "a ref or reflog entry" in out
 
 
 def test_a_clone_with_a_stash_is_kept(env):
@@ -1306,7 +1306,9 @@ def test_a_clone_with_a_stash_is_kept(env):
     rc, out = run_clones(env, "--apply")
     assert rc == 0, out
     assert clone.exists()
-    assert "has a stash" in out
+    # The stash's commit is itself off master, so the ref check keeps it
+    # before the stash check is reached; either reason keeps the clone.
+    assert "has a stash" in out or "a ref or reflog entry" in out
 
 
 def test_a_dirty_or_fresh_clone_is_kept(env):
@@ -1722,8 +1724,9 @@ def test_every_git_call_turns_fsmonitor_off(env):
     """core.fsmonitor names a program git runs on status; the main repo's
     own setting must not run either."""
     marker = env.tmp / "fsmonitor-ran.txt"
-    _git(env.repo, "config", "core.fsmonitor", f"touch {marker.as_posix()}")
     env.add("watched")
+    # Set after the test's own git calls, so only the script's can run it.
+    _git(env.repo, "config", "core.fsmonitor", f"touch {marker.as_posix()}")
     rc, out = run(env)
     assert rc == 0, out
     assert not marker.exists()
