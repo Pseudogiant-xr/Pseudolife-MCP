@@ -339,8 +339,9 @@ identity rather than path.
   before any label. A row where no rule holds it reads `list only; nothing
   keeps it`.
 - **Overlapping roots:** nothing at, under or around a scratch root is a
-  candidate for the cache, target or clone class either, so naming the same
-  dir under two roots removes nothing there.
+  candidate for the worktree, cache, target or clone class either, so
+  naming the same dir under two roots removes nothing there. A registered
+  worktree in a scratch root is listed, with the rule that keeps it.
 - **A nested marker** inside a child changes nothing; only the root's own
   counts.
 
