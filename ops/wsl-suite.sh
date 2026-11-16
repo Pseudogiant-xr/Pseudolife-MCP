@@ -42,6 +42,21 @@
 #                                the arguments and exit code are unchanged
 #   PSEUDOLIFE_SUITE_PROFILE_DIR where the profile goes (default: a new
 #                                directory under ~/.pseudolife-mcp/suite-profiles)
+#   PSEUDOLIFE_SUITE_NATIVE_CLIENT  1: build the native client (`cargo build
+#                                --locked -p pseudolife-stdio`, the dev
+#                                profile, as the hosted `test` lane does) from
+#                                the tested commit and run the tests that need
+#                                it (PSEUDOLIFE_NATIVE_TEST_BINARY, with
+#                                PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1);
+#                                default off, except that ops/remote-suite.ps1
+#                                turns it on for an integrate/* batch branch.
+#                                Linux only: it cannot cover the macOS or
+#                                Windows-native lanes. Every run says before
+#                                pytest starts `wsl-suite: real client: yes|no`.
+#   PSEUDOLIFE_SUITE_CARGO_TARGET_DIR  that build's cache, one per machine and
+#                                written only by these runs (default:
+#                                ~/.cache/pseudolife-suite/cargo-target, never
+#                                a general CARGO_TARGET_DIR; 8 GB free to build)
 #
 # The run is offline (HF_HUB_OFFLINE=1) and WSL has its own Hugging Face
 # cache, so a fresh distribution needs the embedders CI warms
@@ -252,6 +267,39 @@ plan_run() {
     fi
 }
 plan_run "$@"
+
+# A full run started directly on a host whose full suites belong on its
+# remote machine while this PC is not available (ops/wsl-suite.ps1 sends the
+# reason; ops/suite-availability.ps1 has the rule). The default full run is
+# refused here, before anything is fetched; arguments passed to pytest
+# unchanged (`tests/`, `-x`, `-k "not x"` can still be the whole suite) keep
+# the marker, and tests/conftest.py refuses a full one with the lock's own
+# classifier (tests/suite_lock.py pc_unavailable_refusal) and drops it, so
+# the run's children never see it.
+if [[ -n "${PSEUDOLIFE_SUITE_PC_UNAVAILABLE:-}" && "$run_note" != pass ]]; then
+    echo "wsl-suite: a full suite runs on the remote machine while this PC is not available for full suites (${PSEUDOLIFE_SUITE_PC_UNAVAILABLE}); run it there: \$env:PSEUDOLIFE_SUITE_WHERE='remote'; pwsh -NoProfile -File ops/remote-suite.ps1 (an integration batch: python ops/integrate.py suite), or set PSEUDOLIFE_SUITE_WHERE=local to override; refusing" >&2
+    exit 2
+fi
+
+# Whether the run builds the native client and runs the tests that need it
+# (PSEUDOLIFE_SUITE_NATIVE_CLIENT; see native_client below), read before
+# anything is fetched so a mistyped value is refused at once.
+native_client=0
+case "${PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}" in
+    ""|0|off|false|no) ;;
+    1|on|true|yes) native_client=1 ;;
+    *)
+        echo "wsl-suite: PSEUDOLIFE_SUITE_NATIVE_CLIENT takes 1 (build the native client and run the real-client tests) or 0, not '${PSEUDOLIFE_SUITE_NATIVE_CLIENT}'; refusing" >&2
+        exit 2 ;;
+esac
+# While this PC is not available, tests/conftest.py may still refuse a run
+# whose arguments go to pytest unchanged (above): no four-job build first
+# for a run that is then refused (review of #1652). Said in its own line.
+native_deferred=0
+if (( native_client )) && [[ -n "${PSEUDOLIFE_SUITE_PC_UNAVAILABLE:-}" ]]; then
+    native_client=0
+    native_deferred=1
+fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="${PSEUDOLIFE_SUITE_NAME:-$(basename "$root")}"
@@ -588,12 +636,148 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
     fi
     echo "wsl-suite: testing $(git -C "$root" rev-parse --short HEAD) in $root"
 fi
+# Said before pytest starts, on stdout beside "testing <sha>", and read back
+# by ops/remote-suite.ps1 into the result JSON (real_client): a run that
+# silently used the tests' stand-in passed an integration batch locally that
+# then failed 18 tests in the hosted `test` lane (#1634).
+if (( ! native_client )); then
+    if (( native_deferred )); then
+        echo "wsl-suite: real client: no (not built: this PC is not available for full suites, so tests/conftest.py first decides whether this run may go here; PSEUDOLIFE_SUITE_WHERE=local overrides the rule, or run it on the remote machine)"
+    elif [[ -n "${PSEUDOLIFE_NATIVE_TEST_BINARY:-}" ]]; then
+        echo "wsl-suite: real client: yes, given by the caller (not built by this run), at ${PSEUDOLIFE_NATIVE_TEST_BINARY/#$HOME/\~}"
+    else
+        echo "wsl-suite: real client: no (PSEUDOLIFE_SUITE_NATIVE_CLIENT is off, so the tests that need PSEUDOLIFE_NATIVE_TEST_BINARY use their stand-in or skip; the hosted test lane runs them)"
+    fi
+fi
 
 if [[ ! -x "$venv/bin/python" ]]; then
     # --seed: the installer tests ask the run's Python for pip, which a bare
     # uv environment lacks.
     uv venv --quiet --seed --python "${PSEUDOLIFE_SUITE_PYTHON:-3.11}" "$venv"
 fi
+
+# PSEUDOLIFE_SUITE_NATIVE_CLIENT=1: build the native client the way the
+# hosted `test` lane's "Build the native client the installer tests run"
+# step does (.github/workflows/ci.yml: `cargo build --locked -p
+# pseudolife-stdio -j 4` in rust/, the dev profile, then a `version` smoke
+# run) from the tested copy, and export PSEUDOLIFE_NATIVE_TEST_BINARY with
+# PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, so a test that needs the client
+# runs it or fails, never skips. A failed build or smoke run fails the run
+# with cargo's error; nothing falls back to the stand-in.
+#
+# The build output is a cache, one per machine and written only by these
+# runs: PSEUDOLIFE_SUITE_CARGO_TARGET_DIR, else
+# ~/.cache/pseudolife-suite/cargo-target (the pruner above never touches
+# it). A general CARGO_TARGET_DIR is not used: cargo keys a workspace
+# member by its path inside the workspace and judges it fresh by file
+# times, so a target another checkout built into can hand this one that
+# checkout's binary (review of #1634, reproduced). Under the target's own
+# lock, a build that follows another checkout's therefore first cleans the
+# workspace's own packages (`cargo clean -p`; third-party ones stay
+# cached). The build refuses to start with less than 8 GB free there
+# (CLAUDE.md "Disk space"), and holds the machine's full-suite lock (slot
+# 0, full-suite.lock) while it compiles, so it never overlaps a full suite
+# (CLAUDE.md "Sharing the machine"); a full suite started meanwhile queues
+# behind it. The binary is copied into this run's environment, so a later
+# build cannot replace it while the tests run.
+#
+# Linux only (this script runs in WSL or on a Linux dev box): it covers the
+# hosted `test` lane's conditions, not the macOS or Windows lite lanes'.
+# Unlike that lane, a full run's workers stay sized to this machine (the
+# lane runs -n 2 --dist loadfile).
+if (( native_client )); then
+    command -v cargo >/dev/null 2>&1 || {
+        echo "wsl-suite: real client: PSEUDOLIFE_SUITE_NATIVE_CLIENT=1 needs cargo (rustup, which reads rust/rust-toolchain.toml) on this machine; refusing" >&2
+        exit 2
+    }
+    command -v flock >/dev/null 2>&1 || {
+        echo "wsl-suite: real client: PSEUDOLIFE_SUITE_NATIVE_CLIENT=1 needs flock (util-linux) to share the build cache; refusing" >&2
+        exit 2
+    }
+    # Absolute, since cargo resolves a relative one from rust/ (Codex review).
+    native_target="$(realpath -m -- "${PSEUDOLIFE_SUITE_CARGO_TARGET_DIR:-$HOME/.cache/pseudolife-suite/cargo-target}")"
+    mkdir -p "$native_target"
+    native_free_kb="$(df -Pk -- "$native_target" 2>/dev/null | awk 'NR == 2 { print $4 }' || true)"
+    if ! [[ "$native_free_kb" =~ ^[0-9]+$ ]]; then
+        echo "wsl-suite: real client: cannot read the free space at $native_target (df); refusing to build" >&2
+        exit 2
+    fi
+    if (( native_free_kb < 8 * 1024 * 1024 )); then
+        echo "wsl-suite: real client: $native_target has $(( native_free_kb / 1024 )) MB free, under the 8 GB floor for a Rust build; free space (or point PSEUDOLIFE_SUITE_CARGO_TARGET_DIR elsewhere) and rerun; refusing" >&2
+        exit 2
+    fi
+    if [[ "${PSEUDOLIFE_SUITE_LOCK:-}" != off ]]; then
+        native_lock_dir="${PSEUDOLIFE_SUITE_LOCK_DIR:-$HOME/.pseudolife-mcp/locks}"
+        mkdir -p "$native_lock_dir"
+        # Appending: the lock file's contents are never changed here.
+        exec 5>>"$native_lock_dir/full-suite.lock"
+        if ! flock -n 5; then
+            echo "wsl-suite: real client: a full suite is running on this machine; waiting for it before building"
+            flock 5
+        fi
+    fi
+    exec 6>>"$native_target/.suite-build.lock"
+    if ! flock -n 6; then
+        echo "wsl-suite: real client: another run is building into ${native_target/#$HOME/\~}; waiting"
+        flock 6
+    fi
+    native_commit="${PSEUDOLIFE_SUITE_COMMIT:-$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)}"
+    # Which checkout the target's workspace units came from, written before
+    # the build: a build that fails halfway has already replaced some.
+    native_source="$(cat -- "$native_target/.suite-build-source" 2>/dev/null || true)"
+    if [[ "$native_source" != "$root" ]]; then
+        # The workspace's own package ids (`workspace_members`), which
+        # `cargo clean -p` takes as specs.
+        native_clean=()
+        while IFS= read -r native_member || [[ -n "$native_member" ]]; do
+            [[ -n "$native_member" ]] && native_clean+=(-p "$native_member")
+        done < <(cd "$root/rust" && cargo metadata --no-deps --format-version 1 --offline 2>/dev/null 5>&- 6>&- 7>&- 8>&- 9>&- \
+            | sed -n 's/.*"workspace_members":\[\([^]]*\)\].*/\1/p' | tr ',' '\n' | tr -d '"' || true)
+        if (( ! ${#native_clean[@]} )); then
+            echo "wsl-suite: real client: cannot list the workspace's packages (cargo metadata) to clean them; refusing to build" >&2
+            exit 2
+        fi
+        echo "wsl-suite: real client: the build cache last held another checkout's build; cleaning this workspace's $(( ${#native_clean[@]} / 2 )) packages first"
+        ( cd "$root/rust" && CARGO_TARGET_DIR="$native_target" cargo clean --quiet "${native_clean[@]}" ) 5>&- 6>&- 7>&- 8>&- 9>&- || {
+            native_code=$?
+            echo "wsl-suite: real client: build failed: \`cargo clean\` exited $native_code; not falling back to the stand-in"
+            exit "$native_code"
+        }
+        printf '%s\n' "$root" > "$native_target/.suite-build-source"
+    fi
+    echo "wsl-suite: real client: building pseudolife-stdio from $native_commit (cargo build --locked, dev profile) into ${native_target/#$HOME/\~}"
+    native_code=0
+    # Cargo, rustc, build scripts and any RUSTC_WRAPPER daemon get none of
+    # this run's lock descriptors (5-9): Rust's Command does not close them,
+    # and a daemon that kept full-suite.lock would hold off every later suite
+    # (review of #1652). This shell keeps the locks.
+    ( cd "$root/rust" && CARGO_TARGET_DIR="$native_target" cargo build --locked -p pseudolife-stdio -j 4 ) \
+        5>&- 6>&- 7>&- 8>&- 9>&- || native_code=$?
+    if (( native_code )); then
+        # stdout, as the other "real client:" lines: ops/remote-suite.ps1 reads it.
+        echo "wsl-suite: real client: build failed (cargo exit $native_code; its error is above); not falling back to the stand-in"
+        exit "$native_code"
+    fi
+    native_binary="$venv/native-client/pseudolife-stdio"
+    mkdir -p "${native_binary%/*}"
+    # Through a temporary name, so a run still using the old copy keeps it.
+    cp -- "$native_target/debug/pseudolife-stdio" "$native_binary.tmp-$$"
+    mv -f -- "$native_binary.tmp-$$" "$native_binary"
+    exec 6>&- 5>&-
+    native_version="$(cd "${native_binary%/*}" && "$native_binary" version 2>&1)" || {
+        native_code=$?
+        printf '%s\n' "$native_version" >&2
+        echo "wsl-suite: real client: build failed: the built client's \`version\` exited $native_code; not falling back to the stand-in"
+        exit "$native_code"
+    }
+    native_version="${native_version%%$'\n'*}"
+    export PSEUDOLIFE_NATIVE_TEST_BINARY="$native_binary" PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1
+    echo "wsl-suite: real client: yes, pseudolife-stdio built from $native_commit (dev profile, --locked; $native_version), at ${native_binary/#$HOME/\~}"
+fi
+# The switch is this launcher's own: a test that runs this script must not
+# inherit it from the suite around it and start a build of its own.
+unset PSEUDOLIFE_SUITE_NATIVE_CLIENT PSEUDOLIFE_SUITE_CARGO_TARGET_DIR
+
 # The CPU torch wheels, as CI and the daemon image install them; re-run each
 # time so the environment follows the checkout's pyproject.toml.
 uv pip install --quiet --python "$venv/bin/python" --torch-backend cpu -e "$root[dev]"

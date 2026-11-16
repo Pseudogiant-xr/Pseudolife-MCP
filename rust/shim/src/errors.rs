@@ -89,12 +89,22 @@ pub(crate) fn map(
         }
         _ => ErrorCode::INTERNAL_ERROR,
     };
-    failure(
+    let unknown = requested == "call" && observation.dispatched;
+    let mut data = failure(
         classification,
         observation.response_phase.unwrap_or(observation.phase),
-        requested == "call" && observation.dispatched,
+        unknown,
         code,
-    )
+    );
+    // Why the configured credential file cannot be used, when the folders
+    // above it are the cause: the element, the cause and the one fix.
+    if classification == "credential_unavailable"
+        && !unknown
+        && let Some(detail) = &observation.credential_detail
+    {
+        data.message = format!("The memory credential is unavailable: {detail}").into();
+    }
+    data
 }
 pub(crate) fn failure(
     classification: &str,
@@ -200,6 +210,35 @@ mod tests {
             dispatched: true,
             ..Default::default()
         }
+    }
+    #[test]
+    fn a_refused_credential_file_says_which_link_and_the_fix() {
+        let detail = "pseudolife-mcp keeps private files only behind links no other account can change, and /srv/x is a link owned by the account with uid 1001; fix: replace the link with a folder you own and move what it led to there.";
+        let observed = Observation {
+            phase: "initialize",
+            credential_failed: true,
+            credential_detail: Some(detail.into()),
+            ..Default::default()
+        };
+        let error = map(&observed, None, "call", false, true);
+        assert_eq!(
+            error.message,
+            format!("The memory credential is unavailable: {detail}")
+        );
+        assert_eq!(
+            error.data.as_ref().unwrap()["classification"],
+            "credential_unavailable"
+        );
+        // Without a detail the message stays the general one.
+        let plain = Observation {
+            phase: "initialize",
+            credential_failed: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            map(&plain, None, "call", false, true).message,
+            "The memory credential is unavailable; restore the configured credential and retry."
+        );
     }
     fn refusal(code: i32, name: &str, status: u16) -> ServiceError {
         ServiceError::McpError(ErrorData::new(

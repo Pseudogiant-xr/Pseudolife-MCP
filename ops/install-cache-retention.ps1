@@ -3,6 +3,7 @@
 #
 #   ops\install-cache-retention.ps1                       # Sunday 03:00, defaults
 #   ops\install-cache-retention.ps1 -DayOfWeek Wednesday -At 21:00
+#   ops\install-cache-retention.ps1 -Check                # is the registered task able to run?
 #   ops\install-cache-retention.ps1 -Unregister           # remove it
 #
 # The deploy path (ops\update.ps1) already prunes after every healthy deploy;
@@ -14,11 +15,91 @@ param(
     [ValidateSet("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")]
     [string]$DayOfWeek = "Sunday",
     [string]$At = "03:00",
+    [switch]$Check,
     [switch]$Unregister
 )
 
 $ErrorActionPreference = "Stop"
 $taskName = "Pseudolife-MCP Docker cache retention"
+# Each run's output and exit code. A run that cannot find its retention
+# script says so here; a run whose pwsh is gone never starts at all, which
+# only -Check (reading the registration) can see.
+$stateDir = Join-Path $HOME ".pseudolife-mcp"
+$runLog = Join-Path $stateDir "cache-retention-last.log"
+
+# Task Scheduler's result for "the file to run was not found" (0x80070002).
+$fileNotFound = 2147942402
+
+function Get-RegisteredScriptPath([string]$Argument) {
+    $encoded = ($Argument -split '-EncodedCommand ')[-1].Trim()
+    try {
+        $cmd = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+    } catch {
+        return $null
+    }
+    # PowerShell treats the typographic single quotes as quotes too, and
+    # escaping doubles each of them; undo that per character.
+    $m = [regex]::Match($cmd, "& '((?:[^'‘’‚‛]|['‘’‚‛]{2})+\.ps1)'")
+    if (-not $m.Success) { return $null }
+    return $m.Groups[1].Value -replace "(['‘’‚‛])\1", '$1'
+}
+
+function Test-RegisteredExecutable([string]$Execute) {
+    # Task Scheduler expands environment variables and accepts a quoted
+    # path; a bare name resolves against the machine PATH.
+    $path = [Environment]::ExpandEnvironmentVariables($Execute.Trim().Trim('"'))
+    if (-not $path) { return $false }
+    if ([IO.Path]::IsPathRooted($path)) { return [bool](Test-Path -LiteralPath $path) }
+    return [bool](Get-Command $path -CommandType Application -ErrorAction SilentlyContinue)
+}
+
+if ($Check) {
+    # Read-only: it inspects the registration and changes nothing.
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if (-not $task) {
+        Write-Host "'$taskName' is not registered. Register it with: ops\install-cache-retention.ps1"
+        exit 1
+    }
+    $problems = @()
+    $action = @($task.Actions) | Select-Object -First 1
+    $execute = if ($action) { "$($action.Execute)" } else { "" }
+    if (-not $action) {
+        $problems += "it has no action to run"
+    } elseif (-not (Test-RegisteredExecutable $execute)) {
+        $problems += "its pwsh is missing: $execute (PowerShell was moved or reinstalled)"
+    }
+    $registeredScript = if ($action) { Get-RegisteredScriptPath "$($action.Arguments)" }
+    if ($action -and -not $registeredScript) {
+        $problems += "its command names no retention script"
+    } elseif ($registeredScript -and -not (Test-Path -LiteralPath $registeredScript -PathType Leaf)) {
+        $problems += "its retention script is missing: $registeredScript"
+    }
+    $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+    $last = if ($info) { [int64]$info.LastTaskResult } else { $null }
+    if ($problems.Count) {
+        Write-Host "'$taskName' cannot run as registered:"
+        foreach ($p in $problems) { Write-Host "  - $p" }
+        if ($last -eq $fileNotFound) {
+            Write-Host "  - its last run ($($info.LastRunTime)) could not start: the file to run was not found (0x80070002)"
+        }
+        Write-Host "Fix: re-run ops\install-cache-retention.ps1 from the permanent checkout; it re-registers in place."
+        exit 1
+    }
+    Write-Host "'$taskName' can run: $execute -> $registeredScript"
+    # Task Scheduler keeps the last run's result until the next run, so a
+    # result recorded under an earlier registration outlives a repair.
+    if ($last -eq $fileNotFound) {
+        Write-Host "Note: its last run ($($info.LastRunTime)) could not start (0x80070002), before the files it names now existed or under an earlier registration. Confirm with: Start-ScheduledTask -TaskName '$taskName', then -Check again."
+    } elseif ($last -eq 267011) {
+        Write-Host "It has not run yet."
+    } elseif ($null -ne $last -and $last -ne 0) {
+        Write-Host "Note: its last run ($($info.LastRunTime)) ended with result $last; see $runLog"
+    } elseif ($info) {
+        Write-Host "Last run: $($info.LastRunTime), result 0."
+    }
+    if (Test-Path -LiteralPath $runLog) { Write-Host "Last run's output: $runLog" }
+    exit 0
+}
 
 if ($Unregister) {
     if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
@@ -40,20 +121,36 @@ function Resolve-PwshForTaskScheduler {
     # with 0x80070002 (file not found) before the retention script starts.
     # Observed live 2026-08-20: no scheduled run had ever succeeded and the
     # cache sat at 23.6GB against the 20GB ceiling. Register an absolute
-    # path instead. For an MSIX install Get-Command resolves into the
-    # versioned package directory (...\WindowsApps\Microsoft.PowerShell_
-    # <ver>_...), which changes on every Store update and would re-plant
-    # the same failure one update later; the per-user app-execution alias
-    # is the stable spelling of the same executable, so it wins when
-    # present.
+    # path instead.
+    #
+    # The MSI install's path wins when it exists: it stays the same across
+    # every 7.x update and does not depend on a Store package. Observed
+    # 2026-11-16: a task registered with the per-user Store alias failed
+    # with 0x80070002 again after the host replaced the Store install with
+    # the MSI one, because the alias left with the Store package.
+    if ($env:ProgramFiles) {
+        $msi = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+        if (Test-Path -LiteralPath $msi -PathType Leaf) { return $msi }
+    }
+    # For an MSIX install Get-Command resolves into the versioned package
+    # directory (...\WindowsApps\Microsoft.PowerShell_<ver>_...), which
+    # changes on every Store update; the per-user app-execution alias is the
+    # stable spelling of the same executable, so it wins when present.
     $cmd = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
     $source = if ($cmd) { $cmd.Source } else { [Environment]::ProcessPath }
     if ($source -match '\\WindowsApps\\Microsoft\.PowerShell_' -and $env:LOCALAPPDATA) {
         $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
-        if (Test-Path $alias) { return $alias }
+        if (Test-Path -LiteralPath $alias) { return $alias }
     }
     return $source
+}
+
+$execute = Resolve-PwshForTaskScheduler
+if (-not $execute -or -not (Test-Path -LiteralPath $execute)) {
+    Write-Host "Refusing: the pwsh to register ($execute) does not exist, so every scheduled run would fail with 0x80070002. Nothing was registered."
+    Write-Host "Install PowerShell 7 (https://aka.ms/powershell) or run this script from the pwsh you want the task to use."
+    exit 1
 }
 
 # Base64 -EncodedCommand, as ops\install-autostart.ps1 does: it survives the
@@ -62,11 +159,28 @@ function Resolve-PwshForTaskScheduler {
 # a single-quoted string) so a path like C:\Users\O'Brien\... doesn't break
 # the decoded command — which would fail silently until Task Scheduler
 # actually invokes it, unattended.
-$escapedScript = $script -replace "'", "''"
-$inner = "& '$escapedScript' -MaxAgeHours $MaxAgeHours -MaxUsedSpaceGB $MaxUsedSpaceGB"
+function Quote([string]$s) {
+    # Doubles every character PowerShell reads as a single quote, the
+    # typographic ones included (a path like O’Brien).
+    "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($s) + "'"
+}
+# The run writes its output and result to $runLog, and refuses in that log
+# (exit 2) when the retention script it was registered with is gone, such
+# as after the checkout moved, instead of failing with nothing written. The
+# result is the script's own: it throws on a real failure (exit 1, the error
+# in the log) and only warns on a nonfatal step such as fstrim, so the last
+# native command's exit code says nothing about the run.
+$missing = "FAILED: the retention script is missing: $script. Re-run ops\install-cache-retention.ps1 from the permanent checkout."
+$inner = "New-Item -ItemType Directory -Force $(Quote $stateDir) | Out-Null; " +
+    "if (-not (Test-Path -LiteralPath $(Quote $script) -PathType Leaf)) { " +
+    "((Get-Date -Format o) + ' ' + $(Quote $missing)) | Out-File -Encoding utf8 $(Quote $runLog); exit 2 }; " +
+    "`$code = 0; try { " +
+    "& $(Quote $script) -MaxAgeHours $MaxAgeHours -MaxUsedSpaceGB $MaxUsedSpaceGB -PruneDanglingImages *>&1 | Out-File -Encoding utf8 $(Quote $runLog) " +
+    "} catch { `$code = 1; ((Get-Date -Format o) + ' FAILED: ' + `$_) | Out-File -Append -Encoding utf8 $(Quote $runLog) }; " +
+    "((Get-Date -Format o) + ' exit ' + `$code) | Out-File -Append -Encoding utf8 $(Quote $runLog); exit `$code"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
-$action = New-ScheduledTaskAction -Execute (Resolve-PwshForTaskScheduler) `
+$action = New-ScheduledTaskAction -Execute $execute `
     -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $At
 # StartWhenAvailable is the point of this task: a desktop is often off at
@@ -78,8 +192,11 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
     -Settings $settings -Force `
-    -Description "Prune Docker build cache older than $MaxAgeHours h (ceiling ${MaxUsedSpaceGB}GB), then fstrim the WSL disk." | Out-Null
+    -Description "Prune Docker build cache older than $MaxAgeHours h (ceiling ${MaxUsedSpaceGB}GB) and dangling images, then fstrim the WSL disk." | Out-Null
 
 Write-Host "Registered '$taskName' ($DayOfWeek $At) -> $script"
+Write-Host "Runs with  : $execute"
+Write-Host "Last run's output: $runLog"
+Write-Host "Check with :  ops\install-cache-retention.ps1 -Check"
 Write-Host "Run now with:  Start-ScheduledTask -TaskName '$taskName'"
 Write-Host "Remove with :  ops\install-cache-retention.ps1 -Unregister"

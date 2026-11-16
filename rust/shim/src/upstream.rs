@@ -294,10 +294,15 @@ impl Upstream {
         // request future must not abandon its upstream session cleanup.
         let mut task = self.ownership.tasks.spawn(async move {
             let operation = owner.operation(supplied).map_err(|_| {
-                observed
-                    .lock()
-                    .expect("observation lock poisoned")
-                    .credential_failed = true;
+                let detail = owner
+                    .runtime
+                    .provider
+                    .path()
+                    .and_then(crate::private_path::explain);
+                let mut observation = observed.lock().expect("observation lock poisoned");
+                observation.credential_failed = true;
+                observation.credential_detail = detail;
+                drop(observation);
                 mapped(&observed, None, false)
             })?;
             observed.lock().expect("observation lock poisoned").phase = "initialize";

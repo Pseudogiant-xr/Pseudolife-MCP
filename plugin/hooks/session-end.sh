@@ -4,15 +4,67 @@
 # Every file this hook writes beside the digest is private (0600), as the
 # shim's own state is: the native shim refuses markers others can write.
 umask 077
+# Whether the folders above the private file "$1" pass the native client's
+# link rule (rust/shim/src/private_path.rs, the one implementation): a link
+# is followed only when no other account can change it. Asked only when a
+# folder above the file is a link; only the client's exact marker line
+# counts, so a missing, older or non-native client leaves the file refused.
+private_path_trusted() {
+    local file="$1" launcher answer first nl='
+'
+    case "$OSTYPE" in
+        msys*|mingw*|cygwin*)
+            launcher=${PSEUDOLIFE_SHIM_LAUNCHER:-}
+            [ -n "$launcher" ] || [ -z "${LOCALAPPDATA:-}" ] ||
+                launcher="$(cygpath -u "$LOCALAPPDATA")/pseudolife-mcp/bin/pseudolife-mcp.exe"
+            [ -z "$launcher" ] || launcher=$(cygpath -u "$launcher") || return 1
+            file=$(cygpath -w "$file") || return 1 ;;
+        *)
+            launcher=${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp} ;;
+    esac
+    # Character sets are spelled out, never ranges (tests/test_hook_glob_ranges.py).
+    case "$file" in
+        /*|[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz]:\\*|\\\\*) ;;
+        *)
+            printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a link, and a relative path cannot be checked; fix: name the file by its absolute path." >&2
+            return 1 ;;
+    esac
+    if [ -z "$launcher" ] || [ ! -f "$launcher" ] || [ ! -x "$launcher" ]; then
+        printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a symlink or junction, and no native pseudolife-mcp client is installed to check whether another account can change it; fix: install the native client (rerun the installer)." >&2
+        return 1
+    fi
+    answer=$("$launcher" private-path-check "$file" </dev/null 2>&1)
+    # On purpose, stderr is folded into the answer: only this exact line with
+    # exit 0 counts, so a warning the client prints on a good run turns it
+    # into a refusal (fails closed) rather than being ignored.
+    case $?:$answer in
+        "0:pseudolife-private-path: trusted") return 0 ;;
+        "1:pseudolife-private-path: refused: "*)
+            # The client named the link, the cause and the fix.
+            printf '%s\n' "${answer#pseudolife-private-path: refused: }" >&2
+            return 1 ;;
+    esac
+    # Installed but no verdict (an older client, a busy runtime, a refused
+    # runtime folder): relay its own first line, and its fix when it has one.
+    first=${answer%%"$nl"*}
+    case $first in
+        *"fix:"*)
+            printf '%s\n' "pseudolife-mcp: not reading $file: the native client at $launcher could not answer: $first" >&2 ;;
+        *)
+            printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a link, and the native client at $launcher could not answer (${first:-no output}); fix: update the native client (rerun the installer)." >&2 ;;
+    esac
+    return 1
+}
+
 private_regular() {
-    local path="$1" maximum="$2" current parent meta
+    local path="$1" maximum="$2" current parent meta linked=""
     case "$OSTYPE" in msys*|mingw*|cygwin*)
         path=$(cygpath -u "$path") || return 1 ;;
     esac
     [ -f "$path" ] && [ ! -L "$path" ] || return 1
     current=$(dirname "$path")
     while [ "$current" != "." ] && [ "$current" != "/" ]; do
-        [ ! -L "$current" ] || return 1
+        [ ! -L "$current" ] || linked=1
         parent=$(dirname "$current")
         [ "$parent" != "$current" ] || break
         current="$parent"
@@ -35,9 +87,13 @@ private_regular() {
                 $item = Get-Item -LiteralPath $env:PSEUDOLIFE_PRIVATE_FILE -Force
                 if ($item.PSIsContainer -or $item.Length -lt 1 -or
                     ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 }
+                # A reparse point above it is for the native client to judge
+                # (exit 3): links no other account can change are followed,
+                # and a cloud-files placeholder is no link at all.
+                $linked = $false
                 $parent = $item.Directory
                 while ($parent) {
-                    if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }
+                    if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { $linked = $true }
                     $parent = $parent.Parent
                 }
                 $acl = Get-Acl -LiteralPath $item.FullName
@@ -51,12 +107,19 @@ private_regular() {
                         [Security.Principal.SecurityIdentifier]).Value
                     if ($sid -notin $owner, "S-1-3-4") { exit 1 }
                 }
+                if ($linked) { exit 3 }
                 exit 0
             } catch { exit 1 }
         ' </dev/null >/dev/null 2>&1
+        case $? in
+            0) [ -z "$linked" ] || private_path_trusted "$path" ;;
+            3) private_path_trusted "$path" ;;
+            *) return 1 ;;
+        esac
         return $?
         ;;
     esac
+    [ -z "$linked" ] || private_path_trusted "$path" || return 1
     case "${2:-}" in *00) ;; *) return 1 ;; esac
     [ "${1:-x}" = "$(id -u)" ] && [ "${3:-0}" = 1 ] || return 1
     [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ]

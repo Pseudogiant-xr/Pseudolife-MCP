@@ -19,7 +19,7 @@ pub(super) async fn hidden(prompt: &str) -> io::Result<String> {
 /// `connect_cli._ask`: the question on stderr, then yes only for `y`/`yes`.
 /// The answer is read without blocking the runtime, so an interrupt
 /// listener (`super::interruptible`) still runs while it waits.
-pub(super) async fn ask(question: &str) -> bool {
+pub(in crate::cli) async fn ask(question: &str) -> bool {
     let mut stderr = io::stderr().lock();
     let _ = stderr.write_all(question.as_bytes());
     let _ = stderr.flush();

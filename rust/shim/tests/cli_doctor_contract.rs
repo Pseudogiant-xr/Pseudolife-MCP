@@ -958,7 +958,33 @@ mod tunnel_profiles {
         assert_handshake_passed(&map, &output);
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(!text.contains("fixture-tunnel-key"), "{text}");
-        map["tunnels"].as_array().expect("a tunnel section").clone()
+        let section = map["tunnels"].as_array().expect("a tunnel section").clone();
+        // Every step doctor names is one this client runs.
+        assert!(
+            !Value::Array(section.clone()).to_string().contains("Python"),
+            "{section:?}"
+        );
+        section
+    }
+
+    /// Native `tunnel status --profile dot --json` on the store doctor
+    /// read: the command doctor's advice names must answer it, with the
+    /// refresh outcome and the key's state, not defer.
+    fn assert_tunnel_status_answers(home: &Home) {
+        let output = tunnel_status(home);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{stderr}");
+        assert!(!stderr.contains("deferred"), "{stderr}");
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(report["update"]["state"].is_string(), "{report}");
+        assert!(report.get("private_key_present").is_some(), "{report}");
+    }
+
+    fn tunnel_status(home: &Home) -> Output {
+        command(home)
+            .args(["tunnel", "status", "--profile", "dot", "--json"])
+            .output()
+            .unwrap()
     }
 
     #[test]
@@ -1023,27 +1049,27 @@ mod tunnel_profiles {
         assert!(
             next.iter().any(|line| {
                 let line = line.as_str().unwrap();
-                line.starts_with("Last tunnel refresh: failed; needs attention:")
-                    && line.contains("needs the Python client while a tunnel process record exists")
+                line == "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot --json shows the outcome and the key's state."
             }),
             "{entry:?}"
         );
+        assert_tunnel_status_answers(&home);
         // Without the process record, native `tunnel status` is the step.
         std::fs::remove_file(root(&home).join("dot.process.json")).unwrap();
         let entries = tunnels(&home);
         let line = entries[0]["next"][0].as_str().unwrap().to_owned();
         assert!(
             line.ends_with(
-                "pseudolife-mcp tunnel status --profile dot shows the outcome and the key's state."
+                "pseudolife-mcp tunnel status --profile dot --json shows the outcome and the key's state."
             ),
             "{line}"
         );
     }
 
     #[test]
-    fn a_key_the_native_client_cannot_prove_never_names_native_tunnel_status() {
-        // Native `tunnel status` proves the key first and hands the run to
-        // Python when it cannot (a FIFO here; every DPAPI key on Windows).
+    fn a_key_file_the_native_client_cannot_read_is_named_with_its_fix() {
+        // Native `tunnel status` reads the key first and does not answer
+        // while it cannot (a FIFO here), so doctor names that file instead.
         let home = Home::new();
         profile(&home, "dot", READY);
         private(
@@ -1064,10 +1090,19 @@ mod tunnel_profiles {
         let entry = &map["tunnels"][0];
         assert_eq!(entry["private_key_present"], json!("not_verified"));
         let line = entry["next"][0].as_str().unwrap();
-        assert!(
-            line.ends_with("needs the Python client because the key cannot be checked natively."),
-            "{line}"
+        assert_eq!(
+            line,
+            format!(
+                "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot cannot read the key file {}; check that it is a plain owner-only file, not a pipe or a link.",
+                root(&home).join("dot.key").display()
+            )
         );
+        assert!(!entry.to_string().contains("Python"), "{entry}");
+        // Doctor names the file because `tunnel status` really does not
+        // answer while it is a pipe.
+        let output = tunnel_status(&home);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("deferred"));
     }
 
     #[test]
@@ -1083,13 +1118,11 @@ mod tunnel_profiles {
         assert_eq!(entry["state"], json!("ready"));
         assert_eq!(entry["private_key_present"], json!(false));
         assert_eq!(entry["key_expiry"]["expired"], json!(true));
-        let next = entry["next"].as_array().unwrap();
-        assert!(
-            next.iter().any(|line| line
-                .as_str()
-                .unwrap()
-                .contains("pseudolife-mcp tunnel setup --profile dot --read-key")),
-            "{entry:?}"
+        assert_eq!(
+            entry["next"],
+            json!([
+                "The tunnel key expired on 2020-01-01T00:00:00+00:00; create a new restricted key at https://platform.openai.com/settings/organization/api-keys; this client cannot save it yet."
+            ])
         );
     }
 
@@ -1103,11 +1136,11 @@ mod tunnel_profiles {
         assert_eq!(entries[0]["profile"], json!("bad"));
         assert_eq!(entries[0]["state"], json!("unavailable"));
         assert_eq!(entries[0]["reason"], json!("tunnel profile is invalid"));
+        let recovery = entries[0]["recovery"].as_str().unwrap();
+        assert!(recovery.contains("bad.profile.json"), "{recovery}");
         assert!(
-            entries[0]["recovery"]
-                .as_str()
-                .unwrap()
-                .contains("bad.profile.json")
+            recovery.ends_with("move it aside; this client cannot set a tunnel up yet."),
+            "{recovery}"
         );
         assert_eq!(entries[1]["profile"], json!("dot"));
         assert_eq!(entries[1]["state"], json!("pending"));

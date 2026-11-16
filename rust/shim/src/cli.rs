@@ -119,6 +119,11 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "private-path-check" {
+        return Some(ExitCode::from(crate::private_path::hook_command(
+            std::env::args_os().skip(2).collect(),
+        )));
+    }
     if mode == "migrate-flat" {
         return Some(ExitCode::from(migrate_flat::run(
             std::env::args_os().skip(2).collect(),

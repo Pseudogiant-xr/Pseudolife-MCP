@@ -352,18 +352,79 @@ def entry_of(path):
     return parts[1] if parts[0] == "cli" and len(parts) > 1 else None
 
 
+# Where a Rust comment, string or char literal starts (a lifetime is none).
+LITERAL = re.compile(r"""(?P<line>//[^\n]*)|(?P<block>/\*)|(?<!\w)[bc]?r(?P<hashes>\#*)"|"""
+                     r"""(?<!\w)[bc]?"(?:\\.|[^"\\])*"|"""
+                     r"""'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|.)|[^\\'\n])'""", re.S)
+
+
+def code_only(text):
+    """Rust source with its comments and string and char literals blanked."""
+    out, pos = [], 0
+    while match := LITERAL.search(text, pos):
+        out.append(text[pos:match.start()])
+        end = match.end()
+        if match["block"]:
+            depth = 1
+            while depth and end < len(text):
+                pair = text[end:end + 2]
+                depth += (pair == "/*") - (pair == "*/")
+                end += 2 if pair in ("/*", "*/") else 1
+        elif match["hashes"] is not None:
+            close = text.find('"' + match["hashes"], end)
+            end = len(text) if close < 0 else close + 1 + len(match["hashes"])
+        out.append(" ")
+        pos = end
+    return "".join(out) + text[pos:]
+
+
+def imports(text, entry):
+    """Whether Rust source text imports or includes a shim entry.
+
+    A path or `use` item is read from the code alone, because prose in a
+    message or comment ("use `expose status`", "use --no-backup") is no
+    import; an included file's name is read from its literal."""
+    module = re.escape(entry.split(".", 1)[0])
+    if re.search(rf"\b{module}::|\buse\s[^;]*\b{module}\b", code_only(text)):
+        return True
+    return bool(re.search(rf"(path|include_str!)\s*[=(]\s*\"[^\"]*\b{re.escape(entry)}\"", text))
+
+
 def users(entry):
     """Shim source files outside an entry that import or include it."""
-    module = entry.split(".", 1)[0]
-    pattern = re.compile(rf"\b{re.escape(module)}::|\buse [^;]*\b{re.escape(module)}\b|"
-                         rf"(path|include_str!)\s*[=(]\s*\"[^\"]*\b{re.escape(entry)}\"")
     found = set()
     for path in SHIM_SOURCE.rglob("*.rs"):
         if path.name in DISPATCH and path.parent == SHIM_SOURCE or entry_of(path) == entry:
             continue
-        if pattern.search(path.read_text(encoding="utf-8")):
+        if imports(path.read_text(encoding="utf-8"), entry):
             found.add(path)
     return found
+
+
+@pytest.mark.parametrize("text, imported", [
+    # Prose naming the module is no use of it: a message, a comment, a raw
+    # help text, each with a `use` before the name and a `;` after it.
+    ('const M: &str = "clients use {URL} to reach that machine\'s installer";', False),
+    ("// use the installer only once\nlet x = 1;", False),
+    ("/* use the /* nested */ installer */ let x = 1;", False),
+    ('const H: &str = r#"use the "installer" first"#;', False),
+    ("let q = '\"'; // use the installer\nlet x = 1;", False),
+    # Real imports, however they are written, still count.
+    ("    use crate::cli::installer;", True),
+    ("use crate::cli::{\n    expose,\n    installer::Plan,\n};", True),
+    ("pub(crate) use super::installer::Plan;", True),
+    ("fn f() { use crate::cli::installer::run; run() }", True),
+    ("fn f<'a>(s: &'a str) -> &'a str { s }\nuse crate::cli::installer;", True),
+    ("let q = '\"'; use crate::cli::installer;", True),
+    ("fn f() { crate::cli::installer::run() }", True),
+])
+def test_the_import_scan_counts_code_not_prose(text, imported):
+    assert imports(text, "installer") is imported
+
+
+def test_the_import_scan_sees_an_included_file():
+    assert imports('const HELP: &str = include_str!("backup_help.txt");', "backup_help.txt")
+    assert imports('#[path = "../episode.rs"]\nmod episode;', "episode.rs")
 
 
 @pytest.mark.parametrize("entry", sorted(SHIM_COMMANDS))
