@@ -403,14 +403,20 @@ mod seeded {
         );
         private(&home.path("tunnels/dot.process.json"), b"{}");
         assert_deferred(&home, &["verify", "--profile-dir", &dir], &[]);
-        // A record naming no process: not running, and status says so.
+        // A record naming no process id proves nothing: unknown, never
+        // called deletable, and status says so.
         let status = answered(&home, &["status", "--profile-dir", &dir]);
         assert!(
-            status.starts_with("Profile dot: ready; runtime running=False, ready=False; cloud verified=False (0/2 calls).\nTunnel dot is not running; its process record "),
+            status.starts_with("Profile dot: ready; runtime running=unknown, ready=False; cloud verification not checked by this client.\nWhether tunnel dot runs is unknown: its process record ")
+                && status.contains("names no process id")
+                && !status.contains("can be deleted"),
             "{status}"
         );
+        let update = answered(&home, &["update", "--profile-dir", &dir]);
         assert!(
-            answered(&home, &["update", "--profile-dir", &dir]).contains("\"state\": \"not-running\", \"running\": false, \"detail\": \"tunnel dot is not running; its process record "),
+            update.contains("\"state\": \"stale\", \"running\": \"unknown\", \"detail\": \"whether tunnel dot runs is unknown: its process record ")
+                && !update.contains("can be deleted"),
+            "{update}"
         );
     }
 
@@ -437,9 +443,11 @@ mod seeded {
         private(&home.path("tunnels/old.process.json"), dead);
         let report = answered(&home, &["update", "--profile-dir", &dir]);
         let report: serde_json::Value = serde_json::from_str(&report).unwrap();
-        assert_eq!(report["state"], "stale", "{report}");
+        // Nothing runs: the update is current; the orphan is a leftover.
+        assert_eq!(report["state"], "current", "{report}");
         assert_eq!(report["profiles"][0]["state"], "not-running", "{report}");
         assert_eq!(report["profiles"][1]["record"], "old.process.json");
+        assert_eq!(report["profiles"][1]["state"], "leftover", "{report}");
         assert_eq!(report["profiles"][1]["running"], false, "{report}");
     }
 

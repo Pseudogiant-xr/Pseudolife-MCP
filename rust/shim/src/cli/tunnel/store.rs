@@ -18,6 +18,7 @@ pub(super) const UNAVAILABLE: &str = "private tunnel file is unavailable or not 
 const TOO_LARGE: &str = "private tunnel file is too large";
 const INVALID_PROFILE: &str = "tunnel profile is invalid";
 pub(super) const INVALID_NAME: &str = "invalid tunnel profile name";
+pub(super) const NOT_OWNER_ONLY: &str = "tunnel profile directory must be owner-only";
 const EXPIRY: &str = "key expiry requires an ISO date or timestamp with timezone";
 const FIELDS: [&str; 12] = [
     "name",
@@ -453,10 +454,86 @@ pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
     ))
 }
 
-/// The store's listing failed in a way no refusal above names (an entry
-/// that is not a regular file, a name this client cannot fold, an
-/// unreadable directory).
-pub(super) const UNREADABLE_STORE: &str = "the tunnel directory cannot be listed, or holds an entry this client does not read (a *.profile.json that is not a regular file, or a file name that is not UTF-8, or not ASCII on Windows); move that one entry out, keeping every .key and .process.json file, then retry";
+/// The first `*.profile.json` in `root` whose stem `list` refuses as a
+/// profile name, matched as `list` matches it.
+pub(super) fn invalid_profile_entry(root: &Path) -> Option<PathBuf> {
+    fs::read_dir(root).ok()?.flatten().find_map(|entry| {
+        let file_name = entry.file_name();
+        let text = file_name.to_str()?;
+        let folded = if cfg!(windows) {
+            text.to_ascii_lowercase()
+        } else {
+            text.to_owned()
+        };
+        let stem = folded.strip_suffix(".profile.json")?;
+        let stem = &text[..stem.len()];
+        (!valid_name(stem)).then(|| entry.path())
+    })
+}
+
+/// Why listing `root` deferred, naming the root or the one entry it stopped
+/// on, with its fix: a root that cannot be inspected, is not a directory or
+/// cannot be listed; a file name that is not UTF-8 (or, on Windows, not
+/// ASCII); a `*.profile.json` that is not a regular file. Every entry `list`
+/// reads is checked here in the same order, so the first one named is the
+/// one `list` stopped on.
+pub(super) fn list_refusal(root: &Path) -> String {
+    let root_shown = root.display();
+    let keep = "keeping every .key and .process.json file, then retry";
+    match fs::metadata(root) {
+        Err(_) => {
+            return format!(
+                "the tunnel directory {root_shown} cannot be inspected; make it a directory your account can read, then retry"
+            );
+        }
+        Ok(info) if !info.is_dir() => {
+            return format!(
+                "the tunnel directory {root_shown} is not a directory; move it aside, then retry"
+            );
+        }
+        Ok(_) => {}
+    }
+    let unlisted = || {
+        format!(
+            "the tunnel directory {root_shown} cannot be listed; make it a directory your account can read, then retry"
+        )
+    };
+    let Ok(entries) = fs::read_dir(root) else {
+        return unlisted();
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return unlisted();
+        };
+        let file_name = entry.file_name();
+        let Some(text) = file_name.to_str() else {
+            return format!(
+                "the tunnel directory {root_shown} holds an entry whose name is not UTF-8 ({}); move that one entry out, {keep}",
+                file_name.to_string_lossy()
+            );
+        };
+        if cfg!(windows) && !text.is_ascii() {
+            return format!(
+                "the tunnel directory {root_shown} holds {text}, whose name is not plain ASCII; move that one entry out, {keep}"
+            );
+        }
+        let folded = if cfg!(windows) {
+            text.to_ascii_lowercase()
+        } else {
+            text.to_owned()
+        };
+        if folded.ends_with(".profile.json") && !entry.file_type().is_ok_and(|kind| kind.is_file())
+        {
+            return format!(
+                "{} is not a regular file; move it out of the tunnel directory, {keep}",
+                entry.path().display()
+            );
+        }
+    }
+    format!(
+        "the tunnel directory {root_shown} holds an entry this client does not read; make it a directory only your account can access, {keep}"
+    )
+}
 
 /// The root a command's `ProfileStore(args.profile_dir)` opens. Its checks
 /// run outside the oracle's error handler (a traceback): every failure defers.
@@ -520,7 +597,7 @@ pub(super) fn list(root: &Path) -> Result<Vec<String>, Fail> {
 fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
     use std::os::unix::fs::MetadataExt;
     if info.uid() != rustix::process::geteuid().as_raw() || info.mode() & 0o077 != 0 {
-        return Err(Fail::Tunnel("tunnel profile directory must be owner-only"));
+        return Err(Fail::Tunnel(NOT_OWNER_ONLY));
     }
     Ok(())
 }
@@ -542,7 +619,7 @@ fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), Fail> {
     match crate::credentials::windows_security::validate(&directory) {
         Ok(_) => Ok(()),
         Err(error) if error.0 == "credential file must be owner-only" => {
-            Err(Fail::Tunnel("tunnel profile directory must be owner-only"))
+            Err(Fail::Tunnel(NOT_OWNER_ONLY))
         }
         // Link-count or handle failures are outside the oracle's ACL check.
         Err(_) => Err(Fail::Defer),

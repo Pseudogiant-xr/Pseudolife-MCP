@@ -20,18 +20,22 @@ flowchart TD
 ```
 
 **With the native client**, tunnels are not available yet: it cannot set
-up, start, stop or refresh one. It answers `tunnel status`, which reads a
-tunnel's process record and says whether the tunnel runs, and `tunnel
-update`, which starts, stops and signals nothing. `tunnel update` reports a
-tunnel that is not running, names a process record left by a stopped tunnel
-as a file you can delete, and reports a running tunnel as `stale`: it is
-left running on its current runtime, because this client cannot refresh it
-yet. The native client also answers the refusals of `tunnel verify` and
-`tunnel setup` before they would change anything. Every other step stops
-with `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and
-exit 1, having changed nothing. That covers setup itself, `start`, `run`,
-`stop`, `doctor`, `service`, the cloud verification, and `verify` while a
-process record exists. On a host that runs a tunnel, keep the Python
+up, start, stop or refresh one. It answers `tunnel status` for a profile it
+can load, reading the tunnel's process record to say whether the tunnel
+runs. It also answers `tunnel update`, which starts, stops and signals
+nothing. `tunnel update` reports a tunnel that is not running, and names a
+process record left by a stopped tunnel as a file you can delete (a
+`leftover` when no saved profile is beside it). It reports a tunnel that
+runs, or may run, as `stale`: it is left as it is, because this client
+cannot refresh it yet. A record it cannot judge (unreadable, or naming no
+process id) is reported as unknown and never called deletable. The native
+client also answers the refusals of `tunnel verify` and `tunnel setup`
+before they would change anything. Every other step stops with
+`pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,
+having changed nothing. That covers setup itself, `start`, `run`, `stop`,
+`doctor`, `service`, the cloud verification, `status` of a profile in a
+form it does not read, and `verify` while a process record exists or with
+a Windows (DPAPI) key. On a host that runs a tunnel, keep the Python
 client, which an update does unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see

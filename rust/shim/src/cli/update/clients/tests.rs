@@ -857,21 +857,52 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
         "{detail}"
     );
     assert!(
-        detail.ends_with("were left as they are; fix that, then run pseudolife-mcp tunnel update"),
+        detail.ends_with(
+            "were left as they are; after fixing that, run pseudolife-mcp tunnel update"
+        ),
         "{detail}"
     );
     assert!(!detail.contains("tunnel doctor"), "{detail}");
-    // No reason at all still names the next step.
-    let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(124, ""));
-    let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
-    assert_eq!(step["state"], "failed");
-    assert!(
-        step["detail"]
-            .as_str()
-            .unwrap()
-            .contains("ended with exit 124 without a reason"),
-        "{step}"
+    let detail_of = |code: i32, text: &'static str| {
+        let runner = Fake::new(move |_: &[&str], _: Option<&Path>| output(code, text));
+        let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
+        assert_eq!(step["state"], "failed");
+        step["detail"].as_str().unwrap().to_owned()
+    };
+    // A refusal that already ends with its next step gets no second one.
+    let detail = detail_of(
+        2,
+        "tunnel profile is invalid: /t/dot.profile.json; fix that file or move it out of the tunnel directory, then retry\n",
     );
+    assert!(
+        detail.starts_with("installed tunnel update refused (exit 2): tunnel profile is invalid: /t/dot.profile.json; fix that file or move it out of the tunnel directory, then retry with pseudolife-mcp tunnel update; tunnels in "),
+        "{detail}"
+    );
+    assert_eq!(detail.matches("then").count(), 1, "{detail}");
+    // An older runtime that defers: the action is to install the current one.
+    let detail = detail_of(
+        1,
+        "pseudolife-stdio: mode 'tunnel' is deferred in this candidate\n",
+    );
+    assert!(
+        detail.contains("does not run tunnel update")
+            && detail.ends_with("install the current client with pseudolife-mcp update --clients-only, then run pseudolife-mcp tunnel update"),
+        "{detail}"
+    );
+    // The runner's own codes, with no output: a timeout states its figure, a
+    // spawn failure says it could not start; neither reads "exit 1 without a
+    // reason".
+    let detail = detail_of(124, "");
+    assert!(
+        detail.contains("did not answer tunnel update within 150 s"),
+        "{detail}"
+    );
+    let detail = detail_of(1, "");
+    assert!(
+        detail.contains("could not be started, or ended with exit 1 and printed nothing"),
+        "{detail}"
+    );
+    assert!(!detail.contains("without a reason"), "{detail}");
 }
 
 #[test]

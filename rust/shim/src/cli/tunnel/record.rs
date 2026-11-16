@@ -31,9 +31,21 @@ pub(super) enum Liveness {
     Running,
     /// No process the record names runs.
     Gone,
-    /// The process table could not be read, or the record itself could not
-    /// be read: whether a tunnel runs is unknown.
+    /// Whether a tunnel runs is unknown; `Record::why` says which cause.
     Unknown,
+}
+
+/// The one cause, known to the code, of an `Unknown` verdict.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Why {
+    /// The file is not an owner-only JSON object this client can read.
+    Unreadable,
+    /// The record names no usable process id (none, or not a whole number).
+    NoProcessId,
+    /// This machine's process table could not be read.
+    NoTable,
+    /// A named process exists but this account cannot inspect its image.
+    Uninspectable,
 }
 
 #[derive(Debug)]
@@ -42,9 +54,8 @@ pub(super) struct Record {
     pub liveness: Liveness,
     /// The record's own readiness flag, meaningful only while it runs.
     pub ready: bool,
-    /// `false` when the file is not an owner-only JSON object this client
-    /// can read.
-    pub readable: bool,
+    /// Why the verdict is `Unknown`; `None` otherwise.
+    pub why: Option<Why>,
 }
 
 /// This machine's process table, or `None` where it cannot be read. On
@@ -92,30 +103,44 @@ pub(super) fn read(path: PathBuf, table: Option<&[Row]>) -> Option<Record> {
             path,
             liveness: Liveness::Unknown,
             ready: false,
-            readable: false,
+            why: Some(Why::Unreadable),
         });
     };
-    let liveness = match table {
-        None => Liveness::Unknown,
-        Some(rows) => liveness(&record, rows),
+    let (liveness, why) = match table {
+        None if crate::runtime::record_processes(&record).is_empty() => {
+            (Liveness::Unknown, Some(Why::NoProcessId))
+        }
+        None => (Liveness::Unknown, Some(Why::NoTable)),
+        Some(rows) => assess(&record, rows),
     };
     Some(Record {
         path,
         liveness,
         ready: record.get("ready") == Some(&Value::Bool(true)),
-        readable: true,
+        why,
     })
 }
 
-/// Whether any process `record` names runs under its recorded image. A pid
-/// whose image cannot be read (an empty image) is unknown, never gone.
+/// Whether any process `record` names runs under its recorded image.
+#[cfg(test)]
 pub(super) fn liveness(record: &Value, rows: &[Row]) -> Liveness {
-    let mut verdict = Liveness::Gone;
-    for process in crate::runtime::record_processes(record) {
+    assess(record, rows).0
+}
+
+/// The verdict and, for `Unknown`, its cause. "Gone" needs an observation:
+/// at least one named pid, none of them running under its image. A record
+/// naming no usable pid, or a pid whose image cannot be read, is unknown.
+fn assess(record: &Value, rows: &[Row]) -> (Liveness, Option<Why>) {
+    let processes = crate::runtime::record_processes(record);
+    if processes.is_empty() {
+        return (Liveness::Unknown, Some(Why::NoProcessId));
+    }
+    let mut verdict = (Liveness::Gone, None);
+    for process in processes {
         for row in rows.iter().filter(|row| u64::from(row.0) == process.pid) {
             let matched = match (process.exe, process.argv0) {
                 _ if row.2.as_os_str().is_empty() => {
-                    verdict = Liveness::Unknown;
+                    verdict = (Liveness::Unknown, Some(Why::Uninspectable));
                     continue;
                 }
                 // A record that kept no image is matched by pid alone.
@@ -126,7 +151,7 @@ pub(super) fn liveness(record: &Value, rows: &[Row]) -> Liveness {
                     .any(|recorded| same_image(&row.2, Path::new(recorded))),
             };
             if matched {
-                return Liveness::Running;
+                return (Liveness::Running, None);
             }
         }
     }
@@ -165,11 +190,11 @@ fn cut_at_space(row: &Path, recorded: &Path) -> bool {
 /// sorted. `profiles` are the store's listed profile names.
 pub(super) fn orphans(root: &Path, profiles: &[String]) -> Result<Vec<String>, Fail> {
     let mut found = Vec::new();
-    let entries = std::fs::read_dir(root).map_err(|_| Fail::Tunnel(store::UNREADABLE_STORE))?;
+    let entries = std::fs::read_dir(root).map_err(|_| Fail::Defer)?;
     for entry in entries {
-        let entry = entry.map_err(|_| Fail::Tunnel(store::UNREADABLE_STORE))?;
+        let entry = entry.map_err(|_| Fail::Defer)?;
         let Some(file_name) = entry.file_name().to_str().map(str::to_owned) else {
-            return Err(Fail::Tunnel(store::UNREADABLE_STORE));
+            return Err(Fail::Defer);
         };
         // Windows globbing folds case, as the profile listing does.
         let folded = if cfg!(windows) {
@@ -217,7 +242,15 @@ mod tests {
         let dead = json!({"pid": u64::from(pid) + 1, "exe": exe});
         assert_eq!(liveness(&dead, &rows), Liveness::Gone);
         // No process identity at all.
-        assert_eq!(liveness(&json!({}), &rows), Liveness::Gone);
+        // No usable process id: nothing was observed, so unknown.
+        for record in [
+            json!({}),
+            json!({"pid": "12"}),
+            json!({"pid": -3}),
+            json!({"pid": 1.5}),
+        ] {
+            assert_eq!(liveness(&record, &rows), Liveness::Unknown, "{record}");
+        }
         // A live supervisor keeps the record running though its child died.
         let supervised = json!({"pid": u64::from(pid) + 1, "exe": "/nonexistent/tunnel-client",
             "supervisor": {"pid": pid, "exe": exe}});

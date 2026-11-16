@@ -264,11 +264,12 @@ fn tunnel_step(
                 root.display()
             )
         })?;
+        let timeout = Duration::from_secs(60 + 90 * count);
         let output = runner.run(
             &launcher,
             &["tunnel", "update", "--profile-dir", directory],
             None,
-            Duration::from_secs(60 + 90 * count),
+            timeout,
             &[],
         );
         // `stale`: a tunnel keeps running on its current runtime because
@@ -293,16 +294,30 @@ fn tunnel_step(
             .map(str::trim)
             .rfind(|line| !line.is_empty())
             .filter(|line| line.len() <= 400);
+        let left = format!("tunnels in {} were left as they are", root.display());
+        let launcher = launcher.display();
         let detail = match said {
+            // An older native runtime that does not run tunnel update yet.
+            Some(said) if said.contains("is deferred in this candidate") => format!(
+                "the installed launcher {launcher} is a client runtime that does not run tunnel update; {left}; install the current client with pseudolife-mcp update --clients-only, then run pseudolife-mcp tunnel update"
+            ),
+            // The refusal names its own next step ("..., then retry").
+            Some(said) if said.ends_with("then retry") => format!(
+                "installed tunnel update refused (exit {}): {said} with pseudolife-mcp tunnel update; {left}",
+                output.code
+            ),
             Some(said) => format!(
-                "installed tunnel update ended with exit {}: {said}; tunnels in {} were left as they are; fix that, then run pseudolife-mcp tunnel update",
-                output.code,
-                root.display()
+                "installed tunnel update ended with exit {}: {said}; {left}; after fixing that, run pseudolife-mcp tunnel update",
+                output.code
+            ),
+            // The runner's own codes: no output at all.
+            None if output.code == 124 => format!(
+                "the installed launcher {launcher} did not answer tunnel update within {} s; {left}; run pseudolife-mcp tunnel update to see where it stops",
+                timeout.as_secs()
             ),
             None => format!(
-                "installed tunnel update ended with exit {} without a reason; tunnels in {} were left as they are; run pseudolife-mcp tunnel update to see why",
-                output.code,
-                root.display()
+                "the installed launcher {launcher} could not be started, or ended with exit {} and printed nothing; {left}; run pseudolife-mcp tunnel update to see why",
+                output.code
             ),
         };
         Ok(Some(json!({"state":"failed","detail":detail})))

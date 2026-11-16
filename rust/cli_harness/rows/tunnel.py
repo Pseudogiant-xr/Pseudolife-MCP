@@ -684,6 +684,8 @@ def cases() -> list[core.Case]:
         # A Windows DPAPI key is present on disk, not verified (no unprotect).
         case("status-dpapi-key", ["status", "--profile-dir", DIR], ready(), saved_key(),
              platforms=("windows",)),
+        # JSON pins the key's state: present on disk, not verified.
+        status("status-dpapi-key-json", ready(), saved_key(), platforms=("windows",)),
         case("update-ready-key", ["update", "--profile-dir", DIR], ready(), saved_key(),
              rules=("tunnel-dpapi-key",)),
         case("update-dead-record", ["update", "--profile-dir", DIR], ready(), saved_key(),

@@ -302,22 +302,37 @@ fn record_sentence(name: &str, record: &record::Record, updating: bool) -> Strin
     } else {
         ""
     };
-    match (record.liveness, record.readable) {
-        (Liveness::Running, _) if updating => format!(
+    match record.liveness {
+        Liveness::Running if updating => format!(
             "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh or stop it yet, so it was left as it is"
         ),
-        (Liveness::Running, _) => format!(
+        Liveness::Running => format!(
             "tunnel {name} is running (process record {file}); this client cannot refresh or stop it yet"
         ),
-        (Liveness::Gone, _) => format!(
+        Liveness::Gone => format!(
             "tunnel {name} is not running; its process record {file} is left from a tunnel that stopped and can be deleted"
         ),
-        (Liveness::Unknown, false) => format!(
-            "tunnel {name}'s process record {file} is not an owner-only record this client can read, so whether the tunnel runs is unknown{left}"
+        Liveness::Unknown => format!(
+            "whether tunnel {name} runs is unknown: its process record {file} {}{left}",
+            unknown_cause(record.why)
         ),
-        (Liveness::Unknown, true) => format!(
-            "whether tunnel {name} runs (process record {file}) cannot be checked here: the process table cannot be read, or the process it names cannot be inspected{left}"
-        ),
+    }
+}
+
+/// The one cause the code knows for an unknown verdict, and what to do.
+fn unknown_cause(why: Option<record::Why>) -> &'static str {
+    use record::Why;
+    match why {
+        Some(Why::Unreadable) | None => {
+            "is not an owner-only JSON record this client can read; check that file"
+        }
+        Some(Why::NoProcessId) => {
+            "names no process id; look at that file, and keep it while a tunnel of this profile may run"
+        }
+        Some(Why::NoTable) => {
+            "cannot be checked, because this machine's process table cannot be read"
+        }
+        Some(Why::Uninspectable) => "names a process that exists but this account cannot inspect",
     }
 }
 
@@ -448,8 +463,19 @@ fn update(root: &Path) -> Answer {
     // A store this client cannot list is a refusal with its cause, never a
     // deferral: the update step shows the cause to the user.
     let unreadable = |fail: Fail| match fail {
-        Fail::Tunnel(message) => message.to_owned(),
-        Fail::Defer => store::UNREADABLE_STORE.to_owned(),
+        Fail::Tunnel(store::INVALID_NAME) => match store::invalid_profile_entry(root) {
+            Some(path) => format!(
+                "{} is not a valid tunnel profile name (up to 64 letters, digits, '-' or '_', starting with a letter or digit, and not a reserved device name); rename it or move it out of the tunnel directory, then retry",
+                path.display()
+            ),
+            None => format!("{}: {}", store::INVALID_NAME, root.display()),
+        },
+        Fail::Tunnel(store::NOT_OWNER_ONLY) => format!(
+            "the tunnel directory {} must be owner-only; make it a directory only your account can access, then retry",
+            root.display()
+        ),
+        Fail::Tunnel(message) => format!("{message}: {}", root.display()),
+        Fail::Defer => store::list_refusal(root),
     };
     let present = exists(root).map_err(unreadable)?;
     let names = if present {
@@ -542,29 +568,35 @@ fn update(root: &Path) -> Answer {
             continue;
         };
         let file = record.path.display();
-        let (running, sentence) = match record.liveness {
+        // `leftover`: a file a stopped tunnel left; `stale`: one that runs or
+        // may run, left as it is.
+        let (state, running, sentence) = match record.liveness {
             Liveness::Running => (
+                "stale",
                 "true",
                 format!(
                     "{file} has no saved profile beside it but names a running process; this client cannot stop it, so it was left as it is"
                 ),
             ),
             Liveness::Gone => (
+                "leftover",
                 "false",
                 format!(
                     "{file} has no saved profile beside it and names no running process; it can be deleted"
                 ),
             ),
             Liveness::Unknown => (
+                "stale",
                 "\"unknown\"",
                 format!(
-                    "{file} has no saved profile beside it, and whether it names a running process cannot be checked; it was left as it is"
+                    "{file} has no saved profile beside it, and whether a tunnel of it runs is unknown: it {}; it was left as it is",
+                    unknown_cause(record.why)
                 ),
             ),
         };
-        stale = true;
+        stale |= state == "stale";
         entries.push(format!(
-            "{{\"record\": {}, \"state\": \"stale\", \"running\": {running}, \"detail\": {}}}",
+            "{{\"record\": {}, \"state\": \"{state}\", \"running\": {running}, \"detail\": {}}}",
             quoted(file_name),
             quoted(&sentence)
         ));
@@ -976,21 +1008,29 @@ mod tests {
     }
 
     #[test]
-    fn update_names_an_orphan_record_as_stale() {
+    fn update_names_an_orphan_record_by_file() {
         let store = Store::new();
         store.record("gone", DEAD_PID, Path::new("/nonexistent/tunnel-client"));
-        // No profile at all: the record alone is reported, not exit 3.
+        // No profile at all: the record alone is reported, not exit 3. A
+        // dead one is a `leftover` (nothing runs), never `stale`.
         let report = report_of(update(&store.0));
-        assert_eq!(report["state"], "stale", "{report}");
+        assert_eq!(report["state"], "current", "{report}");
         let entry = &report["profiles"][0];
         assert_eq!(entry["record"], "gone.process.json");
-        assert_eq!(entry["state"], "stale");
+        assert_eq!(entry["state"], "leftover");
         assert_eq!(entry["running"], false);
         let detail = report["detail"].as_str().unwrap();
         assert!(
             detail.contains("gone.process.json has no saved profile beside it and names no running process; it can be deleted"),
             "{detail}"
         );
+        // A running orphan is `stale`, left as it is.
+        store.record("live", u64::from(std::process::id()), &own_exe());
+        let report = report_of(update(&store.0));
+        assert_eq!(report["state"], "stale", "{report}");
+        assert_eq!(report["profiles"][1]["record"], "live.process.json");
+        assert_eq!(report["profiles"][1]["state"], "stale");
+        std::fs::remove_file(store.0.join("live.process.json")).unwrap();
         // Beside another profile, too.
         store.profile("dot", false);
         let report = report_of(update(&store.0));
@@ -1006,12 +1046,90 @@ mod tests {
         let report = report_of(update(&store.0));
         assert_eq!(report["state"], "stale");
         assert_eq!(report["profiles"][0]["running"], "unknown");
-        // An empty record names no process: not running.
-        std::fs::remove_file(store.0.join("dot.process.json")).unwrap();
-        store.put("dot.process.json", b"{}");
-        let report = report_of(update(&store.0));
-        assert_eq!(report["state"], "current");
-        assert_eq!(report["profiles"][0]["state"], "not-running");
+        // A record naming no usable process id proves nothing either way:
+        // unknown, with that cause, and never called deletable.
+        for shape in [
+            &b"{}"[..],
+            br#"{"pid": "12"}"#,
+            br#"{"pid": -3}"#,
+            br#"{"pid": 1.5}"#,
+        ] {
+            std::fs::remove_file(store.0.join("dot.process.json")).unwrap();
+            store.put("dot.process.json", shape);
+            let report = report_of(update(&store.0));
+            let shape = String::from_utf8_lossy(shape);
+            assert_eq!(report["state"], "stale", "{shape}: {report}");
+            assert_eq!(report["profiles"][0]["running"], "unknown", "{shape}");
+            let detail = report["profiles"][0]["detail"].as_str().unwrap();
+            assert!(
+                detail.contains("names no process id") && !detail.contains("can be deleted"),
+                "{shape}: {detail}"
+            );
+        }
+    }
+
+    /// The listing's other refusals name the directory or the file too.
+    #[test]
+    fn update_names_the_file_or_directory_a_listing_refusal_is_about() {
+        let store = Store::new();
+        store.put("bad.name.profile.json", b"{}");
+        let refused = update(&store.0).unwrap_err();
+        assert!(
+            refused.contains("bad.name.profile.json is not a valid tunnel profile name")
+                && refused.ends_with("then retry"),
+            "{refused}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let store = Store::new();
+            store.profile("dot", true);
+            std::fs::set_permissions(&store.0, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let refused = update(&store.0).unwrap_err();
+            assert_eq!(
+                refused,
+                format!(
+                    "the tunnel directory {} must be owner-only; make it a directory only your account can access, then retry",
+                    store.0.display()
+                )
+            );
+        }
+    }
+
+    /// A store `list` cannot read is refused (exit 2) naming the entry it
+    /// stopped on, never deferred.
+    #[test]
+    fn update_refuses_a_store_entry_it_does_not_read_and_names_it() {
+        let store = Store::new();
+        store.profile("dot", true);
+        std::fs::create_dir(store.0.join("x.profile.json")).unwrap();
+        let refused = update(&store.0).unwrap_err();
+        assert!(
+            refused.contains("x.profile.json") && refused.contains("is not a regular file"),
+            "{refused}"
+        );
+        assert_eq!(
+            outcome(
+                &parse(&argv(&[
+                    "update",
+                    "--profile-dir",
+                    store.0.to_str().unwrap()
+                ]))
+                .unwrap()
+            ),
+            Some(Err(refused))
+        );
+        #[cfg(windows)]
+        {
+            let store = Store::new();
+            store.profile("dot", true);
+            store.put("na\u{ef}ve.txt", b"");
+            let refused = update(&store.0).unwrap_err();
+            assert!(
+                refused.contains("na\u{ef}ve.txt") && refused.contains("not plain ASCII"),
+                "{refused}"
+            );
+        }
     }
 
     #[test]

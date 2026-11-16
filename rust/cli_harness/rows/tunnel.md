@@ -59,7 +59,10 @@ these cases are recorded from the candidate, not the oracle:
 - A record runs while a pid it names (the tunnel, its supervisor) is in the
   process table under the recorded image (normcase on Windows, the resolved
   file on POSIX); process creation times are not compared. A pid that is
-  gone or runs another image is a record left from a stopped tunnel.
+  gone or runs another image is a record left from a stopped tunnel. A
+  record naming no usable pid, a pid that cannot be inspected (Windows), an
+  unreadable record or process table is unknown, with that one cause, and is
+  never called deletable.
 - `status` reads the record: `runtime.running` is `true`, `false` or
   `"unknown"` (an unreadable record or process table), `runtime.process_record`
   names the file and what it means, and a running tunnel's cloud
@@ -68,12 +71,14 @@ these cases are recorded from the candidate, not the oracle:
 - `update` never stops on a record or a key and starts, stops or signals
   nothing: a ready profile without a running record is `not-running`, a
   running one is `stale` (left running; this client cannot refresh it
-  yet), and a record with no profile beside it is listed as `stale` by file
-  name. The top-level state is `stale` when any entry is, else `current`,
+  yet; also an unknown one), and a record with no profile beside it is
+  listed by file name, `leftover` when its process is gone, `stale` when it
+  runs or may run. The top-level state is `stale` when any entry is, else `current`,
   exit 0; the top-level `detail` carries one sentence per record. A store
-  `list` cannot read is refused (exit 2) with its cause instead of deferring.
+  `list` cannot read is refused (exit 2) naming the directory or the entry
+  it stopped on, instead of deferring.
   Cases: `status-process-record`, `status-process-record-text`,
-  `status-dpapi-key`, `update-ready-key`, `update-dead-record`,
+  `status-dpapi-key`, `status-dpapi-key-json`, `update-ready-key`, `update-dead-record`,
   `update-orphan-record`, and `update-pending-only` / `update-ready-wrong-key`
   (a ready profile is `not-running`, no longer `pending`), and
   `update-corrupt-profile` (the refusal names the profile file).
