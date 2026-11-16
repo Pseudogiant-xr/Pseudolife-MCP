@@ -131,7 +131,6 @@ fn unported_commands_and_argv_shapes_defer_without_effect() {
         &["run", "--profile-dir", &dir],
         &["start", "--profile-dir", &dir],
         &["stop", "--profile-dir", &dir],
-        &["shim", "--profile-dir", &dir],
         &["service", "preview", "--profile-dir", &dir],
         &["service", "install", "--profile-dir", &dir],
         &["service", "status", "--profile-dir", &dir],
@@ -216,6 +215,40 @@ fn setup_resuming_an_existing_profile_defers() {
         &home,
         &["setup", "--profile-dir", &dir, "--tunnel-id", "nope"],
         &[],
+    );
+}
+
+const SHIM_USAGE: &str = "tunnel shim is started by the tunnel runtime, not by hand: it needs --profile <name>, and --profile-dir <directory> for a store other than the default
+";
+
+#[test]
+fn the_hidden_bridge_refuses_plainly_without_what_it_needs() {
+    let home = Home::new();
+    let dir = home.dir();
+    // Not offered anywhere in the help.
+    let help = cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("tunnel shim"));
+    // Started by hand, or without its profile: one line naming what it
+    // needs, nothing written, no daemon contacted, no shim started.
+    for args in [
+        &["shim"][..],
+        &["shim", "--profile-dir", &dir],
+        &["shim", "--profile"],
+        &["shim", "--profile", "dot", "--profile", "dot"],
+        &["shim", "--profile", "dot", "--json"],
+    ] {
+        assert_refused(&home, args, &[], SHIM_USAGE);
+    }
+    // A profile that is not saved is refused by the store, before any spawn.
+    assert_refused(
+        &home,
+        &["shim", "--profile", "dot", "--profile-dir", &dir],
+        &[],
+        UNAVAILABLE,
     );
 }
 
