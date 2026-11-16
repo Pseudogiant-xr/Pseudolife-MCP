@@ -273,7 +273,7 @@ fn check_json_limit(case: usize) {
         ),
     ][case];
     let home = Home::new();
-    home.write(".claude.json", &text);
+    home.write(".claude.json", text);
     let before = home.tree();
     let output = home.run(DEAD, &[DEAD, "--client", "claude-code", "--dry-run"]);
     assert_eq!(output.status.code(), Some(2), "{output:?}");
@@ -283,7 +283,7 @@ fn check_json_limit(case: usize) {
         "{message}"
     );
     assert_eq!(home.tree(), before);
-    home.write(".claude.json", &good);
+    home.write(".claude.json", good);
     assert_eq!(
         home.run(DEAD, &[DEAD, "--client", "claude-code", "--dry-run"])
             .status
