@@ -435,8 +435,11 @@ mod posix {
         }
         assert_eq!(check_ancestors(&folder.join("token")), Ok(()));
         assert_eq!(check_path(&folder), Ok(()));
-        // Each of the 12 links counts once, by its own device and inode.
-        assert_eq!(links_followed(&folder.join("token")), Ok(12));
+        // Each of the 12 links counts once, by its own device and inode, on
+        // top of any link above the scratch folder (macOS `/var`, a linked
+        // `TMPDIR`).
+        let above = links_followed(&scratch.0.join("token")).unwrap();
+        assert_eq!(links_followed(&folder.join("token")), Ok(12 + above));
     }
 
     #[test]
@@ -729,7 +732,9 @@ mod windows {
             made += 1;
         }
         assert!(made >= 7, "only {made} nested junctions could be made");
-        assert_eq!(links_followed(&folder.join("token")), Ok(made));
+        // On top of any link above the scratch folder (a junctioned TEMP).
+        let above = links_followed(&scratch.0.join("token")).unwrap();
+        assert_eq!(links_followed(&folder.join("token")), Ok(made + above));
     }
 
     #[test]
@@ -761,7 +766,9 @@ mod windows {
             Ok(()),
             "{made} links"
         );
-        assert_eq!(links_followed(&folder.join("token")), Ok(made));
+        // On top of any link above the scratch folder (a junctioned TEMP).
+        let above = links_followed(&scratch.0.join("token")).unwrap();
+        assert_eq!(links_followed(&folder.join("token")), Ok(made + above));
     }
 
     #[test]
