@@ -251,8 +251,9 @@ fn the_hidden_bridge_refuses_plainly_without_what_it_needs() {
         &["shim", "--profile", "dot", "--profile-dir", &dir],
         &[],
         &format!(
-            "{}; `pseudolife-mcp tunnel status --profile dot --profile-dir {dir}` names the cause\n",
-            UNAVAILABLE.trim_end()
+            "{}; `pseudolife-mcp tunnel status --profile dot --profile-dir {}` names the cause\n",
+            UNAVAILABLE.trim_end(),
+            shell_quoted(&dir)
         ),
     );
 }
@@ -330,6 +331,16 @@ fn the_bridge_serves_through_the_native_shim_and_the_profiles_daemon() {
     assert_eq!(status.code(), Some(0), "{stderr}");
     assert!(stderr.is_empty(), "{stderr}");
     listener.assert_untouched();
+}
+
+/// The single-quoted spelling the native client's advice uses for a path
+/// (`update::seams::quote`).
+fn shell_quoted(text: &str) -> String {
+    if cfg!(windows) {
+        format!("'{}'", text.replace('\'', "''"))
+    } else {
+        format!("'{}'", text.replace('\'', "'\"'\"'"))
+    }
 }
 
 #[test]

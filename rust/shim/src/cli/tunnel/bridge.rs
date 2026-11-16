@@ -202,15 +202,24 @@ struct Start {
     profile: store::Profile,
 }
 
+/// The `tunnel status` command for this profile, in the store the bridge
+/// was started with, its folder quoted for the shell as update's advice is.
+fn status_command(name: &str, directory: Option<&str>) -> String {
+    let store_option = directory
+        .map(|directory| {
+            format!(
+                " --profile-dir {}",
+                crate::cli::update::seams::quote(directory)
+            )
+        })
+        .unwrap_or_default();
+    format!("pseudolife-mcp tunnel status --profile {name}{store_option}")
+}
+
 fn prepare(values: &[OsString]) -> Result<Start, String> {
     let (name, directory) = parse(values).ok_or(USAGE)?;
     let root = store::store_root(directory.as_deref()).map_err(|_| store::UNSAFE_ROOT)?;
-    // The store the bridge was started with, so the hint looks in it.
-    let store_option = directory
-        .as_deref()
-        .map(|directory| format!(" --profile-dir {directory}"))
-        .unwrap_or_default();
-    let command = format!("pseudolife-mcp tunnel status --profile {name}{store_option}");
+    let command = status_command(&name, directory.as_deref());
     let status = format!("`{command}` names the cause");
     let profile = match store::load(&root, &name) {
         Ok(profile) => profile,

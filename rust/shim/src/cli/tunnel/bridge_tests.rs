@@ -1689,8 +1689,9 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     assert_eq!(
         prepare(&argv(&["--profile", "dot", "--profile-dir", dir])).err(),
         Some(format!(
-            "{}; `pseudolife-mcp tunnel status --profile dot --profile-dir {dir}` names the cause",
-            store::UNAVAILABLE
+            "{}; `{}` names the cause",
+            store::UNAVAILABLE,
+            status_command("dot", Some(dir))
         ))
     );
     let token = serde_json::to_string(&store.0.join("token")).unwrap();
@@ -1704,7 +1705,8 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     assert_eq!(
         prepare(&argv(&["--profile-dir", dir, "--profile", "draft"])).err(),
         Some(format!(
-            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `pseudolife-mcp tunnel status --profile draft --profile-dir {dir}` shows what is missing"
+            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `{}` shows what is missing",
+            status_command("draft", Some(dir))
         ))
     );
     // The store admits an https address with a path; the shim would not.
@@ -1720,13 +1722,27 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
         .unwrap();
     assert!(refused.contains("not an http(s) origin"), "{refused}");
     assert!(
-        refused.contains(&format!("tunnel status --profile web --profile-dir {dir}")),
+        refused.contains(&status_command("web", Some(dir))),
         "{refused}"
     );
     store.profile("dot");
     let start = prepare(&argv(&["--profile-dir", dir, "--profile", "dot"])).unwrap();
     assert_eq!(start.root, Path::new(dir));
     assert_eq!(start.profile.daemon_url, "http://127.0.0.1:9");
+}
+
+/// The hint's store folder is quoted, so one with a space stays one
+/// argument; with no folder given the default store needs none.
+#[test]
+fn the_status_hint_quotes_its_store_folder() {
+    assert_eq!(
+        status_command("dot", Some("/tmp/Example User/profiles")),
+        "pseudolife-mcp tunnel status --profile dot --profile-dir '/tmp/Example User/profiles'"
+    );
+    assert_eq!(
+        status_command("dot", None),
+        "pseudolife-mcp tunnel status --profile dot"
+    );
 }
 
 #[test]
