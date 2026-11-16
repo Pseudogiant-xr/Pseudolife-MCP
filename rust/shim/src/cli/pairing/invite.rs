@@ -772,8 +772,17 @@ fn database_error(error: crate::pg::Error) -> Refusal {
         Error::UnsupportedOption(option) if option == "sslmode" => {
             "PSEUDOLIFE_MCP_DATABASE_URL has an unsupported sslmode; choose disable, prefer, require, verify-ca or verify-full without weakening the required verification"
         }
+        Error::UnsupportedOption(option) if option == "sslcert" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL requires unsupported sslcert client-certificate authentication; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        Error::UnsupportedOption(option) if option == "sslkey" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL requires unsupported sslkey client-certificate authentication; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        Error::UnsupportedOption(option) if option == "sslcrl" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL requires an unsupported sslcrl revocation policy; keep the required policy and ask the maintainer to add support before retrying"
+        }
         Error::UnsupportedOption(_) => {
-            "PSEUDOLIFE_MCP_DATABASE_URL contains an unsupported connection option; use only host, port, user, password, dbname, sslmode and sslrootcert"
+            "PSEUDOLIFE_MCP_DATABASE_URL contains an unsupported connection option; keep the required setting and ask the maintainer to add support before retrying"
         }
         Error::InvalidOption("host") => {
             "PSEUDOLIFE_MCP_DATABASE_URL has an invalid host; supply one TCP hostname or IP address"
@@ -812,27 +821,41 @@ fn ambient_error(control: &str) -> &'static str {
     macro_rules! settings {
         ($($name:literal),* $(,)?) => {
             match control.to_ascii_uppercase().as_str() {
-                $($name => concat!($name, " is unsupported for invite; move its required connection setting into PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"),)*
-                _ => "a PGSSL or PGTLS environment setting is unsupported for invite; move its required TLS policy into PSEUDOLIFE_MCP_DATABASE_URL before unsetting it",
+                $($name => concat!($name, " is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"),)*
+                _ => "a PGSSL or PGTLS environment setting is unsupported by this invite client; keep the required TLS policy and ask the maintainer to add support before retrying",
             }
         };
     }
-    match control {
-        "postgresql.crt" => {
-            "the implicit PostgreSQL postgresql.crt file cannot be used for invite; use a database login that does not require client-certificate authentication in an isolated profile"
+    match control.to_ascii_uppercase().as_str() {
+        "PGHOST" => {
+            "PGHOST is unsupported as an ambient setting for invite; move its required value to host in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
         }
-        "postgresql.key" => {
-            "the implicit PostgreSQL postgresql.key file cannot be used for invite; use a database login that does not require client-certificate authentication in an isolated profile"
+        "PGPORT" => {
+            "PGPORT is unsupported as an ambient setting for invite; move its required value to port in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
         }
-        "root.crl" => {
-            "the implicit PostgreSQL root.crl policy cannot be enforced for invite; run invite in a daemon environment that enforces that certificate policy"
+        "PGDATABASE" => {
+            "PGDATABASE is unsupported as an ambient setting for invite; move its required value to dbname in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGUSER" => {
+            "PGUSER is unsupported as an ambient setting for invite; move its required value to user in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGSSLMODE" => {
+            "PGSSLMODE is unsupported as an ambient setting for invite; move its required value to sslmode in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGSSLROOTCERT" => {
+            "PGSSLROOTCERT is unsupported as an ambient setting for invite; move its required value to sslrootcert in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "POSTGRESQL.CRT" => {
+            "the implicit PostgreSQL postgresql.crt client-certificate policy is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        "POSTGRESQL.KEY" => {
+            "the implicit PostgreSQL postgresql.key client-certificate policy is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        "ROOT.CRL" => {
+            "the implicit PostgreSQL root.crl revocation policy is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"
         }
         _ => settings!(
-            "PGHOST",
             "PGHOSTADDR",
-            "PGPORT",
-            "PGDATABASE",
-            "PGUSER",
             "PGPASSFILE",
             "PGSERVICE",
             "PGSERVICEFILE",
@@ -857,8 +880,6 @@ fn ambient_error(control: &str) -> &'static str {
             "PGDATESTYLE",
             "PGTZ",
             "PGGEQO",
-            "PGSSLMODE",
-            "PGSSLROOTCERT",
             "PGSSLCERT",
             "PGSSLKEY",
             "PGSSLCRL",

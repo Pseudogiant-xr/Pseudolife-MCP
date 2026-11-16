@@ -189,18 +189,32 @@ def test_valid_schema_still_creates_code_with_requested_grants(candidate, tmp_pa
         daemon.close()
 
 
-@pytest.mark.parametrize("setting", ["PGSERVICE", "PGSSLMODE", "PGTLS_UNSUPPORTED"])
-def test_unsupported_pg_setting_names_cause_without_value(candidate, tmp_path, setting):
+@pytest.mark.parametrize("setting,representable", [
+    ("PGHOST", True), ("PGPORT", True), ("PGDATABASE", True), ("PGUSER", True),
+    ("PGSSLMODE", True), ("PGSSLROOTCERT", True),
+    ("PGSERVICE", False), ("PGSSLCERT", False), ("PGSSLKEY", False),
+    ("PGSSLCRL", False), ("PGSSLCRLDIR", False), ("PGCHANNELBINDING", False),
+    ("PGTLS_UNSUPPORTED", False),
+])
+def test_unsupported_pg_setting_names_cause_without_value(candidate, tmp_path, bank, setting, representable):
     env = environment(tmp_path)
     env[setting] = "fixture-private-secret"
     env["PSEUDOLIFE_MCP_DATABASE_URL"] = "host=127.0.0.1 port=9 dbname=fixture user=fixture"
     result = subprocess.run([candidate, "invite", "--list", "--json"], env=env,
                             cwd=tmp_path, input=b"", capture_output=True, timeout=20)
     assert_refusal(result, setting if setting != "PGTLS_UNSUPPORTED" else "PGTLS")
+    recovery = (b"PSEUDOLIFE_MCP_DATABASE_URL" if representable
+                else b"ask the maintainer to add support")
+    actionable = recovery in result.stdout
+    assert actionable, "recovery requires a setting the client does not support"
+    # The same connection with no unsupported ambient policy remains valid.
+    result = invoke(candidate, tmp_path, bank, ["--list"])
+    succeeded = result.returncode == 0
+    assert succeeded, "ambient policy guard rejected an explicit valid connection"
 
 
 @pytest.mark.parametrize("filename", ["postgresql.crt", "postgresql.key", "root.crl"])
-def test_implicit_pg_certificate_names_file_without_contents(candidate, tmp_path, filename):
+def test_implicit_pg_certificate_names_file_without_contents(candidate, tmp_path, bank, filename):
     env = environment(tmp_path)
     directory = tmp_path / ("appdata/postgresql" if os.name == "nt" else ".postgresql")
     directory.mkdir(parents=True)
@@ -209,6 +223,26 @@ def test_implicit_pg_certificate_names_file_without_contents(candidate, tmp_path
     result = subprocess.run([candidate, "invite", "--list", "--json"], env=env,
                             cwd=tmp_path, input=b"", capture_output=True, timeout=20)
     assert_refusal(result, filename)
+    actionable = b"ask the maintainer to add support" in result.stdout
+    assert actionable, "required certificate policy was bypassed in recovery advice"
+    (directory / filename).unlink()
+    result = invoke(candidate, tmp_path, bank, ["--list"])
+    succeeded = result.returncode == 0
+    assert succeeded, "certificate policy guard blocked a profile with no such policy"
+
+
+@pytest.mark.parametrize("option", ["sslcert", "sslkey", "sslcrl"])
+def test_unsupported_dsn_policy_keeps_required_policy(candidate, tmp_path, bank, option):
+    env = environment(tmp_path)
+    env["PSEUDOLIFE_MCP_DATABASE_URL"] = _bank.url(bank) + "?" + option + "=fixture-private-secret"
+    result = subprocess.run([candidate, "invite", "--list", "--json"], env=env,
+                            cwd=tmp_path, input=b"", capture_output=True, timeout=20)
+    assert_refusal(result, option)
+    actionable = b"ask the maintainer to add support" in result.stdout
+    assert actionable, "required DSN policy was bypassed in recovery advice"
+    result = invoke(candidate, tmp_path, bank, ["--list"])
+    succeeded = result.returncode == 0
+    assert succeeded, "DSN policy guard rejected an ordinary connection"
 
 
 @pytest.mark.parametrize("mode", ["invite", "pair"])

@@ -503,7 +503,7 @@
     "rust/shim/src/cli/maintainer/top_help.txt": "206d1f9cb021ff363cafb643157eeedbf9a5dfe2d744dd9578e7594acfa0dc12",
     "rust/shim/src/cli/migrate_flat.rs": "1e9bfbee60968a41c38a0b25677399ce059a6fa1d3872af5f7352c649f467cf4",
     "rust/shim/src/cli/move_cli.rs": "094da07c5606512b93cf57916a36101293ed706d353f382f85b61389ab87f8a9",
-    "rust/shim/src/cli/pairing/invite.rs": "e2a77a53ea50d8d7621635bf61a68ace9790179604a6b7d831a0cd9a77567073",
+    "rust/shim/src/cli/pairing/invite.rs": "f843af366b258daee9ee20b065512a03e499cf81e0fc7d1bdec312f004f15ea4",
     "rust/shim/src/cli/pairing/invite_db.rs": "142fa40df9d5752bd6cbfe257185883d512a6ec4a06ee4462db91f2b6a1d06f2",
     "rust/shim/src/cli/pairing/invite_help.txt": "b5bdd61622278b0de84f4720b91b6864142ebe6ebc4601c23dc2f2da057fd6da",
     "rust/shim/src/cli/pairing/invite_transport.rs": "ee33b2cdbc699a7bff1ed7091912b438cb67874776e3ee2dc23c9974880e4722",
@@ -13350,7 +13350,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/pairing/invite.rs:1069",
+          "location": "rust/shim/src/cli/pairing/invite.rs:1090",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13366,7 +13366,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/pairing/invite.rs:1192",
+          "location": "rust/shim/src/cli/pairing/invite.rs:1213",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13761,7 +13761,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/pairing/invite.rs:1069",
+          "location": "rust/shim/src/cli/pairing/invite.rs:1090",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -81606,7 +81606,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "rust/shim/src/cli/pairing/invite.rs:1192",
+      "location": "rust/shim/src/cli/pairing/invite.rs:1213",
       "name": "CoordinationConfig.not_owner_principals",
       "shape": {
         "channel": "config",
@@ -123516,25 +123516,25 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/pairing/invite.rs:1069",
+      "location": "rust/shim/src/cli/pairing/invite.rs:1090",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/pairing/invite.rs:1069",
+      "location": "rust/shim/src/cli/pairing/invite.rs:1090",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/pairing/invite.rs:1192",
+      "location": "rust/shim/src/cli/pairing/invite.rs:1213",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/pairing/invite.rs:1192",
+      "location": "rust/shim/src/cli/pairing/invite.rs:1213",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.not_owner_principals"
     },
