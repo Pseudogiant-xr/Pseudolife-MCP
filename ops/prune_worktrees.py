@@ -32,6 +32,11 @@ symlink or reparse point, no ``.cargo/config.toml`` pins it as
 retry). Harness-managed checkouts (``.claude/worktrees``, ``.t3/worktrees``,
 ``.codex/worktrees``, temp dirs) are never removed.
 
+Sweep mode also judges cargo targets by the checkouts their dep-info names
+(``--target-root``), standalone clones (``--clone-root``) and idle scratch
+dirs (``--scratch-root``); see the section "cargo targets, standalone
+clones, scratch dirs" below.
+
 Every removal appends a JSON line to ``~/.pseudolife-mcp/retention-ledger.jsonl``.
 Roots come from flags or ``~/.pseudolife-mcp/retention.toml``; nothing is
 configured by default. Runbook: docs/dev/worktree-retention.md.

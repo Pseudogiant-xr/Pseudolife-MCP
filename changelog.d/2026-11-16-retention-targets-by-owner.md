@@ -1,0 +1,9 @@
+### Added (2026-11-16 — the retention sweep frees build trees of finished work, judged by exact markers)
+- `ops/prune_worktrees.py --target-root <dir>` judges each cargo target dir by the checkouts its dep-info files name. It deletes the target once every owner is gone or merged and nothing in it was written for 24 hours (`--target-grace-hours`). A target with no owner found waits 14 days idle (`--unowned-target-days`). A build holding cargo's lock keeps it, and anything cargo's layout does not explain (copied binaries, mutation-test sources) stays and is named.
+- A target needs cargo's own `.rustc_info.json` beside its `CACHEDIR.TAG`, because a uv virtual environment carries the same tag.
+- `--clone-root <dir>` deletes a standalone git clone whose HEAD and every local branch are commits of the main repository on `origin/master`. The clone must also have no stash, be clean and idle, hold no link, and have a config that runs no program. A clone's remote may be a bundle, so "pushed" is never the test.
+- `--scratch-root <dir>` deletes a scratch dir idle for 7 days (`--scratch-grace-days`). Checkouts, virtual environments, logs and evidence are always kept, and so is the `claude` scratchpad root. The system temp dir may be named as a scratch root.
+- The same roots and periods can be set in `~/.pseudolife-mcp/retention.toml` (`target_roots`, `clone_roots`, `scratch_roots`, `target_grace_hours`, `unowned_target_days`, `scratch_grace_days`).
+- Every deletion is still a dry run without `--apply`, and each one adds a ledger line.
+- Every git call the script makes now runs with `core.fsmonitor` off, and git's read-only object files no longer leave a deletion half done on Windows.
+- Nothing is registered or scheduled by this change.

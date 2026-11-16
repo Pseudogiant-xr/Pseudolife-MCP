@@ -122,17 +122,99 @@ A cache root that contains a git worktree, or sits inside one, is skipped
 whole. A drive root, the home dir or any of its ancestors is never used as
 a root, whatever the configuration says.
 
+### Target rule (cargo targets judged by their owners)
+
+A child of a `--target-root` is a candidate only when it carries cargo's
+own markers: a `CACHEDIR.TAG` with cargo's signature **and** a
+`.rustc_info.json`. A uv virtual environment carries the same tag, so the
+tag alone proves nothing, and any other child is only counted. A target is
+deleted when all of these hold:
+
+- **Every owner is finished.** Its owners are the checkouts its dep-info
+  files (`<profile>/*.d`, `<profile>/deps/*.d`) name as sources. An owner
+  counts as finished when one of these is true:
+  - **Gone:** the source path no longer exists, and no existing ancestor of
+    it is a checkout.
+  - **Merged:** it is a worktree or clone whose HEAD, and for a clone every
+    local branch, is a commit of the main repository on `origin/master`.
+
+  The main checkout is never finished. Paths under the cargo or rustup
+  home, inside the target itself, or on a drive this machine does not have
+  name no owner.
+- **Grace:** nothing in it, file or dir, was written within
+  `--target-grace-hours` (default 24).
+- **No owner found:** a target whose dep-info names no owner is deleted
+  only after `--unowned-target-days` (default 14) idle.
+- **No build holds it:** no build holds cargo's lock on any profile's
+  `.cargo-lock`. The script takes the lock without waiting and releases it
+  at once.
+- **The usual cache checks:** it is not pinned by a `.cargo/config.toml`,
+  and it holds no link, junction or mount point.
+
+Only the entries cargo's layout explains are deleted: profile dirs (which
+carry `.fingerprint` or `.cargo-lock`), target-triple dirs of profiles,
+`tmp`, `doc`, `package`, `CACHEDIR.TAG` and `.rustc_info.json`. Anything
+else, such as copied candidate binaries or mutation-test sources, stays,
+and the row names it.
+
+The home dir may be a target root, because WSL workers leave targets
+directly in it and only marked children are ever candidates. A drive root
+or anything above the home never is.
+
+### Clone rule (standalone checkouts)
+
+A child of a `--clone-root` with its own `.git` dir, and not a registered
+worktree, is deleted (renamed aside, then removed) when all of these hold:
+
+- Its HEAD and every local branch are commits of the main repository on
+  `origin/master`. A clone's remote may be a bundle or another machine's
+  path, so "pushed" means nothing here; a commit the main repository lacks
+  exists only in that clone.
+- It has no stash, and it is clean by the worktree rule's whitelist.
+- It holds no link, has no keep marker, and nothing in it was written for
+  the worktree grace period.
+- No running process names it.
+- Its own `.git/config` sets nothing under which git runs a program or
+  reads another file (`core.fsmonitor`, `core.hooksPath`, filters, diff
+  textconv or command, merge drivers, `include`, `credential`). A clone
+  that sets one is kept and never inspected further. Every git call the
+  script makes also turns `core.fsmonitor` off.
+
+The home dir may be a clone root for the same reason as a target root.
+
+### Scratch rule
+
+Each direct child of a `--scratch-root` is deleted when all of these hold:
+
+- It has been idle (no file or dir written) for `--scratch-grace-days`
+  (default 7).
+- It holds no link.
+- No running process names it.
+- It holds nothing kept for ever: no `.git` (a checkout), no `pyvenv.cfg`
+  (a virtual environment), no `*.log` or `*.jsonl` file, and nothing named
+  for evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included.
+  Logs and evidence are kept for ever by the maintainer's ruling of
+  16 November 2026.
+- It is not `claude`, the Claude Code scratchpad root.
+
+The system temp dir may be named as a scratch root on purpose. It stays
+protected for every other class.
+
+When the process list cannot be read, no clone or scratch dir is deleted.
+
 ### Never touched
 
 The script touches nothing outside a configured root. It never touches
 harness-managed checkouts (`.claude/worktrees`, `.t3/worktrees`,
-`.codex/worktrees`) or temp dirs, even when one is configured as a root.
-The report only counts what it left alone there.
+`.codex/worktrees`) or temp dirs, even when one is configured as a root,
+except a temp dir named as a scratch root. The report only counts what it
+left alone there.
 
 ## Configuration
 
-Roots come from flags (`--repo`, `--worktree-root` and `--cache-root`, the
-last two repeatable) or from a private file. Flags win. The tree ships no
+Roots come from flags or from a private file, and flags win. The flags are
+`--repo`, `--worktree-root`, `--cache-root`, `--target-root`, `--clone-root`
+and `--scratch-root`; every root flag is repeatable. The tree ships no
 machine-specific defaults. With no roots configured, a sweep prints how to
 configure them and exits 0 without touching anything.
 
@@ -142,9 +224,18 @@ configure them and exits 0 without touching anything.
 repo = "<main checkout>"
 worktree_roots = ["<dir holding your worktrees>"]
 cache_roots = ["<dir holding one CARGO_TARGET_DIR slice per branch>"]
+target_roots = ["<dir holding cargo target dirs, judged by owner>"]
+clone_roots = ["<dir holding standalone clones>"]
+scratch_roots = ["<dir holding scratch dirs>"]
 worktree_grace_days = 3
 cache_grace_days = 7
+target_grace_hours = 24
+unowned_target_days = 14
+scratch_grace_days = 7
 ```
+
+A dir listed under both a cache root and a target root keeps the cache rule.
+Use one or the other for a given root.
 
 `--repo` defaults to the checkout the script lives in.
 
