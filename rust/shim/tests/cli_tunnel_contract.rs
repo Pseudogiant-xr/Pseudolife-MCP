@@ -251,7 +251,7 @@ fn the_hidden_bridge_refuses_plainly_without_what_it_needs() {
         &["shim", "--profile", "dot", "--profile-dir", &dir],
         &[],
         &format!(
-            "{}; `pseudolife-mcp tunnel status --profile dot` names the cause\n",
+            "{}; `pseudolife-mcp tunnel status --profile dot --profile-dir {dir}` names the cause\n",
             UNAVAILABLE.trim_end()
         ),
     );

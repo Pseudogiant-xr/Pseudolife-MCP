@@ -55,7 +55,11 @@ const SHIM_STOPPED: &str = "tunnel bridge: the stdio shim stopped responding and
 const RECEIPT_FAILED: &str = "tunnel bridge: a verification receipt could not be saved; the session continues, and `pseudolife-mcp tunnel verify` can be repeated";
 const SATURATED: &str = "tunnel bridge: too many requests are unanswered to check verification calls safely; this session writes no more receipts, and a new session can verify";
 const UNPARSED: &str = "tunnel bridge: the client sent a line this bridge cannot read; this session writes no more receipts, and a new session can verify";
-const LINE_TOO_LONG: &str = "tunnel bridge: a message longer than this bridge relays arrived (4 MiB from the client, 32 MiB from the shim), so the session was ended";
+/// The lines that end a session for an overlong line; each names its side
+/// and the cap in bytes (a test checks they match PARSE_LIMIT and
+/// LINE_LIMIT).
+const CLIENT_TOO_LONG: &str = "tunnel bridge: the client sent a line longer than 4194304 bytes, this bridge's cap on a request line (the daemon takes a request body of at most 4 MiB once compacted), so the session was ended";
+const SHIM_TOO_LONG: &str = "tunnel bridge: the stdio shim sent a line longer than 33554432 bytes, this bridge's cap on an answer line, so the session was ended";
 /// Changed on purpose from the Python bridge's "run pseudolife-mcp tunnel
 /// doctor": the native client has no `tunnel doctor` yet.
 const DISCOVERY_FAILED: &str =
@@ -131,12 +135,15 @@ fn inherited(name: &OsStr) -> bool {
 const PARSE_LIMIT: usize = 4 * 1024 * 1024;
 /// The longest line the bridge relays from the shim, which leaves room for
 /// long answers while one endless line can never grow the bridge's memory
-/// past it. From the client the cap is PARSE_LIMIT: the daemon refuses an MCP
-/// request body over 4 MiB (`daemon/src/mcp/mod.rs`, `BODY_LIMIT`), so no
-/// request it would answer is longer, and every client line the bridge
-/// relays is one it could parse. The worst case held at once is then about
-/// (QUEUE + 2) lines a direction: some 264 MiB from the client and 2.1 GiB
-/// from the shim, plus HELD_LIMIT listings of 4 MiB.
+/// past it. From the client the cap is PARSE_LIMIT on the raw line, newline
+/// included, so every client line the bridge relays is one it could parse.
+/// The daemon refuses an MCP request body over 4 MiB once the shim has
+/// compacted it (`daemon/src/mcp/mod.rs`, `BODY_LIMIT`), so a compact
+/// request it accepts fits; a padded or heavily escaped one is cut off
+/// sooner, and ends the session (the simple, safe end for a peer that sends
+/// one). Counted by line length, not allocation, the worst case held at once
+/// is about (QUEUE + 2) lines a direction: some 264 MiB from the client and
+/// 2.1 GiB from the shim, plus HELD_LIMIT listings of 4 MiB.
 const LINE_LIMIT: usize = 32 * 1024 * 1024;
 /// Calls awaiting their answer, client requests in flight, and `tools/list`
 /// requests held by the gate.
@@ -198,7 +205,13 @@ struct Start {
 fn prepare(values: &[OsString]) -> Result<Start, String> {
     let (name, directory) = parse(values).ok_or(USAGE)?;
     let root = store::store_root(directory.as_deref()).map_err(|_| store::UNSAFE_ROOT)?;
-    let status = format!("`pseudolife-mcp tunnel status --profile {name}` names the cause");
+    // The store the bridge was started with, so the hint looks in it.
+    let store_option = directory
+        .as_deref()
+        .map(|directory| format!(" --profile-dir {directory}"))
+        .unwrap_or_default();
+    let command = format!("pseudolife-mcp tunnel status --profile {name}{store_option}");
+    let status = format!("`{command}` names the cause");
     let profile = match store::load(&root, &name) {
         Ok(profile) => profile,
         Err(Fail::Tunnel(message)) => return Err(format!("{message}; {status}")),
@@ -208,14 +221,14 @@ fn prepare(values: &[OsString]) -> Result<Start, String> {
     // (store::validate refuses one without them).
     if profile.state != "ready" {
         return Err(format!(
-            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `pseudolife-mcp tunnel status --profile {name}` shows what is missing"
+            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `{command}` shows what is missing"
         ));
     }
     // The profile's store admits an https address with a path; the shim
     // takes only an origin, and would exit without a word.
     if crate::daemon_url::validate(&profile.daemon_url).is_err() {
         return Err(format!(
-            "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs, and this client cannot change a saved profile yet; `pseudolife-mcp tunnel status --profile {name}` names its file"
+            "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs, and this client cannot change a saved profile yet; `{command}` names its file"
         ));
     }
     Ok(Start { root, profile })
@@ -341,8 +354,9 @@ async fn serve(start: Start) -> ExitCode {
     let spoke = match relayed {
         Ok(spoke) => spoke,
         Err(error) => {
+            // A constant line naming the side and the cap in bytes.
             if error.kind() == std::io::ErrorKind::InvalidData {
-                crate::stderrln!("{LINE_TOO_LONG}");
+                crate::stderrln!("{error}");
             }
             true
         }
@@ -433,8 +447,8 @@ struct Relay {
     stopping: CancellationToken,
     /// The shim wrote at least one line.
     shim_spoke: AtomicBool,
-    /// A line longer than LINE_LIMIT arrived on either side.
-    too_long: AtomicBool,
+    /// The line that ended the session for its length, naming the side.
+    too_long: std::sync::OnceLock<&'static str>,
 }
 
 impl Relay {
@@ -475,7 +489,8 @@ impl Relay {
 /// byte for byte, until the shim's output ends; whether the shim wrote a
 /// line. The observer only reads; the gate holds or answers `tools/list`
 /// when it is enabled, and otherwise passes every line through. A line over
-/// LINE_LIMIT on either side ends the session (`InvalidData`).
+/// PARSE_LIMIT from the client or LINE_LIMIT from the shim ends the session
+/// (`InvalidData`, carrying the line to say).
 ///
 /// Each direction has its own reader, writer and bounded queue, so each
 /// pushes back only on its own source: a shim that is not reading its input
@@ -505,7 +520,7 @@ where
         shim_closed: CancellationToken::new(),
         stopping: CancellationToken::new(),
         shim_spoke: AtomicBool::new(false),
-        too_long: AtomicBool::new(false),
+        too_long: std::sync::OnceLock::new(),
     };
     let (to_client, client_queue) = mpsc::channel(QUEUE);
     let (to_shim, shim_queue) = mpsc::channel(QUEUE);
@@ -538,8 +553,8 @@ where
         // What is queued is written, unless a side stopped reading for good.
         let _ = tokio::time::timeout(CHILD_EXIT, &mut rest).await;
     }
-    if relay.too_long.load(Ordering::SeqCst) {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+    if let Some(line) = relay.too_long.get() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, *line));
     }
     result.map(|()| relay.shim_spoke.load(Ordering::SeqCst))
 }
@@ -566,7 +581,7 @@ async fn inbound<CI: AsyncRead + Unpin>(
             // newline, even one an interrupted read began.
             Ok(Read::End) | Err(_) => true,
             Ok(Read::TooLong) => {
-                relay.too_long.store(true, Ordering::SeqCst);
+                let _ = relay.too_long.set(CLIENT_TOO_LONG);
                 relay.stopping.cancel();
                 break;
             }
@@ -651,7 +666,7 @@ async fn outbound<SO: AsyncRead + Unpin>(
                     Ok(Read::End) => done = Some(Ok(())),
                     Err(error) => done = Some(Err(error)),
                     Ok(Read::TooLong) => {
-                        relay.too_long.store(true, Ordering::SeqCst);
+                        let _ = relay.too_long.set(SHIM_TOO_LONG);
                         return Ok(());
                     }
                 }
@@ -980,7 +995,8 @@ fn private_sink() -> Sink {
     Arc::new(|path, bytes| crate::board::state::atomic_write(path, bytes, None).map_err(|_| ()))
 }
 
-/// Says once per bridge that a receipt could not be saved.
+/// Says each of the observer's lines (a receipt not saved, receipts off for
+/// the session) once per bridge.
 #[derive(Clone)]
 pub(super) struct Reporter {
     said: Arc<std::sync::Mutex<HashSet<&'static str>>>,

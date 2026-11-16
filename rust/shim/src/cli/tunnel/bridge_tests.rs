@@ -1108,8 +1108,10 @@ async fn a_line_past_the_limit_ends_the_session() {
     let ended = tokio::time::timeout(Duration::from_secs(60), w.relayed)
         .await
         .expect("the relay ended")
-        .unwrap();
-    assert_eq!(ended.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(ended.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(ended.to_string(), CLIENT_TOO_LONG);
     let mut received = Vec::new();
     w.fake_reader.read_to_end(&mut received).await.unwrap();
     assert!(received.is_empty(), "part of the line was relayed");
@@ -1128,8 +1130,10 @@ async fn a_line_past_the_limit_ends_the_session() {
     let ended = tokio::time::timeout(Duration::from_secs(60), w.relayed)
         .await
         .expect("the relay ended")
-        .unwrap();
-    assert_eq!(ended.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(ended.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(ended.to_string(), SHIM_TOO_LONG);
     let mut out = Vec::new();
     w.client_reader.read_to_end(&mut out).await.unwrap();
     assert!(out.is_empty(), "part of the line was relayed");
@@ -1620,6 +1624,35 @@ fn the_child_starts_from_a_cleared_environment() {
     assert!(environment.lines().any(|line| line == "PATH=/usr/bin:/bin"));
 }
 
+/// The lines that end a session for its length name the cap they enforce,
+/// in bytes.
+#[test]
+fn the_overlong_line_notes_name_their_caps() {
+    assert!(CLIENT_TOO_LONG.contains(&format!(" {PARSE_LIMIT} bytes")));
+    assert!(SHIM_TOO_LONG.contains(&format!(" {LINE_LIMIT} bytes")));
+}
+
+/// An answer between PARSE_LIMIT and LINE_LIMIT crosses from the shim
+/// unchanged: the shim's cap is the larger one.
+#[tokio::test]
+async fn a_long_answer_under_the_shim_cap_crosses_unchanged() {
+    let request = search(1, "x");
+    let long = format!(
+        "{}\n",
+        json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "a".repeat(PARSE_LIMIT + (1 << 20))}]}})
+    );
+    let answer = long.clone();
+    let (out, _) = session(
+        request.as_bytes(),
+        None,
+        Gate::new(false),
+        Box::new(move |_: &Map<String, Value>| vec![answer.clone()]),
+    )
+    .await;
+    assert_eq!(out.len(), long.len());
+    assert!(out == long.as_bytes(), "the long answer changed");
+}
+
 #[test]
 fn a_shim_that_fails_before_answering_is_named_once() {
     assert_eq!(silent_exit(1, false, false), Some(SHIM_SILENT));
@@ -1656,7 +1689,7 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     assert_eq!(
         prepare(&argv(&["--profile", "dot", "--profile-dir", dir])).err(),
         Some(format!(
-            "{}; `pseudolife-mcp tunnel status --profile dot` names the cause",
+            "{}; `pseudolife-mcp tunnel status --profile dot --profile-dir {dir}` names the cause",
             store::UNAVAILABLE
         ))
     );
@@ -1670,7 +1703,9 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     );
     assert_eq!(
         prepare(&argv(&["--profile-dir", dir, "--profile", "draft"])).err(),
-        Some("tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `pseudolife-mcp tunnel status --profile draft` shows what is missing".to_owned())
+        Some(format!(
+            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `pseudolife-mcp tunnel status --profile draft --profile-dir {dir}` shows what is missing"
+        ))
     );
     // The store admits an https address with a path; the shim would not.
     store.put(
@@ -1684,7 +1719,10 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
         .err()
         .unwrap();
     assert!(refused.contains("not an http(s) origin"), "{refused}");
-    assert!(refused.contains("tunnel status --profile web"), "{refused}");
+    assert!(
+        refused.contains(&format!("tunnel status --profile web --profile-dir {dir}")),
+        "{refused}"
+    );
     store.profile("dot");
     let start = prepare(&argv(&["--profile-dir", dir, "--profile", "dot"])).unwrap();
     assert_eq!(start.root, Path::new(dir));
@@ -1696,5 +1734,8 @@ fn only_saved_nonce_shapes_are_compared() {
     assert!(nonce_shaped(&NONCE));
     assert!(nonce_shaped(&format!("query=\"{NONCE}\"")));
     assert!(!nonce_shaped(&NONCE[..31]));
-    assert!(!nonce_shaped(&NONCE.to_uppercase()));
+    assert!(!nonce_shaped(&format!(
+        "ABCDEF{}",
+        NONCE[6..].to_uppercase()
+    )));
 }
