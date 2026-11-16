@@ -12,9 +12,12 @@ in the memory bank (search "dev machines homelab"), never in this tree.
 ## The machines
 
 - **The maintainer's Windows host.** Interactive work and targeted test
-  runs. Its full suites run in local WSL (`ops/wsl-suite.ps1`), because a
-  native Windows full suite's hook-script tests start Git Bash processes
-  in bursts that stall mouse input.
+  runs. Its full suites run on the Linux box (`ops/remote-suite.ps1`, or
+  `python ops/integrate.py suite` for a batch), and in local WSL only while
+  the maintainer has said this PC is available ("Sharing"), because a full
+  suite here overloads the desktop he is using; never natively, because a
+  native Windows full suite's hook-script tests start Git Bash processes in
+  bursts that stall mouse input.
 - **Linux dev boxes** (the homelab "box" and its sibling, guests of one
   hypervisor). Linux full suites, Rust builds and tests on Linux, and long
   or CPU-heavy Linux work that would otherwise load the Windows host.
@@ -68,14 +71,24 @@ only the machine it dispatches to.
 
 ## Suite launchers
 
-- **`ops/remote-suite.ps1`** tests the committed HEAD on the first free
-  machine, local WSL or the box over SSH, and waits for whichever frees
-  first; `PSEUDOLIFE_SUITE_WHERE=local|remote` forces one, and a remote run
-  needs the commit pushed. Its log and a JSON result (machine, commit, exit
-  code, pytest's summary line) land in `~/.pseudolife-mcp/suite-results`.
-  It does not dispatch to the Windows VM.
+- **`ops/remote-suite.ps1`** tests the committed HEAD on the box over
+  SSH. The box's clone fetches a pushed commit from origin; an unpushed
+  one travels inside the dispatch as a git bundle of what `origin/master`
+  lacks, so nothing is pushed for a run. With a box configured, the box is the
+  only candidate unless the maintainer has said this PC is available (the
+  switch below): then the box comes first and local WSL takes the overflow,
+  or the run when the box cannot be probed. Without that statement it
+  waits for the box, saying so once a minute, and refuses a box it cannot
+  probe. `PSEUDOLIFE_SUITE_WHERE=local|remote` forces a
+  machine, and `local` says it overrides the rule. With no box configured,
+  local WSL runs as before. The first lines name the machine and why. Its
+  log and a JSON result (machine, commit, exit code, pytest's summary line,
+  whether the real native client ran) land in
+  `~/.pseudolife-mcp/suite-results`. It does not dispatch to the Windows VM.
 - **`ops/wsl-suite.ps1`** tests the worktree's committed HEAD from a copy
   on WSL's own filesystem and refuses uncommitted changes to tracked files.
+  With a box configured and no availability statement it refuses a full
+  run (not a targeted one), naming the remote command.
   It keeps a uv environment per checkout under `~/.venvs/pseudolife` in WSL
   and copies under `~/.cache/pseudolife-suite/work`; each run prunes those
   unused for 3 days or past the 8 most recent, under their locks
@@ -100,12 +113,47 @@ only the machine it dispatches to.
   machine, set in its private `full-suite.lease` (`PSEUDOLIFE_SUITE_LEASE`
   overrides). Without that file a run falls back to `full-suite`, the
   Windows host's lease, and the board mislabels it.
+- **The real native client.** `PSEUDOLIFE_SUITE_NATIVE_CLIENT=1` makes
+  `ops/wsl-suite.sh` build `pseudolife-stdio` on the machine the suite runs
+  on, as the hosted `test` lane does, and run the tests that need it
+  (`docs/dev/merge-batches.md` "Validating it"). That machine needs
+  cargo through rustup, flock, and 8 GB free where the build cache lives
+  (`~/.cache/pseudolife-suite/cargo-target`, or
+  `PSEUDOLIFE_SUITE_CARGO_TARGET_DIR` set there; a general
+  `CARGO_TARGET_DIR` is not used). `ops/remote-suite.ps1` turns it on by
+  itself for an `integrate/*` branch. Every run prints `wsl-suite: real
+  client: yes|no` before pytest starts.
 
 ## Sharing
 
 The rules are in `CLAUDE.md` ("Sharing the machine"); this section holds the
 knobs and procedures they point at.
 
+- **This PC's availability for full suites.** It is the maintainer's
+  statement only: the file `~/.pseudolife-mcp/locks/pc-available` on the
+  Windows host, which the conductor writes and removes on the maintainer's
+  word. The launchers only read it (`ops/suite-availability.ps1`) and never
+  guess from processes, the GPU, input or the hour. An empty file (blank
+  lines at most) means available until it is removed. One line
+  `until=<ISO 8601 time with an offset>` means available until then.
+  Anything else reads as not available, and the run says why: a comment
+  (even a commented-out `until=`), an expired time or an unreadable file.
+  To set it
+  until 07:00 AEDT, and to clear it:
+
+  ```powershell
+  Set-Content -Path "$HOME\.pseudolife-mcp\locks\pc-available" -Value 'until=2026-11-17T07:00+11:00'
+  Remove-Item -Path "$HOME\.pseudolife-mcp\locks\pc-available"
+  ```
+
+- **A shared Rust target directory can hand you another checkout's
+  binary.** Cargo keys a workspace package by its path inside the
+  workspace and judges it fresh by file times, so a build in one worktree
+  can reuse units another worktree left in the same `CARGO_TARGET_DIR`
+  and print `Finished` with that worktree's code (reproduced 16 November
+  2026). Share a target only for third-party crates you never test against
+  a specific checkout, or `cargo clean -p` your workspace's packages when
+  you switch, as the suite launchers' native-client build does.
 - **Suite lock switches.** `PSEUDOLIFE_SUITE_LOCK=fail` exits instead of
   queueing, `=off` skips the lock (the CI default), and targeted runs never
   lock. `PSEUDOLIFE_SUITE_SLOTS` stays at 1 on the Windows host.
