@@ -22,8 +22,8 @@ const DETACHED: &str = "native_detached_child_fixture";
 #[cfg(windows)]
 const ORDINARY: &str = "native_ordinary_child_fixture";
 
-// Runtime selection and pruning SHA-256-verify the installed binary about
-// eleven times per run, in an unoptimized build. Measured 16 November 2026 in
+// Installing, launching and pruning SHA-256-verify the whole installed binary
+// 13 times per run, in an unoptimized build. Measured 16 November 2026 in
 // WSL on an 8-core host: installing the 196 MB debug test binary itself cost
 // one quiet run 36 s of CPU. Pinned to one core beside three busy loops, every
 // run failed "fixture readiness timed out" at 43-45 s (hosted #1605: 37 s);
