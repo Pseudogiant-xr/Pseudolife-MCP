@@ -466,6 +466,33 @@ mod posix {
     }
 
     #[test]
+    fn a_remembered_link_never_skips_the_checks_of_another_entry_for_it() {
+        // `a/l` and `shared/l` are one symlink (a hard link) with one
+        // absolute target, so both entries share one key. `a/l` is accepted
+        // first; `shared/l` sits in a folder others may write, and the walk
+        // must still refuse it there (#1644 verifier, F2).
+        let scratch = Scratch::new("shared-key");
+        let real = scratch.0.join("real");
+        let a = scratch.0.join("a");
+        let shared = scratch.0.join("shared");
+        dir(&real);
+        dir(&a);
+        dir(&shared);
+        symlink(&real, a.join("l")).unwrap();
+        fs::hard_link(a.join("l"), shared.join("l")).unwrap();
+        symlink(a.join("l"), scratch.0.join("outer")).unwrap();
+        symlink(shared.join("l"), real.join("inner")).unwrap();
+        mode(&shared, 0o777);
+        let refusal = check_ancestors(&scratch.0.join("outer/inner/file")).unwrap_err();
+        assert_eq!(refusal.element, shared.join("l"), "{refusal}");
+        assert!(
+            matches!(*refusal.cause, Cause::HolderWritable { .. }),
+            "{refusal}"
+        );
+        mode(&shared, 0o700);
+    }
+
+    #[test]
     fn a_token_file_that_is_itself_a_link_is_still_refused() {
         // T6: the leaf rule is unchanged.
         let scratch = Scratch::new("leaf");
@@ -559,22 +586,48 @@ mod windows {
 
     #[test]
     fn a_relative_target_is_read_against_its_folders_real_path() {
-        use crate::credentials::windows_security::lexical_for_test;
-        // The folder's real path (GetFinalPathNameByHandleW) joined to the
-        // link's text, `..` taken against that real path (security review of
-        // 14973a30d, finding 3).
-        for (joined, expected) in [
-            (r"\\?\E:\real\..\x", r"\\?\E:\x"),
-            (r"\\?\E:\real\.\a\..\..\x", r"\\?\E:\x"),
-            (r"\\?\E:\..\x", r"\\?\E:\x"),
-            (r"\\?\UNC\server\share\a\..\b", r"\\?\UNC\server\share\b"),
+        use crate::credentials::windows_security::resolve_relative_for_test;
+        // The folder's real path (GetFinalPathNameByHandleW) with the link's
+        // text applied part by part, as Windows applies it (security review
+        // of 14973a30d, finding 3; verifier of df15d6875, N-c).
+        for (real, target, expected) in [
+            (r"\\?\E:\real", r"..\x", Some(r"\\?\E:\x")),
+            (r"\\?\E:\real", r".\a\..\..\x", Some(r"\\?\E:\x")),
+            (r"\\?\E:\", r"..\x", Some(r"\\?\E:\x")),
+            (
+                r"\\?\UNC\server\share\a",
+                r"..\b",
+                Some(r"\\?\UNC\server\share\b"),
+            ),
+            (r"\\?\E:\real\deep", r"\x", Some(r"\\?\E:\x")),
+            (r"\\?\E:\real", r"x.", Some(r"\\?\E:\real\x.")),
+            // `/` is no separator in a stored target, nor a valid NTFS name.
+            (r"\\?\E:\real", r"../x", None),
+            (r"\\?\E:\real", r"a\b/c", None),
         ] {
             assert_eq!(
-                lexical_for_test(Path::new(joined)),
-                PathBuf::from(expected),
-                "{joined}"
+                resolve_relative_for_test(Path::new(real), target),
+                expected.map(PathBuf::from),
+                "{real} + {target}"
             );
         }
+    }
+
+    #[test]
+    fn an_absolute_target_with_a_dot_or_slash_component_is_refused() {
+        // The walk would fold `.`/`..` or split at `/` where the link follows
+        // its name literally (verifier of df15d6875, N-c).
+        for name in [
+            r"\??\C:\a\..\b",
+            r"\??\C:\a\.\b",
+            r"\??\C:\a\b/c",
+            r"\??\UNC\server\share\..\other",
+            r"\??\Volume{0b6d2f44-0000-0000-0000-100000000000}\..\x",
+        ] {
+            assert_eq!(target_path_for_test(name, false), None, "{name}");
+        }
+        // A trailing dot in a name is a name, not a `.` component.
+        assert!(target_path_for_test(r"\??\C:\a\b.", false).is_some());
     }
 
     #[test]
@@ -591,7 +644,7 @@ mod windows {
         let users = "O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;BU)(A;;0x1200a9;;;WD)";
         assert_eq!(link_holder_distrust_sddl(users, Some(&me)), None);
         // Delete-child, WRITE_DAC or WRITE_OWNER for another account: refused.
-        for right in ["0x40", "WD", "WO", "GA", "FA"] {
+        for right in ["0x40", "SD", "WD", "WO", "GA", "FA"] {
             let sddl = format!("O:{me}D:P(A;OICI;FA;;;{me})(A;;{right};;;AU)");
             assert!(
                 matches!(

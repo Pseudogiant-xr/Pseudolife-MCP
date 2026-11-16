@@ -210,8 +210,17 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
     let target = if target.is_absolute() {
         target
     } else {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = target.as_os_str().encode_wide().collect();
         match final_path(&holder) {
-            Ok(real) => lexical(&real.join(&target)),
+            Ok(real) => match resolve_relative(&real, &wide) {
+                Some(resolved) => resolved,
+                None => {
+                    return Ok(PathEntry::Uncheckable(
+                        "a relative link target this client cannot check".into(),
+                    ));
+                }
+            },
             Err(error) => return Ok(PathEntry::Uncheckable(error.to_string())),
         }
     };
@@ -254,29 +263,48 @@ fn final_path(file: &File) -> io::Result<std::path::PathBuf> {
     }
 }
 
-/// `path` with `.` dropped and each `..` taken against the part before it,
-/// as Windows itself reads a relative link's target joined to the real
-/// path of its folder (which has no links left in it).
-fn lexical(path: &Path) -> std::path::PathBuf {
+/// A relative link target `wide` (UTF-16, as stored) resolved against
+/// `real`, the verbatim real path of the link's folder, the way Windows
+/// resolves it: split on `\` only, `.` dropped, each `..` taken against the
+/// part before it (never past the volume root), a leading `\` starting at
+/// the volume root. Each part is added as one name, so nothing is re-parsed
+/// or folded behind the walk's back. A part holding `/` (not a separator
+/// in a stored target, and not a valid NTFS name) is refused as `None`.
+fn resolve_relative(real: &Path, wide: &[u16]) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
     use std::path::Component;
-    let mut out = std::path::PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+    let (backslash, slash, dot) = (u16::from(b'\\'), u16::from(b'/'), u16::from(b'.'));
+    // The volume root: the prefix and root components of `real`.
+    let root: std::path::PathBuf = real
+        .components()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .collect();
+    let mut out = if wide.first() == Some(&backslash) {
+        root.clone()
+    } else {
+        real.to_path_buf()
+    };
+    for part in wide.split(|unit| *unit == backslash) {
+        if part.contains(&slash) {
+            return None;
+        }
+        match part {
+            [] => {}
+            [d] if *d == dot => {}
+            [d, e] if *d == dot && *e == dot => {
+                if out != root {
                     out.pop();
                 }
             }
-            other => out.push(other),
+            name => out.push(std::ffi::OsString::from_wide(name)),
         }
     }
-    out
+    Some(out)
 }
 
 #[cfg(test)]
-pub(crate) fn lexical_for_test(path: &Path) -> std::path::PathBuf {
-    lexical(path)
+pub(crate) fn resolve_relative_for_test(real: &Path, target: &str) -> Option<std::path::PathBuf> {
+    resolve_relative(real, &target.encode_utf16().collect::<Vec<_>>())
 }
 
 /// [`access_distrust`] over the owner and DACL read from `file`'s handle.
@@ -409,6 +437,16 @@ fn target_path(wide: &[u16], relative: bool) -> Option<std::path::PathBuf> {
         out.extend_from_slice(tail);
         std::path::PathBuf::from(std::ffi::OsString::from_wide(&out))
     };
+    // A component that is `.` or `..`, or holds `/`: the walk would fold or
+    // split it where the link follows it literally, so it is refused rather
+    // than guessed at.
+    let (backslash, slash, dot) = (u16::from(b'\\'), u16::from(b'/'), u16::from(b'.'));
+    if rest
+        .split(|unit| *unit == backslash)
+        .any(|part| part.contains(&slash) || part == [dot] || part == [dot, dot])
+    {
+        return None;
+    }
     if let Some(share) = rest.strip_prefix(units("UNC\\").as_slice()) {
         return (!share.is_empty()).then(|| verbatim("\\\\?\\UNC\\", share));
     }

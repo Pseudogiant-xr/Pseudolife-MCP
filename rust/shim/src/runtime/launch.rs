@@ -34,13 +34,14 @@ pub(super) fn pin_now(runtime: &Runtime) -> Result<fs::File> {
     verified(runtime, file)
 }
 
+/// What [`try_shared`] says when an update holds the runtime: its own advice.
+pub(super) const BUSY: &str = "the native runtime is busy (an update holds it); retry shortly";
+
 /// Take `file`'s shared lock only if nobody holds it exclusively now.
 pub(super) fn try_shared(file: &fs::File) -> Result<()> {
     match file.try_lock_shared() {
         Ok(()) => Ok(()),
-        Err(fs::TryLockError::WouldBlock) => {
-            Err("the native runtime is busy (an update holds it); retry shortly".into())
-        }
+        Err(fs::TryLockError::WouldBlock) => Err(BUSY.into()),
         Err(fs::TryLockError::Error(error)) => Err(io_error(error)),
     }
 }
@@ -92,6 +93,16 @@ pub(super) fn select_pin_with(
     Err("runtime selection changed repeatedly; retry after the update finishes".into())
 }
 
+/// The line a runtime child prints when it cannot pin itself: the advice
+/// once, since the busy refusal carries its own.
+pub(super) fn pin_failure_line(error: &str) -> String {
+    if error == BUSY {
+        format!("pseudolife-mcp: {error}")
+    } else {
+        format!("pseudolife-mcp: {error}; retry after the update finishes")
+    }
+}
+
 /// Call before dispatching *any* CLI mode. A runtime executable pins itself
 /// and returns None; only the stable launcher selects and runs another binary.
 pub fn maybe_launch() -> Option<u8> {
@@ -136,7 +147,7 @@ pub fn maybe_launch() -> Option<u8> {
                     let _ = RUNNING_LOCK.set(lock);
                 }
                 Err(error) => {
-                    crate::stderrln!("pseudolife-mcp: {error}; retry after the update finishes");
+                    crate::stderrln!("{}", pin_failure_line(&error));
                     return Some(1);
                 }
             }

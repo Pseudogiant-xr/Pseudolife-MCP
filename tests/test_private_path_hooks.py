@@ -224,7 +224,25 @@ def test_only_the_clients_exact_marker_counts(base, tmp_path, hook):
     # An installed client with no verdict is named, with its own first line,
     # and one fix; it is not called a missing client (#1644 S2, S6d).
     assert f"the native client at {impostor} could not answer (ok)" in result.stderr, result.stderr
-    assert result.stderr.count("fix:") == 1 and "install" not in result.stderr, result.stderr
+    assert result.stderr.count("fix:") == 1, result.stderr
+    assert "fix: update the native client" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("hook", HOOKS)
+def test_a_clients_own_fix_is_relayed_and_none_is_added(base, tmp_path, hook):
+    """A client that cannot answer but names its own cause and fix (a
+    refused runtime folder, say) is relayed as it is, with no second fix
+    (#1644 verifier, F3)."""
+    file = _own_link_home(base)
+    stand_in = tmp_path / "stand-in"
+    stand_in.write_text("#!/bin/sh\necho 'runtime folder refused; fix: do the one thing' >&2\n"
+                        "exit 1\n")
+    stand_in.chmod(0o700)
+    result = _hook(hook, file, tmp_path, str(stand_in))
+    assert result.returncode == 1
+    assert (f"the native client at {stand_in} could not answer: runtime folder refused; "
+            "fix: do the one thing") in result.stderr, result.stderr
+    assert result.stderr.count("fix:") == 1, result.stderr
 
 
 @pytest.mark.parametrize("hook", HOOKS)

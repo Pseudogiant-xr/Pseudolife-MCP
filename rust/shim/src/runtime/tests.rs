@@ -680,8 +680,21 @@ fn the_pin_a_hook_mode_takes_never_waits_for_an_update() {
     update.lock().unwrap();
     let started = std::time::Instant::now();
     let error = super::launch::try_shared(&hook).unwrap_err();
-    assert!(error.contains("busy"), "{error}");
+    assert_eq!(error, super::launch::BUSY);
     assert!(started.elapsed() < std::time::Duration::from_secs(1));
     update.unlock().unwrap();
     super::launch::try_shared(&hook).unwrap();
+}
+
+#[test]
+fn a_runtime_that_cannot_pin_itself_gives_its_advice_once() {
+    // The busy refusal says "retry shortly" itself; adding "retry after the
+    // update finishes" gave two pieces of advice (#1644 verifier, N-e).
+    let busy = super::launch::pin_failure_line(super::launch::BUSY);
+    assert_eq!(busy.matches("retry").count(), 1, "{busy}");
+    let other = super::launch::pin_failure_line("could not open the usage lock");
+    assert_eq!(
+        other,
+        "pseudolife-mcp: could not open the usage lock; retry after the update finishes"
+    );
 }

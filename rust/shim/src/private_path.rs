@@ -334,11 +334,12 @@ pub fn hook_command(arguments: Vec<std::ffi::OsString>) -> u8 {
 /// nested links cost what they are, not what their prefixes repeat), the
 /// links being resolved (one met again is a loop), and how many links the
 /// check has followed. A link is remembered by its filesystem identity
-/// together with the destination it resolves to here, so an identity two
-/// entries share (a filesystem without stable file IDs, or a hard-linked
-/// symlink whose relative target resolves against each entry's own folder)
-/// can never excuse walking a different destination; an identity that is
-/// zero is never remembered at all.
+/// together with the destination it resolves to here: a hit only spares a
+/// second walk of that very destination, and the link's own checks (owner,
+/// holder, access list) run before the lookup every time. So an identity two
+/// entries share (a filesystem without stable file IDs, a hard-linked
+/// symlink) can never excuse walking a different destination, and a zero
+/// identity is keyed like any other.
 #[derive(Default)]
 struct Walk {
     accepted: HashSet<LinkKey>,
@@ -393,22 +394,19 @@ impl Walk {
                     Some(holder) => holder.join(&target),
                     None => target.clone(),
                 };
-                let key = (identity.1 != 0).then(|| (identity, resolved.clone()));
-                if key.as_ref().is_some_and(|key| self.accepted.contains(key)) {
+                // Only after the link's own checks above: a hit must never
+                // stand in for them.
+                let key = (identity, resolved.clone());
+                if self.accepted.contains(&key) {
                     return Ok(());
                 }
                 self.links += 1;
-                let looped = key
-                    .as_ref()
-                    .is_some_and(|key| !self.resolving.insert(key.clone()));
-                if self.links > MAX_LINKS || looped {
+                if self.links > MAX_LINKS || !self.resolving.insert(key.clone()) {
                     return refuse(Cause::TooManyLinks);
                 }
                 self.walk(&resolved)?;
-                if let Some(key) = key {
-                    self.resolving.remove(&key);
-                    self.accepted.insert(key);
-                }
+                self.resolving.remove(&key);
+                self.accepted.insert(key);
                 Ok(())
             }
             Ok(Entry::Other(tag)) => refuse(Cause::NotALink { tag }),

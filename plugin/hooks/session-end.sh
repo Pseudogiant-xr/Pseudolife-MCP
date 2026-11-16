@@ -22,8 +22,9 @@ private_path_trusted() {
         *)
             launcher=${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp} ;;
     esac
+    # Character sets are spelled out, never ranges (tests/test_hook_glob_ranges.py).
     case "$file" in
-        /*|[A-Za-z]:\\*|\\\\*) ;;
+        /*|[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz]:\\*|\\\\*) ;;
         *)
             printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a link, and a relative path cannot be checked; fix: name the file by its absolute path." >&2
             return 1 ;;
@@ -33,6 +34,9 @@ private_path_trusted() {
         return 1
     fi
     answer=$("$launcher" private-path-check "$file" </dev/null 2>&1)
+    # On purpose, stderr is folded into the answer: only this exact line with
+    # exit 0 counts, so a warning the client prints on a good run turns it
+    # into a refusal (fails closed) rather than being ignored.
     case $?:$answer in
         "0:pseudolife-private-path: trusted") return 0 ;;
         "1:pseudolife-private-path: refused: "*)
@@ -41,9 +45,14 @@ private_path_trusted() {
             return 1 ;;
     esac
     # Installed but no verdict (an older client, a busy runtime, a refused
-    # runtime folder): its own first line says why.
+    # runtime folder): relay its own first line, and its fix when it has one.
     first=${answer%%"$nl"*}
-    printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a link, and the native client at $launcher could not answer (${first:-no output}); fix: run '$launcher' private-path-check '$file' to see its cause, then retry." >&2
+    case $first in
+        *"fix:"*)
+            printf '%s\n' "pseudolife-mcp: not reading $file: the native client at $launcher could not answer: $first" >&2 ;;
+        *)
+            printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a link, and the native client at $launcher could not answer (${first:-no output}); fix: update the native client (rerun the installer)." >&2 ;;
+    esac
     return 1
 }
 
