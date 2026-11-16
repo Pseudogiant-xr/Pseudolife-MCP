@@ -161,21 +161,52 @@ fn task_xml(source: &str, program: &str, arguments: &str) -> Vec<u8> {
     bytes
 }
 
-/// A fake Task Scheduler. It answers only read-only queries and records
-/// every call; anything else fails the test.
+/// A fake Task Scheduler. It answers only the read-only all-tasks query,
+/// `schtasks /Query /XML`, and records every call; anything else fails the
+/// test. `names` lists the tasks as the old CSV listing did (first quoted
+/// field), each answered with `xml`, as `schtasks` pipes it: each
+/// definition after a `<!-- \name -->` comment, in single-byte text.
 struct Registry {
-    listing: Output,
-    xml: Vec<u8>,
+    code: i32,
+    answer: Vec<u8>,
     calls: RefCell<Vec<Vec<String>>>,
 }
 impl Registry {
-    fn new(code: i32, listing: &str, xml: Vec<u8>) -> Self {
+    fn new(code: i32, names: &str, xml: Vec<u8>) -> Self {
+        let text = if xml.starts_with(&[0xff, 0xfe]) {
+            let units: Vec<u16> = xml[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&units)
+        } else {
+            String::from_utf8_lossy(&xml).into_owned()
+        };
+        let mut seen: Vec<String> = Vec::new();
+        let mut answer = String::from("\r\n<Tasks>\r\n");
+        for line in names.lines() {
+            let Some(name) = line.strip_prefix('"').and_then(|r| r.split('"').next()) else {
+                continue;
+            };
+            if seen.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+                continue;
+            }
+            seen.push(name.to_owned());
+            let body = if product_task(name) {
+                text.clone()
+            } else {
+                "<Task><Actions><Exec><Command>C:\\Windows\\System32\\cmd.exe</Command><Arguments>/c exit 0</Arguments></Exec></Actions></Task>\r\n".to_owned()
+            };
+            answer.push_str(&format!("\r\n\r\n<!-- {name} -->\r\n{body}"));
+        }
+        answer.push_str("</Tasks>\r\n");
         Self {
-            listing: Output {
-                code,
-                bytes: listing.as_bytes().to_vec(),
+            code,
+            answer: if code == 0 {
+                answer.into_bytes()
+            } else {
+                vec![]
             },
-            xml,
             calls: RefCell::new(vec![]),
         }
     }
@@ -190,26 +221,24 @@ impl Runner for Registry {
         _: &[(&str, &str)],
     ) -> Output {
         assert_eq!(
-            args.first(),
-            Some(&"/Query"),
-            "only read-only queries: {args:?}"
+            args,
+            ["/Query", "/XML"],
+            "only the read-only all-tasks query"
         );
         assert!(timeout <= Duration::from_secs(30));
         self.calls
             .borrow_mut()
             .push(args.iter().map(|s| s.to_string()).collect());
-        if args.contains(&"/XML") {
-            Output {
-                code: 0,
-                bytes: self.xml.clone(),
-            }
-        } else {
-            Output {
-                code: self.listing.code,
-                bytes: self.listing.bytes.clone(),
-            }
+        Output {
+            code: self.code,
+            bytes: self.answer.clone(),
         }
     }
+}
+
+/// `unit_command` for a system unit (no home for `%h`).
+fn unit_cmd(text: &str) -> Option<Vec<String>> {
+    unit_command(text, None)
 }
 
 /// A runner that must never be reached.
@@ -228,7 +257,10 @@ impl Runner for Untouched {
 }
 
 fn linux() -> Host {
-    Host::Linux { system: None }
+    Host::Linux {
+        system: None,
+        root: false,
+    }
 }
 fn windows() -> Host {
     Host::Windows {
@@ -324,6 +356,7 @@ fn a_root_system_unit_refuses_and_names_the_system_service_removal() {
         &f,
         &Host::Linux {
             system: Some(system.clone()),
+            root: true,
         },
         &Untouched,
     ));
@@ -468,7 +501,7 @@ fn an_already_native_machine_moves_on_and_says_how_to_stop_the_failing_service()
     );
     assert!(
         lines[0].contains(&format!(
-            "remove it with: systemctl --user disable --now pseudolife-tunnel-dot.service && rm {} && systemctl --user daemon-reload; the Python client's record of it, {}, can be deleted too",
+            "Remove it with: systemctl --user disable --now pseudolife-tunnel-dot.service && rm {} && systemctl --user daemon-reload ; the Python client's record of it, {}, can be deleted too",
             quote(&unit.to_string_lossy(), false),
             quote(
                 &PathBuf::from(f.store())
@@ -505,7 +538,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
     };
     assert!(
         lines[0].contains(
-            "remove it with: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot && rm "
+            "Remove it with: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot && rm "
         ),
         "{lines:?}"
     );
@@ -520,7 +553,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
     assert!(
         lines[0].contains("it fails at each logon")
             && lines[0]
-                .contains("remove it with: schtasks /Delete /TN \"\\pseudolife-tunnel-dot\" /F"),
+                .contains("Remove it with: schtasks /Delete /TN \\pseudolife-tunnel-dot /F ;"),
         "{lines:?}"
     );
     let system = f.path.join("etc-systemd-system");
@@ -534,6 +567,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         &f,
         &Host::Linux {
             system: Some(system),
+            root: true,
         },
         &Untouched,
     ) else {
@@ -541,7 +575,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
     };
     assert!(
         lines[0].contains(
-            "remove it with: systemctl disable --now pseudolife-tunnel-dot.service && rm "
+            "It is a system unit, so only root can change it. Remove it with: systemctl disable --now pseudolife-tunnel-dot.service && rm "
         ),
         "{lines:?}"
     );
@@ -673,10 +707,7 @@ fn a_registered_scheduled_task_refuses_after_read_only_queries() {
     );
     assert_eq!(
         *registry.calls.borrow(),
-        vec![
-            vec!["/Query", "/FO", "CSV", "/NH"],
-            vec!["/Query", "/TN", "\\pseudolife-tunnel-dot", "/XML"],
-        ],
+        vec![vec!["/Query", "/XML"]],
         "one listing, then one definition per tunnel task in the root folder"
     );
 }
@@ -695,7 +726,7 @@ fn a_task_definition_printed_without_a_byte_order_mark_is_read() {
     let decoded = decode(&output);
     assert!(task_owned(&decoded));
     assert_eq!(
-        task_command(&decoded).unwrap(),
+        task_command(&decoded, |_| None).unwrap(),
         vec![r"C:\Users\<user>\AppData\Local\pseudolife-mcp\bin\pseudolife-mcp.exe"]
     );
 }
@@ -731,7 +762,7 @@ fn a_task_scheduler_that_does_not_answer_proceeds_with_one_line() {
     };
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
-        notes[0].contains("could not be listed (schtasks could not be started)"),
+        notes[0].contains("could not be read (schtasks could not be started)"),
         "{notes:?}"
     );
 }
@@ -757,14 +788,14 @@ fn owner_markers_are_read_exactly() {
 fn service_commands_are_read_as_render_service_writes_them() {
     let odd = "/home/<user>/a \"b\" 100% $HOME\\x";
     assert_eq!(
-        unit_command(&unit(&[odd, "tunnel", "run"])).unwrap(),
+        unit_cmd(&unit(&[odd, "tunnel", "run"])).unwrap(),
         vec![odd, "tunnel", "run"]
     );
     assert_eq!(
-        unit_command("ExecStart=/usr/bin/x --flag\n").unwrap(),
+        unit_cmd("ExecStart=/usr/bin/x --flag\n").unwrap(),
         vec!["/usr/bin/x", "--flag"]
     );
-    assert_eq!(unit_command("ExecStart=\"/unterminated\n"), None);
+    assert_eq!(unit_cmd("ExecStart=\"/unterminated\n"), None);
     assert_eq!(
         plist_command(&plist("/a & b")).unwrap()[..2],
         ["/a & b", "tunnel"]
@@ -917,6 +948,7 @@ fn the_root_unit_removal_pastes_and_says_why_root() {
         &f,
         &Host::Linux {
             system: Some(system),
+            root: true,
         },
         &Untouched,
     ) else {
@@ -924,7 +956,7 @@ fn the_root_unit_removal_pastes_and_says_why_root() {
     };
     assert!(
         lines[0].contains(&format!(
-            "remove it with: systemctl disable --now pseudolife-tunnel-dot.service && rm {} && systemctl daemon-reload (a system unit: root installed it, so only root can remove it);",
+            "It is a system unit, so only root can change it. Remove it with: systemctl disable --now pseudolife-tunnel-dot.service && rm {} && systemctl daemon-reload ;",
             quote(&unit.to_string_lossy(), false)
         )),
         "{lines:?}"
@@ -944,9 +976,9 @@ fn schtasks_failures_are_said_as_what_happened() {
     assert_eq!(started(1, b""), "schtasks could not be started");
     assert_eq!(
         started(1, b"ERROR: Access is denied.\r\n"),
-        "schtasks /Query exited 1"
+        "schtasks /Query /XML exited 1"
     );
-    assert_eq!(started(2, b""), "schtasks /Query exited 2");
+    assert_eq!(started(2, b""), "schtasks /Query /XML exited 2");
 }
 
 #[test]
@@ -1021,14 +1053,38 @@ fn a_service_made_by_hand_is_warned_about_never_refused() {
         "{lines:?}"
     );
     assert!(
-        lines[0].contains(
-            "remove it with: systemctl --user disable --now my-chatgpt-tunnel.service && rm "
-        ),
+        lines[0]
+            .contains("Stop it with: systemctl --user disable --now my-chatgpt-tunnel.service ; "),
         "{lines:?}"
     );
+    // This run moves the client: no rerun hint, which would be false here.
     assert!(
-        lines[0].contains("rerun without PSEUDOLIFE_SHIM_ENGINE=native"),
+        lines[0].ends_with(&format!(
+            "can then be deleted. This run moves the client now; to go back to the Python client see {NATIVE_CLIENT_DOCS}"
+        )),
         "{lines:?}"
+    );
+    assert!(!lines[0].contains("rerun"), "{lines:?}");
+    assert!(
+        !lines[0].contains("&& rm"),
+        "what the user wrote is disabled, not deleted: {lines:?}"
+    );
+    // The installer's preflight may still say how to keep the Python client.
+    let Decision::Proceed(installer) = decide(
+        &f.layout,
+        &linux(),
+        &f.home(),
+        &Untouched,
+        Mover::Installer,
+        || true,
+    ) else {
+        panic!()
+    };
+    assert!(
+        installer[0].ends_with(
+            "can then be deleted. (or keep the Python client: rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native)"
+        ),
+        "{installer:?}"
     );
     // On a native machine the same unit is still named, without the stay hint.
     let g = Fixture::new();
@@ -1098,7 +1154,9 @@ fn a_hand_made_task_of_that_name_is_warned_about() {
         "{lines:?}"
     );
     assert!(
-        lines[0].contains("remove it with: schtasks /Delete /TN \"\\pseudolife-tunnel-dot\" /F"),
+        lines[0].contains(
+            "Stop it with: schtasks /Change /TN \\pseudolife-tunnel-dot /Disable ; the task can then be deleted too."
+        ),
         "{lines:?}"
     );
 }
@@ -1114,7 +1172,7 @@ fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
         "\tExecStart=  !/usr/bin/true",
     ] {
         assert_eq!(
-            unit_command(&format!("[Service]\n{line}\n")).unwrap(),
+            unit_cmd(&format!("[Service]\n{line}\n")).unwrap(),
             vec!["/usr/bin/true"],
             "{line}"
         );
@@ -1122,14 +1180,14 @@ fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
     // systemd strips single quotes too; a bare word it would decode further
     // is unreadable, which counts as the launcher.
     assert_eq!(
-        unit_command("ExecStart = '/home/u/x y/pseudolife-mcp' tunnel run\n").unwrap(),
+        unit_cmd("ExecStart = '/home/u/x y/pseudolife-mcp' tunnel run\n").unwrap(),
         vec!["/home/u/x y/pseudolife-mcp", "tunnel", "run"]
     );
     assert_eq!(
-        unit_command("ExecStart=/home/u/x\\ y/pseudolife-mcp tunnel run\n"),
+        unit_cmd("ExecStart=/home/u/x\\ y/pseudolife-mcp tunnel run\n"),
         None
     );
-    assert_eq!(unit_command("ExecStart=/home/u/it's tunnel run\n"), None);
+    assert_eq!(unit_cmd("ExecStart=/home/u/it's tunnel run\n"), None);
     // A later word that does not decode is never printed as a value: the
     // profile comes from the unit's name and no --profile-dir is guessed.
     let f = Fixture::new();
@@ -1148,11 +1206,11 @@ fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
     );
     // A later word that does not decode leaves a known program known.
     assert_eq!(
-        unit_command("ExecStart=/usr/bin/python3 /opt/tunnel\\x20runner/launch.py\n").unwrap()[0],
+        unit_cmd("ExecStart=/usr/bin/python3 /opt/tunnel\\x20runner/launch.py\n").unwrap()[0],
         "/usr/bin/python3"
     );
     assert_eq!(
-        unit_command("ExecStart=/usr/bin/true \"unterminated\n").unwrap()[0],
+        unit_cmd("ExecStart=/usr/bin/true \"unterminated\n").unwrap()[0],
         "/usr/bin/true"
     );
     let f = Fixture::new();
@@ -1185,12 +1243,237 @@ fn an_already_native_machine_says_what_it_could_not_check() {
     };
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
-        notes[0].contains("could not be listed (schtasks could not be started)"),
+        notes[0].contains("could not be read (schtasks could not be started)"),
         "{notes:?}"
     );
     assert!(
         notes[0].contains("fails at each start under the native client"),
         "{notes:?}"
+    );
+}
+
+#[test]
+fn a_user_unit_naming_the_launcher_through_percent_h_is_warned_about() {
+    // %h is the form systemd's own documentation steers user units to.
+    let f = Fixture::new();
+    f.python_launcher();
+    f.write(
+        ".config/systemd/user/chatgpt.service",
+        &format!("[Service]\nExecStart=%h/../bin/{BINARY} tunnel run\n"),
+    );
+    let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
+        panic!()
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains("looks like a tunnel service made by hand"),
+        "{lines:?}"
+    );
+    // %% is a literal percent sign, and other specifiers are left as they
+    // read, so they never match by accident.
+    let home = Path::new("/home/u");
+    assert_eq!(
+        unit_command("ExecStart=%h/bin/x 100%% %u\n", Some(home)).unwrap(),
+        vec!["/home/u/bin/x", "100%", "%u"]
+    );
+    assert_eq!(unit_cmd("ExecStart=%h/bin/x\n").unwrap(), vec!["%h/bin/x"]);
+}
+
+#[test]
+fn a_system_unit_made_by_hand_is_warned_about_without_root() {
+    // A unit with User= may run this user's launcher; only root installs
+    // the product's own system units, so off root only hand-made ones count.
+    let f = Fixture::new();
+    f.python_launcher();
+    let system = f.path.join("etc-systemd-system");
+    fs::create_dir_all(&system).unwrap();
+    fs::write(
+        system.join("dot-tunnel.service"),
+        format!(
+            "[Service]\nUser=u\nExecStart={} tunnel run\n",
+            escaped(&f.launcher())
+        ),
+    )
+    .unwrap();
+    fs::write(
+        system.join("pseudolife-tunnel-root.service"),
+        f.unit(&f.launcher()),
+    )
+    .unwrap();
+    let host = Host::Linux {
+        system: Some(system),
+        root: false,
+    };
+    let Decision::Proceed(lines) = update(&f, &host, &Untouched) else {
+        panic!("off root a system unit never refuses this user's move");
+    };
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines.iter().all(|l| l.contains("made by hand")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains(
+            "It is a system unit, so only root can change it. Stop it with: systemctl disable --now dot-tunnel.service ;"
+        )),
+        "{lines:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_unit_is_read_for_hand_made_services_never_as_the_products() {
+    let f = Fixture::new();
+    f.python_launcher();
+    let dotfiles = f.path.join("dotfiles");
+    fs::create_dir_all(&dotfiles).unwrap();
+    fs::write(
+        dotfiles.join("tunnel.service"),
+        format!("[Service]\nExecStart={} tunnel run\n", f.launcher()),
+    )
+    .unwrap();
+    fs::write(dotfiles.join("marked.service"), f.unit(&f.launcher())).unwrap();
+    let units = f.home().join(".config").join("systemd").join("user");
+    fs::create_dir_all(&units).unwrap();
+    std::os::unix::fs::symlink(
+        dotfiles.join("tunnel.service"),
+        units.join("tunnel.service"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        dotfiles.join("marked.service"),
+        units.join("pseudolife-tunnel-dot.service"),
+    )
+    .unwrap();
+    let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
+        panic!("a link is never the product's own unit, so it never refuses");
+    };
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines.iter().all(|l| l.contains("made by hand")),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn an_at_prefixed_exec_start_drops_its_argv0() {
+    assert_eq!(
+        unit_cmd("ExecStart=@/usr/bin/x x-name tunnel run\n").unwrap(),
+        vec!["/usr/bin/x", "tunnel", "run"]
+    );
+    assert_eq!(
+        unit_cmd("ExecStart=-@/usr/bin/x x-name\n").unwrap(),
+        vec!["/usr/bin/x"]
+    );
+}
+
+#[test]
+fn a_task_command_with_environment_variables_is_expanded() {
+    let env =
+        |key: &str| (key == "LOCALAPPDATA").then(|| r"C:\Users\<user>\AppData\Local".to_owned());
+    assert_eq!(
+        expand_percent(r"%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe", env),
+        r"C:\Users\<user>\AppData\Local\pseudolife-mcp\bin\pseudolife-mcp.exe"
+    );
+    assert_eq!(
+        expand_percent("%UNSET%\\x.exe 100%", env),
+        "%UNSET%\\x.exe 100%"
+    );
+    let xml = "<Task><Actions><Exec><Command>%LOCALAPPDATA%\\pseudolife-mcp\\bin\\pseudolife-mcp.exe</Command><Arguments>tunnel run</Arguments></Exec></Actions></Task>";
+    assert_eq!(
+        task_command(xml, env).unwrap(),
+        vec![
+            r"C:\Users\<user>\AppData\Local\pseudolife-mcp\bin\pseudolife-mcp.exe",
+            "tunnel",
+            "run"
+        ]
+    );
+}
+
+#[test]
+fn a_tunnel_run_under_another_program_is_not_a_hand_made_service() {
+    // The launcher as an argument, or tunnel run given to another program.
+    let f = Fixture::new();
+    f.python_launcher();
+    f.write(
+        ".config/systemd/user/wrapped.service",
+        &format!(
+            "[Service]\nExecStart=/usr/bin/python3 {} tunnel run\n",
+            escaped(&f.launcher())
+        ),
+    );
+    assert_eq!(update(&f, &linux(), &Untouched), Decision::Proceed(vec![]));
+    let other = "<Task><Actions><Exec><Command>C:\\Windows\\System32\\cmd.exe</Command><Arguments>tunnel run --profile dot</Arguments></Exec></Actions></Task>";
+    let registry = Registry::new(
+        0,
+        "\"\\Some other task\",\"N/A\",\"Ready\"\r\n",
+        other.as_bytes().to_vec(),
+    );
+    assert_eq!(update(&f, &windows(), &registry), Decision::Proceed(vec![]));
+}
+
+#[test]
+fn every_task_is_read_for_hand_made_services_in_one_query() {
+    // A hand-made task almost never uses the product's name.
+    let f = Fixture::new();
+    f.python_launcher();
+    let mine = format!(
+        "<Task><Actions><Exec><Command>{}</Command><Arguments>tunnel run --profile dot</Arguments></Exec></Actions></Task>",
+        xml(&f.launcher())
+    );
+    let unrelated = "<Task><Actions><Exec><Command>C:\\Windows\\System32\\cmd.exe</Command></Exec></Actions></Task>";
+    let answer = format!(
+        "\r\n<Tasks>\r\n<!-- \\Microsoft\\Windows\\Defrag\\ScheduledDefrag -->\r\n{unrelated}\r\n<!-- \\My Tasks\\ChatGPT tunnel -->\r\n{mine}\r\n</Tasks>\r\n"
+    );
+    let defs = task_definitions(&answer);
+    assert_eq!(defs.len(), 2, "{defs:?}");
+    assert_eq!(defs[1].0, "\\My Tasks\\ChatGPT tunnel");
+    struct One(Vec<u8>);
+    impl Runner for One {
+        fn run(
+            &self,
+            _: &Path,
+            args: &[&str],
+            _: Option<&Path>,
+            _: Duration,
+            _: &[(&str, &str)],
+        ) -> Output {
+            assert_eq!(args, ["/Query", "/XML"]);
+            Output {
+                code: 0,
+                bytes: self.0.clone(),
+            }
+        }
+    }
+    let Decision::Proceed(lines) = update(&f, &windows(), &One(answer.into_bytes())) else {
+        panic!()
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains(
+            "Stop it with: (PowerShell) schtasks /Change /TN '\\My Tasks\\ChatGPT tunnel' /Disable ;"
+        ),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn names_in_printed_commands_are_quoted() {
+    let f = Fixture::new();
+    f.python_launcher();
+    f.write(
+        ".config/systemd/user/a;b.service",
+        &format!(
+            "[Service]\nExecStart={} tunnel run\n",
+            escaped(&f.launcher())
+        ),
+    );
+    let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
+        panic!()
+    };
+    assert!(
+        lines[0].contains("Stop it with: systemctl --user disable --now 'a;b.service' ;"),
+        "{lines:?}"
     );
 }
 
@@ -1319,6 +1602,21 @@ mod update {
         );
         assert_eq!(DAEMON.lock().unwrap().pop(), Some(Mover::Update));
         assert!(!attended.o.daemon_only);
+    }
+
+    #[test]
+    fn the_backstop_keeps_the_client_steps_out_after_a_daemon_only_turn() {
+        let mut update = quiet();
+        update.tunnel_probe = record_daemon;
+        update.o.unattended = true;
+        update.refuse_tunnel_move_before_daemon().unwrap();
+        assert_eq!(update.tunnel_refused.as_deref(), Some("fixture refusal"));
+        // Even if a later step reached the client steps, they stay out.
+        assert!(update.refused_clients(None));
+        assert_eq!(
+            update.report.clients.as_ref().unwrap()["shim"]["state"],
+            "refused"
+        );
     }
 
     #[test]

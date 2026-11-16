@@ -133,6 +133,9 @@ pub(crate) struct Update {
     pub tunnel_probe: fn(tunnel_guard::Mover, Option<&Path>) -> tunnel_guard::Decision,
     /// The probe passed once this run; later client steps do not ask again.
     pub tunnel_checked: bool,
+    /// An unattended run the guard turned daemon-only: its refusal, which
+    /// keeps the client steps out even if a later step reached them.
+    pub tunnel_refused: Option<String>,
 }
 
 /// The checkout as the deploy later names it to the shim step.
@@ -263,6 +266,7 @@ impl Update {
             handover_port: 5432,
             tunnel_probe: tunnel_guard::probe,
             tunnel_checked: false,
+            tunnel_refused: None,
         }
     }
     /// Refuses, before anything is changed, a run whose client steps would
@@ -299,6 +303,7 @@ impl Update {
             {
                 self.o.daemon_only = true;
                 self.tunnel_checked = true;
+                self.tunnel_refused = Some(line.clone());
                 self.warn(line);
                 Ok(())
             }
@@ -315,7 +320,11 @@ impl Update {
     /// The backstop in `clients`: true when the client steps must not run,
     /// with the refusal recorded as the run's result.
     pub(crate) fn refused_clients(&mut self, repo: Option<&Path>) -> bool {
-        let Err(error) = self.refuse_tunnel_move(repo) else {
+        let refused = match self.tunnel_refused.clone() {
+            Some(line) => Err(UpdateError::usage(line)),
+            None => self.refuse_tunnel_move(repo),
+        };
+        let Err(error) = refused else {
             return false;
         };
         self.warn(error.message.clone());

@@ -51,9 +51,12 @@ const NATIVE_CLIENT_DOCS: &str = "https://github.com/Pseudogiant-xr/Pseudolife-M
 
 /// Where a tunnel service could be registered for this user.
 pub(crate) enum Host {
-    /// systemd: the user unit directory, and `system` (the system unit
-    /// directory) when running as root, where `--system-service` installs.
-    Linux { system: Option<PathBuf> },
+    /// systemd: the user unit directory and `system`, the system unit
+    /// directory. Its units are this product's only when running as `root`
+    /// (where `--system-service` installs); otherwise only units made by
+    /// hand are looked for there (one with `User=` may run this user's
+    /// launcher).
+    Linux { system: Option<PathBuf>, root: bool },
     /// launchd: the user's LaunchAgents.
     Mac,
     /// Task Scheduler, read through this `schtasks.exe`.
@@ -77,7 +80,8 @@ impl Host {
             #[cfg(not(unix))]
             let root = false;
             Host::Linux {
-                system: root.then(|| PathBuf::from("/etc/systemd/system")),
+                system: Some(PathBuf::from("/etc/systemd/system")),
+                root,
             }
         }
     }
@@ -220,19 +224,41 @@ impl Registered {
             .as_ref()
             .map(|f| quote(&f.to_string_lossy(), false))
             .unwrap_or_default();
+        let name = quote(&self.name, matches!(self.kind, Kind::Task));
         match self.kind {
             Kind::UserUnit => format!(
-                "systemctl --user disable --now {0} && rm {file} && systemctl --user daemon-reload",
-                self.name
+                "systemctl --user disable --now {name} && rm {file} && systemctl --user daemon-reload"
             ),
-            Kind::SystemUnit => format!(
-                "systemctl disable --now {0} && rm {file} && systemctl daemon-reload (a system unit: root installed it, so only root can remove it)",
-                self.name
-            ),
-            Kind::LaunchAgent => {
-                format!("launchctl bootout gui/$(id -u)/{} && rm {file}", self.name)
+            Kind::SystemUnit => {
+                format!("systemctl disable --now {name} && rm {file} && systemctl daemon-reload")
             }
-            Kind::Task => format!("schtasks /Delete /TN \"{}\" /F", self.name),
+            Kind::LaunchAgent => format!("launchctl bootout gui/$(id -u)/{name} && rm {file}"),
+            Kind::Task => format!("{}schtasks /Delete /TN {name} /F", powershell_note(&name)),
+        }
+    }
+    /// For a service the user wrote: the service manager's commands that
+    /// stop it starting, leaving the definition in place.
+    fn disable_native(&self) -> String {
+        let name = quote(&self.name, matches!(self.kind, Kind::Task));
+        match self.kind {
+            Kind::UserUnit => format!("systemctl --user disable --now {name}"),
+            Kind::SystemUnit => format!("systemctl disable --now {name}"),
+            Kind::LaunchAgent => format!(
+                "launchctl bootout gui/$(id -u)/{name} && launchctl disable gui/$(id -u)/{name}"
+            ),
+            Kind::Task => format!(
+                "{}schtasks /Change /TN {name} /Disable",
+                powershell_note(&name)
+            ),
+        }
+    }
+    /// Said before a command only root can run, so it is never pasted
+    /// with the command.
+    fn root_note(&self) -> &'static str {
+        if matches!(self.kind, Kind::SystemUnit) {
+            "It is a system unit, so only root can change it. "
+        } else {
+            ""
         }
     }
     /// The service manager's command that stops it starting, for a note.
@@ -243,6 +269,15 @@ impl Registered {
             Kind::LaunchAgent => "launchctl bootout gui/$(id -u)/<label>",
             Kind::Task => "schtasks /Change /TN <task> /Disable",
         }
+    }
+}
+
+/// A task name quoted for PowerShell is not read the same by cmd.exe.
+fn powershell_note(name: &str) -> &'static str {
+    if name.starts_with('\'') {
+        "(PowerShell) "
+    } else {
+        ""
     }
 }
 
@@ -321,7 +356,7 @@ pub(crate) fn decide(
         .handmade
         .iter()
         .filter(|r| r.command.as_deref().is_some_and(|c| runs_tunnel(c, layout)))
-        .map(|r| made_by_hand(r, native));
+        .map(|r| made_by_hand(r, native, mover));
     if native {
         // Already moved: refusing changes nothing, so say how to remove it.
         return Decision::Proceed(
@@ -444,16 +479,23 @@ fn runs_tunnel(command: &[String], layout: &Layout) -> bool {
 fn registered(host: &Host, home: &Path, runner: &dyn Runner) -> Scan {
     let mut scan = Scan::default();
     match host {
-        Host::Linux { system } => {
+        Host::Linux { system, root } => {
             let user = home.join(".config").join("systemd").join("user");
-            definitions(&user, ".service", Kind::UserUnit, &mut scan);
+            definitions(
+                &user,
+                ".service",
+                Kind::UserUnit,
+                true,
+                Some(home),
+                &mut scan,
+            );
             if let Some(system) = system {
-                definitions(system, ".service", Kind::SystemUnit, &mut scan);
+                definitions(system, ".service", Kind::SystemUnit, *root, None, &mut scan);
             }
         }
         Host::Mac => {
             let agents = home.join("Library").join("LaunchAgents");
-            definitions(&agents, ".plist", Kind::LaunchAgent, &mut scan);
+            definitions(&agents, ".plist", Kind::LaunchAgent, true, None, &mut scan);
         }
         Host::Windows { schtasks } => tasks(schtasks, runner, &mut scan),
     }
@@ -461,18 +503,30 @@ fn registered(host: &Host, home: &Path, runner: &dyn Runner) -> Scan {
 }
 
 /// Reads the `*<suffix>` definitions in `dir`: `pseudolife-tunnel-*` ones
-/// carrying the owner marker, and any whose command starts this launcher
-/// with `tunnel run` (kept for `decide` to match against the layout). A
-/// missing directory holds none.
-fn definitions(dir: &Path, suffix: &str, kind: Kind, scan: &mut Scan) {
+/// carrying the owner marker (only as plain files, and only where `owned`
+/// says this product's units live), and any whose command starts this
+/// launcher with `tunnel run` (a unit made by hand, which may be a symbolic
+/// link from a dotfile manager), kept for `decide` to match against the
+/// layout. `home` expands systemd's `%h` in user units. A missing directory
+/// holds none.
+fn definitions(
+    dir: &Path,
+    suffix: &str,
+    kind: Kind,
+    owned: bool,
+    home: Option<&Path>,
+    scan: &mut Scan,
+) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(_) => {
-            scan.notes.push(unchecked(
-                &format!("{} could not be read", dir.display()),
-                kind,
-            ));
+            if owned {
+                scan.notes.push(unchecked(
+                    &format!("{} could not be read", dir.display()),
+                    kind,
+                ));
+            }
             return;
         }
     };
@@ -484,14 +538,18 @@ fn definitions(dir: &Path, suffix: &str, kind: Kind, scan: &mut Scan) {
         else {
             continue;
         };
-        let ours = file.starts_with(PREFIX) && file.len() > PREFIX.len() + suffix.len();
         let path = entry.path();
-        // The Python client writes a plain file; anything else is not its own.
+        // The Python client writes a plain file; a link is never its own.
         let plain =
             fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= DEFINITION_LIMIT);
-        if !plain {
+        let linked = !plain
+            && fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink())
+            && fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= DEFINITION_LIMIT);
+        if !plain && !linked {
             continue;
         }
+        let ours =
+            owned && plain && file.starts_with(PREFIX) && file.len() > PREFIX.len() + suffix.len();
         let text = match fs::read(&path) {
             Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
             Err(_) => {
@@ -504,7 +562,7 @@ fn definitions(dir: &Path, suffix: &str, kind: Kind, scan: &mut Scan) {
                 continue;
             }
         };
-        let (owned, command, name, label) = match kind {
+        let (marker, command, name, label) = match kind {
             Kind::LaunchAgent => (
                 plist_owned(&text),
                 plist_command(&text),
@@ -513,13 +571,13 @@ fn definitions(dir: &Path, suffix: &str, kind: Kind, scan: &mut Scan) {
             ),
             Kind::SystemUnit => (
                 unit_owned(&text),
-                unit_command(&text),
+                unit_command(&text, None),
                 file.to_owned(),
                 "systemd system unit",
             ),
             _ => (
                 unit_owned(&text),
-                unit_command(&text),
+                unit_command(&text, home),
                 file.to_owned(),
                 "systemd user unit",
             ),
@@ -531,72 +589,80 @@ fn definitions(dir: &Path, suffix: &str, kind: Kind, scan: &mut Scan) {
             file: Some(path.clone()),
             command,
         };
-        if ours && owned {
+        if ours && marker {
             scan.owned.push(service);
-        } else if service
-            .command
-            .as_ref()
-            .is_some_and(|c| c.get(1..3).is_some_and(|w| w == ["tunnel", "run"]))
-        {
+        } else if starts_tunnel(service.command.as_deref()) {
             scan.handmade.push(service);
         }
     }
 }
 
+/// Words 1 and 2 of a command are `tunnel run`.
+fn starts_tunnel(command: Option<&[String]>) -> bool {
+    command.is_some_and(|c| c.get(1..3).is_some_and(|w| w == ["tunnel", "run"]))
+}
+
+/// Every task at once: `schtasks /Query /XML` with no `/TN` answers each
+/// definition after a `<!-- \path\name -->` comment, in about a second for
+/// 550 tasks (measured on the Windows dev VM, 16 November 2026: 624 ms for
+/// 250, 1027-1065 ms for 550, 737 KB; the CSV listing took 4 s). Owned tasks
+/// are the root-folder `\pseudolife-tunnel-*` ones carrying the marker; any
+/// task may be one made by hand.
 fn tasks(schtasks: &Path, runner: &dyn Runner, scan: &mut Scan) {
-    let listing = runner.run(
-        schtasks,
-        &["/Query", "/FO", "CSV", "/NH"],
-        None,
-        QUERY_TIMEOUT,
-        &[],
-    );
+    let listing = runner.run(schtasks, &["/Query", "/XML"], None, QUERY_TIMEOUT, &[]);
     if listing.code != 0 {
         scan.notes.push(unchecked(
             &format!(
-                "the scheduled tasks could not be listed ({})",
+                "the scheduled tasks could not be read ({})",
                 failed(&listing)
             ),
             Kind::Task,
         ));
         return;
     }
-    for name in task_names(&decode(&listing)) {
-        let definition = runner.run(
-            schtasks,
-            &["/Query", "/TN", &name, "/XML"],
-            None,
-            QUERY_TIMEOUT,
-            &[],
-        );
-        if definition.code != 0 {
-            scan.notes.push(unchecked(
-                &format!(
-                    "the scheduled task {name} could not be read ({})",
-                    failed(&definition)
-                ),
-                Kind::Task,
-            ));
-            continue;
-        }
-        let text = decode(&definition);
+    for (name, text) in task_definitions(&decode(&listing)) {
+        let ours = product_task(&name);
         let service = Registered {
             kind: Kind::Task,
             place: format!("scheduled task {name}"),
             file: None,
-            command: task_command(&text),
+            command: task_command(&text, |key| std::env::var(key).ok()),
             name,
         };
-        if task_owned(&text) {
+        if ours && task_owned(&text) {
             scan.owned.push(service);
-        } else if service
-            .command
-            .as_ref()
-            .is_some_and(|c| c.get(1..3).is_some_and(|w| w == ["tunnel", "run"]))
-        {
+        } else if starts_tunnel(service.command.as_deref()) {
             scan.handmade.push(service);
         }
     }
+}
+
+/// Each task's full name and XML from `schtasks /Query /XML`.
+fn task_definitions(listing: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let mut rest = listing;
+    while let Some((_, after)) = rest.split_once("<!--") {
+        let Some((name, body)) = after.split_once("-->") else {
+            break;
+        };
+        let end = body.find("<!--").unwrap_or(body.len());
+        let name = name.trim();
+        if name.starts_with('\\') {
+            found.push((name.to_owned(), body[..end].to_owned()));
+        }
+        rest = &body[end..];
+    }
+    found
+}
+
+/// A root-folder `\pseudolife-tunnel-<profile>` task, case-insensitive, as
+/// the Python client names its own.
+fn product_task(name: &str) -> bool {
+    let wanted = format!("\\{PREFIX}");
+    name.len() > wanted.len()
+        && name.is_char_boundary(wanted.len())
+        && name[..wanted.len()].eq_ignore_ascii_case(&wanted)
+        && !name[1..].contains('\\')
 }
 
 /// What a failed `schtasks` call means, in words: the runner answers 124
@@ -608,32 +674,8 @@ fn failed(output: &Output) -> String {
             QUERY_TIMEOUT.as_secs()
         ),
         1 if output.bytes.is_empty() => "schtasks could not be started".into(),
-        code => format!("schtasks /Query exited {code}"),
+        code => format!("schtasks /Query /XML exited {code}"),
     }
-}
-
-/// Task names (`\pseudolife-tunnel-<profile>`, root folder) from
-/// `schtasks /Query /FO CSV /NH`, whose first field is the quoted full name.
-fn task_names(listing: &str) -> Vec<String> {
-    let wanted = format!("\\{PREFIX}");
-    let mut names: Vec<String> = Vec::new();
-    for line in listing.lines() {
-        let Some(name) = line
-            .trim_start()
-            .strip_prefix('"')
-            .and_then(|rest| rest.split('"').next())
-        else {
-            continue;
-        };
-        let matches = name.len() > wanted.len()
-            && name.is_char_boundary(wanted.len())
-            && name[..wanted.len()].eq_ignore_ascii_case(&wanted)
-            && !name[1..].contains('\\');
-        if matches && !names.iter().any(|n| n.eq_ignore_ascii_case(name)) {
-            names.push(name.to_owned());
-        }
-    }
-    names
 }
 
 /// `schtasks` writes UTF-16 with a byte-order mark to a console and
@@ -673,17 +715,23 @@ fn unit_owned(text: &str) -> bool {
 }
 
 /// `ExecStart=` as systemd splits it: words in double or single quotes,
-/// with backslash escapes, or bare; `%` and `$` doubled (how
-/// `render_service` writes it). A word systemd would decode further (a bare
-/// word holding a quote or a backslash) makes the command unreadable, which
-/// counts as the launcher rather than letting a move through on a guess.
-fn unit_command(text: &str) -> Option<Vec<String>> {
-    let line = text.lines().find_map(|line| {
-        line.trim()
+/// with backslash escapes, or bare; `%%` and `$$` undoubled (how
+/// `render_service` writes it) and `%h` expanded from `home` for a user
+/// unit; the `-:+!` prefixes dropped, and with `@` the second word, which
+/// is argv[0], dropped too. A word systemd would decode further (a bare
+/// word holding a quote or a backslash) makes the command unreadable when
+/// it is the program, which counts as the launcher rather than letting a
+/// move through on a guess.
+fn unit_command(text: &str, home: Option<&Path>) -> Option<Vec<String>> {
+    let (line, at) = text.lines().find_map(|line| {
+        let rest = line
+            .trim()
             .strip_prefix("ExecStart")
             .map(str::trim_start)
-            .and_then(|rest| rest.strip_prefix('='))
-            .map(|rest| rest.trim_start().trim_start_matches(['-', ':', '+', '!']))
+            .and_then(|rest| rest.strip_prefix('='))?
+            .trim_start();
+        let body = rest.trim_start_matches(['-', ':', '+', '!', '@']);
+        Some((body, rest[..rest.len() - body.len()].contains('@')))
     })?;
     let mut words: Vec<String> = Vec::new();
     let mut chars = line.chars().peekable();
@@ -728,9 +776,35 @@ fn unit_command(text: &str) -> Option<Vec<String>> {
             words.push(UNDECODED.to_owned());
             continue;
         }
-        words.push(word.replace("%%", "%").replace("$$", "$"));
+        words.push(specifiers(&word, home).replace("$$", "$"));
+    }
+    if at && words.len() > 1 {
+        words.remove(1);
     }
     (!words.is_empty()).then_some(words)
+}
+
+/// systemd's `%%` and, with a home, `%h`; any other specifier is left as it
+/// reads, so a path holding one does not match the launcher.
+fn specifiers(word: &str, home: Option<&Path>) -> String {
+    let mut out = String::new();
+    let mut chars = word.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('%') => out.push('%'),
+            Some('h') if home.is_some() => out.push_str(&home.unwrap().to_string_lossy()),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
 }
 
 /// A launchd plist `render_service` wrote: the `PseudolifeTunnelOwner` key
@@ -777,8 +851,9 @@ fn task_owned(text: &str) -> bool {
         .any(|(at, _)| marked(&text[at + open.len()..], "</Source>"))
 }
 
-/// The task's `<Command>` and its `<Arguments>`, split as Windows does.
-fn task_command(text: &str) -> Option<Vec<String>> {
+/// The task's `<Command>` and its `<Arguments>`, split as Windows does;
+/// `%NAME%` in the program is expanded from `env`, as Task Scheduler does.
+fn task_command(text: &str, env: impl Fn(&str) -> Option<String>) -> Option<Vec<String>> {
     let element = |name: &str| {
         let open = format!("<{name}>");
         let close = format!("</{name}>");
@@ -792,9 +867,35 @@ fn task_command(text: &str) -> Option<Vec<String>> {
         .and_then(|p| p.strip_suffix('"'))
         .unwrap_or(&program)
         .to_owned();
-    let mut words = vec![program];
+    let mut words = vec![expand_percent(&program, env)];
     words.extend(split_windows(&element("Arguments").unwrap_or_default()));
     Some(words)
+}
+
+/// `%NAME%` replaced by the variable's value; an unset one is left as it
+/// reads (and so does not match the launcher).
+fn expand_percent(text: &str, env: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) if end > 0 && !after[..end].contains(char::is_whitespace) => {
+                match env(&after[..end]) {
+                    Some(value) => out.push_str(&value),
+                    None => out.push_str(&rest[start..start + end + 2]),
+                }
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Splits a command line as `subprocess.list2cmdline` writes it.
@@ -897,16 +998,18 @@ fn failing(service: &Registered, home: &Path) -> String {
         }
     };
     format!(
-        "the tunnel service {} runs this machine's launcher, now the native client, which cannot run a tunnel yet, so {how}; this client has no tunnel service command, so remove it with: {}; the Python client's record of it, {}, can be deleted too",
+        "the tunnel service {} runs this machine's launcher, now the native client, which cannot run a tunnel yet, so {how}, and this client has no tunnel service command. {}Remove it with: {} ; the Python client's record of it, {}, can be deleted too",
         service.place,
+        service.root_note(),
         service.remove_native(),
         service.records(home)
     )
 }
 
 /// A service made by hand is warned about, never refused: only a definition
-/// carrying the owner marker is this product's exact signal.
-fn made_by_hand(service: &Registered, native: bool) -> String {
+/// carrying the owner marker is this product's exact signal. What the user
+/// wrote is disabled, not deleted.
+fn made_by_hand(service: &Registered, native: bool, mover: Mover) -> String {
     let when = if native {
         "on this client"
     } else {
@@ -916,15 +1019,27 @@ fn made_by_hand(service: &Registered, native: bool) -> String {
         Kind::Task => "it fails at each logon",
         _ => "it fails at each start",
     };
-    let keep = if native {
-        ""
+    let delete = match &service.file {
+        Some(file) => format!(
+            "; {} can then be deleted",
+            quote(&file.to_string_lossy(), false)
+        ),
+        None => "; the task can then be deleted too".to_owned(),
+    };
+    let after = if native {
+        String::new()
+    } else if mover == Mover::Installer {
+        format!(" (or keep the Python client: rerun the installer without {ENGINE}=native)")
     } else {
-        " (or keep the Python client: rerun without PSEUDOLIFE_SHIM_ENGINE=native)"
+        format!(
+            " This run moves the client now; to go back to the Python client see {NATIVE_CLIENT_DOCS}"
+        )
     };
     format!(
-        "{} looks like a tunnel service made by hand: it starts this machine's launcher with tunnel run, and the native client cannot run a tunnel yet, so {when} {how}; remove it with: {}{keep}",
+        "{} looks like a tunnel service made by hand: it starts this machine's launcher with tunnel run, and the native client cannot run a tunnel yet, so {when} {how}. {}Stop it with: {} {delete}.{after}",
         service.place,
-        service.remove_native()
+        service.root_note(),
+        service.disable_native()
     )
 }
 
@@ -959,8 +1074,8 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
             "the next run moves it",
         ),
         Mover::UnattendedDaemon => (
-            "This unattended run updates the daemon alone and leaves this machine's client as it is, at every run until the autostart is gone".to_owned(),
-            "the next run moves it",
+            "This unattended run updates the daemon alone and leaves this machine's client as it is until the autostart is gone".to_owned(),
+            "the next unattended run that installs a release moves it",
         ),
         Mover::Installer => (
             format!("Nothing was changed; to stay on it, rerun the installer without {ENGINE}=native ({unset}, or set it to python)"),

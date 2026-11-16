@@ -2724,3 +2724,38 @@ def test_the_unit_under_home_is_found_when_userprofile_points_elsewhere(tmp_path
                                 capture_output=True, text=True, timeout=60)
         assert result.returncode == 2, result.stdout + result.stderr
         assert f"Registered: systemd user unit {unit}" in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the systemd user unit is the Linux registration")
+def test_an_unattended_update_with_a_tunnel_service_updates_the_daemon_alone(tmp_path):
+    # The daemon is not left behind every night for a client-side service:
+    # the scheduled run deploys exactly as --daemon-only would, leaves the
+    # client on Python, and says why in its output, its log and its notice.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        launcher, unit = _python_client_with_tunnel_service(env)
+        before = launcher.read_bytes()
+        state = json.loads(state_path.read_text())
+        state["no_board_peer"] = True  # an idle board: the unattended run proceeds
+        state_path.write_text(json.dumps(state))
+        env["PSEUDOLIFE_MCP_TOKEN"] = "fixture-bearer"
+        env["PSEUDOLIFE_SHIM_ENGINE"] = "native"
+        result = run_arm(repo, env, binary, ["--unattended", "--tag", "0.21.1", "--json", "--health-retries", "1",
+                                             "--rollback-tag", "pre-tunnel"])
+        out = result.stdout + result.stderr
+        assert result.returncode == 0, out
+        observed = stages(json.loads(state_path.read_text()))
+        assert "tag" in observed and observed[-1] == "up", observed
+        assert launcher.read_bytes() == before, "the client was not moved"
+        assert not Path(env["PSEUDOLIFE_SHIM_RUNTIMES"]).exists(), "no shim runtime was installed"
+        assert "updating the client side" not in out, out
+        assert '"shim"' not in result.stdout and '"plugin"' not in result.stdout, result.stdout
+        warning = "this machine stays on the Python client: a tunnel is registered to start by itself"
+        assert warning in out, out
+        assert "This unattended run updates the daemon alone" in out, out
+        assert "clients not moved: a tunnel autostart service keeps this machine on the Python client" in out, out
+        assert "Start a new session to run on the new shim runtime" not in out, out
+        log = (Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "unattended-update.log").read_text()
+        assert warning in log and f"systemd user unit {unit}" in log, log

@@ -147,11 +147,9 @@ fn run_with(
             }
             return REFUSED;
         }
-        crate::cli::tunnel_guard::Decision::Proceed(notes) => {
-            for note in notes {
-                crate::stderrln!("warning: {note}");
-            }
-        }
+        // The installers print the warnings from their `--check` preflight;
+        // the install itself does not say them twice.
+        crate::cli::tunnel_guard::Decision::Proceed(_) => {}
     }
     let outcome = default_layout().and_then(|layout| install_files(&layout, &options));
     match outcome {
