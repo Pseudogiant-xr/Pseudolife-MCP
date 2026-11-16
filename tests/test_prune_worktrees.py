@@ -2208,3 +2208,104 @@ def test_a_target_whose_profiles_hold_no_dep_info_is_kept(env, targets_root):
     assert rc == 0, out
     assert target.exists()
     assert "nothing of cargo's own" in out
+
+
+# --- read-only Codex pass on round 2 -----------------------------------------
+
+def test_an_old_user_file_in_a_profile_still_keeps_it(env, targets_root):
+    """Provenance, not age: a saved server-good.exe older than a later
+    build's fingerprints is still not cargo's, so its profile stays."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "old-user-file", gone, age=None)
+    (target / "debug" / "server-good.exe").write_bytes(b"kept build")
+    _backdate(target)                       # as old as everything else
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug" / "server-good.exe").exists()
+    assert "nothing of cargo's own" in out
+
+
+def test_an_unknown_dir_in_a_profile_keeps_it(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "unknown-dir", gone, age=None)
+    (target / "debug" / "saved-results").mkdir()
+    (target / "debug" / "saved-results" / "run.txt").write_text("numbers")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug" / "saved-results" / "run.txt").exists()
+
+
+def test_debug_info_with_underscores_is_cargos_own(env, targets_root):
+    """cargo writes pseudolife_stdio.pdb beside pseudolife-stdio.exe."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "underscores", gone, age=None)
+    prof = target / "debug"
+    (prof / "my-tool.exe").write_bytes(b"binary")
+    (prof / "my_tool.pdb").write_bytes(b"debug info")
+    (prof / "my-tool.d").write_text(f"{prof / 'my-tool.exe'}: {gone}\n", encoding="utf-8")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+
+
+def test_a_clone_another_clone_borrows_objects_from_is_kept(env):
+    """``git clone --shared A B`` leaves no trace in A; B's alternates file
+    is the only sign, and deleting A would break B."""
+    lender = _clone(env, "lender")
+    borrower = env.tmp / "clones" / "borrower"
+    _git(env.tmp, "clone", "-q", "--shared", str(lender), str(borrower))
+    _configure(borrower)
+    (borrower / "work.txt").write_text("only here\n", encoding="utf-8")
+    _git(borrower, "add", "work.txt")
+    _git(borrower, "commit", "-qm", "borrower work")
+    _backdate(lender)
+    _backdate(borrower)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert lender.exists() and borrower.exists()
+    assert "another checkout borrows its objects" in out
+
+
+def test_a_root_that_is_also_a_scratch_root_deletes_nothing(env):
+    """A scratch root is list only even when a clone root reaches it."""
+    clone = _clone(env, "under-scratch")
+    _backdate(clone)
+    root = env.tmp / "clones"
+    (root / ".pseudolife-scratch-root").write_text("", encoding="utf-8")
+    rc, out = run(env, "--clone-root", str(root), "--scratch-root", str(root), "--apply",
+                  roots=False)
+    assert rc == 0, out
+    assert clone.exists()
+    assert "at or around a scratch root: 1" in out
+
+
+def test_a_timestamp_preserving_copy_after_the_checks_renames_back(env, targets_root, monkeypatch):
+    """A file copied in with its old mtime (cp -p) still changes its dir."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "copied-late", gone)
+    real_rename = prune.os.rename
+
+    def rename_then_copy(src, dst, *a, **kw):
+        real_rename(src, dst, *a, **kw)
+        if ".retention-" in os.path.basename(str(dst)):
+            copied = Path(dst) / "debug" / "deps" / "kept.bin"
+            copied.write_bytes(b"old data")
+            os.utime(copied, (OLD, OLD))           # the copy keeps its old time
+
+    monkeypatch.setattr(prune.os, "rename", rename_then_copy)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug" / "deps" / "kept.bin").exists()
+    assert "written during the checks; renamed back" in out
+
+
+def test_named_scratch_rows_still_show_size_and_last_write(env):
+    big = _scratch(env, "claude-session")
+    (big / "data.bin").write_bytes(b"x" * 5000)
+    _backdate(big)
+    rc, out = run_scratch(env)
+    assert rc == 0, out
+    row = next(line for line in out.splitlines() if "claude-session" in line)
+    assert "5.0 kB" in row and "last write 30.0 days ago" in row, row

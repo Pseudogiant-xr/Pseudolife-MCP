@@ -704,16 +704,22 @@ def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
         if pid is not None:
             return f"in use or access denied, skipped: process {pid} uses it"
     try:
+        before_root = os.lstat(path).st_mtime
         os.rename(path, trash)
     except OSError as exc:
         return f"in use or access denied, skipped: {exc.strerror or exc}"
     if checked_at is not None:
         late = scan(trash)
+        try:
+            root_moved = os.lstat(trash).st_mtime > before_root
+        except OSError:
+            root_moved = True
         procs = list_processes()
         user = process_in(trash, procs) if procs is not None else -1
         why = (late.error and f"cannot scan it again ({late.error})"
                or (late.links and f"a link appeared ({late.links[0]})")
-               or (late.newest > checked_at and "a file in it was written during the checks")
+               or ((late.newest > checked_at or late.newest_dir > checked_at or root_moved)
+                   and "a file or dir in it was written during the checks")
                or (user is not None and (f"process {user} uses it" if user != -1
                                          else "the process list cannot be read")))
         if why:
@@ -824,16 +830,34 @@ def _real_dir(path: str) -> bool:
     return stat.S_ISDIR(st.st_mode) and not is_link(st)
 
 
+# The dirs cargo makes inside a profile.
+CARGO_PROFILE_DIRS = {"deps", "build", "incremental", "examples", ".fingerprint"}
+
+
+def _same_name(a: str) -> str:
+    # cargo names debug info with underscores beside a hyphenated binary
+    # (pseudolife-stdio.exe, pseudolife_stdio.pdb).
+    return a.lower().replace("-", "_")
+
+
 def _profile_user_file(prof: str) -> str | None:
-    """A file at the top of a profile dir that cargo did not write there
-    and that is newer than the profile's newest fingerprint (a copied
-    server-good.exe or notes kept beside the build), or None."""
+    """An entry at the top of a profile dir that cargo does not write there,
+    whatever its age (a copied server-good.exe, notes, a folder kept beside
+    the build), or None. Cargo writes only its own dirs, its lock, the
+    outputs its top-level dep-info names and their debug info or import
+    libraries, so anything else keeps the profile."""
     outputs: set[str] = set()
     try:
         with os.scandir(prof) as it:
-            entries = [e for e in it if e.is_file(follow_symlinks=False)]
-    except OSError:
-        return None
+            listing = list(it)
+    except OSError as exc:
+        return f"(cannot list it: {exc.strerror or exc})"
+    for e in listing:
+        if e.is_symlink():
+            return e.name
+        if e.is_dir(follow_symlinks=False) and e.name not in CARGO_PROFILE_DIRS:
+            return e.name + "/"
+    entries = [e for e in listing if e.is_file(follow_symlinks=False)]
     for e in entries:
         if e.name.endswith(".d"):
             try:
@@ -844,32 +868,19 @@ def _profile_user_file(prof: str) -> str | None:
             tokens = _dep_tokens(first)
             if tokens:
                 outputs.add(os.path.basename(tokens[0]).lower())
-    stems = {o.split(".", 1)[0] for o in outputs}
-    newest_fp = 0.0
-    fp = os.path.join(prof, ".fingerprint")
-    try:
-        with os.scandir(fp) as it:
-            for unit in it:
-                if not unit.is_dir(follow_symlinks=False):
-                    continue
-                with os.scandir(unit.path) as files:
-                    for f in files:
-                        if f.is_file(follow_symlinks=False):
-                            newest_fp = max(newest_fp, f.stat(follow_symlinks=False).st_mtime)
-    except OSError:
-        pass
+    stems = {_same_name(o.split(".", 1)[0]) for o in outputs}
     for e in entries:
         low = e.name.lower()
-        if low == ".cargo-lock" or low in outputs or low.endswith(".d"):
+        if low == ".cargo-lock" or low in outputs:
             continue
-        if any(low == stem + suffix or low == "lib" + stem + suffix
+        if low.endswith(".d") and _same_name(low[:-2]) in stems | {
+                _same_name(o.split(".", 1)[0]) for o in outputs}:
+            continue
+        same = _same_name(low)
+        if any(same == stem + suffix or same == "lib" + stem + suffix
                for stem in stems for suffix in CARGO_OUTPUT_SUFFIXES):
             continue
-        try:
-            if e.stat(follow_symlinks=False).st_mtime > newest_fp:
-                return e.name
-        except OSError:
-            return e.name
+        return e.name
     return None
 
 
@@ -1421,8 +1432,31 @@ def clone_config_problem(path: str) -> str | None:
     return None
 
 
+def borrowed_object_dirs(places: list[str]) -> dict[str, str]:
+    """Object dirs other checkouts borrow (``git clone --shared`` or
+    ``--reference`` writes them to objects/info/alternates): normalized
+    object dir -> the alternates file naming it. Only the checkouts under
+    the configured roots can be seen; one elsewhere is not."""
+    out: dict[str, str] = {}
+    for place in places:
+        for gitdir in (os.path.join(place, ".git"), place):
+            alt = os.path.join(gitdir, "objects", "info", "alternates")
+            try:
+                with open(alt, encoding="utf-8", errors="replace") as fh:
+                    lines = fh.read().splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                target = line if os.path.isabs(line) else os.path.join(gitdir, "objects", line)
+                out[norm(target)] = alt
+    return out
+
+
 def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
-                   now: float, procs) -> Verdict:
+                   now: float, procs, borrowed: dict[str, str] | None = None) -> Verdict:
     v = Verdict("clone", path)
     if not _real_dir(path) or not _real_dir(os.path.join(path, ".git")):
         v.failure = "not a standalone git clone"
@@ -1435,6 +1469,11 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
         v.failure = problem
         return v
     v.passed.append("config-runs-nothing")
+    objects = norm(os.path.join(path, ".git", "objects"))
+    for lent, alt in (borrowed or {}).items():
+        if is_under(lent, objects) or is_under(objects, lent):
+            v.failure = f"another checkout borrows its objects ({alt})"
+            return v
     top = git(path, "rev-parse", "--show-toplevel")
     if top.returncode or norm(top.stdout.strip()) != norm(path):
         v.failure = f"git does not resolve its work tree to this dir ({top.stdout.strip() or top.stderr.strip()})"
@@ -1583,6 +1622,12 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
     v = Verdict("scratch", path)
     base = os.path.basename(path)
     name = base.lower()
+    if not _real_dir(path):
+        v.failure = "not a plain directory"
+        return v
+    # Measured first, so every row of the listing shows size and last write.
+    s = scan(path, arrival=True)
+    v.bytes, v.newest = s.bytes, max(s.newest, s.newest_dir)
     if sys.platform == "win32" and base != base.rstrip(" ."):
         # Win32 drops a trailing dot or space, so later calls would reach
         # another dir than the one judged here by name.
@@ -1606,15 +1651,10 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
     if "evidence" in name or name == "logs" or name.endswith("-logs"):
         v.failure = f"holds evidence or logs ({os.path.basename(path)})"
         return v
-    if not _real_dir(path):
-        v.failure = "not a plain directory"
-        return v
     npath = norm(path)
     if any(is_under(r, npath) or is_under(npath, r) for r in registered):
         v.failure = "holds or sits inside a registered worktree"
         return v
-    s = scan(path, arrival=True)
-    v.bytes, v.newest = s.bytes, max(s.newest, s.newest_dir)
     if s.error:
         v.failure = f"walk error (failing closed): {s.error}"
         return v
@@ -2020,6 +2060,10 @@ def run_sweep(args, cfg: dict) -> int:
         for child in _children(root):
             if not os.path.isdir(child) and not os.path.islink(child):
                 continue
+            nchild = norm(child)
+            if any(is_under(nchild, r) or is_under(r, nchild) for r in scratch_norm):
+                left["at or around a scratch root"] = left.get("at or around a scratch root", 0) + 1
+                continue
             verdicts.append(evaluate_cache(child, grace_days=cgrace, now=now, pins=pins))
 
     procs = list_processes() if (target_norm or clone_norm or scratch_norm) else None
@@ -2028,11 +2072,23 @@ def run_sweep(args, cfg: dict) -> int:
               "scratch dir is removed")
     if target_norm and not pins:
         pins = current_pins()
+    def borrowed() -> dict[str, str]:
+        # Every checkout this run can see: registered worktrees and the
+        # children of every configured root, read fresh each time.
+        places = {norm(w.path) for w in list_worktrees(repo)}
+        for r in [*wt_norm, *cache_norm, *target_norm, *clone_norm, *scratch_norm]:
+            places.update(norm(c) for c in _children(r))
+        return borrowed_object_dirs(sorted(places))
+
     # A dir is judged once: one listed under a cache root keeps the cache rule.
     seen: set[str] = {norm(v.path) for v in verdicts if v.kind == "cache"}
 
-    def candidate(child: str) -> bool:
+    def candidate(child: str, destructive: bool = True) -> bool:
         n = norm(child)
+        if destructive and any(is_under(n, r) or is_under(r, n) for r in scratch_norm):
+            # A scratch root is list only, also when another root reaches it.
+            left["at or around a scratch root"] = left.get("at or around a scratch root", 0) + 1
+            return False
         if any(is_under(h, n) for h in here):
             left["runs from here"] += 1
             return False
@@ -2054,7 +2110,7 @@ def run_sweep(args, cfg: dict) -> int:
         for child in _children(root):
             if _real_dir(os.path.join(child, ".git")) and candidate(child):
                 verdicts.append(evaluate_clone(child, repo=repo, main=main, grace_days=wgrace,
-                                               now=now, procs=procs))
+                                               now=now, procs=procs, borrowed=borrowed()))
             elif _real_dir(child) and norm(child) not in seen:
                 left["not a clone"] = left.get("not a clone", 0) + 1
     # Scratch is list only: every row says what holds it (or that nothing
@@ -2062,7 +2118,7 @@ def run_sweep(args, cfg: dict) -> int:
     # ever removed by this script.
     for root in scratch_norm:
         for child in _children(root):
-            if _real_dir(child) and candidate(child):
+            if _real_dir(child) and candidate(child, destructive=False):
                 v = evaluate_scratch(child, grace_days=sgrace, now=now, procs=procs,
                                      registered=registered)
                 age = (f"last write {(now - v.newest) / DAY:.1f} days ago"
@@ -2106,7 +2162,7 @@ def run_sweep(args, cfg: dict) -> int:
                                     procs=list_processes())
         elif v.kind == "clone":
             again = evaluate_clone(v.path, repo=repo, main=main, grace_days=wgrace,
-                                   now=time.time(), procs=list_processes())
+                                   now=time.time(), procs=list_processes(), borrowed=borrowed())
         else:
             raise Refusal(f"a {v.kind} row reached the delete path")    # never: scratch is list only
         if not again.ok:
