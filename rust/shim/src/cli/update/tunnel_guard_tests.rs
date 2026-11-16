@@ -1088,6 +1088,52 @@ fn a_hand_made_task_of_that_name_is_warned_about() {
 }
 
 #[test]
+fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
+    // A marked unit edited to run another program, in valid systemd syntax,
+    // is a near miss: it must not count as this launcher.
+    for line in [
+        " ExecStart=/usr/bin/true",
+        "ExecStart = /usr/bin/true",
+        "ExecStart=-/usr/bin/true",
+        "\tExecStart=  !/usr/bin/true",
+    ] {
+        assert_eq!(
+            unit_command(&format!("[Service]\n{line}\n")).unwrap(),
+            vec!["/usr/bin/true"],
+            "{line}"
+        );
+    }
+    let f = Fixture::new();
+    f.python_launcher();
+    let marked = format!("# {OWNER}{HEX}\n[Service]\nExecStart = /usr/bin/true\n");
+    f.write(
+        ".config/systemd/user/pseudolife-tunnel-dot.service",
+        &marked,
+    );
+    assert_eq!(update(&f, &linux(), &Untouched), Decision::Proceed(vec![]));
+}
+
+#[test]
+fn an_already_native_machine_says_what_it_could_not_check() {
+    let f = Fixture::new();
+    f.native_launcher();
+    f.write(".pseudolife-mcp/tunnel/dot.json", "{}");
+    let registry = Registry::new(1, "", vec![]);
+    let Decision::Proceed(notes) = update(&f, &windows(), &registry) else {
+        panic!()
+    };
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].contains("could not be listed (schtasks could not be started)"),
+        "{notes:?}"
+    );
+    assert!(
+        notes[0].contains("fails at each start under the native client"),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn printed_paths_survive_a_paste() {
     assert_eq!(
         quote("/a\\b", false),

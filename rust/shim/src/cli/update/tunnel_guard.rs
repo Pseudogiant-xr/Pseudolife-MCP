@@ -321,6 +321,7 @@ pub(crate) fn decide(
                 .iter()
                 .map(|r| failing(r, home))
                 .chain(handmade)
+                .chain(scan.notes)
                 .collect(),
         );
     }
@@ -666,9 +667,13 @@ fn unit_owned(text: &str) -> bool {
 /// `ExecStart=` as `render_service` quotes it: each word in double quotes,
 /// `\` and `"` backslash-escaped, `%` and `$` doubled.
 fn unit_command(text: &str) -> Option<Vec<String>> {
-    let line = text
-        .lines()
-        .find_map(|line| line.trim_end().strip_prefix("ExecStart="))?;
+    let line = text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("ExecStart")
+            .map(str::trim_start)
+            .and_then(|rest| rest.strip_prefix('='))
+            .map(|rest| rest.trim_start().trim_start_matches(['-', ':', '+', '!']))
+    })?;
     let mut words = Vec::new();
     let mut chars = line.chars().peekable();
     loop {
@@ -845,7 +850,7 @@ fn quote(path: &str, powershell: bool) -> String {
 
 fn unchecked(what: &str, kind: Kind) -> String {
     format!(
-        "{what}, so this run could not check for a tunnel registered to start by itself; if one is, it fails at each start once this machine runs the native client: stop it with {}, or go back to the Python client ({NATIVE_CLIENT_DOCS}) and remove it there with pseudolife-mcp tunnel service remove --profile <name>",
+        "{what}, so this run could not check for a tunnel registered to start by itself; if one is, it fails at each start under the native client: stop it with {}, or go back to the Python client ({NATIVE_CLIENT_DOCS}) and remove it there with pseudolife-mcp tunnel service remove --profile <name>",
         Registered::stop_hint(kind)
     )
 }
