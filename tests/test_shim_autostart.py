@@ -130,6 +130,23 @@ def test_config_writes_a_managed_block_and_merges_later_edits(repo):
     assert sa.read_env(path)["PSEUDOLIFE_CLAUDE_SHIM_CLI"] == odd
 
 
+def test_config_with_unchanged_settings_leaves_the_file_untouched(repo):
+    """A rerun with the same settings must not touch ops/.env: the Windows
+    autostart installers say "nothing changed" only when the recorded shim
+    started after the file was last written, so a rewrite of the same bytes
+    would make every second rerun restart a healthy shim."""
+    import os
+    path, _ = sa.write_config(repo, "codex", {"model": "gpt-5.6-terra", "port": "8086"})
+    os.utime(path, (1_000_000_000, 1_000_000_000))
+    sa.write_config(repo, "codex", {"model": "gpt-5.6-terra", "port": "8086"})
+    sa.write_config(repo, "codex", {"model": "gpt-5.6-terra"})
+    assert path.stat().st_mtime == 1_000_000_000
+    # A real change is still written.
+    sa.write_config(repo, "codex", {"model": "gpt-6-sol"})
+    assert path.stat().st_mtime != 1_000_000_000
+    assert sa.read_env(path)["PSEUDOLIFE_CODEX_SHIM_MODEL"] == "gpt-6-sol"
+
+
 def test_config_moves_a_key_written_outside_the_block_into_it(repo):
     """The block sits at the end of the file and is read last, so a
     hand-written line above it would be shadowed silently; config moves

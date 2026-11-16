@@ -221,7 +221,12 @@ def write_config(repo: Path, kind: str, settings: dict) -> tuple[Path, list[str]
     for key in sorted(existing):
         out.append(f"{key}={_quote(existing[key])}")
     out.append(BLOCK_END)
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    text = "\n".join(out) + "\n"
+    # Unchanged settings leave the file untouched, its modification time
+    # included: the Windows autostart installers decide "nothing changed"
+    # only when the recorded shim started after the file was last written.
+    if path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
     return path, sorted(moved)
 
 
