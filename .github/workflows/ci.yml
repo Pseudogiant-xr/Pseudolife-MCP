@@ -737,6 +737,9 @@ jobs:
         #   refuses a job when the account's LAN block does not bind.
         # - test_windowless_children: the suite's real console check and its
         #   wrapped Popen (tests/windowless_children.py), Windows-only code.
+        # - test_integrate_script (picks): the batch compile check's far half
+        #   (ops/rust-check-remote.ps1) on real pwsh, git and a file lock, as
+        #   the Windows dev VM runs it.
         # - test_scheduled_task_lock: the scheduled-task owner check and its
         #   refusals under Windows PowerShell 5.1 and PowerShell 7, and the
         #   real canonical-path call the recorded-shim proof makes.
@@ -801,6 +804,26 @@ jobs:
           tests/test_installer_native_client_ps.py
           rust/ci/test_pr_precheck.py
           rust/ci/test_pr_precheck_run.py
+          tests/test_integrate_script.py::test_the_far_half_checks_exactly_the_batch_head_in_its_gate_copy
+          tests/test_integrate_script.py::test_the_far_half_withholds_credentials_from_cargo
+          tests/test_integrate_script.py::test_the_far_half_withholds_what_the_local_check_withholds
+          tests/test_integrate_script.py::test_the_far_half_tags_its_verdict_with_the_runs_nonce
+          tests/test_integrate_script.py::test_a_killed_runs_leftovers_are_swept_by_the_next
+          tests/test_integrate_script.py::test_a_trailing_separator_keeps_the_gate_beside_the_clone
+          tests/test_integrate_script.py::test_the_next_batch_reuses_the_gate_copy_clean
+          tests/test_integrate_script.py::test_the_far_half_reports_cargos_own_exit
+          tests/test_integrate_script.py::test_a_bundle_that_is_not_the_batch_head_is_refused_before_cargo
+          tests/test_integrate_script.py::test_a_base_origin_lacks_is_refused
+          tests/test_integrate_script.py::test_a_clone_that_cannot_reach_origin_is_refused
+          tests/test_integrate_script.py::test_no_usable_bundle_is_refused
+          tests/test_integrate_script.py::test_only_an_integrate_ref_is_taken
+          tests/test_integrate_script.py::test_a_held_gate_lock_waits_then_refuses
+          tests/test_integrate_script.py::test_build_and_the_far_half_agree_end_to_end
+          tests/test_integrate_script.py::test_a_drive_under_the_floor_is_not_run_never_a_red_batch
+          tests/test_integrate_script.py::test_a_held_full_suite_lock_is_not_run
+          tests/test_integrate_script.py::test_a_suite_that_starts_during_the_check_waits_for_it
+          tests/test_integrate_script.py::test_a_hook_a_batch_left_in_the_clone_does_not_run
+          tests/test_integrate_script.py::test_a_no_hooks_path_that_exists_is_refused
           tests/test_tunnel_cli.py
           tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations
           tests/test_claude_shim_windows_prompt.py
