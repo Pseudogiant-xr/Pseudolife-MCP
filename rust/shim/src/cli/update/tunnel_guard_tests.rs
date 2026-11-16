@@ -982,6 +982,16 @@ fn unit_files_are_read_from_home_even_when_userprofile_is_set() {
     );
 }
 
+/// A bare ExecStart word: systemd decodes backslashes, so a Windows test
+/// path (the fixture launcher there) is written as systemd would read it.
+fn escaped(path: &str) -> String {
+    if path.contains('\\') {
+        format!("\"{}\"", path.replace('\\', "\\\\"))
+    } else {
+        path.to_owned()
+    }
+}
+
 #[test]
 fn a_service_made_by_hand_is_warned_about_never_refused() {
     let f = Fixture::new();
@@ -990,7 +1000,10 @@ fn a_service_made_by_hand_is_warned_about_never_refused() {
     // No owner marker, any name: the command is this launcher, then tunnel run.
     let hand = f.write(
         ".config/systemd/user/my-chatgpt-tunnel.service",
-        &format!("[Service]\nExecStart={launcher} tunnel run --profile dot\nRestart=always\n"),
+        &format!(
+            "[Service]\nExecStart={} tunnel run --profile dot\nRestart=always\n",
+            escaped(&launcher)
+        ),
     );
     let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
         panic!("a hand-made service is not this product's signal: no refusal");
@@ -1022,7 +1035,10 @@ fn a_service_made_by_hand_is_warned_about_never_refused() {
     g.native_launcher();
     g.write(
         ".config/systemd/user/my-chatgpt-tunnel.service",
-        &format!("[Service]\nExecStart={} tunnel run\n", g.launcher()),
+        &format!(
+            "[Service]\nExecStart={} tunnel run\n",
+            escaped(&g.launcher())
+        ),
     );
     let Decision::Proceed(lines) = update(&g, &linux(), &Untouched) else {
         panic!()
@@ -1103,8 +1119,28 @@ fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
             "{line}"
         );
     }
+    // systemd strips single quotes too; a bare word it would decode further
+    // is unreadable, which counts as the launcher.
+    assert_eq!(
+        unit_command("ExecStart = '/home/u/x y/pseudolife-mcp' tunnel run\n").unwrap(),
+        vec!["/home/u/x y/pseudolife-mcp", "tunnel", "run"]
+    );
+    assert_eq!(
+        unit_command("ExecStart=/home/u/x\\ y/pseudolife-mcp tunnel run\n"),
+        None
+    );
+    assert_eq!(unit_command("ExecStart=/home/u/it's tunnel run\n"), None);
     let f = Fixture::new();
     f.python_launcher();
+    let quoted = format!(
+        "# {OWNER}{HEX}\n[Service]\nExecStart = '{}' tunnel run\n",
+        f.launcher().replace('\\', "\\\\")
+    );
+    f.write(
+        ".config/systemd/user/pseudolife-tunnel-dot.service",
+        &quoted,
+    );
+    refused(update(&f, &linux(), &Untouched));
     let marked = format!("# {OWNER}{HEX}\n[Service]\nExecStart = /usr/bin/true\n");
     f.write(
         ".config/systemd/user/pseudolife-tunnel-dot.service",

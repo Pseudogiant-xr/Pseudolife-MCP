@@ -664,8 +664,11 @@ fn unit_owned(text: &str) -> bool {
         .is_some_and(runtime::valid_digest)
 }
 
-/// `ExecStart=` as `render_service` quotes it: each word in double quotes,
-/// `\` and `"` backslash-escaped, `%` and `$` doubled.
+/// `ExecStart=` as systemd splits it: words in double or single quotes,
+/// with backslash escapes, or bare; `%` and `$` doubled (how
+/// `render_service` writes it). A word systemd would decode further (a bare
+/// word holding a quote or a backslash) makes the command unreadable, which
+/// counts as the launcher rather than letting a move through on a guess.
 fn unit_command(text: &str) -> Option<Vec<String>> {
     let line = text.lines().find_map(|line| {
         line.trim()
@@ -680,10 +683,10 @@ fn unit_command(text: &str) -> Option<Vec<String>> {
         while chars.next_if(|c| c.is_whitespace()).is_some() {}
         let Some(first) = chars.next() else { break };
         let mut word = String::new();
-        if first == '"' {
+        if first == '"' || first == '\'' {
             loop {
                 match chars.next()? {
-                    '"' => break,
+                    c if c == first => break,
                     '\\' => word.push(chars.next()?),
                     c => word.push(c),
                 }
@@ -692,6 +695,9 @@ fn unit_command(text: &str) -> Option<Vec<String>> {
             word.push(first);
             while let Some(c) = chars.next_if(|c| !c.is_whitespace()) {
                 word.push(c);
+            }
+            if word.contains(['"', '\'', '\\']) {
+                return None;
             }
         }
         words.push(word.replace("%%", "%").replace("$$", "$"));
