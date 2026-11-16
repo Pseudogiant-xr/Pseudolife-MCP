@@ -92,6 +92,9 @@ def _run(tmp_path: Path, extra_stubs: str = "", env: dict | None = None,
         f"$env:ProgramFiles = '{env.pop(key)}'\n"
         for key in [k for k in env if k.upper() == "PROGRAMFILES"])
     driver.write_text(
+        # UTF-8 out, so a path such as O’Brien reads back as it is (the
+        # Windows console default is the OEM code page).
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
         f"$env:INSTALL_TEST_LOG = '{log}'\n{in_process}{_STUBS}\n{extra_stubs}\n"
         f'& "{script}" {" ".join(args)}\n'
         "exit $LASTEXITCODE\n",
@@ -100,7 +103,8 @@ def _run(tmp_path: Path, extra_stubs: str = "", env: dict | None = None,
     merged = _merge_env(env)
     proc = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(driver)],
-        capture_output=True, text=True, timeout=120, env=merged,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120, env=merged,
     )
     registered = (json.loads(log.read_text(encoding="utf-8-sig"))
                   if log.exists() and log.stat().st_size else None)
