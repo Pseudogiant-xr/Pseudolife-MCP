@@ -36,6 +36,7 @@ def _load():
 prune = _load()
 REAL_ARRIVAL = getattr(prune, "_arrival", None)   # before any fixture replaces it
 REAL_LIST_PROCESSES = prune.list_processes
+REAL_FIRST_SEEN = getattr(getattr(prune, "Sightings", None), "first_seen", None)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -169,6 +170,10 @@ def env(tmp_path, monkeypatch):
     # Files made here arrive now; tests age them by mtime alone, and the
     # arrival rule has its own test.
     monkeypatch.setattr(prune, "_arrival", lambda st: 0.0, raising=False)
+    # Scratch dirs count as first seen long ago; the sightings rule has its
+    # own tests.
+    if hasattr(prune, "Sightings"):
+        monkeypatch.setattr(prune.Sightings, "first_seen", lambda self, path, now: 0.0)
     monkeypatch.delenv("CARGO_TARGET_DIR", raising=False)
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
         monkeypatch.delenv(var, raising=False)
@@ -2012,3 +2017,41 @@ def test_a_clone_whose_git_dir_names_a_commondir_is_kept(env):
     assert rc == 0, out
     assert clone.exists()
     assert "commondir" in out
+
+
+# --- fresh Codex pass on the review round ------------------------------------
+
+def test_a_keep_marker_keeps_a_scratch_dir(env):
+    kept = _scratch(env, "kept-on-purpose", "data.bin", ".pseudolife-keep")
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert kept.exists()
+    assert "keep marker" in out
+
+
+def test_a_scratch_dir_goes_only_a_grace_period_after_it_was_first_seen(env, monkeypatch):
+    """A move within one Windows volume keeps a dir's creation time, so no
+    time on disk shows its arrival; the first sighting does."""
+    monkeypatch.setattr(prune.Sightings, "first_seen", REAL_FIRST_SEEN)
+    moved = _scratch(env, "moved-in", "data.bin")          # 30 days old on disk
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert moved.exists()
+    assert "first seen 0.0 days ago" in out
+    sightings = json.loads((env.tmp / "scratch-sightings.json").read_text(encoding="utf-8"))
+    assert sightings == {prune.norm(moved): pytest.approx(time.time(), abs=600)}
+    sightings[prune.norm(moved)] = OLD
+    (env.tmp / "scratch-sightings.json").write_text(json.dumps(sightings), encoding="utf-8")
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert not moved.exists()
+
+
+def test_an_unreadable_sightings_file_keeps_every_scratch_dir(env, monkeypatch):
+    monkeypatch.setattr(prune.Sightings, "first_seen", REAL_FIRST_SEEN)
+    old = _scratch(env, "old")
+    (env.tmp / "scratch-sightings.json").write_text("{not json", encoding="utf-8")
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert old.exists()
+    assert "cannot be read" in out

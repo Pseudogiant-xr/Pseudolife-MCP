@@ -288,6 +288,13 @@ these hold:
   arrival.
 - It holds at least one byte. An empty dir may be a lock dir some process
   made with `mkdir`.
+- A run first saw it at least the grace period ago. Times on disk cannot
+  show every arrival (a move within one Windows volume keeps the creation
+  time), so each run records when it first saw each scratch dir in
+  `~/.pseudolife-mcp/scratch-sightings.json` (beside the ledger). Dry runs
+  record too, so a week of dry runs counts. A sightings file that cannot be
+  read keeps every scratch dir.
+- It holds no `.pseudolife-keep` file.
 - It holds nothing kept for ever:
   - **Checkouts and repositories:** a `.git`; a git repository (a dir
     holding `HEAD`, `objects` and `refs`, such as a bare mirror); a

@@ -1421,6 +1421,8 @@ def scratch_reason(path: str) -> str | None:
             return "holds a git repository (bare or a git dir)"
         for e in entries:
             low = e.name.lower()
+            if low == KEEP_FILE:
+                return f"keep marker ({KEEP_FILE})"
             if low == ".git":
                 return "holds a git checkout"
             if low == "pyvenv.cfg":
@@ -1516,6 +1518,47 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
         return v
     v.passed.append("no-process-uses-it")
     return v
+
+
+# --- scratch sightings -------------------------------------------------------
+
+class Sightings:
+    """When a run first saw each scratch dir, kept beside the ledger. Times
+    on disk cannot show every arrival (a move within one Windows volume
+    keeps the creation time), so a scratch dir goes only a grace period
+    after a run first saw it. A dry run records sightings too, so a week of
+    dry runs counts. A file that cannot be read keeps every scratch dir."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.seen: dict[str, float] = {}
+        self.error: str | None = None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not all(
+                    isinstance(k, str) and isinstance(v, (int, float)) and math.isfinite(v)
+                    for k, v in data.items()):
+                raise ValueError("not a map of paths to times")
+            self.seen = {k: float(v) for k, v in data.items()}
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as exc:
+            self.error = f"{path} cannot be read ({exc}); no scratch dir is removed"
+
+    def first_seen(self, path: str, now: float) -> float:
+        return self.seen.setdefault(path, now)
+
+    def save(self, present: set[str]) -> str | None:
+        # Only dirs still there are remembered.
+        kept = {k: v for k, v in self.seen.items() if k in present}
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            tmp.write_text(json.dumps(kept, indent=0, sort_keys=True), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            return f"could not write {self.path}: {exc.strerror or exc}"
+        return None
 
 
 # --- one run at a time -------------------------------------------------------
@@ -1920,14 +1963,28 @@ def run_sweep(args, cfg: dict) -> int:
             elif _real_dir(child) and norm(child) not in seen:
                 left["not a clone"] = left.get("not a clone", 0) + 1
     list_only: set[str] = set()
+    sightings = Sightings(args.ledger.parent / "scratch-sightings.json") if scratch_norm else None
+    present: set[str] = set()
     for root, only_list in scratch_norm:
         for child in _children(root):
             if _real_dir(child) and candidate(child):
                 v = evaluate_scratch(child, grace_days=sgrace, now=now, procs=procs,
                                      registered=registered)
+                key = norm(child)
+                present.add(key)
+                seen_at = sightings.first_seen(key, now)
+                if v.ok and sightings.error:
+                    v.failure = sightings.error
+                elif v.ok and now - seen_at < sgrace * DAY:
+                    v.failure = (f"first seen {(now - seen_at) / DAY:.1f} days ago; a scratch dir "
+                                 f"goes only {sgrace:g} days after a run first saw it")
                 if only_list:
-                    list_only.add(norm(child))
+                    list_only.add(key)
                 verdicts.append(v)
+    if sightings is not None and not sightings.error:
+        note = sightings.save(present)
+        if note:
+            print(f"warning: {note}")
 
     rows: list[tuple[Verdict, str]] = []
     ledger_ok = [True]
