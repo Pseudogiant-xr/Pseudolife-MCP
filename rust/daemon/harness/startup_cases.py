@@ -565,7 +565,8 @@ def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
     """One case on cloned banks. With ``oracle`` the Python service starts
     beside Rust and each stage compares the two; without it (golden checking)
     only Rust starts, and ``expected`` (the case's committed snapshot and
-    database stages) is its expectation. Python seeds the template either way."""
+    database stages) is its expectation. Rust opens the empty template;
+    the remaining row fixtures still use Python's writers."""
     arms = ("python", "rust") if oracle else ("rust",)
     names = [pg.name(f"{pg.PREFIX}{number + index}") for index in range(1 + len(arms))]
     created = []

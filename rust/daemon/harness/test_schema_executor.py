@@ -4,12 +4,15 @@ The unittest discovery in schema_ci also exercises the comparison's negative
 controls without requiring the executable before the build step.
 """
 import copy
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -17,6 +20,7 @@ sys.path.insert(0, str(HERE.parents[2]))
 import dbstate
 import psycopg
 from rust.harness_support.database_guard import assert_disposable_database
+from rust.harness_support import schema
 from rust.harness_support.schema import ensure_schema
 
 
@@ -57,6 +61,29 @@ def check_equivalence(binary, pg):
             if previous is not None:
                 compare(previous, states[0])
             previous = states[0]
+        # A failure after DDL must undo it, including inside an existing
+        # caller transaction; the original catalog and version remain exact.
+        plan = json.loads((schema.STORAGE / "schema_plan.json").read_text(encoding="utf-8"))
+        plan["steps"] += [
+            {"op": "sql", "sql": "CREATE TABLE executor_rollback_probe (id integer)", "parameters": []},
+            {"op": "sql", "sql": "SELECT 1 / 0", "parameters": []},
+        ]
+        with tempfile.TemporaryDirectory(prefix="schema-executor-") as scratch:
+            directory = Path(scratch)
+            (directory / "schema_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            (directory / "schema.sql").write_bytes((schema.STORAGE / "schema.sql").read_bytes())
+            with patch.object(schema, "STORAGE", directory):
+                for autocommit in (True, False):
+                    with psycopg.connect(dsns[0], autocommit=autocommit) as conn:
+                        if not autocommit:
+                            assert_disposable_database(conn)  # begin the caller's transaction
+                        try:
+                            ensure_schema(conn)
+                        except psycopg.errors.DivisionByZero:
+                            pass
+                        else:
+                            raise AssertionError("schema executor swallowed a SQL failure")
+                    compare(previous, dbstate.dump(dsns[0]))
         corrupted = copy.deepcopy(previous)
         table = corrupted["rows"]["public.meta"]
         index = table["columns"].index("value")
@@ -65,7 +92,8 @@ def check_equivalence(binary, pg):
         try:
             compare(previous, corrupted)
         except AssertionError:
-            return {"opens": 2, "catalog_and_rows_equal": True, "corrupted_state_caught": True}
+            return {"opens": 2, "catalog_and_rows_equal": True,
+                    "rollback_preserves_state": True, "corrupted_state_caught": True}
         raise AssertionError("schema comparison accepted a changed schema version")
     finally:
         for name in reversed(created):
