@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, io::Read};
 
 pub(super) const PYTHON_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon";
-pub(super) const RUST_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust";
+pub(crate) const RUST_IMAGE: &str = "ghcr.io/pseudogiant-xr/pseudolife-daemon-rust";
 const COMPOSE_FILES: [&str; 6] = [
     "docker-compose.yml",
     "docker-compose.ghcr.yml",

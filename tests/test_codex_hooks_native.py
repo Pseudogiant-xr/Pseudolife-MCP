@@ -53,6 +53,15 @@ def isolated_env(codex_home):
     return env
 
 
+def pwsh_run(*args, input=None, env=None, raw=False):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    return subprocess.run([pwsh, "-NoProfile", *map(str, args)], input=input,
+                          env=env, capture_output=True, text=not raw,
+                          timeout=HOOK_PROCESS_TIMEOUT, check=True)
+
+
 def bash_exe():
     bash = shutil.which("bash")
     if os.name == "nt":
@@ -66,6 +75,125 @@ def bash_exe():
     if not bash:
         pytest.skip("Bash is not installed")
     return bash
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.parametrize("source,trust,instructions,status,fallback,exit_code", [
+    ("auto", "yes", "auto", "ready", "covered-by-hooks", 0),
+    ("manual", "yes", "append", "ready", "appended", 0),
+    ("plugin", "ask", "auto", "pending", "present", 0),
+    ("plugin", "no", "skip", "pending", "skipped", 1),
+    ("skip", "no", "append", "skipped", "appended", 0),
+    ("auto", "yes", "auto", "unavailable", "appended", 0),
+    ("auto", "ask", "auto", "unavailable", "skipped", 1),
+    ("auto", "yes", "auto", "ready", "covered-by-hooks", 2),
+])
+def test_installer_hook_and_instruction_stages_together(
+        tmp_path, shell, source, trust, instructions, status, fallback, exit_code):
+    """Real shell stages delegate Codex ownership and propagate readiness.
+
+    The helper fixture records its arguments and returns the setup contract.
+    Stage 10 must not write or prompt again, even for explicit append. Docker,
+    MCP registration, and the real user home remain outside this fixture.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    fixture_repo = tmp_path / "repo"
+    (fixture_repo / "ops").mkdir(parents=True)
+    (fixture_repo / "examples").mkdir()
+    shutil.copyfile(ROOT / "examples/CLAUDE.memory.md", fixture_repo / "examples/CLAUDE.memory.md")
+    (fixture_repo / "ops/setup-codex-coordination.py").write_text(
+        "import json\nprint(json.dumps({'status':'tokenless',"
+        "'credential_file_configured':False,'connection_configured':False}))\n",
+        encoding="utf-8")
+    result_data = {"source": source if source != "auto" else "manual",
+                   "status": status, "instructions": fallback,
+                   "recovery": "Review the hook in /hooks." if status != "ready" else None}
+    helper = fixture_repo / "ops/setup-codex-hooks.py"
+    helper.write_text(
+        "import json, os, sys\nfrom pathlib import Path\n"
+        "Path(os.environ['FIXTURE_CALL']).write_text(json.dumps({'args': sys.argv[1:], "
+        "'codex_home': os.environ['CODEX_HOME']}))\n"
+        f"print({json.dumps(result_data)!r})\nsys.exit({exit_code})\n", encoding="utf-8")
+    call = tmp_path / "call.json"
+    codex_home = home / "custom codex"
+    env = isolated_env(codex_home)
+    env.update({"HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
+                "FIXTURE_CALL": str(call)})
+    result = run_installer_stages(tmp_path, shell, fixture_repo, env, source, trust, instructions)
+    expected_status = status if exit_code < 2 else "unavailable"
+    expected_fallback = fallback if exit_code < 2 else "appended"
+    assert f"RESULT:{expected_status}:{expected_fallback}" in result
+    recorded = json.loads(call.read_text())
+    assert recorded == {"args": ["--source", source, "--trust", trust, "--instructions",
+                                 instructions, "--non-interactive"],
+                        "codex_home": codex_home.as_posix()}
+    assert (codex_home / "AGENTS.md").exists() == (exit_code == 2)
+    assert not (home / ".codex/hooks.json").exists()
+    assert not (home / ".codex/AGENTS.md").exists()
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.parametrize("trust,instructions,expected,existing", [
+    ("yes", "auto", "appended", None),
+    ("no", "append", "appended", None),
+    ("ask", "append", "appended", "override"),
+    ("yes", "auto", "appended", "mention"),
+    ("yes", "auto", "present", "complete"),
+    ("yes", "auto", "appended", "empty-override"),
+    ("yes", "skip", "skipped", None),
+    ("ask", "auto", "skipped", None),
+    ("no", "auto", "skipped", None),
+])
+def test_installer_codex_setup_that_cannot_run_reports_unavailable(
+        tmp_path, shell, trust, instructions, expected, existing):
+    """When the native client's Codex steps fail outright, Codex is reported
+    unavailable with its recovery, nothing under the real home is touched,
+    and the standing-instruction fallback still honours the consent given."""
+    home = tmp_path / "home"
+    home.mkdir()
+    codex_home = home / "custom codex"
+    codex_home.mkdir()
+    target = codex_home / ("AGENTS.override.md" if existing == "override" else "AGENTS.md")
+    old = {"override": b"User override rules.\n", "mention": b"Consider pseudolife-memory; use memory_search.\n",
+           "complete": (ROOT / "examples/CLAUDE.memory.md").read_bytes()}.get(existing)
+    if old:
+        target.write_bytes(old)
+    if existing == "empty-override":
+        (codex_home / "AGENTS.override.md").write_bytes(b" \n")
+    env = isolated_env(codex_home)
+    env.update({"HOME": home.as_posix(), "USERPROFILE": home.as_posix()})
+    result = run_installer_stages(tmp_path, shell, ROOT, env, "auto", trust, instructions,
+                                  helper_fails=True)
+    assert f"RESULT:unavailable:{expected}" in result
+    assert "Codex credential setup failed" in result
+    assert "Install Python" not in result
+    assert not (home / ".codex").exists()
+    assert target.exists() == (expected != "skipped")
+    if expected == "appended":
+        text = target.read_text(encoding="utf-8")
+        assert all(term in text for term in ("## Memory", "pseudolife-memory", "RECALL", "CAPTURE", "REFLECT"))
+        if old:
+            assert target.read_bytes().startswith(old)
+            backups = list(codex_home.glob(target.name + ".bak-pseudolife-*"))
+            assert len(backups) == 1 and backups[0].read_bytes() == old
+    elif expected == "present":
+        assert target.read_bytes() == old
+        assert not list(codex_home.glob("*.bak-pseudolife-*"))
+    if existing == "empty-override":
+        assert (codex_home / "AGENTS.override.md").read_bytes() == b" \n"
+
+
+def test_powershell_installer_recovers_when_hook_helper_launch_throws(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    env = isolated_env(home / "codex-home")
+    env.update({"HOME": home.as_posix(), "USERPROFILE": home.as_posix()})
+    result = run_installer_stages(
+        tmp_path, "powershell", ROOT, env, "auto", "yes", "auto",
+        launch_throws=True)
+    assert "RESULT:unavailable:appended" in result
+    assert "Codex setup did not return a valid result" in result
 
 
 @pytest.mark.parametrize(("bootstrap_success", "shim_available", "runtime_success", "expected_state"), [
@@ -307,7 +435,6 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 {native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -456,7 +583,6 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 {native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -688,7 +814,6 @@ function Get-EnvValue($name) {{
     return $null
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
-function python {{ & '{Path(sys.executable).as_posix()}' @args }}
 {native_stub.NATIVE_FROM_SHIM_BIN_PS}
 function codex {{
     if ($args[0] -eq 'mcp' -and $args[1] -eq 'get') {{ $global:LASTEXITCODE=1; return }}
@@ -743,3 +868,141 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
     assert "http://127.0.0.1:4321" not in arguments
     assert "installer-fixture" not in arguments
     assert "unforwarded-literal" not in arguments
+
+
+def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions,
+                         helper_fails=False, launch_throws=False):
+    """Run sections 9 and 10 of an installer with the native client's
+    installer steps answered by the stand-in helper (the Python helpers in
+    ``repo``). ``helper_fails``: every native step exits 1 with no output.
+    ``launch_throws`` (PowerShell): the credential step answers tokenless and
+    launching the hook step throws."""
+    if shell == "powershell":
+        text = (ROOT / "ops/install-native.ps1").read_text(encoding="utf-8")
+        stages = text.split("# -- 9. session lifecycle hooks", 1)[1].split(
+            "# -- 11. wire into selected MCP clients", 1)[0].split("\n", 1)[1]
+        if helper_fails:
+            helper = "function Invoke-NativeHelper { $global:LASTEXITCODE = 1 }\n"
+        elif launch_throws:
+            helper = (
+                "function Invoke-NativeHelper {\n"
+                "  if ($args[0] -eq 'codex-credentials') {\n"
+                "    $global:LASTEXITCODE = 0\n"
+                "    Write-Output '{\"status\":\"tokenless\",\"credential_file_configured\":false,\"connection_configured\":false}'\n"
+                "    return\n"
+                "  }\n"
+                "  throw 'fixture launch failure'\n"
+                "}\n")
+        else:
+            helper = native_stub.HELPER_PS
+        script = tmp_path / "stages.ps1"
+        script.write_text(
+            "$ErrorActionPreference = 'Stop'\n"
+            f"$repo = '{repo.as_posix()}'\n$clients = @('codex')\n"
+            f"$CodexHooks = '{source}'\n$CodexHookTrust = '{trust}'\n"
+            f"$Instructions = '{instructions}'\n$interactive = $false\n"
+            "function Step($text) { Write-Host $text }\n"
+            "function Get-EnvValue($name) { return $null }\n"
+            "function Read-Host($text) { throw 'Unexpected second prompt' }\n"
+            + helper
+            + stages + "\nWrite-Output ('RESULT:' + $hookState['codex'] + ':' + $instrState['codex'])\n",
+            encoding="utf-8")
+        return pwsh_run("-File", script, env=env).stdout
+    # bash_exe() skips the native-Windows System32 WSL launcher for Git Bash.
+    bash = bash_exe()
+    text = (ROOT / "ops/install-native.sh").read_text(encoding="utf-8")
+    parts = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)^# [^\n]*11\. wire into selected MCP clients", text)
+    assert parts, "installer stage boundaries changed"
+    script = tmp_path / "stages.sh"
+    script.write_text(
+        "set -euo pipefail\n"
+        f"repo={shlex.quote(repo.as_posix())}\n"
+        f"CLIENTS=codex\nCODEX_HOOKS={source}\nCODEX_HOOK_TRUST={trust}\nINSTRUCTIONS={instructions}\n"
+        "CLAUDE_MD=''\nAGENTS_FILE=''\nstep() { echo \"$*\"; }\n"
+        "get_env() { return 0; }\n"
+        + ("native_helper() { return 1; }\n" if helper_fails else native_stub.HELPER_SH)
+        + parts[1] + '\nprintf "RESULT:%s:%s\\n" "$HOOK_CODEX" "$INSTR_CODEX"\n',
+        encoding="utf-8")
+    result = subprocess.run([bash, script.as_posix()], env=env, capture_output=True,
+                            timeout=HOOK_PROCESS_TIMEOUT, check=True)
+    return result.stdout.decode("utf-8")
+
+
+DOCKER_BRIEFING = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+
+
+def _install_hooks(shell, client, settings, command):
+    # A disposable home beside the settings, so neither installer reads or
+    # runs anything of the developer's; install-hook-native.sh edits through the
+    # native client (the real one, or the stand-in running its old heredocs).
+    from tests import installer_sandbox
+    from tests import native_client_stub as native_stub
+    root = Path(settings).parent.parent
+    keep = ("PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "COMSPEC", "PATHEXT")
+    env = installer_sandbox.environment(root / "hook-home", {k: v for k, v in os.environ.items() if k in keep})
+    env["PSEUDOLIFE_NATIVE_CLI"] = native_stub.native_cli(root / "hook-cli").as_posix()
+    if shell == "bash":
+        installer_sandbox.run([bash_exe(), str(ROOT / "ops/install-hook-native.sh"), "--client", client,
+                               settings.as_posix(), command], env=installer_sandbox.layout(env, root), root=root,
+                              capture_output=True, text=True, timeout=HOOK_PROCESS_TIMEOUT, check=True)
+    else:
+        installer_sandbox.require(env, root)
+        pwsh_run("-File", ROOT / "ops/install-hook.ps1", "-Client", client,
+                 "-SettingsPath", settings, "-Command", command, env=env)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("client", ["claude", "codex"])
+def test_hook_installers_gate_the_coordination_checkin(tmp_path, shell, client):
+    """The check-in comes from the daemon, which serves it only where the
+    board works; an older install's unconditional echo is replaced in place
+    and nothing else is touched (2026-09-25)."""
+    legacy_line = re.search(r'^COORDINATION_LINE="(.*)"$',
+                            (ROOT / "ops/install-hook-native.sh").read_text(encoding="utf-8"), re.M)[1]
+    legacy = {"type": "command", "command": f"echo '{legacy_line}'"}
+    if client == "codex":
+        legacy.update(commandWindows=f"Write-Output '{legacy_line}'", timeout=5)
+    unrelated = {"type": "command", "command": "echo user-owned"}
+    # A user's own hook that merely mentions the phrase is not ours to remove.
+    lookalike = {"type": "command", "command": "echo 'Pseudolife coordination: my own reminder'"}
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"hooks": {"SessionStart": [
+        {"hooks": [legacy, unrelated, lookalike]}]}}), encoding="utf-8")
+    for _ in range(2):
+        _install_hooks(shell, client, settings, DOCKER_BRIEFING)
+    starts = [h for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+              for h in g["hooks"]]
+    commands = [h["command"] for h in starts]
+    gated = DOCKER_BRIEFING + " --coordination"
+    assert commands.count(gated) == 1
+    assert commands.count(DOCKER_BRIEFING) == 1
+    assert legacy["command"] not in commands
+    assert unrelated in starts and lookalike in starts
+    if client == "codex" and shell == "powershell":  # the Windows override
+        hook = next(h for h in starts if h["command"] == gated)
+        assert hook["commandWindows"] == gated and hook["timeout"] == 5
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_hook_installers_add_a_missing_briefing_beside_the_checkin(tmp_path, shell):
+    """The check-in command also names `pseudolife-mcp briefing`; it must
+    not pass for the memory briefing itself."""
+    settings = tmp_path / "settings.json"
+    gated = "pseudolife-mcp briefing --hook-json --coordination"
+    settings.write_text(json.dumps({"hooks": {"SessionStart": [
+        {"hooks": [{"type": "command", "command": gated}]}]}}), encoding="utf-8")
+    _install_hooks(shell, "claude", settings, "pseudolife-mcp briefing --hook-json")
+    commands = [h["command"] for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+                for h in g["hooks"]]
+    assert sorted(commands) == ["pseudolife-mcp briefing --hook-json", gated]
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_hook_installers_fresh_install_gets_one_briefing_and_one_checkin(tmp_path, shell):
+    settings = tmp_path / "settings.json"
+    for _ in range(2):
+        _install_hooks(shell, "claude", settings, "pseudolife-mcp briefing --hook-json")
+    commands = [h["command"] for g in json.loads(settings.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+                for h in g["hooks"]]
+    assert commands == ["pseudolife-mcp briefing --hook-json",
+                        "pseudolife-mcp briefing --hook-json --coordination"]

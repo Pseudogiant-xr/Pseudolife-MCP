@@ -5,8 +5,15 @@
 mod claude_desktop;
 mod codex_config;
 mod codex_hooks;
+pub(in crate::cli) mod credentials;
+mod engine;
 #[cfg(test)]
 mod fake_codex;
+mod helpers;
+mod hook_settings;
+mod preflight;
+pub(in crate::cli) mod state;
+mod volumes;
 
 use crate::runtime::{self, Layout, registrations};
 use serde_json::{Value, json};
@@ -16,19 +23,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]
-       pseudolife-mcp installer expose [--json]
-       pseudolife-mcp installer --capability
-       pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]
-       pseudolife-mcp installer codex-runtime-defaults
-       pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]
-       pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
+const USAGE: &str = "usage: pseudolife-mcp installer migrate-registrations [--client claude-code|claude-desktop|codex|gemini]... [--json]\n       pseudolife-mcp installer expose [--json]\n       pseudolife-mcp installer --capability\n       pseudolife-mcp installer credentials STEP ... (installer credentials --help)\n       pseudolife-mcp installer state ACTION ... | volume-names --repo R --env-file F | engine detect|prepare|accept|choose ...\n       pseudolife-mcp installer json-field FIELD | json-string | connect-report valid|error|plan|manual|handled (JSON on stdin)\n       pseudolife-mcp installer is-loopback URL | pairing-code-valid (code on stdin) | codex-fields credentials|hooks|runtime-defaults (JSON on stdin)\n       pseudolife-mcp installer plugin-marketplace | preflight-check --repo R --env-file F | hook-settings install|remove-legacy\n       pseudolife-mcp installer codex-credentials [--installer-daemon-url URL] [--installer-token-stdin]\n       pseudolife-mcp installer codex-runtime-defaults\n       pseudolife-mcp installer codex-hooks --checkout DIR [--source S] [--trust T] [--instructions I] [--non-interactive]\n       pseudolife-mcp installer claude-desktop --command ABSOLUTE_PATH [options; see --help]";
 /// The installer steps this binary carries, as a level the installers probe
 /// before running any of them (`installer --capability`;
 /// ops/install-native.sh `NATIVE_INSTALLER_PROTOCOL`). Raise it when a step the
 /// installers call is added or changes meaning, and raise the installers'
 /// required level with it.
-pub const INSTALLER_PROTOCOL: u32 = 1;
+pub const INSTALLER_PROTOCOL: u32 = 3;
 const CLIENTS: [&str; 4] = ["claude-code", "claude-desktop", "codex", "gemini"];
 
 /// Arguments follow `installer`. Exit 0 when every selected registration
@@ -54,10 +55,41 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
             [flag] if flag == "--help" || flag == "-h" => emit(USAGE),
             _ => usage("expose takes only --json"),
         },
+        Some("credentials") => credentials::run(&arguments[1..]),
+        Some("state") => state::run(&arguments[1..]),
+        Some("volume-names") => volumes::run(&arguments[1..]),
+        Some("engine") => engine::run(&arguments[1..]),
+        Some("json-field") => match &arguments[1..] {
+            [field] => helpers::json_field(field),
+            _ => usage("json-field takes one field name"),
+        },
+        Some("json-string") if arguments.len() == 1 => helpers::json_string(),
+        Some("connect-report") => match &arguments[1..] {
+            [mode] if ["valid", "error", "plan", "manual", "handled"].contains(&mode.as_str()) => {
+                helpers::connect_report(mode)
+            }
+            _ => usage("connect-report takes valid, error, plan, manual or handled"),
+        },
+        Some("is-loopback") => match &arguments[1..] {
+            [url] => helpers::is_loopback(url),
+            _ => usage("is-loopback takes one URL"),
+        },
+        Some("pairing-code-valid") if arguments.len() == 1 => helpers::pairing_code_valid(),
+        Some("codex-fields") => match &arguments[1..] {
+            [kind] if ["credentials", "hooks", "runtime-defaults"].contains(&kind.as_str()) => {
+                helpers::codex_fields(kind)
+            }
+            _ => usage("codex-fields takes credentials, hooks or runtime-defaults"),
+        },
         Some("codex-credentials") => codex_config::run_credentials(&arguments[1..]),
         Some("codex-runtime-defaults") => codex_config::run_runtime_defaults(&arguments[1..]),
         Some("codex-hooks") => codex_hooks::run(&arguments[1..]),
         Some("claude-desktop") => claude_desktop::run(&arguments[1..]),
+        Some("preflight-check") => preflight::run(&arguments[1..]),
+        Some("hook-settings") => hook_settings::run(&arguments[1..]),
+        Some("plugin-marketplace") if arguments.len() == 1 => {
+            helpers::plugin_marketplace(&crate::cli::update::clients::migrate_marketplace())
+        }
         Some("--capability") => match &arguments[1..] {
             [] => emit(&format!(
                 "pseudolife-mcp installer-protocol {INSTALLER_PROTOCOL}"
@@ -66,7 +98,7 @@ pub fn run(arguments: Vec<OsString>) -> u8 {
         },
         Some("--help" | "-h") => emit(USAGE),
         _ => usage(
-            "expected an installer step: migrate-registrations, expose, codex-credentials, codex-runtime-defaults, codex-hooks, claude-desktop",
+            "expected an installer step: migrate-registrations, expose, credentials, state, volume-names, engine, json-field, json-string, connect-report, is-loopback, pairing-code-valid, codex-fields, preflight-check, hook-settings, plugin-marketplace, codex-credentials, codex-runtime-defaults, codex-hooks or claude-desktop",
         ),
     }
 }
