@@ -1,5 +1,6 @@
 //! Installed-home proofs. The fixture child is native Rust; neither launcher
 //! nor selected runtime can find an interpreter on PATH.
+mod bounded_child;
 mod native_binary_fixture;
 use pseudolife_stdio::runtime::{self, BINARY, Evidence, Layout, UpdateLock};
 use serde_json::json;
@@ -12,6 +13,14 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
+
+/// A one-shot child of the installed client (`--help`, `runtime install`):
+/// it pins and hashes a stripped runtime, then exits. Generous, since the
+/// bound exists to name a child that never exits and to reap it, not to fail
+/// a slow healthy run that nextest's 120 s cap would pass.
+const CHILD: Duration = Duration::from_secs(60);
+/// A runtime fixture's exit after "quit": no hashing.
+const QUIT: Duration = Duration::from_secs(20);
 
 struct Home(PathBuf);
 impl Home {
@@ -98,12 +107,16 @@ fn installed_production_launcher_ignores_incomplete_and_forged_runtime() {
         }
     }
     drop(_lock);
-    let result = home
-        .command(&layout.launcher)
-        .arg("--help")
-        .output()
-        .unwrap();
-    let direct = home.command(&candidate).arg("--help").output().unwrap();
+    let result = bounded_child::output_within(
+        home.command(&layout.launcher).arg("--help"),
+        CHILD,
+        "the installed launcher's --help",
+    );
+    let direct = bounded_child::output_within(
+        home.command(&candidate).arg("--help"),
+        CHILD,
+        "the candidate's own --help",
+    );
     assert!(
         result.status.success(),
         "{}",
@@ -112,12 +125,13 @@ fn installed_production_launcher_ignores_incomplete_and_forged_runtime() {
     assert_eq!(result.stdout, direct.stdout);
     assert_eq!(result.stderr, direct.stderr);
     for missing in ["PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER"] {
-        let result = home
-            .command(&layout.launcher)
-            .env_remove(missing)
-            .arg("--help")
-            .output()
-            .unwrap();
+        let result = bounded_child::output_within(
+            home.command(&layout.launcher)
+                .env_remove(missing)
+                .arg("--help"),
+            CHILD,
+            &format!("the installed launcher's --help without {missing}"),
+        );
         assert_eq!(result.status.code(), Some(1));
         assert!(result.stdout.is_empty());
         assert!(String::from_utf8_lossy(&result.stderr).contains("set both"));
@@ -170,14 +184,16 @@ fn installed_cli_archive_install_retains_inputs_and_reports_checksum_failure() {
     );
     fs::write(&sums, format!("{:x}  {name}\n", Sha256::digest(&data))).unwrap();
     let invoke = || {
-        home.command(&candidate)
-            .args(["runtime", "install", "--archive"])
-            .arg(&archive)
-            .arg("--sha256sums")
-            .arg(&sums)
-            .args(["--version", "1.0.0", "--json"])
-            .output()
-            .unwrap()
+        bounded_child::output_within(
+            home.command(&candidate)
+                .args(["runtime", "install", "--archive"])
+                .arg(&archive)
+                .arg("--sha256sums")
+                .arg(&sums)
+                .args(["--version", "1.0.0", "--json"]),
+            CHILD,
+            "runtime install --archive",
+        )
     };
     let output = invoke();
     assert_eq!(
@@ -332,7 +348,9 @@ fn launcher_holds_runtime_lock_across_exec_before_child_initializes() {
     session.send("continue");
     session.until("fixture-ready:000001");
     session.send("quit");
-    assert_eq!(session.child.wait().unwrap().code(), Some(37));
+    let status =
+        bounded_child::wait_within(&mut session.child, QUIT, "the runtime fixture after quit");
+    assert_eq!(status.code(), Some(37));
 }
 impl Drop for Session {
     fn drop(&mut self) {
@@ -433,7 +451,10 @@ fn installed_launcher_keeps_old_session_while_new_session_selects_new_runtime() 
     assert!(old.path.is_dir());
     assert!(new.path.is_dir());
     first.send("quit");
-    assert_eq!(first.child.wait().unwrap().code(), Some(37));
+    let status = bounded_child::wait_within(&mut first.child, QUIT, "the first session after quit");
+    assert_eq!(status.code(), Some(37));
     second.send("quit");
-    assert_eq!(second.child.wait().unwrap().code(), Some(37));
+    let status =
+        bounded_child::wait_within(&mut second.child, QUIT, "the second session after quit");
+    assert_eq!(status.code(), Some(37));
 }
