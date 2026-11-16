@@ -3,7 +3,7 @@
 use super::*;
 
 use std::sync::Mutex;
-use tokio::io::{AsyncReadExt, duplex};
+use tokio::io::{AsyncReadExt, DuplexStream, duplex};
 
 const NONCE: &str = "0123456789abcdef0123456789abcdef";
 const OTHER_NONCE: &str = "fedcba9876543210fedcba9876543210";
@@ -609,6 +609,160 @@ async fn a_shim_that_is_not_reading_never_stalls_the_relay() {
     .expect("the relay stalled");
     assert_eq!(outcome.0, noted.as_bytes());
     assert_eq!(outcome.1, sent.as_bytes());
+}
+
+/// Pipes for a hand-driven session: the client's two ends, the fake
+/// shim's two ends, and the running relay.
+struct Wired {
+    client_writer: DuplexStream,
+    client_reader: DuplexStream,
+    fake_reader: DuplexStream,
+    fake_writer: DuplexStream,
+    relayed: tokio::task::JoinHandle<std::io::Result<()>>,
+}
+fn wired(size: usize, observer: Option<Observer>, gate: Gate) -> Wired {
+    let (client_writer, client_in) = duplex(size);
+    let (client_out, client_reader) = duplex(size);
+    let (shim_in, fake_reader) = duplex(size);
+    let (fake_writer, shim_out) = duplex(size);
+    Wired {
+        client_writer,
+        client_reader,
+        fake_reader,
+        fake_writer,
+        relayed: tokio::spawn(relay(
+            client_in, client_out, shim_in, shim_out, observer, gate,
+        )),
+    }
+}
+
+async fn line_of(reader: &mut DuplexStream) -> Value {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    while reader.read_exact(&mut byte).await.is_ok() && byte[0] != b'\n' {
+        line.push(byte[0]);
+    }
+    serde_json::from_slice(&line).unwrap()
+}
+
+/// A listing the gate refused is answered: its id may be used again, and
+/// a verification call under it is credited.
+#[tokio::test]
+async fn an_id_the_gate_answered_may_carry_a_verification_call() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let recorder = Recorder::default();
+    let mut w = wired(
+        1 << 16,
+        Some(observer(&store, "dot", recorder.sink())),
+        Gate::new(true),
+    );
+    w.client_writer
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/list\"}\n")
+        .await
+        .unwrap();
+    // The gate's catalog check fails: the listing is refused.
+    let check = line_of(&mut w.fake_reader).await;
+    assert_eq!(check["params"]["name"], "memory_toolset");
+    let failed =
+        json!({"jsonrpc": "2.0", "id": check["id"], "error": {"code": -32601, "message": "no"}});
+    w.fake_writer
+        .write_all(format!("{failed}\n").as_bytes())
+        .await
+        .unwrap();
+    let refusal = line_of(&mut w.client_reader).await;
+    assert_eq!(refusal["id"], 5);
+    assert_eq!(refusal["error"]["message"], DISCOVERY_FAILED);
+    // The client uses id 5 again, for the verification search.
+    w.client_writer
+        .write_all(search(5, NONCE).as_bytes())
+        .await
+        .unwrap();
+    let forwarded = line_of(&mut w.fake_reader).await;
+    assert_eq!(forwarded["params"]["arguments"]["query"], NONCE);
+    w.fake_writer
+        .write_all(success(&json!(5)).as_bytes())
+        .await
+        .unwrap();
+    assert_eq!(line_of(&mut w.client_reader).await["id"], 5);
+    drop(w.client_writer);
+    drop(w.fake_writer);
+    tokio::time::timeout(Duration::from_secs(30), w.relayed)
+        .await
+        .expect("the relay ended")
+        .unwrap()
+        .unwrap();
+    assert_eq!(recorder.written().len(), 1, "no receipt for the reused id");
+}
+
+/// A client that stops reading while its input stays open ends the
+/// session: the shim's input closes and the relay returns.
+#[tokio::test]
+async fn a_client_that_stops_reading_ends_the_session() {
+    let mut w = wired(1 << 16, None, Gate::new(false));
+    drop(w.client_reader);
+    w.client_writer
+        .write_all(search(1, "x").as_bytes())
+        .await
+        .unwrap();
+    line_of(&mut w.fake_reader).await;
+    w.fake_writer
+        .write_all(success(&json!(1)).as_bytes())
+        .await
+        .unwrap();
+    // The answer cannot be written: the shim's input closes.
+    let mut rest = Vec::new();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        w.fake_reader.read_to_end(&mut rest),
+    )
+    .await
+    .expect("the shim's input closed")
+    .unwrap();
+    drop(w.fake_writer);
+    tokio::time::timeout(Duration::from_secs(30), w.relayed)
+        .await
+        .expect("the relay ended")
+        .unwrap()
+        .unwrap();
+    drop(w.client_writer);
+}
+
+/// A shim slow to take its input, once the client has finished sending,
+/// still answers every request: its time to exit starts only once its
+/// input has been written and closed.
+#[tokio::test(start_paused = true)]
+async fn a_slow_shim_answers_everything_queued_before_the_client_left() {
+    const LINES: usize = 40;
+    let mut w = wired(256, None, Gate::new(false));
+    let sent: String = (0..LINES).map(|n| search(n as u64, "x")).collect();
+    let writing = {
+        let mut writer = w.client_writer;
+        let sent = sent.clone();
+        tokio::spawn(async move { writer.write_all(sent.as_bytes()).await.unwrap() })
+    };
+    let fake = tokio::spawn(async move {
+        // Busy for longer than the exit allowance before it reads.
+        tokio::time::sleep(CHILD_EXIT * 3).await;
+        let mut reader = BufReader::new(w.fake_reader);
+        let mut line = Vec::new();
+        while reader.read_until(b'\n', &mut line).await.unwrap() > 0 {
+            let message = message(&line).unwrap();
+            w.fake_writer
+                .write_all(success(&message["id"]).as_bytes())
+                .await
+                .unwrap();
+            line.clear();
+        }
+    });
+    let mut out = Vec::new();
+    w.client_reader.read_to_end(&mut out).await.unwrap();
+    writing.await.unwrap();
+    fake.await.unwrap();
+    w.relayed.await.unwrap().unwrap();
+    let expected: String = (0..LINES).map(|n| success(&json!(n))).collect();
+    assert_eq!(out, expected.as_bytes());
 }
 
 /// A fake daemon's toolset: answers `memory_toolset` status and expand from

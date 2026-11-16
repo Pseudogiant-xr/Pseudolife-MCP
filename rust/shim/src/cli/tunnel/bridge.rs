@@ -40,6 +40,8 @@ use std::{
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use super::{Fail, store, syntax};
 
@@ -80,6 +82,11 @@ const HELD_LIMIT: usize = 64;
 const GATE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the child shim gets to exit once its input closed.
 const CHILD_EXIT: Duration = Duration::from_secs(5);
+/// How long a shim that does not take its input is waited for once the
+/// client is gone: past a held listing's wait and the exit above.
+const CLIENT_GONE: Duration = Duration::from_secs(30);
+/// Lines a direction queues before its reader waits for its writer.
+const QUEUE: usize = 64;
 
 /// The verification tools whose successful calls write a receipt.
 const TOOLS: [&str; 2] = ["memory_search", "memory_agents"];
@@ -261,7 +268,50 @@ async fn serve(start: Start) -> ExitCode {
 /// proof to settle once every line queued before it has been written.
 enum Out {
     Line(Vec<u8>),
-    Settle(Proof),
+    Settle(Box<Proof>),
+}
+
+/// What both directions of one relay share. The lock is never held across
+/// an await.
+struct Relay {
+    state: std::sync::Mutex<(Option<Observer>, Gate)>,
+    /// The gate's deadline or waiting state changed.
+    gate_changed: tokio::sync::Notify,
+    /// The client's input ended, or its output can no longer be written.
+    client_ended: CancellationToken,
+    /// The shim's input has been closed.
+    shim_closed: CancellationToken,
+    /// The shim's output ended: everything else stops.
+    stopping: CancellationToken,
+}
+
+impl Relay {
+    fn lock(&self) -> std::sync::MutexGuard<'_, (Option<Observer>, Gate)> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Queues a line for the client. The observer sees it as the client
+    /// will, whether the shim or the gate wrote it, and a proof it yields is
+    /// queued behind it.
+    async fn to_client(&self, queue: &mpsc::Sender<Out>, line: Vec<u8>) {
+        let proof = match (self.lock().0.as_mut(), message(&line)) {
+            (Some(observer), Some(message)) => observer.response(&message),
+            _ => None,
+        };
+        let _ = queue.send(Out::Line(line)).await;
+        if let Some(proof) = proof {
+            let _ = queue.send(Out::Settle(Box::new(proof))).await;
+        }
+    }
+
+    /// Waits for a change to the gate, from the moment this is called.
+    fn gate_change(&self) -> impl Future<Output = ()> + '_ {
+        let mut changed = Box::pin(self.gate_changed.notified());
+        changed.as_mut().enable();
+        changed
+    }
 }
 
 /// Relay the client's lines to the shim and the shim's lines to the client,
@@ -269,11 +319,13 @@ enum Out {
 /// gate holds or answers `tools/list` when it is enabled, and otherwise
 /// passes every line through.
 ///
-/// Reading never waits for writing: each direction has its own writer and
-/// queue, so a shim that is not reading its input (while it attaches, say)
-/// cannot stop the bridge draining its output. Once the shim's input closes
-/// it has `CHILD_EXIT` to end its output; receipts settle after their answer
-/// is written, and have settled when this returns.
+/// Each direction has its own reader, writer and bounded queue, so each
+/// pushes back only on its own source: a shim that is not reading its input
+/// (while it attaches, say) never stops the bridge draining its output. The
+/// gate's own few lines to the shim take a lane of their own. Once the
+/// shim's input has closed it has `CHILD_EXIT` to end its output. Receipts
+/// settle after their answer is written, and have settled when this
+/// returns.
 pub(super) async fn relay<CI, CO, SI, SO>(
     client_in: CI,
     client_out: CO,
@@ -288,114 +340,164 @@ where
     SI: AsyncWrite + Unpin,
     SO: AsyncRead + Unpin,
 {
-    let (to_client, client_queue) = tokio::sync::mpsc::unbounded_channel();
-    let (to_shim, shim_queue) = tokio::sync::mpsc::unbounded_channel();
-    let control = control(client_in, shim_out, observer, gate, to_client, to_shim);
-    let writers = async {
+    let relay = Relay {
+        state: std::sync::Mutex::new((observer, gate)),
+        gate_changed: tokio::sync::Notify::new(),
+        client_ended: CancellationToken::new(),
+        shim_closed: CancellationToken::new(),
+        stopping: CancellationToken::new(),
+    };
+    let (to_client, client_queue) = mpsc::channel(QUEUE);
+    let (to_shim, shim_queue) = mpsc::channel(QUEUE);
+    let (gate_to_shim, gate_queue) = mpsc::unbounded_channel();
+    let outbound = outbound(&relay, shim_out, gate_to_shim, to_client.clone());
+    let rest = async {
         tokio::join!(
-            write_client(client_out, client_queue),
-            write_shim(shim_in, shim_queue)
+            inbound(&relay, client_in, to_shim, to_client),
+            write_client(&relay, client_out, client_queue),
+            write_shim(&relay, shim_in, gate_queue, shim_queue),
         )
     };
-    tokio::pin!(control, writers);
-    // The writers end only after the control loop has dropped their queues.
-    let (result, written) = tokio::select! {
-        result = &mut control => (result, false),
-        _ = &mut writers => (Ok(()), true),
+    tokio::pin!(outbound, rest);
+    // `rest` ends only after the client's queue closes, which needs
+    // `outbound` to have ended first.
+    let (result, finished) = tokio::select! {
+        result = &mut outbound => (result, false),
+        _ = &mut rest => ((&mut outbound).await, true),
     };
-    if !written {
+    relay.stopping.cancel();
+    if !finished {
         // What is queued is written, unless a side stopped reading for good.
-        let _ = tokio::time::timeout(CHILD_EXIT, &mut writers).await;
+        let _ = tokio::time::timeout(CHILD_EXIT, &mut rest).await;
     }
     result
 }
 
-/// Reads both sides and decides where each line goes.
-async fn control<CI, SO>(
+/// The client's lines, to the shim (or answered by the gate).
+async fn inbound<CI: AsyncRead + Unpin>(
+    relay: &Relay,
     client_in: CI,
-    shim_out: SO,
-    mut observer: Option<Observer>,
-    mut gate: Gate,
-    to_client: tokio::sync::mpsc::UnboundedSender<Out>,
-    to_shim: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
-) -> std::io::Result<()>
-where
-    CI: AsyncRead + Unpin,
-    SO: AsyncRead + Unpin,
-{
-    let mut client_in = BufReader::new(client_in);
-    let mut shim_out = BufReader::new(shim_out);
-    let mut to_shim = Some(to_shim);
+    to_shim: mpsc::Sender<Vec<u8>>,
+    to_client: mpsc::Sender<Out>,
+) {
+    let mut reader = BufReader::new(client_in);
     // Kept across select! rounds: a partly read line stays in its buffer.
-    let (mut inbound, mut outbound) = (Vec::new(), Vec::new());
-    let mut client_open = true;
-    let mut closing: Option<tokio::time::Instant> = None;
+    let mut buffer = Vec::new();
     loop {
-        if !client_open && !gate.waiting() && to_shim.is_some() {
-            // The client is gone and nothing is held: the shim's input
-            // closes, and the shim must end its output in turn.
-            to_shim = None;
-            closing = Some(tokio::time::Instant::now() + CHILD_EXIT);
-        }
-        let deadline = gate.deadline;
-        let mut shim_done = None;
-        let (actions, proof) = tokio::select! {
-            read = client_in.read_until(b'\n', &mut inbound), if client_open => {
-                // A read that adds nothing is the end of the stream, even
-                // when an earlier, cancelled read left an unended last line.
-                if !matches!(read, Ok(n) if n > 0) {
-                    client_open = false;
-                }
-                let line = std::mem::take(&mut inbound);
-                if line.is_empty() {
-                    (Vec::new(), None)
-                } else {
-                    let message = message(&line);
-                    if let (Some(observer), Some(message)) = (observer.as_mut(), message.as_ref()) {
-                        observer.request(message);
-                    }
-                    (gate.inbound(line, message.as_ref()), None)
-                }
-            },
-            read = shim_out.read_until(b'\n', &mut outbound) => {
-                match read {
-                    Ok(n) if n > 0 => {}
-                    Ok(_) => shim_done = Some(Ok(())),
-                    Err(error) => shim_done = Some(Err(error)),
-                }
-                let line = std::mem::take(&mut outbound);
-                if line.is_empty() {
-                    (Vec::new(), None)
-                } else {
-                    let message = message(&line);
-                    let actions = gate.outbound(line, message.as_ref());
-                    let proof = observer
-                        .as_mut()
-                        .zip(message.as_ref())
-                        .and_then(|(observer, message)| observer.response(message));
-                    (actions, proof)
-                }
-            },
-            () = sleep_until(deadline), if deadline.is_some() => (gate.expire(), None),
-            // The shim kept its output open past its input's end.
-            () = sleep_until(closing), if closing.is_some() => return Ok(()),
+        let read = tokio::select! {
+            read = reader.read_until(b'\n', &mut buffer) => read,
+            () = relay.client_ended.cancelled() => break,
+            () = relay.stopping.cancelled() => break,
         };
-        for action in actions {
-            match action {
-                Action::ToShim(bytes) => {
-                    if let Some(queue) = &to_shim {
-                        let _ = queue.send(bytes);
-                    }
+        // A read that adds nothing is the end of the stream, even when an
+        // earlier, cancelled read left an unended last line in the buffer.
+        let ended = !matches!(read, Ok(n) if n > 0);
+        let line = std::mem::take(&mut buffer);
+        if !line.is_empty() {
+            let message = message(&line);
+            let actions = {
+                let mut state = relay.lock();
+                let (observer, gate) = &mut *state;
+                if let (Some(observer), Some(message)) = (observer.as_mut(), message.as_ref()) {
+                    observer.request(message);
                 }
-                Action::ToClient(bytes) => {
-                    let _ = to_client.send(Out::Line(bytes));
+                gate.inbound(line, message.as_ref())
+            };
+            relay.gate_changed.notify_waiters();
+            for action in actions {
+                match action {
+                    Action::ToShim(bytes) => {
+                        let _ = to_shim.send(bytes).await;
+                    }
+                    Action::ToClient(bytes) => relay.to_client(&to_client, bytes).await,
                 }
             }
         }
-        if let Some(proof) = proof {
-            let _ = to_client.send(Out::Settle(proof));
+        if ended {
+            break;
         }
-        if let Some(done) = shim_done {
+    }
+    relay.client_ended.cancel();
+    // Held listings still need the shim: its input stays open until the
+    // gate has settled them.
+    loop {
+        let changed = relay.gate_change();
+        if !relay.lock().1.waiting() || relay.stopping.is_cancelled() {
+            break;
+        }
+        tokio::select! {
+            () = changed => {}
+            () = relay.stopping.cancelled() => break,
+        }
+    }
+    // Dropping the last strong sender closes the shim's input.
+    drop(to_shim);
+}
+
+/// The shim's lines, to the client (or to the gate), until the shim's
+/// output ends.
+async fn outbound<SO: AsyncRead + Unpin>(
+    relay: &Relay,
+    shim_out: SO,
+    gate_to_shim: mpsc::UnboundedSender<Vec<u8>>,
+    to_client: mpsc::Sender<Out>,
+) -> std::io::Result<()> {
+    let mut reader = BufReader::new(shim_out);
+    let mut buffer = Vec::new();
+    // Once the shim's input has closed, it must end its output in time; and
+    // a shim that never takes its input once the client is gone is not
+    // waited for without end.
+    let mut closing: Option<tokio::time::Instant> = None;
+    let mut abandoned: Option<tokio::time::Instant> = None;
+    loop {
+        let now = tokio::time::Instant::now();
+        if closing.is_none() && relay.shim_closed.is_cancelled() {
+            closing = Some(now + CHILD_EXIT);
+        }
+        if abandoned.is_none() && relay.client_ended.is_cancelled() {
+            abandoned = Some(now + CLIENT_GONE);
+        }
+        let changed = relay.gate_change();
+        let deadline = relay.lock().1.deadline;
+        let ending = [closing, abandoned].into_iter().flatten().min();
+        let mut done = None;
+        let actions = tokio::select! {
+            read = reader.read_until(b'\n', &mut buffer) => {
+                match read {
+                    Ok(n) if n > 0 => {}
+                    Ok(_) => done = Some(Ok(())),
+                    Err(error) => done = Some(Err(error)),
+                }
+                let line = std::mem::take(&mut buffer);
+                if line.is_empty() {
+                    Vec::new()
+                } else {
+                    let message = message(&line);
+                    let actions = relay.lock().1.outbound(line, message.as_ref());
+                    relay.gate_changed.notify_waiters();
+                    actions
+                }
+            },
+            () = sleep_until(deadline), if deadline.is_some() => {
+                let actions = relay.lock().1.expire();
+                relay.gate_changed.notify_waiters();
+                actions
+            },
+            () = sleep_until(ending), if ending.is_some() => return Ok(()),
+            () = relay.shim_closed.cancelled(), if closing.is_none() => Vec::new(),
+            () = relay.client_ended.cancelled(), if abandoned.is_none() => Vec::new(),
+            () = changed => Vec::new(),
+        };
+        for action in actions {
+            match action {
+                // Held listings and the gate's own calls; a handful at most.
+                Action::ToShim(bytes) => {
+                    let _ = gate_to_shim.send(bytes);
+                }
+                Action::ToClient(bytes) => relay.to_client(&to_client, bytes).await,
+            }
+        }
+        if let Some(done) = done {
             return done;
         }
     }
@@ -404,8 +506,9 @@ where
 /// Writes the client's lines in order; settles each proof, on the blocking
 /// pool, once the answer queued before it has been written.
 async fn write_client<CO: AsyncWrite + Unpin>(
+    relay: &Relay,
     mut writer: CO,
-    mut queue: tokio::sync::mpsc::UnboundedReceiver<Out>,
+    mut queue: mpsc::Receiver<Out>,
 ) {
     let mut open = true;
     let mut receipts = tokio::task::JoinSet::new();
@@ -415,8 +518,10 @@ async fn write_client<CO: AsyncWrite + Unpin>(
                 if open
                     && (writer.write_all(&bytes).await.is_err() || writer.flush().await.is_err())
                 {
-                    // The client is gone; its input ends next.
+                    // The client is gone: the session ends as if its input
+                    // had.
                     open = false;
+                    relay.client_ended.cancel();
                 }
             }
             // An answer the client never received proves nothing.
@@ -430,19 +535,40 @@ async fn write_client<CO: AsyncWrite + Unpin>(
     while receipts.join_next().await.is_some() {}
 }
 
-/// Writes the shim's lines in order; its input closes when the queue does.
+/// Writes the shim's lines in order, the gate's first; the shim's input
+/// closes once the client's queue has closed and been written.
 async fn write_shim<SI: AsyncWrite + Unpin>(
+    relay: &Relay,
     mut writer: SI,
-    mut queue: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    mut gate_queue: mpsc::UnboundedReceiver<Vec<u8>>,
+    mut queue: mpsc::Receiver<Vec<u8>>,
 ) {
     let mut open = true;
-    while let Some(bytes) = queue.recv().await {
+    let mut gate_open = true;
+    loop {
+        let bytes = tokio::select! {
+            biased;
+            bytes = gate_queue.recv(), if gate_open => match bytes {
+                Some(bytes) => bytes,
+                None => {
+                    gate_open = false;
+                    continue;
+                }
+            },
+            bytes = queue.recv() => match bytes {
+                Some(bytes) => bytes,
+                None => break,
+            },
+            () = relay.stopping.cancelled() => break,
+        };
         if open && (writer.write_all(&bytes).await.is_err() || writer.flush().await.is_err()) {
             // The shim stopped reading: its output ends next.
             open = false;
         }
     }
     let _ = writer.shutdown().await;
+    drop(writer);
+    relay.shim_closed.cancel();
 }
 
 async fn sleep_until(deadline: Option<tokio::time::Instant>) {
