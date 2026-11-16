@@ -423,14 +423,19 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
     })
 }
 
-/// `_key_present`: `ProfileStore.read_key` succeeds. A Windows DPAPI key
-/// would need CryptUnprotectData, which this leaf does not call: deferred.
+/// `_key_present`: `ProfileStore.read_key` succeeds. A Windows key this
+/// session cannot unseal is deferred rather than called absent.
 pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
     key_state(root, name)?.ok_or(Fail::Defer)
 }
 
-/// The private key's presence, `None` for a Windows DPAPI key, which only
-/// CryptUnprotectData could prove (not called here).
+/// The private key's presence: `Some(true)` when it reads as a valid key
+/// (on Windows, after DPAPI unseals it), `Some(false)` when it is absent,
+/// unreadable as a private file, protected for another platform or not a
+/// key, and `None` for a Windows key that cannot be unsealed in this
+/// session: another account's or a damaged blob, or a logon without the
+/// account's credentials. `Err(Defer)` when the key file itself is a form
+/// this client does not open (a pipe, a link).
 pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
     let path = match checked_path(&root.join(format!("{name}.key"))) {
         Ok(path) => path,
@@ -446,12 +451,22 @@ pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
         Some(index) => (&data[..index], &data[index + 1..]),
         None => (&data[..], &[][..]),
     };
-    if cfg!(windows) {
-        return Ok((prefix != b"DPAPI").then_some(false));
+    #[cfg(windows)]
+    {
+        if prefix != b"DPAPI" {
+            return Ok(Some(false));
+        }
+        Ok(super::dpapi::holds_key(encoded))
     }
+    #[cfg(not(windows))]
     Ok(Some(
         prefix == b"PLAIN" && crate::credentials::decode_token(encoded).is_ok(),
     ))
+}
+
+/// The key file `key_state` reads, for a person.
+pub(super) fn key_path(root: &Path, name: &str) -> PathBuf {
+    root.join(format!("{name}.key"))
 }
 
 /// The first `*.profile.json` in `root` whose stem `list` refuses as a
