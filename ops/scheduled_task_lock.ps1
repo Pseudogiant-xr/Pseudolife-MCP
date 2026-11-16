@@ -49,7 +49,7 @@ function Get-AccountSid([string]$Account) {
 function Get-TaskPrincipalSid([string]$TaskName) {
     # The account the task runs as, as a SID, or '' when it names none
     # (a group principal) or the name does not resolve.
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop
     Get-AccountSid "$($task.Principal.UserId)"
 }
 function Get-TaskLogonMismatch($task) {
@@ -112,7 +112,7 @@ function Format-TaskLock($lock, [switch]$Removal, [string]$Follows, [string]$Rea
     $remove = "Stop-ScheduledTask -TaskName '$quoted'; Unregister-ScheduledTask -TaskName '$quoted' -Confirm:`$false"
     if ($lock.OtherUser) {
         return ("the scheduled task '$($lock.TaskName)' belongs to another account ($($lock.Owner)), " +
-                "and this run never changes another account's task; nothing was changed. Ask that account to remove it: $remove")
+                "and this run never changes another account's task; nothing was changed. Ask that account or an administrator to remove it: $remove")
     }
     $why = if ($lock.Owner -eq 'Administrators') {
         "was registered from an elevated PowerShell, so Administrators own it"
@@ -179,35 +179,6 @@ public static class PseudolifeFinalPath {
     $final
 }
 # <<< task lock <<<
-function Get-TaskRunnerMismatch([string]$TaskName, [string]$Repo, [string]$Kind) {
-    # Why the task cannot be followed by writing ops\.env, or '' when it can:
-    # its one action is the spawner the autostart scripts in this folder
-    # register since 29 September 2026, starting
-    # "<Repo>\ops\shim_autostart.py" run <Kind> (which reads ops\.env at every
-    # start) with an interpreter that still exists, at this user's logon, and
-    # it is enabled. Read only.
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-    # A disabled task never starts at logon, and this shell cannot enable it.
-    if ($task.Settings -and -not $task.Settings.Enabled) { return 'is disabled, so it never starts at logon' }
-    $logon = Get-TaskLogonMismatch $task
-    if ($logon) { return $logon }
-    $older = "runs an older command that carries its settings on its own command line instead of reading ops\.env"
-    $actions = @($task.Actions)
-    if ($actions.Count -ne 1 -or [IO.Path]::GetFileName("$($actions[0].Execute)") -notin @('powershell.exe', 'pwsh.exe') -or
-        "$($actions[0].Arguments)" -notmatch '-EncodedCommand ([A-Za-z0-9+/=]+)') { return $older }
-    try { $code = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1])) } catch { return $older }
-    $lines = @($code -split "`r?`n")
-    $runner = ('"' + $Repo + '\ops\shim_autostart.py" run ' + $Kind).Replace("'", "''")
-    if (-not ($lines -contains "`$psi.Arguments = '$runner'")) {
-        if ($code -match 'shim_autostart\.py') { return "runs the runner of another checkout or of the other shim" }
-        return $older
-    }
-    $file = @($lines | Where-Object { $_ -match "^\`$psi\.FileName = '((?:[^']|'')*)'$" })
-    if ($file.Count -ne 1 -or $file[0] -notmatch "^\`$psi\.FileName = '((?:[^']|'')*)'$") { return $older }
-    $python = $Matches[1].Replace("''", "'")
-    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { return "runs an interpreter that no longer exists ($python)" }
-    ''
-}
 function Get-RecordedShim([string]$Repo, [string]$Kind) {
     # The shim the runner started last, proved by its PID file rather than by
     # a command-line pattern: the PID it recorded, a process started no later

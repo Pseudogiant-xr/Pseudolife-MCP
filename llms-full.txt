@@ -3885,14 +3885,11 @@ steps:
      token, which Windows lets an unelevated user register, replace and
      remove. A task of that name registered earlier from an elevated
      PowerShell is owned by Administrators and cannot be changed from a
-     normal window. The script never re-registers it: when it already runs
-     `ops\shim_autostart.py` from this checkout, which reads `ops\.env` at
-     every start, the script writes the new settings there and restarts the
-     shim; otherwise it changes nothing and prints the one command to run
-     once in a PowerShell opened with Run as administrator from the Start
-     menu, never from a terminal inside Claude Desktop or
-     another Store-packaged app, or that app's next update fails to launch
-     until a reboot — see
+     normal window, so the script refuses before it changes anything and
+     prints the one command that removes it: run that once in a PowerShell
+     opened with Run as administrator from the Start menu, never from a
+     terminal inside Claude Desktop or another Store-packaged app, or that
+     app's next update fails to launch until a reboot — see
      [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
      `-Model` picks the served default —
      `claude-opus-5-5` since 2026-09-29, when it cleared the paired
@@ -3923,7 +3920,10 @@ steps:
      change any of them later, edit that line and run
      `python ops/shim_autostart.py restart claude` — the task is registered
      only once. On Windows `restart` stops
-     the shim and starts it itself (the task still starts it at logon);
+     every `claude_shim.py` on that port that your account may stop, by
+     its command line, and starts the shim itself (the task still starts
+     it at logon), while the installer stops only the shim the runner
+     recorded and refuses when anything else holds the port;
      on Linux it is `systemctl --user restart`. Run the Windows restart
      from a plain terminal: the shim starts with that shell's environment
      (a Claude Code session's own `CLAUDE_CODE_*` variables are dropped,

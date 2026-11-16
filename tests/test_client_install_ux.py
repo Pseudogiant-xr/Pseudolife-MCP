@@ -623,24 +623,26 @@ def test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bin
     port in LISTEN), so there is no traceback to log; and two independent
     ``cmd >> log`` appenders keep separate file pointers, so the old shim's
     next health-probe line overwrote whatever the new one wrote. The
-    installer must therefore (a) stop every process whose command line
-    names ``claude_shim.py`` and this ``--port`` BEFORE it starts the task
-    — the launch is a three-layer tree (cmd.exe, the .venv launcher, the
-    base interpreter) and no layer's death propagates — and (b) verify the
+    installer must therefore (a) stop the shim on the port BEFORE it starts
+    the task — only the one the runner's PID file proves (PID, start time,
+    command line), with its descendants, since the launch is a three-layer
+    tree (cmd.exe, the .venv launcher, the base interpreter) and no layer's
+    death propagates; a kill by command-line pattern could reach another
+    checkout's or another account's shim, so any other holder is refused
+    before anything changes — and (b) verify the
     start affirmatively: poll for a listener owned by a shim process, echo
     the log's new startup lines, and THROW when no listener appears rather
     than print success. The header's never-elevate-inside-Claude-Desktop
     warning (pinned separately above) stays."""
     ps = _read("ops/install-shim-autostart.ps1")
-    start_call = "Start-ScheduledTask -TaskName $taskName"
+    start_call = "Start-ScheduledTask -TaskPath '\\' -TaskName $taskName -ErrorAction Stop"
     assert ps.count(start_call) == 1
     before, after = ps.split(start_call)
-    # (a) the running tree is stopped first, keyed on the script AND the port
-    # (an A/B shim on another port must survive), and only after the task
+    # (a) only the recorded shim is stopped, and only after the task
     # registration succeeded — killing the live shim and then failing to
-    # register would leave the box with no extractor at all.
-    assert r"claude_shim\.py" in before and "--port" in before
-    assert "Stop-Process" in before
+    # register would leave the box with no extractor at all. No pattern kill.
+    assert "Stop-Process" not in ps and "Get-ShimProcess" not in ps
+    assert "$recorded = @(Get-RecordedShim $repo 'claude')" in before
     # Anchored at line start so a comment that merely mentions the cmdlet
     # can never satisfy the ordering; only the real call does. (A bare
     # "Register-ScheduledTask" does NOT match inside the earlier
@@ -648,10 +650,13 @@ def test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bin
     # anchor is belt-and-braces, checked 2026-09-07 by reordering the text.)
     register = "\nRegister-ScheduledTask -TaskName $taskName"
     assert ps.count(register) == 1
-    assert before.index(register) < before.index("Stop-Process")
+    assert before.index(register) < before.index("    Stop-RecordedShim $recorded")
     # The CHANGELOG's other claims about the flow.
     assert "StartupTimeoutSec = 90" in ps           # the poll budget
-    assert "free the port" in before                # foreign holder -> refuse
+    # A holder this run cannot prove is refused before anything changes, and
+    # one still there after the recorded shim stopped blocks the start.
+    assert before.index("which this run cannot prove is the shim") < before.index("Unregister-ScheduledTask")
+    assert before.index(register) < before.index("is still held by pid")
     assert "registration or start failed" in _read("ops/install.ps1")
     # (b) affirmative verification after the start: listener poll, the two
     # startup log lines, a throw on timeout, and the success line only after.

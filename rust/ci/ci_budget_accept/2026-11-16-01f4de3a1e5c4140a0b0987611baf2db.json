@@ -4,5 +4,5 @@
   "job": "test-lite-windows",
   "before": "5d59b56aa5766fd5",
   "fingerprint": "d03d1c5d3ebdce43",
-  "reason": "adds tests/test_scheduled_task_lock.py (16 cases, each a short pwsh child with the Windows readers mocked; about 30 s) to the existing test-lite-windows selection, as the platform rule requires for scheduled-task changes; no new job, shard or setup"
+  "reason": "adds tests/test_scheduled_task_lock.py (22 cases, each a short pwsh child with the Windows readers mocked, several run under both PowerShell 5.1 and 7; about 60 s) to the existing test-lite-windows selection, as the platform rule requires for scheduled-task changes; no new job, shard or setup"
 }

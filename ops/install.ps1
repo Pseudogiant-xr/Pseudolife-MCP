@@ -3358,7 +3358,7 @@ function Invoke-TestLoginSetup {
 # alone, read-only, with the one elevated command that removes it.
 . (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
 function Remove-ShimTask($name, $family) {
-    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return }
+    if (-not (Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction SilentlyContinue)) { return }
     # A failed owner read is a refusal, never a fall-through to the delete:
     # from an elevated shell that delete could take another account's task.
     try { $lock = Get-TaskLock $name }
@@ -3367,11 +3367,12 @@ function Remove-ShimTask($name, $family) {
         return
     }
     if ($lock) {
-        Write-Warning "its $family shim keeps starting at logon until the task is removed: $(Format-TaskLock $lock -Removal)"
+        $prefix = if ($lock.OtherUser) { "the $family shim task is another account's, so it was left alone" } else { "its $family shim keeps starting at logon until the task is removed" }
+        Write-Warning "${prefix}: $(Format-TaskLock $lock -Removal)"
         return
     }
-    Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
-    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskPath '\' -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+    if (Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction SilentlyContinue) {
         Write-Warning "could not remove autostart task '$name' (Task Scheduler refused; see the message above) - its $family shim keeps starting at logon until you remove it: Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false"
     } else {
         Step "Removed autostart task '$name' (the $family shim): extractor mode $Extractor does not use it, and an abandoned shim keeps making real CLI calls at every health refresh (a running shim process, if any, persists until logoff)"
@@ -3396,7 +3397,10 @@ if ($claudeShimMode) {
             Write-Warning "Shim autostart registration or start failed: $($_.Exception.Message)"
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with:"
             Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-            Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v5.md"
+            # Only on a free port: a second shim binds beside one already listening and gets no traffic.
+            if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
+                Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v5.md"
+            }
         }
     }
 } elseif ($codexShimMode) {
@@ -3410,7 +3414,10 @@ if ($claudeShimMode) {
             Write-Warning "Shim autostart registration failed: $($_.Exception.Message)"
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with:"
             Write-Host "    ops\install-codex-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-            Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
+            # Only on a free port: a second shim binds beside one already listening and gets no traffic.
+            if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
+                Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
+            }
         }
     }
 }

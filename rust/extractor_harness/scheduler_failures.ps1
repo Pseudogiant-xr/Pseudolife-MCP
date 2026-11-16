@@ -166,7 +166,7 @@ if ($Case -in @('LateLauncherChild','LateOldRuntimeRecorded','LateLegacyUnseen',
         if (-not $identity) { throw 'foreign process handle requested' }
         New-FixtureProcess $identity
     }
-    function Unregister-ScheduledTask { param($TaskName,[switch]$Confirm) $global:r6fixtureTask=$null }
+    function Unregister-ScheduledTask { param($TaskName,$TaskPath,[switch]$Confirm) $global:r6fixtureTask=$null }
     function Start-Sleep { }
     $caught=''
     try { Remove-OwnedTask 'fixture-late' } catch { $caught=$_.Exception.Message }
@@ -369,7 +369,7 @@ if ($Case -in @('InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','St
     $global:r6queries=0
     $global:r6taskStops=0
     function Get-ScheduledTask {
-        [CmdletBinding()] param($TaskName)
+        [CmdletBinding()] param($TaskName,$TaskPath)
         $global:r6queries++
         if ($Case -eq 'TaskAbsent') {
             Write-Error -Message 'fixture task does not exist' -ErrorId 'CmdletizationQuery_NotFound_TaskName' -Category ObjectNotFound
@@ -384,7 +384,7 @@ if ($Case -in @('InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','St
     function Get-OwnedTaskProcesses { }
     function Stop-ScheduledTask { $global:r6taskStops++ }
     function Unregister-ScheduledTask {
-        [CmdletBinding()] param($TaskName, [switch]$Confirm)
+        [CmdletBinding()] param($TaskName,$TaskPath, [switch]$Confirm)
         $global:r6deleteAttempts++
         if ($Case -eq 'DeleteReplacedTask' -and $global:r6deleteAttempts -eq 1) {
             $global:r6fixtureTask.Actions[0].Arguments='--foreign'
@@ -493,7 +493,9 @@ exit `$process.ExitCode
     $expectedFailure = 'original fixture registration failure'
     if ($Case -eq 'LockedLegacy') {
         $global:r6owners['Pseudolife Sonnet Shim'] = 'O:BAG:SYD:(A;ID;FA;;;BA)'
-        $global:r6legacyTask | Add-Member Principal ([PSCustomObject]@{ UserId = [Security.Principal.WindowsIdentity]::GetCurrent().Name; LogonType = 'Interactive' }) -Force
+        # Measured on the Windows dev VM (16 November 2026): a real task's
+        # Principal.UserId reads back as the bare user name, Interactive, Limited.
+        $global:r6legacyTask | Add-Member Principal ([PSCustomObject]@{ UserId = [Environment]::UserName; LogonType = 'Interactive'; RunLevel = 'Limited' }) -Force
     }
 } elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied','DisabledReinstall','QueryStopFailure','ReplacementDuringStop','ReplacementBeforeRegister','InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister','RemoveUnverifiedPreflight','TaskRemovedDuringHealth','LockedReplace','LockedUnchanged','LockedRemove','LockedFollows','LockedFollowsFails','LockedFollowsAfterUpdate','LockedOtherUser','OrphanedShim','LockedFollowsReplaced','LockedTriggerOther','OrphanedPythonShim','OrphanedShimFails')) {
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
@@ -512,7 +514,10 @@ exit `$process.ExitCode
     # A task Administrators own runs as this user: an elevated registration
     # of this user's own autostart.
     if ($Case -like 'Locked*') {
-        $global:r6fixtureTask.Principal | Add-Member UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -Force
+        # The shapes measured on the Windows dev VM (16 November 2026) from
+        # real tasks: Principal.UserId the bare user name, the logon
+        # trigger's UserId HOST\user and a Boolean Enabled.
+        $global:r6fixtureTask.Principal | Add-Member UserId ([Environment]::UserName) -Force
         # A logon trigger for this user, enabled; LockedTriggerOther's fires
         # at SYSTEM's logon instead.
         $triggerUser = if ($Case -eq 'LockedTriggerOther') { 'NT AUTHORITY\SYSTEM' } else { [Security.Principal.WindowsIdentity]::GetCurrent().Name }
@@ -554,7 +559,7 @@ if ($Case -eq 'SiblingUnverifiedPreflight') {
 }
 function Get-ScheduledTask {
     [CmdletBinding()]
-    param($TaskName)
+    param($TaskName,$TaskPath)
     $fault = ($Case -eq 'QueryStopFailure' -and $global:r6stopPending -gt 0) -or ($Case -eq 'QueryRemovalFailure' -and $global:r6deleteAttempts -gt 0) -or $Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent') -or (
         $global:r6queryFaults -lt 2 -and (
             $Case -eq 'QueryInitialRetry' -or
@@ -631,7 +636,7 @@ function New-ScheduledTaskAction {
     }
     $action
 }
-function Enable-ScheduledTask { param($TaskName) $global:r6enabled=$true; $global:r6fixtureTask.Settings.Enabled=$true }
+function Enable-ScheduledTask { param($TaskName,$TaskPath) $global:r6enabled=$true; $global:r6fixtureTask.Settings.Enabled=$true }
 function New-ScheduledTaskPrincipal {
     param($UserId,$LogonType,$RunLevel)
     # The one shape an unelevated user may register for a logon task.
@@ -643,7 +648,7 @@ function New-ScheduledTaskSettingsSet { }
 function Export-ScheduledTask { '<Task><LogonType>Password</LogonType></Task>' }
 $global:r6xmlRestored=$false
 function Stop-ScheduledTask {
-    param($TaskName)
+    param($TaskName,$TaskPath)
     $global:r6stopInvoked=$true
     if ($global:r6foreignInjected) { $global:r6stopsAfterReplace++ }
     if ($TaskName -eq 'Pseudolife Codex Shim') { $global:r6siblingStopped=$true; $global:r6siblingTask.State='Ready'; return }
@@ -656,7 +661,7 @@ function Stop-ScheduledTask {
 }
 function Unregister-ScheduledTask {
     [CmdletBinding()]
-    param([string]$TaskName, [switch]$Confirm)
+    param([string]$TaskName,$TaskPath, [switch]$Confirm)
     $global:r6deleteAttempts++
     if ($Case -eq 'DeleteFailure' -or ($Case -eq 'DeleteRetry' -and $global:r6deleteAttempts -lt 3)) {
         Write-Error 'fixture delete rejected'
@@ -679,7 +684,7 @@ function Register-ScheduledTask {
     $global:r6fixtureTask
 }
 function Start-ScheduledTask {
-    param($TaskName)
+    param($TaskName,$TaskPath)
     if ($Case -eq 'RollbackQueryFailure') { $global:r6rollbackStarted=$true }
     if ($Case -in @('InstallUnverifiedLate','InstallUnverifiedPreflight','TaskRemovedBeforeRegister') -and -not $global:r6registered) {
         if (-not $global:r6fixtureTask) { throw 'attempted to restart an absent original' }

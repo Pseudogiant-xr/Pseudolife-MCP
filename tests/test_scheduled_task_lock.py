@@ -192,7 +192,7 @@ def test_a_task_owned_by_another_user_is_never_this_users() -> None:
     state, owner, hidden, line = _lock_of(f"O:{OTHER}D:(A;;FA;;;{OTHER})").split("|", 3)
     assert (state, owner, hidden) == ("LOCKED", f"account {OTHER}", "False")
     assert f"belongs to another account (account {OTHER})" in line and "nothing was changed" in line
-    assert "Ask that account to remove it: " in line and "Run as administrator" not in line
+    assert "Ask that account or an administrator to remove it: " in line and "Run as administrator" not in line
     _ends_with_the_command(line, "Pseudolife Claude Shim")
     # A SID that merely starts with this user's is someone else's.
     assert _lock_of(f"O:{ME}0D:(A;;FA;;;{ME}0)").startswith("LOCKED|")
@@ -231,6 +231,50 @@ def test_a_lock_refusal_is_marked_for_its_callers() -> None:
         assert proc.stdout.strip() == "PseudolifeTaskLocked|the line", proc.stdout
 
 
+def test_the_logon_and_principal_checks_read_the_measured_task_shapes() -> None:
+    """Shapes measured on the Windows dev VM (16 November 2026, a local
+    account, Windows PowerShell 5.1 and PowerShell 7, read under a UAC-style
+    filtered token) from real tasks registered three ways: master's
+    Python-era scripts elevated (``-AtLogOn`` with no user, no principal),
+    master's native script elevated, and this registration unelevated. All
+    three read back with ``Principal.UserId`` the bare user name,
+    ``LogonType`` Interactive and ``RunLevel`` Limited; the logon trigger is
+    ``MSFT_TaskLogonTrigger`` with a Boolean ``Enabled`` and ``UserId``
+    ``HOST\\user``, or empty for the Python-era any-user trigger."""
+    def trigger(cls: str, user: str, enabled: str = "$true") -> str:
+        return (f"[pscustomobject]@{{ CimClass = [pscustomobject]@{{ CimClassName = '{cls}' }}; "
+                f"UserId = '{user}'; Enabled = {enabled} }}")
+    cases = {
+        "python-era": (trigger("MSFT_TaskLogonTrigger", ""), ""),
+        "per-user": (trigger("MSFT_TaskLogonTrigger", "HOST\\this-user"), ""),
+        "other-user": (trigger("MSFT_TaskLogonTrigger", "HOST\\other-user"), "has no enabled logon trigger for this user"),
+        "disabled": (trigger("MSFT_TaskLogonTrigger", "HOST\\this-user", "$false"), "has no enabled logon trigger for this user"),
+        "no-logon": (trigger("MSFT_TaskTimeTrigger", ""), "has no logon trigger"),
+    }
+    script = _read(LOCK) + (
+        f"function Get-TaskShellUserSid {{ '{ME}' }}\n"
+        # Name resolution reads the account database; the measured names are
+        # the bare user name and HOST\user.
+        f"function Get-AccountSid([string]$Account) {{ if (-not $Account) {{ '' }} "
+        f"elseif ($Account -match '^(HOST\\\\)?this-user$') {{ '{ME}' }} else {{ '{OTHER}' }} }}\n"
+        "function Get-ScheduledTask { param($TaskPath, $TaskName, $ErrorAction) "
+        "[pscustomobject]@{ Principal = [pscustomobject]@{ UserId = 'this-user'; LogonType = 'Interactive'; RunLevel = 'Limited' } } }\n"
+        "'PRINCIPAL ' + (Get-TaskPrincipalSid 'fixture')\n"
+    )
+    for name, (shape, _) in cases.items():
+        script += f"'CASE {name}=' + (Get-TaskLogonMismatch ([pscustomobject]@{{ Triggers = @({shape}) }}))\n"
+    for shell in _shells():
+        proc = _run(script, shell)
+        assert proc.returncode == 0, (shell, proc.stderr)
+        assert f"PRINCIPAL {ME}" in proc.stdout, (shell, proc.stdout)
+        for name, (_, why) in cases.items():
+            line = next(l for l in proc.stdout.splitlines() if l.startswith(f"CASE {name}="))
+            if why:
+                assert why in line, (shell, name, line)
+            else:
+                assert line == f"CASE {name}=", (shell, name, line)
+
+
 def _sandboxed_lock(tmp_path: Path, sddl_by_task: dict[str, str], runs_as: str = ME) -> Path:
     """A scheduled_task_lock.ps1 beside a copied script: the real functions,
     then readers that answer per task name."""
@@ -245,141 +289,89 @@ def _sandboxed_lock(tmp_path: Path, sddl_by_task: dict[str, str], runs_as: str =
     return tmp_path
 
 
-def _spawner(python: str, repo: str, kind: str) -> str:
-    """The -EncodedCommand argument the autostart scripts register since 29
-    September 2026, built the way they build it."""
-    runner = f'"{repo}\\ops\\shim_autostart.py" run {kind}'.replace("'", "''")
-    double = lambda text: text.replace("'", "''")  # noqa: E731
-    inner = (f"$psi = New-Object System.Diagnostics.ProcessStartInfo\n"
-             f"$psi.FileName = '{double(python)}'\n"
-             f"$psi.Arguments = '{runner}'\n"
-             "$psi.UseShellExecute = $false\n$psi.CreateNoWindow = $true\n"
-             f"$psi.WorkingDirectory = '{double(repo)}'\n"
-             "[System.Diagnostics.Process]::Start($psi) | Out-Null\n")
-    return "-NoProfile -WindowStyle Hidden -EncodedCommand " + base64.b64encode(inner.encode("utf-16-le")).decode()
-
-
-@pytest.mark.parametrize("script,kind,names", [
-    ("install-shim-autostart.ps1", "claude", ["Pseudolife Claude Shim", "Pseudolife Sonnet Shim"]),
-    ("install-codex-shim-autostart.ps1", "codex", ["Pseudolife Codex Shim"]),
+@pytest.mark.parametrize("script,names", [
+    ("install-shim-autostart.ps1", ["Pseudolife Claude Shim", "Pseudolife Sonnet Shim"]),
+    ("install-codex-shim-autostart.ps1", ["Pseudolife Codex Shim"]),
 ])
-def test_the_autostart_scripts_decide_before_changing_anything(tmp_path: Path, script: str, kind: str,
-                                                               names: list[str]) -> None:
-    """The lock check runs before the interpreter pick (which may build a
-    venv), the log directory, ops/.env and any task change. A locked task
-    that is enabled, starts at this user's logon and runs this checkout's
-    runner follows ops/.env; any other locked task, another account's task
-    even when it runs the same runner, and a locked legacy task (which would
-    start a second shim beside the new one) are refused with their reason,
-    marked so the installer prints only that line."""
+def test_the_python_era_scripts_refuse_a_locked_task_before_anything(tmp_path: Path, script: str,
+                                                                    names: list[str]) -> None:
+    """The Python-era scripts never follow a locked task: one Administrators
+    own or another account's is refused, marked so the installer prints only
+    its line, before the interpreter pick (which may build a venv), the log
+    directory, ops/.env, any task change or any process stop. The Claude
+    script also refuses, at the same point, a port held by anything but the
+    shim the runner recorded."""
     text = _read(ROOT / "ops" / script)
     check = _block(text, "task lock check")
-    config = 'ops\\shim_autostart.py") config claude' if kind == "claude" else 'ops\\shim_autostart.py") @configArgs'
-    for later in (config, "Unregister-ScheduledTask", "Register-ScheduledTask", "shim_python.py", "New-Item -ItemType Directory",
-                  r'ops\shim_autostart.py") run ' + kind):
+    config = 'ops\\shim_autostart.py") config claude' if "codex" not in script else 'ops\\shim_autostart.py") @configArgs'
+    for later in (config, "Unregister-ScheduledTask", "Register-ScheduledTask", "shim_python.py",
+                  "New-Item -ItemType Directory", "Stop-RecordedShim", "Start-ScheduledTask -TaskPath"):
+        if later == "Stop-RecordedShim" and "codex" in script:
+            continue
         assert later in text, later
         assert text.index(check) < text.index(later), later
-    python = tmp_path / "python.exe"
-    python.write_text("", encoding="utf-8")
-    repo = "C:\\checkout with 'quote"
+    assert "followsFile" not in text and "Test-TaskRunsRunner" not in text and "Get-TaskRunnerMismatch" not in text
     task = names[0]
+    claude = "codex" not in script
 
-    def run(sddl_by_task: dict[str, str], arguments: str, sandbox: str, enabled: bool = True,
-            logon: bool = True, runs_as: str = ME, trigger_user: str = "this-user", trigger_enabled: bool = True) -> str:
+    def run(sddl_by_task: dict[str, str], sandbox: str, runs_as: str = ME, listeners: str = "",
+            recorded: str = "") -> str:
         box = _sandboxed_lock(tmp_path / sandbox, sddl_by_task, runs_as)
         body = box / "check.ps1"
-        quoted = arguments.replace("'", "''")
-        trigger = "MSFT_TaskLogonTrigger" if logon else "MSFT_TaskTimeTrigger"
         body.write_text(
             # The scripts dot-source the lock file before the check block.
             ". (Join-Path $PSScriptRoot 'scheduled_task_lock.ps1')\n"
             f"$taskName = '{task}'\n$legacyTaskName = 'Pseudolife Sonnet Shim'\n"
-            f"$repo = '{repo.replace(chr(39), chr(39) * 2)}'\n"
-            "function Get-ScheduledTask { param($TaskName, $ErrorAction) "
-            f"[pscustomobject]@{{ TaskName = $TaskName; Settings = [pscustomobject]@{{ Enabled = ${'true' if enabled else 'false'} }}; "
-            f"Triggers = @([pscustomobject]@{{ CimClass = [pscustomobject]@{{ CimClassName = '{trigger}' }}; "
-            f"Enabled = ${'true' if trigger_enabled else 'false'}; UserId = '{trigger_user}' }}); "
-            f"Actions = @([pscustomobject]@{{ Execute = 'powershell.exe'; Arguments = '{quoted}' }}) }} }}\n"
-            + check + "'FOLLOWS ' + $followsFile\n", encoding="utf-8")
+            "$repo = 'C:\\checkout'\n$Port = 8082\n"
+            "function Get-NetTCPConnection { param($LocalPort, $State, $ErrorAction) "
+            f"@({listeners}) | ForEach-Object {{ [pscustomobject]@{{ OwningProcess = $_ }} }} }}\n"
+            "function Get-RecordedShim { param($Repo, $Kind) "
+            f"@({recorded}) | ForEach-Object {{ [pscustomobject]@{{ ProcessId = $_ }} }} }}\n"
+            + check + "'PASSED'\n", encoding="utf-8")
         proc = _run(f"try {{ & '{body}' }} catch {{ 'REFUSED ' + $_.FullyQualifiedErrorId + ' ' + $_.Exception.Message }}")
         assert proc.returncode == 0, proc.stderr
         return proc.stdout
 
-    runner = _spawner(str(python), repo, kind)
-    locked = f"REFUSED PseudolifeTaskLocked the scheduled task '{task}' was registered from an elevated PowerShell"
-    # Locked, and it runs this checkout's runner with an interpreter that exists.
-    out = run({task: "O:BA"}, runner, "follows")
-    assert "FOLLOWS True" in out and "REFUSED" not in out, out
-    # Locked, and it is anything else: each refusal says why.
-    others = {
-        "older": ("/c \"\"C:\\py\\python.exe\" \"C:\\repo\\evals\\claude_shim.py\" --port 8082 --model m >> \"\"log\"\" 2>&1\"",
-                  "runs an older command that carries its settings on its own command line"),
-        "kind": (_spawner(str(python), repo, "codex" if kind == "claude" else "claude"), "runs the runner of another checkout"),
-        "checkout": (_spawner(str(python), "C:\\another checkout", kind), "runs the runner of another checkout"),
-        "gone": (_spawner(str(tmp_path / "gone.exe"), repo, kind), "runs an interpreter that no longer exists"),
-    }
-    for sandbox, (arguments, reason) in others.items():
-        out = run({task: "O:BA"}, arguments, sandbox)
-        assert locked in out and reason in out and "the new settings were not applied" in out, (sandbox, out)
-        assert "FOLLOWS" not in out, (sandbox, out)
-    out = run({task: "O:BA"}, runner, "disabled", enabled=False)
-    assert locked in out and "is disabled, so it never starts at logon" in out, out
-    out = run({task: "O:BA"}, runner, "nologon", logon=False)
-    assert locked in out and "has no logon trigger" in out, out
-    # A logon trigger that is disabled, or fires at another account's logon,
-    # does not start the shim at this user's logon either.
-    for sandbox, kwargs in (("triggeroff", {"trigger_enabled": False}), ("triggerother", {"trigger_user": "someone-else"})):
-        out = run({task: "O:BA"}, runner, sandbox, **kwargs)
-        assert locked in out and "has no enabled logon trigger for this user" in out, (sandbox, out)
-    # The older any-user logon trigger (no user) does fire at this user's logon.
-    out = run({task: "O:BA"}, runner, "anyuser", trigger_user="")
-    assert "FOLLOWS True" in out, out
-    # The near misses: another account's task running this very runner is
-    # never followed, whether another user owns it or Administrators own it
-    # and it runs as another account (an elevated run sees both).
-    out = run({task: f"O:{OTHER}"}, runner, "otheruser")
-    assert "REFUSED PseudolifeTaskLocked" in out and "never changes another account's task" in out, out
-    out = run({task: "O:BA"}, runner, "otherprincipal", runs_as=OTHER)
-    assert "REFUSED PseudolifeTaskLocked" in out and "never changes another account's task" in out, out
+    elevated = f"REFUSED PseudolifeTaskLocked the scheduled task '{task}' was registered from an elevated PowerShell"
+    # Administrators own it: refused, whatever it runs, with the one command.
+    out = run({task: "O:BA"}, "admins")
+    assert elevated in out and "PASSED" not in out, out
+    assert out.rstrip().endswith(f"Unregister-ScheduledTask -TaskName '{task}' -Confirm:$false"), out
+    # Another account's, whether another user owns it or Administrators own
+    # it and it runs as another account.
+    for sandbox, kwargs in (("otheruser", {"sddl_by_task": {task: f"O:{OTHER}"}}),
+                            ("otherprincipal", {"sddl_by_task": {task: "O:BA"}, "runs_as": OTHER})):
+        out = run(sandbox=sandbox, **kwargs)
+        assert "REFUSED PseudolifeTaskLocked" in out and "never changes another account's task" in out, (sandbox, out)
     # A locked legacy task is refused even when the selected task is free.
     for legacy in names[1:]:
-        out = run({legacy: "O:BA"}, runner, "legacy")
+        out = run({legacy: "O:BA"}, "legacy")
         assert f"REFUSED PseudolifeTaskLocked the scheduled task '{legacy}' was registered from an elevated PowerShell" in out, out
         assert "To remove it, run this once" in out, out
-    # Free (this user's own task): no lock, normal registration follows.
-    out = run({task: f"O:{ME}"}, runner, "free")
-    assert "FOLLOWS False" in out and "REFUSED" not in out, out
+    # This user's own task, or none: the registration goes ahead.
+    assert "PASSED" in run({task: f"O:{ME}"}, "free"), "free"
+    assert "PASSED" in run({}, "absent"), "absent"
+    if claude:
+        # A listener the runner's PID file does not prove is refused; the
+        # recorded shim (and a free port) is not.
+        out = run({}, "foreign", listeners="4242", recorded="")
+        assert "REFUSED PseudolifeTaskLocked port 8082 is held by pid 4242" in out and "nothing was changed" in out, out
+        out = run({}, "second", listeners="4242, 4343", recorded="4242")
+        assert "REFUSED PseudolifeTaskLocked port 8082 is held by pid 4343" in out, out
+        assert "PASSED" in run({}, "recorded", listeners="4242", recorded="4242")
 
 
-def test_the_follow_branches_stop_only_the_recorded_shim_and_verify_the_bind() -> None:
-    """Following a locked runner task stops only the shim the runner recorded
-    (proved by its PID file), never by a command-line pattern; refuses a
-    port held by anything else before ops/.env is written; removes a legacy
-    task this user owns (Claude); and does not take the runner's zero exit
-    as a working shim: a <kind>_shim.py must own the port."""
-    for script, kind in (("install-shim-autostart.ps1", "claude"), ("install-codex-shim-autostart.ps1", "codex")):
-        text = _read(ROOT / "ops" / script)
-        proof = text.index(f"$recorded = @(Get-RecordedShim $repo '{kind}')")
-        assert "$full = Get-CanonicalPath $Repo" in _read(LOCK)
-        config = text.index('shim_autostart.py") config claude' if kind == "claude" else "@configArgs 2>&1")
-        assert proof < config, script
-        assert "cannot prove is the shim it started" in text[proof:config], script
-        branch = text[text.index("if ($followsFile) {", config):]
-        branch = branch[:branch.index("\n}\n")]
-        assert "restart " + kind not in branch and "Stop-Process" not in branch, script
-        assert branch.index("Stop-RecordedShim $recorded") < branch.index(f'shim_autostart.py") run {kind}'), script
-        start = branch.index(f'shim_autostart.py") run {kind}')
-        assert branch.index("Get-PortListener -ShimPort $Port", start) < branch.index(f"Restarted the {kind.capitalize()} shim"), script
-        assert f"{kind}_shim\\.py" in branch and f'throw "no {kind}_shim.py listens' in branch[start:], script
-        if kind == "claude":
-            # Removed before ops/.env is written, so a refused removal changes nothing.
-            assert proof < text.index("Unregister-ScheduledTask -TaskName $legacyTaskName", proof) < config
-        # A failed restart puts the settings back and starts the previous
-        # shim again, after stopping whatever the failed start left.
-        assert text.index("$envBefore = ") < config, script
-        rollback = branch[branch.index("if ($failure) {"):]
-        assert rollback.index(f"Stop-RecordedShim @(Get-RecordedShim $repo '{kind}')") < rollback.index("WriteAllBytes($envFile, $envBefore)")
-        assert rollback.index("WriteAllBytes($envFile, $envBefore)") < rollback.index(f'shim_autostart.py") run {kind}')
+def test_the_claude_register_path_stops_only_the_recorded_shim() -> None:
+    """No kill by command-line pattern: the shim already on the port is the
+    one the runner's PID file proves, stopped only after the new task is
+    registered, and anything still holding the port stops the start."""
+    text = _read(ROOT / "ops" / "install-shim-autostart.ps1")
+    assert "Stop-Process" not in text and "Get-ShimProcess" not in text and "Win32_Process -ErrorAction Stop |" not in text
+    register = text.index("\nRegister-ScheduledTask -TaskName $taskName")
+    stop = text.index("    Stop-RecordedShim $recorded")
+    still = text.index("is still held by pid")
+    start = text.index("Start-ScheduledTask -TaskPath '\\' -TaskName $taskName -ErrorAction Stop")
+    assert register < stop < still < start
 
 
 def _recorded(tmp_path: Path, processes: list[dict], *, written_after: bool = True, port: int = 8082,
@@ -466,8 +458,8 @@ def test_a_mode_switch_leaves_a_locked_task_alone_and_says_how_to_remove_it(inst
     common = (
         "$global:unregistered = @()\n"
         "$global:present = @{ 'Pseudolife Codex Shim' = $true }\n"
-        "function Get-ScheduledTask { param($TaskName, $ErrorAction) if ($global:present[$TaskName]) { [pscustomobject]@{ TaskName = $TaskName } } }\n"
-        "function Unregister-ScheduledTask { param($TaskName, $Confirm, $ErrorAction) $global:unregistered += $TaskName; $global:present[$TaskName] = $false }\n"
+        "function Get-ScheduledTask { param($TaskName, $TaskPath, $ErrorAction) if ($global:present[$TaskName]) { [pscustomobject]@{ TaskName = $TaskName } } }\n"
+        "function Unregister-ScheduledTask { param($TaskName, $TaskPath, $Confirm, $ErrorAction) $global:unregistered += $TaskName; $global:present[$TaskName] = $false }\n"
         "function Step($text) { Write-Host \"STEP $text\" }\n"
         "$Extractor = 'claude-only'\n"
     )
@@ -486,8 +478,12 @@ def test_a_mode_switch_leaves_a_locked_task_alone_and_says_how_to_remove_it(inst
         # Locked, another account's, or an owner that could not be read: a
         # failed read is a refusal, never a fall-through to the delete.
         assert re.search(r"^UNREGISTERED\s*$", proc.stdout, re.M), (case, proc.stdout)
-        assert "nothing was changed" in proc.stdout and "its Codex shim keeps starting at logon" in proc.stdout, (case, proc.stdout)
-        fix = {"admins": "To remove it, run this once", "other": "Ask that account to remove it",
+        # Another account's task never starts at this user's logon, so it
+        # is "left alone", not "keeps starting".
+        prefix = ("the Codex shim task is another account's, so it was left alone" if case == "other"
+                  else "its Codex shim keeps starting at logon")
+        assert "nothing was changed" in proc.stdout and prefix in proc.stdout, (case, proc.stdout)
+        fix = {"admins": "To remove it, run this once", "other": "Ask that account or an administrator to remove it",
                "unread": "could not read the owner of autostart task 'Pseudolife Codex Shim' (fixture COM failure)"}[case]
         assert fix in proc.stdout, (case, proc.stdout)
         if case != "unread":
@@ -528,7 +524,7 @@ def test_the_native_script_checks_locks_before_it_changes_anything() -> None:
     assert legacy_check < selected < first_mutation
     refusal = text.index("Stop-TaskLocked (Format-TaskLock $selectedLock -Reason $why)")
     assert selected < refusal < first_mutation
-    assert refusal < text.index("$mutated = $true") and refusal < text.index("Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue")
+    assert refusal < text.index("$mutated = $true") and refusal < text.index("Stop-ScheduledTask -TaskPath '\\' -TaskName $name -ErrorAction SilentlyContinue")
     assert "$selectedLock.OtherUser" in text[selected:refusal]
     assert "-replace '^\\$runtimeExe = " in text
     gate = text[text.index("if ($selectedLock) {", selected):refusal]

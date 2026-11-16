@@ -12,7 +12,8 @@
 # versions registered a trigger for ANY user's logon, which needs
 # elevation. A task registered from an elevated shell is owned by
 # Administrators and cannot be changed unelevated: this script then changes
-# nothing and prints the one elevated command that removes it. Never
+# nothing and prints the one elevated command that removes it (run once;
+# after that a normal window is enough). Never
 # request UAC elevation from a shell inside Claude Desktop or another
 # Store-packaged app (Store-installed pwsh 7 included): Windows'
 # Application Information service then keeps a handle to that app's
@@ -26,8 +27,9 @@
 # The task runs `ops\shim_autostart.py run claude`, which reads the model,
 # prompt file, port, host, CLI path, interpreter and log file from ops/.env
 # (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written
-# into that file. Changing a value later is an edit plus
-# `python ops\shim_autostart.py restart claude` — no re-registration.
+# into that file. Changing a value later is an edit plus a rerun of this
+# script (or `python ops\shim_autostart.py restart claude`, which stops
+# every claude_shim.py on that port this account may stop).
 #   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5-5,
 #   claude-sonnet-5, claude-haiku-5-5, claude-haiku-4-5, claude-fable-5-1,
 #   claude-fable-5 (the list ops\install.ps1 offers; any other
@@ -96,24 +98,29 @@ if ($NativeExe) {
 $taskName = "Pseudolife Claude Shim"
 $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # >>> task lock check >>>
-# Decide before changing anything, before the interpreter pick (which may
-# build a venv) and the log directory. A task this shell cannot replace
-# (one registered from an elevated shell, which Administrators own) is never
-# re-registered. If it runs this checkout's ops\shim_autostart.py, enabled
-# and at this user's logon, it reads ops\.env at every start: the settings
-# are written there and the shim restarted, and the task keeps doing its
-# job. Another account's task, and any other locked task, is refused with
-# its reason and the one command that removes it. The legacy name is
-# checked first: left behind beside the new task, it would start a second
-# shim at logon.
-$legacyLock = Get-TaskLock $legacyTaskName
-if ($legacyLock) { throw (New-TaskLockError (Format-TaskLock $legacyLock -Removal)) }
-$taskLock = Get-TaskLock $taskName
-$followsFile = $false
-if ($taskLock) {
-    $mismatch = if ($taskLock.Hidden -or $taskLock.OtherUser) { '' } else { Get-TaskRunnerMismatch $taskName $repo 'claude' }
-    if ($taskLock.Hidden -or $taskLock.OtherUser -or $mismatch) { throw (New-TaskLockError (Format-TaskLock $taskLock -Reason $mismatch)) }
-    $followsFile = $true
+# Decide before changing anything: before the interpreter pick (which may
+# build a venv), the log directory, ops\.env and any task. A task this
+# shell cannot replace (one registered from an elevated shell, which
+# Administrators own, or another account's) is refused with the one command
+# that removes it; the legacy name is checked first, since left behind
+# beside the new task it would start a second shim at logon. A port held by
+# anything but the shim the runner recorded (its PID file, proved by PID,
+# start time and command line) is refused too: a kill by command-line
+# pattern could reach another checkout's or another account's shim.
+function Get-PortListeners([int]$ShimPort) {
+    @(Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)
+}
+function Get-PortListener([int]$ShimPort) { Get-PortListeners $ShimPort | Select-Object -First 1 }
+foreach ($name in @($legacyTaskName, $taskName)) {
+    $lock = Get-TaskLock $name
+    if ($lock) { throw (New-TaskLockError (Format-TaskLock $lock -Removal:($name -eq $legacyTaskName))) }
+}
+$recorded = @(Get-RecordedShim $repo 'claude')
+$foreign = @(Get-PortListeners $Port | Where-Object { $_.OwningProcess -notin @($recorded | ForEach-Object ProcessId) } |
+    ForEach-Object OwningProcess | Select-Object -Unique)
+if ($foreign.Count) {
+    throw (New-TaskLockError ("port $Port is held by pid $($foreign -join ', '), which this run cannot prove is the shim " +
+        "ops\shim_autostart.py started from this checkout; nothing was changed. Stop that process, or pick another -Port, then rerun"))
 }
 # <<< task lock check <<<
 
@@ -156,23 +163,6 @@ $PythonExe = "$picked".Trim()
 # it against this shell's location.
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
-# Every process whose command line names claude_shim.py AND this --port. The
-# shim is a two-layer tree (the .venv python.exe launcher -> the base
-# interpreter that owns the socket) and neither layer's death propagates to
-# the other, so the whole set is what "the running shim" means here. Keyed
-# on the port too: an A/B shim serving another port from the same script
-# must survive an install.
-function Get-ShimProcess {
-    param([int]$ShimPort)
-    $pattern = "claude_shim\.py.*--port\s+$ShimPort(\s|$)"
-    @(Get-CimInstance Win32_Process -ErrorAction Stop |
-        Where-Object { $_.CommandLine -and ($_.CommandLine -match $pattern) })
-}
-function Get-PortListener {
-    param([int]$ShimPort)
-    Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-}
 # Lines the shim appended to its log after byte offset $Offset. Opened with
 # FileShare ReadWrite so the running shim's own handle is undisturbed.
 function Read-LogSince {
@@ -207,84 +197,9 @@ function Read-LogSince {
 # runner opens the log itself and starts the shim with the same hidden
 # console (no `cmd >> log` layer: the process tree is the runner, gone in
 # a second, then the shim's python).
-if ($followsFile) {
-    # Only the shim the runner recorded is stopped, proved by its PID file
-    # (PID, start time, command line), never by a command-line pattern that
-    # could match another checkout's or another account's shim. Anything
-    # else on the port is refused before the settings are written.
-    $recorded = @(Get-RecordedShim $repo 'claude')
-    # What a failed restart puts back: the settings as they were.
-    $envFile = Join-Path $repo 'ops\.env'
-    $envBefore = if (Test-Path -LiteralPath $envFile -PathType Leaf) { [IO.File]::ReadAllBytes($envFile) } else { $null }
-    # A legacy task this user owns is still removed, before the settings are
-    # written, or it would start a second shim at logon.
-    if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
-        Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
-        if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
-            throw "could not remove the legacy task '$legacyTaskName' (see the message above); nothing else was changed, and it would start a second shim at logon"
-        }
-    }
-    $holder = Get-PortListener -ShimPort $Port
-    if ($holder -and $holder.OwningProcess -notin @($recorded | ForEach-Object ProcessId)) {
-        throw ("port $Port is held by pid $($holder.OwningProcess), which this run cannot prove is the shim it started " +
-               "(ops\shim_autostart.py records that one in ~\.pseudolife-mcp); nothing was changed. Stop that process, then rerun")
-    }
-}
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
     --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
-if ($followsFile) {
-    # The registered task reads ops\.env at every start: restart the shim
-    # here (no scheduler call), and leave the task as it is.
-    $failure = $null
-    try {
-        Stop-RecordedShim $recorded
-        $deadline = (Get-Date).AddSeconds(15)
-        while ((Get-PortListener -ShimPort $Port) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-        if (Get-PortListener -ShimPort $Port) {
-            throw "port $Port did not become free after stopping the recorded shim"
-        }
-        & $PythonExe (Join-Path $repo "ops\shim_autostart.py") run claude 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "the claude shim did not start (see above)" }
-        # The runner returns once it has started the shim, not once it serves:
-        # verify it as the registration path below does, by a listener a
-        # claude_shim.py owns.
-        $listener = $null
-        $deadline = (Get-Date).AddSeconds($StartupTimeoutSec)
-        while (-not $listener -and (Get-Date) -lt $deadline) {
-            $candidate = Get-PortListener -ShimPort $Port
-            if ($candidate) {
-                $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
-                if ($owner -and $owner.CommandLine -match 'claude_shim\.py') { $listener = $candidate; break }
-            }
-            Start-Sleep -Seconds 2
-        }
-        if (-not $listener) {
-            throw "no claude_shim.py listens on 127.0.0.1:$Port after ${StartupTimeoutSec}s; see $LogFile"
-        }
-    } catch { $failure = $_ }
-    if ($failure) {
-        # A failed restart leaves what was there: the previous settings,
-        # and the previous shim started again on them.
-        $restored = 'ops\.env was put back to its previous settings'
-        try {
-            # A shim the failed start left behind (the runner recorded it) goes
-            # first, so the previous one does not bind beside it.
-            Stop-RecordedShim @(Get-RecordedShim $repo 'claude')
-            if ($null -ne $envBefore) { [IO.File]::WriteAllBytes($envFile, $envBefore) }
-            elseif (Test-Path -LiteralPath $envFile) { Remove-Item -LiteralPath $envFile }
-            if ($recorded.Count) {
-                & $PythonExe (Join-Path $repo "ops\shim_autostart.py") run claude 2>&1 | Out-Host
-                $restored += $(if ($LASTEXITCODE -eq 0) { ' and the previous shim was started again' } else { ', but the previous shim did not start again (see above)' })
-            }
-        } catch { $restored = "ops\.env could not be put back ($($_.Exception.Message)); it holds the new settings" }
-        throw "$($failure.Exception.Message); $restored"
-    }
-    Write-Host "Restarted the Claude shim with the settings in ops\.env (port $Port, pid $($listener.OwningProcess)). $(Format-TaskLock $taskLock -Follows 'ops\.env')"
-    & $PythonExe (Join-Path $repo "ops/shim_cutover.py") --repo $repo --port $Port
-    if ($LASTEXITCODE -ne 0) { throw "could not report daemon cutover settings" }
-    return
-}
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
 `$psi.FileName = '$($PythonExe -replace "'", "''")'
@@ -308,8 +223,8 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
-Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskPath '\' -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
 # CIM cmdlet errors here do NOT reliably terminate even under
 # $ErrorActionPreference = "Stop" (observed live: an unelevated run printed
 # "Access is denied" and fell through to the success message). Force it, and
@@ -317,7 +232,7 @@ Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal `
     -Settings $settings -Description "Claude extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
     -ErrorAction Stop | Out-Null
-if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+if (-not (Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue)) {
     throw ("task '$taskName' was not registered: Task Scheduler refused it (see the message above). " +
            "No elevation is needed for this per-user task; run this script again in a normal " +
            "PowerShell 7 window, and if it still fails, check that the ScheduledTasks module loads " +
@@ -333,39 +248,23 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
 # shim's next log write (two appending opens keep independent file
 # pointers). Both probed 2026-09-07. This runs only after registration
 # succeeded: stopping the live shim and then failing to register would leave
-# the box with no extractor at all.
-$stale = @(Get-ShimProcess -ShimPort $Port)
-if ($stale.Count -gt 0) {
-    $pids = ($stale | ForEach-Object { "$($_.ProcessId) $($_.Name)" }) -join ", "
-    Write-Host "Stopping the running claude_shim.py instance on port $Port ($pids) so the new task instance can take the port..."
-    foreach ($p in $stale) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+# the box with no extractor at all. Only the shim the runner recorded is
+# stopped, proved before anything changed (the task lock check block).
+if ($recorded.Count) {
+    Write-Host ("Stopping the running claude_shim.py the runner recorded (pid " + (($recorded | ForEach-Object ProcessId) -join ', ') +
+                ") so the new task instance can take the port...")
+    Stop-RecordedShim $recorded
     $deadline = (Get-Date).AddSeconds(15)
-    while ((Get-Date) -lt $deadline -and
-           (((Get-ShimProcess -ShimPort $Port).Count -gt 0) -or (Get-PortListener -ShimPort $Port))) {
-        Start-Sleep -Milliseconds 500
-    }
-    $left = @(Get-ShimProcess -ShimPort $Port)
-    if ($left.Count -gt 0) {
-        throw ("could not stop the running shim (pid " +
-               (($left | ForEach-Object ProcessId) -join ", ") + ") - stop it and re-run.")
-    }
+    while ((Get-PortListener -ShimPort $Port) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 }
 $holder = Get-PortListener -ShimPort $Port
 if ($holder) {
-    $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($holder.OwningProcess)" -ErrorAction SilentlyContinue
-    if ($owner -and $owner.CommandLine -match 'claude_shim\.py') {
-        # Launched by hand with a spelling the kill set does not parse
-        # (--port=N, or the flag omitted for the default port).
-        throw ("port $Port is held by a claude_shim.py this installer could not match by --port " +
-               "(pid $($holder.OwningProcess)) - stop that process and re-run.")
-    }
-    throw ("port $Port is held by pid $($holder.OwningProcess) ($($owner.Name)), which is not " +
-           "a claude_shim.py instance - free the port (or pick another with -Port) and re-run. " +
-           "The task would not fail to bind beside it; it would just never receive the traffic.")
+    throw ("port $Port is still held by pid $($holder.OwningProcess) after stopping the recorded shim; the task is registered " +
+           "but not started. Stop that process, then run: Start-ScheduledTask -TaskName '$taskName'")
 }
 
 $logOffset = (Test-Path $LogFile) ? (Get-Item $LogFile).Length : 0
-Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+Start-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
 Write-Host "Started '$taskName'; waiting up to ${StartupTimeoutSec}s for the shim to bind 127.0.0.1:$Port (health warm-up is one real CLI call)..."
 # Affirmative verification: a listener on the port OWNED BY a claude_shim.py
 # process. "The task ran" (LastTaskResult 0) only means the spawner exited.
@@ -381,7 +280,7 @@ while (-not $listener -and (Get-Date) -lt $deadline) {
 }
 $newLines = @(Read-LogSince -Path $LogFile -Offset $logOffset)
 if (-not $listener) {
-    $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+    $info = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
     $tail = if ($newLines.Count -gt 0) { $newLines -join "`n" } else {
         "(none - nothing reached $LogFile; check the CLI login with: claude -p hi)" }
     throw ("shim did not bind 127.0.0.1:$Port within ${StartupTimeoutSec}s " +
@@ -401,7 +300,7 @@ if ($startup.Count -eq 0) {
     foreach ($line in $startup) { Write-Host "  log: $line" }
 }
 Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), python $PythonExe, log $LogFile)."
-Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart claude."
+Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then rerun this script (or python ops\shim_autostart.py restart claude, which stops every claude_shim.py on that port this account may stop)."
 # >>> shim cutover >>>
 & $PythonExe (Join-Path $repo "ops/shim_cutover.py") --repo $repo --port $Port
 if ($LASTEXITCODE -ne 0) { throw "could not report daemon cutover settings" }

@@ -737,6 +737,9 @@ jobs:
         #   refuses a job when the account's LAN block does not bind.
         # - test_windowless_children: the suite's real console check and its
         #   wrapped Popen (tests/windowless_children.py), Windows-only code.
+        # - test_scheduled_task_lock: the scheduled-task owner check and its
+        #   refusals under Windows PowerShell 5.1 and PowerShell 7, and the
+        #   real canonical-path call the recorded-shim proof makes.
         env:
           PSEUDOLIFE_REQUIRE_TEST_POSTGRES: "1"
         run: >-

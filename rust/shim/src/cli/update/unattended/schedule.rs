@@ -567,12 +567,32 @@ fn run_windows_script(script: &str) -> Result<(i32, String)> {
 
 /// The registration failure a Windows task script's exit code means.
 fn registration_failure(code: i32, output: &str) -> UpdateError {
-    if code == TASK_LOCKED || code == TASK_OWNER_UNREAD {
-        UpdateError::usage(locked_reason(output))
-    } else {
-        UpdateError::usage(
-            "Task Scheduler registration failed. This per-user daily task needs no elevation; check that the Windows ScheduledTasks PowerShell module is available (Get-Command Register-ScheduledTask) and run this command again in a normal PowerShell",
-        )
+    UpdateError::usage(script_failure(
+        code,
+        output,
+        "Task Scheduler registration failed. This per-user daily task needs no elevation; check that the Windows ScheduledTasks PowerShell module is available (Get-Command Register-ScheduledTask) and run this command again in a normal PowerShell",
+    ))
+}
+
+/// The true line for a Windows task script that exited `code`: its own
+/// refusal (a locked task, an owner it could not read), a script file that
+/// changed before it ran, or the last line it printed with "nothing was
+/// changed"; `fallback` only when it printed nothing.
+fn script_failure(code: i32, output: &str, fallback: &str) -> String {
+    let last = output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty());
+    match code {
+        TASK_LOCKED | TASK_OWNER_UNREAD => locked_reason(output),
+        SCRIPT_CHANGED => {
+            "the scheduler script changed after it was written; nothing was run".to_owned()
+        }
+        _ => match last {
+            Some(line) => format!("{line}; nothing was changed"),
+            None => fallback.to_owned(),
+        },
     }
 }
 
@@ -765,12 +785,13 @@ pub(crate) fn unschedule(update: &mut Update) -> Result<()> {
             // could not start all refuse, so an elevated shell never deletes
             // a task it could not prove is this user's.
             let (code, output) = run_windows_script(&windows_removal_check(task)?)?;
-            if code == TASK_LOCKED || code == TASK_OWNER_UNREAD {
-                return Err(UpdateError::usage(locked_reason(&output)));
-            }
             if code != 0 {
-                return Err(UpdateError::usage(format!(
-                    "could not check who owns the scheduled task '{task}' (the check exited {code}); nothing was removed. Run --unschedule again; if it fails again, check that Windows PowerShell and its ScheduledTasks module work: Get-ScheduledTask -TaskName '{task}'"
+                return Err(UpdateError::usage(script_failure(
+                    code,
+                    &output,
+                    &format!(
+                        "could not check who owns the scheduled task '{task}' (the check exited {code}); nothing was removed. Run --unschedule again; if it fails again, check that Windows PowerShell and its ScheduledTasks module work: Get-ScheduledTask -TaskName '{task}'"
+                    ),
                 )));
             }
         }
@@ -1085,6 +1106,25 @@ Connection: close
         );
     }
     #[test]
+    fn every_script_failure_says_its_own_cause() {
+        assert_eq!(
+            script_failure(
+                SCRIPT_CHANGED,
+                "the scheduler script changed after it was written; nothing was run",
+                "x"
+            ),
+            "the scheduler script changed after it was written; nothing was run"
+        );
+        assert_eq!(
+            script_failure(1, "noise\nTerm 'Get-TaskLock' is not recognized\r\n", "x"),
+            "Term 'Get-TaskLock' is not recognized; nothing was changed"
+        );
+        assert_eq!(script_failure(1, "", "the fallback"), "the fallback");
+        let line =
+            "could not read the owner of the scheduled task 'X': denied; nothing was changed";
+        assert_eq!(script_failure(TASK_OWNER_UNREAD, line, "x"), line);
+    }
+    #[test]
     fn the_unschedule_check_reads_and_never_removes() {
         let script = windows_removal_check("Pseudolife Client Update").unwrap();
         assert!(script.contains("$lock=Get-TaskLock 'Pseudolife Client Update'"));
@@ -1176,7 +1216,7 @@ function New-Object { param([string]$TypeName,[object[]]$ArgumentList,[string]$C
  else { Microsoft.PowerShell.Utility\New-Object -TypeName $TypeName }
 }
 function Register-ScheduledTask { throw 'registered over a locked task' }
-function Get-ScheduledTask { param($TaskName,$ErrorAction)
+function Get-ScheduledTask { param($TaskName,$TaskPath,$ErrorAction)
  [pscustomobject]@{ TaskName=$TaskName; Principal=[pscustomobject]@{ UserId=[Security.Principal.WindowsIdentity]::GetCurrent().Name } }
 }
 "#;
