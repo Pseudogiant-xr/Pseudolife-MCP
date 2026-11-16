@@ -75,7 +75,8 @@ these cases are recorded from the candidate, not the oracle:
   Cases: `status-process-record`, `status-process-record-text`,
   `status-dpapi-key`, `update-ready-key`, `update-dead-record`,
   `update-orphan-record`, and `update-pending-only` / `update-ready-wrong-key`
-  (a ready profile is `not-running`, no longer `pending`).
+  (a ready profile is `not-running`, no longer `pending`), and
+  `update-corrupt-profile` (the refusal names the profile file).
 
 ## Deferred (before any effect)
 

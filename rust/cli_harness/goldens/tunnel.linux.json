@@ -2601,13 +2601,13 @@
    "utc_offset": 39600,
    "exit": 2,
    "stdout": "",
-   "stderr": "dHVubmVsIHByb2ZpbGUgaXMgaW52YWxpZAo=",
+   "stderr": "dHVubmVsIHByb2ZpbGUgaXMgaW52YWxpZDoge0hPTUV9L3R1bm5lbHMvZG90LnByb2ZpbGUuanNvbjsgZml4IHRoYXQgZmlsZSBvciBtb3ZlIGl0IG91dCBvZiB0aGUgdHVubmVsIGRpcmVjdG9yeSwgdGhlbiByZXRyeQo=",
    "window": [
-    1791588257.6844742,
-    1791588258.0826678
+    1794788943.7174923,
+    1794788943.7194932
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
@@ -4127,6 +4127,12 @@
    "rust_tree": "clean",
    "platform": "linux",
    "candidate_sha256": "1de7e5aa7619c3e66947cb524c9711c4efbdd88f4f5c2c343bc8602087025387"
+  },
+  "update-corrupt-profile": {
+   "commit": "ebbb36a52f3566210ced9185a336d3eb003feabe",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "89ae744f084c1ce09eb77a2e694b99880171574586eae1885a2f4014c9ef258d"
   },
   "update-dead-record": {
    "commit": "40a82fd7aec15080397a565b8ef98360ef8812b5",
