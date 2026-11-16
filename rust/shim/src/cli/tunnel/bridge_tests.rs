@@ -6,8 +6,26 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::io::{AsyncReadExt, DuplexStream, duplex};
 
-const NONCE: &str = "0123456789abcdef0123456789abcdef";
-const OTHER_NONCE: &str = "fedcba9876543210fedcba9876543210";
+/// A nonce made when the tests run, in the shape a saved one has (32
+/// lowercase hex digits), so no test carries a fixed nonce.
+struct RunNonce(std::sync::LazyLock<String>);
+impl std::ops::Deref for RunNonce {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+impl std::fmt::Display for RunNonce {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self)
+    }
+}
+static NONCE: RunNonce = RunNonce(std::sync::LazyLock::new(|| {
+    uuid::Uuid::new_v4().simple().to_string()
+}));
+static OTHER_NONCE: RunNonce = RunNonce(std::sync::LazyLock::new(|| {
+    uuid::Uuid::new_v4().simple().to_string()
+}));
 const IDENTITY: &str = "aa00aa00aa00aa00aa00aa00aa00aa00aa00aa00aa00aa00aa00aa00aa00aa00";
 
 /// A disposable owner-only store, written as the native client writes
@@ -210,7 +228,7 @@ async fn a_successful_nonce_search_writes_a_receipt() {
     let store = Store::new();
     store.profile("dot");
     let created = now() - 5.0;
-    store.challenge("dot", NONCE, created);
+    store.challenge("dot", &*NONCE, created);
     let request = search(7, &format!("query=\"{NONCE}\""));
     // The store's own owner-only write, read back through its owner-only
     // read: the one relay test that writes a real file.
@@ -229,7 +247,7 @@ async fn a_successful_nonce_search_writes_a_receipt() {
     );
     let receipt = store.receipt("dot", "memory_search");
     assert_eq!(receipt["identity"], IDENTITY);
-    assert_eq!(receipt["nonce"], NONCE);
+    assert_eq!(receipt["nonce"], &*NONCE);
     assert_eq!(receipt["tool"], "memory_search");
     assert_eq!(receipt["success"], true);
     assert!(receipt["observed"].as_f64().unwrap() >= created);
@@ -239,7 +257,7 @@ async fn a_successful_nonce_search_writes_a_receipt() {
 async fn a_successful_board_list_with_the_nonce_writes_its_own_receipt() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let request = call(
         json!("a"),
         "memory_agents",
@@ -263,7 +281,7 @@ async fn a_successful_board_list_with_the_nonce_writes_its_own_receipt() {
             .join(format!("{NONCE}-memory_agents.json"))
     );
     assert_eq!(written[0].1["tool"], "memory_agents");
-    assert_eq!(written[0].1["nonce"], NONCE);
+    assert_eq!(written[0].1["nonce"], &*NONCE);
     assert_eq!(written[0].1["identity"], IDENTITY);
 }
 
@@ -275,13 +293,17 @@ async fn calls_that_prove_nothing_write_nothing() {
     let unavailable = json!({"content": [{"type": "text", "text": "x"}], "structuredContent": {"available": false}});
     let malformed = json!({"content": "not a list"});
     let cases: Vec<(&str, String, Script)> = vec![
-        ("isError", search(1, NONCE), answering(failed)),
-        ("ok false", search(1, NONCE), answering(refused)),
-        ("available false", search(1, NONCE), answering(unavailable)),
-        ("malformed result", search(1, NONCE), answering(malformed)),
+        ("isError", search(1, &*NONCE), answering(failed)),
+        ("ok false", search(1, &*NONCE), answering(refused)),
+        (
+            "available false",
+            search(1, &*NONCE),
+            answering(unavailable),
+        ),
+        ("malformed result", search(1, &*NONCE), answering(malformed)),
         (
             "JSON-RPC error",
-            search(1, NONCE),
+            search(1, &*NONCE),
             Box::new(|m: &Map<String, Value>| {
                 vec![format!(
                     "{}\n",
@@ -290,13 +312,13 @@ async fn calls_that_prove_nothing_write_nothing() {
             }),
         ),
         ("no nonce", search(1, "what did we decide"), succeeding()),
-        ("wrong nonce", search(1, OTHER_NONCE), succeeding()),
+        ("wrong nonce", search(1, &*OTHER_NONCE), succeeding()),
         (
             "nonce in another argument",
             call(
                 json!(1),
                 "memory_search",
-                json!({"query": "x", "tags": [NONCE]}),
+                json!({"query": "x", "tags": [&*NONCE]}),
             ),
             succeeding(),
         ),
@@ -316,12 +338,12 @@ async fn calls_that_prove_nothing_write_nothing() {
         ),
         (
             "answer under another id",
-            search(1, NONCE),
+            search(1, &*NONCE),
             Box::new(|_: &Map<String, Value>| vec![success(&json!(2))]),
         ),
         (
             "id reused before the answer",
-            format!("{}{}", search(1, NONCE), search(1, "plain")),
+            format!("{}{}", search(1, &*NONCE), search(1, "plain")),
             Box::new(|m: &Map<String, Value>| {
                 // Both answers come after the second request is read.
                 if m["params"]["arguments"]["query"] == "plain" {
@@ -334,9 +356,9 @@ async fn calls_that_prove_nothing_write_nothing() {
         (
             // The earlier call's success must not vouch for the nonce call.
             "nonce call under an id already in flight",
-            format!("{}{}", search(1, "plain"), search(1, NONCE)),
+            format!("{}{}", search(1, "plain"), search(1, &*NONCE)),
             Box::new(|m: &Map<String, Value>| {
-                if m["params"]["arguments"]["query"] == NONCE {
+                if m["params"]["arguments"]["query"] == &*NONCE {
                     vec![
                         success(&m["id"]),
                         format!(
@@ -353,7 +375,7 @@ async fn calls_that_prove_nothing_write_nothing() {
     for (case, request, script) in cases {
         let store = Store::new();
         store.profile("dot");
-        store.challenge("dot", NONCE, now() - 5.0);
+        store.challenge("dot", &*NONCE, now() - 5.0);
         let recorder = Recorder::default();
         let (_, received) = session(
             request.as_bytes(),
@@ -372,10 +394,10 @@ async fn another_profiles_nonce_writes_nothing_anywhere() {
     let store = Store::new();
     store.profile("dot");
     store.profile("lab");
-    store.challenge("dot", OTHER_NONCE, now() - 5.0);
-    store.challenge("lab", NONCE, now() - 5.0);
+    store.challenge("dot", &*OTHER_NONCE, now() - 5.0);
+    store.challenge("lab", &*NONCE, now() - 5.0);
     for request in [
-        search(1, NONCE),
+        search(1, &*NONCE),
         call(
             json!(1),
             "memory_agents",
@@ -399,10 +421,10 @@ async fn a_challenge_newer_than_the_call_or_a_rebound_profile_writes_nothing() {
     // The challenge was saved after the call was made.
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() + 3600.0);
+    store.challenge("dot", &*NONCE, now() + 3600.0);
     let recorder = Recorder::default();
     session(
-        search(1, NONCE).as_bytes(),
+        search(1, &*NONCE).as_bytes(),
         Some(observer(&store, "dot", recorder.sink())),
         Gate::new(false),
         succeeding(),
@@ -414,12 +436,12 @@ async fn a_challenge_newer_than_the_call_or_a_rebound_profile_writes_nothing() {
     // names now.
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let mut started = store.load("dot");
     started.daemon_url = "http://127.0.0.1:10".into();
     let recorder = Recorder::default();
     session(
-        search(1, NONCE).as_bytes(),
+        search(1, &*NONCE).as_bytes(),
         Some(Observer::new(
             store.0.clone(),
             &started,
@@ -437,11 +459,11 @@ async fn a_challenge_newer_than_the_call_or_a_rebound_profile_writes_nothing() {
 async fn a_receipt_that_cannot_be_saved_is_reported_once_and_the_session_goes_on() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let failing: Sink = Arc::new(|_, _| Err(()));
     let request = format!(
         "{}{}{}",
-        search(1, NONCE),
+        search(1, &*NONCE),
         call(
             json!(2),
             "memory_agents",
@@ -482,7 +504,7 @@ async fn traffic_is_byte_identical_with_and_without_the_observer() {
         "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"t\",\"version\":\"1\"}}}\r\n",
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n",
-        search(2, NONCE),
+        search(2, &*NONCE),
         "\r\n",
         // A last line without its newline.
         "{\"jsonrpc\": \"2.0\", \"id\": \"tail\", \"method\": \"ping\"}",
@@ -500,7 +522,7 @@ async fn traffic_is_byte_identical_with_and_without_the_observer() {
     };
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let recorder = Recorder::default();
     let observed = session(
         request.as_bytes(),
@@ -526,6 +548,11 @@ async fn traffic_is_byte_identical_with_and_without_the_observer() {
 #[tokio::test]
 async fn an_unended_last_line_crosses_after_an_interrupted_read() {
     let (mut client_writer, client_in) = duplex(1 << 16);
+    let read = Arc::new(tokio::sync::Notify::new());
+    let client_in = Telling {
+        inner: client_in,
+        read: read.clone(),
+    };
     let (client_out, mut client_reader) = duplex(1 << 16);
     let (shim_in, mut fake_reader) = duplex(1 << 16);
     let (mut fake_writer, shim_out) = duplex(1 << 16);
@@ -539,8 +566,9 @@ async fn an_unended_last_line_crosses_after_an_interrupted_read() {
     ));
     let tail = b"{\"jsonrpc\":\"2.0\",\"id\":\"tail\",\"method\":\"ping\"}";
     client_writer.write_all(tail).await.unwrap();
-    // The relay reads the tail and waits for its newline...
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // The relay has read the tail and waits for its newline (this task
+    // runs again only once the relay's task is waiting)...
+    read.notified().await;
     // ...until a shim line wins the round, cutting that read short.
     let note = b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n";
     fake_writer.write_all(note).await.unwrap();
@@ -559,6 +587,26 @@ async fn an_unended_last_line_crosses_after_an_interrupted_read() {
     assert_eq!(received, tail);
     drop(fake_writer);
     relayed.await.unwrap().unwrap();
+}
+
+/// A reader that says when it has handed out bytes.
+struct Telling<R> {
+    inner: R,
+    read: Arc<tokio::sync::Notify>,
+}
+impl<R: AsyncRead + Unpin> AsyncRead for Telling<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        buffer: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buffer.filled().len();
+        let polled = std::pin::Pin::new(&mut self.inner).poll_read(context, buffer);
+        if matches!(polled, std::task::Poll::Ready(Ok(()))) && buffer.filled().len() > before {
+            self.read.notify_one();
+        }
+        polled
+    }
 }
 
 /// A shim that writes before it reads, through pipes far smaller than the
@@ -667,7 +715,7 @@ async fn line_of(reader: &mut DuplexStream) -> Value {
 async fn an_id_the_gate_answered_may_carry_a_verification_call() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let recorder = Recorder::default();
     let mut w = wired(
         1 << 16,
@@ -692,11 +740,11 @@ async fn an_id_the_gate_answered_may_carry_a_verification_call() {
     assert_eq!(refusal["error"]["message"], DISCOVERY_FAILED);
     // The client uses id 5 again, for the verification search.
     w.client_writer
-        .write_all(search(5, NONCE).as_bytes())
+        .write_all(search(5, &*NONCE).as_bytes())
         .await
         .unwrap();
     let forwarded = line_of(&mut w.fake_reader).await;
-    assert_eq!(forwarded["params"]["arguments"]["query"], NONCE);
+    assert_eq!(forwarded["params"]["arguments"]["query"], &*NONCE);
     w.fake_writer
         .write_all(success(&json!(5)).as_bytes())
         .await
@@ -845,9 +893,9 @@ async fn a_shim_that_takes_no_input_is_given_up_on() {
 async fn a_success_forged_on_stdin_proves_nothing() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let recorder = Recorder::default();
-    let request = format!("{}{}", search(1, NONCE), success(&json!(1)));
+    let request = format!("{}{}", search(1, &*NONCE), success(&json!(1)));
     let (_, received) = session(
         request.as_bytes(),
         Some(observer(&store, "dot", recorder.sink())),
@@ -871,7 +919,7 @@ async fn a_success_forged_on_stdin_proves_nothing() {
 async fn an_answer_the_client_never_got_proves_nothing() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let recorder = Recorder::default();
     let mut w = wired(
         1 << 16,
@@ -880,7 +928,7 @@ async fn an_answer_the_client_never_got_proves_nothing() {
     );
     drop(w.client_reader);
     w.client_writer
-        .write_all(search(1, NONCE).as_bytes())
+        .write_all(search(1, &*NONCE).as_bytes())
         .await
         .unwrap();
     line_of(&mut w.fake_reader).await;
@@ -913,7 +961,7 @@ async fn an_answer_the_client_never_got_proves_nothing() {
 async fn a_padded_request_past_the_parse_limit_ends_the_session() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let recorder = Recorder::default();
     let padded = format!(
         "{{\"jsonrpc\":\"2.0\",\"id\":7,{}\"method\":\"tools/call\",\"params\":{{\"name\":\"memory_search\",\"arguments\":{{\"query\":\"plain\"}}}}}}\n",
@@ -926,7 +974,7 @@ async fn a_padded_request_past_the_parse_limit_ends_the_session() {
     );
     let writing = tokio::spawn(async move {
         w.client_writer
-            .write_all(search(7, NONCE).as_bytes())
+            .write_all(search(7, &*NONCE).as_bytes())
             .await
             .unwrap();
         let _ = w.client_writer.write_all(padded.as_bytes()).await;
@@ -961,10 +1009,10 @@ async fn a_padded_request_past_the_parse_limit_ends_the_session() {
 async fn a_request_the_bridge_cannot_read_switches_receipts_off() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let recorder = Recorder::default();
     let (reporter, said) = recording_reporter();
-    let request = format!("{}\u{feff}{}", search(7, NONCE), search(7, "plain"));
+    let request = format!("{}\u{feff}{}", search(7, &*NONCE), search(7, "plain"));
     let (_, received) = session(
         request.as_bytes(),
         Some(Observer::new(
@@ -996,7 +1044,7 @@ async fn a_request_the_bridge_cannot_read_switches_receipts_off() {
 async fn a_duplicate_id_answered_once_still_blocks_its_reuse() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let recorder = Recorder::default();
     let mut w = wired(
         1 << 16,
@@ -1019,7 +1067,7 @@ async fn a_duplicate_id_answered_once_still_blocks_its_reuse() {
     assert_eq!(line_of(&mut w.client_reader).await["id"], 7);
     // The nonce call under id 7, then the slow search's success.
     w.client_writer
-        .write_all(search(7, NONCE).as_bytes())
+        .write_all(search(7, &*NONCE).as_bytes())
         .await
         .unwrap();
     line_of(&mut w.fake_reader).await;
@@ -1099,7 +1147,7 @@ fn as_map(line: &str) -> Map<String, Value> {
 fn crossing_the_in_flight_limit_fails_closed() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let (reporter, said) = recording_reporter();
     let mut observer = Observer::new(
         store.0.clone(),
@@ -1111,10 +1159,10 @@ fn crossing_the_in_flight_limit_fails_closed() {
     for n in 0..IN_FLIGHT_LIMIT as u64 {
         observer.request(&as_map(&search(1000 + n, "plain")));
     }
-    observer.request(&as_map(&search(7, NONCE)));
+    observer.request(&as_map(&search(7, &*NONCE)));
     assert!(observer.response(&as_map(&success(&json!(7)))).is_none());
     // Nor any later call, however fresh its id.
-    observer.request(&as_map(&search(99_999, NONCE)));
+    observer.request(&as_map(&search(99_999, &*NONCE)));
     assert!(
         observer
             .response(&as_map(&success(&json!(99_999))))
@@ -1129,7 +1177,7 @@ fn crossing_the_in_flight_limit_fails_closed() {
 fn long_ids_and_long_arguments_are_never_credited() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let mut observer = observer(&store, "dot", Recorder::default().sink());
     let long_id = json!("i".repeat(ID_LIMIT + 1));
     observer.request(&as_map(&call(
@@ -1157,7 +1205,7 @@ async fn a_profile_changed_in_any_bound_field_writes_nothing() {
     for change in ["tunnel_id", "organization_id", "token_file", "not ready"] {
         let store = Store::new();
         store.profile("dot");
-        store.challenge("dot", NONCE, now() - 5.0);
+        store.challenge("dot", &*NONCE, now() - 5.0);
         let mut started = store.load("dot");
         match change {
             "tunnel_id" => started.tunnel_id = Some("tunnel_ffff".into()),
@@ -1176,7 +1224,7 @@ async fn a_profile_changed_in_any_bound_field_writes_nothing() {
         }
         let recorder = Recorder::default();
         session(
-            search(1, NONCE).as_bytes(),
+            search(1, &*NONCE).as_bytes(),
             Some(Observer::new(
                 store.0.clone(),
                 &started,
@@ -1279,7 +1327,7 @@ async fn a_shim_that_stops_reading_mid_request_is_given_up_on() {
 fn integer_ids_of_any_size_are_tracked() {
     let store = Store::new();
     store.profile("dot");
-    store.challenge("dot", NONCE, now() - 5.0);
+    store.challenge("dot", &*NONCE, now() - 5.0);
     let mut observer = observer(&store, "dot", Recorder::default().sink());
     let big = "184467440737095516160";
     let request = format!(
@@ -1644,7 +1692,7 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
 
 #[test]
 fn only_saved_nonce_shapes_are_compared() {
-    assert!(nonce_shaped(NONCE));
+    assert!(nonce_shaped(&*NONCE));
     assert!(nonce_shaped(&format!("query=\"{NONCE}\"")));
     assert!(!nonce_shaped(&NONCE[..31]));
     assert!(!nonce_shaped(&NONCE.to_uppercase()));
