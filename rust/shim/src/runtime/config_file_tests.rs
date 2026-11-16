@@ -242,8 +242,9 @@ mod modes {
         let content = fs::read(&path).unwrap();
         let error = write_config(&path, &content, b"after").unwrap_err();
         // As root it is sent back to the file's owner, never told to copy the
-        // file as root; anyone else meets /etc, which only root can give
-        // them, by their own account name.
+        // file as root; anyone else meets /etc, a folder outside their home,
+        // and is never told to take it over: that would hand them every
+        // other file in it.
         let me = rustix::process::getuid().as_raw();
         if me == 0 {
             assert!(
@@ -255,7 +256,9 @@ mod modes {
             let name = owner_label(me);
             assert!(
                 error.contains("is owned by another account (root)")
-                    && error.ends_with(&format!("sudo chown '{name}' '/etc' '/etc/passwd'")),
+                    && error.contains(&format!("outside {name}'s home"))
+                    && !error.contains("chown")
+                    && !error.contains("sudo"),
                 "{error}"
             );
         }
