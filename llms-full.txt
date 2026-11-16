@@ -13700,7 +13700,8 @@ client, which an update does unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
-to go back).
+to go back). A machine whose tunnel is set to start by itself stays on the
+Python client (see [Autostart and private storage](#autostart-and-private-storage)).
 
 ## Start or resume
 
