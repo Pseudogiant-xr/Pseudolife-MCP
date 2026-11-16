@@ -94,13 +94,15 @@ fn pin_of(archive: &[u8]) -> Pin<'static> {
 
 const REGULAR: u32 = 0o100644;
 
-/// A zip of `(name, bytes, unix mode)` members, deflated, the way the vendor
-/// builds them.
+/// A zip of `(name, bytes, unix mode)` members, deflated and Unix-made, the
+/// way the vendor builds them on every host (the writer's default on
+/// Windows is DOS-made, whose modes the reader synthesises instead).
 fn zip_of(members: &[(&str, &[u8], u32)]) -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     for (name, data, mode) in members {
         let options = SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
+            .system(zip::System::Unix)
             .external_attributes(mode << 16);
         writer.start_file(*name, options).unwrap();
         writer.write_all(data).unwrap();
@@ -254,7 +256,7 @@ fn a_rerun_reuses_the_verified_runtime_and_changes_nothing() {
 }
 
 #[test]
-fn a_runtime_the_python_client_installed_is_reused() {
+fn a_folder_in_the_python_clients_layout_is_reused() {
     let store = Store::new();
     let pin = host();
     let folder = store.root.join(folder_name(&pin));
@@ -265,6 +267,12 @@ fn a_runtime_the_python_client_installed_is_reused() {
         .enumerate()
     {
         crate::board::state::atomic_create(&folder.join(name), data).unwrap();
+        // Python's chmod of the wrapper.
+        #[cfg(unix)]
+        if index == 0 {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(folder.join(name), fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let comma = if index == 0 { "" } else { ", " };
         // json.dumps's spacing.
         manifest += &format!("{comma}\"{name}\": \"{:x}\"", Sha256::digest(data));
@@ -452,7 +460,7 @@ fn an_archive_without_the_wrapper_or_with_too_many_members_is_refused() {
 }
 
 #[test]
-fn the_unpacked_total_is_capped_by_what_actually_unpacks() {
+fn the_unpacked_total_is_capped_and_a_member_past_its_declared_size_refused() {
     let store = Store::new();
     let wrapper = binary_name(&host());
     let archive = zip_of(&[
@@ -462,7 +470,10 @@ fn the_unpacked_total_is_capped_by_what_actually_unpacks() {
     let pin = pin_of(&archive);
     // Declared sizes over the cap: refused before a stage exists.
     let error = install(&store.root, pin, &archive, &Probe::new(0), 4096).unwrap_err();
-    assert!(error.contains("more than the size cap"), "{error}");
+    assert!(
+        error.contains("its members declare more than the size cap"),
+        "{error}"
+    );
     assert!(store.listing().is_empty());
     // A member that unpacks past what it declares: patch the second
     // member's declared size (central directory) down to 1, so only the
@@ -474,7 +485,8 @@ fn the_unpacked_total_is_capped_by_what_actually_unpacks() {
     lying[local + 22..local + 26].copy_from_slice(&1u32.to_le_bytes());
     let pin = pin_of(&lying);
     let error = install(&store.root, pin, &lying, &Probe::new(0), 4096 + 2).unwrap_err();
-    assert!(error.contains("nothing was installed"), "{error}");
+    // The reader stops at the declared size, before the counted cap.
+    assert!(error.contains("a member is corrupt"), "{error}");
     assert!(store.listing().is_empty(), "{:?}", store.listing());
 }
 
@@ -485,11 +497,101 @@ fn a_failed_probe_is_refused_and_leaves_nothing() {
     let probe = Probe::new(3);
     let error = attempt(&store, &archive, &archive, &probe).unwrap_err();
     assert!(
-        error.contains("did not start (`tunnel-client --help` exited 3)"),
+        error.contains("check `tunnel-client --help` failed (exit 3)"),
         "{error}"
     );
     assert_eq!(probe.calls.borrow().len(), 1);
     assert!(store.listing().is_empty(), "{:?}", store.listing());
+}
+
+#[test]
+fn a_probe_timeout_or_interrupt_is_named() {
+    for (code, says) in [
+        (124, "did not finish within 15 s"),
+        (130, "was interrupted"),
+    ] {
+        let store = Store::new();
+        let archive = release(&host());
+        let error = attempt(&store, &archive, &archive, &Probe::new(code)).unwrap_err();
+        assert!(error.contains(says), "{error}");
+        assert!(store.listing().is_empty(), "{:?}", store.listing());
+    }
+}
+
+#[test]
+fn a_stage_that_changes_during_the_probe_is_refused_and_removed() {
+    // Something (a scan, the program itself) adds a file beside the wrapper:
+    // a rerun would refuse that folder, so this call must not commit it.
+    let store = Store::new();
+    let archive = release(&host());
+    let mut probe = Probe::new(0);
+    probe.during = Box::new(|wrapper| {
+        fs::write(wrapper.with_file_name("scan.log"), b"added").unwrap();
+    });
+    let error = attempt(&store, &archive, &archive, &probe).unwrap_err();
+    assert!(error.contains("changed while it was checked"), "{error}");
+    assert!(error.contains("does not name"), "{error}");
+    assert!(store.listing().is_empty(), "{:?}", store.listing());
+}
+
+/// Set a folder's modification time `by` into the past.
+fn age(dir: &Path, by: Duration) {
+    #[cfg(unix)]
+    let handle = fs::File::open(dir).unwrap();
+    #[cfg(windows)]
+    let handle = {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_WRITE_ATTRIBUTES, opened as a folder (BACKUP_SEMANTICS).
+        fs::OpenOptions::new()
+            .access_mode(0x0100)
+            .custom_flags(0x0200_0000)
+            .open(dir)
+            .unwrap()
+    };
+    handle
+        .set_modified(std::time::SystemTime::now() - by)
+        .unwrap();
+}
+
+#[test]
+fn an_install_removes_stale_stages_and_leaves_anything_else() {
+    let store = Store::new();
+    let stage = |name: &str, files: &[&str], old: bool| {
+        let path = store.root.join(name);
+        crate::board::state::private_dir(&path).unwrap();
+        for file in files {
+            crate::board::state::atomic_create(&path.join(file), b"x").unwrap();
+        }
+        if old {
+            age(&path, Duration::from_secs(2 * 3600));
+        }
+        path
+    };
+    let ours = stage(
+        ".runtime-0123456789abcdef0123456789abcdef",
+        &["LICENSE", MANIFEST],
+        true,
+    );
+    let python = stage(".runtime-ab_12cd3", &[], true);
+    let fresh = stage(
+        ".runtime-fedcba9876543210fedcba9876543210",
+        &["LICENSE"],
+        false,
+    );
+    let odd = stage(".runtime-0000aaaa", &["LICENSE"], true);
+    crate::board::state::private_dir(&odd.join("nested")).unwrap();
+    age(&odd, Duration::from_secs(2 * 3600));
+    let foreign = stage(".runtime-old", &["notes.txt", "x y"], true);
+    let other = stage("keep-me", &["LICENSE"], true);
+    let archive = release(&host());
+    ensure_with(&store.root, pin_of(&archive), &Probe::new(0), |_, _| {
+        Ok(archive.clone())
+    })
+    .unwrap();
+    assert!(!ours.exists() && !python.exists(), "{:?}", store.listing());
+    for kept in [&fresh, &odd, &foreign, &other] {
+        assert!(kept.exists(), "{kept:?} removed: {:?}", store.listing());
+    }
 }
 
 #[test]
@@ -598,6 +700,23 @@ fn a_missing_installed_file_is_refused() {
     });
 }
 
+#[cfg(unix)]
+#[test]
+fn a_fifo_in_the_installed_runtime_is_refused_without_blocking() {
+    broken_install_is_refused("not an owner-only regular file", |folder, _| {
+        let path = folder.join("LICENSE");
+        fs::remove_file(&path).unwrap();
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &path,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            0,
+        )
+        .unwrap();
+    });
+}
+
 #[test]
 fn a_hard_linked_installed_file_is_refused() {
     broken_install_is_refused("one link", |folder, pin| {
@@ -694,6 +813,13 @@ fn a_store_root_reached_through_a_link_is_refused_and_nothing_is_written() {
     let store = Store::new();
     let link = store.base.join("linked");
     dir_link(&store.root, &link);
+    // Nothing is changed through the link either: a folder others can read
+    // stays as it was (private_dir would otherwise tighten it).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&store.root, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let probe = Probe::new(0);
     let archive = release(&host());
     let error = ensure_with(&link.join("inner"), pin_of(&archive), &probe, |_, _| {
@@ -706,4 +832,10 @@ fn a_store_root_reached_through_a_link_is_refused_and_nothing_is_written() {
     assert!(error.contains("link or junction is on its path"), "{error}");
     assert!(store.listing().is_empty(), "{:?}", store.listing());
     assert!(probe.calls.borrow().is_empty());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&store.root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
+    }
 }

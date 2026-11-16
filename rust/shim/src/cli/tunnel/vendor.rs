@@ -2,11 +2,15 @@
 //! pinned version, verified against a digest compiled into this client,
 //! unpacked flat into the tunnel store and probed before it is installed.
 //!
-//! Trusted: only the `PINS` table below (an archive's exact size and
-//! sha256). Not trusted: the network, the download's length and bytes until
-//! they match a pin, and every piece of the archive's own metadata (names,
-//! types, declared sizes, permissions), which is checked even after the
-//! digest matches.
+//! Trusted for a download: only the `PINS` table below (an archive's exact
+//! size and sha256). Not trusted: the network, the download's length and
+//! bytes until they match a pin, and every piece of the archive's own
+//! metadata (names, types, declared sizes, permissions), which is checked
+//! even after the digest matches. A rerun reuses an installed copy on the
+//! strength of the owner-only tunnel store: its `checksums.json`, written
+//! from a verified archive, is checked against the files, so corruption, a
+//! planted file or a swapped link is refused, but a program running as this
+//! account could rewrite both, as it could the tunnel key beside them.
 //!
 //! Assumptions about the archive, each checked; any violation refuses with
 //! nothing written:
@@ -112,6 +116,14 @@ const MANIFEST: &str = "checksums.json";
 const MANIFEST_LIMIT: usize = 64 * 1024;
 /// How long `tunnel-client --help` may take (the Python client's bound).
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+/// The whole download's bound: the largest pinned archive (28.9 MB) in 15
+/// minutes needs about 32 KB/s.
+const TRANSFER_TIMEOUT: Duration = Duration::from_secs(900);
+/// An interrupted install (a kill, a closed terminal, Ctrl-C during the
+/// probe) leaves its stage behind. An install in progress writes into its
+/// stage within seconds and holds it for at most the probe after that, so a
+/// stage untouched for an hour is a leftover the next install removes.
+const STALE_STAGE: Duration = Duration::from_secs(3600);
 
 /// What `ensure` left in place: the wrapper to run, and whether this call
 /// installed it (`false`: a verified runtime was already there).
@@ -205,8 +217,66 @@ fn ensure_with(
     if let Some(installed) = installed(&target, &pin)? {
         return Ok(installed);
     }
+    sweep_stale_stages(root);
     let archive = fetch(&url(&pin), pin.size)?;
     install(root, pin, &archive, runner, UNPACKED_LIMIT)
+}
+
+/// Remove stages earlier installs left (`STALE_STAGE`): only an owner-only
+/// plain folder named as an install names its stage (this client's
+/// `.runtime-<uuid>`, or the Python client's `.runtime-<8 characters>`)
+/// that holds only regular files an install writes. Anything else is left
+/// as it is; a failure here never stops the install.
+fn sweep_stale_stages(root: &Path) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(suffix) = name.to_str().and_then(|n| n.strip_prefix(".runtime-")) else {
+            continue;
+        };
+        if suffix.is_empty()
+            || suffix.len() > 32
+            || !suffix
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        {
+            continue;
+        }
+        let stage = entry.path();
+        let Ok(info) = fs::symlink_metadata(&stage) else {
+            continue;
+        };
+        let stale = info
+            .modified()
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age >= STALE_STAGE);
+        if !info.is_dir() || !stale || store::owner_only_directory(&stage, &info).is_err() {
+            continue;
+        }
+        let Ok(listing) = fs::read_dir(&stage) else {
+            continue;
+        };
+        let Ok(files) = listing.collect::<io::Result<Vec<_>>>() else {
+            continue;
+        };
+        let expected = files.iter().all(|file| {
+            file.file_type().is_ok_and(|kind| kind.is_file())
+                && file
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|n| n == MANIFEST || member_problem(n).is_none())
+        });
+        if !expected {
+            continue;
+        }
+        for file in &files {
+            remove_retry(|| fs::remove_file(file.path()));
+        }
+        remove_retry(|| fs::remove_dir(&stage));
+    }
 }
 
 /// The store root, owner-only and reached through no link or junction (the
@@ -262,7 +332,7 @@ fn verify(target: &Path, pin: &Pin) -> Result<(), &'static str> {
         return Err("it is not a plain folder");
     }
     store::owner_only_directory(target, &info).map_err(|_| "the folder is not owner-only")?;
-    let bytes = crate::board::state::read(&target.join(MANIFEST), MANIFEST_LIMIT)
+    let bytes = store::private_read(&target.join(MANIFEST), MANIFEST_LIMIT)
         .map_err(|_| "its checksums.json is missing, not owner-only or a link")?;
     let manifest: BTreeMap<String, String> =
         serde_json::from_slice(&bytes).map_err(|_| "its checksums.json is invalid")?;
@@ -290,12 +360,10 @@ fn verify(target: &Path, pin: &Pin) -> Result<(), &'static str> {
         return Err("it holds files its checksums.json does not name, or lacks some");
     }
     for (name, digest) in &manifest {
-        let opened = crate::board::state::open(&target.join(name))
+        // Never blocks: a FIFO in place of a file is refused, not opened.
+        let data = store::private_read(&target.join(name), UNPACKED_LIMIT as usize)
             .map_err(|_| "a file in it is not an owner-only regular file with one link")?;
-        let mut hasher = Sha256::new();
-        let copied = io::copy(&mut opened.file.take(UNPACKED_LIMIT + 1), &mut hasher)
-            .map_err(|_| "a file in it cannot be read")?;
-        if copied > UNPACKED_LIMIT || format!("{:x}", hasher.finalize()) != *digest {
+        if format!("{:x}", Sha256::digest(&data)) != *digest {
             return Err("a file in it does not match its recorded checksum");
         }
     }
@@ -377,7 +445,6 @@ fn install(
         .map_err(|_| unsafe_archive("it is not a readable zip"))?;
     let members = members(&mut zip, &pin, unpacked_limit)?;
     let stage = root.join(format!(".runtime-{}", uuid::Uuid::new_v4().simple()));
-    let mut written = Vec::new();
     let result = (|| {
         crate::board::state::private_dir(&stage)
             .map_err(|_| unwritable(root, "its folder cannot be created"))?;
@@ -387,7 +454,6 @@ fn install(
             let path = stage.join(name);
             let mut opened = crate::board::state::create(&path)
                 .map_err(|_| unwritable(root, "a file cannot be created"))?;
-            written.push(path.clone());
             let entry = zip
                 .by_index(index)
                 .map_err(|_| unsafe_archive("a member cannot be read"))?;
@@ -402,6 +468,9 @@ fn install(
                     break;
                 }
                 total += read as u64;
+                // zip 9 already fails a member that unpacks past its declared
+                // size, and the declared total is capped above, so this count
+                // is the cap's own guard should the reader ever change.
                 if total > unpacked_limit {
                     return Err(unsafe_archive("it unpacks to more than the size cap"));
                 }
@@ -428,7 +497,6 @@ fn install(
         let path = stage.join(MANIFEST);
         let mut opened = crate::board::state::create(&path)
             .map_err(|_| unwritable(root, "its checksums.json cannot be created"))?;
-        written.push(path);
         let bytes = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
         opened
             .file
@@ -444,14 +512,28 @@ fn install(
             &[],
         );
         if probe.code != 0 {
+            // NativeRunner's own codes: 124 for its timeout, 128 + n for a
+            // signal; anything else is the program's exit or a failed start.
+            let outcome = match probe.code {
+                124 => format!("did not finish within {} s", PROBE_TIMEOUT.as_secs()),
+                code if code > 128 => "was interrupted".to_owned(),
+                code => format!("failed (exit {code})"),
+            };
             return Err(format!(
-                "the downloaded tunnel runtime did not start (`tunnel-client --help` exited {}); nothing was installed; check that this host can run {}-{} programs and that no security tool blocks new programs in {}, then retry",
-                probe.code,
+                "the downloaded tunnel runtime's check `tunnel-client --help` {outcome}; nothing was installed; check that this host can run {}-{} programs and that no security tool blocks new programs in {}, then retry",
                 pin.system,
                 pin.arch,
                 root.display()
             ));
         }
+        // The folder about to be committed must pass the check every rerun
+        // applies, or a rerun would refuse what this call reports installed.
+        verify(&stage, &pin).map_err(|why| {
+            format!(
+                "the unpacked tunnel runtime changed while it was checked ({why}); nothing was installed; if this repeats, check whether a security tool adds or alters files in {}, then retry",
+                root.display()
+            )
+        })?;
         let target = root.join(folder_name(&pin));
         if fs::symlink_metadata(&target).is_ok() {
             // Another install finished meanwhile: keep it if it verifies.
@@ -463,20 +545,39 @@ fn install(
                 binary: target.join(binary_name(&pin)),
                 changed: true,
             }),
-            Err(error) => match installed(&target, &pin) {
-                Ok(Some(other)) => Ok(other),
-                _ => Err(unwritable(root, &error)),
-            },
+            // Another install may have won the rename; otherwise say what
+            // the rename met (often a scan holding the new files a moment).
+            Err(error) => installed(&target, &pin)?.ok_or_else(|| {
+                format!(
+                    "the tunnel runtime could not be moved into {}: {error}; nothing was installed; retry",
+                    target.display()
+                )
+            }),
         }
     })();
     if result.as_ref().is_ok_and(|installed| installed.changed) {
         return result;
     }
-    for path in written.iter().rev() {
-        remove_retry(|| fs::remove_file(path));
+    // The stage is this call's own fresh folder: remove the files in it,
+    // whatever put them there, then the folder; a leftover is named.
+    if let Ok(entries) = fs::read_dir(&stage) {
+        for entry in entries.flatten() {
+            if entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_file() || kind.is_symlink())
+            {
+                remove_retry(|| fs::remove_file(entry.path()));
+            }
+        }
     }
     remove_retry(|| fs::remove_dir(&stage));
-    result
+    match result {
+        Err(error) if fs::symlink_metadata(&stage).is_ok() => Err(format!(
+            "{error} (the partial folder {} could not be removed; delete it once nothing holds it open)",
+            stage.display()
+        )),
+        other => other,
+    }
 }
 
 /// The archive's members in order, after every check that needs no
@@ -536,7 +637,7 @@ fn members(
         }
         declared = declared.saturating_add(entry.size());
         if declared > unpacked_limit {
-            return Err(unsafe_archive("it unpacks to more than the size cap"));
+            return Err(unsafe_archive("its members declare more than the size cap"));
         }
         names.push(name);
     }
@@ -583,7 +684,7 @@ fn remove_retry(remove: impl Fn() -> io::Result<()>) {
 /// digest of whatever comes back.
 fn download(url: &str, limit: u64) -> Result<Vec<u8>, String> {
     use futures::StreamExt;
-    let failed = |why: &str| {
+    let failed = |why: String| {
         format!(
             "could not download the tunnel runtime from {url}: {why}; check that this host can reach github.com over HTTPS, then retry"
         )
@@ -591,34 +692,42 @@ fn download(url: &str, limit: u64) -> Result<Vec<u8>, String> {
     let owned = url.to_owned();
     // A private runtime avoids nesting Tokio runtimes in synchronous callers
     // (as `runtime::install_source` does).
-    std::thread::spawn(move || -> Result<Vec<u8>, &'static str> {
+    std::thread::spawn(move || -> Result<Vec<u8>, String> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|_| "no I/O runtime")?;
+            .map_err(|_| "no I/O runtime could be started".to_owned())?;
         runtime.block_on(async move {
+            let cause = |error: reqwest::Error| {
+                if error.is_timeout() {
+                    format!("it took longer than {} s", TRANSFER_TIMEOUT.as_secs())
+                } else if let Some(status) = error.status() {
+                    format!("the server answered HTTP {}", status.as_u16())
+                } else {
+                    "the connection failed".to_owned()
+                }
+            };
             let client = reqwest::Client::builder()
                 .https_only(true)
                 .user_agent("pseudolife-mcp")
-                .timeout(Duration::from_secs(300))
+                .timeout(TRANSFER_TIMEOUT)
                 .build()
-                .map_err(|_| "no HTTPS client")?;
+                .map_err(|_| "no HTTPS client could be built".to_owned())?;
             let response = client
                 .get(&owned)
                 .send()
                 .await
-                .map_err(|_| "the request failed")?
-                .error_for_status()
-                .map_err(|_| "the server refused it")?;
+                .and_then(reqwest::Response::error_for_status)
+                .map_err(cause)?;
             if response.content_length().is_some_and(|n| n > limit) {
-                return Err("it is larger than the pinned release");
+                return Err("it is larger than the pinned release".to_owned());
             }
             let mut stream = response.bytes_stream();
             let mut bytes = Vec::new();
             while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|_| "it was interrupted")?;
+                let chunk = chunk.map_err(cause)?;
                 if bytes.len() as u64 + chunk.len() as u64 > limit {
-                    return Err("it is larger than the pinned release");
+                    return Err("it is larger than the pinned release".to_owned());
                 }
                 bytes.extend_from_slice(&chunk);
             }
@@ -626,7 +735,7 @@ fn download(url: &str, limit: u64) -> Result<Vec<u8>, String> {
         })
     })
     .join()
-    .map_err(|_| failed("the download worker failed"))?
+    .map_err(|_| failed("the download worker failed".to_owned()))?
     .map_err(failed)
 }
 
