@@ -722,6 +722,9 @@ fn stage_link(store: &Store, name: &str, target: &Path) -> PathBuf {
 
 #[test]
 fn the_sweep_never_follows_a_link_or_takes_a_folder_others_can_use() {
+    // The links here are this user's own, in an owner-only folder: ones the
+    // private-path rule would follow above a private file. The sweep follows
+    // none.
     let store = Store::new();
     // A folder outside the store holding names an install writes: what a
     // sweep following a link would empty.
@@ -988,6 +991,9 @@ fn junction(target: &Path, link: &Path) {
 
 #[test]
 fn an_installed_runtime_reached_through_a_link_is_refused() {
+    // This user's own link in the owner-only store, one the private-path
+    // rule would follow above a private file: the runtime folder itself is
+    // never a link.
     broken_install_is_refused("not a plain folder", |folder, _| {
         let real = folder.with_extension("real");
         fs::rename(folder, &real).unwrap();
@@ -995,34 +1001,225 @@ fn an_installed_runtime_reached_through_a_link_is_refused() {
     });
 }
 
+/// A folder `real` beside the store, and a link to it made by this user in
+/// a folder only this user may change: the shape the private-path rule
+/// follows. On Windows the folder holding the link gets the protected
+/// owner-only access list a hosted runner's temporary folder has (this
+/// host's may grant other groups Modify, which would make any link made
+/// under it untrusted).
+fn own_link(store: &Store, holder: &str) -> (PathBuf, PathBuf) {
+    let real = store.base.join("real");
+    crate::board::state::private_dir(&real).unwrap();
+    let holder = store.base.join(holder);
+    crate::board::state::private_dir(&holder).unwrap();
+    #[cfg(windows)]
+    {
+        let me = crate::credentials::windows_security::current_user_sid().unwrap();
+        crate::credentials::windows_security::set_link_dacl_sddl(
+            &holder,
+            &format!("D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
+            true,
+        )
+        .unwrap();
+    }
+    let link = holder.join("linked");
+    dir_link(&real, &link);
+    assert_eq!(crate::private_path::check_path(&link), Ok(()));
+    (real, link)
+}
+
+#[cfg(unix)]
+fn mode_of(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, bits: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(bits)).unwrap();
+}
+
+/// Every name under `dir`, recursively (empty when it is missing).
+fn names_under(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut pending = vec![dir.to_owned()];
+    while let Some(next) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&next) else {
+            continue;
+        };
+        for entry in entries {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                pending.push(entry.path());
+            }
+            out.push(entry.path().display().to_string());
+        }
+    }
+    out.sort();
+    out
+}
+
 #[test]
-fn a_store_root_reached_through_a_link_is_refused_and_nothing_is_written() {
+fn a_store_root_behind_this_users_own_link_installs() {
     let store = Store::new();
-    let link = store.base.join("linked");
-    dir_link(&store.root, &link);
-    // Nothing is changed through the link either: a folder others can read
-    // stays as it was (private_dir would otherwise tighten it).
+    let (real, link) = own_link(&store, "home");
+    // On POSIX the folder the link leads to may be readable by others, and
+    // the store folder in it already exists the same way: the link is this
+    // user's, so the store is this user's own folder by another name, and is
+    // tightened exactly as it would be if named directly. What the link leads
+    // to is a folder above the store, which nothing changes.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&store.root, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::create_dir(real.join("tunnel")).unwrap();
+        set_mode(&real.join("tunnel"), 0o755);
+        set_mode(&real, 0o755);
     }
+    let root = link.join("tunnel");
+    let archive = release(&host());
+    let pin = pin_of(&archive);
+    let probe = Fake::new(0);
+    let installed = ensure_with(&root, pin, &probe, |_, _| Ok(archive.clone())).unwrap();
+    assert!(installed.changed);
+    assert_eq!(
+        installed.binary,
+        root.join(folder_name(&pin)).join(binary_name(&pin))
+    );
+    assert_eq!(probe.calls.borrow().len(), 1);
+    // The files are where the link leads.
+    let wrapper = real
+        .join("tunnel")
+        .join(folder_name(&pin))
+        .join(binary_name(&pin));
+    assert_eq!(fs::read(&wrapper).unwrap(), b"wrapper program");
+    #[cfg(unix)]
+    {
+        assert_eq!(
+            mode_of(&real.join("tunnel")),
+            0o700,
+            "the store was not made owner-only"
+        );
+        assert_eq!(
+            mode_of(&real),
+            0o755,
+            "the folder above the store was changed"
+        );
+    }
+    // A rerun through the same link reuses it.
+    let again = ensure_with(
+        &root,
+        pin,
+        &Fake::new(0),
+        |_, _| -> Result<Vec<u8>, String> { panic!("a verified runtime is downloaded again") },
+    )
+    .unwrap();
+    assert!(!again.changed);
+}
+
+#[test]
+fn a_store_root_behind_a_link_another_account_could_change_is_refused_and_nothing_is_written() {
+    let store = Store::new();
+    let (real, link) = own_link(&store, "shared");
+    let holder = link.parent().unwrap().to_owned();
+    #[cfg(unix)]
+    {
+        fs::create_dir(real.join("tunnel")).unwrap();
+        set_mode(&real.join("tunnel"), 0o755);
+    }
+    let root = link.join("tunnel");
+    let archive = release(&host());
+    let pin = pin_of(&archive);
+    let probe = Fake::new(0);
+    // The shapes of #1644's own refusals: the link's folder writable by
+    // others without the sticky bit (POSIX), or where another account may
+    // delete entries (Windows); and on Windows a junction another account may
+    // rewrite.
+    #[cfg(unix)]
+    let shapes: Vec<Box<dyn Fn() + '_>> = vec![Box::new(|| set_mode(&holder, 0o777))];
+    #[cfg(windows)]
+    let me = crate::credentials::windows_security::current_user_sid().unwrap();
+    #[cfg(windows)]
+    let shapes: Vec<Box<dyn Fn() + '_>> = vec![
+        Box::new(|| {
+            crate::credentials::windows_security::set_link_dacl_sddl(
+                &holder,
+                &format!("D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)(A;;0x40;;;AU)"),
+                true,
+            )
+            .unwrap()
+        }),
+        Box::new(|| {
+            crate::credentials::windows_security::set_link_dacl_sddl(
+                &link,
+                &format!("D:P(A;;FA;;;{me})(A;;0x1301bf;;;AU)"),
+                true,
+            )
+            .unwrap()
+        }),
+    ];
+    let trusted = || {
+        #[cfg(unix)]
+        set_mode(&holder, 0o700);
+        #[cfg(windows)]
+        for path in [&holder, &link] {
+            crate::credentials::windows_security::set_link_dacl_sddl(
+                path,
+                &format!("D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
+                true,
+            )
+            .unwrap();
+        }
+    };
+    let before = names_under(&real);
+    for make_hostile in &shapes {
+        make_hostile();
+        // The private-path rule refuses at the link itself.
+        let refusal = crate::private_path::check_path(&root).unwrap_err();
+        assert_eq!(refusal.element, link, "{refusal}");
+        let error = ensure_with(&root, pin, &probe, |_, _| Ok(archive.clone())).unwrap_err();
+        assert!(
+            error.contains("could be changed by another account"),
+            "{error}"
+        );
+        assert_eq!(names_under(&real), before, "something was written");
+        #[cfg(unix)]
+        assert_eq!(
+            mode_of(&real.join("tunnel")),
+            0o755,
+            "the store was changed"
+        );
+        assert!(probe.calls.borrow().is_empty());
+        trusted();
+    }
+    // The twin: the same link, its folder made this user's alone again,
+    // installs.
+    ensure_with(&root, pin, &probe, |_, _| Ok(archive.clone())).unwrap();
+    assert_eq!(probe.calls.borrow().len(), 1);
+}
+
+#[test]
+fn a_store_root_that_is_itself_a_link_is_refused_and_nothing_is_written() {
+    // Even this user's own link, which the private-path rule would follow:
+    // the tunnel store's other readers (`store::checked_path`) refuse a
+    // store that is a link, and nothing is changed through it.
+    let store = Store::new();
+    let (real, link) = own_link(&store, "home");
+    #[cfg(unix)]
+    set_mode(&real, 0o755);
     let probe = Fake::new(0);
     let archive = release(&host());
-    let error = ensure_with(&link.join("inner"), pin_of(&archive), &probe, |_, _| {
-        Ok(archive.clone())
-    })
-    .unwrap_err();
-    assert!(error.contains("link or junction is on its path"), "{error}");
     let error =
         ensure_with(&link, pin_of(&archive), &probe, |_, _| Ok(archive.clone())).unwrap_err();
-    assert!(error.contains("link or junction is on its path"), "{error}");
-    assert!(store.listing().is_empty(), "{:?}", store.listing());
+    assert!(
+        error.contains("is not a plain folder only your account"),
+        "{error}"
+    );
+    assert!(names_under(&real).is_empty(), "{:?}", names_under(&real));
     assert!(probe.calls.borrow().is_empty());
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(&store.root).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o755);
-    }
+    assert_eq!(
+        mode_of(&real),
+        0o755,
+        "the folder behind the link was changed"
+    );
 }

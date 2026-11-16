@@ -393,17 +393,21 @@ fn sweep_stale_stages(root: &Path) {
     }
 }
 
-/// The store root, owner-only and reached through no link or junction (the
-/// client's one private-path rule: `board::state` and `store.rs`).
+/// The store root: an owner-only plain folder, reached only through links
+/// the client's one private-path rule accepts (`board::state::private_dir`,
+/// over `crate::private_path`: a link nobody but this user could have made or
+/// can change).
 fn prepare_root(root: &Path) -> Result<(), String> {
     let refuse = || {
         format!(
-            "the tunnel directory {} is not a plain folder only your account can access (or a link or junction is on its path); make it one, then retry",
+            "the tunnel directory {} is not a plain folder only your account can access, or a link on its path could be changed by another account; make it one, then retry",
             root.display()
         )
     };
-    // A link or junction at the root itself is refused before anything
-    // changes it (`private_dir` checks only the folders above it).
+    // The root itself is never a link or junction, trusted or not: the
+    // tunnel store's other readers (`store::checked_path`) refuse one there,
+    // and `private_dir`, which follows a trusted one, must not change what it
+    // leads to.
     if fs::symlink_metadata(root).is_ok_and(|info| !info.is_dir()) {
         return Err(refuse());
     }
