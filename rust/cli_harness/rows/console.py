@@ -715,6 +715,11 @@ MUTANTS = [
            "        Ok(None) => Ok(()),",
            '        Ok(None) => Err(format!("{program} still running")),',
            ("open",), platforms=("windows",)),
+    # Legacy id: Windows no longer distinguishes GenericBrowser by `&`.
+    # Flipping the executable admission rule must still break a safe launch.
+    Mutant("console-generic-launched", "console", "shim/src/cli/console/browser.rs",
+           "    if !launchable(&program) {", "    if launchable(&program) {",
+           ("open",), platforms=("windows",)),
     Mutant("console-running-counts-as-failed", "console", LAUNCH_FILE,
            "Ok(None) if std::time::Instant::now() >= deadline => return Ok(()),",
            "Ok(None) if std::time::Instant::now() >= deadline => return Err(String::new()),",
