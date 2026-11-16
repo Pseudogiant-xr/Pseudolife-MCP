@@ -63,6 +63,8 @@ def _backdate(path: Path, when: float = OLD) -> None:
             entry = os.path.join(dirpath, name)
             if not _is_link(entry):  # never age a link's target
                 os.utime(entry, (when, when))
+    if not _is_link(str(path)):
+        os.utime(path, (when, when))       # the root dir's own mtime too
     dotgit = path / ".git"
     if dotgit.is_file():
         admin = Path(dotgit.read_text(encoding="utf-8").split("gitdir:", 1)[1].strip())
@@ -1396,3 +1398,28 @@ def test_new_root_keys_are_read_from_the_config(env, targets_root):
                   "--apply", roots=False)
     assert rc == 0, out
     assert not target.exists(), out
+
+
+def test_a_clone_whose_config_can_run_a_program_is_kept(env):
+    """git status in a clone runs whatever core.fsmonitor (or a filter)
+    names in that clone's own config, so such a clone is never inspected
+    further (security review of this change)."""
+    clone = _clone(env, "fsmonitor")
+    marker = env.tmp / "ran.txt"
+    _git(clone, "config", "core.fsmonitor", f"touch {marker.as_posix()}")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists() and not marker.exists()
+    assert "core.fsmonitor, which can run a program" in out
+
+
+def test_a_scratch_tree_of_new_empty_dirs_is_not_idle(env):
+    """A dir with no files has no file mtime; its dirs' own mtimes count, so
+    it is not idle for ever (security review of this change)."""
+    path = env.tmp / "scratch" / "dirs-only"
+    (path / "a" / "b").mkdir(parents=True)
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert path.exists()
+    assert "in grace period" in out

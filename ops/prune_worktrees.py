@@ -147,6 +147,7 @@ def is_link(st: os.stat_result) -> bool:
 class Scan:
     bytes: int = 0
     newest: float = 0.0          # newest mtime of a non-whitelisted file
+    newest_dir: float = 0.0      # newest mtime of the root or any dir under it
     links: list[str] = field(default_factory=list)
     error: str | None = None
     first_file: str | None = None
@@ -160,10 +161,12 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
     # A POSIX mount (bind or other) is a plain dir to lstat; a different
     # device fails closed. Windows mount points are reparse points already.
     try:
-        root_dev = os.lstat(base).st_dev if sys.platform != "win32" else None
+        root_st = os.lstat(base)
     except OSError as exc:
         out.error = f".: {exc.strerror or exc}"
         return out
+    root_dev = root_st.st_dev if sys.platform != "win32" else None
+    out.newest_dir = root_st.st_mtime
     stack = [("", base)]
     while stack:
         rel_dir, abs_dir = stack.pop()
@@ -187,6 +190,7 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
                 if root_dev is not None and st.st_dev != root_dev:
                     out.links.append(f"{rel} (mount point)")
                     continue
+                out.newest_dir = max(out.newest_dir, st.st_mtime)
                 stack.append((rel, entry.path))
                 continue
             out.bytes += st.st_size
@@ -201,7 +205,9 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
 
 def git(cwd: str, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
     env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
-    return subprocess.run(["git", "--no-optional-locks", "-C", cwd, *args],
+    # core.fsmonitor names a program git runs on status; never one here.
+    return subprocess.run(["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
+                           "-C", cwd, *args],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env, timeout=timeout)
 
@@ -552,6 +558,20 @@ def evaluate_cache(path: str, *, grace_days: float | None, now: float,
     return v
 
 
+def _rmtree(path: str) -> None:
+    """``shutil.rmtree`` that clears the read-only bit Windows puts on git's
+    object files, then retries that one entry. The tree was scanned first
+    and holds no link, and this runs only inside the renamed-aside copy."""
+    def retry(func, entry, _exc):
+        os.chmod(entry, stat.S_IWRITE | stat.S_IREAD)
+        func(entry)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
 def delete_cache(path: str) -> str | None:
     """Rename aside (fails atomically while cargo holds a file open on
     Windows), then delete. Returns an error text, or None."""
@@ -562,7 +582,7 @@ def delete_cache(path: str) -> str | None:
     except OSError as exc:
         return f"in use or access denied, skipped: {exc.strerror or exc}"
     try:
-        shutil.rmtree(_long(trash))
+        _rmtree(_long(trash))
     except OSError as exc:
         return f"deleted in part; the rest stays at {trash}: {exc.strerror or exc}"
     return None
@@ -840,7 +860,9 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
             return v
     v.passed.append("not-pinned")
     s = scan(path)
-    v.bytes, v.newest = s.bytes, s.newest
+    # A dir created or emptied counts as a write, so a tree of empty dirs
+    # is never idle for ever.
+    v.bytes, v.newest = s.bytes, max(s.newest, s.newest_dir)
     if s.error:
         v.failure = f"walk error (failing closed): {s.error}"
         return v
@@ -915,6 +937,27 @@ def _clone_newest(path: str, s: Scan) -> float:
     return newest
 
 
+# Clone config keys under which git runs a program or reads another file;
+# a clone carrying any of them is kept, never inspected further.
+_RUNS_PROGRAMS = re.compile(
+    r"^(core\.fsmonitor|core\.hookspath|core\.sshcommand|core\.pager|core\.editor"
+    r"|filter\..*|diff\..*\.(textconv|command)|merge\..*\.driver|include\.path"
+    r"|includeif\..*|credential\..*)$")
+
+
+def clone_config_problem(path: str) -> str | None:
+    cfg = os.path.join(path, ".git", "config")
+    proc = subprocess.run(["git", "config", "--file", cfg, "--name-only", "--list"],
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=60)
+    if proc.returncode:
+        return f"its git config cannot be read: {proc.stderr.strip()}"
+    for key in proc.stdout.split():
+        if _RUNS_PROGRAMS.match(key.lower()):
+            return f"its git config sets {key}, which can run a program; kept"
+    return None
+
+
 def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
                    now: float, procs) -> Verdict:
     v = Verdict("clone", path)
@@ -924,6 +967,11 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
     if norm(path) == norm(main):
         v.failure = "the main checkout"
         return v
+    problem = clone_config_problem(path)
+    if problem:
+        v.failure = problem
+        return v
+    v.passed.append("config-runs-nothing")
     marker = keep_marker(path)
     if marker:
         v.failure = marker
@@ -948,7 +996,7 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
     v.passed.append("no-stash")
     s = scan(path, skip_mtime=lambda rel: whitelisted(rel) or rel.startswith(".git/"))
     v.bytes = s.bytes
-    v.newest = _clone_newest(path, s)
+    v.newest = max(_clone_newest(path, s), s.newest_dir)
     if s.error:
         v.failure = f"walk error (failing closed): {s.error}"
         return v
@@ -1027,7 +1075,7 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
         v.failure = "holds or sits inside a registered worktree"
         return v
     s = scan(path)
-    v.bytes, v.newest = s.bytes, s.newest
+    v.bytes, v.newest = s.bytes, max(s.newest, s.newest_dir)
     if s.error:
         v.failure = f"walk error (failing closed): {s.error}"
         return v
