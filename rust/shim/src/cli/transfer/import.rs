@@ -565,22 +565,34 @@ async fn import_meta(pass: Pass<'_>, text: &str) -> Result<u64, Stop> {
 /// (`vector(n)`, uuid, timestamptz in this session) is cast by the server
 /// first, so the transaction never meets a value error.
 async fn check(pass: Pass<'_>, checks: &mut Vec<(String, String)>) -> Result<(), Stop> {
-    if let Pass::Dry(client) = pass {
-        for (statement, column) in checks.iter() {
-            client.batch_execute(statement).await.map_err(|error| {
-                if let Some(db) = error.as_db_error() {
-                    refuse(
-                        format!(
-                            "{column} value was rejected by PostgreSQL (SQLSTATE {})",
-                            db.code().code()
-                        ),
-                        "correct that archive field for the target column type",
-                    )
-                } else {
-                    Stop::Refuse(sql::refusal(error, "validate archive field types"))
-                }
-            })?;
-        }
+    if let Pass::Dry(client) = pass
+        && !checks.is_empty()
+    {
+        let statements = checks
+            .iter()
+            .map(|(sql, _)| sql.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        let mut columns = checks
+            .iter()
+            .map(|(_, column)| column.as_str())
+            .collect::<Vec<_>>();
+        columns.sort_unstable();
+        columns.dedup();
+        client.batch_execute(&statements).await.map_err(|error| {
+            if let Some(db) = error.as_db_error() {
+                refuse(
+                    format!(
+                        "cast validation for {} was rejected by PostgreSQL (SQLSTATE {})",
+                        columns.join(", "),
+                        db.code().code()
+                    ),
+                    "correct the archive fields for their target column types",
+                )
+            } else {
+                Stop::Refuse(sql::refusal(error, "validate archive field types"))
+            }
+        })?;
     }
     checks.clear();
     Ok(())

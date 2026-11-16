@@ -13,8 +13,10 @@ from rust.cli_harness.rows import _bank
 
 @pytest.fixture
 def native(tmp_path):
-    binary = os.environ.get("PSEUDOLIFE_RUST_BINARY")
-    if not binary:
+    binary = os.environ.get("PSEUDOLIFE_RUST_BINARY") or (
+        Path(__file__).resolve().parents[1] / "target" / "release" /
+        ("pseudolife-stdio.exe" if os.name == "nt" else "pseudolife-stdio"))
+    if not Path(binary).is_file():
         pytest.skip("PSEUDOLIFE_RUST_BINARY must name the native client")
     env = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP") if k in os.environ}
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
@@ -348,3 +350,36 @@ def test_import_schema_lock_failure_rolls_back_and_near_miss(native, tmp_path, b
         conn.rollback()
     assert _bank.dump(bank) == before
     assert native("import", "bank.zip", dsn=_bank.url(bank))[0] == 0
+
+
+def test_ci_provisions_database_before_native_transfer_tests():
+    import yaml
+    workflow = Path(__file__).resolve().parents[2] / ".github/workflows/rust.yml"
+    steps = yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"]["parity-checks"]["steps"]
+    setup = next(i for i, step in enumerate(steps)
+                 if step.get("name") == "Prepare disposable PostgreSQL for CLI lease row")
+    selected = [i for i, step in enumerate(steps)
+                if "pytest" in step.get("run", "") and "test_transfer_native.py" in step["run"]]
+    assert len(selected) == 1
+    assert selected[0] > setup
+    assert steps[selected[0]]["if"] == "matrix.suite == 'cli'"
+    assert "Resolve-Path" in steps[selected[0]]["run"]
+
+
+@pytest.mark.parametrize("invalid_last", [False, True])
+def test_cast_batches_and_float4_near_miss(native, tmp_path, bank, invalid_last):
+    vector = "[" + ",".join(["0"] * 1024) + "]"
+    rows = [{"id": n + 1, "band": "test", "text": "cast batch", "embedding": vector,
+             "surprise": 1.25, "ts": 1} for n in range(101)]
+    if invalid_last:
+        rows[-1]["embedding"] = "[1,2]"
+    archive(tmp_path / "bank.zip", members={"entries.jsonl": "\n".join(map(json.dumps, rows))})
+    before = _bank.dump(bank)
+    result = native("import", "bank.zip", dsn=_bank.url(bank))
+    if invalid_last:
+        refused(result, "entries.embedding")
+        assert _bank.dump(bank) == before
+    else:
+        assert result[0] == 0 and not result[2]
+        with _bank.connect(bank) as conn:
+            assert conn.execute("SELECT count(*) FROM entries").fetchone()[0] == 101
