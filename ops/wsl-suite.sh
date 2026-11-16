@@ -292,6 +292,14 @@ case "${PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}" in
         echo "wsl-suite: PSEUDOLIFE_SUITE_NATIVE_CLIENT takes 1 (build the native client and run the real-client tests) or 0, not '${PSEUDOLIFE_SUITE_NATIVE_CLIENT}'; refusing" >&2
         exit 2 ;;
 esac
+# While this PC is not available, tests/conftest.py may still refuse a run
+# whose arguments go to pytest unchanged (above): no four-job build first
+# for a run that is then refused (review of #1652). Said in its own line.
+native_deferred=0
+if (( native_client )) && [[ -n "${PSEUDOLIFE_SUITE_PC_UNAVAILABLE:-}" ]]; then
+    native_client=0
+    native_deferred=1
+fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="${PSEUDOLIFE_SUITE_NAME:-$(basename "$root")}"
@@ -633,7 +641,9 @@ fi
 # silently used the tests' stand-in passed an integration batch locally that
 # then failed 18 tests in the hosted `test` lane (#1634).
 if (( ! native_client )); then
-    if [[ -n "${PSEUDOLIFE_NATIVE_TEST_BINARY:-}" ]]; then
+    if (( native_deferred )); then
+        echo "wsl-suite: real client: no (not built: this PC is not available for full suites, so tests/conftest.py first decides whether this run may go here; PSEUDOLIFE_SUITE_WHERE=local overrides the rule, or run it on the remote machine)"
+    elif [[ -n "${PSEUDOLIFE_NATIVE_TEST_BINARY:-}" ]]; then
         echo "wsl-suite: real client: yes, given by the caller (not built by this run), at ${PSEUDOLIFE_NATIVE_TEST_BINARY/#$HOME/\~}"
     else
         echo "wsl-suite: real client: no (PSEUDOLIFE_SUITE_NATIVE_CLIENT is off, so the tests that need PSEUDOLIFE_NATIVE_TEST_BINARY use their stand-in or skip; the hosted test lane runs them)"
@@ -721,14 +731,14 @@ if (( native_client )); then
         native_clean=()
         while IFS= read -r native_member || [[ -n "$native_member" ]]; do
             [[ -n "$native_member" ]] && native_clean+=(-p "$native_member")
-        done < <(cd "$root/rust" && cargo metadata --no-deps --format-version 1 --offline 2>/dev/null \
+        done < <(cd "$root/rust" && cargo metadata --no-deps --format-version 1 --offline 2>/dev/null 5>&- 6>&- 7>&- 8>&- 9>&- \
             | sed -n 's/.*"workspace_members":\[\([^]]*\)\].*/\1/p' | tr ',' '\n' | tr -d '"' || true)
         if (( ! ${#native_clean[@]} )); then
             echo "wsl-suite: real client: cannot list the workspace's packages (cargo metadata) to clean them; refusing to build" >&2
             exit 2
         fi
         echo "wsl-suite: real client: the build cache last held another checkout's build; cleaning this workspace's $(( ${#native_clean[@]} / 2 )) packages first"
-        ( cd "$root/rust" && CARGO_TARGET_DIR="$native_target" cargo clean --quiet "${native_clean[@]}" ) || {
+        ( cd "$root/rust" && CARGO_TARGET_DIR="$native_target" cargo clean --quiet "${native_clean[@]}" ) 5>&- 6>&- 7>&- 8>&- 9>&- || {
             native_code=$?
             echo "wsl-suite: real client: build failed: \`cargo clean\` exited $native_code; not falling back to the stand-in"
             exit "$native_code"
@@ -737,8 +747,12 @@ if (( native_client )); then
     fi
     echo "wsl-suite: real client: building pseudolife-stdio from $native_commit (cargo build --locked, dev profile) into ${native_target/#$HOME/\~}"
     native_code=0
+    # Cargo, rustc, build scripts and any RUSTC_WRAPPER daemon get none of
+    # this run's lock descriptors (5-9): Rust's Command does not close them,
+    # and a daemon that kept full-suite.lock would hold off every later suite
+    # (review of #1652). This shell keeps the locks.
     ( cd "$root/rust" && CARGO_TARGET_DIR="$native_target" cargo build --locked -p pseudolife-stdio -j 4 ) \
-        || native_code=$?
+        5>&- 6>&- 7>&- 8>&- 9>&- || native_code=$?
     if (( native_code )); then
         # stdout, as the other "real client:" lines: ops/remote-suite.ps1 reads it.
         echo "wsl-suite: real client: build failed (cargo exit $native_code; its error is above); not falling back to the stand-in"

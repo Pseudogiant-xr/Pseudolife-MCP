@@ -361,6 +361,10 @@ def test_a_full_run_is_refused_while_this_pc_is_not_available(config, refused):
         assert "python ops/integrate.py suite" in refusal
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the marker is only ever set inside WSL or on Linux (ops/wsl-suite.ps1 sends "
+                           "it over WSLENV), so a native-Windows run adds no coverage, and this spawns "
+                           "a real pytest")
 @pytest.mark.parametrize("args, refused", [(["tests", "-x"], True), (["tests/test_ci_native_client.py", "--co", "-q"], False)])
 def test_conftest_applies_the_availability_refusal_before_anything_runs(args, refused):
     # The wiring in tests/conftest.py: a real pytest with the marker refuses

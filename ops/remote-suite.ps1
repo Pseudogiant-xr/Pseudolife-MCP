@@ -222,6 +222,18 @@ while (-not $target) {
     }
 }
 Write-Host "remote-suite: running on $(if ($target -eq 'remote') { 'the remote machine' } else { 'this PC (local WSL)' }): $reason"
+# Local WSL tests this checkout's HEAD, while the result records $sha, the
+# commit chosen before any wait (the remote run carries $sha itself as a
+# bundle): a checkout that moved or changed while this run waited is refused.
+if ($target -eq 'local') {
+    $headNow = (git -C $root rev-parse HEAD).Trim()
+    $dirtyNow = git -C $root status --porcelain --untracked-files=no
+    if ($headNow -ne $sha -or $dirtyNow) {
+        Fail ("the checkout moved from $short to $($headNow.Substring(0, 8))" +
+            $(if ($dirtyNow) { ' or has uncommitted changes' } else { '' }) +
+            " while this run waited, so local WSL would test something other than the commit it records; rerun on the commit you mean")
+    }
+}
 
 $results = Join-Path $home_ '.pseudolife-mcp\suite-results'
 New-Item -ItemType Directory -Force -Path $results | Out-Null
@@ -345,10 +357,11 @@ $profileDir = if ($profileDir) { ($profileDir.Matches[0].Groups[1].Value.Trim() 
 # What the run said about the native client (ops/wsl-suite.sh prints the
 # path with its home as ~): true only for "yes", false for "no" or a failed
 # build, null when it never said (a launcher older than the switch, or a run
-# that stopped first).
+# that stopped first). The first such line: the launcher says it before
+# pytest starts, and a test's captured output later in the log may quote one.
 $realClient = $null; $realCommit = $null; $realPath = $null
 $said = (Select-String -Path $log -Pattern '^wsl-suite: real client: (yes|no|build failed)\b(.*)$' -ErrorAction SilentlyContinue |
-    Select-Object -Last 1)
+    Select-Object -First 1)
 if ($said) {
     $realClient = $said.Matches[0].Groups[1].Value -eq 'yes'
     $rest = $said.Matches[0].Groups[2].Value

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -1117,6 +1118,8 @@ def test_dist_no_runs_the_full_suite_in_one_process(tmp_path):
 
 _STUB_CARGO = r'''#!/bin/bash
 printf '%s|%s|%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "$*" >> "$CARGO_CALLS"
+# CARGO_FDS: what this cargo (and so its rustc and wrappers) holds open.
+if [ -n "${CARGO_FDS:-}" ]; then ls -l "/proc/$$/fd" >> "$CARGO_FDS" 2>/dev/null; fi
 if [ "$1" = metadata ]; then
     printf '%s' '{"packages":[],"workspace_members":["path+file:///w/rust/shim#pseudolife-stdio@0.24.0","path+file:///w/rust/daemon#pseudolife-daemon@0.24.0"],"resolve":null}'
     exit 0
@@ -1393,13 +1396,22 @@ def test_a_callers_own_client_is_reported_as_given_not_built(tmp_path):
     assert _read(tmp_path / "cargo-calls") == []
 
 
-def _wait_for_line(proc: subprocess.Popen, text: str) -> None:
-    """Read the launcher's stdout until a line contains `text`."""
-    while True:
-        line = proc.stdout.readline()
-        assert line or proc.poll() is None, f"the launcher ended without saying {text!r}: {proc.stderr.read()}"
-        if text in line:
-            return
+def _wait_for_line(proc: subprocess.Popen, text: str, deadline: float = 60) -> None:
+    """Read the launcher's stdout until a line contains `text`, failing
+    after `deadline` seconds rather than hanging the job (Linux: select)."""
+    import selectors
+    end = time.monotonic() + deadline
+    with selectors.DefaultSelector() as sel:
+        sel.register(proc.stdout, selectors.EVENT_READ)
+        while True:
+            left = end - time.monotonic()
+            assert left > 0, f"the launcher did not say {text!r} within {deadline}s"
+            if not sel.select(timeout=left):
+                continue
+            line = proc.stdout.readline()
+            assert line or proc.poll() is None, f"the launcher ended without saying {text!r}: {proc.stderr.read()}"
+            if text in line:
+                return
 
 
 @_LINUX_ONLY
@@ -1624,7 +1636,11 @@ def _availability(tmp_path: Path, content: str | None, now: str = "2026-11-16T20
 @pytest.mark.parametrize("content, available, why", [
     (None, False, "no ~/.pseudolife-mcp/locks/pc-available"),
     ("", True, "until it is removed"),
-    ("# overnight, as the maintainer said\n\n", True, "until it is removed"),
+    ("\n  \n", True, "until it is removed"),
+    # Only an empty file opens the PC with no end: a comment, or a
+    # commented-out expiry, is not (conductor ruling, 16 November 2026).
+    ("# overnight, as the maintainer said\n\n", False, "is not one"),
+    ("#until=2026-11-17T07:00+11:00\n", False, "is not one"),
     ("until=2026-11-17T07:00+11:00\n", True, "until 2026-11-17T07:00+11:00"),
     # "now" is 2026-11-16T20:00+11:00, 09:00Z: a second later is still open.
     ("until=2026-11-16T09:00:01Z", True, "until 2026-11-16T09:00:01Z"),
@@ -1659,6 +1675,11 @@ if [[ "${@: -1}" == *full-suite.lock* ]]; then
     echo $((n + 1)) > "$STUB_SSH_PROBES"
     # STUB_REMOVE_AT=N: this, the Nth probe, removes STUB_REMOVE_FILE.
     if [[ "${STUB_REMOVE_AT:-}" == "$((n + 1))" ]]; then rm -f -- "$STUB_REMOVE_FILE"; fi
+    # STUB_MOVE_AT=N: this probe commits in STUB_MOVE_REPO, as a checkout
+    # that moves while the run waits.
+    if [[ "${STUB_MOVE_AT:-}" == "$((n + 1))" ]]; then
+        git -C "$STUB_MOVE_REPO" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m moved
+    fi
     IFS=, read -ra states <<< "${STUB_REMOTE_STATES:-0}"
     i=$(( n < ${#states[@]} ? n : ${#states[@]} - 1 ))
     exit "${states[$i]}"
@@ -1837,6 +1858,9 @@ def test_a_direct_run_sends_the_reason_only_when_the_rule_applies(tmp_path, env,
     wslenv = next(line for line in call.splitlines() if line.startswith("wslenv="))
     assert ("PSEUDOLIFE_SUITE_PC_UNAVAILABLE" in wslenv.split("=", 1)[1].split(":")) is sent, call
     assert ("overrides the availability rule" in proc.stdout) is (env.get("PSEUDOLIFE_SUITE_WHERE") == "local")
+    # The dispatcher's mark is never silent, since a hand-set one skips the rule.
+    assert ("PSEUDOLIFE_SUITE_CHOSEN=local: ops/remote-suite.ps1 chose this PC" in proc.stdout) is \
+        (env.get("PSEUDOLIFE_SUITE_CHOSEN") == "local" and env.get("PSEUDOLIFE_SUITE_REMOTE") is not None)
 
 
 @_LINUX_ONLY
@@ -1896,6 +1920,8 @@ _FAKE_SUDO = r'''#!/bin/bash
 repo="${PSEUDOLIFE_SUITE_GIT_COMMON%/.git}"
 got="$(git -C "$repo" rev-parse --verify --quiet "refs/heads/suite/$PSEUDOLIFE_SUITE_COMMIT" || echo missing)"
 echo "ran $PSEUDOLIFE_SUITE_COMMIT $got" >> "$SSH_CALLS"
+# The dispatch's temporary copy of wsl-suite.sh, which the real step deletes.
+for arg in "$@"; do [[ "$prev" == _ ]] && rm -f -- "$arg"; prev="$arg"; done
 echo "wsl-suite: real client: no (PSEUDOLIFE_SUITE_NATIVE_CLIENT is off)"
 echo "3 passed in 0.1s"
 '''
@@ -1976,3 +2002,57 @@ def test_the_bundle_carries_the_commit_chosen_even_if_the_checkout_moved_while_w
     refs = subprocess.run(["git", "-C", str(tmp_path / "repo"), "for-each-ref", "refs/pseudolife-suite-bundle/"],
                           capture_output=True, text=True, check=True).stdout
     assert refs == ""
+
+
+# ── review of #1652 (fix round) ────────────────────────────────────────────
+
+@_LINUX_ONLY
+def test_cargo_and_its_children_hold_none_of_the_runs_locks(tmp_path):
+    # A RUSTC_WRAPPER daemon that inherited full-suite.lock would hold off
+    # every later suite on the machine; cargo gets no lock descriptor.
+    fds = tmp_path / "cargo-fds"
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", CARGO_FDS=str(fds))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert {c.split("|")[2].split(" ")[0] for c in _read(tmp_path / "cargo-calls")} == {"metadata", "clean", "build"}
+    seen = fds.read_text(encoding="utf-8")
+    assert seen.count("total") == 3, seen   # one listing per cargo call
+    assert "full-suite.lock" not in seen and ".suite-build.lock" not in seen, seen
+
+
+@_LINUX_ONLY
+def test_no_build_for_a_selection_conftest_may_still_refuse(tmp_path):
+    proc = _native_run(tmp_path, "tests/", PSEUDOLIFE_SUITE_NATIVE_CLIENT="1",
+                       PSEUDOLIFE_SUITE_PC_UNAVAILABLE="no ~/.pseudolife-mcp/locks/pc-available")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _read(tmp_path / "cargo-calls") == []
+    assert ("wsl-suite: real client: no (not built: this PC is not available for full suites, so "
+            "tests/conftest.py first decides") in proc.stdout
+    assert _read(tmp_path / "client-env")[:2] == ["binary=", "required="]
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_the_result_takes_the_launchers_own_line_not_one_quoted_later(tmp_path, monkeypatch):
+    # A failing test's captured output may quote a "real client: yes" line.
+    monkeypatch.setattr(sys.modules[__name__], "_STUB_WSL", _STUB_WSL.replace(
+        'echo "3 passed in 0.1s" ;;',
+        'echo "wsl-suite: real client: yes, pseudolife-stdio built from $(printf %040d 0) (quoted), at ~/x"; '
+        'echo "3 passed in 0.1s" ;;'))
+    proc, result, _ = _remote_suite(tmp_path, "fix/something")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert result["real_client"] is False and result["real_client_commit"] is None
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_local_run_refuses_a_checkout_that_moved_while_it_waited(tmp_path):
+    # Local WSL tests HEAD while the result records the commit chosen
+    # first; the remote run carries that commit itself (the bundle test).
+    proc, result, head = _dispatch(tmp_path, remote_states="1", pc_available="",
+                                   STUB_MOVE_AT="1", STUB_MOVE_REPO=str(tmp_path / "repo"))
+    assert proc.returncode == 2
+    # `head` is read after the run: where the checkout moved to.
+    assert re.search(rf"the checkout moved from [0-9a-f]{{8}} to {head[:8]} while this run waited", proc.stderr)
+    assert _ran_on(tmp_path) == [] and result is None

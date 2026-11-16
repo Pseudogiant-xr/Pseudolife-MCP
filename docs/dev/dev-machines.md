@@ -12,9 +12,12 @@ in the memory bank (search "dev machines homelab"), never in this tree.
 ## The machines
 
 - **The maintainer's Windows host.** Interactive work and targeted test
-  runs. Its full suites run in local WSL (`ops/wsl-suite.ps1`), because a
-  native Windows full suite's hook-script tests start Git Bash processes
-  in bursts that stall mouse input.
+  runs. Its full suites run on the Linux box (`ops/remote-suite.ps1`, or
+  `python ops/integrate.py suite` for a batch), and in local WSL only while
+  the maintainer has said this PC is available ("Sharing"), because a full
+  suite here overloads the desktop he is using; never natively, because a
+  native Windows full suite's hook-script tests start Git Bash processes in
+  bursts that stall mouse input.
 - **Linux dev boxes** (the homelab "box" and its sibling, guests of one
   hypervisor). Linux full suites, Rust builds and tests on Linux, and long
   or CPU-heavy Linux work that would otherwise load the Windows host.
@@ -130,10 +133,12 @@ knobs and procedures they point at.
   statement only: the file `~/.pseudolife-mcp/locks/pc-available` on the
   Windows host, which the conductor writes and removes on the maintainer's
   word. The launchers only read it (`ops/suite-availability.ps1`) and never
-  guess from processes, the GPU, input or the hour. An empty file means
-  available until it is removed. One line `until=<ISO 8601 time with an
-  offset>` means available until then. Anything else, an expired time or an
-  unreadable file reads as not available, and the run says why. To set it
+  guess from processes, the GPU, input or the hour. An empty file (blank
+  lines at most) means available until it is removed. One line
+  `until=<ISO 8601 time with an offset>` means available until then.
+  Anything else reads as not available, and the run says why: a comment
+  (even a commented-out `until=`), an expired time or an unreadable file.
+  To set it
   until 07:00 AEDT, and to clear it:
 
   ```powershell

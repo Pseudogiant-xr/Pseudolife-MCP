@@ -107,7 +107,11 @@ $copy = @{}
 # PSEUDOLIFE_SUITE_PC_UNAVAILABLE carries the reason, ops/wsl-suite.sh refuses
 # the default full run and tests/conftest.py any other full one.
 $userHome = [Environment]::GetFolderPath('UserProfile')
-if ((Get-SuiteRemote $userHome) -and $env:PSEUDOLIFE_SUITE_CHOSEN -ne 'local') {
+if ((Get-SuiteRemote $userHome) -and $env:PSEUDOLIFE_SUITE_CHOSEN -eq 'local') {
+    # Never silent: set by hand, this skips the availability rule.
+    Write-Host ("wsl-suite: PSEUDOLIFE_SUITE_CHOSEN=local: ops/remote-suite.ps1 chose this PC by the " +
+        "availability rule, so it is not checked again here (set by hand, it overrides the rule)")
+} elseif (Get-SuiteRemote $userHome) {
     $availability = Get-SuiteAvailability $userHome
     if (-not $availability.Available) {
         if ($env:PSEUDOLIFE_SUITE_WHERE -eq 'local') {

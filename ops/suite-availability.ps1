@@ -11,14 +11,16 @@
 # the hour. docs/dev/dev-machines.md ("Sharing") has the format and the
 # commands that set and clear it:
 #
-#   (empty, or only blank and # lines)   available until the file is removed
+#   (empty: no content but blank lines)  available until the file is removed
 #   until=2026-11-17T07:00+11:00         available until then (an offset or Z
 #                                        is required), after which it reads
 #                                        as not available
 #
-# Anything else (a second setting, a time without an offset, garbage, a file
-# that cannot be read) reads as NOT available, and the reason says so: a
-# statement the launcher cannot read is not a statement.
+# Anything else (a comment, a commented-out or second setting, a time without
+# an offset, garbage, a file that cannot be read) reads as NOT available, and
+# the reason says so: a statement the launcher cannot read is not a
+# statement, and a commented-out expiry must not open this PC with no end
+# (conductor ruling, 16 November 2026).
 
 function Get-SuiteRemote([string]$home_) {
     # The second machine, as ops/remote-suite.ps1 reads it: ssh= in
@@ -46,7 +48,7 @@ function Get-SuiteAvailability([string]$home_, [DateTimeOffset]$now = [DateTimeO
     } catch {
         return @{ Available = $false; Why = "${shown} cannot be read ($($_.Exception.Message)), so it says nothing" }
     }
-    $settings = @($lines | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+    $settings = @($lines | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($settings.Count -eq 0) {
         return @{ Available = $true; Why = "${shown} says so, until it is removed" }
     }

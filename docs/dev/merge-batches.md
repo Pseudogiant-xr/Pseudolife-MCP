@@ -369,13 +369,17 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   the body and the comments `open` would post, then switches back; it
   creates, pushes and comments on nothing, and only says whether `build`
   would run the Rust compile check.
-- **`open`** publishes a built batch once the local full suite passed on
-  it. `--suite` takes the result JSON `ops/remote-suite.ps1` writes and
-  refuses unless it tested exactly the batch head and exited 0;
+- **`open`** publishes a built batch once its full suite passed on it.
+  `--suite` takes the result JSON `ops/remote-suite.ps1` writes (the one
+  `suite` names) and refuses unless it tested exactly the batch head,
+  exited 0 and ran the real native client built from that head
+  (`real_client` true, `real_client_commit` the head; "Validating it");
   `--suite-note` takes the result in words for a run that wrote no JSON
-  (`ops/wsl-suite.ps1` alone); the note must name the head's short sha,
-  and the body says it was not checked. A result for a selected run, or
-  one from a launcher too old to record its pytest arguments, is refused.
+  (`ops/wsl-suite.ps1` alone); the note must name the head's short sha and
+  say `real client: yes` for a client the run built, and the body says it
+  was not checked. A result for a selected run, or one from a launcher too
+  old to record its pytest arguments or the real client, is refused, so a
+  batch suite run before this rule needs a rerun.
   `--harness-note` takes the Rust harness run's result in words (next
   section); it must name the head's short sha and state pytest's
   `<count> passed` with no failed or error count, and the body records it
@@ -552,8 +556,10 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
      checkout built into can hand this one that checkout's binary. So, under
      the cache's own lock, a build that follows another checkout's first
      runs `cargo clean -p` on the workspace's own packages; third-party
-     crates stay cached. The build holds the machine's full-suite lock (slot
-     0) while it compiles, so a full suite never runs beside it.
+     crates stay cached. The build holds the machine's slot-0 full-suite
+     lock (`full-suite.lock`) while it compiles, so no full suite on slot 0
+     runs beside it; with `PSEUDOLIFE_SUITE_SLOTS` above 1 a suite on
+     another slot can (the machines run one slot).
    - **`open` refuses a result without it:** `real_client` must be true and
      `real_client_commit` the batch head, and a `--suite-note` must say
      `real client: yes`. There is no escape for a batch that "touches
