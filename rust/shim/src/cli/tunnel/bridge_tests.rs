@@ -137,11 +137,15 @@ async fn session(
         drop(fake_writer);
         received
     });
-    client_writer.write_all(client_bytes).await.unwrap();
     let relayed = tokio::spawn(relay(
         client_in, client_out, shim_in, shim_out, observer, gate,
     ));
-    drop(client_writer);
+    // Written while the relay runs: input larger than a pipe's buffer must
+    // not wait for a relay that has not started.
+    let client_bytes = client_bytes.to_vec();
+    tokio::spawn(async move {
+        client_writer.write_all(&client_bytes).await.unwrap();
+    });
     // A relay that never ends fails the test instead of hanging it.
     tokio::time::timeout(Duration::from_secs(30), async move {
         let mut out = Vec::new();
