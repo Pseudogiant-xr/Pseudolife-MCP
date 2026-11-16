@@ -330,16 +330,21 @@ pub fn hook_command(arguments: Vec<std::ffi::OsString>) -> u8 {
     }
 }
 
-/// One check's state: the links already accepted (checked once each, so
+/// One check's state: the links already accepted (walked once each, so
 /// nested links cost what they are, not what their prefixes repeat), the
 /// links being resolved (one met again is a loop), and how many links the
-/// check has followed.
+/// check has followed. A link is remembered by its filesystem identity
+/// together with where it leads, so an identity two objects share (a
+/// filesystem without stable file IDs) cannot excuse walking a different
+/// target, and an identity that is zero is never remembered at all.
 #[derive(Default)]
 struct Walk {
-    accepted: HashSet<(u64, u64)>,
-    resolving: HashSet<(u64, u64)>,
+    accepted: HashSet<LinkKey>,
+    resolving: HashSet<LinkKey>,
     links: usize,
 }
+
+type LinkKey = ((u64, u64), PathBuf);
 
 impl Walk {
     fn walk(&mut self, path: &Path) -> Result<(), Refusal> {
@@ -378,11 +383,15 @@ impl Walk {
                 if let Some(cause) = distrust {
                     return refuse(cause);
                 }
-                if self.accepted.contains(&identity) {
+                let key = (identity.1 != 0).then(|| (identity, target.clone()));
+                if key.as_ref().is_some_and(|key| self.accepted.contains(key)) {
                     return Ok(());
                 }
                 self.links += 1;
-                if self.links > MAX_LINKS || !self.resolving.insert(identity) {
+                let looped = key
+                    .as_ref()
+                    .is_some_and(|key| !self.resolving.insert(key.clone()));
+                if self.links > MAX_LINKS || looped {
                     return refuse(Cause::TooManyLinks);
                 }
                 // Where the link leads: absolute, or relative to the folder
@@ -394,8 +403,10 @@ impl Walk {
                     None => target.clone(),
                 };
                 self.walk(&resolved)?;
-                self.resolving.remove(&identity);
-                self.accepted.insert(identity);
+                if let Some(key) = key {
+                    self.resolving.remove(&key);
+                    self.accepted.insert(key);
+                }
                 Ok(())
             }
             Ok(Entry::Other(tag)) => refuse(Cause::NotALink { tag }),
