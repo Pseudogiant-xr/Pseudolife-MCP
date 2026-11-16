@@ -4,6 +4,7 @@ pub(super) mod clients;
 pub(crate) mod disk;
 pub(crate) mod engine;
 mod options;
+mod ownership;
 pub(crate) mod release;
 pub(crate) mod seams;
 mod shadow;
@@ -126,6 +127,12 @@ pub(crate) struct Update {
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
     pub handover_port: u16,
+    /// What this run's ownership repairs changed, repeated after a later
+    /// refusal so "nothing was deployed" is never read as "nothing changed".
+    pub ownership_changes: Vec<String>,
+    /// The next built-in backup archives a stopped daemon's state through the
+    /// uid-0 read-only state helper, before that state's ownership repair.
+    pub archive_with_helper: bool,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -247,6 +254,8 @@ impl Update {
             rollback_scope: None,
             stopped_handover: false,
             handover_port: 5432,
+            ownership_changes: vec![],
+            archive_with_helper: false,
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {
@@ -442,6 +451,11 @@ impl Update {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 self.warn(error.message);
+                for change in self.ownership_changes.clone() {
+                    self.warn(format!(
+                        "before that, this update {change}; only owners changed, and the running daemon is unaffected"
+                    ));
+                }
                 self.report.ok = false;
                 self.report.exit_code = error.exit_code;
             }

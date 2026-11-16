@@ -313,6 +313,19 @@ elif a[:2]==["volume","inspect"]:
 elif a[:1]==["ps"]: out=s["running"]["Id"]
 elif a[:1]==["pull"]: code=int(s["failure"]=="pull" or (bool(s.get("rust_pull_fails")) and "-rust:" in a[-1]) or (bool(s.get("python_pull_fails")) and "-rust:" not in a[-1]))
 elif a[:2]==["manifest","inspect"]: code=0 if s.get("rust_published") else 1
+elif a[:1]==["run"] and any(m in a for m in ("--probe-access","--list-root-owned","--repair-ownership")):
+ # The ownership helpers (cli::ownership), answering in hex as the script
+ # does: an entry the row made unusable stays so until a repair of its root
+ # changes it (only uid 0 entries).
+ o=s.setdefault("ownership",{});bad=[e for e in o.get("unusable",[]) if e[1] not in o.get("repaired",[])]
+ mode=next(m for m in ("--probe-access","--list-root-owned","--repair-ownership") if m in a)
+ roots=a[a.index(mode)+1:];mine=[q for u,q in bad if u=="0" and any(q==r or q.startswith(r+"/") for r in roots)]
+ if mode=="--probe-access":code=o.get("probe_code",0);fields=["probe-access","1"]+[f for u,q in bad for f in ("U",u,q)]
+ elif mode=="--list-root-owned":code=0;fields=["list-root-owned","1"]+[f for q in mine for f in ("L","0",q)]
+ else:
+  o.setdefault("repaired",[]).extend(mine);code=o.get("repair_code",0)
+  fields=["repair-ownership","1"]+[f for q in mine for f in ("C","0",q)]
+ out="".join(f+"\0" for f in fields+["end"]).encode().hex()
 elif a[:1]==["run"]:
  if "check-config" in a:
   code=s.get("check_config",0)
@@ -392,7 +405,8 @@ elif a[:1]==["cp"]:
   with tarfile.open(target,"w:gz") as tar:
    member=tarfile.TarInfo("config.yaml");member.size=2;tar.addfile(member,io.BytesIO(b"{}"))
 p.write_text(json.dumps(s))
-print(out)
+# The helpers' NUL-framed answers carry no trailing newline, as Docker relays them.
+sys.stdout.write(out if out.endswith("\0") else out+"\n")
 raise SystemExit(code)
 '''
 
@@ -2547,3 +2561,227 @@ def test_anonymous_mount_requires_docker_volume_provenance(tmp_path, mode, evide
         assert result.returncode == 2, result.stdout + result.stderr
         assert "/cache" in result.stdout and "declare" in result.stdout and "recreate" in result.stdout
         assert stages(json.loads(state_path.read_text())) == []
+
+
+# The ownership order rule (cli::ownership, update/ownership.rs): probe
+# first; repair the model cache if it needs it; a state volume the daemon
+# account cannot use is backed up through the old container first and only
+# then repaired; with no container able to read it, repaired then backed up.
+def ownership_stages(state):
+    """Every stage, with the ownership helpers named by what they do."""
+    result = []
+    for args in state["calls"]:
+        if args[:1] == ["run"] and "--probe-access" in args:
+            result.append("probe")
+        elif args[:1] == ["run"] and "--list-root-owned" in args:
+            roots = args[args.index("--list-root-owned") + 1:]
+            result.append("list " + " ".join(roots))
+        elif args[:1] == ["run"] and "--repair-ownership" in args:
+            roots = args[args.index("--repair-ownership") + 1:]
+            result.append("repair " + " ".join(roots))
+        elif args[:1] == ["run"] and "check-config" in args:
+            result.append("check-config")
+        elif args[:1] == ["run"] and "provision" in args:
+            result.append("provision")
+        else:
+            result.extend(stages({"calls": [args]}))
+    return result
+
+
+def ownership_host(tmp_path, mode, unusable=(), user="", running=True, models=False, failure=""):
+    context = host(tmp_path, failure, mode)
+    repo, env, state_path = context.__enter__()
+    state = json.loads(state_path.read_text())
+    state["ownership"] = {"unusable": [list(entry) for entry in unusable]}
+    state["running"]["Config"]["User"] = user
+    state["running"]["State"]["Running"] = running
+    if models:
+        state["running"]["Mounts"].append({"Type": "volume", "Name": "fixture-models", "Destination": "/models", "RW": True})
+        state["running"]["Config"]["Env"].append("PSEUDOLIFE_DAEMON_MODELS_DIR=/models")
+        # The project declares the same cache, so the mount identity holds.
+        daemon = state["config"]["services"][SERVICE]
+        daemon["volumes"].append({"type": "volume", "source": "models", "target": "/models"})
+        daemon["environment"]["PSEUDOLIFE_DAEMON_MODELS_DIR"] = "/models"
+        state["config"]["volumes"]["models"] = {"name": "fixture-models"}
+        state["volume_inspections"]["fixture-models"] = [{"Name": "fixture-models"}]
+    state_path.write_text(json.dumps(state))
+    return context, repo, env, state_path
+
+
+def ownership_args(mode, repo):
+    common = ["--json", "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"]
+    if mode == "release":
+        return [*common, "--tag", "0.21.1", "--daemon-only"]
+    return [*common, "--checkout", str(repo), "--no-test-login"]
+
+
+def root_helpers(state):
+    return [call for call in state["calls"] if "--cap-add" in call or "0:0" in call]
+
+
+@pytest.mark.parametrize("mode", ["release", "checkout"])
+def test_a_healthy_host_probes_before_any_change_and_runs_no_root_container_for_ownership(tmp_path, mode):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    context, repo, env, state_path = ownership_host(tmp_path, mode)
+    try:
+        result = run_arm(repo, env, binary, ownership_args(mode, repo))
+        assert result.returncode == 0, result.stdout + result.stderr
+        state = json.loads(state_path.read_text())
+        seen = ownership_stages(state)
+        # Only the image pull (which changes no volume) may come first.
+        assert [s for s in seen if s != "pull"][0] == "probe", seen
+        assert seen.count("probe") == 1 and not any(s.startswith("repair") for s in seen), seen
+        assert root_helpers(state) == []
+        probe = next(call for call in state["calls"] if "--probe-access" in call)
+        assert probe[probe.index("--user") + 1] == "10001:10001"
+        assert probe[probe.index("--cap-drop") + 1] == "ALL"
+        assert "--read-only" in probe and probe[probe.index("--network") + 1] == "none"
+        assert not (Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "ownership-repair").exists()
+    finally:
+        context.__exit__(None, None, None)
+
+
+def test_a_model_cache_is_listed_repaired_and_reprobed_and_the_state_is_untouched(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    context, repo, env, state_path = ownership_host(tmp_path, "release", unusable=[("0", "/models/m")], models=True)
+    try:
+        result = run_arm(repo, env, binary, ownership_args("release", repo))
+        assert result.returncode == 0, result.stdout + result.stderr
+        seen = ownership_stages(json.loads(state_path.read_text()))
+        # The pull and the schema check change nothing and come first; the
+        # undo list is written before the change, which is reprobed.
+        start = seen.index("probe")
+        assert seen.index("pull") < start, seen
+        assert seen[start:start + 4] == ["probe", "list /models", "repair /models", "probe"], seen
+        assert seen.index("repair /models") < seen.index("backup"), seen
+        assert "repair /data" not in seen and "list /data" not in seen
+        logs = list((Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "ownership-repair").iterdir())
+        assert [log.name.endswith("-models.log") for log in logs] == [True]
+        assert logs[0].read_text().endswith("0:0\t/models/m\n")
+        assert "model volume" in result.stdout and str(logs[0]).replace("\\", "\\\\") in result.stdout
+    finally:
+        context.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize("mode", ["release", "checkout"])
+def test_an_unusable_state_volume_is_backed_up_through_the_old_container_before_its_repair(tmp_path, mode):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    context, repo, env, state_path = ownership_host(tmp_path, mode, unusable=[("0", "/data/old")])
+    try:
+        result = run_arm(repo, env, binary, ownership_args(mode, repo))
+        assert result.returncode == 0, result.stdout + result.stderr
+        seen = ownership_stages(json.loads(state_path.read_text()))
+        assert seen.count("backup") == 1, seen
+        assert seen.index("probe") < seen.index("backup") < seen.index("list /data") < seen.index("repair /data") < seen.index("up"), seen
+        # The repair is followed by its own probe, which found nothing left.
+        assert seen[seen.index("repair /data") + 1] == "probe", seen
+        log = next((Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "ownership-repair").iterdir())
+        assert log.read_text().endswith("0:0\t/data/old\n")
+        assert "state volume" in result.stdout
+    finally:
+        context.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize("user,running,first", [("10001:10001", True, "repair /data"), ("", False, "backup"),
+                                                  ("10001:10001", False, "backup")])
+def test_state_only_a_running_daemon_account_container_holds_is_repaired_before_the_backup(tmp_path, user, running, first):
+    """A running container that already is the daemon account cannot archive
+    root's files: repair, then back up. A stopped one is archived through
+    the uid-0 read-only state helper first, as on a root-run host."""
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    context, repo, env, state_path = ownership_host(tmp_path, "checkout", unusable=[("0", "/data/old")], user=user, running=running)
+    try:
+        result = run_arm(repo, env, binary, ownership_args("checkout", repo))
+        assert result.returncode == 0, result.stdout + result.stderr
+        seen = ownership_stages(json.loads(state_path.read_text()))
+        assert "repair /data" in seen and "backup" in seen, seen
+        other = "backup" if first == "repair /data" else "repair /data"
+        assert seen.index(first) < seen.index(other), seen
+    finally:
+        context.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize("mode", ["release", "checkout"])
+def test_a_second_failed_probe_refuses_with_the_path_and_changes_nothing_more(tmp_path, mode):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    # uid 999 owns it: a repair of uid-0 entries cannot help.
+    context, repo, env, state_path = ownership_host(tmp_path, mode, unusable=[("999", "/data/theirs")])
+    try:
+        result = run_arm(repo, env, binary, ownership_args(mode, repo))
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "/data/theirs" in result.stdout and "Give it to 10001:10001" in result.stdout
+        assert "nothing was deployed" in result.stdout
+        seen = ownership_stages(json.loads(state_path.read_text()))
+        # Nothing root-owned to list: no chown helper, only the probe again.
+        after = seen[seen.index("list /data") + 1:]
+        assert after == ["probe"], seen
+        assert "repair /data" not in seen
+        assert seen.index("backup") < seen.index("list /data"), seen
+    finally:
+        context.__exit__(None, None, None)
+
+
+def test_no_backup_with_an_unusable_state_volume_refuses_before_any_repair(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    context, repo, env, state_path = ownership_host(tmp_path, "release", unusable=[("0", "/data/old"), ("0", "/models/m")], models=True)
+    try:
+        result = run_arm(repo, env, binary, [*ownership_args("release", repo), "--no-backup"])
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "--no-backup" in result.stdout and "/data/old" in result.stdout
+        state = json.loads(state_path.read_text())
+        assert ownership_stages(state) == ["pull", "probe"]
+        assert root_helpers(state) == []
+    finally:
+        context.__exit__(None, None, None)
+
+
+def test_a_state_archive_that_cannot_be_made_stops_before_the_repair(tmp_path):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    context, repo, env, state_path = ownership_host(tmp_path, "checkout", unusable=[("0", "/data/old")], failure="missing_state")
+    try:
+        for name in ("backup.sh", "backup.ps1"):
+            (repo / "ops" / name).unlink(missing_ok=True)
+        result = run_arm(repo, env, binary, ownership_args("checkout", repo))
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "ownership was not repaired" in result.stdout or "state volume backup" in result.stdout
+        state = json.loads(state_path.read_text())
+        assert not any(s.startswith("repair") for s in ownership_stages(state))
+        assert root_helpers(state) == []
+    finally:
+        context.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize("code", [127, 70, 1])
+def test_a_probe_that_cannot_run_refuses_before_anything_changes(tmp_path, code):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
+    context, repo, env, state_path = ownership_host(tmp_path, "release")
+    try:
+        state = json.loads(state_path.read_text())
+        state["ownership"]["probe_code"] = code
+        state_path.write_text(json.dumps(state))
+        result = run_arm(repo, env, binary, ownership_args("release", repo))
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "cannot check whether the daemon account can use its volumes" in result.stdout
+        state = json.loads(state_path.read_text())
+        assert ownership_stages(state) == ["pull", "probe"]
+        # The failed helper is removed by its name.
+        probe = next(call for call in state["calls"] if "--probe-access" in call)
+        assert ["rm", "-f", probe[probe.index("--name") + 1]] in state["calls"]
+    finally:
+        context.__exit__(None, None, None)

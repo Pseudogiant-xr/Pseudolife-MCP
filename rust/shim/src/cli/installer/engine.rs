@@ -465,6 +465,11 @@ fn activation() -> String {
 
 fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     let written = |r: io::Result<PathBuf>| r.map(|p| vec![p]).map_err(|_| refusal(BAD_OVERLAY));
+    // Checkout mode manages a checkout's Rust daemon, and its update
+    // probes; every other rerun applies the ownership order rule first.
+    if engine != "rust-checkout" {
+        ownership()?;
+    }
     if engine == "python" {
         if let Some(found) = labels()?
             && *label(&found, ENGINE_LABEL) == "rust"
@@ -522,6 +527,106 @@ fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     labels.insert(ACTIVATION_LABEL.into(), json!(activation()));
     labels.insert(RELEASE_LABEL.into(), json!(version));
     written(write_overlay(&image, &labels))
+}
+
+impl crate::cli::ownership::Docker for Installer {
+    fn docker(&mut self, args: &[String]) -> (i32, String) {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        match docker(&args, true, 3600) {
+            Ok(ran) => (ran.code, ran.stdout),
+            Err(_) => (1, String::new()),
+        }
+    }
+}
+
+/// The ownership helpers' Docker: this module's own calls.
+struct Installer;
+
+/// A rerun over an existing daemon applies update's ownership order rule
+/// before Compose recreates it (`cli::ownership`): probe; repair the model
+/// cache when it needs it; and when the state volume needs it, back it up
+/// first with the native backup (into the data directory's backups), then
+/// repair it. A healthy host runs only the unprivileged probe; a first
+/// install has no daemon to probe.
+fn ownership() -> Result<()> {
+    let ran = docker(&["inspect", DAEMON_CONTAINER], true, 60)?;
+    if ran.code != 0 {
+        if format!("{}{}", ran.stderr, ran.stdout)
+            .to_lowercase()
+            .contains("no such")
+        {
+            return Ok(());
+        }
+        return Err(refusal(
+            "Cannot inspect the existing daemon container; check docker info and rerun. Nothing was started.",
+        ));
+    }
+    let container = serde_json::from_str::<Value>(&ran.stdout)
+        .ok()
+        .and_then(|list| list.get(0).cloned())
+        .ok_or_else(|| {
+            refusal("Cannot inspect the existing daemon container; check docker info and rerun. Nothing was started.")
+        })?;
+    let directory = crate::cli::update::data_dir().join("ownership-repair");
+    let stamp = crate::cli::update::seams::stamp();
+    let request = crate::cli::restore_cli::docker_backup::Request {
+        keep_days: 7.0,
+        ..Default::default()
+    };
+    ownership_order(
+        &mut Installer,
+        &container,
+        &directory,
+        &stamp,
+        || crate::cli::restore_cli::docker_backup::run_on_stderr(&request) == 0,
+        &mut |line| {
+            let _ = writeln!(io::stderr().lock(), "{line}");
+        },
+    )
+}
+
+/// [`ownership`]'s order over one daemon: `backup` takes the native backup
+/// (true when it wrote a verified pair), `say` prints a line for the user.
+fn ownership_order(
+    docker: &mut impl crate::cli::ownership::Docker,
+    container: &Value,
+    directory: &Path,
+    stamp: &str,
+    backup: impl FnOnce() -> bool,
+    say: &mut dyn FnMut(&str),
+) -> Result<()> {
+    use crate::cli::ownership;
+    let checked = ownership::preflight(docker, container, directory, stamp, |_| Ok(()))
+        .map_err(|message| refusal(format!("{message}. Nothing was started.")))?;
+    let Some(checked) = checked else {
+        return Ok(());
+    };
+    if let Some(models) = &checked.models {
+        say(&models.line());
+    }
+    if checked.state_usable() {
+        return Ok(());
+    }
+    say(&format!(
+        "The daemon account cannot use {} in the state volume: backing it up, after which the backup repairs its ownership.",
+        checked.state[0].shown()
+    ));
+    // The native backup takes its verified pair and only then repairs the
+    // state (`restore_cli::docker_backup`): one repair, after one backup.
+    if !backup() {
+        return Err(refusal(
+            "The backup above, or the ownership repair that follows it, did not complete; fix the cause it names and rerun. Nothing was started.",
+        ));
+    }
+    let after = ownership::probe(docker, &checked.layout)
+        .map_err(|message| refusal(format!("{message}. Nothing was started.")))?;
+    if let Some(left) = after.of(&checked.layout, ownership::Part::State).first() {
+        return Err(refusal(format!(
+            "The daemon account still cannot use {} in the state volume after the backup's ownership repair (see above); fix the cause it names and rerun. Nothing was started.",
+            left.shown()
+        )));
+    }
+    Ok(())
 }
 
 fn image_schema(image: &str) -> Option<i64> {
@@ -756,6 +861,186 @@ pub(crate) fn run(args: &[String]) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The helpers' world: entries the probe reports until a repair (the
+    /// installer's for models, the backup's for the state) changes them, and
+    /// one order of every helper and the backup.
+    #[derive(Default)]
+    struct World {
+        unusable: Vec<(&'static str, &'static str)>,
+        repaired: Vec<String>,
+        order: Vec<String>,
+    }
+
+    type Shared = std::rc::Rc<std::cell::RefCell<World>>;
+
+    struct Helpers(Shared);
+
+    fn hex(fields: &[&str]) -> String {
+        let mut bytes = Vec::new();
+        for field in fields {
+            bytes.extend_from_slice(field.as_bytes());
+            bytes.push(0);
+        }
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn left(world: &World, root: &str) -> Vec<(&'static str, &'static str)> {
+        world
+            .unusable
+            .iter()
+            .filter(|(_, path)| path.starts_with(&format!("{root}/")) || root.is_empty())
+            .filter(|(_, path)| !world.repaired.iter().any(|r| r == path))
+            .cloned()
+            .collect()
+    }
+
+    impl crate::cli::ownership::Docker for Helpers {
+        fn docker(&mut self, args: &[String]) -> (i32, String) {
+            let mut world = self.0.borrow_mut();
+            let root = args.last().unwrap().clone();
+            if args.iter().any(|a| a == "--probe-access") {
+                world.order.push("probe".into());
+                let mut fields = vec!["probe-access", "1"];
+                let found = left(&world, "");
+                for (owner, path) in &found {
+                    fields.extend(["U", *owner, *path]);
+                }
+                fields.push("end");
+                return (0, hex(&fields));
+            }
+            let entries: Vec<_> = left(&world, &root)
+                .into_iter()
+                .filter(|(o, _)| *o == "0")
+                .collect();
+            if args.iter().any(|a| a == "--list-root-owned") {
+                world.order.push(format!("list {root}"));
+                let mut fields = vec!["list-root-owned", "1"];
+                for (_, path) in &entries {
+                    fields.extend(["L", "0", *path]);
+                }
+                fields.push("end");
+                return (0, hex(&fields));
+            }
+            world.order.push(format!("repair {root}"));
+            let mut fields = vec!["repair-ownership", "1"];
+            for (_, path) in &entries {
+                fields.extend(["C", "0", *path]);
+            }
+            fields.push("end");
+            let answer = hex(&fields);
+            world
+                .repaired
+                .extend(entries.iter().map(|(_, p)| (*p).to_owned()));
+            (0, answer)
+        }
+    }
+
+    fn rerun(
+        unusable: Vec<(&'static str, &'static str)>,
+        backed_up: bool,
+    ) -> (Result<()>, Vec<String>, Vec<String>) {
+        let world: Shared = Shared::default();
+        world.borrow_mut().unusable = unusable;
+        let mut docker = Helpers(world.clone());
+        let container = json!({
+            "Image": "sha256:old",
+            "State": {"Running": true},
+            "Config": {"User": "", "Env": ["PSEUDOLIFE_DAEMON_MODELS_DIR=/models"]},
+            "Mounts": [
+                {"Type": "volume", "Name": "s", "Destination": "/data", "RW": true},
+                {"Type": "volume", "Name": "m", "Destination": "/models", "RW": true},
+            ],
+        });
+        let dir = std::env::temp_dir().join(format!(
+            "pl-installer-own-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut said = Vec::new();
+        let result = ownership_order(
+            &mut docker,
+            &container,
+            &dir,
+            "s",
+            || {
+                // The native backup: its pair, then its own state repair.
+                let mut world = world.borrow_mut();
+                world.order.push("backup".into());
+                if backed_up {
+                    let fixed: Vec<String> = left(&world, "/data")
+                        .into_iter()
+                        .filter(|(o, _)| *o == "0")
+                        .map(|(_, p)| p.to_owned())
+                        .collect();
+                    world.repaired.extend(fixed);
+                }
+                backed_up
+            },
+            &mut |line| said.push(line.to_owned()),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let seen = world.borrow().order.clone();
+        (result, seen, said)
+    }
+
+    #[test]
+    fn a_rerun_on_a_healthy_host_only_probes() {
+        let (result, seen, said) = rerun(vec![], true);
+        assert!(result.is_ok());
+        assert_eq!(seen, ["probe"]);
+        assert!(said.is_empty(), "{said:?}");
+    }
+
+    #[test]
+    fn a_rerun_repairs_models_then_leaves_the_state_to_the_backup_it_takes_first() {
+        let (result, seen, said) = rerun(vec![("0", "/models/m"), ("0", "/data/old")], true);
+        assert!(result.is_ok(), "{:?}", result.err().map(|r| r.message));
+        // One state repair only: the backup's, after its pair; then a probe
+        // confirms it.
+        assert_eq!(
+            seen,
+            [
+                "probe",
+                "list /models",
+                "repair /models",
+                "probe",
+                "backup",
+                "probe"
+            ]
+        );
+        assert!(said.iter().any(|l| l.contains("model volume")), "{said:?}");
+        assert!(said.iter().any(|l| l.contains("/data/old")), "{said:?}");
+    }
+
+    #[test]
+    fn a_rerun_whose_backup_fails_never_repairs_the_state() {
+        let (result, seen, _) = rerun(vec![("0", "/data/old")], false);
+        let refused = result.unwrap_err();
+        assert!(
+            refused.message.contains("did not complete"),
+            "{}",
+            refused.message
+        );
+        assert!(
+            refused.message.ends_with("Nothing was started."),
+            "{}",
+            refused.message
+        );
+        assert_eq!(seen, ["probe", "backup"]);
+    }
+
+    #[test]
+    fn a_rerun_whose_state_is_still_unusable_after_the_backup_refuses() {
+        // uid 999's entry: the backup's repair (uid 0 only) cannot help.
+        let (result, seen, _) = rerun(vec![("999", "/data/theirs")], true);
+        let refused = result.unwrap_err();
+        assert!(
+            refused.message.contains("/data/theirs"),
+            "{}",
+            refused.message
+        );
+        assert_eq!(seen, ["probe", "backup", "probe"]);
+    }
 
     #[test]
     fn the_fallback_line_keeps_only_the_cause() {

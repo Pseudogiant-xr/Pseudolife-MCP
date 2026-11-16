@@ -110,6 +110,10 @@ pub(super) struct Fake {
     /// The first call with this label never runs, for this reason (a
     /// spawn failure, a timeout, an output file that cannot be created).
     pub(super) fault_on: Option<(&'static str, &'static str)>,
+    /// (owner, path) entries the ownership probe reports as unusable until
+    /// a repair of their root changes them (uid 0 entries only).
+    pub(super) unusable: Vec<(&'static str, &'static str)>,
+    pub(super) repaired: Vec<String>,
 }
 
 impl Docker for Fake {
@@ -253,6 +257,61 @@ impl Docker for Fake {
                 ok("")
             }
             ["inspect", name] if self.docs.contains_key(*name) => ok(&self.docs[*name]),
+            ["run", ..]
+                if ["--probe-access", "--list-root-owned", "--repair-ownership"]
+                    .iter()
+                    .any(|m| a.contains(m)) =>
+            {
+                // The ownership helpers, answering in hex as the script does.
+                let mode = ["--probe-access", "--list-root-owned", "--repair-ownership"]
+                    .into_iter()
+                    .find(|m| a.contains(m))
+                    .unwrap();
+                let at = a.iter().position(|w| *w == mode).unwrap();
+                let roots: Vec<String> = a[at + 1..].iter().map(|r| (*r).to_owned()).collect();
+                let left: Vec<(&str, &str)> = self
+                    .unusable
+                    .iter()
+                    .filter(|(_, path)| !self.repaired.iter().any(|r| r == path))
+                    .cloned()
+                    .collect();
+                let mine: Vec<&str> = left
+                    .iter()
+                    .filter(|(owner, path)| {
+                        *owner == "0"
+                            && roots
+                                .iter()
+                                .any(|r| path == r || path.starts_with(&format!("{r}/")))
+                    })
+                    .map(|(_, path)| *path)
+                    .collect();
+                let mut fields: Vec<String> = vec![mode.trim_start_matches('-').into(), "1".into()];
+                match mode {
+                    "--probe-access" => {
+                        for (owner, path) in &left {
+                            fields.extend(["U".into(), (*owner).into(), (*path).into()]);
+                        }
+                    }
+                    "--list-root-owned" => {
+                        for path in &mine {
+                            fields.extend(["L".into(), "0".into(), (*path).into()]);
+                        }
+                    }
+                    _ => {
+                        for path in &mine {
+                            fields.extend(["C".into(), "0".into(), (*path).into()]);
+                            self.repaired.push((*path).to_owned());
+                        }
+                    }
+                }
+                fields.push("end".into());
+                let hex: String = fields
+                    .iter()
+                    .flat_map(|f| f.bytes().chain([0]))
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                ok(&hex)
+            }
             _ if a
                 .iter()
                 .any(|arg| arg.contains("SELECT EXISTS(SELECT 1 FROM pg_database")) =>
@@ -372,6 +431,7 @@ impl Setup {
             state_mounts: vec!["/data".into()],
             pg_paths: vec!["/".into()],
             stale_helpers: Vec::new(),
+            running: Value::Null,
         };
         Self {
             dir,
@@ -439,6 +499,13 @@ pub(super) fn label(call: &[String]) -> String {
         ["create", .., s] if s.contains("-printf") => "create stage-helper".into(),
         ["create", .., s] if s.contains("mv -t /data") => "create swap-helper".into(),
         ["start", "-a", h] => format!("start-a {h}"),
+        ["run", ..] if a.contains(&"--probe-access") => "probe".into(),
+        ["run", ..] if a.contains(&"--list-root-owned") => {
+            format!("list {}", a.last().unwrap())
+        }
+        ["run", ..] if a.contains(&"--repair-ownership") => {
+            format!("repair {}", a.last().unwrap())
+        }
         ["rm", "-f", h] => format!("rm {h}"),
         ["rm", "-f", "-v", h] => format!("rm {h}"),
         ["exec", "-i", ..] => "copy-in".into(),
@@ -1475,4 +1542,99 @@ fn printed_commands_quote_for_this_platform() {
         assert_eq!(execute::shell_word("it's here"), r"'it'\''s here'");
     }
     let _ = Stop("x".into(), 1);
+}
+
+/// A daemon with a named state volume, as Docker reports one.
+pub(super) fn volume_daemon() -> Value {
+    serde_json::json!({
+        "Image": "img",
+        "State": {"Running": true},
+        "Config": {"User": "", "Env": []},
+        "Mounts": [{"Type": "volume", "Name": "st", "Destination": "/data", "Source": "/var/lib/docker/volumes/st/_data", "RW": true}],
+    })
+}
+
+#[test]
+fn a_restore_probes_first_and_repairs_the_restored_state_before_the_daemon_starts() {
+    let mut setup = Setup::new(true);
+    setup.plan.running = volume_daemon();
+    let mut docker = Fake {
+        unusable: vec![("0", "/data/restored")],
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 0, "{:?}", host.errors);
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    let at = |wanted: &str| {
+        labels
+            .iter()
+            .position(|l| l == wanted)
+            .unwrap_or(usize::MAX)
+    };
+    assert!(at("probe") < at("stop d"), "{labels:?}");
+    // The restored state is repaired after the swap, with its probe, and
+    // before the daemon starts; the safety pair was taken long before.
+    let repair = at("repair /data");
+    assert!(
+        at("create safety-helper") < repair && repair < at("start d"),
+        "{labels:?}"
+    );
+    assert_eq!(labels[repair + 1], "probe", "{labels:?}");
+    assert_eq!(
+        labels.iter().filter(|l| l.starts_with("repair")).count(),
+        1,
+        "{labels:?}"
+    );
+    assert!(
+        host.info
+            .iter()
+            .any(|l| l.contains("state volume") && l.contains("ownership-repair")),
+        "{:?}",
+        host.info
+    );
+}
+
+#[test]
+fn a_restore_on_a_healthy_host_runs_no_ownership_repair() {
+    let mut setup = Setup::new(true);
+    setup.plan.running = volume_daemon();
+    let mut docker = Fake::default();
+    let mut host = ready_host();
+    assert_eq!(setup.run(&mut docker, &mut host), 0, "{:?}", host.errors);
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    assert_eq!(
+        labels.iter().filter(|l| *l == "probe").count(),
+        2,
+        "{labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("repair")),
+        "{labels:?}"
+    );
+    assert!(
+        !docker
+            .calls
+            .iter()
+            .any(|c| c.iter().any(|a| a == "--cap-add"))
+    );
+}
+
+#[test]
+fn a_restored_state_the_repair_cannot_fix_is_reported_with_the_data_restored() {
+    let mut setup = Setup::new(true);
+    setup.plan.running = volume_daemon();
+    let mut docker = Fake {
+        unusable: vec![("999", "/data/theirs")],
+        ..Fake::default()
+    };
+    let mut host = ready_host();
+    assert_ne!(setup.run(&mut docker, &mut host), 0);
+    let errors = host.errors.join("\n");
+    assert!(
+        errors.contains("/data/theirs") && errors.contains("Give it to 10001:10001"),
+        "{errors}"
+    );
+    assert!(errors.contains("restored completely"), "{errors}");
+    let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+    assert!(!labels.iter().any(|l| l == "start d"), "{labels:?}");
 }

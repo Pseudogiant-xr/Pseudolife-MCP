@@ -29,6 +29,7 @@ use super::{
     args::Args,
     bank::{self, BULK, Bank, CLEANUP, MINUTE, NESTED_MOUNTS, Plan, Step, Stop, sh_quote},
     docker::{Docker, Input, Output},
+    ownership_steps,
     safety::{self, Pair},
     state,
 };
@@ -528,6 +529,21 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             }
         }
 
+        // Before anything changes: can the daemon account use its volumes?
+        // A model cache it cannot use is repaired now; the state is checked
+        // again once it is restored, with the safety pair already taken.
+        self.check()?;
+        let stamp = self.host.stamp();
+        let checked = step(ownership_steps::preflight(
+            &mut self.bank,
+            &plan.running,
+            &cx.data_dir,
+            &stamp,
+        ))?;
+        if let Some(models) = checked.as_ref().and_then(|c| c.models.as_ref()) {
+            self.host.info(&models.line());
+        }
+
         self.check()?;
         self.phase = Phase::Stopped;
         if plan.was_running {
@@ -751,6 +767,29 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         self.phase = Phase::DataRestored;
         if let Some(warning) = clear_journal(&journal_path(cx)) {
             self.host.error(&warning);
+        }
+        // What was restored may hold entries the daemon account cannot use
+        // (an archive written as another owner); the safety pair exists.
+        self.check()?;
+        let restored = ownership_steps::after_restore(
+            &mut self.bank,
+            &plan.running,
+            &cx.data_dir,
+            &format!("{stamp}-restored"),
+        )
+        // The restore itself is complete: the next step is the daemon's
+        // start, never the restore again.
+        .map_err(|Stop(message, code)| {
+            Stop(
+                message.replace(
+                    ", then retry",
+                    &format!(", then start the daemon (docker start {})", plan.daemon),
+                ),
+                code,
+            )
+        });
+        if let Some(repaired) = step(restored)? {
+            self.host.info(&repaired.line());
         }
         if cx.args.leave_stopped {
             self.host
