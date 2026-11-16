@@ -224,7 +224,7 @@ class _TeardownAdmin:
 
 def _teardown_fixture(monkeypatch, connects, statements, **admin):
     import time
-    from pseudolife_memory.storage import schema
+    from rust.harness_support import database_guard as schema
 
     monkeypatch.setattr(_bank, "url", lambda name: name)
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
@@ -333,7 +333,7 @@ def test_drop_retries_a_timed_out_admin_connect(monkeypatch):
 
 def test_teardown_propagates_when_the_check_fails_or_a_guard_refuses(monkeypatch):
     import psycopg
-    from pseudolife_memory.storage.schema import ProductionDatabaseError
+    from rust.harness_support.database_guard import ProductionDatabaseError
 
     failure = psycopg.OperationalError("server closed the connection")
 

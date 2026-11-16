@@ -18,6 +18,7 @@ import schema_cases
 import schema_ci
 import startup_ci
 import startup_cases
+import test_schema_executor
 
 
 def script(command):
@@ -223,6 +224,9 @@ class GoldenChecking(unittest.TestCase):
             return {"ok": True, "startup": {}, "entries": []}, [0.0, 0.0]
 
         with patch.object(module, "invoke", invoke), \
+                patch.object(startup_cases, "rust_open"), \
+                patch.object(startup_cases.psycopg, "connect", lambda *args, **kwargs: Connection()), \
+                patch.object(startup_cases, "assert_disposable_database", lambda conn: None), \
                 patch.object(module.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
                 patch.object(module.pg, "drop", lambda name, *args: None), \
                 patch.object(module.dbstate, "dump", empty_state), \
@@ -249,6 +253,7 @@ class GoldenChecking(unittest.TestCase):
 
         import pseudolife_memory.storage.postgres as postgres
         with patch.object(postgres, "PostgresStorage", Storage), \
+                patch.object(test_schema_executor, "check_equivalence", return_value={}), \
                 patch.object(schema_cases, "rust_open", rust_open), \
                 patch.object(schema_cases.pg, "create", lambda name, template=None: f"postgresql:///{name}"), \
                 patch.object(schema_cases.pg, "drop", lambda name, *args: None), \

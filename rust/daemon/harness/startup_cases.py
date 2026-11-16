@@ -34,8 +34,8 @@ import dbstate
 import pgdisposable
 import psycopg
 from psycopg import sql
-from schema_cases import clock_diffs
-from pseudolife_memory.storage.schema import assert_disposable_database
+from schema_cases import clock_diffs, rust_open
+from rust.harness_support.database_guard import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
 # Multi-band presets and retention policies other than balanced are retired
@@ -577,7 +577,12 @@ def cell(binary, number, case, result, mutant=None, expected=None, oracle=True):
             homes = [daemons.make_home(root, kind, config) for kind in ("seed", *arms)]
             template = pg.create(names[0])
             created.append(names[0])
-            invoke(binary, "python", template, homes[0], root / "seed.json", seed_case=case)
+            if case == "empty":
+                with psycopg.connect(template, autocommit=True) as conn:
+                    assert_disposable_database(conn)
+                rust_open(binary, template)
+            else:
+                invoke(binary, "python", template, homes[0], root / "seed.json", seed_case=case)
             if case in REQUIRED_FAILURES:
                 table, column, _, _ = REQUIRED_FAILURES[case]
                 with psycopg.connect(template, autocommit=True) as conn:
