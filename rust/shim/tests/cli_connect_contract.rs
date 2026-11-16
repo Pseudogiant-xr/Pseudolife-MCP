@@ -355,8 +355,29 @@ fn native_unknown_options_name_only_the_option_and_suggest_the_spelling() {
         let output = home.run(DEAD, &[DEAD, &format!("{option}=fixture-secret")]);
         assert_eq!(output.status.code(), Some(2), "{output:?}");
         let text = String::from_utf8_lossy(&output.stderr);
-        assert!(text.contains(option) && text.contains(hint), "{text}");
+        assert!(
+            text.contains("unknown option") && text.contains(hint),
+            "{text}"
+        );
         assert!(!text.contains("fixture-secret"), "{text}");
+    }
+    for json in [false, true] {
+        let mut args = vec![DEAD, "--fixture-secret"];
+        if json {
+            args.push("--json");
+        }
+        let output = home.run(DEAD, &args);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!text.contains("fixture-secret"), "{text}");
+        assert!(
+            text.contains("unknown option") && text.contains("--help"),
+            "{text}"
+        );
     }
 }
 #[cfg(windows)]

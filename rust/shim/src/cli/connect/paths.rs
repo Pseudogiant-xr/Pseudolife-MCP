@@ -33,25 +33,32 @@ fn setting(key: &str, value: &str) -> Result<PathBuf, Refusal> {
     #[cfg(windows)]
     let normalized = {
         use std::path::{Component, Prefix};
-        match Path::new(value).components().next() {
+        let device_error = || {
+            let remedy = if key == "the current directory" {
+                "run connect from an ordinary drive or UNC directory".to_owned()
+            } else {
+                format!("set {key} to its ordinary drive or UNC path")
+            };
+            Refusal(format!("{key} uses an unsupported device path; {remedy}"))
+        };
+        let normalized = match Path::new(value).components().next() {
             Some(Component::Prefix(prefix)) => match prefix.kind() {
                 Prefix::Disk(_) | Prefix::UNC(_, _) => PathBuf::from(value),
                 Prefix::VerbatimDisk(_) | Prefix::VerbatimUNC(_, _) => {
                     strip_verbatim(PathBuf::from(value))
                 }
-                _ => {
-                    let remedy = if key == "the current directory" {
-                        "run connect from an ordinary drive or UNC directory".to_owned()
-                    } else {
-                        format!("set {key} to its ordinary drive or UNC path")
-                    };
-                    return Err(Refusal(format!(
-                        "{key} uses an unsupported device path; {remedy}"
-                    )));
-                }
+                _ => return Err(device_error()),
             },
             _ => PathBuf::from(value),
+        };
+        // A verbatim UNC server such as `.` must not become a device
+        // namespace after removing the verbatim wrapper.
+        if let Some(Component::Prefix(prefix)) = normalized.components().next()
+            && !matches!(prefix.kind(), Prefix::Disk(_) | Prefix::UNC(_, _))
+        {
+            return Err(device_error());
         }
+        normalized
     };
     #[cfg(windows)]
     let value = normalized.to_str().expect("Unicode input stays Unicode");
@@ -519,6 +526,8 @@ mod tests {
                 r"\\.\C:\dir",
                 r"\\?\GLOBALROOT\Device\HarddiskVolume1",
                 r"\\?\Volume{fixture}\dir",
+                r"\\?\UNC\.\C:\client",
+                r"\\?\UNC\?\C:\client",
             ] {
                 let error = setting(key, value).unwrap_err().0;
                 assert!(error.contains(key) && error.contains("device"), "{error}");

@@ -120,14 +120,8 @@ pub(super) fn parse(values: &[OsString]) -> Result<Args, Refusal> {
                 }
             }
             _ => {
-                // Only the option spelling is reported, never its inline or next value.
-                let name = if option.len() <= 40
-                    && option.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-')
-                {
-                    option
-                } else {
-                    "(unrecognized spelling)"
-                };
+                // An arbitrary dash-leading word may be a pasted token. Only
+                // suggest known option names, never echo the supplied bytes.
                 let hint = [
                     "--token-file",
                     "--read-token",
@@ -144,7 +138,7 @@ pub(super) fn parse(values: &[OsString]) -> Result<Args, Refusal> {
                     || "see `pseudolife-mcp connect --help`".to_owned(),
                     |known| format!("use {known}; see `pseudolife-mcp connect --help`"),
                 );
-                return Err(Refusal(format!("unknown option {name}; {remedy}")));
+                return Err(Refusal(format!("unknown option; {remedy}")));
             }
         }
     }
