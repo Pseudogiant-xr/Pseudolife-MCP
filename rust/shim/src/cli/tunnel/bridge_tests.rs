@@ -1036,12 +1036,13 @@ async fn a_profile_changed_in_any_bound_field_writes_nothing() {
             "organization_id" => started.organization_id = Some("org-other".into()),
             "token_file" => started.token_file = "/elsewhere/token".into(),
             _ => {
-                // The saved profile is pending now: no longer ready.
+                // The saved profile is pending now, every bound field the
+                // same: only its readiness changed.
                 std::fs::remove_file(store.0.join("dot.profile.json")).unwrap();
                 let token = serde_json::to_string(&store.0.join("token")).unwrap();
                 store.put(
                     "dot.profile.json",
-                    format!("{{\"name\": \"dot\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}}}").as_bytes(),
+                    format!("{{\"name\": \"dot\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}, \"tunnel_id\": \"tunnel_0123\", \"state\": \"pending\", \"consent\": true}}").as_bytes(),
                 );
             }
         }
