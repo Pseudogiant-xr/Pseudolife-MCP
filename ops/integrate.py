@@ -2419,10 +2419,32 @@ def _after_drop_shared(path: str) -> bool:
 
 
 def _after_drop_workflow_text(rev: str) -> str:
-    """Every workflow file at `rev`, joined: a path a workflow names (a CI
-    script, a Dockerfile) is an input of the jobs that run it."""
+    """Every string value of every workflow file at `rev`, joined: a path a
+    workflow names in a step, an input or a filter (a CI script, a
+    Dockerfile) is an input of the jobs that run it. Comments are not
+    values, so a path a comment mentions does not count. A file that does
+    not parse counts whole."""
     names = _out("ls-tree", "-r", "--name-only", rev, "--", ".github/workflows").splitlines()
-    return "\n".join(git("show", f"{rev}:{name}", check=False).stdout for name in names)
+    texts = []
+
+    def strings(value) -> None:
+        if isinstance(value, str):
+            texts.append(value)
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                strings(k)
+                strings(v)
+        elif isinstance(value, list):
+            for v in value:
+                strings(v)
+
+    for name in names:
+        raw = git("show", f"{rev}:{name}", check=False).stdout
+        try:
+            strings(_yaml().safe_load(raw))
+        except Exception:        # unparseable, or no YAML module: the whole text
+            texts.append(raw)
+    return "\n".join(texts)
 
 
 def _after_drop_imported(path: str, rev: str) -> bool:
@@ -2432,8 +2454,12 @@ def _after_drop_imported(path: str, rev: str) -> bool:
     if not (name.startswith("test_") and name.endswith(".py")):
         return False
     stem = name[:-3]
-    importing = re.compile(rf"^\s*(from\s+[\w.]*\b{re.escape(stem)}\s+import\b|"
-                           rf"import\s+([\w.]*\.)?{re.escape(stem)}\b)", re.M)
+    name_re = re.escape(stem)
+    importing = re.compile(
+        rf"^\s*(from\s+[\w.]*\b{name_re}\s+import\b"          # from pkg.test_x import a
+        rf"|import\s+([\w.]*\.)?{name_re}\b"                     # import pkg.test_x
+        rf"|from\s+[\w.]+\s+import\s+(\([^)]*|[^\n]*)\b{name_re}\b)",  # from pkg import test_x
+        re.M)
     # Candidates by plain text, then the import itself (git grep's regex
     # dialect differs between builds).
     hits = git("grep", "-l", "-F", stem, rev, "--", "*.py", check=False).stdout.splitlines()

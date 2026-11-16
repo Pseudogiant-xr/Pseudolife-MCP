@@ -5948,3 +5948,30 @@ def test_after_drop_names_no_summary_for_a_job_that_needs_nothing_carried(world,
 
     err = capsys.readouterr().err
     assert "cannot carry (Parity / ubuntu-latest)" in err and "saves no time" not in err
+
+
+@pytest.mark.parametrize("importer", [
+    "from tests import test_fixture_mod\n",
+    "from tests import test_fixture_mod as fm\n",
+    "from tests import (\n    other,\n    test_fixture_mod,\n)\n"])
+def test_after_drop_refuses_a_test_module_imported_through_its_package(world, capsys, importer):
+    # Codex review of a219cbb26: `from cli_harness.rows import test_login`.
+    world.advance_master({"tests/test_user.py": importer})
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"},
+                                11: {"tests/test_fixture_mod.py": "thing = 2\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 2
+
+    assert "tests/test_fixture_mod.py" in capsys.readouterr().err
+
+
+def test_after_drop_takes_a_file_a_workflow_names_only_in_a_comment(world, capsys):
+    # Codex review of a219cbb26: a comment is not a workflow input.
+    world.advance_master({".github/workflows/ci.yml": "# ops/ci_tests.sh is described elsewhere\n"
+                                                      "jobs:\n  t:\n    steps:\n"
+                                                      "      - run: echo ok\n"})
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"}, 11: {"ops/ci_tests.sh": "exit 0\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
