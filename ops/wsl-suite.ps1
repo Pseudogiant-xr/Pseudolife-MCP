@@ -49,6 +49,19 @@
 # PSEUDOLIFE_WSL_DISTRO picks the distribution (default: WSL's default
 # one). The exit code is pytest's.
 #
+# A host with a second machine configured for full suites
+# (~/.pseudolife-mcp/locks/full-suite.remote ssh=, or PSEUDOLIFE_SUITE_REMOTE)
+# runs them there, and in WSL here only while its owner has said this PC is
+# available (~/.pseudolife-mcp/locks/pc-available; ops/suite-availability.ps1
+# has the format), so a FULL run started here directly is refused with the
+# command that runs it remotely; targeted runs are untouched (ops/wsl-suite.sh
+# refuses the default full run, and tests/conftest.py any arguments that
+# still select the whole suite, with the suite lock's own classifier).
+# PSEUDOLIFE_SUITE_WHERE=local overrides
+# that, and says so; ops/remote-suite.ps1 marks a local run it chose by that
+# rule (PSEUDOLIFE_SUITE_CHOSEN=local). With no remote configured nothing
+# changes.
+#
 # The run logs in to the test Postgres with the test login file
 # (PSEUDOLIFE_TEST_PG_LOGIN_FILE, else ~/.pseudolife-mcp/test-pg.env, written
 # by `pseudolife-mcp test-login create`) when there is one; only without it
@@ -57,6 +70,7 @@
 $ErrorActionPreference = 'Stop'
 # Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
 function Fail([string]$message) { [Console]::Error.WriteLine("wsl-suite: $message"); exit 2 }
+. (Join-Path $PSScriptRoot 'suite-availability.ps1')
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $distro = @()
@@ -89,6 +103,22 @@ if (-not $env:PSEUDOLIFE_MCP_TOKEN -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
     $paths = @('PSEUDOLIFE_MCP_TOKEN_FILE/p')
 }
 $copy = @{}
+# Whether a full run may use this PC (the header): while
+# PSEUDOLIFE_SUITE_PC_UNAVAILABLE carries the reason, ops/wsl-suite.sh refuses
+# the default full run and tests/conftest.py any other full one.
+$userHome = [Environment]::GetFolderPath('UserProfile')
+if ((Get-SuiteRemote $userHome) -and $env:PSEUDOLIFE_SUITE_CHOSEN -ne 'local') {
+    $availability = Get-SuiteAvailability $userHome
+    if (-not $availability.Available) {
+        if ($env:PSEUDOLIFE_SUITE_WHERE -eq 'local') {
+            Write-Host ("wsl-suite: PSEUDOLIFE_SUITE_WHERE=local overrides the availability rule: a full run " +
+                "goes ahead on this PC although it is not available for full suites ($($availability.Why))")
+        } else {
+            $copy['PSEUDOLIFE_SUITE_PC_UNAVAILABLE'] = $availability.Why
+            $forward += @('PSEUDOLIFE_SUITE_PC_UNAVAILABLE')
+        }
+    }
+}
 # The test login (`pseudolife-mcp test-login create`): a Postgres role that
 # cannot open the bank, in a file outside the checkout. The run reads it in
 # place over /mnt/c, and then needs no ops/.env, which holds the bank owner's

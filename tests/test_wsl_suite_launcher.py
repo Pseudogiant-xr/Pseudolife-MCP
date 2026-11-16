@@ -45,7 +45,8 @@ def _not_profiled(monkeypatch):
     # under test that inherited the switch would start a real cargo build.
     for name in ("PSEUDOLIFE_SUITE_NATIVE_CLIENT", "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
                  "PSEUDOLIFE_NATIVE_TEST_BINARY", "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
-                 "CARGO_TARGET_DIR"):
+                 "CARGO_TARGET_DIR", "PSEUDOLIFE_SUITE_PC_UNAVAILABLE", "PSEUDOLIFE_SUITE_CHOSEN",
+                 "PSEUDOLIFE_SUITE_REMOTE", "PSEUDOLIFE_SUITE_WHERE"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -1459,9 +1460,14 @@ _STUB_WSL = r'''#!/bin/bash
 # wsl.exe as ops/remote-suite.ps1 and ops/wsl-suite.ps1 call it.
 case "$*" in
     *wslpath*) printf '%s\n' "${@: -1}" ;;
-    *"sh -c"*) exit 0 ;;  # the suite lock probe: free
+    *"sh -c"*)  # the suite lock probe: STUB_LOCAL_STATES answers in turn (default free)
+        n=$(cat "$STUB_LOCAL_PROBES" 2>/dev/null || echo 0)
+        [[ -n "${STUB_LOCAL_PROBES:-}" ]] && echo $((n + 1)) > "$STUB_LOCAL_PROBES"
+        IFS=, read -ra states <<< "${STUB_LOCAL_STATES:-0}"
+        exit "${states[$(( n < ${#states[@]} ? n : ${#states[@]} - 1 ))]}" ;;
     *wsl-suite.sh*)
-        printf 'switch=%s wslenv=%s\n' "${PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}" "${WSLENV:-}" > "$WSL_CALLS"
+        printf 'switch=%s\nwslenv=%s\nunavailable=%s\n' "${PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}" "${WSLENV:-}" \
+            "${PSEUDOLIFE_SUITE_PC_UNAVAILABLE:-}" > "$WSL_CALLS"
         if [ "${PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}" = 1 ]; then
             echo "wsl-suite: real client: yes, pseudolife-stdio built from $PSEUDOLIFE_SUITE_COMMIT (dev profile, --locked; pseudolife-mcp 1.2.3), at ~/v/native-client/pseudolife-stdio"
         else
@@ -1472,30 +1478,39 @@ esac
 '''
 
 
-def _remote_suite(tmp_path: Path, branch: str, **env: str | None):
-    """ops/remote-suite.ps1 and ops/wsl-suite.ps1, committed in a repository
-    of their own on `branch`, with a wsl.exe stand-in; returns the run and
-    the result JSON it wrote."""
+def _remote_suite(tmp_path: Path, branch: str, *, origin: bool = False,
+                  script: str = "remote-suite.ps1", **env: str | None):
+    """ops/remote-suite.ps1 (or `script`), ops/wsl-suite.ps1 and
+    ops/suite-availability.ps1, committed in a repository of their own on
+    `branch` (pushed to a bare origin when `origin`), with a wsl.exe
+    stand-in; returns the run, the result JSON it wrote and the commit."""
     repo = tmp_path / "repo"
     (repo / "ops").mkdir(parents=True)
-    for name in ("remote-suite.ps1", "wsl-suite.ps1"):
+    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1"):
         shutil.copy(ROOT / "ops" / name, repo / "ops" / name)
     for argv in (["init", "-q", "-b", branch], ["add", "-A"],
                  ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "x"]):
         subprocess.run(["git", "-C", str(repo), *argv], check=True, capture_output=True)
+    if origin:
+        bare = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True, capture_output=True)
+        # On origin/master too: a commit the remote clone fetches from origin
+        # (one that is not travels as a bundle; the bundle tests below).
+        for argv in (["remote", "add", "origin", str(bare)], ["push", "-q", "origin", branch, f"{branch}:master"]):
+            subprocess.run(["git", "-C", str(repo), *argv], check=True, capture_output=True)
     stubs = tmp_path / "stubs"
-    stubs.mkdir()
+    stubs.mkdir(exist_ok=True)
     (stubs / "wsl.exe").write_text(_STUB_WSL, encoding="utf-8")
     (stubs / "wsl.exe").chmod(0o755)
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     base = {"HOME": str(home), "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
             "WSL_CALLS": str(tmp_path / "wsl-calls"), "PSEUDOLIFE_SUITE_WHERE": "local",
             "PSEUDOLIFE_SUITE_REMOTE": None, "PSEUDOLIFE_WSL_DISTRO": None,
             "PSEUDOLIFE_LEASES_HELD": None, "WSLENV": None,
             "PSEUDOLIFE_TEST_PG_LOGIN_FILE": str(tmp_path / "no-login")}
     base.update(env)
-    proc = subprocess.run([PWSH, "-NoProfile", "-File", str(repo / "ops" / "remote-suite.ps1")],
+    proc = subprocess.run([PWSH, "-NoProfile", "-File", str(repo / "ops" / script)],
                           capture_output=True, text=True, timeout=120, env=hermetic_env(**base))
     results = sorted((home / ".pseudolife-mcp" / "suite-results").glob("*.json"))
     result = json.loads(results[-1].read_text(encoding="utf-8-sig")) if results else None
@@ -1514,7 +1529,7 @@ def test_a_batch_branch_runs_the_real_client_and_records_it(tmp_path):
     proc, result, head = _remote_suite(tmp_path, "integrate/2026-11-16-batch-9")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "is an integration batch, so the run builds the native client" in proc.stdout
-    switch, wslenv = _read(tmp_path / "wsl-calls")[0].split(" ")
+    switch, wslenv = _read(tmp_path / "wsl-calls")[:2]
     assert switch == "switch=1" and "PSEUDOLIFE_SUITE_NATIVE_CLIENT" in wslenv.split("=", 1)[1].split(":")
     assert result["real_client"] is True and result["real_client_commit"] == head
     assert result["real_client_path"] == "~/v/native-client/pseudolife-stdio"
@@ -1529,7 +1544,7 @@ def test_an_ordinary_branch_stays_without_the_real_client_and_says_so(tmp_path):
     proc, result, _ = _remote_suite(tmp_path, "fix/something")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "integration batch" not in proc.stdout
-    assert _read(tmp_path / "wsl-calls")[0].startswith("switch= ")
+    assert _read(tmp_path / "wsl-calls")[0] == "switch="
     assert result["real_client"] is False and result["real_client_commit"] is None
     assert "real client: no" in proc.stdout.splitlines()[-1]
 
@@ -1582,3 +1597,382 @@ def test_a_launcher_that_never_says_leaves_real_client_null(tmp_path, monkeypatc
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert result["real_client"] is None and result["real_client_commit"] is None
     assert "real client: not reported" in proc.stdout.splitlines()[-1]
+
+
+# ── which machine runs a full suite: the remote, and this PC only while its
+#    owner has said it is available (maintainer ruling, 16 November 2026) ──
+
+def _availability(tmp_path: Path, content: str | None, now: str = "2026-11-16T20:00:00+11:00",
+                  unreadable: bool = False) -> dict:
+    """ops/suite-availability.ps1's verdict on a pc-available file."""
+    home = tmp_path / "home"
+    locks = home / ".pseudolife-mcp" / "locks"
+    locks.mkdir(parents=True, exist_ok=True)
+    if content is not None:
+        (locks / "pc-available").write_text(content, encoding="utf-8")
+        if unreadable:
+            (locks / "pc-available").chmod(0)
+    script = (f". '{ROOT / 'ops' / 'suite-availability.ps1'}'; "
+              f"Get-SuiteAvailability '{home}' ([DateTimeOffset]::Parse('{now}')) | ConvertTo-Json -Compress")
+    proc = subprocess.run([PWSH, "-NoProfile", "-Command", script], capture_output=True, text=True,
+                          timeout=60, env=hermetic_env(HOME=str(home)))
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+@_NEEDS_PWSH
+@pytest.mark.parametrize("content, available, why", [
+    (None, False, "no ~/.pseudolife-mcp/locks/pc-available"),
+    ("", True, "until it is removed"),
+    ("# overnight, as the maintainer said\n\n", True, "until it is removed"),
+    ("until=2026-11-17T07:00+11:00\n", True, "until 2026-11-17T07:00+11:00"),
+    # "now" is 2026-11-16T20:00+11:00, 09:00Z: a second later is still open.
+    ("until=2026-11-16T09:00:01Z", True, "until 2026-11-16T09:00:01Z"),
+    # Fail closed: expired (the moment itself included), no offset, garbage,
+    # two settings, a time that does not exist.
+    ("until=2026-11-16T19:59+11:00\n", False, "expired at 2026-11-16T19:59+11:00"),
+    ("until=2026-11-16T09:00:00Z\n", False, "expired at 2026-11-16T09:00:00Z"),
+    ("until=2026-11-17T07:00\n", False, "is not one"),
+    ("yes please\n", False, "is not one"),
+    ("until=2026-11-17T07:00+11:00\nuntil=2026-11-18T07:00+11:00\n", False, "is not one"),
+    ("until=2026-13-45T07:00+11:00\n", False, "does not exist"),
+])
+def test_the_availability_file_is_read_fail_closed(tmp_path, content, available, why):
+    verdict = _availability(tmp_path, content)
+    assert verdict["Available"] is available
+    assert why in verdict["Why"]
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+def test_an_unreadable_availability_file_reads_as_not_available(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root reads a mode-000 file")
+    verdict = _availability(tmp_path, "", unreadable=True)
+    assert verdict["Available"] is False and "cannot be read" in verdict["Why"]
+
+
+_STUB_SSH = r'''#!/bin/bash
+# ssh as ops/remote-suite.ps1 calls it: the suite-lock probe, or the run.
+if [[ "${@: -1}" == *full-suite.lock* ]]; then
+    n=$(cat "$STUB_SSH_PROBES" 2>/dev/null || echo 0)
+    echo $((n + 1)) > "$STUB_SSH_PROBES"
+    # STUB_REMOVE_AT=N: this, the Nth probe, removes STUB_REMOVE_FILE.
+    if [[ "${STUB_REMOVE_AT:-}" == "$((n + 1))" ]]; then rm -f -- "$STUB_REMOVE_FILE"; fi
+    IFS=, read -ra states <<< "${STUB_REMOTE_STATES:-0}"
+    i=$(( n < ${#states[@]} ? n : ${#states[@]} - 1 ))
+    exit "${states[$i]}"
+fi
+cat > /dev/null
+echo ran >> "$SSH_CALLS"
+echo "wsl-suite: real client: no (PSEUDOLIFE_SUITE_NATIVE_CLIENT is off)"
+echo "3 passed in 0.1s"
+'''
+
+
+def _dispatch(tmp_path: Path, *, remote_states: str | None = "0", pc_available: str | None = None,
+              pushed: bool = True, **env: str | None):
+    """ops/remote-suite.ps1 in a repository of its own, with stand-ins for
+    ssh (STUB_REMOTE_STATES: the remote's probe exits in turn, 0 free, 1
+    held, else a failed probe; None configures no remote) and wsl.exe."""
+    stubs = tmp_path / "stubs"
+    stubs.mkdir(parents=True, exist_ok=True)
+    (stubs / "ssh").write_text(_STUB_SSH, encoding="utf-8")
+    (stubs / "ssh").chmod(0o755)
+    home = tmp_path / "home"
+    if pc_available is not None:
+        locks = home / ".pseudolife-mcp" / "locks"
+        locks.mkdir(parents=True, exist_ok=True)
+        (locks / "pc-available").write_text(pc_available, encoding="utf-8")
+    extra = {"PSEUDOLIFE_SUITE_REMOTE": "box" if remote_states is not None else None,
+             "STUB_REMOTE_STATES": remote_states, "STUB_SSH_PROBES": str(tmp_path / "probes"),
+             "SSH_CALLS": str(tmp_path / "ssh-calls"), "PSEUDOLIFE_SUITE_WHERE": None,
+             "PSEUDOLIFE_SUITE_POLL_SECONDS": "0"}
+    extra.update(env)
+    return _remote_suite(tmp_path, "fix/something", origin=pushed, **extra)
+
+
+def _ran_on(tmp_path: Path) -> list[str]:
+    return (["remote"] if _read(tmp_path / "ssh-calls") else []) + \
+           (["local"] if (tmp_path / "wsl-calls").exists() else [])
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_with_a_remote_and_no_availability_only_the_remote_runs_it(tmp_path):
+    proc, result, _ = _dispatch(tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path) == ["remote"] and result["machine"] == "remote"
+    lines = proc.stdout.splitlines()
+    assert any("only the remote machine is a candidate: this PC is not available for full suites "
+               "(no ~/.pseudolife-mcp/locks/pc-available" in ln for ln in lines), lines
+    assert "remote-suite: running on the remote machine: its suite lock is free" in lines
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_held_remote_is_waited_for_while_this_pc_is_not_available(tmp_path):
+    proc, result, _ = _dispatch(tmp_path, remote_states="1,1,0")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path) == ["remote"]
+    assert ("waiting for the remote machine, which is running a full suite; this PC is not "
+            "available for full suites") in proc.stdout
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+@pytest.mark.parametrize("pc_available", ["", "until=2999-01-01T00:00+11:00\n"])
+def test_with_availability_the_remote_comes_first_and_this_pc_takes_the_overflow(tmp_path, pc_available):
+    proc, _, _ = _dispatch(tmp_path / "free", pc_available=pc_available)
+    assert proc.returncode == 0 and _ran_on(tmp_path / "free") == ["remote"], proc.stdout
+
+    proc, result, _ = _dispatch(tmp_path / "held", remote_states="1", pc_available=pc_available)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path / "held") == ["local"] and result["machine"] == "local-wsl"
+    assert ("running on this PC (local WSL): the remote machine is running a full suite and this PC "
+            "is available") in proc.stdout
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_availability_withdrawn_while_waiting_takes_this_pc_out(tmp_path):
+    # Both held at first; the file goes during the wait, and local frees on
+    # the next probe while the remote is still held: without the re-read the
+    # run would take this PC (both reviews of #1634).
+    pc_file = tmp_path / "home" / ".pseudolife-mcp" / "locks" / "pc-available"
+    proc, _, _ = _dispatch(tmp_path, remote_states="1,1,0", pc_available="",
+                           STUB_LOCAL_STATES="1,0", STUB_LOCAL_PROBES=str(tmp_path / "local-probes"),
+                           STUB_REMOVE_AT="1", STUB_REMOVE_FILE=str(pc_file))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path) == ["remote"]
+    assert "this PC is no longer available for full suites (no ~/.pseudolife-mcp/locks/pc-available" in proc.stdout
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_an_expired_availability_is_no_availability(tmp_path):
+    proc, _, _ = _dispatch(tmp_path, remote_states="1,0", pc_available="until=2020-01-01T00:00Z\n")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path) == ["remote"]
+    assert "expired at 2020-01-01T00:00Z" in proc.stdout
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_remote_that_cannot_be_probed_is_a_refusal_without_availability(tmp_path):
+    proc, result, _ = _dispatch(tmp_path, remote_states="255")
+    assert proc.returncode == 2
+    assert "cannot probe the remote machine's suite lock (error (exit 255))" in proc.stderr
+    assert "this PC is not available for full suites" in proc.stderr
+    assert _ran_on(tmp_path) == [] and result is None
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_remote_that_cannot_be_probed_falls_to_an_available_pc(tmp_path):
+    proc, _, _ = _dispatch(tmp_path, remote_states="255", pc_available="")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path) == ["local"]
+    assert "the remote machine could not be probed (error (exit 255)) and this PC is available" in proc.stdout
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_forcing_local_overrides_the_rule_and_says_so(tmp_path):
+    proc, result, _ = _dispatch(tmp_path, PSEUDOLIFE_SUITE_WHERE="local")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path) == ["local"]
+    assert proc.stdout.splitlines()[0].startswith(
+        "remote-suite: PSEUDOLIFE_SUITE_WHERE=local overrides the availability rule")
+    assert "running on this PC (local WSL): forced by PSEUDOLIFE_SUITE_WHERE=local" in proc.stdout
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_with_no_remote_configured_this_pc_runs_it_as_before(tmp_path):
+    proc, result, _ = _dispatch(tmp_path, remote_states=None)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _ran_on(tmp_path) == ["local"] and "availability" not in proc.stdout
+    assert "running on this PC (local WSL): no remote machine is configured" in proc.stdout
+
+
+# ops/wsl-suite.ps1 started directly: it sends the reason across, and
+# ops/wsl-suite.sh refuses a full run with it (one classifier: plan_run).
+
+def _direct_wsl(tmp_path: Path, **env: str | None) -> tuple[subprocess.CompletedProcess, str]:
+    """ops/wsl-suite.ps1 run directly, and the wsl.exe stand-in's record."""
+    env.setdefault("PSEUDOLIFE_SUITE_WHERE", None)  # _remote_suite's default forces local
+    proc, _, _ = _remote_suite(tmp_path, "fix/something", script="wsl-suite.ps1", **env)
+    return proc, "\n".join(_read(tmp_path / "wsl-calls"))
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+@pytest.mark.parametrize("env, sent", [
+    ({"PSEUDOLIFE_SUITE_REMOTE": "box"}, True),
+    ({"PSEUDOLIFE_SUITE_REMOTE": "box", "PC_AVAILABLE": ""}, False),
+    ({"PSEUDOLIFE_SUITE_REMOTE": "box", "PSEUDOLIFE_SUITE_CHOSEN": "local"}, False),
+    ({"PSEUDOLIFE_SUITE_REMOTE": "box", "PSEUDOLIFE_SUITE_WHERE": "local"}, False),
+    ({"PSEUDOLIFE_SUITE_REMOTE": None}, False),
+])
+def test_a_direct_run_sends_the_reason_only_when_the_rule_applies(tmp_path, env, sent):
+    env = dict(env)
+    if "PC_AVAILABLE" in env:
+        locks = tmp_path / "home" / ".pseudolife-mcp" / "locks"
+        locks.mkdir(parents=True)
+        (locks / "pc-available").write_text(env.pop("PC_AVAILABLE"), encoding="utf-8")
+    proc, call = _direct_wsl(tmp_path, **env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert ("unavailable=no ~/.pseudolife-mcp/locks/pc-available" in call) is sent, call
+    wslenv = next(line for line in call.splitlines() if line.startswith("wslenv="))
+    assert ("PSEUDOLIFE_SUITE_PC_UNAVAILABLE" in wslenv.split("=", 1)[1].split(":")) is sent, call
+    assert ("overrides the availability rule" in proc.stdout) is (env.get("PSEUDOLIFE_SUITE_WHERE") == "local")
+
+
+@_LINUX_ONLY
+def test_wsl_suite_sh_refuses_a_full_run_while_this_pc_is_not_available(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_PC_UNAVAILABLE="no ~/.pseudolife-mcp/locks/pc-available")
+    assert proc.returncode == 2
+    assert "a full suite runs on the remote machine while this PC is not available" in proc.stderr
+    assert "$env:PSEUDOLIFE_SUITE_WHERE='remote'; pwsh -NoProfile -File ops/remote-suite.ps1" in proc.stderr
+    assert not (tmp_path / "uv-called").exists() and not (tmp_path / "argv").exists()
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("args", [("tests/test_ci_native_client.py",), ("tests/",), ("-x",),
+                                  ("-k", "not slow")])
+def test_a_selection_goes_to_pytest_with_the_marker_for_conftest_to_classify(tmp_path, args):
+    # `tests/`, `-x` and an exclude-only `-k` are the whole suite too, which
+    # plan_run cannot tell; tests/conftest.py refuses those with the lock's
+    # own classifier (test_suite_lock.py), a targeted one goes ahead.
+    venv_python = tmp_path / "home" / "v" / "bin" / "python"
+    record = tmp_path / "env"
+    proc = _native_run(tmp_path, *args,
+                       PSEUDOLIFE_SUITE_PC_UNAVAILABLE="no ~/.pseudolife-mcp/locks/pc-available")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _read(tmp_path / "argv")[:2 + len(args)] == ["-m", "pytest", *args]
+    venv_python.write_text(f"#!/bin/bash\nprintf '%s' \"${{PSEUDOLIFE_SUITE_PC_UNAVAILABLE-unset}}\" > '{record}'\n",
+                           encoding="utf-8")
+    proc = _native_run(tmp_path / "again", *args, HOME=str(tmp_path / "home"),
+                       PSEUDOLIFE_SUITE_VENV=str(tmp_path / "home" / "v"),
+                       PSEUDOLIFE_SUITE_PC_UNAVAILABLE="no ~/.pseudolife-mcp/locks/pc-available")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert record.read_text(encoding="utf-8") == "no ~/.pseudolife-mcp/locks/pc-available"
+
+
+# The remote machine fetches a pushed commit from origin; one that is not on
+# origin travels inside the dispatch as a bundle, and nothing is pushed.
+# Here ssh runs the dispatch body for real against a local "remote" clone;
+# only its last step (sudo systemd-run ... wsl-suite.sh) is a stand-in.
+
+_STUB_SSH_RUNS_BODY = r'''#!/bin/bash
+if [[ "${@: -1}" == *full-suite.lock* ]]; then
+    # MOVE_REPO: the first probe moves that checkout to another commit and
+    # finds the remote busy, as a checkout switched while the run waits.
+    if [[ -n "${MOVE_REPO:-}" && ! -e "$MOVE_REPO.moved" ]]; then
+        touch "$MOVE_REPO.moved"
+        git -C "$MOVE_REPO" switch -q -c elsewhere master
+        echo other > "$MOVE_REPO/other.txt"
+        git -C "$MOVE_REPO" add other.txt
+        git -C "$MOVE_REPO" -c user.email=t@example.com -c user.name=t commit -q -m other
+        exit 1
+    fi
+    exit 0
+fi
+HOME="$REMOTE_HOME" PATH="$FAKE_BIN:$PATH" PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5999 bash -c "${@: -1}"
+'''
+_FAKE_SUDO = r'''#!/bin/bash
+# The dispatch's last step: report what the remote clone now holds.
+repo="${PSEUDOLIFE_SUITE_GIT_COMMON%/.git}"
+got="$(git -C "$repo" rev-parse --verify --quiet "refs/heads/suite/$PSEUDOLIFE_SUITE_COMMIT" || echo missing)"
+echo "ran $PSEUDOLIFE_SUITE_COMMIT $got" >> "$SSH_CALLS"
+echo "wsl-suite: real client: no (PSEUDOLIFE_SUITE_NATIVE_CLIENT is off)"
+echo "3 passed in 0.1s"
+'''
+
+
+def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, to_master: bool = False):
+    repo, bare = tmp_path / "repo", tmp_path / "origin.git"
+    (repo / "ops").mkdir(parents=True)
+    for name in ("remote-suite.ps1", "wsl-suite.ps1", "suite-availability.ps1", "wsl-suite.sh"):
+        shutil.copy(ROOT / "ops" / name, repo / "ops" / name)
+    def git(cwd, *argv):
+        return subprocess.run(["git", "-C", str(cwd), "-c", "user.email=t@example.com",
+                               "-c", "user.name=t", *argv],
+                              check=True, capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "master", str(bare)], check=True)
+    git(tmp_path, "init", "-q", "-b", "master", str(repo))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    git(repo, "remote", "add", "origin", str(bare))
+    git(repo, "push", "-q", "origin", "master")
+    git(repo, "switch", "-q", "-c", "integrate/2026-11-16-batch-9")
+    (repo / "batch.txt").write_text("the batch's own change\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "batch merge")
+    head = git(repo, "rev-parse", "HEAD")
+    if push_head:
+        git(repo, "push", "-q", "origin", "HEAD:master" if to_master else "HEAD")
+    remote_home = tmp_path / "remote-home"
+    (remote_home / "projects").mkdir(parents=True)
+    subprocess.run(["git", "clone", "-q", str(bare), str(remote_home / "projects" / "Pseudolife-MCP")],
+                   check=True, capture_output=True)
+    stubs, fake_bin = tmp_path / "stubs", tmp_path / "fake-bin"
+    stubs.mkdir()
+    fake_bin.mkdir()
+    for path, body in ((stubs / "ssh", _STUB_SSH_RUNS_BODY), (stubs / "wsl.exe", _STUB_WSL),
+                       (fake_bin / "sudo", _FAKE_SUDO)):
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"HOME": str(home), "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+           "REMOTE_HOME": str(remote_home), "FAKE_BIN": str(fake_bin),
+           "SSH_CALLS": str(tmp_path / "ssh-calls"), "WSL_CALLS": str(tmp_path / "wsl-calls"),
+           "PSEUDOLIFE_SUITE_REMOTE": "box", "PSEUDOLIFE_SUITE_WHERE": "remote",
+           "PSEUDOLIFE_SUITE_NATIVE_CLIENT": None, "PSEUDOLIFE_MCP_TOKEN": None,
+           "PSEUDOLIFE_WSL_DISTRO": None, "WSLENV": None, "PSEUDOLIFE_SUITE_POLL_SECONDS": "0",
+           "MOVE_REPO": str(repo) if move_head else None}
+    proc = subprocess.run([PWSH, "-NoProfile", "-File", str(repo / "ops" / "remote-suite.ps1")],
+                          capture_output=True, text=True, timeout=120, env=hermetic_env(**env))
+    on_origin = subprocess.run(["git", "-C", str(bare), "cat-file", "-e", f"{head}^{{commit}}"],
+                               capture_output=True).returncode == 0
+    return proc, head, on_origin
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+@pytest.mark.parametrize("push_head, to_master", [(False, False), (True, False), (True, True)])
+def test_the_remote_machine_gets_the_commit_and_an_unpushed_one_is_never_pushed(tmp_path, push_head, to_master):
+    # Unpushed and a pushed branch travel as a bundle (nothing rests on
+    # remote-tracking refs); a commit on origin/master is fetched from origin.
+    proc, head, on_origin = _bundle_world(tmp_path, push_head=push_head, to_master=to_master)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _read(tmp_path / "ssh-calls") == [f"ran {head} {head}"]
+    assert on_origin is push_head          # a bundle pushes nothing
+    assert ("travels as a bundle" in proc.stdout) is (not to_master)
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_the_bundle_carries_the_commit_chosen_even_if_the_checkout_moved_while_waiting(tmp_path):
+    proc, head, on_origin = _bundle_world(tmp_path, push_head=False, move_head=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _read(tmp_path / "ssh-calls") == [f"ran {head} {head}"]
+    assert not on_origin
+    # The private ref that named it for the bundle is gone again.
+    refs = subprocess.run(["git", "-C", str(tmp_path / "repo"), "for-each-ref", "refs/pseudolife-suite-bundle/"],
+                          capture_output=True, text=True, check=True).stdout
+    assert refs == ""

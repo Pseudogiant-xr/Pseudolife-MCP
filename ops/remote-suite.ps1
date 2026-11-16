@@ -1,16 +1,33 @@
-# Run this checkout's full suite on the first free machine: local WSL
-# (ops/wsl-suite.ps1) or a second Linux machine over SSH.
+# Run this checkout's full suite on a second Linux machine over SSH, or in
+# local WSL (ops/wsl-suite.ps1) when that is allowed.
 #
-#   pwsh ops/remote-suite.ps1                 # the full suite, wherever is free
+#   pwsh ops/remote-suite.ps1                 # the full suite, where allowed
 #   pwsh ops/remote-suite.ps1 -q -n 2         # still the full suite (display
 #                                             # and worker options only)
 #   pwsh ops/remote-suite.ps1 tests/x.py -x   # any other pytest arguments
 #   $env:PSEUDOLIFE_SUITE_WHERE='remote'      # force a machine: local | remote
 #
-# Each machine allows one full suite (its own lock), so two machines give
-# two slots. "Free" is that machine's suite lock, probed with flock as the
-# suite itself takes it: a free lock is tried, a held one waits, and the
-# script waits for whichever machine frees first, saying so once a minute.
+# Which machine. With a remote machine configured (below), it is the only
+# candidate, because a full suite in WSL overloads this PC while its owner
+# uses it; this PC is a candidate too only while its owner has said it is
+# available: the file ~/.pseudolife-mcp/locks/pc-available
+# (ops/suite-availability.ps1 has the format; expired, unreadable or
+# malformed reads as not available). With it, the remote still comes first
+# and local WSL takes the overflow, or the run when the remote cannot be
+# probed. PSEUDOLIFE_SUITE_WHERE=local forces this PC and says it overrides
+# that rule; =remote forces the remote. With no remote configured at all,
+# local WSL runs as it always has. Nothing guesses availability from
+# processes, the GPU, input or the hour. The run's first lines say which
+# machine it chose and why. The availability file is read again on every
+# probe, so a statement that expires or is removed while the run waits
+# takes this PC out. The rule covers every run of this script, the
+# full-suite dispatcher; a targeted run on this PC uses ops/wsl-suite.ps1.
+#
+# Each machine allows one full suite (its own lock). "Free" is that
+# machine's suite lock, probed with flock as the suite itself takes it: a
+# free lock is tried, a held one waits, and the script waits for whichever
+# candidate frees first, saying so once a minute
+# (PSEUDOLIFE_SUITE_POLL_SECONDS, default 20, sets how often it probes).
 #
 # The remote machine is configured in ~/.pseudolife-mcp/locks/full-suite.remote
 # (one key=value per line; never in the repository, it names a host):
@@ -26,9 +43,15 @@
 #   daemon_url=<board daemon URL as seen from there>   (optional)
 # PSEUDOLIFE_SUITE_REMOTE overrides ssh=. Without either, only local runs.
 #
-# Both machines test the committed HEAD: a dirty checkout is refused, and a
-# remote run also needs the commit pushed (the remote clone fetches it from
-# origin). The remote side runs that commit's own ops/wsl-suite.sh in its
+# Both machines test the committed HEAD: a dirty checkout is refused. The
+# remote clone fetches a commit on origin/master from origin; any other (a
+# pull request's head, an integration batch's head before `open`, a local
+# branch) travels inside the dispatch as a git bundle of what origin/master
+# lacks (base64 on SSH's stdin), which that clone fetches after origin, so
+# nothing is pushed to the public repository for a run and nothing rests on
+# this checkout's remote-tracking refs, which can be stale or another
+# remote's.
+# The remote side runs that commit's own ops/wsl-suite.sh in its
 # copy mode, under a systemd scope with MemoryMax, as the SSH user (who needs
 # password-free sudo for systemd-run that may preserve the environment:
 # NOPASSWD:SETENV:, or NOPASSWD: ALL). It refuses to start unless env=
@@ -69,6 +92,7 @@
 $ErrorActionPreference = 'Stop'
 # Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
 function Fail([string]$message) { [Console]::Error.WriteLine("remote-suite: $message"); exit 2 }
+. (Join-Path $PSScriptRoot 'suite-availability.ps1')
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $name = Split-Path $root -Leaf
@@ -102,14 +126,21 @@ $where = $env:PSEUDOLIFE_SUITE_WHERE
 if ($where -and $where -notin 'local', 'remote') { Fail "PSEUDOLIFE_SUITE_WHERE must be local or remote" }
 if ($where -eq 'remote' -and -not $remote) { Fail "no remote configured ($cfgFile ssh=...)" }
 
-$pushed = $false
+$short = $sha.Substring(0, 8)
+$available = $null
+if ($remote -and $where -ne 'remote') { $available = Get-SuiteAvailability $home_ }
+if ($where -eq 'local' -and $remote -and -not $available.Available) {
+    Write-Host ("remote-suite: PSEUDOLIFE_SUITE_WHERE=local overrides the availability rule: running on this PC " +
+        "although it is not available for full suites ($($available.Why))")
+}
+
+# A commit origin/master does not contain reaches the remote machine as a
+# bundle (the header); decided here, made only if the remote is chosen.
+$onMaster = $false
 if ($remote -and $where -ne 'local') {
-    git -C $root fetch --quiet origin 2>$null
-    $pushed = [bool](git -C $root branch -r --contains $sha 2>$null)
-    if (-not $pushed) {
-        if ($where -eq 'remote') { Fail "$($sha.Substring(0,8)) is not on origin; push it first" }
-        Write-Host "remote-suite: $($sha.Substring(0,8)) is not pushed, so only local WSL is a candidate"
-    }
+    git -C $root fetch --quiet origin master 2>$null
+    git -C $root merge-base --is-ancestor $sha 'origin/master' 2>$null
+    $onMaster = $LASTEXITCODE -eq 0
 }
 
 # A machine's suite lock: exit 0 free (or never created), 1 held. Anything
@@ -122,30 +153,75 @@ function Get-State([string]$machine) {
     switch ($LASTEXITCODE) { 0 { 'free' } 1 { 'held' } default { "error (exit $LASTEXITCODE)" } }
 }
 
-$candidates = switch ($where) {
+# The candidates, in order. @(): a switch that yields one array unrolls it,
+# and a lone string's [0] is its first character.
+$candidates = @(switch ($where) {
     'local' { @('local') }
     'remote' { @('remote') }
-    default { if ($remote -and $pushed) { @('local', 'remote') } else { @('local') } }
+    default {
+        if (-not $remote) { @('local') }
+        elseif ($available.Available) { @('remote', 'local') }
+        else { @('remote') }
+    }
+})
+if (-not $where -and $remote -and -not $available.Available) {
+    Write-Host "remote-suite: only the remote machine is a candidate: this PC is not available for full suites ($($available.Why))"
 }
-$target = $null; $lastNote = [datetime]::MinValue
+function Get-Reason([string]$machine, [string]$remoteState) {
+    if ($where) { return "forced by PSEUDOLIFE_SUITE_WHERE=$where" }
+    if (-not $remote) { return 'no remote machine is configured' }
+    if ($machine -eq 'remote') { return 'its suite lock is free' }
+    if ($remoteState -like 'error*') {
+        return "the remote machine could not be probed ($remoteState) and this PC is available ($($available.Why))"
+    }
+    "the remote machine is running a full suite and this PC is available ($($available.Why))"
+}
+$poll = 20
+if ($env:PSEUDOLIFE_SUITE_POLL_SECONDS -match '^\d+$') { $poll = [int]$env:PSEUDOLIFE_SUITE_POLL_SECONDS }
+$target = $null; $reason = $null; $remoteState = $null; $lastNote = [datetime]::MinValue
 while (-not $target) {
+    # Read again on every probe: an `until` that passes, or a file removed,
+    # while this run waits takes this PC out before it could be chosen.
+    if (-not $where -and $remote -and $candidates -contains 'local') {
+        $available = Get-SuiteAvailability $home_
+        if (-not $available.Available) {
+            $candidates = @($candidates | Where-Object { $_ -ne 'local' })
+            if (-not $candidates) {
+                Fail "this PC is no longer available for full suites ($($available.Why)) and the remote machine could not be probed, so nothing runs"
+            }
+            Write-Host "remote-suite: this PC is no longer available for full suites ($($available.Why)); only the remote machine is a candidate"
+        }
+    }
     foreach ($c in @($candidates)) {
         $state = Get-State $c
-        if ($state -eq 'free') { $target = $c; break }
+        if ($c -eq 'remote') { $remoteState = $state }
+        if ($state -eq 'free') { $target = $c; $reason = Get-Reason $c $remoteState; break }
         if ($state -ne 'held') {
-            if ($candidates.Count -eq 1) { Fail "cannot probe $c's suite lock: $state" }
+            if ($candidates.Count -eq 1) {
+                if ($c -eq 'remote' -and $remote -and -not $where -and -not $available.Available) {
+                    Fail ("cannot probe the remote machine's suite lock ($state), and this PC is not available " +
+                        "for full suites ($($available.Why)), so nothing runs; fix the remote, or wait for this PC to be available")
+                }
+                Fail "cannot probe $c's suite lock: $state"
+            }
             Write-Host "remote-suite: cannot probe $c's suite lock ($state); leaving it out"
             $candidates = @($candidates | Where-Object { $_ -ne $c })
         }
     }
     if (-not $target) {
         if (((Get-Date) - $lastNote).TotalSeconds -ge 60) {
-            Write-Host "remote-suite: waiting; every candidate machine is running a full suite ($($candidates -join ', '))"
+            if ($candidates.Count -eq 1 -and $candidates[0] -eq 'remote' -and $remote -and -not $where -and -not $available.Available) {
+                Write-Host ("remote-suite: waiting for the remote machine, which is running a full suite; " +
+                    "this PC is not available for full suites ($($available.Why))")
+            } else {
+                Write-Host "remote-suite: waiting; every candidate machine is running a full suite ($($candidates -join ', '))"
+            }
             $lastNote = Get-Date
         }
-        Start-Sleep -Seconds 20
+        Start-Sleep -Seconds $poll
     }
 }
+Write-Host "remote-suite: running on $(if ($target -eq 'remote') { 'the remote machine' } else { 'this PC (local WSL)' }): $reason"
 
 $results = Join-Path $home_ '.pseudolife-mcp\suite-results'
 New-Item -ItemType Directory -Force -Path $results | Out-Null
@@ -157,12 +233,17 @@ Write-Host "remote-suite: $($sha.Substring(0,8)) of $name on $target; log $log"
 if ($target -eq 'local') {
     # Restored afterwards, as ops/wsl-suite.ps1 restores what it sets.
     $savedNative = $env:PSEUDOLIFE_SUITE_NATIVE_CLIENT
+    $savedChosen = $env:PSEUDOLIFE_SUITE_CHOSEN
     try {
         $env:PSEUDOLIFE_SUITE_NATIVE_CLIENT = $nativeClient
+        # This script chose local WSL by the rule above, so ops/wsl-suite.ps1
+        # does not refuse it as a direct full run.
+        $env:PSEUDOLIFE_SUITE_CHOSEN = 'local'
         & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'wsl-suite.ps1') @args 2>&1 | Tee-Object -FilePath $log
         $code = $LASTEXITCODE
     } finally {
         $env:PSEUDOLIFE_SUITE_NATIVE_CLIENT = $savedNative
+        $env:PSEUDOLIFE_SUITE_CHOSEN = $savedChosen
     }
 } else {
     function Quote([string]$s) { "'" + $s.Replace("'", "'\''") + "'" }
@@ -177,7 +258,46 @@ if ($target -eq 'local') {
     $lines.Add('name=' + (Quote $name))
     $lines.Add('memory=' + (Quote $cfg['memory']))
     $lines.Add('envfile="' + $(if ($cfg['env']) { $cfg['env'].Replace('~', '$HOME') } else { '' }) + '"')
-    $lines.Add('git -C "$repo" fetch --quiet origin "$sha"')
+    if ($onMaster) {
+        $lines.Add('git -C "$repo" fetch --quiet origin "$sha"')
+    } else {
+        # The commit travels in the body: a bundle of what origin/master
+        # lacks, decoded there and fetched after origin (which holds its
+        # prerequisites) into the ref the copy below is checked out from.
+        # The commit chosen at the start, not whatever HEAD is now: the
+        # checkout may have moved while the run waited (Codex review). A
+        # bundle names refs, so a private one points at it for the moment.
+        $bundleFile = Join-Path ([IO.Path]::GetTempPath()) "pseudolife-suite-$short-$PID.bundle"
+        $bundleRef = "refs/pseudolife-suite-bundle/$sha-$PID"
+        try {
+            $said = git -C $root update-ref $bundleRef $sha 2>&1
+            if ($LASTEXITCODE -ne 0) { Fail "could not pin $short for its bundle: $said" }
+            $said = git -C $root bundle create $bundleFile $bundleRef '^origin/master' 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Fail "could not bundle $short against origin/master for the remote machine (fetch origin, or push it): $said"
+            }
+            $bytes = [IO.File]::ReadAllBytes($bundleFile)
+            $encoded = [Convert]::ToBase64String($bytes, 'InsertLineBreaks')
+            Write-Host ("remote-suite: $short is not on origin/master, so it travels as a bundle of what " +
+                "origin/master lacks ($([Math]::Ceiling($bytes.Length / 1KB)) KB); nothing is pushed")
+        } finally {
+            git -C $root update-ref -d $bundleRef *> $null
+            Remove-Item -LiteralPath $bundleFile -ErrorAction SilentlyContinue
+        }
+        $lines.Add('bundle="$(mktemp)"')
+        # Gone on any failure below; the exec at the end runs no EXIT trap,
+        # and by then it is removed.
+        $lines.Add('trap ''rm -f -- "$bundle"'' EXIT')
+        $lines.Add("base64 -d > `"`$bundle`" <<'PSEUDOLIFE_SUITE_BUNDLE'")
+        foreach ($chunk in ($encoded -split "`r?`n")) { $lines.Add($chunk) }
+        $lines.Add('PSEUDOLIFE_SUITE_BUNDLE')
+        # Origin for the bundle's prerequisites; if it cannot be reached the
+        # clone may hold them already, and the bundle fetch says if not.
+        $lines.Add('git -C "$repo" fetch --quiet origin || echo "remote-suite: could not fetch origin there; trying the bundle with what the clone holds" >&2')
+        $lines.Add('git -C "$repo" fetch --quiet "$bundle" ' + (Quote "+${bundleRef}:refs/heads/suite/$sha"))
+        $lines.Add('rm -f -- "$bundle"; trap - EXIT')
+        $lines.Add('test "$(git -C "$repo" rev-parse --verify --quiet "refs/heads/suite/$sha")" = "$sha"')
+    }
     # Named by commit, not checkout: every Codex worktree shares one name,
     # and two dispatches of different commits raced on one ref.
     $lines.Add('git -C "$repo" update-ref "refs/heads/suite/$sha" "$sha"')

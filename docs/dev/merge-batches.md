@@ -337,7 +337,7 @@ other package path is refused, label or no label.
 python ops/integrate.py status
 python ops/integrate.py build --dry-run
 python ops/integrate.py build            # with the Rust compile check when rust/ changed
-PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1   # builds the native client too
+python ops/integrate.py suite > <log> 2>&1   # the full suite on the box, with the native client
 python -m pytest -q -p no:cacheprovider --require-databases <the RUST_HARNESS paths build prints> > <log> 2>&1
 python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
   --harness-note "<count> passed at <head short sha>"
@@ -511,11 +511,24 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
 
 ## Validating it
 
-1. The local WSL full suite runs on the batch head between `build` and
-   `open`, before any CI. With #846's four-worker launcher it takes about
-   10 minutes, a fraction of one CI run. Use `PSEUDOLIFE_SUITE_WHERE=local`
-   so it runs in WSL on the unpushed branch; a run on the Linux box needs
-   the commit pushed.
+1. The full suite runs on the batch head between `build` and `open`,
+   before any CI. With #846's four-worker launcher it takes about 10
+   minutes, a fraction of one CI run.
+   - **It runs on the Linux box by default.** A full suite in WSL overloads
+     the maintainer's PC while he uses it, so `python ops/integrate.py
+     suite` runs it there (maintainer ruling, 16 November 2026). It runs
+     `ops/remote-suite.ps1` with `PSEUDOLIFE_SUITE_WHERE=remote` and the
+     native client on, then names the result JSON for `open --suite`. The
+     batch head is not on origin yet, so `ops/remote-suite.ps1` carries it
+     inside the dispatch as a git bundle of what `origin/master` lacks. The
+     box's clone fetches origin, then the bundle, into the ref its test copy
+     is checked out from. Nothing is pushed before `open`.
+   - **This PC only when he says so.** Local WSL is a candidate only while
+     `~/.pseudolife-mcp/locks/pc-available` says the PC is available
+     (`docs/dev/dev-machines.md` "Sharing"). Then
+     `PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1` runs the
+     unpushed batch in WSL; without it that command overrides the rule and
+     says so.
    - **It runs the real native client.** The hosted `test` lane builds
      `pseudolife-stdio` and exports `PSEUDOLIFE_NATIVE_TEST_BINARY` with
      `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1`

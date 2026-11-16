@@ -268,6 +268,19 @@ plan_run() {
 }
 plan_run "$@"
 
+# A full run started directly on a host whose full suites belong on its
+# remote machine while this PC is not available (ops/wsl-suite.ps1 sends the
+# reason; ops/suite-availability.ps1 has the rule). The default full run is
+# refused here, before anything is fetched; arguments passed to pytest
+# unchanged (`tests/`, `-x`, `-k "not x"` can still be the whole suite) keep
+# the marker, and tests/conftest.py refuses a full one with the lock's own
+# classifier (tests/suite_lock.py pc_unavailable_refusal) and drops it, so
+# the run's children never see it.
+if [[ -n "${PSEUDOLIFE_SUITE_PC_UNAVAILABLE:-}" && "$run_note" != pass ]]; then
+    echo "wsl-suite: a full suite runs on the remote machine while this PC is not available for full suites (${PSEUDOLIFE_SUITE_PC_UNAVAILABLE}); run it there: \$env:PSEUDOLIFE_SUITE_WHERE='remote'; pwsh -NoProfile -File ops/remote-suite.ps1 (an integration batch: python ops/integrate.py suite), or set PSEUDOLIFE_SUITE_WHERE=local to override; refusing" >&2
+    exit 2
+fi
+
 # Whether the run builds the native client and runs the tests that need it
 # (PSEUDOLIFE_SUITE_NATIVE_CLIENT; see native_client below), read before
 # anything is fetched so a mistyped value is refused at once.

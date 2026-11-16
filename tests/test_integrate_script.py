@@ -4195,3 +4195,111 @@ def test_a_waiting_release_cut_shows_its_unfolded_fragments(world, capsys):
 
     out = capsys.readouterr().out
     assert "#10, once ready: it is a release cut, but merging it onto master leaves 1 changelog fragment" in out, out
+
+
+# ── `suite`: the batch's full suite on the remote machine (16 November 2026) ──
+
+def _origin_refs(world) -> list[str]:
+    return _git(world.origin, "for-each-ref", "--format=%(refname)").splitlines()
+
+
+def _fake_remote_suite(world, monkeypatch, tmp_path, *, code=0, writes=True):
+    """Stand in for ops/remote-suite.ps1 (which carries the batch head as a
+    bundle): record what origin holds while it runs, and write its result."""
+    results = tmp_path / "suite-results"
+    results.mkdir(exist_ok=True)
+    seen = []
+
+    def run(head):
+        seen.append(_origin_refs(world))
+        if writes:
+            (results / f"20261116-150000-remote-{head[:8]}.json").write_text(
+                json.dumps({"machine": "remote", "commit": head, "args": [], "exit_code": code}),
+                encoding="utf-8")
+        return code
+
+    monkeypatch.setattr(integrate, "_run_remote_suite", run)
+    monkeypatch.setattr(integrate, "_suite_results_dir", lambda: results)
+    return seen, results
+
+
+def test_suite_runs_the_batch_remotely_and_pushes_nothing(world, monkeypatch, tmp_path, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+    before = _origin_refs(world)
+    seen, results = _fake_remote_suite(world, monkeypatch, tmp_path)
+
+    assert integrate.main(["suite"]) == 0
+
+    out = capsys.readouterr().out
+    assert seen == [before] and _origin_refs(world) == before   # nothing pushed
+    assert out.splitlines()[0] == (f"integrate: running {head[:12]}'s full suite on the remote machine, "
+                                   "with the real native client; the batch head travels as a bundle, "
+                                   "nothing is pushed")
+    assert f"open --suite {results / f'20261116-150000-remote-{head[:8]}.json'}" in out
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("failure", ["red", "no-result"])
+def test_suite_fails_with_the_run_and_names_no_result_to_open(world, monkeypatch, tmp_path, capsys, failure):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+    if failure == "red":
+        _fake_remote_suite(world, monkeypatch, tmp_path, code=1)
+        assert integrate.main(["suite"]) == 1
+        assert "open --suite" not in capsys.readouterr().out
+    else:
+        _fake_remote_suite(world, monkeypatch, tmp_path, writes=False)
+        assert integrate.main(["suite"]) == 1
+        assert "wrote no result" in capsys.readouterr().err
+
+
+def test_the_remote_run_is_asked_for_the_remote_and_the_real_client(world, monkeypatch):
+    calls = []
+
+    class Done:
+        returncode = 7
+
+    monkeypatch.setattr(integrate, "_out", lambda *args: str(world.work))
+    monkeypatch.setattr(integrate.subprocess, "run", lambda argv, **kw: calls.append((argv, kw)) or Done())
+    assert integrate._run_remote_suite("0" * 40) == 7
+    ((argv, kw),) = calls
+    assert argv[:3] == ["pwsh", "-NoProfile", "-File"] and argv[3].endswith("remote-suite.ps1")
+    assert kw["env"]["PSEUDOLIFE_SUITE_WHERE"] == "remote"
+    assert kw["env"]["PSEUDOLIFE_SUITE_NATIVE_CLIENT"] == "1"
+
+
+@pytest.mark.parametrize("case", ["head-moved", "not-a-batch", "dirty"])
+def test_suite_refuses_anything_but_the_built_batch(world, monkeypatch, tmp_path, capsys, case):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    capsys.readouterr()
+    seen, _ = _fake_remote_suite(world, monkeypatch, tmp_path)
+    if case == "head-moved":
+        (world.work / "fix.txt").write_text("a fix\n", encoding="utf-8")
+        _git(world.work, "add", "fix.txt")
+        _git(world.work, "commit", "-q", "-m", "fix inside the batch")
+        expect = "nothing is fixed inside a batch"
+    elif case == "not-a-batch":
+        _git(world.work, "switch", "-q", "--detach", "origin/master")
+        expect = "build` first"
+    else:
+        (world.work / "a.txt").write_text("edited\n", encoding="utf-8")
+        expect = "uncommitted changes"
+
+    assert integrate.main(["suite"]) == 2
+
+    assert expect in capsys.readouterr().err
+    assert seen == []
+
+
+def test_build_names_the_remote_suite_step_first(world, capsys):
+    _three_with_a_collision(world)
+    assert _build() == 0
+    out = capsys.readouterr().out
+    suite = out.index("1. python ops/integrate.py suite")
+    assert suite < out.index("2. ") < out.index("3. python ops/integrate.py open --suite")
+    assert "carried as a bundle" in out and integrate.SUITE_LOCAL_NOTE in out
