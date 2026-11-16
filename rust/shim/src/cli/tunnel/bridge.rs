@@ -731,9 +731,26 @@ async fn write_shim<SI: AsyncWrite + Unpin>(
             },
             () = relay.stopping.cancelled() => break,
         };
-        if open && (writer.write_all(&bytes).await.is_err() || writer.flush().await.is_err()) {
+        if !open {
+            continue;
+        }
+        let written = tokio::time::timeout(SHIM_STALL, async {
+            writer.write_all(&bytes).await?;
+            writer.flush().await
+        })
+        .await;
+        match written {
+            Ok(Ok(())) => {}
             // The shim stopped reading: its output ends next.
-            open = false;
+            Ok(Err(_)) => open = false,
+            Err(_) => {
+                // A line the shim has not taken for a minute: it is hung,
+                // and a shutdown of its input would wait the same way.
+                relay.stopping.cancel();
+                drop(writer);
+                relay.shim_closed.cancel();
+                return;
+            }
         }
     }
     let _ = writer.shutdown().await;
@@ -763,18 +780,30 @@ fn message(line: &[u8]) -> Option<Map<String, Value>> {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Id {
     Text(String),
-    Integer(i128),
+    /// An integer id by its digits, of any size the shim preserves.
+    Integer(String),
 }
 
 fn identifier(message: &Map<String, Value>) -> Option<Id> {
     match message.get("id")? {
         // A longer id is never tracked, so never credited.
         Value::String(text) if text.len() <= ID_LIMIT => Some(Id::Text(text.clone())),
-        Value::Number(number) => number
-            .as_i64()
-            .map(i128::from)
-            .or_else(|| number.as_u64().map(i128::from))
-            .map(Id::Integer),
+        // An integer literal of any size (as Python's int); `-0` is `0`. A
+        // float, or an integer spelled as one, is never tracked.
+        Value::Number(number) => {
+            let digits = number.to_string();
+            let unsigned = digits.strip_prefix('-').unwrap_or(&digits);
+            (digits.len() <= ID_LIMIT
+                && !unsigned.is_empty()
+                && unsigned.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| {
+                Id::Integer(if unsigned.bytes().all(|byte| byte == b'0') {
+                    "0".to_owned()
+                } else {
+                    digits
+                })
+            })
+        }
         _ => None,
     }
 }

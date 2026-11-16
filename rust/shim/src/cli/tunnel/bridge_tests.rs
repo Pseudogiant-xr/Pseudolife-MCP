@@ -1121,6 +1121,55 @@ async fn traffic_is_byte_identical_with_the_gate_on() {
     assert_eq!(String::from_utf8(out).unwrap(), expected);
 }
 
+/// A shim that stops reading part-way through one request larger than its
+/// pipe, while the client waits with its input open, is given up on within
+/// SHIM_STALL: the stall bound covers the write itself, not only the queue.
+#[tokio::test(start_paused = true)]
+async fn a_shim_that_stops_reading_mid_request_is_given_up_on() {
+    let Wired {
+        mut client_writer,
+        client_reader,
+        fake_reader,
+        fake_writer,
+        relayed,
+    } = wired(256, None, Gate::new(false));
+    client_writer
+        .write_all(search(1, &"x".repeat(64 * 1024)).as_bytes())
+        .await
+        .unwrap();
+    let ended = tokio::time::timeout(SHIM_STALL * 3, relayed).await;
+    assert!(
+        ended.is_ok(),
+        "the relay waited on a hung shim's input without end"
+    );
+    drop((client_writer, client_reader, fake_reader, fake_writer));
+}
+
+/// An integer id beyond 64 bits, which the shim preserves, carries a
+/// verification call like any other; `-0` and `0` are one id.
+#[test]
+fn integer_ids_of_any_size_are_tracked() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let mut observer = observer(&store, "dot", Recorder::default().sink());
+    let big = "184467440737095516160";
+    let request = format!(
+        "{{\"jsonrpc\":\"2.0\",\"id\":{big},\"method\":\"tools/call\",\"params\":{{\"name\":\"memory_search\",\"arguments\":{{\"query\":\"{NONCE}\"}}}}}}"
+    );
+    observer.request(&as_map(&request));
+    let answer = format!(
+        "{{\"jsonrpc\":\"2.0\",\"id\":{big},\"result\":{{\"content\":[{{\"type\":\"text\",\"text\":\"ok\"}}]}}}}"
+    );
+    assert!(observer.response(&as_map(&answer)).is_some());
+    assert_eq!(
+        identifier(&as_map("{\"id\":-0}")),
+        identifier(&as_map("{\"id\":0}"))
+    );
+    assert_eq!(identifier(&as_map("{\"id\":1.0}")), None);
+    assert_eq!(identifier(&as_map("{\"id\":1e2}")), None);
+}
+
 /// A fake daemon's toolset: answers `memory_toolset` status and expand from
 /// `tier`, records the order of what it is asked, and answers the rest.
 fn toolset(start: &'static str, log: Arc<Mutex<Vec<String>>>) -> Script {
