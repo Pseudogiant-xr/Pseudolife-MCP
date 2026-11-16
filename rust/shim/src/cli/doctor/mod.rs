@@ -267,11 +267,21 @@ enum BearerProblem {
     Unavailable(Source, &'static str),
     /// The token is outside printable ASCII.
     Unsendable,
+    /// A folder above the token file is a link another account could
+    /// change: the private-path rule's line, which names the link and the fix.
+    Behind(String),
 }
 
 impl BearerProblem {
-    fn reason(&self) -> &'static str {
+    fn reason(&self) -> String {
         match self {
+            Self::Behind(line) => line.clone(),
+            other => other.fixed_reason().into(),
+        }
+    }
+    fn fixed_reason(&self) -> &'static str {
+        match self {
+            Self::Behind(_) => "",
             // decode_token's refusal names a file even for an inline token.
             Self::Unavailable(Source::Inline, _) => {
                 "the PSEUDOLIFE_MCP_TOKEN value is empty, longer than 4096 bytes, or contains whitespace or control characters (a space or tab from a paste counts)"
@@ -292,6 +302,14 @@ impl BearerProblem {
     /// `source` is the report's `credential_source`: `environment` or a
     /// client registration's label.
     fn error(&self, source: &str) -> (&'static str, String) {
+        if let Self::Behind(line) = self {
+            return (
+                "CredentialUnavailable",
+                format!(
+                    "doctor could not use the configured credential (source: {source}): {line} The checks that need no credential ran."
+                ),
+            );
+        }
         let reason = self.reason();
         let registration = source != "environment";
         let fix = match (self, registration) {
@@ -307,6 +325,7 @@ impl BearerProblem {
             (Self::Unavailable(Source::NotText, _), false) => {
                 "Set the variable again as plain text, then retry"
             }
+            (Self::Behind(_), _) => "",
             // Shell variables would only make doctor pass: the client reads
             // its own registration.
             (_, true) => {
@@ -320,7 +339,7 @@ impl BearerProblem {
                     "The configured bearer token (source: {source}) contains characters other than printable ASCII. The native shim sends such a token as UTF-8 while the daemon reads the Authorization header as Latin-1, so MCP calls can never authenticate with it (DEL and other control characters cannot be sent at all)."
                 ),
             ),
-            Self::Unavailable(..) => (
+            Self::Unavailable(..) | Self::Behind(_) => (
                 "CredentialUnavailable",
                 format!(
                     "doctor could not use the configured credential ({reason}; source: {source})."
@@ -692,7 +711,16 @@ async fn diagnose(
         Some(Ok(snapshot)) => snapshot.token().map(str::to_owned),
         // Only a file is read at snapshot time.
         Some(Err(error)) => {
-            problem = Some(BearerProblem::Unavailable(Source::File, error.0));
+            // A link above the file another account could change is named
+            // with its one fix (`private_path`).
+            let behind = provider
+                .as_ref()
+                .and_then(|provider| provider.path())
+                .and_then(crate::private_path::explain);
+            problem = Some(match behind {
+                Some(line) => BearerProblem::Behind(line),
+                None => BearerProblem::Unavailable(Source::File, error.0),
+            });
             None
         }
         None => None,
@@ -1082,6 +1110,18 @@ mod tests {
 
     fn report(pairs: Value) -> Map<String, Value> {
         pairs.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn a_token_file_behind_an_untrusted_link_is_reported_with_its_one_fix() {
+        let line = "pseudolife-mcp keeps private files only behind links no other account can change, and /srv/x is a link owned by the account with uid 1001; fix: replace the link with a folder you own and move what it led to there.";
+        let problem = BearerProblem::Behind(line.into());
+        let (error, text) = problem.error("environment");
+        assert_eq!(error, "CredentialUnavailable");
+        assert!(text.contains(line), "{text}");
+        assert_eq!(text.matches("fix:").count(), 1, "{text}");
+        assert!(!text.contains("owner-only file"), "{text}");
+        assert!(problem.board_line().contains(line));
     }
 
     #[test]

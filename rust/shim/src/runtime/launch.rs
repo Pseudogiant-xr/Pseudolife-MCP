@@ -22,6 +22,46 @@ pub(super) fn usage_file_with(
 pub(super) fn pin(runtime: &Runtime) -> Result<fs::File> {
     let file = usage_file(&runtime.usage_lock_path())?;
     file.lock_shared().map_err(io_error)?;
+    verified(runtime, file)
+}
+
+/// [`pin`] that never waits: for a mode a hook runs under a time budget
+/// (`private-path-check`), a runtime an update holds is "no answer", not a
+/// stall.
+pub(super) fn pin_now(runtime: &Runtime) -> Result<fs::File> {
+    let file = usage_file(&runtime.usage_lock_path())?;
+    try_shared(&file)?;
+    verified(runtime, file)
+}
+
+/// What [`try_shared`] says when an update holds the runtime: its own advice.
+pub(super) const BUSY: &str = "the native runtime is busy (an update holds it); retry shortly";
+
+/// Take `file`'s shared lock only if nobody holds it exclusively now.
+pub(super) fn try_shared(file: &fs::File) -> Result<()> {
+    match file.try_lock_shared() {
+        Ok(()) => Ok(()),
+        Err(fs::TryLockError::WouldBlock) => Err(BUSY.into()),
+        Err(fs::TryLockError::Error(error)) => Err(io_error(error)),
+    }
+}
+
+/// Whether this process runs a mode that must not wait for the runtime pin.
+fn must_not_wait() -> bool {
+    std::env::args_os()
+        .nth(1)
+        .is_some_and(|mode| mode == "private-path-check")
+}
+
+fn pin_for_mode(runtime: &Runtime) -> Result<fs::File> {
+    if must_not_wait() {
+        pin_now(runtime)
+    } else {
+        pin(runtime)
+    }
+}
+
+fn verified(runtime: &Runtime, file: fs::File) -> Result<fs::File> {
     // Hash only after pinning: selection can race with pruning while waiting
     // for this lock. Both launcher and child need this verification because
     // runtime binaries can also be invoked directly, without a launcher pin.
@@ -51,6 +91,16 @@ pub(super) fn select_pin_with(
         }
     }
     Err("runtime selection changed repeatedly; retry after the update finishes".into())
+}
+
+/// The line a runtime child prints when it cannot pin itself: the advice
+/// once, since the busy refusal carries its own.
+pub(super) fn pin_failure_line(error: &str) -> String {
+    if error == BUSY {
+        format!("pseudolife-mcp: {error}")
+    } else {
+        format!("pseudolife-mcp: {error}; retry after the update finishes")
+    }
 }
 
 /// Call before dispatching *any* CLI mode. A runtime executable pins itself
@@ -85,7 +135,7 @@ pub fn maybe_launch() -> Option<u8> {
                     return Some(1);
                 }
             };
-            match pin(&runtime) {
+            match pin_for_mode(&runtime) {
                 Ok(lock) => {
                     #[cfg(unix)]
                     if let Err(error) = inherited_pin::cloexec(&lock) {
@@ -97,14 +147,14 @@ pub fn maybe_launch() -> Option<u8> {
                     let _ = RUNNING_LOCK.set(lock);
                 }
                 Err(error) => {
-                    crate::stderrln!("pseudolife-mcp: {error}; retry after the update finishes");
+                    crate::stderrln!("{}", pin_failure_line(&error));
                     return Some(1);
                 }
             }
         }
         return None;
     }
-    let (runtime, lock) = match select_pin_with(&layout, pin) {
+    let (runtime, lock) = match select_pin_with(&layout, pin_for_mode) {
         Ok(selected) => selected,
         Err(error) => {
             crate::stderrln!("pseudolife-mcp: {error}");

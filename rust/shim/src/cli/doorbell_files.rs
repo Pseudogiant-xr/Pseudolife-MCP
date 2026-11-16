@@ -44,14 +44,12 @@ fn lexical_absolute(path: &Path) -> Result<std::path::PathBuf> {
         Ok(std::env::current_dir().map_err(|_| ())?.join(path))
     }
 }
+/// The doorbell folder and every folder above it pass the private-path rule
+/// (`private_path`): a link is followed only when no other account can
+/// change it, and a refusal is printed once with its one fix.
 fn no_symlink(path: &Path) -> Result<()> {
     let absolute = lexical_absolute(path)?;
-    for ancestor in absolute.ancestors() {
-        if fs::symlink_metadata(ancestor).is_ok_and(|m| m.file_type().is_symlink()) {
-            return Err(());
-        }
-    }
-    Ok(())
+    crate::credentials::reject_redirects(&absolute).map_err(|_| ())
 }
 pub(super) fn prepare_dir(path: &Path) -> Result<()> {
     no_symlink(path)?;
@@ -308,5 +306,37 @@ mod fable125_path_controls {
             assert!(absolute.is_absolute());
             assert!(absolute.ancestors().any(|p| p.ends_with("fable125-link")));
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod private_path_rule {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    /// The doorbell folder follows the one private-path rule (#1644 S5): a
+    /// home behind the user's own link works, a link another account could
+    /// replace is refused.
+    #[test]
+    fn the_doorbell_folder_works_behind_a_trusted_link_and_not_an_untrusted_one() {
+        let base = std::env::temp_dir().join(format!("doorbell-link-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&base).unwrap();
+        let mode = |path: &Path, bits| fs::set_permissions(path, fs::Permissions::from_mode(bits));
+        mode(&base, 0o700).unwrap();
+        let real = base.join("real-home");
+        fs::create_dir(&real).unwrap();
+        mode(&real, 0o700).unwrap();
+        symlink(&real, base.join("home")).unwrap();
+        prepare_dir(&base.join("home/.codex/doorbell")).unwrap();
+        assert!(real.join(".codex/doorbell").is_dir());
+
+        let shared = base.join("shared");
+        fs::create_dir(&shared).unwrap();
+        symlink(&real, shared.join("home")).unwrap();
+        mode(&shared, 0o777).unwrap();
+        assert_eq!(prepare_dir(&shared.join("home/.codex/other")), Err(()));
+        assert!(!real.join(".codex/other").exists());
+        mode(&shared, 0o700).unwrap();
+        let _ = fs::remove_dir_all(&base);
     }
 }
