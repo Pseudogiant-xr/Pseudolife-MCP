@@ -14,9 +14,9 @@ use std::{
 /// killed. An exiting child's own ends of its pipes close with it, so a
 /// healthy child's last bytes arrive at once; this bounds only a descendant
 /// that inherited the pipes and still holds them. It is a fixed budget of its
-/// own, not whatever is left of the child's: a loaded machine that delivers
-/// the last bytes late cannot trip it, only a pipe still open this long after
-/// the exit can.
+/// own, not whatever is left of the child's, so a loaded machine that delivers
+/// the last bytes late does not trip it: only a stall of this long between
+/// the exit and the read, or a pipe still held that long, can.
 const PIPE_DRAIN: Duration = Duration::from_secs(10);
 
 /// Waits until `child` exits, closing its stdin first as `Child::wait` does.
@@ -46,8 +46,8 @@ fn wait_until(child: &mut Child, budget: Duration, what: &str) -> Result<ExitSta
 }
 
 /// `Command::output` with a deadline: stdin is closed and stdout and stderr
-/// are captured, as `output` does. The child must exit within `budget`, and
-/// its pipes close within PIPE_DRAIN after that.
+/// are captured, as `output` does. The child must exit within `budget`; each
+/// pipe is then waited on for up to PIPE_DRAIN.
 pub fn output_within(command: &mut Command, budget: Duration, what: &str) -> Output {
     let mut child = command
         .stdin(Stdio::null())
@@ -71,7 +71,7 @@ pub fn output_within(command: &mut Command, budget: Duration, what: &str) -> Out
     };
     let collect = |pipe: mpsc::Receiver<Vec<u8>>, name: &str| {
         pipe.recv_timeout(PIPE_DRAIN).unwrap_or_else(|_| {
-            panic!("{what} exited, but a descendant kept its {name} open for {PIPE_DRAIN:?} after")
+            panic!("{what} exited, but a descendant kept its {name} open {PIPE_DRAIN:?} after it")
         })
     };
     Output {
