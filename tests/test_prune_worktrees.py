@@ -1943,22 +1943,62 @@ def test_an_owner_path_that_cannot_be_read_keeps_the_target(env, targets_root, m
     assert "its owners cannot all be read" in out
 
 
-@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="reads /proc")
+def _pause_forever_elf() -> bytes:
+    """A static x86-64 Linux program that blocks in pause() until killed.
+
+    It needs no libraries, no interpreter and no particular file name or
+    argv[0], so a copy of it runs anywhere. A copied system binary does not:
+    a multi-call coreutils (uutils, as on the hosted ubuntu-26.04 runner)
+    picks its program from its own name and exits at once under any other.
+    """
+    import struct
+    base = 0x400000
+    code_at = 64 + 56  # right after the ELF header and one program header
+    # loop: mov eax, 34 (pause); syscall; jmp loop
+    code = bytes.fromhex("b822000000" "0f05" "ebf7")
+    size = code_at + len(code)
+    header = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        b"\x7fELF\x02\x01\x01" + bytes(9),  # 64-bit, little endian, SysV
+        2, 0x3E, 1,                          # ET_EXEC, x86-64, version 1
+        base + code_at, 64, 0,               # entry, phoff, no sections
+        0, 64, 56, 1, 0, 0, 0,               # flags, sizes, one phdr
+    )
+    load = struct.pack("<IIQQQQQQ", 1, 5, 0, base, base, size, size, 0x1000)
+    return header + load + code
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self") or os.uname().machine != "x86_64",
+                    reason="reads /proc and runs an x86-64 Linux program")
 def test_a_running_program_from_a_target_keeps_it(env, targets_root, monkeypatch):
     """S9: the executable path counts, not only the command line."""
-    import shutil
     gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
     target = _target(env, "server", gone, age=None)
-    (target / "debug" / "app").write_bytes(Path(shutil.which("sleep")).read_bytes())
-    os.chmod(target / "debug" / "app", 0o755)
+    app = target / "debug" / "app"
+    app.write_bytes(_pause_forever_elf())
+    os.chmod(app, 0o755)
     # An output cargo names in the profile's own dep-info, so the profile
     # stays cargo's own and only the process keeps it.
-    (target / "debug" / "app.d").write_text(f"{target / 'debug' / 'app'}: {gone}\n")
+    (target / "debug" / "app.d").write_text(f"{app}: {gone}\n")
     _backdate(target)
     monkeypatch.setattr(prune, "list_processes", REAL_LIST_PROCESSES)
-    child = subprocess.Popen(["renamed-argv0", "60"], executable=str(target / "debug" / "app"))
+    # argv[0] names nothing in the target: only the executable path can.
+    child = subprocess.Popen(["renamed-argv0"], executable=str(app))
     try:
+        # The precondition, so a program that exits early fails here and
+        # not as a missing target: it runs, from inside the target.
+        deadline = time.monotonic() + 10
+        while True:
+            assert child.poll() is None, f"the test program exited with {child.returncode}"
+            try:
+                if os.readlink(f"/proc/{child.pid}/exe") == os.path.realpath(app):
+                    break
+            except OSError:
+                pass
+            assert time.monotonic() < deadline, "the test program never ran from the target"
+            time.sleep(0.02)
         rc, out = run_targets(env, "--apply")
+        assert child.poll() is None, "the test program exited during the sweep"
     finally:
         child.kill()
         child.wait()
