@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "33b408320649d20d",
-  "fingerprint": "4fa2b4a6779e2389",
-  "reason": "Add one native transfer pytest file to the existing post-PostgreSQL CLI lease-operator step; no setup, job, or dependency is added. On this branch's own hosted Rust run https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/43925893199 at 0ec812037, the first 11 successful Windows stress selections measured 0.93-1.53 minutes (median 1.13). The measured selection fits the existing 10-minute step allowance; retain existing job prices and limits for the batch to remeasure as a whole. Other parity shards are unchanged."
-}
