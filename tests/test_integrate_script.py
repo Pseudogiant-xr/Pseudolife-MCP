@@ -5610,13 +5610,16 @@ def test_after_drop_merge_reads_every_check_again_before_the_click(world, capsys
         _run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
         _run("Parity / windows-latest"), _run("Rust / windows-latest", None, status="QUEUED")])
     original = world.gh.__class__.__call__
+    reads = []
 
     def turning_red(self, *args, input=None):
         out = original(self, *args, input=input)
-        if list(args[:2]) == ["pr", "comment"]:
-            # The carried job fails while the comment is posted.
-            self.pr(901)["statusCheckRollup"][-1] = _run("Rust / windows-latest", "FAILURE",
-                                                         started="2026-10-21T11:00:00Z")
+        if list(args[:3]) == ["pr", "view", "901"] and "statusCheckRollup" in args[-1]:
+            reads.append(1)
+            if len(reads) == 1:
+                # The carried job fails between the first read and the second.
+                self.pr(901)["statusCheckRollup"][-1] = _run(
+                    "Rust / windows-latest", "FAILURE", started="2026-10-21T11:00:00Z")
         return out
 
     world.gh.__class__ = type("TurningRed", (world.gh.__class__,), {"__call__": turning_red})
@@ -5624,7 +5627,8 @@ def test_after_drop_merge_reads_every_check_again_before_the_click(world, capsys
     assert integrate.main(["merge"]) == 2
 
     assert "Rust / windows-latest (FAILURE)" in capsys.readouterr().err
-    assert _merge_calls(world) == []
+    # Nothing said and nothing clicked: the comment follows the second read.
+    assert _merge_calls(world) == [] and _comments_on(world, 901) == []
 
 
 def test_after_drop_open_still_refuses_a_failed_compile_check(world, capsys, monkeypatch):
@@ -5681,3 +5685,266 @@ def test_after_drop_refuses_a_head_this_checkout_lacks(world, capsys):
     old.head = "1" * 40
     with pytest.raises(integrate.Refusal, match="closed batch's head 111111111111 is not in this checkout"):
         integrate._after_drop_record(new, old)
+
+
+@pytest.mark.parametrize("path", [
+    "frontend/package.json", "frontend/package-lock.json", "rust/rust-toolchain.toml",
+    "rust/.cargo/config.toml"])
+def test_after_drop_refuses_a_dropped_member_changing_a_build_input(world, capsys, path):
+    # Codex review of f299e9604: the frontend's manifests and the pinned Rust
+    # toolchain are build inputs every job of theirs shares.
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"}, 11: {path: "x = 1\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 2
+
+    err = capsys.readouterr().err
+    assert "changes code every test or job shares" in err and path in err
+
+
+@pytest.mark.parametrize("importer", [
+    "from test_fixture_mod import thing\n",
+    "def test_it():\n    from tests.test_fixture_mod import thing\n",
+    "import test_fixture_mod\n"])
+def test_after_drop_refuses_a_dropped_test_module_other_tests_import(world, capsys, importer):
+    # Codex review of f299e9604: a test module another test imports is a
+    # shared fixture, though test-named.
+    world.advance_master({"tests/test_user.py": importer})
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"},
+                                11: {"tests/test_fixture_mod.py": "thing = 2\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 2
+
+    err = capsys.readouterr().err
+    assert "changes code every test or job shares" in err and "tests/test_fixture_mod.py" in err
+
+
+def test_after_drop_takes_a_dropped_test_module_nothing_imports(world, capsys):
+    # The near miss: a name that merely starts the same is not an import.
+    world.advance_master({"tests/test_user.py": "from test_fixture_mod_other import thing\n"})
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"},
+                                11: {"tests/test_fixture_mod.py": "thing = 2\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+
+
+@pytest.mark.parametrize("first", ["FAILURE", "CANCELLED", "TIMED_OUT"])
+def test_after_drop_merge_refuses_a_failure_whose_rerun_still_runs(world, capsys, first):
+    # Codex review of f299e9604 (P1): the latest run alone reads as pending,
+    # which the fast path would carry from the closed head.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+        _run("Parity / windows-latest"),
+        _run("Rust / windows-latest", first, started="2026-10-21T10:00:00Z"),
+        _run("Rust / windows-latest", None, status="IN_PROGRESS",
+             started="2026-10-21T11:00:00Z")])
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "no finished rerun has replaced the failure" in err and "Rust / windows-latest" in err
+    assert _merge_calls(world) == [] and _comments_on(world, 901) == []
+
+
+def test_after_drop_merge_takes_a_failure_a_finished_rerun_replaced(world, capsys):
+    # The near miss: the rerun finished green, so the failure is history.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+        _run("Parity / windows-latest"),
+        _run("Rust / windows-latest", "FAILURE", started="2026-10-21T10:00:00Z"),
+        _run("Rust / windows-latest", "SUCCESS", started="2026-10-21T11:00:00Z")])
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+
+
+def test_after_drop_refuses_a_closed_batch_already_rebuilt_after_a_drop(world, capsys):
+    # Opus review of f299e9604: #901, built from #900 after a drop, went red
+    # too; its checks are newer, so #900's must not be carried again.
+    _after_drop_opened(world, capsys, [_run("scope"), _run("test", "FAILURE")])
+    world.gh.pr(901)["state"] = "CLOSED"
+    world.gh.ready = [r for r in world.gh.ready if r["number"] != 12]
+    _git(world.work, "switch", "-q", "--detach", "origin/master")
+    _git(world.work, "branch", "-q", "-D", f"integrate/{DATE}-batch-2")
+
+    assert _build("--after-drop", "900") == 2
+
+    err = capsys.readouterr().err
+    assert "already built again after a drop and opened as #901" in err
+    assert "`build --after-drop 901`" in err
+
+
+def test_after_drop_refuses_a_closed_batch_from_a_fork(world, capsys):
+    _closed_red(world, capsys)
+    world.gh.pr(900)["isCrossRepository"] = True
+
+    assert _build("--after-drop", "900") == 2
+
+    assert "not an integrate/ batch into master" in capsys.readouterr().err
+
+
+def test_after_drop_merge_refuses_a_closed_batch_reopened(world, capsys):
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+        _run("Parity / windows-latest", None, status="IN_PROGRESS")])
+    world.gh.pr(900)["state"] = "OPEN"
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "closed batch #900 now reads open, not closed" in capsys.readouterr().err
+    assert _merge_calls(world) == []
+
+
+def test_after_drop_refuses_a_dropped_file_a_workflow_names(world, capsys):
+    # Opus review of f299e9604: a CI script or Dockerfile a workflow runs is
+    # an input of every job that runs it.
+    world.advance_master({".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n"
+                                                      "      - run: bash ops/ci_tests.sh\n"})
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"}, 11: {"ops/ci_tests.sh": "exit 0\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 2
+
+    err = capsys.readouterr().err
+    assert "changes code every test or job shares" in err and "ops/ci_tests.sh" in err
+
+
+def test_after_drop_refusal_leaves_the_checkout_as_it_was(world, capsys):
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"}, 11: {"tests/conftest.py": "x = 1\n"},
+                                12: {"d.txt": "d\n"}})
+    before = _git(world.work, "rev-parse", "HEAD")
+
+    assert _build("--after-drop", "900") == 2
+
+    assert _git(world.work, "rev-parse", "HEAD") == before
+    assert _git(world.work, "branch", "--list", f"integrate/{DATE}-batch-2") == ""
+    assert _git(world.work, "status", "--porcelain") == ""
+    assert not _batch_plan_path(world, 2).exists()
+
+
+def test_after_drop_waits_when_no_run_on_the_new_head_is_listed(world, capsys):
+    # No workflow run listed yet: nothing has settled, so an absent required
+    # lane waits rather than being carried.
+    head = _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest")])
+    world.gh.run_lists[head] = []
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "Parity / windows-latest (not reported yet)" in capsys.readouterr().err
+
+
+def test_after_drop_open_still_checks_a_suite_result_it_is_given(world, capsys):
+    _closed_red(world, capsys)
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+    capsys.readouterr()
+
+    assert _open(world, exit_code=1) == 2
+
+    assert "the suite failed on this head" in capsys.readouterr().err
+
+
+def test_after_drop_body_says_the_harness_was_not_run(world, capsys):
+    _after_drop_opened(world, capsys, [_run("scope")])
+
+    (_, body) = world.gh.bodies("create")[-1]
+    assert "Rust harness Python tests" in body
+    line = next(l for l in body.splitlines() if l.startswith("- Rust harness Python tests"))
+    assert "not run: a batch built after a drop skips it" in line
+
+
+def test_after_drop_carries_a_status_context_that_succeeded(world, capsys):
+    status = {"__typename": "StatusContext", "context": "CodeQL", "state": "SUCCESS",
+              "targetUrl": OLD_RUN + "9"}
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest"),
+        {**status, "state": "PENDING", "targetUrl": NEW_RUN + "9"}],
+        rollup=[_run("scope"), _run("test", "FAILURE"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), status])
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+
+    (comment,) = _comments_on(world, 901)
+    assert f"- CodeQL: carried, success on #900's head" in comment and OLD_RUN + "9" in comment
+
+
+def test_after_drop_never_carries_a_job_across_workflows(world, capsys):
+    # The same job name in another workflow is another check.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest"),
+        _run("lint", None, status="IN_PROGRESS", workflow="Rust shim")],
+        rollup=[_run("scope"), _run("test", "FAILURE"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), _run("lint", workflow="CI")])
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "cannot carry (lint)" in capsys.readouterr().err
+
+
+def test_after_drop_judges_only_ci_s_own_test_and_scope(world, capsys):
+    # A job named `test` in another workflow is not the required `test`.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test", "SKIPPED", workflow="Other"),
+        _run("Parity / ubuntu-latest"), _run("Parity / windows-latest")])
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "test (not reported yet)" in capsys.readouterr().err
+
+
+SUMMARY_WORKFLOW = """name: Rust shim
+on: pull_request
+jobs:
+  parity-checks:
+    name: Parity checks / ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo shard
+  parity:
+    name: Parity / ${{ matrix.os }}
+    needs: [parity-checks]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo summary
+"""
+
+
+def test_after_drop_says_a_summary_job_waits_for_the_carried_jobs_it_needs(world, capsys):
+    # The conductor's finding on #1671: a summary job that failed on the
+    # closed head (one shard went red) must pass anew, so it waits for the
+    # carried shards it needs, and the fast path saves no time; `merge`
+    # says so, naming them.
+    world.advance_master({".github/workflows/rust.yml": SUMMARY_WORKFLOW})
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / windows-latest"),
+        _run("Parity checks / ubuntu-latest", None, status="IN_PROGRESS", workflow="Rust shim"),
+        _run("Parity / ubuntu-latest", None, status="QUEUED", workflow="Rust shim")],
+        rollup=[_run("scope"), _run("test"), _run("Parity / windows-latest"),
+                _run("Parity checks / ubuntu-latest", workflow="Rust shim"),
+                _run("Parity checks / macos-latest", "FAILURE", workflow="Rust shim"),
+                _run("Parity / ubuntu-latest", "FAILURE", workflow="Rust shim")])
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "cannot carry (Parity / ubuntu-latest)" in err
+    assert ("Parity / ubuntu-latest did not pass on #900's head, so it must pass on this one; "
+            "it needs Parity checks / ubuntu-latest, which is carried but still running") in err
+    assert "the fast path saves no time here" in err
+
+
+def test_after_drop_names_no_summary_for_a_job_that_needs_nothing_carried(world, capsys):
+    # The near miss: a waiting job whose inputs are not carried gets no note.
+    world.advance_master({".github/workflows/rust.yml": SUMMARY_WORKFLOW})
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / windows-latest"),
+        _run("Parity / ubuntu-latest", None, status="QUEUED", workflow="Rust shim")],
+        rollup=[_run("scope"), _run("test"), _run("Parity / windows-latest"),
+                _run("Parity / ubuntu-latest", "FAILURE", workflow="Rust shim")])
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    assert "cannot carry (Parity / ubuntu-latest)" in err and "saves no time" not in err

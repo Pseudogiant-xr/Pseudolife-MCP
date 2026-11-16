@@ -759,6 +759,13 @@ and `build`, `open` and the batch body print it.
 its new head has finished, which no other batch does: once `test` passed
 there, the jobs that passed on the closed batch are not waited for again.
 
+**When it saves time.** A summary job, such as `Parity / <os>` over the
+parity shards, is a job like any other: if it did not pass on the closed
+head (one shard went red), it must pass on the new one, so it waits for the
+carried shards it needs, and the fast path saves no time while they run;
+`merge` says so, naming them. So the fast path pays off when the closed
+batch went red outside the Rust workflow, `test` alone for example.
+
 **A Rust-only rebuilt batch** (the maintainer's ruling, 17 November 2026):
 `scope` skips `test` on a head with no Python change, and `merge` accepts
 that `test` as skipped only when `scope` itself succeeded on the new head.
