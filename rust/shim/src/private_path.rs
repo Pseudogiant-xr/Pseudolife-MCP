@@ -62,17 +62,33 @@ pub enum Cause {
         target: PathBuf,
     },
     /// Others may remove or replace entries in the folder holding the link.
+    /// `owned`: that folder is this user's own, so tightening it is theirs to
+    /// do.
     HolderWritable {
         holder: PathBuf,
         writer: Writer,
+        owned: bool,
         target: PathBuf,
     },
     /// More than [`MAX_LINKS`] links, usually a loop.
     TooManyLinks,
     /// A Windows reparse point that is neither a link nor a cloud placeholder.
     NotALink { tag: u32 },
+    /// A link whose target cannot be checked (a Windows device path, or
+    /// reparse data that is malformed or changed while it was read).
+    UncheckableTarget { detail: String },
     /// The element could not be inspected.
     Uninspectable { detail: String },
+}
+
+/// The fix for a link this user should not keep: it may be impossible to
+/// repair in place (another account's link or folder), and following it
+/// literally must not leave the client looking at an empty folder.
+const REPLACE: &str = "replace the link with a folder you own and move what it led to there";
+
+/// `path` quoted for a POSIX shell: in single quotes, each `'` written `'\''`.
+fn shell_quoted(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
 }
 
 /// Who besides this user may change entries in a link's folder.
@@ -92,15 +108,15 @@ impl fmt::Display for Refusal {
         match &*self.cause {
             Cause::LinkOwner { owner, .. } => write!(
                 f,
-                "{lead}, and {element} is a link owned by {owner}; fix: replace the link with a folder you own."
+                "{lead}, and {element} is a link owned by {owner}; fix: {REPLACE}."
             ),
             Cause::LinkWriter { writer, .. } => write!(
                 f,
-                "{lead}, and {writer} may delete or rewrite the link {element}; fix: replace the link with a folder you own."
+                "{lead}, and {writer} may delete or rewrite the link {element}; fix: {REPLACE}."
             ),
             Cause::HolderOwner { holder, owner, .. } => write!(
                 f,
-                "{lead}, and the link {element} sits in {}, which {owner} owns and so can replace it; fix: replace the link with a folder you own.",
+                "{lead}, and the link {element} sits in {}, which {owner} owns and so can replace it; fix: {REPLACE}.",
                 holder.display()
             ),
             Cause::HolderWritable {
@@ -109,19 +125,30 @@ impl fmt::Display for Refusal {
                 ..
             } => write!(
                 f,
-                "{lead}, and {account} may delete or replace entries in {}, which holds the link {element}; fix: replace the link with a folder you own.",
+                "{lead}, and {account} may delete or replace entries in {}, which holds the link {element}; fix: {REPLACE}.",
                 holder.display()
             ),
-            Cause::HolderWritable { holder, writer, .. } => {
+            Cause::HolderWritable {
+                holder,
+                writer,
+                owned,
+                ..
+            } => {
                 let (who, bits) = match writer {
                     Writer::Group => ("the folder's group", "g-w"),
                     Writer::Others => ("other users", "o-w"),
                     _ => ("the folder's group and other users", "go-w"),
                 };
+                // Tightening a folder is the fix only for one this user owns:
+                // never a system folder such as a root-owned /usr/local.
+                let fix = if *owned {
+                    format!("chmod {bits} {}", shell_quoted(holder))
+                } else {
+                    REPLACE.to_owned()
+                };
                 write!(
                     f,
-                    "{lead}, and {who} can replace the link {element} because they may write {}; fix: chmod {bits} '{}'.",
-                    holder.display(),
+                    "{lead}, and {who} can replace the link {element} because they may write {}; fix: {fix}.",
                     holder.display()
                 )
             }
@@ -131,7 +158,11 @@ impl fmt::Display for Refusal {
             ),
             Cause::NotALink { tag } => write!(
                 f,
-                "{lead}, and {element} is a Windows reparse point of tag {tag:#010x}, which is neither a symlink, a junction nor a cloud-files placeholder; fix: keep this client's files in a plain folder, for example by setting PSEUDOLIFE_MCP_DATA_DIR."
+                "{lead}, and {element} is a Windows reparse point of tag {tag:#010x}, which is neither a symlink, a junction nor a cloud-files placeholder; fix: keep this client's files in a plain folder."
+            ),
+            Cause::UncheckableTarget { detail } => write!(
+                f,
+                "{lead}, and where the link {element} leads cannot be checked ({detail}); fix: {REPLACE}."
             ),
             Cause::Uninspectable { detail } => write!(
                 f,
@@ -405,6 +436,7 @@ fn inspect(path: &Path) -> io::Result<Entry> {
                 PosixDistrust::HolderWritable(writer) => Cause::HolderWritable {
                     holder: holder_path.to_path_buf(),
                     writer,
+                    owned: holder.uid() == me,
                     target: shown,
                 },
             },
@@ -435,6 +467,10 @@ fn inspect(path: &Path) -> io::Result<Entry> {
     Ok(match inspect_entry(path)? {
         PathEntry::Missing | PathEntry::Plain | PathEntry::Placeholder => Entry::Plain,
         PathEntry::Other(tag) => Entry::Other(tag),
+        PathEntry::Uncheckable(detail) => Entry::Link {
+            target: PathBuf::new(),
+            distrust: Some(Cause::UncheckableTarget { detail }),
+        },
         PathEntry::Link { target, distrust } => {
             let shown = target.clone();
             let distrust = distrust.map(|distrust| match distrust {
@@ -457,6 +493,7 @@ fn inspect(path: &Path) -> io::Result<Entry> {
                     (false, writer) => Cause::HolderWritable {
                         holder,
                         writer: Writer::Account(writer),
+                        owned: false,
                         target: shown,
                     },
                 },

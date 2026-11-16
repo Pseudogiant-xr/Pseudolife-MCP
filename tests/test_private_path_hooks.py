@@ -144,8 +144,10 @@ def base(tmp_path):
 REFUSED = "pseudolife-private-path: refused: "
 
 
-def _client(file: Path) -> bool:
-    result = subprocess.run([str(REAL), "private-path-check", str(file)],
+def _client(file: Path, home: Path) -> bool:
+    # A disposable environment: the real HOME and data folders never apply.
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home)}
+    result = subprocess.run([str(REAL), "private-path-check", str(file)], env=env,
                             stdin=subprocess.DEVNULL, capture_output=True, text=True,
                             timeout=60)
     trusted = result.returncode == 0 and result.stdout.strip() == MARKER
@@ -182,7 +184,7 @@ def _hook(hook: str, file: Path, home: Path, launcher: str) -> subprocess.Comple
 @pytest.mark.parametrize("hook", HOOKS)
 def test_the_hooks_and_the_client_give_one_verdict(base, tmp_path, name, build, expected, hook):
     file = build(base)
-    assert _client(file) is expected, name
+    assert _client(file, tmp_path) is expected, name
     result = _hook(hook, file, tmp_path, str(REAL))
     assert (result.returncode == 0) is expected, (name, result.stderr)
     if not expected:
@@ -204,7 +206,9 @@ def test_without_a_client_a_linked_folder_stays_refused_and_says_why(base, tmp_p
     file = _own_link_home(base)
     result = _hook(hook, file, tmp_path, str(tmp_path / "no-such-client"))
     assert result.returncode == 1
-    assert f"not reading {file}" in result.stderr and "fix:" in result.stderr, result.stderr
+    assert f"not reading {file}" in result.stderr, result.stderr
+    assert result.stderr.count("fix:") == 1, result.stderr
+    assert "install the native client" in result.stderr, result.stderr
 
 
 @pytest.mark.parametrize("hook", HOOKS)
@@ -215,7 +219,26 @@ def test_only_the_clients_exact_marker_counts(base, tmp_path, hook):
     impostor = tmp_path / "impostor"
     impostor.write_text("#!/bin/sh\necho ok\nexit 0\n")
     impostor.chmod(0o700)
-    assert _hook(hook, file, tmp_path, str(impostor)).returncode == 1
+    result = _hook(hook, file, tmp_path, str(impostor))
+    assert result.returncode == 1
+    # An installed client with no verdict is named, with its own first line,
+    # and one fix; it is not called a missing client (#1644 S2, S6d).
+    assert f"the native client at {impostor} could not answer (ok)" in result.stderr, result.stderr
+    assert result.stderr.count("fix:") == 1 and "install" not in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize("hook", HOOKS)
+def test_a_relative_token_path_behind_a_link_gets_its_own_cause(base, tmp_path, hook):
+    _own_link_home(base)
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp_path),
+           "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "no-such-client")}
+    script = _hook_functions(hook) + "\nprivate_regular home/.pseudolife-mcp/token 4096"
+    result = subprocess.run([BASH, "-c", script], cwd=base, env=env,
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                            timeout=60)
+    assert result.returncode == 1
+    assert ("a relative path cannot be checked; fix: name the file by its absolute path."
+            in result.stderr), result.stderr
 
 
 def test_every_hook_carries_the_same_functions():

@@ -213,7 +213,7 @@ mod tests {
     }
     #[test]
     fn a_refused_credential_file_says_which_link_and_the_fix() {
-        let detail = "pseudolife-mcp keeps private files only behind links no other account can change, and /srv/x is a link owned by the account with uid 1001; fix: replace the link with a folder you own.";
+        let detail = "pseudolife-mcp keeps private files only behind links no other account can change, and /srv/x is a link owned by the account with uid 1001; fix: replace the link with a folder you own and move what it led to there.";
         let observed = Observation {
             phase: "initialize",
             credential_failed: true,

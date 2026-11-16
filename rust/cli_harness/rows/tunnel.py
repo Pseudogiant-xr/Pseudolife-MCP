@@ -343,6 +343,53 @@ def junction(rel: str, target_rel: str, *, dangling=False):
     return seed
 
 
+def replaceable(rel: str):
+    """Give the junction at ``rel`` itself (not where it leads) an access list
+    that lets Authenticated Users delete or rewrite it: a link another
+    account could replace, which private paths never follow (#1639). Set
+    through the Windows API on a handle opened without following it."""
+    def seed(arm):
+        import ctypes  # noqa: PLC0415 (Windows only)
+        from ctypes import wintypes  # noqa: PLC0415
+        advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                       ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+                                       wintypes.HANDLE]
+        advapi.GetSecurityDescriptorDacl.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL), ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.BOOL)]
+        advapi.SetSecurityInfo.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.DWORD,
+                                           ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                           ctypes.c_void_p]
+        descriptor = ctypes.c_void_p()
+        # This user, SYSTEM and Administrators, and Modify for Authenticated
+        # Users (which includes DELETE and write rights on the link itself).
+        assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1301bf;;;AU)", 1,
+            ctypes.byref(descriptor), None), ctypes.get_last_error()
+        try:
+            present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+            dacl = ctypes.c_void_p()
+            assert advapi.GetSecurityDescriptorDacl(descriptor, ctypes.byref(present),
+                                                    ctypes.byref(dacl), ctypes.byref(defaulted))
+            # WRITE_DAC | READ_CONTROL; backup semantics, the reparse point itself.
+            handle = kernel.CreateFileW(str(arm.home / Path(rel)), 0x00040000 | 0x00020000,
+                                        0x7, None, 3, 0x02000000 | 0x00200000, None)
+            assert handle not in (None, wintypes.HANDLE(-1).value), ctypes.get_last_error()
+            try:
+                # SE_FILE_OBJECT; DACL | PROTECTED_DACL.
+                result = advapi.SetSecurityInfo(handle, 1, 0x4 | 0x80000000, None, None,
+                                                dacl, None)
+                assert result == 0, result
+            finally:
+                kernel.CloseHandle(handle)
+        finally:
+            kernel.LocalFree(descriptor)
+    return seed
+
+
 def edit(**changes):
     def apply(payload):
         payload.update(changes)
@@ -611,9 +658,17 @@ def cases() -> list[core.Case]:
                mkdir("tunnels/dot-verification"),
                symlink("tunnels/dot-verification/challenge.json", "deep.json"),
                platforms=("linux",)),
+        # A junction only this user can change is followed (#1639); one
+        # another account could replace is not, and the challenge behind it
+        # is never read.
         status("status-challenge-junction", ready(),
                private("deep-dir/challenge.json", DEEP),
                junction("tunnels/dot-verification", "deep-dir"),
+               platforms=("windows",), skip_if=no_junctions),
+        status("status-challenge-junction-replaceable", ready(),
+               private("deep-dir/challenge.json", DEEP),
+               junction("tunnels/dot-verification", "deep-dir"),
+               replaceable("tunnels/dot-verification"),
                platforms=("windows",), skip_if=no_junctions),
         # status: refusals (exit 2, sanitized stderr)
         status("status-missing-profile", prepared()),

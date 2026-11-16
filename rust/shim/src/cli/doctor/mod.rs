@@ -1114,7 +1114,7 @@ mod tests {
 
     #[test]
     fn a_token_file_behind_an_untrusted_link_is_reported_with_its_one_fix() {
-        let line = "pseudolife-mcp keeps private files only behind links no other account can change, and /srv/x is a link owned by the account with uid 1001; fix: replace the link with a folder you own.";
+        let line = "pseudolife-mcp keeps private files only behind links no other account can change, and /srv/x is a link owned by the account with uid 1001; fix: replace the link with a folder you own and move what it led to there.";
         let problem = BearerProblem::Behind(line.into());
         let (error, text) = problem.error("environment");
         assert_eq!(error, "CredentialUnavailable");

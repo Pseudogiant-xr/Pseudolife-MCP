@@ -61,6 +61,8 @@ pub(crate) enum PathEntry {
     },
     /// Any other reparse point, by tag.
     Other(u32),
+    /// A link whose target cannot be checked, and why.
+    Uncheckable(String),
 }
 
 /// Why a link is not trusted: the link's own owner or access list, or the
@@ -112,9 +114,23 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(PathEntry::Missing),
         Err(error) => return Err(error),
     }
-    let entry = match open(path, FILE_READ_ATTRIBUTES, false) {
-        Ok(entry) => entry,
+    // One handle for everything read about the element (tag, target, owner
+    // and access list), so nothing can be swapped between the reads. A
+    // reparse point that is not a link needs only its attributes, so where
+    // READ_CONTROL is refused it is read without: a link read that way is
+    // refused below.
+    let (entry, readable) = match open(path, READ_CONTROL | FILE_READ_ATTRIBUTES, false) {
+        Ok(entry) => (entry, true),
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(PathEntry::Missing),
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            match open(path, FILE_READ_ATTRIBUTES, false) {
+                Ok(entry) => (entry, false),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return Ok(PathEntry::Missing);
+                }
+                Err(error) => return Err(error),
+            }
+        }
         Err(error) => return Err(error),
     };
     let mut tag_info: FILE_ATTRIBUTE_TAG_INFO = FILE_ATTRIBUTE_TAG_INFO {
@@ -144,22 +160,34 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
         crate::private_path::ReparseKind::Other => return Ok(PathEntry::Other(tag)),
         crate::private_path::ReparseKind::Link => {}
     }
-    let target = reparse_target(&entry, tag)?;
+    if !readable {
+        return Err(io::Error::other(
+            "this account may not read the link's permissions",
+        ));
+    }
+    // Where the link leads, when that can be checked: an unrecognised form,
+    // or reparse data that is malformed or changed while it was read, is a
+    // refusal of its own, not a permissions problem.
+    let target = match reparse_target(&entry, tag) {
+        Ok(target) => target,
+        Err(error) => return Ok(PathEntry::Uncheckable(error.to_string())),
+    };
     // SAFETY: token_user returns an owned, usize-aligned TOKEN_USER buffer;
     // it outlives every use of its SID below.
     let user =
         unsafe { token_user() }.ok_or_else(|| io::Error::other("this account cannot be read"))?;
     let user_sid = unsafe { (*(user.as_ptr().cast::<Security::TOKEN_USER>())).User.Sid };
-    let link = open(path, READ_CONTROL | FILE_READ_ATTRIBUTES, false)?;
-    if let Some(why) = security_distrust(&link, user_sid, Rule::File)? {
+    if let Some(why) = security_distrust(&entry, user_sid, Rule::File)? {
         return Ok(PathEntry::Link {
             target,
             distrust: Some(LinkDistrust::Link(why)),
         });
     }
-    let holder_path = path
-        .parent()
-        .ok_or_else(|| io::Error::other("a link with no folder above it"))?;
+    let Some(holder_path) = path.parent() else {
+        return Ok(PathEntry::Uncheckable(
+            "a link with no folder above it".into(),
+        ));
+    };
     // Followed: the folders above it were checked first.
     let holder = open(holder_path, READ_CONTROL, true)?;
     // Windows resolves a relative symlink against where its folder really
@@ -168,7 +196,10 @@ pub(crate) fn inspect_entry(path: &Path) -> io::Result<PathEntry> {
     let target = if target.is_absolute() {
         target
     } else {
-        lexical(&final_path(&holder)?.join(&target))
+        match final_path(&holder) {
+            Ok(real) => lexical(&real.join(&target)),
+            Err(error) => return Ok(PathEntry::Uncheckable(error.to_string())),
+        }
     };
     let distrust = security_distrust(&holder, user_sid, Rule::LinkHolder)?
         .map(|why| LinkDistrust::Holder(holder_path.to_path_buf(), why));
@@ -254,8 +285,11 @@ fn security_distrust(
             &mut descriptor,
         );
         let _descriptor = Descriptor(descriptor);
-        if result != 0 || descriptor.is_null() || owner.is_null() {
+        if result != 0 {
             return Err(io::Error::from_raw_os_error(result as i32));
+        }
+        if descriptor.is_null() || owner.is_null() {
+            return Err(io::Error::other("its owner could not be read"));
         }
         Ok(access_distrust(owner, dacl, user, rule))
     }
@@ -711,11 +745,13 @@ pub(crate) unsafe fn marker_distrust(
 const FOLDER_DELETE_CHILD: u32 = 0x0040;
 
 /// Rights on the folder holding a link that let a principal remove or
-/// replace that link, or grant itself the right to: deleting a child, and
-/// changing the folder's access list or owner. Adding files or subfolders
-/// (`C:\` grants that to Authenticated Users) cannot replace an entry that
-/// exists, so those rights are not counted.
+/// replace that link, or grant itself the right to: deleting a child,
+/// deleting (so renaming away) the folder itself, and changing its access
+/// list or owner. Adding files or subfolders (`C:\` grants that to
+/// Authenticated Users) cannot replace an entry that exists, so those
+/// rights are not counted.
 const LINK_HOLDER_RIGHTS: u32 = FOLDER_DELETE_CHILD
+    | 0x0001_0000 // DELETE
     | 0x0004_0000 // WRITE_DAC
     | 0x0008_0000 // WRITE_OWNER
     | 0x1000_0000; // GENERIC_ALL

@@ -154,7 +154,7 @@ fn each_refusal_names_the_element_and_one_fix() {
                 owner: "the account with uid 1001".into(),
                 target: target.clone(),
             },
-            "fix: replace the link with a folder you own.",
+            "fix: replace the link with a folder you own and move what it led to there.",
         ),
         (
             Cause::HolderOwner {
@@ -162,12 +162,13 @@ fn each_refusal_names_the_element_and_one_fix() {
                 owner: "the account with uid 1001".into(),
                 target: target.clone(),
             },
-            "fix: replace the link with a folder you own.",
+            "fix: replace the link with a folder you own and move what it led to there.",
         ),
         (
             Cause::HolderWritable {
                 holder: holder.clone(),
                 writer: Writer::GroupAndOthers,
+                owned: true,
                 target: target.clone(),
             },
             "fix: chmod go-w '/srv/shared'.",
@@ -176,16 +177,44 @@ fn each_refusal_names_the_element_and_one_fix() {
             Cause::HolderWritable {
                 holder: holder.clone(),
                 writer: Writer::Group,
+                owned: true,
                 target: target.clone(),
             },
             "fix: chmod g-w '/srv/shared'.",
+        ),
+        // A writable folder this user does not own (Debian's root:staff
+        // /usr/local is 2775) is never theirs to chmod.
+        (
+            Cause::HolderWritable {
+                holder: PathBuf::from("/usr/local"),
+                writer: Writer::Group,
+                owned: false,
+                target: target.clone(),
+            },
+            "fix: replace the link with a folder you own and move what it led to there.",
+        ),
+        (
+            Cause::HolderWritable {
+                holder: PathBuf::from(r"C:\shared"),
+                writer: Writer::Account("Everyone".into()),
+                owned: false,
+                target: target.clone(),
+            },
+            "fix: replace the link with a folder you own and move what it led to there.",
+        ),
+        // A target that cannot be checked is not a permissions problem.
+        (
+            Cause::UncheckableTarget {
+                detail: "a link target in a form this client cannot check".into(),
+            },
+            "fix: replace the link with a folder you own and move what it led to there.",
         ),
         (
             Cause::LinkWriter {
                 writer: "Everyone".into(),
                 target: target.clone(),
             },
-            "fix: replace the link with a folder you own.",
+            "fix: replace the link with a folder you own and move what it led to there.",
         ),
         (Cause::TooManyLinks, "fix: point it at the folder itself."),
         (
@@ -203,7 +232,26 @@ fn each_refusal_names_the_element_and_one_fix() {
         assert!(text.contains(fix), "{text}");
         assert_eq!(text.matches("fix:").count(), 1, "{text}");
         assert!(!text.contains("invalid_state"), "{text}");
+        assert!(!text.contains("chmod") || fix.contains("chmod"), "{text}");
     }
+}
+
+#[test]
+fn a_quote_in_the_folder_name_is_escaped_for_the_shell() {
+    let text = Refusal {
+        element: PathBuf::from("/home/o'brien/link"),
+        cause: Box::new(Cause::HolderWritable {
+            holder: PathBuf::from("/home/o'brien"),
+            writer: Writer::Others,
+            owned: true,
+            target: PathBuf::from("/data"),
+        }),
+    }
+    .to_string();
+    assert!(
+        text.ends_with(r"fix: chmod o-w '/home/o'\''brien'."),
+        "{text}"
+    );
 }
 
 // ---- POSIX, on the real filesystem (Linux; macOS: not yet run) ----

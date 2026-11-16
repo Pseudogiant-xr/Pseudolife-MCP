@@ -251,7 +251,8 @@ DIGEST_AT_ARM=0
 # folder above the file is a link; only the client's exact marker line
 # counts, so a missing, older or non-native client leaves the file refused.
 private_path_trusted() {
-    local file="$1" launcher answer
+    local file="$1" launcher answer first nl='
+'
     case "$OSTYPE" in
         msys*|mingw*|cygwin*)
             launcher=${PSEUDOLIFE_SHIM_LAUNCHER:-}
@@ -262,17 +263,28 @@ private_path_trusted() {
         *)
             launcher=${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp} ;;
     esac
-    if [ -n "$launcher" ] && [ -f "$launcher" ] && [ -x "$launcher" ]; then
-        answer=$("$launcher" private-path-check "$file" </dev/null 2>/dev/null)
-        case $?:$answer in
-            "0:pseudolife-private-path: trusted") return 0 ;;
-            "1:pseudolife-private-path: refused: "*)
-                # The client named the link, the cause and the fix.
-                printf '%s\n' "${answer#pseudolife-private-path: refused: }" >&2
-                return 1 ;;
-        esac
+    case "$file" in
+        /*|[A-Za-z]:\\*|\\\\*) ;;
+        *)
+            printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a link, and a relative path cannot be checked; fix: name the file by its absolute path." >&2
+            return 1 ;;
+    esac
+    if [ -z "$launcher" ] || [ ! -f "$launcher" ] || [ ! -x "$launcher" ]; then
+        printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a symlink or junction, and no native pseudolife-mcp client is installed to check whether another account can change it; fix: install the native client (rerun the installer)." >&2
+        return 1
     fi
-    printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a symlink or junction, and no native pseudolife-mcp client answered whether another account can change it; fix: install the native client (rerun the installer), or name the file by its real path." >&2
+    answer=$("$launcher" private-path-check "$file" </dev/null 2>&1)
+    case $?:$answer in
+        "0:pseudolife-private-path: trusted") return 0 ;;
+        "1:pseudolife-private-path: refused: "*)
+            # The client named the link, the cause and the fix.
+            printf '%s\n' "${answer#pseudolife-private-path: refused: }" >&2
+            return 1 ;;
+    esac
+    # Installed but no verdict (an older client, a busy runtime, a refused
+    # runtime folder): its own first line says why.
+    first=${answer%%"$nl"*}
+    printf '%s\n' "pseudolife-mcp: not reading $file: a folder above it is a link, and the native client at $launcher could not answer (${first:-no output}); fix: run '$launcher' private-path-check '$file' to see its cause, then retry." >&2
     return 1
 }
 

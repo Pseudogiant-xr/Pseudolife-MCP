@@ -337,13 +337,16 @@ fn marker_folder_trusted(folder: &Path) -> Result<File> {
     // file index, read through this same handle), not its name: a folder
     // swapped in under the same name is checked afresh.
     let Ok(identity) = crate::credentials::windows_security::folder_identity(&directory) else {
-        report_folder_once(
-            folder,
-            &format!(
-                "pseudolife-mcp: not reading board markers in {}: it is not a plain folder (a symlink or junction, which private state never follows). Fix: point the digest folder at a plain folder, then retry.",
+        // The private-path rule names a link it does not follow; anything
+        // else is a folder that could not be read as one.
+        let line = match crate::private_path::check_path(folder) {
+            Err(refusal) => refusal.to_string(),
+            Ok(()) => format!(
+                "pseudolife-mcp: not reading board markers in {}: it could not be opened as a plain folder. Fix: point the digest folder at a plain folder you own, then retry.",
                 folder.display()
             ),
-        );
+        };
+        report_folder_once(folder, &line);
         return Err("invalid_state");
     };
     let fresh = MARKER_FOLDERS

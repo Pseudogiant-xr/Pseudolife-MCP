@@ -656,3 +656,32 @@ fn download_errors_name_the_archive_url_override_only_when_it_is_set() {
         "{noted}"
     );
 }
+
+// Unix only: a windows-latest test resting on real file locks needs the
+// 20-run hosted stress loop first (CLAUDE.md "Dev machines").
+#[cfg(unix)]
+#[test]
+fn the_pin_a_hook_mode_takes_never_waits_for_an_update() {
+    // private-path-check runs under a hook's time budget: a runtime an
+    // update holds exclusively is "busy" at once, never a wait (#1644 S3).
+    let f = Fixture::new();
+    let path = f.path.join("usage.lock");
+    fs::write(&path, b"").unwrap();
+    let update = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let hook = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    update.lock().unwrap();
+    let started = std::time::Instant::now();
+    let error = super::launch::try_shared(&hook).unwrap_err();
+    assert!(error.contains("busy"), "{error}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    update.unlock().unwrap();
+    super::launch::try_shared(&hook).unwrap();
+}

@@ -22,6 +22,45 @@ pub(super) fn usage_file_with(
 pub(super) fn pin(runtime: &Runtime) -> Result<fs::File> {
     let file = usage_file(&runtime.usage_lock_path())?;
     file.lock_shared().map_err(io_error)?;
+    verified(runtime, file)
+}
+
+/// [`pin`] that never waits: for a mode a hook runs under a time budget
+/// (`private-path-check`), a runtime an update holds is "no answer", not a
+/// stall.
+pub(super) fn pin_now(runtime: &Runtime) -> Result<fs::File> {
+    let file = usage_file(&runtime.usage_lock_path())?;
+    try_shared(&file)?;
+    verified(runtime, file)
+}
+
+/// Take `file`'s shared lock only if nobody holds it exclusively now.
+pub(super) fn try_shared(file: &fs::File) -> Result<()> {
+    match file.try_lock_shared() {
+        Ok(()) => Ok(()),
+        Err(fs::TryLockError::WouldBlock) => {
+            Err("the native runtime is busy (an update holds it); retry shortly".into())
+        }
+        Err(fs::TryLockError::Error(error)) => Err(io_error(error)),
+    }
+}
+
+/// Whether this process runs a mode that must not wait for the runtime pin.
+fn must_not_wait() -> bool {
+    std::env::args_os()
+        .nth(1)
+        .is_some_and(|mode| mode == "private-path-check")
+}
+
+fn pin_for_mode(runtime: &Runtime) -> Result<fs::File> {
+    if must_not_wait() {
+        pin_now(runtime)
+    } else {
+        pin(runtime)
+    }
+}
+
+fn verified(runtime: &Runtime, file: fs::File) -> Result<fs::File> {
     // Hash only after pinning: selection can race with pruning while waiting
     // for this lock. Both launcher and child need this verification because
     // runtime binaries can also be invoked directly, without a launcher pin.
@@ -85,7 +124,7 @@ pub fn maybe_launch() -> Option<u8> {
                     return Some(1);
                 }
             };
-            match pin(&runtime) {
+            match pin_for_mode(&runtime) {
                 Ok(lock) => {
                     #[cfg(unix)]
                     if let Err(error) = inherited_pin::cloexec(&lock) {
@@ -104,7 +143,7 @@ pub fn maybe_launch() -> Option<u8> {
         }
         return None;
     }
-    let (runtime, lock) = match select_pin_with(&layout, pin) {
+    let (runtime, lock) = match select_pin_with(&layout, pin_for_mode) {
         Ok(selected) => selected,
         Err(error) => {
             crate::stderrln!("pseudolife-mcp: {error}");
