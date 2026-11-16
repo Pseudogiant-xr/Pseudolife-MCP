@@ -4,14 +4,15 @@
 # (Install under pwsh 7 — the ternary below needs it; the scheduled task
 # itself runs fine under powershell.exe 5.1.)
 #
-# Needs an ELEVATED PowerShell (Task Scheduler refuses unelevated per-user
-# registration on administrator accounts). Open it fresh from the Start
-# menu - never request the UAC elevation from a shell inside Claude Desktop
-# or another Store-packaged app: that app's next update then fails to
-# launch until a reboot (anthropics/claude-code#61635; full note in
-# install-shim-autostart.ps1). This very installer, elevated from a Claude
-# Desktop session on 2026-08-31, is the most likely trigger of the
-# 2026-09-02 reproduction (inferred from timing, not proven).
+# No elevation: run this from a normal PowerShell 7 window. The task is
+# registered for this user only (logon of this user, Interactive,
+# -RunLevel Limited), which an unelevated user may register, replace and
+# remove; a task registered from an elevated shell is owned by
+# Administrators, and this script then changes nothing and prints the one
+# elevated command that removes it (full note in install-shim-autostart.ps1).
+# Never request UAC elevation from a shell inside Claude Desktop or another
+# Store-packaged app: that app's next update then fails to launch until a
+# reboot (anthropics/claude-code#61635).
 #
 #   ops\install-codex-shim-autostart.ps1                      # port 8086, terra
 #   ops\install-codex-shim-autostart.ps1 -Model gpt-5.6-sol   # pick the served model
@@ -21,7 +22,7 @@
 # CLI path, interpreter and log file read from ops/.env
 # (PSEUDOLIFE_CODEX_SHIM_*) at every start; the flags here are written into
 # that file. Changing a value later is an edit plus
-# `python ops\shim_autostart.py restart codex` — no elevation.
+# `python ops\shim_autostart.py restart codex` — no re-registration.
 #   OpenAI models: gpt-5.6-terra (default), gpt-5.6-sol, gpt-5.6-luna, gpt-6-sol,
 #   gpt-6-luna, gpt-6.1-sol (the list ops\install.ps1 offers; the GPT-6 ids were
 #   accepted by the Codex CLI on 2026-09-29, gpt-6.1-sol on 2026-11-08 by
@@ -127,11 +128,29 @@ $taskName = "Pseudolife Codex Shim"
 # The task's only argument is the runner: the values live in ops/.env. An
 # explicit -CodexCli is written there; without one the shim re-resolves
 # the rotating %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ path at each start.
+# >>> task lock check >>>
+# Decide before changing anything (see install-shim-autostart.ps1): a task
+# Administrators own that runs this checkout's runner follows ops\.env and
+# is left registered; any other such task is refused.
+. (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
+$taskLock = Get-TaskLock $taskName
+$followsFile = $false
+if ($taskLock) {
+    if ($taskLock.Hidden -or -not (Test-TaskRunsRunner $taskName $repo 'codex')) { throw (Format-TaskLock $taskLock) }
+    $followsFile = $true
+}
+# <<< task lock check <<<
 $configArgs = @("config", "codex", "--model", $Model, "--port", "$Port", "--health-ttl", "$HealthTtl",
                 "--python", $PythonExe, "--log", $LogFile)
 if ($CodexCli) { $configArgs += @("--cli", $CodexCli) }
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") @configArgs 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
+if ($followsFile) {
+    & $PythonExe (Join-Path $repo "ops\shim_autostart.py") restart codex 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "the settings are in ops\.env, but the shim did not restart (see above); the task starts it with them at your next logon" }
+    Write-Host "Codex shim autostart: $(Format-TaskLock $taskLock -Follows 'ops\.env')"
+    return
+}
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
 `$psi.FileName = '$($PythonExe -replace "'", "''")'
@@ -145,7 +164,11 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
+# This user's logon only, run as this user with a limited token: the shape
+# an unelevated user may register.
+$user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
@@ -156,19 +179,18 @@ Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Silent
 # unelevated run printed "Access is denied" and fell through to the success
 # message). Force it, and verify the task actually exists before claiming
 # success.
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal `
     -Settings $settings -Description "Codex extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
     -ErrorAction Stop | Out-Null
 if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
-    throw ("task '$taskName' was not registered - Task Scheduler needs an ELEVATED " +
-           "PowerShell on administrator accounts. Open it fresh from the Start menu; " +
-           "never elevate from a shell inside Claude Desktop or another Store-packaged " +
-           "app (its next update then fails to launch until a reboot - " +
-           "anthropics/claude-code#61635).")
+    throw ("task '$taskName' was not registered: Task Scheduler refused it (see the message above). " +
+           "No elevation is needed for this per-user task; run this script again in a normal " +
+           "PowerShell 7 window, and if it still fails, check that the ScheduledTasks module loads " +
+           "(Get-Command Register-ScheduledTask).")
 }
 Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
 Write-Host "Registered + started '$taskName' ($Model, port $Port, health-ttl ${HealthTtl}s, python $PythonExe, log $LogFile)."
-Write-Host "To change the model, port, health TTL or CLI later: edit the PSEUDOLIFE_CODEX_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart codex (no elevation)."
+Write-Host "To change the model, port, health TTL or CLI later: edit the PSEUDOLIFE_CODEX_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart codex."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

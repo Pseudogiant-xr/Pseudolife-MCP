@@ -202,12 +202,12 @@ an unrelated, never-adopted 2026-08-02 lineage.
 Existing installs pick v5 up when the shim is restarted on the new file:
 set `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` in `ops/.env` (the autostart task
 and unit read it at every start) and run `python ops/shim_autostart.py
-restart claude` — no re-registration, no elevation, once the task or unit
+restart claude` — no re-registration, once the task or unit
 runs the runner (an install registered before 2026-09-29 still carries
 the prompt file on its command line: `show claude` says so, `restart`
 refuses until then — `--force` restarts from `ops/.env` anyway, and the
 task's own values come back at the next logon — and one more run of the
-autostart installer, elevated on Windows, switches it).
+autostart installer switches it).
 Rebuilding the daemon image alone does **not** reach the shim path.
 The Codex shim passes no prompt file at all, so it already runs the shipped
 prompt.
@@ -420,11 +420,20 @@ steps:
 
 1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:
-   - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
-     `127.0.0.1:8082`; needs an elevated PowerShell — open it fresh from
-     the Start menu, never from a terminal inside Claude Desktop or another
-     Store-packaged app, or that app's next update fails to launch until a
-     reboot — see
+   - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at your
+     logon, `127.0.0.1:8082`; run it from a normal PowerShell 7 window, no
+     elevation: the task is registered for your user only, with a limited
+     token, which Windows lets an unelevated user register, replace and
+     remove. A task of that name registered earlier from an elevated
+     PowerShell is owned by Administrators and cannot be changed from a
+     normal window. The script never re-registers it: when it already runs
+     `ops\shim_autostart.py` from this checkout, which reads `ops\.env` at
+     every start, the script writes the new settings there and restarts the
+     shim; otherwise it changes nothing and prints the one command to run
+     once in a PowerShell opened with Run as administrator from the Start
+     menu, never from a terminal inside Claude Desktop or
+     another Store-packaged app, or that app's next update fails to launch
+     until a reboot — see
      [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
      `-Model` picks the served default —
      `claude-opus-5-5` since 2026-09-29, when it cleared the paired
@@ -453,8 +462,8 @@ steps:
      `…_PROMPT_FILE`, `…_PORT`, `…_HOST`, `…_CLI`, `…_PYTHON`, `…_LOG`, in
      a block the installers write from their flags) at every start. To
      change any of them later, edit that line and run
-     `python ops/shim_autostart.py restart claude` — the elevated shell is
-     needed only once, to register the task. On Windows `restart` stops
+     `python ops/shim_autostart.py restart claude` — the task is registered
+     only once. On Windows `restart` stops
      the shim and starts it itself (the task still starts it at logon);
      on Linux it is `systemctl --user restart`. Run the Windows restart
      from a plain terminal: the shim starts with that shell's environment
@@ -463,7 +472,7 @@ steps:
      ops/shim_autostart.py show claude` prints what the next start would
      run, and warns when the registered task or unit predates the runner
      and still carries the values on its command line (re-run the
-     installer once, elevated on Windows, to switch it). The Codex shim
+     installer once to switch it). The Codex shim
      is the same with `codex` and `PSEUDOLIFE_CODEX_SHIM_*`
      (`…_HEALTH_TTL` instead of a prompt file). When no `…_CLI` is set the
      shim's own lookup applies (`PSEUDOLIFE_SHIM_CLAUDE_CLI` /
@@ -540,8 +549,9 @@ ops/install.sh --extractor openai-fallback     # or openai-only; Windows: ops\in
 which prompts for the GPT dreamer (GPT-5.6 Terra / Sol / Luna, GPT-6 Sol /
 Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
-Scheduler, elevated pwsh opened from the Start menu, same caveat as the
-Claude shim above; `.sh` — systemd `--user`, docker-bridge bind; both pick
+Scheduler, a normal pwsh window, a task for your user only, and the same
+note as the Claude shim above for a task registered earlier from an
+elevated PowerShell; `.sh` — systemd `--user`, docker-bridge bind; both pick
 and verify the unit's interpreter exactly as the Claude shim's autostart
 does, `--python` / `-PythonExe` naming one), and writes the env triple for
 you. Unlike the Claude shim's installer, the Windows Codex installer does

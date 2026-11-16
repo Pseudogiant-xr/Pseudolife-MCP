@@ -480,6 +480,7 @@ live test_runner_cleanup.py
 live test_runner_watch.py
 live test_rust_mcp_catalogue.py
 live test_rust_release_image.py
+live test_scheduled_task_lock.py
 frozen test_schema_ddl_shape.py
 frozen test_schema_healing.py
 live test_schema_version.py

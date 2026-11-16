@@ -4998,8 +4998,12 @@ off" from counting as unit failures) and enables the timer. A `--user`
 timer runs only while that user has a session unless lingering is on:
 `loginctl enable-linger <user>` once, which is the headless case this
 is for. On Windows it registers the task `Pseudolife Unattended Update`
-through `schtasks`, which on an administrator account needs an elevated
-PowerShell opened from the Start menu (the refusal says so); the task
+through Task Scheduler's PowerShell cmdlets as a daily task for you only,
+with a limited token, which needs no elevation. A task of that name
+registered earlier from an elevated PowerShell is owned by Administrators
+and cannot be replaced or removed from a normal window: `--schedule` and
+`--unschedule` then change nothing and print the one command to run once
+in a PowerShell opened with Run as administrator. The task
 runs while the user is signed in, with the user's User-scope environment
 variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` and any
 `PSEUDOLIFE_MCP_DAEMON_URL` must be set at User scope (the command

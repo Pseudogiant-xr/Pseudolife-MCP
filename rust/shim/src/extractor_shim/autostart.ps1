@@ -226,6 +226,106 @@ function Get-OwnedTaskProcesses($task, $previous = @(), [switch]$RequireSettled)
     } while ($added.Count)
     $captured
 }
+# >>> task lock >>>
+# Whether this shell may change or remove a scheduled task, read without
+# changing anything. Valid for Windows PowerShell 5.1 and PowerShell 7.
+#
+# An unelevated user can register, replace, disable and remove a task they
+# own. A task registered from an elevated shell is owned by Administrators
+# and grants its user only read access, so an unelevated shell can neither
+# replace nor remove it (Windows dev VM probe, 16 November 2026, with a
+# UAC-style filtered token: the owner in the task's security descriptor is
+# the signal). The copies of this block in ops/scheduled_task_lock.ps1 and
+# rust/shim/src/extractor_shim/autostart.ps1 are kept identical by
+# tests/test_scheduled_task_lock.py.
+function Test-TaskShellElevated {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    (New-Object Security.Principal.WindowsPrincipal $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+function Get-TaskShellUserSid {
+    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+}
+function Get-TaskOwnerSddl([string]$TaskName) {
+    # The owner part of the task's security descriptor (SDDL "O:..."), or
+    # 'absent' when no task of that name exists in the root folder, or
+    # 'hidden' when Task Scheduler refuses to show it to this account.
+    $service = New-Object -ComObject Schedule.Service
+    $service.Connect()
+    try { $task = $service.GetFolder('\').GetTask($TaskName) }
+    catch {
+        # PowerShell wraps the COM error; its HRESULT is the COMException's.
+        $code = $_.Exception.HResult
+        for ($inner = $_.Exception; $inner; $inner = $inner.InnerException) {
+            if ($inner -is [Runtime.InteropServices.COMException]) { $code = $inner.HResult; break }
+        }
+        # 0x80070002 file not found, 0x80070003 path not found.
+        if ($code -eq -2147024894 -or $code -eq -2147024893) { return 'absent' }
+        # 0x80070005 access denied: a task this account may not even read.
+        if ($code -eq -2147024891) { return 'hidden' }
+        throw
+    }
+    # 1 = OWNER_SECURITY_INFORMATION: reading it needs only read access.
+    $task.GetSecurityDescriptor(1)
+}
+function Get-TaskOwnerName([string]$Owner) {
+    if ($Owner -eq 'BA') { return 'Administrators' }
+    if ($Owner -eq 'SY') { return 'SYSTEM' }
+    try {
+        (New-Object Security.Principal.SecurityIdentifier $Owner).Translate([Security.Principal.NTAccount]).Value
+    } catch { $Owner }
+}
+function Get-TaskLock([string]$TaskName) {
+    # $null when this shell may change the task: there is none, this user
+    # owns it, or Administrators or SYSTEM own it and this shell is
+    # elevated. Otherwise an object naming who owns it ('another account'
+    # when the task is hidden from this one). Another user's task is never
+    # this shell's to change, elevated or not.
+    $sddl = Get-TaskOwnerSddl $TaskName
+    if ($sddl -eq 'absent') { return $null }
+    if ($sddl -eq 'hidden') {
+        return [pscustomobject]@{ TaskName = $TaskName; Owner = 'another account'; Hidden = $true; OtherUser = $true }
+    }
+    $owner = if ("$sddl" -match '^O:(.+?)(?=[GDS]:|$)') { $Matches[1] } else { '' }
+    if ($owner -and $owner -eq (Get-TaskShellUserSid)) { return $null }
+    $machine = $owner -in @('BA', 'SY', 'S-1-5-32-544', 'S-1-5-18')
+    if ($machine -and (Test-TaskShellElevated)) { return $null }
+    $name = if ($owner) { Get-TaskOwnerName $owner } else { 'an unknown owner' }
+    [pscustomobject]@{ TaskName = $TaskName; Owner = $name; Hidden = $false; OtherUser = -not $machine }
+}
+function Format-TaskLock($lock, [switch]$Removal, [string]$Follows) {
+    # One line: the true state and the one command that changes it.
+    # -Removal words it for a task this run meant to remove, not replace.
+    # -Follows names the settings file a task this shell cannot change still
+    # reads at every start: the command is then only for a user who wants a
+    # task of their own.
+    $quoted = $lock.TaskName.Replace("'", "''")
+    if ($lock.Hidden) {
+        return ("a scheduled task named '$($lock.TaskName)' exists but this account cannot read it, " +
+                "so it belongs to another account on this machine; nothing was changed. " +
+                "Ask that account to remove it, or pick another task name")
+    }
+    $remove = "Stop-ScheduledTask -TaskName '$quoted'; Unregister-ScheduledTask -TaskName '$quoted' -Confirm:`$false"
+    if ($lock.OtherUser) {
+        return ("the scheduled task '$($lock.TaskName)' is owned by another account ($($lock.Owner)), " +
+                "and this run never changes another account's task; nothing was changed and it keeps running as registered. " +
+                "Ask that account to remove it ($remove), or pick another task name")
+    }
+    $why = if ($lock.Owner -eq 'Administrators') {
+        "was registered from an elevated PowerShell, so Administrators own it"
+    } else { "is owned by $($lock.Owner)" }
+    $command = ("run once in Windows PowerShell opened with Run as administrator from the Start menu " +
+                "(not from a shell inside Claude Desktop: anthropics/claude-code#61635): $remove")
+    if ($Follows) {
+        return ("the scheduled task '$($lock.TaskName)' $why and only an elevated shell can change it, " +
+                "but it reads $Follows at every start, so it keeps following these settings. " +
+                "Only if you want a task of your own instead, $command - then rerun this command in a normal window")
+    }
+    $goal = if ($Removal) { "To remove it" } else { "To replace it with a task of your own" }
+    $then = if ($Removal) { "" } else { " - then rerun this command in a normal window" }
+    ("the scheduled task '$($lock.TaskName)' $why, and this unelevated shell cannot change or remove it; " +
+     "nothing was changed and it keeps running as registered. $goal, $command" + $then)
+}
+# <<< task lock <<<
 function Get-TaskRegistration([string]$taskName, [datetime]$deadline = (Get-Date).AddSeconds(15)) {
     # The 2026-11-03 VM trace saw four intermittent provider file-not-found
     # errors in 80 autostart proofs. They are not the named-task absence result.
@@ -320,7 +420,19 @@ if ($c.Remove) {
     $script:removedRegistration = $false
     $names = @($name)
     if ($name -eq 'Pseudolife Claude Shim') { $names += 'Pseudolife Sonnet Shim' }
-    foreach ($task in $names) { Assert-ShimRegistration (Get-TaskRegistration $task) }
+    # Read-only, before anything stops: an Administrators-owned task cannot
+    # be removed from this shell, and stopping its shim first would leave
+    # the task in place with nothing running.
+    $present = @()
+    foreach ($task in $names) {
+        $registration = Get-TaskRegistration $task
+        Assert-ShimRegistration $registration
+        if ($registration) { $present += $task }
+    }
+    foreach ($task in $present) {
+        $lock = Get-TaskLock $task
+        if ($lock) { throw (Format-TaskLock $lock -Removal) }
+    }
     foreach ($task in $names) {
         $null = Remove-OwnedTask $task
     }
@@ -332,12 +444,25 @@ $legacy = if ($name -eq 'Pseudolife Claude Shim') { Get-TaskRegistration 'Pseudo
 Assert-ShimRegistration $registered
 Assert-ShimRegistration $legacy
 $siblings = @()
+$presentSiblings = @()
 if ($c.ReplaceSibling) {
     $siblings = if ($kind -eq 'claude') { @('Pseudolife Codex Shim') } else { @('Pseudolife Claude Shim', 'Pseudolife Sonnet Shim') }
     foreach ($sibling in $siblings) {
-        if ($sibling -ne $name) { Assert-ShimRegistration (Get-TaskRegistration $sibling) }
+        if ($sibling -ne $name) {
+            $registration = Get-TaskRegistration $sibling
+            Assert-ShimRegistration $registration
+            if ($registration) { $presentSiblings += $sibling }
+        }
     }
 }
+# Read-only, before anything changes: a legacy or sibling task this shell
+# cannot remove would keep starting a second shim at logon beside the new
+# registration, so it is refused here with the one elevated command.
+foreach ($other in @(@(if ($legacy) { $legacy.TaskName }) + $presentSiblings)) {
+    $lock = Get-TaskLock $other
+    if ($lock) { throw (Format-TaskLock $lock -Removal) }
+}
+$selectedLock = if ($registered) { Get-TaskLock $name } else { $null }
 # Refuse ambiguous metadata-free runtimes before changing settings or stopping
 # either original task; the settled snapshot repeats this check for late children.
 $legacyProcesses = @(Get-OwnedTaskProcesses $legacy -RequireSettled)
@@ -367,7 +492,9 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encoded"
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType ([string]$c.LogonType)
+# This user, limited token, and a logon trigger for this user only: the
+# shape an unelevated user may register (S4U itself still needs elevation).
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType ([string]$c.LogonType) -RunLevel Limited
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -Hidden
 function Test-HealthyListener {
@@ -397,14 +524,22 @@ $originalOwnership = $rollbackOwnership
 $replacementRegistered = $false
 $mutated = $false
 $unchanged = $false
+$sameTask = $registered -and @($registered.Actions).Count -eq 1 -and
+    $registered.Actions[0].Execute -eq $action.Execute -and $registered.Actions[0].Arguments -eq $action.Arguments -and
+    [string]$registered.Principal.LogonType -eq [string]$c.LogonType
+# A task this shell cannot replace is never changed: unless it already runs
+# this action, and so reads the settings file at every start, it is refused
+# here, before the settings file is written or anything is stopped.
+if ($selectedLock -and -not ($sameTask -and $registered.Settings.Enabled)) { throw (Format-TaskLock $selectedLock) }
+$followsFile = $false
 try {
     $configArgs = @($c.ConfigArgs)
     & $native @configArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'could not write native shim settings' }
-    $sameTask = $registered -and @($registered.Actions).Count -eq 1 -and
-        $registered.Actions[0].Execute -eq $action.Execute -and $registered.Actions[0].Arguments -eq $action.Arguments -and
-        [string]$registered.Principal.LogonType -eq [string]$c.LogonType
     $unchanged = $sameTask -and (Test-HealthyListener)
+    # The task this shell cannot replace runs this action: it is left
+    # registered and restarted below to pick up the settings just written.
+    $followsFile = $selectedLock -and -not $unchanged
     if ($unchanged -and -not $registered.Settings.Enabled) {
         Enable-ScheduledTask -TaskName $name -ErrorAction Stop | Out-Null
     }
@@ -426,10 +561,17 @@ try {
             (-not $beforeRegister -and $rollbackOwnership)) {
             throw "task $name registration changed; inspect its action before retrying; refusing to overwrite it"
         }
-        $installed = Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force
-        $replacementRegistered = $true
-        $rollbackOwnership = Get-TaskOwnership $installed
-        if (-not (Get-TaskRegistration $name)) { throw "task was not registered: $name" }
+        # A task this shell cannot replace already runs this action: it is
+        # only restarted. An unelevated user may stop and start a task
+        # Administrators own (Windows dev VM, 16 November 2026, filtered
+        # token: Start-ScheduledTask, schtasks /Run and Stop-ScheduledTask
+        # were accepted), so the new settings apply now.
+        if (-not $followsFile) {
+            $installed = Register-ScheduledTask -TaskName $name -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Description "Native $kind extractor CLI shim" -Force
+            $replacementRegistered = $true
+            $rollbackOwnership = Get-TaskOwnership $installed
+            if (-not (Get-TaskRegistration $name)) { throw "task was not registered: $name" }
+        }
         Start-ScheduledTask -TaskName $name
         $deadline = (Get-Date).AddSeconds([int]$c.Timeout)
         while (-not (Test-HealthyListener)) {
@@ -458,6 +600,21 @@ try {
             Register-ScheduledTask -TaskName $name -Xml $previousXml -Force | Out-Null
             if ($wasActive) { Start-ScheduledTask -TaskName $name }
         } catch { $rollbackErrors += "restoring previous task: $($_.Exception.Message)" }
+    }
+    if ($followsFile -and $mutated) {
+        # The restart of a task this shell cannot replace started an instance
+        # on the new settings: stop it before the original restarts on the
+        # restored ones.
+        try {
+            $current = Get-TaskRegistration $name
+            if ($current) {
+                $started = @(Get-OwnedTaskProcesses $current -RequireSettled)
+                Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+                foreach ($process in @($started | Sort-Object CreationDate -Descending)) { Stop-CapturedProcess $process }
+                Wait-TaskStopped $name $originalOwnership
+                foreach ($process in @(Get-OwnedTaskProcesses $current $started -RequireSettled)) { Stop-CapturedProcess $process }
+            }
+        } catch { $rollbackErrors += "stopping the restarted task: $($_.Exception.Message)" }
     }
     if ($mutated -and -not $replacementRegistered) {
         # Stopping the original is not replacing its registration. Restart only
@@ -488,7 +645,13 @@ if ($c.ReplaceSibling) {
         }
     }
 }
-if (-not $unchanged) {
+if (-not $unchanged -and -not $followsFile) {
     Write-Host "Registered + started native $kind shim (port $port, pid $script:verifiedPid)."
     Write-Host "To reload $($c.EnvFile): stop and start scheduled task $name."
+} elseif ($followsFile) {
+    Write-Host "Native $kind shim autostart '$name' keeps its registration and was restarted with the new settings in $($c.EnvFile) (port $port, pid $script:verifiedPid). Note: $(Format-TaskLock $selectedLock -Follows $c.EnvFile)"
+} elseif ($selectedLock) {
+    Write-Host "Native $kind shim autostart '$name' already runs these settings on port $port; nothing changed. Note: $(Format-TaskLock $selectedLock -Follows $c.EnvFile)"
+} else {
+    Write-Host "Native $kind shim autostart '$name' is already registered and serving these settings on port $port; nothing changed."
 }

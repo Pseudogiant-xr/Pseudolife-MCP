@@ -445,6 +445,83 @@ fn schedule_windows(argv: &[String]) -> Result<(String, String)> {
     ))
 }
 
+/// The extractor-shim autostart script, which holds the one copy in this
+/// crate of the PowerShell functions that read a task's owner.
+const AUTOSTART_SCRIPT: &str = include_str!("../../../extractor_shim/autostart.ps1");
+
+/// The exit code of a Windows task script that found the task owned by
+/// someone this shell cannot act for, and changed nothing.
+const TASK_LOCKED: i32 = 3;
+
+/// The `Get-TaskLock` and `Format-TaskLock` functions: whether this shell may
+/// change or remove a scheduled task, read without changing it. A task
+/// registered from an elevated shell is owned by Administrators, and an
+/// unelevated shell can neither replace nor remove it.
+fn task_lock_functions() -> &'static str {
+    let start = AUTOSTART_SCRIPT
+        .find("# >>> task lock >>>")
+        .expect("autostart.ps1 carries the task lock block");
+    let end = AUTOSTART_SCRIPT
+        .find("# <<< task lock <<<")
+        .expect("autostart.ps1 closes the task lock block");
+    &AUTOSTART_SCRIPT[start..end]
+}
+
+/// A script that changes nothing and exits [`TASK_LOCKED`] with the one-line
+/// reason and fix when this shell may not remove `task`, else exits 0.
+fn windows_removal_check(task: &str) -> Result<String> {
+    Ok(format!(
+        "{}$ErrorActionPreference='Stop';$lock=Get-TaskLock {};if($lock){{[Console]::Out.WriteLine((Format-TaskLock $lock -Removal));exit {TASK_LOCKED}}};exit 0",
+        task_lock_functions(),
+        powershell_literal(task)?
+    ))
+}
+
+/// What a Windows task script exiting [`TASK_LOCKED`] printed: its last line.
+fn locked_reason(output: &str) -> String {
+    output
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("the scheduled task is owned by another account, so this shell cannot change it; nothing was changed")
+        .trim()
+        .to_owned()
+}
+
+/// Run a Windows PowerShell `script` encoded, as the scheduler calls do.
+fn run_windows_script(script: &str) -> Result<(i32, String)> {
+    let encoded = base64(
+        &script
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>(),
+    );
+    Ok(seams::run_cli(
+        &[
+            windows_powershell()?,
+            "-NoLogo".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-EncodedCommand".into(),
+            encoded,
+        ],
+        None,
+        30,
+        false,
+    ))
+}
+
+/// The registration failure a Windows task script's exit code means.
+fn registration_failure(code: i32, output: &str) -> UpdateError {
+    if code == TASK_LOCKED {
+        UpdateError::usage(locked_reason(output))
+    } else {
+        UpdateError::usage(
+            "Task Scheduler registration failed. This per-user daily task needs no elevation; check that the Windows ScheduledTasks PowerShell module is available (Get-Command Register-ScheduledTask) and run this command again in a normal PowerShell",
+        )
+    }
+}
+
 fn windows_registration(
     task: &str,
     hour: u8,
@@ -454,11 +531,16 @@ fn windows_registration(
 ) -> Result<String> {
     // schtasks /TR is limited to 261 characters. Register the action through
     // Task Scheduler's object API so layout overrides and long paths survive.
+    // A daily task for this user with a limited token needs no elevation;
+    // one of the same name registered from an elevated shell cannot be
+    // replaced from an unelevated one, so that is read first and the script
+    // changes nothing and exits TASK_LOCKED with the reason.
+    let name = powershell_literal(task)?;
     Ok(format!(
-        "$ErrorActionPreference='Stop';$action=New-ScheduledTaskAction -Execute {} -Argument {};$trigger=New-ScheduledTaskTrigger -Daily -At '{hour:02}:{minute:02}';$principal=New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited;Register-ScheduledTask -TaskName {} -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null",
+        "{}$ErrorActionPreference='Stop';$lock=Get-TaskLock {name};if($lock){{[Console]::Out.WriteLine((Format-TaskLock $lock));exit {TASK_LOCKED}}};$action=New-ScheduledTaskAction -Execute {} -Argument {};$trigger=New-ScheduledTaskTrigger -Daily -At '{hour:02}:{minute:02}';$principal=New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited;Register-ScheduledTask -TaskName {name} -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null",
+        task_lock_functions(),
         powershell_literal(executable)?,
         powershell_literal(arguments)?,
-        powershell_literal(task)?
     ))
 }
 
@@ -595,30 +677,9 @@ fn write(
         };
         let (executable, arguments) = schedule_windows(argv)?;
         let script = windows_registration(task, hour, minute, &executable, &arguments)?;
-        let encoded = base64(
-            &script
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes)
-                .collect::<Vec<_>>(),
-        );
-        let code = seams::run_cli(
-            &[
-                windows_powershell()?,
-                "-NoLogo".into(),
-                "-NoProfile".into(),
-                "-NonInteractive".into(),
-                "-EncodedCommand".into(),
-                encoded,
-            ],
-            None,
-            30,
-            false,
-        )
-        .0;
+        let (code, output) = run_windows_script(&script)?;
         if code != 0 {
-            return Err(UpdateError::usage(
-                "Task Scheduler registration failed. Check that the Windows ScheduledTasks PowerShell module is available; an unelevated administrator account may need to run this command once from an elevated PowerShell fresh from the Start menu",
-            ));
+            return Err(registration_failure(code, &output));
         }
         update.step(format!("registered the scheduled task '{task}' (daily at {hour:02}:{minute:02}); the task inherits your User-scope bearer environment, not this shell's"));
     } else {
@@ -639,6 +700,16 @@ fn write(
 
 pub(crate) fn unschedule(update: &mut Update) -> Result<()> {
     if cfg!(windows) {
+        // Read-only first, for both tasks: a task registered from an
+        // elevated shell cannot be removed from an unelevated one, and
+        // removing one task before refusing the other would leave half a
+        // removal behind.
+        for task in [TASK, CLIENT_TASK] {
+            let (code, output) = run_windows_script(&windows_removal_check(task)?)?;
+            if code == TASK_LOCKED {
+                return Err(UpdateError::usage(locked_reason(&output)));
+            }
+        }
         let mut removed = false;
         for task in [TASK, CLIENT_TASK] {
             if seams::run_cli(
@@ -670,9 +741,9 @@ pub(crate) fn unschedule(update: &mut Update) -> Result<()> {
             )
             .0 != 0
             {
-                return Err(UpdateError::usage(
-                    "schtasks /Delete failed; run --unschedule again from an elevated PowerShell",
-                ));
+                return Err(UpdateError::usage(format!(
+                    "schtasks /Delete failed for the scheduled task '{task}'. Run --unschedule again; if it fails again, run schtasks /Delete /TN \"{task}\" /F yourself to see the reason Task Scheduler gives"
+                )));
             }
             update.step(format!("removed the scheduled task '{task}'"));
             removed = true;
@@ -901,6 +972,132 @@ Connection: close
         assert!(script.contains("-LogonType Interactive -RunLevel Limited"));
         assert!(!script.contains("schtasks"));
         assert!(windows_registration("bad\nname", 3, 30, "cli", "update").is_err());
+    }
+    #[test]
+    fn windows_registration_reads_the_tasks_owner_before_it_registers() {
+        // A task registered from an elevated shell is owned by Administrators
+        // and cannot be replaced unelevated: the script reads that first and
+        // exits TASK_LOCKED having changed nothing.
+        let script = windows_registration("fixture ' task", 3, 30, "cli.exe", "update").unwrap();
+        let check = script.find("$lock=Get-TaskLock 'fixture '' task'").unwrap();
+        let register = script
+            .find("Register-ScheduledTask -TaskName 'fixture '' task'")
+            .unwrap();
+        assert!(check < register);
+        assert!(script[check..register].contains(&format!("exit {TASK_LOCKED}")));
+        assert!(script.starts_with("# >>> task lock >>>"));
+        assert!(script.contains("function Get-TaskLock"));
+        assert!(!script.contains("RunLevel Highest"));
+    }
+    #[test]
+    fn a_failed_registration_says_why_without_asking_for_elevation() {
+        let line = "the scheduled task 'Pseudolife Client Update' was registered from an elevated PowerShell, so Administrators own it, and this unelevated shell cannot change or remove it; nothing was changed";
+        let locked = registration_failure(TASK_LOCKED, &format!("noise\n{line}\r\n\n"));
+        assert_eq!(locked.message, line);
+        let other = registration_failure(1, "Access is denied.");
+        assert!(
+            other.message.contains("needs no elevation"),
+            "{}",
+            other.message
+        );
+        assert!(
+            !other.message.contains("from an elevated PowerShell"),
+            "{}",
+            other.message
+        );
+        assert_eq!(
+            locked_reason(""),
+            "the scheduled task is owned by another account, so this shell cannot change it; nothing was changed"
+        );
+    }
+    #[test]
+    fn the_unschedule_check_reads_and_never_removes() {
+        let script = windows_removal_check("Pseudolife Client Update").unwrap();
+        assert!(script.contains("$lock=Get-TaskLock 'Pseudolife Client Update'"));
+        assert!(script.contains("Format-TaskLock $lock -Removal"));
+        assert!(script.ends_with("exit 0"));
+        // Only the printed fix names Unregister-ScheduledTask; nothing calls it.
+        let body = &script[script.find("$ErrorActionPreference").unwrap()..];
+        assert!(!body.contains("Unregister-ScheduledTask") && !body.contains("schtasks"));
+        assert!(windows_removal_check("bad\nname").is_err());
+    }
+    #[test]
+    fn the_task_lock_functions_are_the_embedded_autostart_copy() {
+        let functions = task_lock_functions();
+        assert!(functions.starts_with("# >>> task lock >>>"));
+        for name in [
+            "Get-TaskOwnerSddl",
+            "Get-TaskLock",
+            "Format-TaskLock",
+            "Test-TaskShellElevated",
+        ] {
+            assert!(functions.contains(&format!("function {name}")), "{name}");
+        }
+        assert!(!functions.contains("# <<< task lock <<<"));
+    }
+    /// A fake Schedule.Service whose one task is owned by Administrators, and
+    /// an unelevated token, so the real lock functions run without reading a
+    /// real task.
+    #[cfg(windows)]
+    const LOCKED_TASK_MOCKS: &str = r#"
+function New-Object { param([string]$TypeName,[object[]]$ArgumentList,[string]$ComObject)
+ if ($ComObject) {
+  $task = [pscustomobject]@{}; $task | Add-Member ScriptMethod GetSecurityDescriptor { param($i) 'O:BAG:SYD:(A;ID;FA;;;BA)' }
+  $folder = [pscustomobject]@{ Task=$task }; $folder | Add-Member ScriptMethod GetTask { param($n) $this.Task }
+  $service = [pscustomobject]@{ Folder=$folder }; $service | Add-Member ScriptMethod Connect { }
+  $service | Add-Member ScriptMethod GetFolder { param($p) $this.Folder }; return $service }
+ if ($TypeName -eq 'Security.Principal.WindowsPrincipal') { $p=[pscustomobject]@{}; $p | Add-Member ScriptMethod IsInRole { param($r) $false }; return $p }
+ if ($ArgumentList) { Microsoft.PowerShell.Utility\New-Object -TypeName $TypeName -ArgumentList $ArgumentList }
+ else { Microsoft.PowerShell.Utility\New-Object -TypeName $TypeName }
+}
+function Register-ScheduledTask { throw 'registered over a locked task' }
+"#;
+    #[cfg(windows)]
+    fn run_mocked(script: &str) -> std::process::Output {
+        let script = format!("{LOCKED_TASK_MOCKS}{script}");
+        let encoded = base64(
+            &script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        std::process::Command::new(windows_powershell().unwrap())
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                &encoded,
+            ])
+            .output()
+            .unwrap()
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_task_administrators_own_is_left_alone_with_its_one_elevated_command() {
+        let output =
+            run_mocked(&windows_registration(CLIENT_TASK, 4, 30, "C:/cli.exe", "update").unwrap());
+        assert_eq!(
+            output.status.code(),
+            Some(TASK_LOCKED),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let reason = locked_reason(&String::from_utf8_lossy(&output.stdout));
+        assert!(reason.contains("'Pseudolife Client Update' was registered from an elevated PowerShell, so Administrators own it"), "{reason}");
+        assert!(reason.contains("nothing was changed"), "{reason}");
+        assert!(
+            reason.contains(
+                "Unregister-ScheduledTask -TaskName 'Pseudolife Client Update' -Confirm:$false"
+            ),
+            "{reason}"
+        );
+        let output = run_mocked(&windows_removal_check(CLIENT_TASK).unwrap());
+        assert_eq!(output.status.code(), Some(TASK_LOCKED));
+        assert!(
+            locked_reason(&String::from_utf8_lossy(&output.stdout))
+                .contains("To remove it, run once")
+        );
     }
     #[cfg(windows)]
     #[test]

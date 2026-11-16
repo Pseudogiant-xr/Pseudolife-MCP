@@ -1,4 +1,4 @@
-param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','DetachedClaude','DetachedCodex','DetachedCodexCli','LateLauncherChild','ProcessExitWait','ProcessExitTimeout','ProcessQueryFailure','ProcessPidReused','ProcessPinnedExitRace','ProcessHandleIdentityChanged','ProcessHandleFailure','ProcessStartTimeFailure','InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','StopQueryFailure','RemovalQueryFailure','RollbackQueryFailure','TaskAbsent','HistoricalTailBoundaries','LateOldRuntimeRecorded','LateLegacyUnseen','LateLegacyKnown','LateLegacyUnseenNoLauncher','CimSnapshotFailure','CimParentFailure','ReplacementDuringStop','LateCurrentRuntimeRecorded','ReplacementBeforeRegister','TaskAppearedBeforeRegister','InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister','RemoveUnverifiedPreflight','SiblingUnverifiedPreflight','TaskRemovedDuringHealth')][string]$Case)
+param([string]$Source, [string]$Root, [ValidateSet('PasswordRollback','LegacyMigration','LegacyJuly','LegacyDetached','DelayedStop','DelayedRemoval','DeleteRetry','DeleteFailure','StopTimeout','RemovalTimeout','ProcessExitRace','ProcessStopFailure','ProcessIdentityChanged','QueryInitialRetry','QueryRollbackRetry','QueryRemovalRetry','QueryFailure','QueryAccessDenied','QueryNamedAbsent','DisabledReinstall','QueryStopFailure','QueryRemovalFailure','ForeignRemoval','ForeignLegacy','ForeignSibling','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','DetachedClaude','DetachedCodex','DetachedCodexCli','LateLauncherChild','ProcessExitWait','ProcessExitTimeout','ProcessQueryFailure','ProcessPidReused','ProcessPinnedExitRace','ProcessHandleIdentityChanged','ProcessHandleFailure','ProcessStartTimeFailure','InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','StopQueryFailure','RemovalQueryFailure','RollbackQueryFailure','TaskAbsent','HistoricalTailBoundaries','LateOldRuntimeRecorded','LateLegacyUnseen','LateLegacyKnown','LateLegacyUnseenNoLauncher','CimSnapshotFailure','CimParentFailure','ReplacementDuringStop','LateCurrentRuntimeRecorded','ReplacementBeforeRegister','TaskAppearedBeforeRegister','InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister','RemoveUnverifiedPreflight','SiblingUnverifiedPreflight','TaskRemovedDuringHealth','LockedReplace','LockedLegacy','LockedUnchanged','LockedRemove','LockedFollows','LockedFollowsFails')][string]$Case)
 $ErrorActionPreference = 'Stop'
 # Every scheduler/process operation is mocked; these cases need no credentials,
 # real registrations, listeners or process termination.
@@ -39,6 +39,7 @@ $global:r6unverifiedProcess = $null
 $global:r6siblingProcess = $null
 $global:r6siblingStopped = $false
 $global:r6healthRemoved = $false
+$global:r6starts = 0
 function New-FixtureProcess($identity) {
     $process = [PSCustomObject]@{ StartTime=$identity.CreationDate; HasExited=$false; FixtureId=$identity.ProcessId }
     $process | Add-Member ScriptMethod get_Handle {
@@ -76,6 +77,42 @@ function New-FixtureProcess($identity) {
     $process | Add-Member ScriptMethod Dispose { $global:r6disposed++ }
     return $process
 }
+# Task ownership is read through the Schedule.Service COM object and this
+# token's elevation; both are faked so no case reads a real task. A task in
+# $global:r6owners has that owner (SDDL); any other name is absent.
+$global:r6owners = @{}
+$global:r6hostText = ''
+function New-FixtureScheduler {
+    $folder = [PSCustomObject]@{}
+    $folder | Add-Member ScriptMethod GetTask {
+        param($taskName)
+        $sddl = $global:r6owners[$taskName]
+        if (-not $sddl) { throw [Runtime.InteropServices.COMException]::new('fixture task absent', -2147024894) }
+        $task = [PSCustomObject]@{ Sddl=$sddl }
+        $task | Add-Member ScriptMethod GetSecurityDescriptor { param($information) if ($information -ne 1) { throw 'owner information only' }; $this.Sddl }
+        $task
+    }
+    $service = [PSCustomObject]@{ Folder=$folder }
+    $service | Add-Member ScriptMethod Connect { }
+    $service | Add-Member ScriptMethod GetFolder { param($path) if ($path -ne '\') { throw 'root folder only' }; $this.Folder }
+    $service
+}
+function New-Object {
+    param([string]$TypeName, [object[]]$ArgumentList, [string]$ComObject)
+    if ($ComObject) {
+        if ($ComObject -ne 'Schedule.Service') { throw "unexpected COM object $ComObject" }
+        return New-FixtureScheduler
+    }
+    if ($TypeName -eq 'Security.Principal.WindowsPrincipal') {
+        # An unelevated shell: the case under test is a limited token.
+        $principal = [PSCustomObject]@{}
+        $principal | Add-Member ScriptMethod IsInRole { param($role) $false }
+        return $principal
+    }
+    if ($ArgumentList) { Microsoft.PowerShell.Utility\New-Object -TypeName $TypeName -ArgumentList $ArgumentList }
+    else { Microsoft.PowerShell.Utility\New-Object -TypeName $TypeName }
+}
+function Write-Host { param($Object) $global:r6hostText += "$Object`n" }
 # Any unexpected old implementation call is also mocked, including PID-based
 # termination after the fixture has replaced the captured process.
 function Stop-Process { param($Id,[switch]$PassThru) $global:r6stoppedPids += $Id; $global:r6listening=$false; if ($PassThru) { New-FixtureProcess ([PSCustomObject]@{ProcessId=$Id;CreationDate=[datetime]'2026-01-01'}) } }
@@ -416,7 +453,7 @@ exit `$process.ExitCode
 } elseif ($Case -eq 'PasswordRollback') {
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
     $expectedFailure = 'original fixture startup failure'
-} elseif ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached')) {
+} elseif ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached','LockedLegacy')) {
     $taskName = 'Pseudolife Claude Shim'
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
     $global:r6legacyTask = [PSCustomObject]@{ TaskName='Pseudolife Sonnet Shim'; State='Running'; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=$arguments}) }
@@ -453,7 +490,8 @@ exit `$process.ExitCode
     }
     $global:r6listening = $true
     $expectedFailure = 'original fixture registration failure'
-} elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied','DisabledReinstall','QueryStopFailure','ReplacementDuringStop','ReplacementBeforeRegister','InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister','RemoveUnverifiedPreflight','TaskRemovedDuringHealth')) {
+    if ($Case -eq 'LockedLegacy') { $global:r6owners['Pseudolife Sonnet Shim'] = 'O:BAG:SYD:(A;ID;FA;;;BA)' }
+} elseif ($Case -in @('DelayedStop','StopTimeout','QueryInitialRetry','QueryFailure','QueryAccessDenied','DisabledReinstall','QueryStopFailure','ReplacementDuringStop','ReplacementBeforeRegister','InstallUnverifiedPreflight','InstallUnverifiedLate','TaskRemovedBeforeRegister','RemoveUnverifiedPreflight','TaskRemovedDuringHealth','LockedReplace','LockedUnchanged','LockedRemove','LockedFollows','LockedFollowsFails')) {
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Running'; Principal=[PSCustomObject]@{LogonType='S4U'}; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=$arguments}) }
     $global:r6oldProcess = [PSCustomObject]@{ ProcessId=4242; ParentProcessId=1; CreationDate=[datetime]'2026-01-01'; ExecutablePath=$writer; CommandLine=($writer + ' ' + $arguments) }
@@ -461,6 +499,9 @@ exit `$process.ExitCode
     $expectedFailure = "task $taskName did not stop; inspect its scheduler state"
     if ($Case -eq 'ReplacementDuringStop') { $expectedFailure='task fixture-native registration changed; refusing to change it' }
     if ($Case -eq 'DisabledReinstall') { $global:r6fixtureTask | Add-Member Settings ([PSCustomObject]@{Enabled=$false}) }
+    if ($Case -in @('LockedUnchanged','LockedFollows','LockedFollowsFails')) { $global:r6fixtureTask | Add-Member Settings ([PSCustomObject]@{Enabled=$true}) }
+    # Registered from an elevated shell: Administrators own it, the user may only read it.
+    if ($Case -in @('LockedReplace','LockedUnchanged','LockedRemove','LockedFollows','LockedFollowsFails')) { $global:r6owners[$taskName] = 'O:BAG:SYD:(A;ID;FA;;;BA)' }
     if ($Case -eq 'QueryStopFailure') { $expectedFailure = 'could not confirm task fixture-native stopped: fixture task query failed; inspect its scheduler state' }
     if ($Case -in @('QueryFailure','QueryAccessDenied')) { $expectedFailure = 'fixture task query failed' }
 } else {
@@ -535,6 +576,7 @@ function Get-Process {
     [CmdletBinding()] param($Id)
     $identity = if ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached')) { $global:r6legacyProcess } else { $global:r6oldProcess }
     if ($global:r6siblingProcess -and $Id -eq $global:r6siblingProcess.ProcessId) { $identity=$global:r6siblingProcess }
+    if ($Case -eq 'LockedFollowsFails' -and $global:r6newProcess -and $Id -eq $global:r6newProcess.ProcessId) { $identity=$global:r6newProcess }
     if (-not $identity -or $Id -ne $identity.ProcessId) { throw 'unexpected process handle lookup' }
     New-FixtureProcess $identity
 }
@@ -543,11 +585,16 @@ function Start-Sleep { param($Milliseconds) $global:r6clock=$global:r6clock.AddM
 function New-ScheduledTaskAction {
     param($Execute,$Argument)
     $action = [PSCustomObject]@{Execute=$Execute;Arguments=$Argument}
-    if ($Case -eq 'DisabledReinstall') { $global:r6fixtureTask.Actions=@($action) }
+    if ($Case -in @('DisabledReinstall','LockedUnchanged','LockedFollows','LockedFollowsFails')) { $global:r6fixtureTask.Actions=@($action) }
     $action
 }
 function Enable-ScheduledTask { param($TaskName) $global:r6enabled=$true; $global:r6fixtureTask.Settings.Enabled=$true }
-function New-ScheduledTaskPrincipal { param($UserId,$LogonType) [PSCustomObject]@{LogonType=$LogonType} }
+function New-ScheduledTaskPrincipal {
+    param($UserId,$LogonType,$RunLevel)
+    # The one shape an unelevated user may register for a logon task.
+    if ($RunLevel -ne 'Limited') { throw "principal run level changed: $RunLevel" }
+    [PSCustomObject]@{LogonType=$LogonType}
+}
 function New-ScheduledTaskTrigger { }
 function New-ScheduledTaskSettingsSet { }
 function Export-ScheduledTask { '<Task><LogonType>Password</LogonType></Task>' }
@@ -595,7 +642,8 @@ function Start-ScheduledTask {
         $global:r6originalRestarted=$true; $global:r6fixtureTask.State='Running'; $global:r6listening=$true; return
     }
     if ($TaskName -eq 'Pseudolife Sonnet Shim') { $global:r6restartedLegacy=$true; return }
-    if ($Case -in @('DelayedStop','QueryInitialRetry','SiblingUnverifiedPreflight','TaskRemovedDuringHealth')) {
+    if ($Case -in @('DelayedStop','QueryInitialRetry','SiblingUnverifiedPreflight','TaskRemovedDuringHealth','LockedFollows','LockedFollowsFails')) {
+        $global:r6starts++
         $global:r6newProcess = [PSCustomObject]@{ ProcessId=4343; ParentProcessId=1; CreationDate=[datetime]'2026-01-02'; ExecutablePath=$writer; CommandLine=($writer + ' extractor-shim claude --env-file "' + $global:r6settings + '"') }
         $global:r6listening=$true
         return
@@ -606,15 +654,52 @@ function Start-ScheduledTask {
 }
 function Invoke-WebRequest {
     if ($Case -eq 'TaskRemovedDuringHealth') { $global:r6fixtureTask=$null; $global:r6healthRemoved=$true; throw 'fixture removed task during health wait' }
-    if ($Case -notin @('DelayedStop','QueryInitialRetry','DisabledReinstall','SiblingUnverifiedPreflight')) { throw 'unexpected HTTP call in scheduler failure fixture' }
+    # The shim running before the restart serves the old settings.
+    if ($Case -eq 'LockedFollows' -and -not $global:r6newProcess) { throw 'fixture shim serves the old settings' }
+    if ($Case -eq 'LockedFollowsFails') { throw 'fixture restarted shim never becomes healthy' }
+    if ($Case -notin @('DelayedStop','QueryInitialRetry','DisabledReinstall','SiblingUnverifiedPreflight','LockedUnchanged','LockedFollows')) { throw 'unexpected HTTP call in scheduler failure fixture' }
 }
 function Write-Warning { param($Message) $global:r6warningText += $Message }
 $config = Join-Path $directory 'registration.json'
-@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','RemoveUnverifiedPreflight'));ReplaceSibling=($Case -in @('ForeignSibling','SiblingUnverifiedPreflight'));ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
+@{ Native=$writer;OwnerExe=$writer;Kind='claude';Port=12345;Host='127.0.0.1';Name=$taskName;EnvFile=$settings;LogonType='S4U';Timeout=1;Remove=($Case -in @('QueryNamedAbsent','ForeignRemoval','ForeignUninstallLegacy','ForeignNativeArguments','CustomLauncherRemoval','ForeignEncodedArguments','ForeignNativeBasename','RemoveUnverifiedPreflight','LockedRemove'));ReplaceSibling=($Case -in @('ForeignSibling','SiblingUnverifiedPreflight'));ConfigArgs=@();ServeArgs=@('extractor-shim','claude','--env-file',$settings) } |
     ConvertTo-Json | Set-Content -LiteralPath $config -Encoding UTF8
 if ($Case -in @('ReplacementBeforeRegister','TaskAppearedBeforeRegister')) { $expectedFailure='task fixture-native registration changed; inspect its action before retrying; refusing to overwrite it' }
 $caught = ''
 try { & $Source -ConfigPath $config } catch { $caught = $_.Exception.Message }
+if ($Case -in @('LockedReplace','LockedLegacy','LockedUnchanged','LockedRemove','LockedFollows','LockedFollowsFails')) {
+    # A task registered from an elevated shell: nothing is stopped, written,
+    # registered or removed, and the one line names the elevated command.
+    $lockedName = if ($Case -eq 'LockedLegacy') { 'Pseudolife Sonnet Shim' } else { $taskName }
+    $untouched = -not $global:r6registered -and -not $global:r6deleteAttempts -and -not $global:r6stoppedLegacy -and -not $global:r6enabled -and -not $global:r6xmlRestored
+    # Only the follow case stops its own shim (and nothing else) to restart the task.
+    if ($Case -eq 'LockedFollowsFails') {
+        # The restarted instance is stopped, then the original restarts on
+        # the restored settings: nothing of the failed restart is left.
+        if (($global:r6stoppedPids -join ',') -ne '4242,4343' -or $global:r6starts -ne 2 -or -not $global:r6listening -or $global:r6warningText) { $untouched = $false }
+    } elseif ($Case -ne 'LockedFollows') { $untouched = $untouched -and -not $global:r6stoppedPids.Count -and -not $global:r6stopInvoked }
+    elseif (($global:r6stoppedPids -join ',') -ne '4242' -or -not $global:r6stopInvoked -or -not $global:r6listening) { $untouched = $false }
+    if (-not $untouched) { throw "a task this shell cannot change was changed: $caught" }
+    if ($Case -eq 'LockedFollowsFails') {
+        if ($caught -notlike '*failed its health check*' -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "a failed restart of a locked task did not restore its settings: $caught / $global:r6warningText" }
+    } elseif ($Case -eq 'LockedFollows') {
+        # Same action, not serving the new settings: the settings file keeps
+        # them and the registration is left as it is.
+        if ($caught -or $global:r6hostText -notlike "*'$taskName' keeps its registration and was restarted with the new settings in*pid 4343*" -or
+            $global:r6hostText -notlike '*it reads*at every start, so it keeps following these settings*' -or [IO.File]::ReadAllText($settings) -ne 'after') { throw "a locked task with the same action did not follow its settings file: $caught / $global:r6hostText" }
+    } elseif ($Case -eq 'LockedUnchanged') {
+        if ($caught -or $global:r6hostText -notlike "*'$taskName' already runs these settings*nothing changed*" -or $global:r6hostText -notlike '*registered from an elevated PowerShell, so Administrators own it*') { throw "an unchanged locked task was not left alone with its one line: $caught / $global:r6hostText" }
+    } else {
+        if ($caught -notlike "*the scheduled task '$lockedName' was registered from an elevated PowerShell, so Administrators own it*" -or $caught -notlike '*nothing was changed*' -or
+            $caught -notlike "*Unregister-ScheduledTask -TaskName '$lockedName' -Confirm:`$false*") { throw "locked task refusal lost its cause or fix: $caught" }
+        $wording = if ($Case -eq 'LockedReplace') { '*To replace it with a task of your own*then rerun this command*' } else { '*To remove it, run once*' }
+        if ($caught -notlike $wording) { throw "locked task refusal has the wrong wording: $caught" }
+        if ([IO.File]::ReadAllText($settings) -ne 'before') { throw 'settings were changed for a task this shell cannot change' }
+        $kept = if ($Case -eq 'LockedLegacy') { $global:r6legacyTask } else { $global:r6fixtureTask }
+        if (-not $kept) { throw 'the locked task disappeared' }
+    }
+    Write-Output "$Case passed without real scheduler operations"
+    return
+}
 if ($Case -eq 'TaskRemovedDuringHealth') {
     if (-not $global:r6registered -or -not $global:r6healthRemoved -or $caught -notlike '*failed its health check*' -or $global:r6xmlRestored -or $global:r6fixtureTask -or $global:r6deleteAttempts -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "concurrent removal during health wait resurrected the task: $caught" }
     Write-Output "$Case passed without real scheduler operations"

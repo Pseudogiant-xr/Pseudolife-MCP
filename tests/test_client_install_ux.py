@@ -579,30 +579,37 @@ def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
 
 
 def test_elevated_autostart_steps_warn_against_elevating_inside_claude_desktop() -> None:
-    """Task Scheduler refuses per-user logon-task registration from an
-    unelevated administrator account (probed 2026-09-02: fresh task, Limited
-    principal, root folder and a subfolder all return Access is denied), so
-    the Windows autostart installers legitimately need an elevated
-    PowerShell. WHERE that elevation is requested matters: a UAC prompt
-    raised from a shell running inside Claude Desktop (or any Store-packaged
-    app such as Store-installed pwsh 7) leaves Windows' Application
-    Information service holding a handle to that app's container job, and
-    the app's next update then fails to launch ("Another program is
-    currently using this file") until a reboot — anthropics/claude-code
-    #61635, reproduced live on the maintainer's box 2026-09-02, most likely
-    triggered by the codex-shim autostart installer having been elevated
-    from a Desktop session on 2026-08-31 (inferred from timing).
-    Every place that tells the user to elevate must say to open the elevated
-    PowerShell fresh from the Start menu instead."""
+    """The Windows autostart installers no longer need elevation: they
+    register a task for this user only (logon of this user, Interactive,
+    Limited), which an unelevated user may register, replace and remove
+    (the maintainer's desktop check and a Windows dev VM probe, 16 November
+    2026). Elevation is still the one fix for a task an elevated shell
+    registered earlier, which Administrators own, and WHERE that elevation
+    is requested matters: a UAC prompt raised from a shell running inside
+    Claude Desktop (or any Store-packaged app such as Store-installed pwsh
+    7) leaves Windows' Application Information service holding a handle to
+    that app's container job, and the app's next update then fails to
+    launch ("Another program is currently using this file") until a reboot
+    (anthropics/claude-code#61635, reproduced live on the maintainer's box
+    2026-09-02). So the caveat sits where elevation remains, the one-line
+    message for a task Administrators own, and no default-path step asks
+    for elevation."""
     for rel in ("ops/install-shim-autostart.ps1",
                 "ops/install-codex-shim-autostart.ps1",
+                "ops/scheduled_task_lock.ps1",
                 "docs/guide/dreaming.md"):
         text = _read(rel)
         assert "inside Claude Desktop" in text, f"{rel}: missing the caveat"
         assert "claude-code#61635" in text, f"{rel}: missing the issue reference"
-    # The one-shot installer only points at the autostart scripts, but its
-    # own retry hint is where a user actually copies the command from.
-    assert "inside Claude Desktop" in _read("ops/install.ps1")
+    message = _read("ops/scheduled_task_lock.ps1").split("function Format-TaskLock", 1)[1]
+    assert "Run as administrator from the Start menu" in message
+    # The installers' registration steps and retry hints ask for a normal window.
+    for rel in ("ops/install.ps1", "ops/install-native.ps1"):
+        text = _read(rel)
+        block = text.split("# >>> shim autostart >>>", 1)[1].split("# <<< shim autostart <<<", 1)[0]
+        assert "no elevation needed" in block, rel
+        assert "normal (not elevated) pwsh" in block, rel
+        assert "ELEVATED" not in block and "admin pwsh" not in block, rel
 
 
 def test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bind() -> None:

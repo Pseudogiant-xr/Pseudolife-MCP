@@ -3,19 +3,22 @@
 # Scheduler). (Install under pwsh 7 — the ternary below needs it; the
 # scheduled task itself runs fine under powershell.exe 5.1.)
 #
-# Task Scheduler refuses per-user task registration from an UNELEVATED
-# administrator account (Access is denied - probed 2026-09-02: fresh task,
-# Limited principal, root folder and a subfolder alike), so run this from
-# an ELEVATED PowerShell. Open that PowerShell fresh from the Start menu
-# ("Windows PowerShell" -> Run as administrator). Do NOT request the UAC
-# elevation from a shell running inside Claude Desktop or any other
-# Store-packaged app (Store-installed pwsh 7 included): Windows' Application
-# Information service then keeps a handle to that app's container job, and
-# the app's next update fails to launch ("Another program is currently
-# using this file") until a reboot - anthropics/claude-code#61635,
-# reproduced live 2026-09-02; the most likely trigger was the Codex twin
-# of this script being elevated from a Claude Desktop session on
-# 2026-08-31 (inferred from timing, not proven).
+# No elevation: run this from a normal PowerShell 7 window. The task is
+# registered for this user only (a logon trigger for this user, principal
+# this user, Interactive, -RunLevel Limited), a shape Task Scheduler lets an
+# unelevated user register, replace and remove: checked by the maintainer on
+# a real desktop in a non-elevated Windows PowerShell on 16 November 2026,
+# and with a UAC-style filtered token on the Windows dev VM. Earlier
+# versions registered a trigger for ANY user's logon, which needs
+# elevation. A task registered from an elevated shell is owned by
+# Administrators and cannot be changed unelevated: this script then changes
+# nothing and prints the one elevated command that removes it. Never
+# request UAC elevation from a shell inside Claude Desktop or another
+# Store-packaged app (Store-installed pwsh 7 included): Windows'
+# Application Information service then keeps a handle to that app's
+# container job, and the app's next update fails to launch ("Another
+# program is currently using this file") until a reboot -
+# anthropics/claude-code#61635, reproduced live 2026-09-02.
 #
 #   ops\install-shim-autostart.ps1              # default port 8082, v5 prompt, opus
 #   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
@@ -24,8 +27,7 @@
 # prompt file, port, host, CLI path, interpreter and log file from ops/.env
 # (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written
 # into that file. Changing a value later is an edit plus
-# `python ops\shim_autostart.py restart claude` — no elevation. Elevation
-# is needed only here, to register the task, once.
+# `python ops\shim_autostart.py restart claude` — no re-registration.
 #   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5-5,
 #   claude-sonnet-5, claude-haiku-5-5, claude-haiku-4-5, claude-fable-5-1,
 #   claude-fable-5 (the list ops\install.ps1 offers; any other
@@ -179,9 +181,61 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # runner opens the log itself and starts the shim with the same hidden
 # console (no `cmd >> log` layer: the process tree is the runner, gone in
 # a second, then the shim's python).
+# >>> task lock check >>>
+# Decide before changing anything. A task this shell cannot replace (one
+# registered from an elevated shell, which Administrators own) is never
+# changed. If it already runs ops\shim_autostart.py from this checkout it
+# reads ops\.env at every start, so the settings are written there and the
+# shim restarted, and the task keeps doing its job; any other such task is
+# refused with the one elevated command that removes it. The legacy name is
+# checked first: left behind beside the new task, it would start a second
+# shim at logon.
+. (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
+$legacyLock = Get-TaskLock $legacyTaskName
+if ($legacyLock) { throw (Format-TaskLock $legacyLock -Removal) }
+$taskLock = Get-TaskLock $taskName
+$followsFile = $false
+if ($taskLock) {
+    if ($taskLock.Hidden -or -not (Test-TaskRunsRunner $taskName $repo 'claude')) { throw (Format-TaskLock $taskLock) }
+    $followsFile = $true
+}
+# <<< task lock check <<<
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
     --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
+if ($followsFile) {
+    # The registered task reads ops\.env at every start: restart the shim
+    # here (no scheduler call), and leave the task as it is. A legacy task
+    # this user owns is still removed, or it would start a second shim.
+    if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
+            throw "could not remove the legacy task '$legacyTaskName' (see the message above); it would start a second shim at logon"
+        }
+    }
+    & $PythonExe (Join-Path $repo "ops\shim_autostart.py") restart claude 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "the settings are in ops\.env, but the shim did not restart (see above); the task starts it with them at your next logon" }
+    # restart exits 0 even when the shim has not bound yet: verify it as the
+    # registration path below does, by a listener a claude_shim.py owns.
+    $listener = $null
+    $deadline = (Get-Date).AddSeconds($StartupTimeoutSec)
+    while (-not $listener -and (Get-Date) -lt $deadline) {
+        $candidate = Get-PortListener -ShimPort $Port
+        if ($candidate) {
+            $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
+            if ($owner -and $owner.CommandLine -match 'claude_shim\.py') { $listener = $candidate; break }
+        }
+        Start-Sleep -Seconds 2
+    }
+    if (-not $listener) {
+        throw ("the settings are in ops\.env, but no claude_shim.py listens on 127.0.0.1:$Port after ${StartupTimeoutSec}s; " +
+               "see $LogFile (the task starts the shim with these settings at your next logon)")
+    }
+    Write-Host "Restarted the Claude shim with the settings in ops\.env (port $Port, pid $($listener.OwningProcess)). $(Format-TaskLock $taskLock -Follows 'ops\.env')"
+    & $PythonExe (Join-Path $repo "ops/shim_cutover.py") --repo $repo --port $Port
+    if ($LASTEXITCODE -ne 0) { throw "could not report daemon cutover settings" }
+    return
+}
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
 `$psi.FileName = '$($PythonExe -replace "'", "''")'
@@ -195,7 +249,12 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
+# This user's logon only, run as this user with a limited token: the shape
+# an unelevated user may register (a trigger for any user's logon needs
+# elevation).
+$user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
@@ -206,15 +265,14 @@ Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction 
 # $ErrorActionPreference = "Stop" (observed live: an unelevated run printed
 # "Access is denied" and fell through to the success message). Force it, and
 # verify the task actually exists before claiming success.
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal `
     -Settings $settings -Description "Claude extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
     -ErrorAction Stop | Out-Null
 if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
-    throw ("task '$taskName' was not registered - Task Scheduler needs an ELEVATED " +
-           "PowerShell on administrator accounts. Open it fresh from the Start menu; " +
-           "never elevate from a shell inside Claude Desktop or another Store-packaged " +
-           "app (its next update then fails to launch until a reboot - " +
-           "anthropics/claude-code#61635).")
+    throw ("task '$taskName' was not registered: Task Scheduler refused it (see the message above). " +
+           "No elevation is needed for this per-user task; run this script again in a normal " +
+           "PowerShell 7 window, and if it still fails, check that the ScheduledTasks module loads " +
+           "(Get-Command Register-ScheduledTask).")
 }
 
 # Stop the shim that is already serving this port BEFORE starting the task.
@@ -294,7 +352,7 @@ if ($startup.Count -eq 0) {
     foreach ($line in $startup) { Write-Host "  log: $line" }
 }
 Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), python $PythonExe, log $LogFile)."
-Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart claude (no elevation)."
+Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart claude."
 # >>> shim cutover >>>
 & $PythonExe (Join-Path $repo "ops/shim_cutover.py") --repo $repo --port $Port
 if ($LASTEXITCODE -ne 0) { throw "could not report daemon cutover settings" }

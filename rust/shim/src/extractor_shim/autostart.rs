@@ -13,7 +13,7 @@ impl Drop for Scratch {
 pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
     if args.is_empty() || args.iter().any(|a| a == "--help") {
         println!(
-            "usage: pseudolife-mcp extractor-shim install-autostart claude|codex [--env-file PATH] [--repo PATH] [--name NAME] [--native-exe PATH] [--replace-sibling] [--startup-timeout SECONDS] [--task-logon-type Interactive|S4U] [shim settings]\nDefault config: ~/.pseudolife-mcp/extractor-shims.env. Settings include --cli, --model, --host, --port, --prompt-file, --health-ttl and --log. An explicit --repo reads that checkout's ops/.env. Registration requires systemd --user on Linux, or an elevated PowerShell on Windows. S4U is an explicit local-only task principal for unattended hosts."
+            "usage: pseudolife-mcp extractor-shim install-autostart claude|codex [--env-file PATH] [--repo PATH] [--name NAME] [--native-exe PATH] [--replace-sibling] [--startup-timeout SECONDS] [--task-logon-type Interactive|S4U] [shim settings]\nDefault config: ~/.pseudolife-mcp/extractor-shims.env. Settings include --cli, --model, --host, --port, --prompt-file, --health-ttl and --log. An explicit --repo reads that checkout's ops/.env. Registration requires systemd --user on Linux. On Windows it registers a task for this user only and needs no elevation; a task of the same name registered from an elevated PowerShell is never re-registered: when it already runs this action it is restarted with the new settings, otherwise nothing changes and the error names the one elevated command that removes it. S4U is an explicit local-only task principal for unattended hosts, and Windows lets only an elevated PowerShell register it."
         );
         return Ok(());
     }

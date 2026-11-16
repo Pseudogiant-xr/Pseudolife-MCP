@@ -10,8 +10,9 @@ The scheduled task (Windows) and the systemd --user unit (Linux) that the
 autostart installers register run ``run <kind>`` and nothing else, so the
 model, prompt file, port, host, CLI path, interpreter and log file are
 read from ``ops/.env`` at every start. Changing a default is then an edit
-plus ``restart`` — no elevation; Task Scheduler needs an elevated shell
-only to REGISTER a task, which stays a one-time install step. The
+plus ``restart`` — no re-registration; registering the task stays a
+one-time install step, and needs no elevation (a task for this user only).
+The
 installers' flags (``-Model`` / ``--model`` and so on) keep working: they
 are written into ``ops/.env`` by ``config``, and any flag given to ``run``
 overrides the file for that start.
@@ -26,7 +27,7 @@ A registration from before the runner (the task or unit still carries
 at logon: ``show`` says so, ``restart`` refuses rather than start the
 ops/.env values under a task that brings its own back at the next logon
 (``--force`` restarts from ops/.env anyway), and the fix is one more run
-of the installer, elevated on Windows.
+of the installer.
 """
 from __future__ import annotations
 
@@ -407,20 +408,18 @@ def registration_note(kind: str) -> str:
     spec = KINDS[kind]
     where = f"the scheduled task '{spec['task']}'" if os.name == "nt" else f"the unit {spec['unit']}"
     installer = spec["installer"] + (".ps1" if os.name == "nt" else ".sh")
-    elevated = " (elevated)" if os.name == "nt" else ""
     text = _registered_command(kind)
     if text is None:
         if os.name != "nt" and not shutil.which("systemctl"):
             return ""
         return (f"{where} is not registered: the shim will not start at logon until "
-                f"{installer} has run once{elevated}")
+                f"{installer} has run once")
     if registration_carries_its_values(kind, text):
         return (f"{where} still carries the model and the rest on its command line: at logon it starts "
-                f"those, not ops/.env. Run {installer} once{elevated} to switch it to ops/.env")
+                f"those, not ops/.env. Run {installer} once to switch it to ops/.env")
     if os.name == "nt" and re.search(r"<Enabled>\s*false\s*</Enabled>", text, re.IGNORECASE):
         return (f"{where} is disabled: it will not start the shim at logon "
-                f"(Enable-ScheduledTask -TaskName '{spec['task']}' from an elevated PowerShell, "
-                f"or run {installer} again)")
+                f"(Enable-ScheduledTask -TaskName '{spec['task']}', or run {installer} again)")
     return ""
 
 
