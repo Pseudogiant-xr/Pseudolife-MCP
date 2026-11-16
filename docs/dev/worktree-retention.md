@@ -304,7 +304,8 @@ worktree, is deleted (renamed aside, then removed) when all of these hold:
   - A checkout made with `git clone --shared` or `--reference` names this
     clone's object dir in its `objects/info/alternates`. Every registered
     worktree and every child of every configured root is read for such a
-    file, and a match keeps the clone.
+    file (for a linked worktree, in the git dir its `.git` file points to
+    and that dir's `commondir`), and a match keeps the clone.
   - A borrower outside the configured roots cannot be seen.
   - The objects such a borrower loses are then all commits already on
     `origin/master`, so it can be repaired by pointing its alternates at
