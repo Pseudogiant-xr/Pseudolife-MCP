@@ -23,7 +23,32 @@ The real block is tested in ``test_installer_native_client.py`` and
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from tests.installer_protocol import LEVEL
+
+_STANDIN = (Path(__file__).resolve().parent / "native_helper_standin.py").as_posix()
+_PYTHON = Path(sys.executable).as_posix()
+
+# The installers' `native_helper` / `Invoke-NativeHelper` (one installer step
+# of the verified native client), answered by the Python helper each step
+# replaced: see native_helper_standin.py. Included in BASH and POWERSHELL.
+# A slice without the native block also gets a staging step that has
+# already succeeded (the loopback test stages on first use).
+HELPER_SH = f'''
+native_helper() {{ "{_PYTHON}" "{_STANDIN}" "$repo" "$@"; }}
+declare -F native_stage >/dev/null || native_stage() {{ :; }}
+'''
+HELPER_PS = f'''
+function Invoke-NativeHelper {{
+    if ($MyInvocation.ExpectingInput) {{ $input | & "{_PYTHON}" "{_STANDIN}" $repo @args }}
+    else {{ & "{_PYTHON}" "{_STANDIN}" $repo @args }}
+}}
+if (-not (Get-Command Initialize-NativeClient -ErrorAction SilentlyContinue)) {{
+    function Initialize-NativeClient {{ }}
+}}
+'''
 
 # The launcher the stub install writes (POSIX shell).
 LAUNCHER_SH = r'''#!/bin/sh
@@ -154,12 +179,101 @@ def write_release(directory, version: str, launcher_body: str) -> dict[str, str]
     return {"PSEUDOLIFE_NATIVE_ARCHIVE_URL": str(directory), "PSEUDOLIFE_NATIVE_TARGET": RELEASE_TARGET}
 
 
+BASH += HELPER_SH
+POWERSHELL += HELPER_PS
+
+
+# -- A real native client, for tests that can run one -------------------------
+# PSEUDOLIFE_NATIVE_TEST_BINARY names a debug pseudolife-stdio[.exe] built from
+# the same commit; CI lanes that build one also set
+# PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, so a missing build fails instead
+# of skipping.
+def real_binary() -> Path | None:
+    import os
+    value = os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY", "")
+    path = Path(value) if value else None
+    if path is not None and path.is_file():
+        return path
+    if os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED") == "1":
+        raise RuntimeError(
+            "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, but PSEUDOLIFE_NATIVE_TEST_BINARY "
+            f"({value or 'unset'}) names no file: build pseudolife-stdio first")
+    return None
+
+
+def host_target() -> str | None:
+    """This machine's release target triple, or None for one no release has."""
+    import platform
+    machine = platform.machine().lower()
+    arm = machine in ("arm64", "aarch64")
+    if sys.platform == "win32":
+        return None if arm else "x86_64-pc-windows-msvc"
+    if sys.platform == "darwin":
+        return "aarch64-apple-darwin" if arm else "x86_64-apple-darwin"
+    if sys.platform.startswith("linux"):
+        return "aarch64-unknown-linux-gnu" if arm else "x86_64-unknown-linux-gnu"
+    return None
+
+
+def archive_binary_limit() -> int:
+    """``runtime install``'s limit on the one binary in a release archive
+    (``BINARY_LIMIT`` in ``rust/shim/src/runtime/install.rs``), read from the
+    source so a test never packs to a stale number."""
+    import re
+    source = (Path(__file__).resolve().parents[1] / "rust/shim/src/runtime/install.rs").read_text(encoding="utf-8")
+    match = re.search(r"const BINARY_LIMIT: u64 = ([0-9 *]+);", source)
+    assert match, "BINARY_LIMIT is no longer a product of integers in rust/shim/src/runtime/install.rs"
+    limit = 1
+    for factor in match.group(1).split("*"):
+        limit *= int(factor)
+    return limit
+
+
+def release_copy(binary: Path, folder: Path) -> Path:
+    """The built client as a release archive carries it: a copy in ``folder``
+    (the test's own temp folder; the built binary is never touched).
+
+    On Linux a debug build embeds its debug info (about 300 MB on the hosted
+    ``test`` lane), past ``archive_binary_limit()``, so the copy is stripped of
+    it with ``strip --strip-debug``, as a release binary ships. A macOS debug
+    build leaves its debug info in the object files and a Windows one in a
+    .pdb, so there the copy is the binary as built and no tool is needed."""
+    import os
+    import shutil
+    import subprocess
+
+    import pytest
+
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / binary.name
+    shutil.copyfile(binary, copy)
+    copy.chmod(0o755)
+    if sys.platform.startswith("linux"):
+        strip = shutil.which("strip")
+        if strip is None:
+            reason = ("strip (binutils) is needed to pack the debug-built native client the way a release "
+                      "ships it; install binutils")
+            if os.environ.get("PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED") == "1":
+                pytest.fail(reason + " (PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1, so this is not skipped)")
+            pytest.skip(reason)
+        stripped = subprocess.run([strip, "--strip-debug", str(copy)], capture_output=True, text=True,
+                                  timeout=300, check=False)
+        if stripped.returncode != 0:
+            pytest.fail(f"{strip} --strip-debug {copy} exited {stripped.returncode}: "
+                        f"{(stripped.stderr or stripped.stdout).strip()}")
+    size, limit = copy.stat().st_size, archive_binary_limit()
+    assert size <= limit, (
+        f"the native client packed for this test is {size} bytes (built: {binary.stat().st_size} bytes), "
+        f"past runtime install's {limit}-byte limit on a release binary (BINARY_LIMIT in "
+        "rust/shim/src/runtime/install.rs), so its install would be refused")
+    return copy
+
 # Harnesses whose fake shim sits in $FIXTURE_SHIM_BIN (test_codex_hooks.py).
 NATIVE_FROM_SHIM_BIN_SH = 'FAKE_LAUNCHER="$FIXTURE_SHIM_BIN/pseudolife-mcp"\nFAKE_KEEP_LAUNCHER=1\n' + BASH
 NATIVE_UNAVAILABLE_SH = (
     'NATIVE_ARCHIVE="the verified fake archive"\n'
     "native_install() { return 1; }\n"
-    "native_installed_launcher() { :; }\n")
+    "native_installed_launcher() { :; }\n" + HELPER_SH)
 NATIVE_FROM_SHIM_BIN_PS = (
     # The fixture's shim-bin holds both names; its tests expect the .exe one
     # on every platform, as the earlier pipx lookup found it first.

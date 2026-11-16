@@ -182,12 +182,12 @@
         "estimate": "2026-11-14: the 34.0 measured (#1557) plus 1.2 for building the native client the installer tests run, from the steps' times in rust.yml's ordinary PR precheck jobs, which ran the same toolchain, cache and `cargo build --locked -p pseudolife-stdio -j 4` (runs 43513352894, 43516792342, 2026-11-13): toolchain 0.1, cache restore 0.2-0.3, build 0.4-0.9 on ubuntu-latest."
       },
       "test-lite-windows": {
-        "minutes": 17.6,
-        "estimate": "2026-11-15: the 14.6 estimated on 2026-11-14 (12.1 measured in #1557 plus 2.5 for the native client build) plus 3.0 for the two files this change adds to the lane: tests/test_installer_client_engine.py (37.3 s serially in WSL at 543ddcd59, taken at three times on windows-latest) and tests/test_installer_native_client_ps.py, moved from test-windows-nightly (with test_installer_native_client.py it took 34.8 s on the maintainer's Windows host on 2026-11-14; 58.3 s in WSL against the stub release), each process start dearer on Windows."
+        "minutes": 18.6,
+        "estimate": "2026-11-15: the 17.6 estimated for #1541 (14.6 before the stack, plus 3.0 for tests/test_installer_client_engine.py and tests/test_installer_native_client_ps.py) plus 1.0 for the native-installer copies this change adds beside the files the lane already runs: test_installer_reruns_native.py 7.2 s, test_installer_engine_native.py 5.5 s, test_installer_claude_profile_native.py 4.6 s, test_installer_resources_native.py 2.8 s, test_installer_plugin_native.py's marketplace test 0.5 s and the rest under 0.5 s, 21 s together serially in WSL at e78826f72, taken at three times on windows-latest."
       },
       "test-lite-macos": {
-        "minutes": 21.1,
-        "estimate": "2026-11-15: the 18.6 estimated on 2026-11-14 (12.6 measured in #1557 plus 6.0 for the cold native client build) plus 2.5 for the files this change adds to the lane: tests/test_installer_client_engine.py 37.3 s, tests/test_codex_hooks_native.py 34.9 s, tests/test_installer_native_client.py 2.0 s and tests/test_client_install_ux_native.py under 0.1 s, 74 s together run serially in WSL (Ubuntu, Python 3.11) at 543ddcd59, doubled for the hosted macOS runner."
+        "minutes": 21.3,
+        "estimate": "2026-11-15: the 21.1 estimated for #1541 (18.6 before the stack plus 2.5 for its files) plus 0.2 for tests/test_installer_native_goldens.py (4.4 s) and tests/test_installer_sandbox.py (under 0.1 s), serially in WSL at e78826f72, doubled for the hosted macOS runner."
       },
       "frontend": {
         "minutes": 0.5

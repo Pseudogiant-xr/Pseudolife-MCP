@@ -9,22 +9,25 @@ import json
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 import pytest
 
 from tests import native_client_stub as native_stub
 
 from pseudolife_memory.credentials import CredentialProvider
-from tests.test_installer_existing_upgrade import (
-    _bash_fixture_path, _bash_variants, _between, _fixture_env,
-)
+from tests.test_installer_existing_upgrade import _bash_fixture_path, _bash_variants, _between
+from tests.test_installer_existing_upgrade_native import _fixture_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 BASH = pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
+
+
+def _block(name: str) -> str:
+    text = (ROOT / "ops" / "install-native.sh").read_text(encoding="utf-8")
+    return text.split(f"# >>> {name} >>>\n", 1)[1].split(f"# <<< {name} <<<", 1)[0]
 
 
 def _q(value: str) -> str:
@@ -48,11 +51,154 @@ class _Shell:
             "set -u\n"
             f"HOME='{self.path(self.home)}'\n"
             f"repo='{self.path(ROOT)}'\n"
-            f"installer_python() {{ printf '%s\\n' '{self.path(sys.executable)}'; }}\n"
-            "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
+            + native_stub.HELPER_SH
+            + "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
         )
         return subprocess.run([self.bash], input=prelude + body, capture_output=True,
                               text=True, timeout=120, env=self.env, check=False)
+
+
+def _mint(shell: _Shell, env_file: Path, *, no_token: str = "", transport: str = "shim",
+          extra: str = ""):
+    return shell.run(
+        extra + f"env_file='{shell.path(env_file)}'\nNO_TOKEN='{no_token}'\n"
+        f"TRANSPORT='{transport}'\n"
+        + _block("mint token")
+        + "\nprintf 'TOKEN_STATE=%s\\n' \"$TOKEN_STATE\"\n")
+
+
+def _minted(env_file: Path) -> list[str]:
+    return re.findall(r"(?m)^PSEUDOLIFE_MCP_TOKEN=(\S+)\r?$",
+                      env_file.read_text(encoding="utf-8"))
+
+
+@BASH
+def test_default_install_mints_a_token_and_never_prints_it(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
+    proc = _mint(shell, env_file)
+    assert proc.returncode == 0, proc.stderr
+    [token] = _minted(env_file)
+    assert "TOKEN_STATE=minted" in proc.stdout
+    assert token not in proc.stdout + proc.stderr
+    again = _mint(shell, env_file)
+    assert "TOKEN_STATE=present" in again.stdout
+    assert _minted(env_file) == [token]
+
+
+@pytest.mark.parametrize("no_token,transport,state", [
+    ("1", "shim", "opted-out"),
+    ("", "http", "http"),
+])
+@BASH
+def test_open_loopback_installs_mint_nothing(bash, tmp_path, no_token, transport, state):
+    shell = _Shell(bash, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
+    proc = _mint(shell, env_file, no_token=no_token, transport=transport)
+    assert proc.returncode == 0, proc.stderr
+    assert f"TOKEN_STATE={state}" in proc.stdout
+    assert _minted(env_file) == []
+
+
+@pytest.mark.parametrize("no_token,transport,extra", [
+    ("", "http", ""),
+    ("", "shim", ""),
+    ("1", "shim", ""),
+])
+@BASH
+def test_an_existing_token_is_reported_present_whatever_else_holds(bash, tmp_path, no_token,
+                                                                   transport, extra):
+    """The daemon is gated by a token already in ops/.env whether or not
+    this run could have minted one, so the HTTP-registration warning and
+    the board hint must see it (final review, 2026-09-28)."""
+    shell = _Shell(bash, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-existing\n", encoding="utf-8")
+    getter = _between("ops/install-native.sh", "get_env() {", "\n") + "\n"
+    proc = _mint(shell, env_file, no_token=no_token, transport=transport,
+                 extra=getter + extra)
+    assert proc.returncode == 0, proc.stderr
+    assert "TOKEN_STATE=present" in proc.stdout
+
+
+@BASH
+def test_http_registrations_against_a_gated_daemon_are_warned_about(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = shell.run(
+        "CLAUDE_TOKEN_FILE='' GEMINI_TOKEN_FILE='' CODEX_CREDENTIAL_FILE=''\n"
+        "CLIENT_DAEMON_URL='http://127.0.0.1:1' TOKEN_STATE=present\n"
+        "MCP_CLAUDE=http MCP_GEMINI='' MCP_CODEX=''\n"
+        "desktop_token_source() { printf 'fixture-existing\\n'; }\n" + _block("board line"))
+    assert proc.returncode == 0, proc.stderr
+    assert "HTTP registration sends no bearer token" in proc.stderr
+    assert "fixture-existing" not in proc.stdout + proc.stderr
+
+
+def _client_files(shell: _Shell, env_file: Path, clients: str, *, hook: str = "",
+                  process_env: str = "") -> subprocess.CompletedProcess[str]:
+    getters = (_between("ops/install-native.sh", "get_env() {", "\n")
+               + "\n" + _between("ops/install-native.sh", "desktop_token_source() {",
+                                 "\nconfigure_codex_runtime_defaults()"))
+    return shell.run(
+        process_env
+        + f"env_file='{shell.path(env_file)}'\nCLIENTS='{clients}'\nTRANSPORT=shim\n"
+        f"HOOK_CLAUDE='{hook}'\n" + getters + "\n" + _block("client token files")
+        + "\nprintf 'CLAUDE=%s\\nGEMINI=%s\\n' \"$CLAUDE_TOKEN_FILE\" \"$GEMINI_TOKEN_FILE\"\n")
+
+
+@BASH
+def test_claude_and_gemini_get_owner_only_token_files(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-singular\n", encoding="utf-8")
+    proc = _client_files(shell, env_file, "claude gemini")
+    assert proc.returncode == 0, proc.stderr
+    assert "fixture-singular" not in proc.stdout + proc.stderr
+    for principal in ("claude-code", "gemini"):
+        target = shell.home / ".pseudolife-mcp" / f"{principal}.token"
+        assert CredentialProvider(path=target).snapshot().token == "fixture-singular"
+    assert re.search(r"(?m)^CLAUDE=.*/\.pseudolife-mcp/claude-code\.token$", proc.stdout)
+    assert re.search(r"(?m)^GEMINI=.*/\.pseudolife-mcp/gemini\.token$", proc.stdout)
+
+
+@BASH
+def test_tokenless_install_writes_no_client_files(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("#PSEUDOLIFE_MCP_TOKEN=\n", encoding="utf-8")
+    proc = _client_files(shell, env_file, "claude gemini", hook="plugin")
+    assert proc.returncode == 0, proc.stderr
+    assert "CLAUDE=\nGEMINI=\n" in proc.stdout
+    assert not (shell.home / ".pseudolife-mcp").exists()
+    assert not (shell.home / ".claude" / "settings.json").exists()
+
+
+@BASH
+def test_plugin_hooks_get_the_token_file_through_claude_settings(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-singular\n", encoding="utf-8")
+    settings = shell.home / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"enabledPlugins": {"x": True}}), encoding="utf-8")
+    proc = _client_files(shell, env_file, "claude", hook="plugin")
+    assert proc.returncode == 0, proc.stderr
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["enabledPlugins"] == {"x": True}
+    assert data["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"].endswith("claude-code.token")
+
+
+@BASH
+def test_plugin_hooks_keep_a_token_the_user_environment_supplies(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text("PSEUDOLIFE_MCP_TOKEN=fixture-singular\n", encoding="utf-8")
+    proc = _client_files(shell, env_file, "claude", hook="plugin",
+                         process_env="export PSEUDOLIFE_MCP_TOKEN=fixture-singular\n")
+    assert proc.returncode == 0, proc.stderr
+    assert not (shell.home / ".claude" / "settings.json").exists()
 
 
 def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None = None,
@@ -230,3 +376,15 @@ def test_existing_http_registration_is_warned_about_not_broken_silently(bash, tm
     assert _adds(calls) == []
     assert "requires a bearer token" in proc.stderr
     assert "register the stdio shim instead" in proc.stderr
+
+
+@BASH
+def test_final_ladder_prints_one_board_line(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = shell.run(
+        "CLAUDE_TOKEN_FILE='' GEMINI_TOKEN_FILE='' CODEX_CREDENTIAL_FILE=''\n"
+        "CLIENT_DAEMON_URL='http://127.0.0.1:1' TOKEN_STATE=opted-out\n"
+        "desktop_token_source() { :; }\n" + _block("board line"))
+    assert proc.returncode == 0, proc.stderr
+    [line] = [line for line in proc.stdout.splitlines() if "Agent board" in line]
+    assert re.fullmatch(r"\s*\[!\] Agent board\s+off - no bearer token.*--no-token.*", line)

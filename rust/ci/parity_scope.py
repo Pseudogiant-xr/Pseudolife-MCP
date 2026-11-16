@@ -164,6 +164,10 @@ SHIM_COMMANDS = {
     # move_native answers the move row through the cli.rs dispatcher, which
     # the import scan skips.
     "restore_cli": UPDATE_CYCLE,
+    # No harness row runs `pseudolife-mcp installer` (its goldens and contract
+    # binaries test it), and nothing outside it imports it; it imports connect
+    # and update, so its rows must stay among theirs.
+    "installer": (),
     "episode.rs": ("episode",), "episode_input.rs": ("episode",),
     "briefing_hook.rs": ("hook",), "briefing_help.txt": ("hook",),
 }
