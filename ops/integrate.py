@@ -2594,6 +2594,11 @@ def suite(args: argparse.Namespace) -> int:
     if head != plan.head:
         raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
                       "build; nothing is fixed inside a batch, so rebuild it")
+    # A head that did not pass the compile check never opens, so a full suite
+    # on it would only spend the remote machine's half hour.
+    if plan.rust_check not in RUST_CHECK_OK:
+        raise Refusal(f"{_rust_check_refusal(plan)}. The full suite does not run on a "
+                      "head that did not pass the Rust compile check")
     started = time.time()
     print(f"integrate: running {head[:12]}'s full suite on the remote machine, with the "
           "real native client; the batch head travels as a bundle, nothing is pushed",
@@ -2746,12 +2751,18 @@ def open_(args: argparse.Namespace) -> int:
     if others:
         raise Refusal("a batch is already open: " + ", ".join(
             f"#{n} ({name})" for n, name in others))
-    text = body(plan, _suite_line(args, head), _harness_line(args, head))
     # A rerun after a failure past the push resumes: this branch's own pull
     # request is the one to finish, not a second batch, but only while it
     # still points at the head the suite passed on. Once it is open, a moved
     # master is its CI's concern, so the base check applies only before then.
     own = [(n, u, sha) for n, name, u, sha in open_prs if name == plan.branch]
+    # The compile check is judged before the suite result, so a batch that
+    # did not pass it is refused for that (`suite` does not run on it), not
+    # for a missing suite result. Before the push only: a batch already open
+    # resumes, as one opened from a plan that predates the check must.
+    if not own and plan.rust_check not in RUST_CHECK_OK:
+        raise Refusal(_rust_check_refusal(plan))
+    text = body(plan, _suite_line(args, head), _harness_line(args, head))
     url = None
     if own:
         number, url, sha = own[0]
@@ -2759,10 +2770,6 @@ def open_(args: argparse.Namespace) -> int:
             raise Refusal(f"#{number} is open from {plan.branch} at {sha[:12]}, not "
                           f"the built head {plan.head[:12]}; check it by hand")
     else:
-        # Before the push only: a batch already open resumes, as one opened
-        # from a plan that predates the check must.
-        if plan.rust_check not in RUST_CHECK_OK:
-            raise Refusal(_rust_check_refusal(plan))
         git("fetch", "-q", REMOTE, BASE)
         if _out("rev-parse", f"{REMOTE}/{BASE}") != plan.base_sha:
             raise Refusal(f"{REMOTE}/{BASE} moved since {branch} was built; switch "

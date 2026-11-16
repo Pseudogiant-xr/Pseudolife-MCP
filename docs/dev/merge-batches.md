@@ -502,7 +502,10 @@ outside contributor gets. `build --dry-run` names the machine without
 contacting it.
 
 A failure drops nothing and leaves the branch and plan as they are, and
-`open` refuses the plan. cargo's output cannot tell the batch from the machine (a lock file two
+`open` refuses the plan. `suite` refuses that head too, before it starts,
+since a batch that never opens is not worth a full suite, and `open` judges
+the compile check before it reads any suite result, so the refusal names the
+compile check, not a missing suite. cargo's output cannot tell the batch from the machine (a lock file two
 members left inconsistent fails like a download; a missing linker or
 exhausted memory prints "could not compile"), so the refusal sends you to
 master first: run the same command on `origin/master`. If it fails there

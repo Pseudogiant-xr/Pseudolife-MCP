@@ -5131,6 +5131,56 @@ def test_suite_refuses_anything_but_the_built_batch(world, monkeypatch, tmp_path
     assert seen == []
 
 
+def _uncompiled_batch(world, monkeypatch, capsys, case: str) -> None:
+    """A batch `build` left after its Rust compile check failed or could not run."""
+    _rust_member(world)
+    if case == "failed":
+        monkeypatch.setenv("FAKE_CARGO_EXIT", "101")
+    else:
+        monkeypatch.setattr(integrate, "RUST_CHECK",
+                            ("cargo-is-not-installed-here", "check", "--workspace",
+                             "--all-targets", "--locked"))
+    assert _build() == 1
+    capsys.readouterr()
+    monkeypatch.delenv("FAKE_CARGO_EXIT", raising=False)
+    assert _plan(world)["rust_check"].startswith("failed" if case == "failed" else "not run")
+
+
+@pytest.mark.parametrize("case", ["failed", "not-run"])
+def test_suite_refuses_a_batch_that_did_not_pass_the_compile_check(world, monkeypatch, tmp_path,
+                                                                    capsys, case):
+    # It never opens, so its full suite would spend the remote machine for nothing.
+    _uncompiled_batch(world, monkeypatch, capsys, case)
+    seen, _ = _fake_remote_suite(world, monkeypatch, tmp_path)
+
+    assert integrate.main(["suite"]) == 2
+
+    err = capsys.readouterr().err
+    assert ("does not compile" if case == "failed" else "did not run") in err
+    assert "build again" in err and "does not run on a head" in err
+    assert seen == []
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
+@pytest.mark.parametrize("case", ["failed", "not-run"])
+@pytest.mark.parametrize("suite", ["none", "no-real-client", "passing"])
+def test_open_judges_the_compile_check_before_the_suite_result(world, monkeypatch, capsys,
+                                                              case, suite):
+    # The operator is told the batch did not compile, not to go and run a
+    # suite that `suite` then refuses.
+    _uncompiled_batch(world, monkeypatch, capsys, case)
+    if suite == "none":
+        code = integrate.main(["open", "--harness-note", _harness_note(world)])
+    else:
+        code = _open(world, **({"real_client": False} if suite == "no-real-client" else {}))
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert ("does not compile" if case == "failed" else "did not run") in err
+    assert "give the local full suite" not in err and integrate.SUITE_COMMAND not in err
+    assert world.remote_branches() == [] and world.gh.mutations() == []
+
+
 def test_build_names_the_remote_suite_step_first(world, capsys):
     _three_with_a_collision(world)
     assert _build() == 0
