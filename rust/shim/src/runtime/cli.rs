@@ -2,7 +2,7 @@
 use super::*;
 use std::ffi::OsString;
 
-const HELP: &str = "usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]\n";
+const HELP: &str = "usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]\n       pseudolife-mcp runtime install --check   (exit 3 when this machine must stay on the Python client)\n";
 #[derive(Debug, PartialEq, Eq)]
 struct Options {
     archive: PathBuf,
@@ -95,8 +95,39 @@ fn install_files(layout: &Layout, options: &Options) -> Result<Value> {
 }
 
 /// Arguments follow the `runtime` mode name. Usage errors exit 2, install or
-/// activation errors exit 1, and a verified complete installation exits 0.
+/// activation errors exit 1, a refused move exits 3 having changed nothing,
+/// and a verified complete installation exits 0.
 pub fn run(args: Vec<OsString>) -> u8 {
+    run_with(args, |repo| {
+        crate::cli::tunnel_guard::probe(crate::cli::tunnel_guard::Mover::Installer, repo)
+    })
+}
+
+/// A machine the Python client runs while a tunnel is registered to start
+/// by itself through its launcher stays on it (issue #1632): the refusal is
+/// exit 3, before the archive is read or the update lock taken.
+pub(crate) const REFUSED: u8 = 3;
+
+fn run_with(
+    args: Vec<OsString>,
+    probe: fn(Option<&Path>) -> crate::cli::tunnel_guard::Decision,
+) -> u8 {
+    // The installers' preflight asks first, before the host changes at all;
+    // a release without this check answers a usage error they ignore.
+    if args.len() == 2 && args[0] == "install" && args[1] == "--check" {
+        return match probe(None) {
+            crate::cli::tunnel_guard::Decision::Refuse(line) => {
+                crate::stderrln!("runtime install refused: {line}");
+                REFUSED
+            }
+            crate::cli::tunnel_guard::Decision::Proceed(notes) => {
+                for note in notes {
+                    crate::stderrln!("warning: {note}");
+                }
+                0
+            }
+        };
+    }
     let options = match parse(args) {
         Ok(Some(options)) => options,
         Ok(None) => {
@@ -107,6 +138,19 @@ pub fn run(args: Vec<OsString>) -> u8 {
             return 2;
         }
     };
+    match probe(None) {
+        crate::cli::tunnel_guard::Decision::Refuse(line) => {
+            if options.json {
+                let _ = emit(&json!({"state":"refused","detail":line}).to_string());
+            } else {
+                crate::stderrln!("runtime install refused: {line}");
+            }
+            return REFUSED;
+        }
+        // The installers print the warnings from their `--check` preflight;
+        // the install itself does not say them twice.
+        crate::cli::tunnel_guard::Decision::Proceed(_) => {}
+    }
     let outcome = default_layout().and_then(|layout| install_files(&layout, &options));
     match outcome {
         Ok(report) => {
@@ -144,6 +188,50 @@ mod tests {
     fn args(parts: &[&str]) -> Vec<OsString> {
         parts.iter().map(OsString::from).collect()
     }
+    #[test]
+    fn the_check_alone_answers_the_installers_preflight() {
+        fn refuse(_: Option<&Path>) -> crate::cli::tunnel_guard::Decision {
+            crate::cli::tunnel_guard::Decision::Refuse("fixture refusal".into())
+        }
+        fn proceed(_: Option<&Path>) -> crate::cli::tunnel_guard::Decision {
+            crate::cli::tunnel_guard::Decision::Proceed(vec![])
+        }
+        assert_eq!(run_with(args(&["install", "--check"]), refuse), REFUSED);
+        assert_eq!(run_with(args(&["install", "--check"]), proceed), 0);
+        // Not a flag of the archive install.
+        assert_eq!(
+            run_with(args(&["install", "--check", "--version", "1.2.3"]), proceed),
+            2
+        );
+    }
+
+    #[test]
+    fn a_refused_move_exits_3_before_reading_the_archive() {
+        fn refuse(_: Option<&Path>) -> crate::cli::tunnel_guard::Decision {
+            crate::cli::tunnel_guard::Decision::Refuse("fixture refusal".into())
+        }
+        // The archive and sums do not exist: reaching install_files would
+        // fail with exit 1, so exit 3 proves the refusal came first.
+        let missing = std::env::temp_dir().join(format!("absent-{}", uuid::Uuid::new_v4()));
+        let archive = missing.join("a.tar.gz");
+        let sums = missing.join("SHA256SUMS");
+        let code = run_with(
+            args(&[
+                "install",
+                "--archive",
+                archive.to_str().unwrap(),
+                "--sha256sums",
+                sums.to_str().unwrap(),
+                "--version",
+                "1.2.3",
+                "--json",
+            ]),
+            refuse,
+        );
+        assert_eq!(code, REFUSED);
+        assert!(!missing.exists());
+    }
+
     #[test]
     fn archive_only_parser_requires_every_input_and_refuses_binary_bypass() {
         for arguments in [

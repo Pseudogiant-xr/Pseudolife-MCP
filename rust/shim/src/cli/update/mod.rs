@@ -9,6 +9,7 @@ pub(crate) mod seams;
 mod shadow;
 #[cfg(unix)]
 mod signals;
+pub(crate) mod tunnel_guard;
 mod unattended;
 #[cfg(windows)]
 mod windows_job;
@@ -126,6 +127,22 @@ pub(crate) struct Update {
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
     pub handover_port: u16,
+    /// Decides whether moving this machine's launcher to the native runtime
+    /// must be refused because a tunnel is registered to start by itself
+    /// (`tunnel_guard`); a seam so tests never ask a real service manager.
+    pub tunnel_probe: fn(tunnel_guard::Mover, Option<&Path>) -> tunnel_guard::Decision,
+    /// The probe passed once this run; later client steps do not ask again.
+    pub tunnel_checked: bool,
+    /// An unattended run the guard turned daemon-only: its refusal, which
+    /// keeps the client steps out even if a later step reached them.
+    pub tunnel_refused: Option<String>,
+}
+
+/// The checkout as the deploy later names it to the shim step.
+fn canonical(repo: &Path) -> PathBuf {
+    fs::canonicalize(repo)
+        .map(seams::command_path)
+        .unwrap_or_else(|_| repo.to_owned())
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -247,7 +264,77 @@ impl Update {
             rollback_scope: None,
             stopped_handover: false,
             handover_port: 5432,
+            tunnel_probe: tunnel_guard::probe,
+            tunnel_checked: false,
+            tunnel_refused: None,
         }
+    }
+    /// Refuses, before anything is changed, a run whose client steps would
+    /// move this machine's launcher to the native runtime while a tunnel is
+    /// registered to start by itself (issue #1632). Called at the start of
+    /// every path that runs the client steps, and again by `clients` as a
+    /// backstop.
+    pub fn refuse_tunnel_move(&mut self, repo: Option<&Path>) -> Result<()> {
+        self.tunnel_check(repo, false)
+    }
+    /// The same check where a release deploy is about to update the daemon:
+    /// an unattended run does not leave the daemon behind every night for a
+    /// client-side service, so it updates the daemon alone (as with
+    /// `--daemon-only`), skips the client steps and warns instead.
+    pub fn refuse_tunnel_move_before_daemon(&mut self) -> Result<()> {
+        self.tunnel_check(None, true)
+    }
+    fn tunnel_check(&mut self, repo: Option<&Path>, before_daemon: bool) -> Result<()> {
+        if self.tunnel_checked {
+            return Ok(());
+        }
+        let mover = if self.o.unattended && before_daemon {
+            tunnel_guard::Mover::UnattendedDaemon
+        } else if self.o.unattended {
+            tunnel_guard::Mover::Unattended
+        } else if self.report.mode == "checkout" {
+            tunnel_guard::Mover::Checkout
+        } else {
+            tunnel_guard::Mover::Update
+        };
+        match (self.tunnel_probe)(mover, repo) {
+            tunnel_guard::Decision::Refuse(line)
+                if mover == tunnel_guard::Mover::UnattendedDaemon =>
+            {
+                self.o.daemon_only = true;
+                self.tunnel_checked = true;
+                self.tunnel_refused = Some(line.clone());
+                self.warn(line);
+                Ok(())
+            }
+            tunnel_guard::Decision::Refuse(line) => Err(UpdateError::usage(line)),
+            tunnel_guard::Decision::Proceed(notes) => {
+                self.tunnel_checked = true;
+                for note in notes {
+                    self.warn(note);
+                }
+                Ok(())
+            }
+        }
+    }
+    /// The backstop in `clients`: true when the client steps must not run,
+    /// with the refusal recorded as the run's result.
+    pub(crate) fn refused_clients(&mut self, repo: Option<&Path>) -> bool {
+        let refused = match self.tunnel_refused.clone() {
+            Some(line) => Err(UpdateError::usage(line)),
+            None => self.refuse_tunnel_move(repo),
+        };
+        let Err(error) = refused else {
+            return false;
+        };
+        self.warn(error.message.clone());
+        self.report.ok = false;
+        self.report.exit_code = error.exit_code;
+        self.report.clients = Some(json!({
+            "shim": {"state": "refused", "detail": error.message},
+            "ok": false,
+        }));
+        true
     }
     pub fn step(&mut self, text: impl Into<String>) {
         let text = text.into();
@@ -386,10 +473,16 @@ impl Update {
     pub fn update(&mut self) -> Result<()> {
         if let Some(repo) = engine::selected_checkout(self)? {
             self.report.mode = "checkout".into();
+            if self.o.all_clients {
+                self.refuse_tunnel_move(Some(&canonical(&repo)))?;
+            }
             return engine::deploy(self, &repo);
         }
         if let Some(repo) = self.o.checkout.clone() {
             self.report.mode = "checkout".into();
+            if self.o.all_clients {
+                self.refuse_tunnel_move(Some(&canonical(&repo)))?;
+            }
             self.deploy_checkout(&repo)
         } else {
             self.report.mode = "release".into();
@@ -569,6 +662,11 @@ impl Update {
     }
     pub fn clients(&mut self, repo: Option<&Path>, source: &str, health: Option<&Value>) {
         use clients::handoff::{self, Note};
+        // Every caller refuses earlier; this only keeps a new caller from
+        // moving the launcher under a registered tunnel service.
+        if self.refused_clients(repo) {
+            return;
+        }
         let own = env!("CARGO_PKG_VERSION");
         // A handed-off run never hands off again; a checkout deploy already
         // runs the checkout's own code.
@@ -721,6 +819,7 @@ impl Update {
         let current = health.as_ref().and_then(|h| h["version"].as_str());
         self.refuse_downgrade(current, &target)?;
         self.refuse_checkout_shadow(&target)?;
+        self.refuse_tunnel_move(None)?;
         self.report.mode = "clients".into();
         self.report.current = current.map(str::to_owned);
         self.report.target = Some(target.clone());

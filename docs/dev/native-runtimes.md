@@ -350,7 +350,16 @@ tests (`test`, `test-lite-windows`, `test-lite-macos`, the Windows nightly)
 build one before their tests, smoke-run its `version` and set both
 (`tests/test_ci_native_client.py` pins it, and runs the binary in the `test`
 lane); on macOS that smoke run is the native client's only CI execution.
-The installer tests that will run it are being added with the native
-installer work; today only `tests/test_ci_native_client.py` reads the
-variable. Locally, set them to a `cargo build -p pseudolife-stdio` output
-to run the same path.
+The installer tests read it (`tests/native_client_stub.py`,
+`tests/test_installer_native_client.py`,
+`tests/test_installer_native_client_ps.py`) and use their stand-in or skip
+without it. Locally, `PSEUDOLIFE_SUITE_NATIVE_CLIENT=1` makes the suite
+launchers (`ops/wsl-suite.ps1`, `ops/wsl-suite.sh`, `ops/remote-suite.ps1`)
+build the client as the `test` lane does (`--locked`, the dev profile, in
+WSL or on the Linux box) and set both variables. `ops/remote-suite.ps1`
+turns it on by itself for an integration batch's gate
+(`docs/dev/merge-batches.md` "Validating it"), and every run says
+`wsl-suite: real client: yes|no` before pytest starts. It
+is Linux only: the macOS and Windows lanes' runs of these tests have no
+local equivalent. For a single test file, set both variables to a `cargo
+build -p pseudolife-stdio` output.

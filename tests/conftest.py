@@ -439,6 +439,14 @@ def pytest_configure(config: pytest.Config) -> None:
 
     refuse_live_bank()
 
+    # A full run on a host whose full suites belong on its remote machine
+    # while this PC is not available (ops/wsl-suite.ps1 sets the marker):
+    # refused whatever the lock mode, and never passed to this run's children.
+    refusal = suite_lock.pc_unavailable_refusal(config, os.environ, ROOT / "tests")
+    os.environ.pop(suite_lock.PC_UNAVAILABLE_ENV, None)
+    if refusal:
+        raise pytest.UsageError(refusal)
+
     # A full run queues for the suite lock first, while it holds ~50 MB:
     # the embedding import below commits ~1.3 GB (measured 2026-09-23).
     # What it read from the checkout by now (this file, its imports, and

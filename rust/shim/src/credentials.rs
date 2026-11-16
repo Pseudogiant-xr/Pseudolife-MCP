@@ -322,38 +322,26 @@ fn inspect_redirect(path: &Path) -> io::Result<bool> {
         fs::symlink_metadata(path).map(|info| is_redirect(&info))
     }
 }
+/// The private-path rule (`private_path`) for the folders above `path`: a
+/// link on the way is followed only when no other account can change it.
+/// A refusal is printed once on stderr with the element, the cause and the
+/// fix; callers keep their own short code.
 pub(crate) fn reject_ancestor_redirects(path: &Path) -> Result<(), CredentialError> {
-    #[cfg(windows)]
-    {
-        windows_security::reject_ancestor_redirects(path)
-    }
-    #[cfg(not(windows))]
-    reject_ancestor_symlinks(path)
+    crate::private_path::check_ancestors(path).map_err(refusal_code)
 }
-#[cfg(not(windows))]
-fn reject_ancestor_symlinks(path: &Path) -> Result<(), CredentialError> {
-    let ancestors: Vec<_> = path
-        .parent()
-        .into_iter()
-        .flat_map(Path::ancestors)
-        .collect();
-    for ancestor in ancestors.into_iter().rev() {
-        match inspect_redirect(ancestor) {
-            Ok(true) => {
-                return Err(CredentialError(
-                    "credential path must not contain redirects",
-                ));
-            }
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => {
-                return Err(CredentialError(
-                    "credential path ancestors cannot be inspected",
-                ));
-            }
+/// [`reject_ancestor_redirects`] for `path` itself too: a private folder used
+/// as a folder, where a link in its place is followed.
+pub(crate) fn reject_redirects(path: &Path) -> Result<(), CredentialError> {
+    crate::private_path::check_path(path).map_err(refusal_code)
+}
+fn refusal_code(refusal: crate::private_path::Refusal) -> CredentialError {
+    crate::private_path::report_once(&refusal);
+    CredentialError(match *refusal.cause {
+        crate::private_path::Cause::Uninspectable { .. } => {
+            "credential path ancestors cannot be inspected"
         }
-    }
-    Ok(())
+        _ => "credential path must not contain redirects",
+    })
 }
 fn open_failure(error: io::Error) -> CredentialError {
     CredentialError(if error.kind() == io::ErrorKind::NotFound {

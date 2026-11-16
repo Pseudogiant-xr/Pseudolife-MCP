@@ -43,6 +43,44 @@ impl Runner for NativeRunner {
         timeout: Duration,
         env: &[(&str, &str)],
     ) -> Output {
+        run_child(executable, args, cwd, timeout, env, 0)
+    }
+}
+
+/// As `NativeRunner`, but a console child started from a process with no
+/// console (a scheduled task, a GUI parent) gets no window of its own
+/// (`restore_cli::child_window`). Used by the tunnel-service guard's
+/// read-only `schtasks /Query`; other callers keep `NativeRunner`.
+pub struct WindowlessRunner;
+impl Runner for WindowlessRunner {
+    fn run(
+        &self,
+        executable: &Path,
+        args: &[&str],
+        cwd: Option<&Path>,
+        timeout: Duration,
+        env: &[(&str, &str)],
+    ) -> Output {
+        #[cfg(windows)]
+        let window = crate::cli::restore_cli::child_window::child_window_flag();
+        #[cfg(not(windows))]
+        let window = 0;
+        run_child(executable, args, cwd, timeout, env, window)
+    }
+}
+
+/// `window` is added to the child's creation flags on Windows.
+fn run_child(
+    executable: &Path,
+    args: &[&str],
+    cwd: Option<&Path>,
+    timeout: Duration,
+    env: &[(&str, &str)],
+    window: u32,
+) -> Output {
+    #[cfg(not(windows))]
+    let _ = window;
+    {
         #[cfg(unix)]
         let _signals = match super::super::signals::Guard::new() {
             Ok(guard) => guard,
@@ -94,7 +132,9 @@ impl Runner for NativeRunner {
                 };
                 let mut command = CommandWrap::with_new(executable, |c| {
                     #[cfg(windows)]
-                    c.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
+                    c.creation_flags(
+                        windows_sys::Win32::System::Threading::CREATE_SUSPENDED | window,
+                    );
                     c.args(args)
                         .stdin(Stdio::null())
                         .stdout(Stdio::piped())

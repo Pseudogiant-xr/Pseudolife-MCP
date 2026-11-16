@@ -337,7 +337,7 @@ other package path is refused, label or no label.
 python ops/integrate.py status
 python ops/integrate.py build --dry-run
 python ops/integrate.py build            # with the Rust compile check when rust/ changed
-PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1
+python ops/integrate.py suite > <log> 2>&1   # the full suite on the box, with the native client
 python -m pytest -q -p no:cacheprovider --require-databases <the RUST_HARNESS paths build prints> > <log> 2>&1
 python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
   --harness-note "<count> passed at <head short sha>"
@@ -369,13 +369,17 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   the body and the comments `open` would post, then switches back; it
   creates, pushes and comments on nothing, and only says whether `build`
   would run the Rust compile check.
-- **`open`** publishes a built batch once the local full suite passed on
-  it. `--suite` takes the result JSON `ops/remote-suite.ps1` writes and
-  refuses unless it tested exactly the batch head and exited 0;
+- **`open`** publishes a built batch once its full suite passed on it.
+  `--suite` takes the result JSON `ops/remote-suite.ps1` writes (the one
+  `suite` names) and refuses unless it tested exactly the batch head,
+  exited 0 and ran the real native client built from that head
+  (`real_client` true, `real_client_commit` the head; "Validating it");
   `--suite-note` takes the result in words for a run that wrote no JSON
-  (`ops/wsl-suite.ps1` alone); the note must name the head's short sha,
-  and the body says it was not checked. A result for a selected run, or
-  one from a launcher too old to record its pytest arguments, is refused.
+  (`ops/wsl-suite.ps1` alone); the note must name the head's short sha and
+  say `real client: yes` for a client the run built, and the body says it
+  was not checked. A result for a selected run, or one from a launcher too
+  old to record its pytest arguments or the real client, is refused, so a
+  batch suite run before this rule needs a rerun.
   `--harness-note` takes the Rust harness run's result in words (next
   section); it must name the head's short sha and state pytest's
   `<count> passed` with no failed or error count, and the body records it
@@ -487,9 +491,13 @@ like a red suite ("Validating it", step 3). A check that could not start
 run. Once the batch pull request is open, `open` resumes it whatever its
 plan says. Notes:
 
-- It honours `CARGO_TARGET_DIR`, so point that at the machine's shared
-  target directory to keep it warm; a cold check in a fresh worktree
-  otherwise fills its own `rust/target`, so mind the 8 GB free-disk floor.
+- It honours `CARGO_TARGET_DIR`. Leave it unset in the checkout that
+  builds batches, so the check keeps that checkout's own `rust/target`
+  warm from one batch to the next, and do not point it at a directory
+  other checkouts build into: cargo can reuse another checkout's units from
+  a shared one and report a check that never compiled this tree (CLAUDE.md,
+  "Disk space"). A cold check fills `rust/target`, so mind the 8 GB
+  free-disk floor.
   If another cargo holds that directory, the check waits for its lock
   ("Blocking waiting for file lock").
 - It runs member build scripts and proc macros, as the full suite runs
@@ -511,11 +519,72 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
 
 ## Validating it
 
-1. The local WSL full suite runs on the batch head between `build` and
-   `open`, before any CI. With #846's four-worker launcher it takes about
-   10 minutes, a fraction of one CI run. Use `PSEUDOLIFE_SUITE_WHERE=local`
-   so it runs in WSL on the unpushed branch; a run on the Linux box needs
-   the commit pushed.
+1. The full suite runs on the batch head between `build` and `open`,
+   before any CI. With #846's four-worker launcher it takes about 10
+   minutes, a fraction of one CI run.
+   - **It runs on the Linux box by default.** A full suite in WSL overloads
+     the maintainer's PC while he uses it, so `python ops/integrate.py
+     suite` runs it there (maintainer ruling, 16 November 2026). It runs
+     `ops/remote-suite.ps1` with `PSEUDOLIFE_SUITE_WHERE=remote` and the
+     native client on, then names the result JSON for `open --suite`. The
+     batch head is not on origin yet, so `ops/remote-suite.ps1` carries it
+     inside the dispatch as a git bundle of what `origin/master` lacks. The
+     box's clone fetches origin, then the bundle, into the ref its test copy
+     is checked out from. Nothing is pushed before `open`.
+   - **This PC only when he says so.** Local WSL is a candidate only while
+     `~/.pseudolife-mcp/locks/pc-available` says the PC is available
+     (`docs/dev/dev-machines.md` "Sharing"). Then
+     `PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1` runs the
+     unpushed batch in WSL; without it that command overrides the rule and
+     says so.
+   - **It runs the real native client.** The hosted `test` lane builds
+     `pseudolife-stdio` and exports `PSEUDOLIFE_NATIVE_TEST_BINARY` with
+     `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1`
+     (`docs/dev/native-runtimes.md`), so the tests that need a real client
+     run it there. A local suite without it uses their stand-in or skips
+     them: a batch passed its local suite that way and then failed 18 of
+     them hosted (#1634). So on an `integrate/*` branch
+     `ops/remote-suite.ps1` sets `PSEUDOLIFE_SUITE_NATIVE_CLIENT=1` unless
+     the variable is set, says so before anything starts, and the run builds
+     the client from the batch head inside the place the suite runs (the
+     WSL copy, or the box). It runs `cargo build --locked -p
+     pseudolife-stdio -j 4` in `rust/`, the dev profile, as the lane does.
+     The run smoke-runs the client's `version` and exports both variables to
+     pytest. The result JSON records `real_client`, `real_client_commit` and
+     `real_client_path`.
+   - **The build cache** is one per machine, written only by these runs
+     (`~/.cache/pseudolife-suite/cargo-target`, or
+     `PSEUDOLIFE_SUITE_CARGO_TARGET_DIR`; never a general
+     `CARGO_TARGET_DIR`). Cargo keys a workspace package by its path inside
+     the workspace and judges it fresh by file times, so a cache another
+     checkout built into can hand this one that checkout's binary. So, under
+     the cache's own lock, a build that follows another checkout's first
+     runs `cargo clean -p` on the workspace's own packages; third-party
+     crates stay cached. The build holds the machine's slot-0 full-suite
+     lock (`full-suite.lock`) while it compiles, so no full suite on slot 0
+     runs beside it; with `PSEUDOLIFE_SUITE_SLOTS` above 1 a suite on
+     another slot can (the machines run one slot).
+   - **`open` refuses a result without it:** `real_client` must be true and
+     `real_client_commit` the batch head, and a `--suite-note` must say
+     `real client: yes`. There is no escape for a batch that "touches
+     nothing the real-client tests cover", because no tool can judge that
+     (conductor ruling, 16 November 2026).
+   - **A gate that cannot build stops, and the batch does not open.** Under
+     8 GB free where the cache lives, the run refuses before building and
+     names the space. Without cargo it refuses and names the need. A failed
+     build or a failed `version` fails the run with cargo's error. None of
+     them falls back to the stand-in. Free the space, or fix the toolchain
+     or the culprit member, and rerun.
+   - **What it matches, and what it cannot.** It matches the lane's
+     `--locked` dev-profile build and the two variables. It does not match
+     the lane's workers: the local suite keeps its workers sized to the
+     machine, where the lane runs `-n 2 --dist loadfile`. It is Linux only
+     (WSL or the Linux box), so it covers the hosted `test` lane's
+     conditions and never the macOS or Windows lite lanes'. Their
+     real-client tests are still first run by the batch's hosted CI.
+     A dev-profile Linux client is about 300 MB, over the client's 256 MiB
+     archive limit; the installer tests pack a debug-stripped copy
+     (#1556, #1560).
 2. The Rust harness Python tests run on the same head, because the full
    suite collects only `tests/` and never runs the Python tests under
    `rust/`: #877 broke `rust/daemon/harness/test_w2e_lifecycle.py`, passed

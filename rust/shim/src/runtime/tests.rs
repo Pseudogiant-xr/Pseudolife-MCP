@@ -576,14 +576,29 @@ fn an_inaccessible_tunnel_parent_is_unknown_evidence() {
 #[cfg(unix)]
 #[test]
 fn redirected_tunnel_roots_and_missing_children_are_unknown_evidence() {
+    use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new();
     let real = f.path.join("real");
     fs::create_dir(&real).unwrap();
-    let redirected = f.path.join("redirected");
+    // A link another account could replace: in a folder others may write.
+    let shared = f.path.join("shared");
+    fs::create_dir(&shared).unwrap();
+    let redirected = shared.join("redirected");
     std::os::unix::fs::symlink(&real, &redirected).unwrap();
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
     for root in [&redirected, &redirected.join("absent")] {
         assert!(prune::tunnel_runtimes(&f.layout, root, &[]).is_err());
     }
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+    // A tunnel root that is itself a link is still unknown evidence; a
+    // missing child below a link only this user can change is just missing
+    // (the private-path rule, #1639).
+    // Only this user may write the folder holding it, whatever the umask.
+    fs::set_permissions(&f.path, fs::Permissions::from_mode(0o700)).unwrap();
+    let trusted = f.path.join("trusted");
+    std::os::unix::fs::symlink(&real, &trusted).unwrap();
+    assert!(prune::tunnel_runtimes(&f.layout, &trusted, &[]).is_err());
+    assert!(prune::tunnel_runtimes(&f.layout, &trusted.join("absent"), &[]).is_ok());
 }
 
 #[test]
@@ -639,5 +654,47 @@ fn download_errors_name_the_archive_url_override_only_when_it_is_set() {
     assert!(
         noted.contains("unset it to use the GitHub release"),
         "{noted}"
+    );
+}
+
+// Unix only: a windows-latest test resting on real file locks needs the
+// 20-run hosted stress loop first (CLAUDE.md "Dev machines").
+#[cfg(unix)]
+#[test]
+fn the_pin_a_hook_mode_takes_never_waits_for_an_update() {
+    // private-path-check runs under a hook's time budget: a runtime an
+    // update holds exclusively is "busy" at once, never a wait (#1644 S3).
+    let f = Fixture::new();
+    let path = f.path.join("usage.lock");
+    fs::write(&path, b"").unwrap();
+    let update = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let hook = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    update.lock().unwrap();
+    let started = std::time::Instant::now();
+    let error = super::launch::try_shared(&hook).unwrap_err();
+    assert_eq!(error, super::launch::BUSY);
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    update.unlock().unwrap();
+    super::launch::try_shared(&hook).unwrap();
+}
+
+#[test]
+fn a_runtime_that_cannot_pin_itself_gives_its_advice_once() {
+    // The busy refusal says "retry shortly" itself; adding "retry after the
+    // update finishes" gave two pieces of advice (#1644 verifier, N-e).
+    let busy = super::launch::pin_failure_line(super::launch::BUSY);
+    assert_eq!(busy.matches("retry").count(), 1, "{busy}");
+    let other = super::launch::pin_failure_line("could not open the usage lock");
+    assert_eq!(
+        other,
+        "pseudolife-mcp: could not open the usage lock; retry after the update finishes"
     );
 }

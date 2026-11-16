@@ -4,12 +4,16 @@
 #   ops/prune-build-cache.sh                     # age 168h, ceiling 20GB
 #   ops/prune-build-cache.sh --dry-run           # report only; mutate nothing
 #   ops/prune-build-cache.sh --max-age-hours 24  # tighter age policy
+#   ops/prune-build-cache.sh --prune-dangling-images  # also `docker image prune --force`
 #
 # Build cache is pure derived data: over-pruning costs rebuild time and
-# nothing else. This script ONLY ever calls `docker builder prune`. It never
-# removes images (ops/prune-rollbacks.sh owns rollback-tag retention), never
-# touches containers, and never runs `docker system prune` or any volume
-# command — the bank lives in the external ops_pseudolife_* volumes.
+# nothing else. This script calls `docker builder prune` and, only with
+# --prune-dangling-images, `docker image prune --force` with no -a/--all and
+# no filter: Docker then removes only untagged images that no container,
+# running or stopped, uses. It never removes a tagged image
+# (ops/prune-rollbacks.sh owns rollback-tag retention), never touches
+# containers, and never runs `docker system prune` or any volume command —
+# the bank lives in the external ops_pseudolife_* volumes.
 #
 # Why age is the primary filter and size only a backstop: minutes after a
 # deploy, `docker builder du` reports the whole fresh cache as
@@ -47,6 +51,7 @@ MAX_AGE_HOURS=168
 MAX_USED_SPACE_GB=20
 DRY_RUN=0
 NO_TRIM=0
+PRUNE_DANGLING=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -54,6 +59,7 @@ while [ $# -gt 0 ]; do
         --max-used-space-gb)  MAX_USED_SPACE_GB="$2"; shift 2 ;;
         --dry-run)            DRY_RUN=1; shift ;;
         --no-trim)            NO_TRIM=1; shift ;;
+        --prune-dangling-images) PRUNE_DANGLING=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -200,11 +206,25 @@ if [ "$DRY_RUN" = "1" ]; then
         echo "    ceiling pass: unknown (depends on the age-pass estimate above, which"
         echo "                  is unavailable on this platform)."
     fi
+    if [ "$PRUNE_DANGLING" = "1" ]; then
+        echo "    images      : docker image prune --force (dangling, unused images only)"
+    fi
     if [ "$NO_TRIM" != "1" ]; then
         echo "    trim        : wsl -d docker-desktop -e sh -c \"fstrim -v /mnt/docker-desktop-disk\""
     fi
     echo "==> DRY RUN complete: nothing was changed."
     exit 0
+fi
+
+# Dangling images only: no -a/--all and no filter, so Docker removes only
+# untagged images that no container (running or stopped) uses. It runs
+# before the cache passes so they see whatever it frees. Never fatal.
+if [ "$PRUNE_DANGLING" = "1" ]; then
+    if docker image prune --force > /dev/null; then
+        echo "==> Build-cache retention: removed dangling images (docker image prune --force)."
+    else
+        echo "WARNING: docker image prune (dangling images) failed (retention otherwise succeeded)." >&2
+    fi
 fi
 
 # Age pass — the normal policy, always runs.
