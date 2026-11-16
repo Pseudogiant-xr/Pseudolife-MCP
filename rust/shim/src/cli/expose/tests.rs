@@ -588,7 +588,7 @@ fn a_refused_serve_leaves_the_port_as_it_was() {
     assert_eq!(stdout, plan());
     assert_eq!(
         stderr,
-        "expose: tailscale refused the serve (serve: listener failed); nothing changed\n"
+        "expose: tailscale refused the serve (serve: listener failed); nothing changed: fix what tailscale reports, then rerun this command\n"
     );
     assert_eq!(fake.calls(), reads_then(&SERVE), "the state was read back");
     assert_eq!(fake.serve_state(), json!({}));
@@ -659,6 +659,36 @@ fn an_interrupted_serve_says_so_rather_than_refused() {
         stderr.ends_with("expose: `tailscale serve` was interrupted (exit -2); nothing changed\n"),
         "{stderr}"
     );
+}
+
+#[test]
+fn an_undo_never_calls_a_forward_still_in_place_someone_elses() {
+    // The serve failed although its forward appeared, the undo's removal
+    // did nothing, and Funnel was switched on meanwhile: the forward is
+    // still this run's, so the run says so and names the command.
+    let mut fake = Fake::free();
+    fake.bg.code = 1;
+    fake.off.effect = Effect::Nothing;
+    fake.meanwhile_off = Some(json!({"TCP": {PORT: {"TCPForward": "127.0.0.1:8443"}},
+                                     "AllowFunnel": {"n.example.com:8443": true}}));
+    let (_, stderr, code) = drive(&fake, &["tailscale", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_UNDONE);
+    assert!(
+        stderr.contains("and removing it again did not finish")
+            && stderr.contains("run `tailscale serve --tcp=8443 off` yourself"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn the_goal_met_after_the_question_reports_no_command_in_json() {
+    let mut fake = Fake::ours().at_terminal(Answer::Yes);
+    fake.meanwhile = Some(json!({}));
+    let (stdout, _, code) = drive(&fake, &["off", "--port", PORT, "--json"]);
+    assert_eq!(code, EXIT_OK);
+    let report: Value = serde_json::from_str(&stdout).expect("one JSON report");
+    assert_eq!(report["state"], "not_exposed");
+    assert_eq!(report["command"], Value::Null, "nothing ran");
 }
 
 #[test]
@@ -922,7 +952,7 @@ fn off_that_does_not_remove_the_forward_says_so() {
         assert_eq!(
             stderr,
             format!(
-                "expose: tailscale did not remove the forward ({why}); it is still in place, so nothing changed: check `tailscale serve status`, then rerun this command or run the plan's `tailscale serve` command yourself\n"
+                "expose: tailscale did not remove the forward ({why}); it is still in place, so nothing changed: check `tailscale serve status`, then run the plan's `tailscale serve` command yourself\n"
             )
         );
         assert_eq!(

@@ -479,12 +479,14 @@ async fn unchanged(
     }
     match (expected, state, url) {
         (State::None, State::Ours, Some(url)) => {
+            report.command = None;
             report.state = Some("already_exposed");
             report.url = Some(url.to_owned());
             report.say_text(&format!("already exposed: clients use {url}"));
             return Err(report.finish(EXIT_OK));
         }
         (State::Ours, State::None, _) => {
+            report.command = None;
             report.state = Some("not_exposed");
             report.say_text(&format!("not exposed: nothing serves tailnet port {port}"));
             return Err(report.finish(EXIT_OK));
@@ -614,6 +616,24 @@ fn command(words: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The port's state after a removal, judged by its handler itself: still
+/// this daemon's forward is `Ours` even beside Funnel, which
+/// [`tailscale::port_state`] reads as someone else's port and would hide
+/// the forward behind.
+async fn read_owned(
+    host: &impl Host,
+    binary: &Binary,
+    port: u16,
+) -> Result<(State, Option<Vec<u16>>), String> {
+    tailscale::serve_config(host, binary).await.map(|config| {
+        if tailscale::still_forwards(&config, port) {
+            (State::Ours, None)
+        } else {
+            tailscale::port_state(&config, port)
+        }
+    })
+}
+
 /// The port's state read back after a change, or why it could not be.
 async fn read_back(
     host: &impl Host,
@@ -712,7 +732,7 @@ async fn serve(
             return report.fail_text(
                 EXIT_REFUSED,
                 &format!(
-                    "tailscale refused the serve ({}); nothing changed",
+                                        "tailscale refused the serve ({}); nothing changed: fix what tailscale reports, then rerun this command",
                     ran(&proc)
                 ),
             );
@@ -742,7 +762,7 @@ async fn serve(
 /// free before, so the forward is this run's; take it back off and check.
 async fn undo(host: &impl Host, binary: &Binary, port: u16, proc: &Proc, report: Report) -> Out {
     let removal = host.run(binary, &words(&off_words(port))).await;
-    let left = match read_back(host, binary, port).await {
+    let left = match read_owned(host, binary, port).await {
         Ok((State::None, _)) => None,
         Ok((State::Foreign, detail)) => {
             // Something else is on the port now: not this run's to remove.
@@ -836,17 +856,7 @@ async fn probe(host: &impl Host, report: &mut Report, url: &str, bank: &J) {
 async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report) -> Out {
     host.hold_interrupts();
     let proc = host.run(binary, &words(&off_words(port))).await;
-    // Judged by the handler itself: Funnel switched on meanwhile reads as
-    // someone else's port, but would hide a forward still in place.
-    let after = tailscale::serve_config(host, binary).await.map(|config| {
-        let (state, detail) = tailscale::port_state(&config, port);
-        let state = if tailscale::still_forwards(&config, port) {
-            State::Ours
-        } else {
-            state
-        };
-        (state, detail)
-    });
+    let after = read_owned(host, binary, port).await;
     note_interrupt(host, &mut report);
     match after {
         Err(why) => report.fail_text(
@@ -862,7 +872,7 @@ async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report
         Ok((State::Ours, _)) => report.fail_text(
             EXIT_REFUSED,
             &format!(
-                "tailscale did not remove the forward ({}); it is still in place, so nothing changed: check `tailscale serve status`, then rerun this command or run the plan's `tailscale serve` command yourself",
+                "tailscale did not remove the forward ({}); it is still in place, so nothing changed: check `tailscale serve status`, then run the plan's `tailscale serve` command yourself",
                 ran(&proc)
             ),
         ),

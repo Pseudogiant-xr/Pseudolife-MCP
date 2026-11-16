@@ -155,9 +155,10 @@ has to work, not match Python):
   forward is gone anyway is the removal. Cases `tailscale-yes-permission`
   and `off-yes-permission` therefore hold one more `serve status --json`
   call than the oracle makes.
-- After a question, the port is read again before the change; one that
-  changed while the question waited (another serve put there, or this one
-  removed) is named and nothing is changed (the oracle goes ahead).
+- After a question, the port is read again before the change (the oracle
+  goes ahead). Another serve put there while the question waited is named
+  and nothing is changed (exit 4); the state asked for reached meanwhile is
+  the goal met (next bullet but one).
 - On Windows, stdin redirected from `NUL` is no terminal (the oracle's
   `isatty()` says it is, then reads end of input as "declined"): without
   `--yes` the run refuses naming `--yes`. Cased: `off-null-stdin` and
@@ -175,10 +176,11 @@ has to work, not match Python):
   (timed out after 30s)`). On POSIX a timed-out read is answered rather
   than deferred; on both OSes, after the kill, the child gets up to 2 s to
   exit and its pipes up to 2 s more.
-- `off` judges its removal by the port's handler itself: while that is
-  still a forward to `127.0.0.1:N` (Funnel switched on meanwhile reads as
-  someone else's port, but would hide it), it reports that the forward is
-  still in place (exit 4). Once it is gone and something else serves the
+- `off`, and the undo after a failed serve, judge a removal by the port's
+  handler itself: while that is still this daemon's plain forward to
+  `127.0.0.1:N` (Funnel switched on meanwhile reads as someone else's
+  port, but would hide it), `off` reports that the forward is still in
+  place (exit 4) and the undo that removing it did not finish (exit 5). Once it is gone and something else serves the
   port, it reports `removed: this daemon's forward on tailnet port N` and
   warns, naming what serves the port now.
 - From the change on, Ctrl-C is held: the `tailscale` child receives the
@@ -204,10 +206,13 @@ Not covered by any committed test, because `Fake` stands in for them:
 
 Declared limits:
 
-- A Ctrl-C after "y", during the re-read of the port (a few milliseconds),
-  is held by the interrupt listener rather than ending the run: the serve
-  then goes ahead unless the `tailscale` child stopped on the same
-  interrupt.
+- A Ctrl-C after "y", while the port is read again (one `serve status
+  --json` call, at most 30 s), is neither reported nor ending the run: the
+  question's listener is gone and the change's is not yet started, but the
+  Tokio handler installed for the question still takes the signal. The
+  `tailscale` child of that read receives it too; if it stops, the read
+  fails and the run exits 4 with nothing changed, and if it finishes, the
+  change goes ahead.
 - Only the direct `tailscale` child is killed at the timeout; a wrapper
   script's own children are not.
 

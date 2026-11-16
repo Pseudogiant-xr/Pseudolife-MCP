@@ -495,13 +495,12 @@ fn funnelled(config: Option<&Dict>, port: u16) -> bool {
         })
 }
 
-/// The background handler on the port is still a forward to
-/// `127.0.0.1:<port>`, whatever else is set on it or on the port (Funnel,
-/// TLS): what `serve --tcp=N off` removes, so what a removal is judged by.
+/// The background handler on the port is still this daemon's plain
+/// forward to `127.0.0.1:<port>`, whatever is set on the port beside it
+/// (Funnel reads as someone else's port in [`port_state`], but would hide
+/// the forward): what a removal is judged by.
 pub(super) fn still_forwards(config: &Dict, port: u16) -> bool {
-    matches!(handler(Some(config), port), Some(J::Dict(handler))
-        if pyjson::get(handler, "TCPForward").and_then(J::as_str)
-            == Some(format!("127.0.0.1:{port}").as_str()))
+    handler(Some(config), port).is_some_and(|handler| is_ours(handler, port))
 }
 
 /// `_port_state(config, port)`, the detail as code units.
@@ -673,14 +672,15 @@ mod tests {
         (state, detail.map(|units| String::from_utf16_lossy(&units)))
     }
 
-    /// Re-executed by the Windows timeout test: run with its own full name
-    /// as the filter it prints its process id and wedges; in any other run
-    /// (a plain `--ignored` run included) it returns at once.
+    /// Re-executed by the Windows timeout test: given [`WEDGE_MARKER`] as a
+    /// second filter (which matches no test) it prints its process id and
+    /// wedges; in any other run (a libtest `--ignored` run, or nextest's
+    /// `--run-ignored`, which pass no such word) it returns at once.
     #[test]
     #[ignore = "a helper the Windows timeout test re-executes"]
     fn wedge_helper() {
         use std::io::Write;
-        if std::env::args().any(|arg| arg == WEDGE_HELPER) {
+        if std::env::args().any(|arg| arg == WEDGE_MARKER) {
             println!("wedged pid={}", std::process::id());
             let _ = std::io::stdout().flush();
             std::thread::sleep(Duration::from_secs(120));
@@ -688,6 +688,7 @@ mod tests {
     }
 
     const WEDGE_HELPER: &str = "cli::expose::tailscale::tests::wedge_helper";
+    const WEDGE_MARKER: &str = "pseudolife-expose-wedge-helper-marker";
 
     /// The Windows kill path: a child still running at the bound (this test
     /// binary, re-executed as [`wedge_helper`]; a console program that
@@ -710,6 +711,7 @@ mod tests {
             &me,
             &[
                 WEDGE_HELPER,
+                WEDGE_MARKER,
                 "--exact",
                 "--ignored",
                 "--nocapture",
@@ -722,8 +724,10 @@ mod tests {
         assert!(ran.timed_out, "{ran:?}");
         assert!(!ran.succeeded());
         assert_eq!((ran.code, ran.err.as_str()), (124, "timed out after 10s"));
-        // The bound, then at most 2 s to reap and 2 s to drain.
-        assert!(elapsed < Duration::from_secs(16), "{elapsed:?}");
+        // The bound, then the kill: without it the 2 s reap and the 2 s
+        // drain would both run out (about 14 s), and only `kill_on_drop`
+        // would end the child.
+        assert!(elapsed < Duration::from_secs(13), "{elapsed:?}");
         let pid: u32 = ran
             .out
             .split("wedged pid=")
@@ -750,7 +754,14 @@ mod tests {
         let config = read(
             r#"{"TCP": {"8765": {"TCPForward": "127.0.0.1:8765", "TerminateTLS": "n"}}, "AllowFunnel": {"n:8765": true}}"#,
         );
-        assert!(still_forwards(&config, 8765));
+        assert!(
+            !still_forwards(&config, 8765),
+            "a TLS forward is not this daemon's"
+        );
+        let funnel_beside = read(
+            r#"{"TCP": {"8765": {"TCPForward": "127.0.0.1:8765"}}, "AllowFunnel": {"n:8765": true}}"#,
+        );
+        assert!(still_forwards(&funnel_beside, 8765));
         assert!(!still_forwards(
             &read(r#"{"TCP": {"8765": {"HTTPS": true}}}"#),
             8765

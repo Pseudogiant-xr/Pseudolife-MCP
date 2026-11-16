@@ -226,15 +226,15 @@ NATIVE_WORDING = [
      b"no terminal to confirm on, so nothing changed: rerun with --yes"),
     (re.compile(rb"(tailscale refused the change for this user \([^\r\n\"]*\)): "),
      rb"\1; nothing changed: "),
-    (re.compile(rb"(tailscale refused the serve \([^\r\n\"]*\))(?=[\r\n\"])"),
-     rb"\1; nothing changed"),
+        (re.compile(rb"(tailscale refused the serve \([^\r\n\"]*\))(?=[\r\n\"])"),
+     rb"\1; nothing changed: fix what tailscale reports, then rerun this command"),
     (re.compile(rb"the serve did not take \(the serve status does not show the forward\); "
                 rb"nothing to undo"),
      b"the serve did not take (`tailscale serve` exited 0, but the serve status does not "
      b"show the forward); nothing changed. Check `tailscale serve status`, then rerun"),
     (re.compile(rb"(tailscale did not remove the forward \([^\r\n\"]*\))(?=[\r\n\"])"),
-     rb"\1; it is still in place, so nothing changed: check `tailscale serve status`, then "
-     rb"rerun this command or run the plan's `tailscale serve` command yourself"),
+          rb"\1; it is still in place, so nothing changed: check `tailscale serve status`, then "
+     rb"run the plan's `tailscale serve` command yourself"),
 ]
 
 
