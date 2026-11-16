@@ -14,7 +14,7 @@
 //! Every effect goes through [`Host`], so the tests drive the whole flow
 //! with a fake `tailscale`, daemon and terminal.
 mod args;
-pub(super) mod tailscale;
+mod tailscale;
 
 use super::hook_http;
 use super::pyjson::{self, Dict, J};
@@ -529,9 +529,10 @@ fn permission_refused(proc: &Proc) -> bool {
 }
 
 /// `_permission_fix()`: what lets this user change the serve config, worded
-/// once for `expose` and `maintainer setup` ([`tailscale::permission_fix`]).
+/// once for `expose` and `maintainer setup`
+/// ([`crate::cli::maintainer::setup::tailscale_permission_fix`]).
 fn permission_fix() -> &'static str {
-    tailscale::permission_fix(std::env::consts::OS)
+    crate::cli::maintainer::setup::tailscale_permission_fix(std::env::consts::OS)
 }
 
 /// Said only once the serve state was read back unchanged.

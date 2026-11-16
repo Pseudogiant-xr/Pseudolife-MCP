@@ -17,26 +17,6 @@ use std::{
     time::Duration,
 };
 
-/// The fix for a user Tailscale does not let change its serve config, by OS.
-/// Forwarding a port needs neither root nor an Administrator console
-/// (Tailscale's Serve documentation, "Limitations"); what it needs is a user
-/// Tailscale trusts. On Linux that is its operator, a grant made once with
-/// one privileged command; on Windows and macOS it is the account that owns
-/// the Tailscale configuration, and there is no grant to give another one.
-/// The one wording for `expose` and `maintainer setup`, keyed by
-/// `std::env::consts::OS` so either platform's text is testable anywhere.
-pub(crate) fn permission_fix(os: &str) -> &'static str {
-    match os {
-        "windows" => {
-            "run it as the Windows user that owns this device's Tailscale configuration (the one signed in to the Tailscale app, or the one that turned on unattended mode)"
-        }
-        "macos" => "run it as the macOS user logged in to the Tailscale app",
-        _ => {
-            "make this user Tailscale's operator once with `sudo tailscale set --operator=$USER` (the one privileged step; after it this user changes serves without sudo)"
-        }
-    }
-}
-
 /// `TAILSCALE_TIMEOUT_S`: a design bound, not a measurement; a tailscale
 /// CLI call that takes longer is wedged.
 pub(super) const TIMEOUT: Duration = Duration::from_secs(30);
