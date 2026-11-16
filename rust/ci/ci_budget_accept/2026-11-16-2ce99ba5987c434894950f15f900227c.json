@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "d5eacc86bd528116",
+  "fingerprint": "954d6243529019c3",
+  "reason": "#1651 merged onto master f91ec4071, which carries #1653: the lane is master's selection plus tests/test_scheduled_task_lock.py, its only addition. Hosted per-case times from the lane's JUnit reports: on run 43907569151 (head 909526100, #1651's side) the file's 30 cases took 64.6 s; on batch #1672's run 43924441194 (head 335efde76, #1653's side) #1653's 21 test_integrate_script cases took 38.7 s. The merged lane therefore costs master's plus about 1.1 min. The whole job took 22.5 min and 18.0 min on those runs, but the 1,415 cases both ran took 855 s and 576 s, so that gap is runner speed, not either addition. The recorded 18.6 min holds within about 1.1 min (18.0 + 1.1 on #1653's run), and even the slower run's 22.5 keeps ci.yml within its limits (89.5 of 96 runner-minutes; longest job under 41). Re-measure from this change's batch runs."
+}

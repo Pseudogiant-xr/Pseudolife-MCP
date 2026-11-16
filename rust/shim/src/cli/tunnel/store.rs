@@ -39,6 +39,12 @@ const FIELDS: [&str; 12] = [
 #[derive(Debug)]
 pub(super) struct Profile {
     pub name: String,
+    /// The daemon the bridge forwards to, and the token file it names (a
+    /// path; the token itself is never read here).
+    pub daemon_url: String,
+    pub token_file: String,
+    pub tunnel_id: Option<String>,
+    pub organization_id: Option<String>,
     pub state: String,
     pub catalog: String,
     pub expires_at: Option<(String, DateTime<Utc>)>,
@@ -322,20 +328,24 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
         Some(Some(name)) if valid_name(name) => name.to_owned(),
         _ => return Err(Fail::Tunnel(INVALID_NAME)),
     };
-    match text(payload, "daemon_url") {
-        Some(Some(url)) => validate_url(url)?,
+    let daemon_url = match text(payload, "daemon_url") {
+        Some(Some(url)) => {
+            validate_url(url)?;
+            url.to_owned()
+        }
         _ => return Err(Fail::Tunnel("invalid tunnel endpoint")),
-    }
-    match text(payload, "token_file") {
+    };
+    let token_file = match text(payload, "token_file") {
         Some(Some(token)) if !token.is_empty() && absolute_reference(token)? => {
             checked_path(Path::new(token))?;
+            token.to_owned()
         }
         _ => {
             return Err(Fail::Tunnel(
                 "daemon credential reference requires an absolute path",
             ));
         }
-    }
+    };
     // re.fullmatch(prefix + '[class]+', value) for an optional identifier.
     let identifier =
         |key: &str, prefix: &str, class: fn(&u8) -> bool, message: &'static str| match text(
@@ -415,8 +425,13 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
             ));
         }
     }
+    let id = |key: &str| text(payload, key).flatten().map(str::to_owned);
     Ok(Profile {
         name,
+        daemon_url,
+        token_file,
+        tunnel_id: id("tunnel_id"),
+        organization_id: id("organization_id"),
         state: state.to_owned(),
         catalog: catalog.to_owned(),
         expires_at,
@@ -627,7 +642,7 @@ pub(super) fn list(root: &Path) -> Result<Vec<String>, Fail> {
 }
 
 #[cfg(unix)]
-fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
+pub(super) fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
     use std::os::unix::fs::MetadataExt;
     if info.uid() != rustix::process::geteuid().as_raw() || info.mode() & 0o077 != 0 {
         return Err(Fail::Tunnel(NOT_OWNER_ONLY));
@@ -636,7 +651,7 @@ fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
 }
 
 #[cfg(windows)]
-fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), Fail> {
+pub(super) fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), Fail> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,

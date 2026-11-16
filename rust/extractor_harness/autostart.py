@@ -193,7 +193,9 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                      "DetachedCodexCli", "LateLauncherChild", "ProcessExitWait", "ProcessExitTimeout", "ProcessQueryFailure",
                      "ProcessPidReused", "ProcessPinnedExitRace", "ProcessHandleIdentityChanged", "ProcessHandleFailure", "ProcessStartTimeFailure",
                      "InitialForeignTask", "DeleteReplacedTask", "TaskQueryFailure", "StopQueryFailure", "RemovalQueryFailure",
-                     "RollbackQueryFailure", "TaskAbsent", "HistoricalTailBoundaries", "LateOldRuntimeRecorded", "LateLegacyUnseen", "LateLegacyKnown", "LateLegacyUnseenNoLauncher", "CimSnapshotFailure", "CimParentFailure", "ReplacementDuringStop", "LateCurrentRuntimeRecorded", "ReplacementBeforeRegister", "TaskAppearedBeforeRegister", "InstallUnverifiedPreflight", "InstallUnverifiedLate", "TaskRemovedBeforeRegister", "RemoveUnverifiedPreflight", "SiblingUnverifiedPreflight", "TaskRemovedDuringHealth"):
+                     "RollbackQueryFailure", "TaskAbsent", "HistoricalTailBoundaries", "LateOldRuntimeRecorded", "LateLegacyUnseen", "LateLegacyKnown", "LateLegacyUnseenNoLauncher", "CimSnapshotFailure", "CimParentFailure", "ReplacementDuringStop", "LateCurrentRuntimeRecorded", "ReplacementBeforeRegister", "TaskAppearedBeforeRegister", "InstallUnverifiedPreflight", "InstallUnverifiedLate", "TaskRemovedBeforeRegister", "RemoveUnverifiedPreflight", "SiblingUnverifiedPreflight", "TaskRemovedDuringHealth",
+                     "LockedReplace", "LockedLegacy", "LockedUnchanged", "LockedRemove", "LockedFollows", "LockedFollowsFails",
+                     "LockedFollowsAfterUpdate", "LockedOtherUser", "OrphanedShim", "LockedFollowsReplaced", "LockedTriggerOther", "OrphanedPythonShim", "OrphanedShimFails"):
             checked(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("scheduler_failures.ps1")),
                      "-Source", str(run.ROOT / "rust/shim/src/extractor_shim/autostart.ps1"), "-Root", str(root), "-Case", case], step=case)
     if scenario == "controls":
@@ -296,19 +298,26 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
             assert Path(run.journal_rows(journal)[-1]["cwd"]).resolve() == repo.resolve()
             initial_calls = len(run.journal_rows(journal))
             repeated = checked(args, env=env, step=f"{kind} unchanged reinstall")
-            assert not repeated.stdout.strip(), repeated.stdout
+            # A rerun on a set-up host changes nothing; the Windows script
+            # says so in one line, the systemd one stays silent.
+            expected = [f"Native {kind} shim autostart '{token}' is already registered and serving these settings on port {port}; nothing changed."] if windows else []
+            assert repeated.stdout.decode().strip().splitlines() == expected, repeated.stdout
             assert len(run.journal_rows(journal)) == initial_calls, "unchanged install restarted its provider"
             if windows:
                 checked(["pwsh", "-NoProfile", "-Command",
                          f"Disable-ScheduledTask -TaskName '{token}' -ErrorAction Stop | Out-Null"], step=f"{kind} disable healthy task")
-                assert not checked(args, env=env, step=f"{kind} re-enable healthy task").stdout.strip()
+                reenabled = checked(args, env=env, step=f"{kind} re-enable healthy task")
+                assert reenabled.stdout.decode().strip().splitlines() == [
+                    f"Native {kind} shim autostart '{token}' was disabled and is enabled again; it already serves these settings on port {port}."
+                ], reenabled.stdout
                 checked(["pwsh", "-NoProfile", "-Command", WINDOWS_TASK_ABSENCE +
                          f"\nif (-not (Get-FixtureTask '{token}').Settings.Enabled) {{ throw 'task remains disabled' }}"],
                         step=f"{kind} enabled registration")
                 assert len(run.journal_rows(journal)) == initial_calls, "re-enabling restarted its provider"
             with config_file.open("a") as settings:
                 settings.write("\nUNRELATED_PASSWORD=synthetic-only\n")
-            assert not checked(args, env=env, step=f"{kind} unrelated setting").stdout.strip(), "unrelated setting forced reinstall"
+            unrelated = checked(args, env=env, step=f"{kind} unrelated setting")
+            assert unrelated.stdout.decode().strip().splitlines() == expected, ("unrelated setting forced reinstall", unrelated.stdout)
             assert len(run.journal_rows(journal)) == initial_calls, "unrelated settings restarted its provider"
             if not windows:
                 checked(["systemctl", "--user", "disable", registration])
@@ -352,7 +361,8 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
                     pass
                 assert time.monotonic() < deadline, "previous registration was not restarted"
                 time.sleep(.1)
-            assert not checked(args, env=env, step=f"{kind} restored registration").stdout.strip(), "restored registration differs from the original"
+            restored = checked(args, env=env, step=f"{kind} restored registration")
+            assert restored.stdout.decode().strip().splitlines() == expected, ("restored registration differs from the original", restored.stdout)
             model += "-next"
             checked(args + [model_flag, model], env=env, step=f"{kind} final replacement")
             status, body = run.call(port, "GET", "/models")
