@@ -76,8 +76,8 @@ pub(super) fn write_config_with(
                 &shown,
                 &parent.display().to_string().replace('\'', "'\\''"),
                 case,
-                &account_name(me),
-                &account_name(meta.uid()),
+                &owner_label(me),
+                &owner_label(meta.uid()),
             ));
         }
         if meta.nlink() != 1 {
@@ -224,10 +224,11 @@ fn foreign_owner_refusal(
     }
 }
 
-/// The account name of `uid`, or the number when it has no name.
+/// How the owner `id` is named in a message: its passwd name, or the
+/// number when it has none.
 #[cfg(unix)]
 #[allow(unsafe_code)]
-fn account_name(uid: u32) -> String {
+fn owner_label(id: u32) -> String {
     use std::ffi::CStr;
     let mut record = std::mem::MaybeUninit::<libc::passwd>::uninit();
     let mut scratch = [0; 4096];
@@ -236,7 +237,7 @@ fn account_name(uid: u32) -> String {
     // `scratch`; both outlive every read below.
     let found = unsafe {
         libc::getpwuid_r(
-            uid,
+            id,
             record.as_mut_ptr(),
             scratch.as_mut_ptr(),
             scratch.len(),
@@ -254,7 +255,7 @@ fn account_name(uid: u32) -> String {
             return name.to_owned();
         }
     }
-    uid.to_string()
+    id.to_string()
 }
 
 /// The replacement keeps the original's group as well as its mode: a mode

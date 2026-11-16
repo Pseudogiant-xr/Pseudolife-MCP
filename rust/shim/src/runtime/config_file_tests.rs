@@ -252,7 +252,7 @@ mod modes {
                 "{error}"
             );
         } else {
-            let name = account_name(me);
+            let name = owner_label(me);
             assert!(
                 error.contains("is owned by another account (root)")
                     && error.ends_with(&format!("sudo chown '{name}' '/etc' '/etc/passwd'")),
@@ -573,8 +573,8 @@ fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
 
 #[cfg(unix)]
 #[test]
-fn account_names_resolve_and_fall_back_to_the_number() {
-    assert_eq!(account_name(0), "root");
+fn owner_labels_resolve_and_fall_back_to_the_number() {
+    assert_eq!(owner_label(0), "root");
     // A uid with no account (not -2, 4294967294, which macOS gives nobody).
-    assert_eq!(account_name(3_999_999_999), "3999999999");
+    assert_eq!(owner_label(3_999_999_999), "3999999999");
 }
