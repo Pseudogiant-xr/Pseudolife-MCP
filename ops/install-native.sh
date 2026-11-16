@@ -672,8 +672,19 @@ native_install() {
     native_launcher_before="$(native_installed_launcher)"
     native_sum_before=""
     [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
+    native_changing_before="${NATIVE_HOST_CHANGING:-}"
     NATIVE_HOST_CHANGING=1
-    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
+    native_install_status=0
+    native_install_out="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION")" || native_install_status=$?
+    if [ "$native_install_status" = 3 ]; then
+        # Refused before it changed anything (a tunnel registered to start by
+        # itself runs this machine's Python client; its line is above).
+        NATIVE_HOST_CHANGING="$native_changing_before"
+        NATIVE_KEPT_PYTHON=1
+        return 1
+    fi
+    [ "$native_install_status" = 0 ] || return 1
+    native_launcher="$(printf '%s\n' "$native_install_out" | tail -1)"
     native_launcher="${native_launcher%$'\r'}"
     if command -v cygpath >/dev/null 2>&1; then
         case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
@@ -2275,6 +2286,8 @@ ensure_shim() {
     if native_install; then
         SHIM_OK=1
         SHIM_MANAGER_KIND=runtime
+    elif [ -n "${NATIVE_KEPT_PYTHON:-}" ]; then
+        echo "WARNING: the native client was not installed (the reason is above); this machine keeps the Python client, and its client registrations are left as they are." >&2
     else
         echo "WARNING: the native client could not be installed from $NATIVE_ARCHIVE (see above); rerun the installer, which reuses the verified download." >&2
     fi

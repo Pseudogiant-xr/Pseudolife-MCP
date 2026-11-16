@@ -2547,3 +2547,132 @@ def test_anonymous_mount_requires_docker_volume_provenance(tmp_path, mode, evide
         assert result.returncode == 2, result.stdout + result.stderr
         assert "/cache" in result.stdout and "declare" in result.stdout and "recreate" in result.stdout
         assert stages(json.loads(state_path.read_text())) == []
+
+
+TUNNEL_OWNER = "PseudolifeTunnelOwner:" + "3c3b30db37fcc1368d48917c2405a0b06b94add3faba142553cb8649e81527d7"
+
+
+def _python_client_with_tunnel_service(env):
+    """A machine on the Python client: its stable launcher is the Python
+    selector, Claude Code runs it, and `tunnel service install` registered a
+    systemd user unit for profile `dot` (issue #1632). Returns the launcher
+    and the unit."""
+    home = Path(env["HOME"])
+    launcher = Path(env["PSEUDOLIFE_SHIM_LAUNCHER"])
+    launcher.write_text("#!/bin/sh\n# Python selector fixture\nexit 0\n")
+    launcher.chmod(0o755)
+    (home / ".claude.json").write_text(json.dumps(
+        {"mcpServers": {"pseudolife-memory": {"type": "stdio", "command": str(launcher), "args": []}}}))
+    unit = home / ".config/systemd/user/pseudolife-tunnel-dot.service"
+    unit.parent.mkdir(parents=True)
+    unit.write_text(f"# {TUNNEL_OWNER}\n[Unit]\nDescription=Optional Pseudolife MCP tunnel (dot)\n[Service]\n"
+                    f"ExecStart=\"{launcher}\" \"tunnel\" \"run\" \"--profile\" \"dot\"\nRestart=on-failure\n"
+                    "RestartSec=5\n[Install]\nWantedBy=default.target\n")
+    # The host chose the Python daemon, so an update to the running release
+    # has nothing to do.
+    choice = Path(env["PSEUDOLIFE_MCP_DATA_DIR"]) / "update-engine/engine-choice.json"
+    choice.parent.mkdir(parents=True, exist_ok=True)
+    choice.write_text('{"engine": "python"}\n')
+    return launcher, unit
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the systemd user unit is the Linux registration")
+@pytest.mark.parametrize("clients_only", [False, True], ids=["release", "clients-only"])
+def test_a_registered_tunnel_service_keeps_the_python_client_and_changes_nothing(tmp_path, clients_only):
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        launcher, unit = _python_client_with_tunnel_service(env)
+        before = {p: p.read_bytes() for p in (launcher, unit, Path(env["HOME"]) / ".claude.json")}
+        args = ["--tag", "0.21.1", "--health-retries", "1", "--rollback-tag", "pre-tunnel"]
+        if clients_only:
+            args = ["--clients-only", *args]
+        result = run_arm(repo, env, binary, args)
+        assert result.returncode == 2, result.stdout + result.stderr
+        out = result.stdout + result.stderr
+        assert "this machine stays on the Python client" in out, out
+        assert f"systemd user unit {unit}" in out, out
+        assert "Nothing was changed" in out, out
+        assert stages(json.loads(state_path.read_text())) == [], "no pull, backup or recreate"
+        assert {p: p.read_bytes() for p in before} == before, "launcher, unit and registration are byte-identical"
+        assert not Path(env["PSEUDOLIFE_SHIM_RUNTIMES"]).exists(), "no runtime was installed"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the systemd user unit is the Linux registration")
+def test_an_update_with_nothing_to_do_is_not_refused_for_a_tunnel_service(tmp_path):
+    # The running daemon already is the release and nothing else changes:
+    # the client steps never run, so the launcher would not move (Codex).
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with host(tmp_path) as (repo, env, state_path):
+        _python_client_with_tunnel_service(env)
+        result = run_arm(repo, env, binary, ["--tag", "0.21.0", "--health-retries", "1"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "nothing to do" in result.stdout, result.stdout
+        assert "stays on the Python client" not in result.stdout + result.stderr
+
+
+def _client_machine(tmp_path):
+    """A disposable client machine: no Docker, a daemon address nobody
+    answers, and every path the native client reads under its own home."""
+    home = tmp_path / "client-home"
+    home.mkdir()
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("PSEUDOLIFE_", "XDG_", "CLAUDE_", "CODEX_"))}
+    env.update(HOME=str(home), USERPROFILE=str(home), PATH=os.environ.get("PATH", ""),
+               CODEX_HOME=str(home / "codex"),
+               PSEUDOLIFE_DOCKER=str(home / "no-docker-here"),
+               PSEUDOLIFE_MCP_DATA_DIR=str(home / "data"),
+               PSEUDOLIFE_MCP_DAEMON_URL="http://127.0.0.1:9",
+               PSEUDOLIFE_SHIM_RUNTIMES=str(home / "runtimes"),
+               PSEUDOLIFE_SHIM_LAUNCHER=str(home / "bin/pseudolife-mcp"))
+    Path(env["PSEUDOLIFE_SHIM_LAUNCHER"]).parent.mkdir(parents=True)
+    return env
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the systemd user unit is the Linux registration")
+def test_a_client_machine_with_a_tunnel_service_stays_on_the_python_client(tmp_path):
+    # The update bridge's usual target: a client machine on the Python client.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    env = _client_machine(tmp_path)
+    launcher, unit = _python_client_with_tunnel_service(env)
+    before = launcher.read_bytes()
+    result = subprocess.run([binary, "update", "--clients-only", "--tag", "0.21.1"], env=env, cwd=tmp_path,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 2, result.stdout + result.stderr
+    out = result.stdout + result.stderr
+    assert "this machine stays on the Python client" in out, out
+    assert "rerun the same command without PSEUDOLIFE_SHIM_ENGINE=native" in out, out
+    assert f"pseudolife-mcp tunnel service remove --profile dot), then rerun it. Registered: systemd user unit {unit}" in out, out
+    assert launcher.read_bytes() == before
+    assert not Path(env["PSEUDOLIFE_SHIM_RUNTIMES"]).exists()
+    # The same machine with the unit removed moves on past the guard.
+    unit.unlink()
+    moved = subprocess.run([binary, "update", "--clients-only", "--tag", "0.21.1"], env=env, cwd=tmp_path,
+                           capture_output=True, text=True, timeout=60)
+    assert "stays on the Python client" not in moved.stdout + moved.stderr, moved.stdout + moved.stderr
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the systemd user unit is the Linux registration")
+def test_runtime_install_refuses_the_move_before_reading_its_archive(tmp_path):
+    # What both native installers run; they keep the Python client on exit 3.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    env = _client_machine(tmp_path)
+    launcher, _unit = _python_client_with_tunnel_service(env)
+    (Path(env["HOME"]) / ".claude.json").unlink()   # the installer moves with no registration
+    before = launcher.read_bytes()
+    missing = tmp_path / "never-read"
+    result = subprocess.run([binary, "runtime", "install", "--archive", str(missing / "a.tar.gz"),
+                             "--sha256sums", str(missing / "SHA256SUMS"), "--version", "0.21.1"],
+                            env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "runtime install refused: this machine stays on the Python client" in result.stderr
+    assert "rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native" in result.stderr
+    assert launcher.read_bytes() == before
+    assert not Path(env["PSEUDOLIFE_SHIM_RUNTIMES"]).exists()

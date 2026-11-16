@@ -13849,15 +13849,21 @@ a sleeping or powered-off host available.
 
 **A machine with an autostart service stays on the Python client.** The
 service starts the tunnel through the installed `pseudolife-mcp` launcher,
-and the native client cannot run a tunnel yet. So an update that would move
-this machine to the native client (`PSEUDOLIFE_SHIM_ENGINE=native`) refuses
-while a tunnel service it installed is registered, even a disabled one. The
-refusal names the service, changes nothing and exits 2, and the tunnel keeps
-starting as before. Update without `PSEUDOLIFE_SHIM_ENGINE=native` to stay
-on the Python client. To move anyway, first run `pseudolife-mcp tunnel
-service remove --profile <name>` (with the `--profile-dir` or
-`--system-service` the service was installed with), then rerun the update.
-A saved profile without a service does not block the move.
+and the native client cannot run a tunnel yet. So a run that would move this
+machine to the native client refuses while a tunnel service it installed is
+registered and runs that launcher, even a disabled one. That covers an
+update with `PSEUDOLIFE_SHIM_ENGINE=native` (exit 2) and the installer with
+it (`runtime install` exits 3, and the installer keeps the Python client).
+The refusal names the service and changes nothing. Rerun without
+`PSEUDOLIFE_SHIM_ENGINE=native` to stay on the Python client. To move anyway,
+first run the `pseudolife-mcp tunnel service remove` command the refusal
+prints (it carries the service's `--profile`, `--profile-dir` and, for a root
+service, `--system-service`), then rerun. A saved profile without a service,
+or a service that runs another program, does not block the move. On a
+machine already on the native client, an update warns about such a service
+and prints the service manager's own command that stops it
+(`systemctl --user disable --now`, `launchctl bootout` and `launchctl
+disable`, or `schtasks /Change /Disable`).
 
 Windows stores the runtime key using user-scoped DPAPI plus owner-only ACLs;
 POSIX stores it in an owner-only file, with disk encryption left to the host.

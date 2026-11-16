@@ -67,6 +67,10 @@ printf '%s\n' "$*" >>"$NATIVE_CALLS"
 case "$1" in
     version) [ -z "$STUB_HANG_VERSION" ] || sleep 600; echo "pseudolife-mcp 9.8.7" ;;
     runtime)
+        if [ -n "$STUB_REFUSE_TUNNEL" ]; then
+            echo "runtime install refused: this machine stays on the Python client: a tunnel is registered to start by itself" >&2
+            exit 3
+        fi
         mkdir -p "$(dirname "$PSEUDOLIFE_SHIM_LAUNCHER")"
         cp "$0" "$PSEUDOLIFE_SHIM_LAUNCHER"; chmod 755 "$PSEUDOLIFE_SHIM_LAUNCHER"
         echo "$PSEUDOLIFE_SHIM_LAUNCHER" ;;
@@ -189,6 +193,20 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
     assert second.returncode == 0, second.stderr + second.stdout
     assert f"Native client {VERSION} already installed at" in second.stdout, second.stdout
     assert "nothing changed" in second.stdout
+
+
+@pytest.mark.skipif(INSTALL != "stub", reason="the refusing stand-in is the shell stub; the real client refuses only on a registered tunnel service")
+def test_a_refused_move_keeps_the_python_client_and_says_so(tmp_path):
+    # runtime install exits 3 when a tunnel registered to start by itself
+    # runs this machine's Python client (issue #1632): nothing was changed.
+    body = 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "KEPT changing=$($script:nativeHostChanging)" }'
+    result = _run(INSTALL, tmp_path, body, extra_env={"STUB_REFUSE_TUNNEL": "1"})
+    assert result.returncode == 0, result.stderr + result.stdout
+    out = result.stdout + result.stderr
+    assert "KEPT changing=" in result.stdout and "changing=True" not in result.stdout, out
+    assert "this machine keeps the Python client" in out, out
+    assert "rerun the installer, which reuses" not in out, out
+    assert not (tmp_path / "home" / "runtimes").exists()
 
 
 @needs_client

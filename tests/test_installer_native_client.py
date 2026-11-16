@@ -73,6 +73,10 @@ printf '%s\n' "$*" >>"$NATIVE_CALLS"
 case "$1" in
     version) [ -z "$STUB_HANG_VERSION" ] || sleep 600; echo "pseudolife-mcp 9.8.7"; [ -z "$STUB_BROKEN" ] || { echo "GLIBC_2.35 not found" >&2; exit 1; } ;;
     runtime)
+        if [ -n "$STUB_REFUSE_TUNNEL" ]; then
+            echo "runtime install refused: this machine stays on the Python client: a tunnel is registered to start by itself" >&2
+            exit 3
+        fi
         if [ -z "$STUB_NO_LAUNCHER" ]; then
             mkdir -p "$(dirname "$PSEUDOLIFE_SHIM_LAUNCHER")"
             cp "$0" "$PSEUDOLIFE_SHIM_LAUNCHER"; chmod 755 "$PSEUDOLIFE_SHIM_LAUNCHER"
@@ -336,6 +340,19 @@ def test_a_reported_launcher_that_does_not_exist_is_not_success(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "OK=unset" in result.stdout
     assert "the native client could not be installed" in result.stderr
+
+
+def test_a_refused_move_keeps_the_python_client_and_says_so(tmp_path):
+    # runtime install exits 3 when a tunnel registered to start by itself
+    # runs this machine's Python client (issue #1632): nothing was changed.
+    result = _run(tmp_path, 'native_stage; ensure_shim; echo "OK=${SHIM_OK:-unset} CHANGING=${NATIVE_HOST_CHANGING:-unset}"',
+                  env={"STUB_REFUSE_TUNNEL": "1"})
+    assert result.returncode == 0, result.stderr
+    assert "OK=unset CHANGING=unset" in result.stdout
+    assert "runtime install refused: this machine stays on the Python client" in result.stderr
+    assert "this machine keeps the Python client" in result.stderr
+    assert "rerun the installer, which reuses" not in result.stderr
+    assert not (tmp_path / "home" / "runtimes").exists()
 
 
 def test_one_run_installs_the_client_once(tmp_path):

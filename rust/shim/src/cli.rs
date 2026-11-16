@@ -31,6 +31,7 @@ mod test_login;
 mod transfer;
 mod tunnel;
 mod update;
+pub(crate) use update::tunnel_guard;
 mod version;
 pub mod wait_mail;
 

@@ -130,9 +130,16 @@ pub(crate) struct Update {
     /// Decides whether moving this machine's launcher to the native runtime
     /// must be refused because a tunnel is registered to start by itself
     /// (`tunnel_guard`); a seam so tests never ask a real service manager.
-    pub tunnel_probe: fn(Option<&Path>) -> tunnel_guard::Decision,
+    pub tunnel_probe: fn(tunnel_guard::Mover, Option<&Path>) -> tunnel_guard::Decision,
     /// The probe passed once this run; later client steps do not ask again.
     pub tunnel_checked: bool,
+}
+
+/// The checkout as the deploy later names it to the shim step.
+fn canonical(repo: &Path) -> PathBuf {
+    fs::canonicalize(repo)
+        .map(seams::command_path)
+        .unwrap_or_else(|_| repo.to_owned())
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -267,7 +274,14 @@ impl Update {
         if self.tunnel_checked {
             return Ok(());
         }
-        match (self.tunnel_probe)(repo) {
+        let mover = if self.o.unattended {
+            tunnel_guard::Mover::Unattended
+        } else if self.report.mode == "checkout" {
+            tunnel_guard::Mover::Checkout
+        } else {
+            tunnel_guard::Mover::Update
+        };
+        match (self.tunnel_probe)(mover, repo) {
             tunnel_guard::Decision::Refuse(line) => Err(UpdateError::usage(line)),
             tunnel_guard::Decision::Proceed(notes) => {
                 self.tunnel_checked = true;
@@ -277,6 +291,21 @@ impl Update {
                 Ok(())
             }
         }
+    }
+    /// The backstop in `clients`: true when the client steps must not run,
+    /// with the refusal recorded as the run's result.
+    pub(crate) fn refused_clients(&mut self, repo: Option<&Path>) -> bool {
+        let Err(error) = self.refuse_tunnel_move(repo) else {
+            return false;
+        };
+        self.warn(error.message.clone());
+        self.report.ok = false;
+        self.report.exit_code = error.exit_code;
+        self.report.clients = Some(json!({
+            "shim": {"state": "refused", "detail": error.message},
+            "ok": false,
+        }));
+        true
     }
     pub fn step(&mut self, text: impl Into<String>) {
         let text = text.into();
@@ -416,14 +445,14 @@ impl Update {
         if let Some(repo) = engine::selected_checkout(self)? {
             self.report.mode = "checkout".into();
             if self.o.all_clients {
-                self.refuse_tunnel_move(Some(&repo))?;
+                self.refuse_tunnel_move(Some(&canonical(&repo)))?;
             }
             return engine::deploy(self, &repo);
         }
         if let Some(repo) = self.o.checkout.clone() {
             self.report.mode = "checkout".into();
             if self.o.all_clients {
-                self.refuse_tunnel_move(Some(&repo))?;
+                self.refuse_tunnel_move(Some(&canonical(&repo)))?;
             }
             self.deploy_checkout(&repo)
         } else {
@@ -606,14 +635,7 @@ impl Update {
         use clients::handoff::{self, Note};
         // Every caller refuses earlier; this only keeps a new caller from
         // moving the launcher under a registered tunnel service.
-        if let Err(error) = self.refuse_tunnel_move(repo) {
-            self.warn(error.message.clone());
-            self.report.ok = false;
-            self.report.exit_code = error.exit_code;
-            self.report.clients = Some(json!({
-                "shim": {"state": "refused", "detail": error.message},
-                "ok": false,
-            }));
+        if self.refused_clients(repo) {
             return;
         }
         let own = env!("CARGO_PKG_VERSION");

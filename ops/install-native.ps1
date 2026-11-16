@@ -588,6 +588,7 @@ function Install-NativeClient {
     $launcherPath = Get-NativeLauncherPath
     $before = $null
     if (Get-NativeInstalledLauncher) { $before = (Get-FileHash -LiteralPath $launcherPath -Algorithm SHA256).Hash }
+    $changingBefore = $script:nativeHostChanging
     $script:nativeHostChanging = $true
     # A failed install keeps the staged copy: the installer steps after this
     # one still run it (Invoke-NativeHelper), and the script's end removes it.
@@ -595,6 +596,13 @@ function Install-NativeClient {
         $launcher = & $script:nativeStaged runtime install --archive $script:nativeArchive --sha256sums $script:nativeSums --version $script:nativeVersion | Select-Object -Last 1
     } catch { return $null }
     $installExit = $LASTEXITCODE
+    if ($installExit -eq 3) {
+        # Refused before it changed anything (a tunnel registered to start by
+        # itself runs this machine's Python client; its line is above).
+        $script:nativeHostChanging = $changingBefore
+        $script:nativeKeptPython = $true
+        return $null
+    }
     if (($installExit -ne 0) -or (-not $launcher)) { return $null }
     $launcher = "$launcher".Trim()
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return $null }
@@ -2201,6 +2209,9 @@ function Install-ShimOnce {
         $script:shimInstallPath = $launcher
         $script:shimManagerKind = "runtime"
         $script:shimInstallResult = $true
+    } elseif ($script:nativeKeptPython) {
+        Write-Warning "The native client was not installed (the reason is above); this machine keeps the Python client, and its client registrations are left as they are."
+        $script:shimInstallResult = $false
     } else {
         Write-Warning "The native client could not be installed from $($script:nativeArchive) (see above); rerun the installer, which reuses the verified download."
         $script:shimInstallResult = $false
