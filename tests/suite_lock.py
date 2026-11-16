@@ -951,6 +951,20 @@ class TreeChanged(RuntimeError):
     """Files a queued run already read changed on disk while it waited."""
 
 
+def _full_session(config, tests_root: Path) -> bool:
+    """:func:`is_full_run` for this pytest session's own arguments."""
+    option = config.option
+    from tests import suite_classes
+    excluded = frozenset() if getattr(option, "include_frozen", False) else suite_classes.frozen()
+    return is_full_run(
+        config.args, config.invocation_params.dir, tests_root,
+        keyword=getattr(option, "keyword", "") or "",
+        markexpr=getattr(option, "markexpr", "") or "",
+        listing_only=any(getattr(option, name, False)
+                         for name in LISTING_OPTIONS),
+        excluded=excluded)
+
+
 def session_kind(config, environ, tests_root: Path) -> str:
     """What this session is to the lock: ``worker`` (an xdist worker, whose
     controller holds it), ``off`` (the lock is off, as on GitHub Actions),
@@ -962,17 +976,29 @@ def session_kind(config, environ, tests_root: Path) -> str:
         return "worker"
     if lock_mode(environ) == "off":
         return "off"
-    option = config.option
-    from tests import suite_classes
-    excluded = frozenset() if getattr(option, "include_frozen", False) else suite_classes.frozen()
-    full = is_full_run(
-        config.args, config.invocation_params.dir, tests_root,
-        keyword=getattr(option, "keyword", "") or "",
-        markexpr=getattr(option, "markexpr", "") or "",
-        listing_only=any(getattr(option, name, False)
-                         for name in LISTING_OPTIONS),
-        excluded=excluded)
-    return "full" if full else "targeted"
+    return "full" if _full_session(config, tests_root) else "targeted"
+
+
+# Set by ops/wsl-suite.ps1, with the reason, on a host whose full suites run
+# on its remote machine while its owner has not said this PC is available
+# (ops/suite-availability.ps1). ops/wsl-suite.sh refuses a plain full run
+# itself; a run it passes to pytest unchanged (`tests/`, `-x`, `-k "not x"`)
+# is classified here, exactly as the lock classifies it.
+PC_UNAVAILABLE_ENV = "PSEUDOLIFE_SUITE_PC_UNAVAILABLE"
+
+
+def pc_unavailable_refusal(config, environ, tests_root: Path) -> str | None:
+    """The refusal for a full run while :data:`PC_UNAVAILABLE_ENV` says this
+    PC is not available, whatever the lock mode; None for a targeted run, an
+    xdist worker, or without the marker."""
+    why = environ.get(PC_UNAVAILABLE_ENV, "")
+    if not why or hasattr(config, "workerinput") or not _full_session(config, tests_root):
+        return None
+    return (f"a full suite runs on the remote machine while this PC is not available "
+            f"for full suites ({why}); run it there: "
+            "$env:PSEUDOLIFE_SUITE_WHERE='remote'; pwsh -NoProfile -File ops/remote-suite.ps1 "
+            "(an integration batch: python ops/integrate.py suite), or set "
+            "PSEUDOLIFE_SUITE_WHERE=local to override. A targeted run is fine here.")
 
 
 def take_for_session(config, environ, tests_root: Path,

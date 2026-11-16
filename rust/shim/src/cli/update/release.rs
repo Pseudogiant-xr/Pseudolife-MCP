@@ -531,6 +531,7 @@ impl Update {
         }
         if self.o.clients_only {
             self.refuse_checkout_shadow(&target)?;
+            self.refuse_tunnel_move(None)?;
             self.clients(None, &format!("pseudolife-mcp=={target}"), before.as_ref());
             return Ok(());
         }
@@ -559,6 +560,13 @@ impl Update {
             }
             self.step(format!("the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, --clients-only for the shim and plugin)"));
             return Ok(());
+        }
+        if !self.o.daemon_only {
+            // Before the backup and the daemon, since the client steps run
+            // last; and outside the default-engine attempt, whose early
+            // refusals fall back to the host's own engine. An unattended
+            // run updates the daemon alone instead of refusing.
+            self.refuse_tunnel_move_before_daemon()?;
         }
         if defaulted {
             // The default never blocks an ordinary update: a move that refuses

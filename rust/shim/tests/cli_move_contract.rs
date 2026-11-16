@@ -17,7 +17,7 @@ use std::{
 };
 
 const DEFERRED: &str = "pseudolife-stdio: mode 'move' is deferred in this candidate\n";
-const BAD_TO: &str = "move: --to takes an ssh target such as root@box or a ~/.ssh/config alias\n";
+const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as \
                        http://100.64.0.2:8765 (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";
@@ -250,6 +250,11 @@ fn help_and_usage_at_80_columns() {
         let text = String::from_utf8(output.stdout).unwrap();
         assert!(text.starts_with(&String::from_utf8(cli::native_text(USAGE)).unwrap()));
         assert!(text.contains("--json                one JSON report on stdout"));
+        // The example target is an ordinary account, never a root login.
+        assert!(
+            text.contains("(user@box, or a") && !text.contains("root@"),
+            "{text}"
+        );
         assert!(output.stderr.is_empty());
     }
     let required =

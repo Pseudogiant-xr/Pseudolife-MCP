@@ -138,7 +138,11 @@ has to work, not match Python):
   says nothing changed; a refused serve or removal, and a permission
   refusal, say nothing changed (a removal that did not take also says the
   forward is still in place); a serve that exited 0 but did not take says
-  nothing changed and to check `tailscale serve status`, then rerun.
+  nothing changed and to check `tailscale serve status`, then rerun. The
+  permission refusal's fix names only the least-privilege step (Linux: make
+  the user Tailscale's operator once; Windows: run as the account that owns
+  the device's Tailscale configuration), never root or an elevated shell,
+  since forwarding a port needs neither.
 - A question answered with anything but `y` / `yes`, or the end of input,
   says `not confirmed (only y or yes goes ahead); nothing changed` (the
   oracle: `declined; nothing changed`); Ctrl-C at the question says

@@ -424,6 +424,7 @@ NATIVE_STAGED=""
 # changed" (native_exit). NATIVE_INSTALLED_AT names the native client once
 # it is installed.
 NATIVE_HOST_CHANGING=""
+NATIVE_KEPT_PYTHON=""
 NATIVE_INSTALLED_AT=""
 NATIVE_PART_WAY_SAID=""
 native_target() {  # echoes this host's release target triple, or nothing
@@ -664,6 +665,21 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
         native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only; this native installer itself works from a checkout of a release that carries it."
     fi
+    # A tunnel registered to start by itself through this machine's Python
+    # client keeps it on that client (issue #1632): refused here, before the
+    # host changes. A release without the check answers a usage error, and
+    # one that does not answer in time is not waited for; runtime install
+    # itself refuses the same move later.
+    native_check_status=0
+    native_check_says="$(native_bounded both "$NATIVE_STAGED" runtime install --check)" || native_check_status=$?
+    if [ "$native_check_status" = 3 ]; then
+        printf '%s\n' "$native_check_says" >&2
+        native_refuse "a tunnel is registered to start by itself through this machine's Python client, and the native client cannot run a tunnel yet (the line above names it)" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native to keep the Python client, or first remove the autostart with the command the line above prints, then rerun."
+    elif [ "$native_check_status" = 124 ]; then
+        echo "  the tunnel-service check did not answer in $NATIVE_PROBE_SECONDS s; runtime install checks again later" >&2
+    elif [ "$native_check_status" = 0 ] && [ -n "$native_check_says" ]; then
+        printf '%s\n' "$native_check_says" >&2
+    fi
 }
 # ensure_shim's install: the verified archive into a new side-by-side runtime
 # behind the stable launcher. Status 0 with SHIM_PATH set, else 1.
@@ -672,8 +688,19 @@ native_install() {
     native_launcher_before="$(native_installed_launcher)"
     native_sum_before=""
     [ -z "$native_launcher_before" ] || native_sum_before="$(native_sha256 "$native_launcher_before" 2>/dev/null || true)"
+    native_changing_before="${NATIVE_HOST_CHANGING:-}"
     NATIVE_HOST_CHANGING=1
-    native_launcher="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION" | tail -1)" || return 1
+    native_install_status=0
+    native_install_out="$("$NATIVE_STAGED" runtime install --archive "$NATIVE_ARCHIVE" --sha256sums "$NATIVE_SUMS" --version "$NATIVE_VERSION")" || native_install_status=$?
+    if [ "$native_install_status" = 3 ]; then
+        # Refused before it changed anything (a tunnel registered to start by
+        # itself runs this machine's Python client; its line is above).
+        NATIVE_HOST_CHANGING="$native_changing_before"
+        NATIVE_KEPT_PYTHON=1
+        return 1
+    fi
+    [ "$native_install_status" = 0 ] || return 1
+    native_launcher="$(printf '%s\n' "$native_install_out" | tail -1)"
     native_launcher="${native_launcher%$'\r'}"
     if command -v cygpath >/dev/null 2>&1; then
         case "$native_launcher" in [A-Za-z]:\\*) native_launcher="$(cygpath -u "$native_launcher")" ;; esac
@@ -2275,6 +2302,8 @@ ensure_shim() {
     if native_install; then
         SHIM_OK=1
         SHIM_MANAGER_KIND=runtime
+    elif [ -n "${NATIVE_KEPT_PYTHON:-}" ]; then
+        echo "WARNING: the native client was not installed (the reason is above); this machine keeps the Python client, and its client registrations are left as they are." >&2
     else
         echo "WARNING: the native client could not be installed from $NATIVE_ARCHIVE (see above); rerun the installer, which reuses the verified download." >&2
     fi

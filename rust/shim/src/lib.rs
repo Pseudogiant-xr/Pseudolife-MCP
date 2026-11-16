@@ -13,6 +13,7 @@ pub mod lifecycle;
 pub mod maintainer_sent;
 mod owned_transport;
 pub mod pg;
+pub mod private_path;
 mod raw_http;
 mod recovery;
 pub mod runtime;

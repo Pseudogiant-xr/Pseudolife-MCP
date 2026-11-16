@@ -775,7 +775,11 @@ pub fn holds_bearer(provider: &CredentialProvider) -> bool {
 }
 pub fn credential_file_warning(provider: &CredentialProvider) -> Option<String> {
     let path = provider.path()?;
-    provider.snapshot().err().map(|error| format!("[shim] the configured credential file cannot be used: {error}\n  PSEUDOLIFE_MCP_TOKEN_FILE={}\n  If the daemon requires bearer authentication, every call will be refused until the file exists, is owner-only, and holds only the token.", path.display()))
+    provider.snapshot().err().map(|error| match crate::private_path::explain(path) {
+        // A folder above it is the cause: name it and its one fix.
+        Some(detail) => format!("[shim] the configured credential file cannot be used: {detail}\n  PSEUDOLIFE_MCP_TOKEN_FILE={}", path.display()),
+        None => format!("[shim] the configured credential file cannot be used: {error}\n  PSEUDOLIFE_MCP_TOKEN_FILE={}\n  If the daemon requires bearer authentication, every call will be refused until the file exists, is owner-only, and holds only the token.", path.display()),
+    })
 }
 
 #[derive(Clone, Debug)]

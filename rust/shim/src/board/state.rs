@@ -323,26 +323,30 @@ type FolderPass = ((u64, u64), std::time::Instant);
 fn marker_folder_trusted(folder: &Path) -> Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     const FRESH: Duration = Duration::from_secs(30);
-    // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse point,
-    // sharing read and write but not delete: while the caller holds this
-    // handle the folder cannot be renamed or removed.
+    // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse point
+    // unless it is a link the private-path rule accepted (the caller checked
+    // the marker's folders), sharing read and write but not delete: while
+    // the caller holds this handle the folder cannot be renamed or removed.
     let directory = OpenOptions::new()
         .access_mode(0x0002_0000 | 0x80)
         .share_mode(0x1 | 0x2)
-        .custom_flags(0x02000000 | 0x00200000)
+        .custom_flags(0x02000000 | no_follow_unless_link(folder))
         .open(folder)
         .map_err(|_| "state_unavailable")?;
     // The pass is cached for the folder object it was made on (volume and
     // file index, read through this same handle), not its name: a folder
     // swapped in under the same name is checked afresh.
     let Ok(identity) = crate::credentials::windows_security::folder_identity(&directory) else {
-        report_folder_once(
-            folder,
-            &format!(
-                "pseudolife-mcp: not reading board markers in {}: it is not a plain folder (a symlink or junction, which private state never follows). Fix: point the digest folder at a plain folder, then retry.",
+        // The private-path rule names a link it does not follow; anything
+        // else is a folder that could not be read as one.
+        let line = match crate::private_path::check_path(folder) {
+            Err(refusal) => refusal.to_string(),
+            Ok(()) => format!(
+                "pseudolife-mcp: not reading board markers in {}: it could not be opened as a plain folder. Fix: point the digest folder at a plain folder you own, then retry.",
                 folder.display()
             ),
-        );
+        };
+        report_folder_once(folder, &line);
         return Err("invalid_state");
     };
     let fresh = MARKER_FOLDERS
@@ -502,7 +506,8 @@ pub fn private_dir(path: &Path) -> Result<()> {
     private_dir_at(path, true)
 }
 fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
-    crate::credentials::reject_ancestor_redirects(path).map_err(|_| "invalid_state")?;
+    // The folder itself too: in its place a link is followed below.
+    crate::credentials::reject_redirects(path).map_err(|_| "invalid_state")?;
     // Whether this call made the folder, or another task did meanwhile.
     let mut created = false;
     let mut appeared = false;
@@ -569,7 +574,7 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
             let directory = OpenOptions::new()
                 .access_mode(0x00120089 | 0x000c0000)
                 .share_mode(0x1 | 0x2)
-                .custom_flags(0x02000000 | 0x00200000)
+                .custom_flags(0x02000000 | no_follow_unless_link(path))
                 .open(path)
                 .map_err(|_| "state_unavailable")?;
             // An existing empty folder another account owns is refused, not
@@ -594,12 +599,13 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
             }
         } else {
             // READ_CONTROL | FILE_READ_ATTRIBUTES, not following a reparse
-            // point: enough to read the owner and DACL, which the owner can
-            // always do.
+            // point unless the folder is a link the check above trusted:
+            // enough to read the owner and DACL, which the owner can always
+            // do.
             let directory = OpenOptions::new()
                 .access_mode(0x0002_0000 | 0x80)
                 .share_mode(0x1 | 0x2 | 0x4)
-                .custom_flags(0x02000000 | 0x00200000)
+                .custom_flags(0x02000000 | no_follow_unless_link(path))
                 .open(path)
                 .map_err(|_| "state_unavailable")?;
             match crate::credentials::windows_security::validate_folder(&directory) {
@@ -623,6 +629,23 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+/// `FILE_FLAG_OPEN_REPARSE_POINT`, unless `path` is a link: a private folder
+/// in whose place the private-path rule accepted a link is opened where the
+/// link leads, and any other reparse point is opened as itself (and refused).
+///
+/// The rule is applied again here, not taken from the caller's earlier
+/// check, so a link made in between (where the folder was missing then) is
+/// never followed unchecked.
+#[cfg(windows)]
+fn no_follow_unless_link(path: &Path) -> u32 {
+    if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+        && crate::private_path::check_path(path).is_ok()
+    {
+        0
+    } else {
+        0x0020_0000
+    }
 }
 /// The icacls command that makes `folder` private to this account while
 /// keeping access for what is in it, and removes `writer`'s own grants
@@ -713,8 +736,9 @@ fn icacls_line(folder: &str, calls: &[Vec<(&str, bool)>]) -> String {
 /// account (by SID, inheritable) full control, because an entry like that can
 /// also come from a parent, and a folder under one that passes nothing on is
 /// left with no entries by `/reset` alone. The owner keeps WRITE_DAC however
-/// empty the list is, so the second call always runs (from an elevated
-/// prompt when Administrators owns the folder).
+/// empty the list is, so the second call always runs (see
+/// [`ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER`] for when that owner needs an
+/// elevated prompt).
 #[cfg(windows)]
 fn unreadable_folder_command(folder: &str) -> String {
     let grant = format!("*{}:(OI)(CI)F", this_account_sid());
@@ -772,7 +796,7 @@ fn folder_refusal_windows(
         // icacls cannot name an entry it does not read; /reset replaces the
         // folder's explicit entries, that one included, with inherited ones.
         MarkerDistrust::Unreadable => format!(
-            "pseudolife-mcp: not using {shown}: its access list holds an entry this client cannot read (a callback or object entry), which could let another account change what is in it. Fix: drop its own entries and give this account full control of it and what is in it ({}; from an elevated prompt if Administrators owns it), then retry.",
+            "pseudolife-mcp: not using {shown}: its access list holds an entry this client cannot read (a callback or object entry), which could let another account change what is in it. Fix: drop its own entries and give this account full control of it and what is in it ({}), then retry. {ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER}",
             unreadable_folder_command(&shown.to_string())
         ),
         MarkerDistrust::NoDacl => format!(
@@ -793,6 +817,23 @@ fn report_folder_once(path: &Path, line: &str) {
     {
         eprintln!("{line}");
     }
+}
+/// When the repair of a folder's access list needs elevation, and why: its
+/// owner always holds the right to change that list, and an elevated process
+/// creates folders owned by Administrators, whose rights only an elevated
+/// token carries. Not even an elevated token holds SYSTEM's, so a folder
+/// SYSTEM owns has to be taken over first. A folder this account owns needs
+/// no elevation.
+#[cfg(windows)]
+const ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER: &str = "An ordinary prompt is enough when this account owns the folder; a folder owned by Administrators (as one an elevated process created is) needs an elevated prompt, because only an elevated token holds that owner's right to change its access list; one owned by SYSTEM must first be taken over by an administrator (takeown, from an elevated prompt), since no prompt holds SYSTEM's right.";
+/// The line for a file an earlier client's folder protection emptied, with
+/// the repair of `folder`. Git Bash rewrites the /reset and /T switches, so
+/// the command is given for PowerShell or cmd.
+#[cfg(windows)]
+fn empty_access_list_line(error: &str, path: &str, folder: &str) -> String {
+    format!(
+        "{error}: {path} has an empty access list (an earlier native client's folder protection removed the access it inherited); restore it as its owner, in PowerShell or cmd, with: icacls \"{folder}\" /reset /T. {ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER}"
+    )
 }
 /// `error` from opening, reading or moving `path`, with its cause when that
 /// is an earlier native client's folder protection: on Windows a file this
@@ -815,11 +856,10 @@ pub fn denied_cause(path: &Path, error: &std::io::Error) -> String {
             .or(path.parent())
             .unwrap_or(path)
             .display();
-        // Git Bash rewrites the /reset and /T switches, so the command is
-        // given for PowerShell or cmd.
-        return format!(
-            "{error}: {} has an empty access list (an earlier native client's folder protection removed the access it inherited); restore it as its owner (from an elevated prompt if Administrators owns it), in PowerShell or cmd, with: icacls \"{folder}\" /reset /T",
-            path.display()
+        return empty_access_list_line(
+            &error.to_string(),
+            &path.display().to_string(),
+            &folder.to_string(),
         );
     }
     let _ = path;
@@ -830,14 +870,13 @@ pub fn denied_cause(path: &Path, error: &std::io::Error) -> String {
 /// prints. `None` when nothing is wrong now, or the cause is not a
 /// permission or redirect one.
 pub fn diagnose(path: &Path) -> Option<String> {
-    if crate::credentials::reject_ancestor_redirects(path).is_err() {
-        return Some(
-            "a folder on its path is a symlink or junction, which private state never follows"
-                .into(),
-        );
+    if let Err(refusal) = crate::private_path::check_ancestors(path) {
+        return Some(refusal.to_string());
     }
     let folder = path.parent()?;
-    let meta = fs::symlink_metadata(folder).ok()?;
+    // A folder that is itself a link passed the check above: read where it
+    // leads.
+    let meta = fs::metadata(folder).ok()?;
     if !meta.is_dir() {
         return Some(format!("{} is not a plain folder", folder.display()));
     }
@@ -870,10 +909,10 @@ pub fn diagnose(path: &Path) -> Option<String> {
             OpenOptions::new()
                 .access_mode(0x0002_0000 | 0x80)
                 .share_mode(0x1 | 0x2)
-                .custom_flags(flags | 0x0020_0000)
+                .custom_flags(flags)
                 .open(target)
         };
-        let Ok(directory) = opened(folder, 0x0200_0000) else {
+        let Ok(directory) = opened(folder, 0x0200_0000 | no_follow_unless_link(folder)) else {
             return Some(format!(
                 "this user cannot read the permissions of {}",
                 folder.display()
@@ -891,7 +930,7 @@ pub fn diagnose(path: &Path) -> Option<String> {
             ));
         }
         if exists(path) {
-            let Ok(file) = opened(path, 0) else {
+            let Ok(file) = opened(path, 0x0020_0000) else {
                 return Some("this user cannot read the file's permissions".into());
             };
             if crate::credentials::windows_security::validate(&file).is_err() {
@@ -1206,7 +1245,12 @@ mod tests {
         let printed = line
             .split(" (in PowerShell: ")
             .nth(1)
-            .and_then(|rest| rest.strip_suffix("), then retry."))
+            // The command ends at "), then retry."; when elevation is
+            // needed follows it.
+            .and_then(|rest| {
+                rest.split_once("), then retry. ")
+                    .map(|(command, _)| command)
+            })
             .unwrap_or_else(|| panic!("{line}"));
         // Each call of the printed line must succeed, not only the last.
         for call in printed.split("; ") {
@@ -1738,6 +1782,34 @@ mod tests {
                 && !line.contains("uid")
                 && line.contains("Fix: remove it"),
             "{line}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_access_list_repairs_say_when_elevation_is_needed_and_why() {
+        use crate::credentials::windows_security::MarkerDistrust;
+        let unreadable =
+            folder_refusal_windows(Path::new(r"C:\state"), &MarkerDistrust::Unreadable);
+        let emptied = empty_access_list_line("Access is denied.", r"C:\state\a.json", r"C:\state");
+        for line in [&unreadable, &emptied] {
+            // Elevation is conditional on the owner, and the line says why.
+            assert!(
+                line.contains("An ordinary prompt is enough when this account owns the folder")
+                    && line.contains("only an elevated token holds that owner's right")
+                    && line.contains("owned by SYSTEM must first be taken over"),
+                "{line}"
+            );
+            assert!(!line.contains("from an elevated prompt if"), "{line}");
+        }
+        assert!(
+            emptied.contains(r#"icacls "C:\state" /reset /T"#)
+                && emptied.contains("in PowerShell or cmd"),
+            "{emptied}"
+        );
+        assert!(
+            unreadable.contains(&unreadable_folder_command(r"C:\state")),
+            "{unreadable}"
         );
     }
 

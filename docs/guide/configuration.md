@@ -2822,12 +2822,18 @@ also capped (below, and by the daemon's `wake` caps under
   other hooks), the URL from `PSEUDOLIFE_MCP_DAEMON_URL`, as for the other
   hooks. On Windows, Git Bash uses the native ACL rules: current-user
   ownership, a protected DACL, and allow rules only for the owner or OWNER
-  RIGHTS; reparse points in the file or its parents are rejected. A token
-  file rejected by the Stop gate or coordination-start hook leaves a `token`
-  line with value `rejected` in the digest directory's `ledger.log`, without
-  a path or token. OneDrive-redirected profiles using reparse points are
-  rejected: move the token file outside the redirected folder and update
-  `PSEUDOLIFE_MCP_TOKEN_FILE`.
+  RIGHTS; a file that is itself a reparse point is rejected. When a folder
+  above the file is a symlink, a junction or another reparse point, the hook
+  asks the installed native client (`pseudolife-mcp private-path-check`)
+  and reads the file only if that folder passes the client's link rule
+  ([Private files behind a symlink or junction](#private-files-behind-a-symlink-or-junction));
+  without a native client it rejects the file. The session-start,
+  session-end and coordination-start hooks say why on stderr; the Stop gate
+  and the subagent-board hook keep their stderr closed, so for them the
+  refusal shows only as a `token` line with value `rejected` in the digest
+  directory's `ledger.log` (no path or token). This applies to the bash
+  hooks (Linux, macOS, Git Bash); the native-Windows PowerShell hooks
+  (`lifecycle.ps1`) check only the token file itself today.
 - **The woke marker.** After a wake fires, the hook posts once to the daemon
   that this address's turn is starting, `POST /api/hook/woke?agent=<id>` (in
   the background, 2 s, the same bearer and URL as the gate, so a daemon that
@@ -3907,7 +3913,7 @@ token):
 | `configured credential file is missing` | Restore the file, or set `PSEUDOLIFE_MCP_TOKEN_FILE` to the file that holds the token. |
 | `configured credential file is unavailable` | Check that the shim's account can read it and no other program holds it locked. |
 | `credential path ancestors cannot be inspected` | Check that the shim's account can read every directory on the path. |
-| `credential path must not contain redirects` | A directory on the path is a symlink or junction: set `PSEUDOLIFE_MCP_TOKEN_FILE` to the real path. |
+| `credential path must not contain redirects` | A folder on the path is a link another account could change, or a Windows reparse point that is not a link. The shim's stderr and the error name the link and the one fix ([Private files behind a symlink or junction](#private-files-behind-a-symlink-or-junction)). |
 | `credential file must be a private regular file` | It is a link, a junction, a hard link or not a file: replace it with a regular file holding only the token. |
 | `credential file contains an invalid bearer token` | Write only the token: one line, no spaces or control characters, at most 4096 bytes. |
 
@@ -3948,6 +3954,37 @@ such as one under your user profile. This applies to every private file
 Pseudolife writes: token files, client configs, tunnel profiles.
 
 ## Claude Code plugin
+
+### Private files behind a symlink or junction
+
+The native client keeps its token file, board state and other private
+files behind a symlink or junction when no other account could have made
+the link or can change it. Then a home reached through a link (a `/home`
+on another volume, macOS `/var` and `/tmp`, a Windows profile behind a
+junction) and a data folder moved to another disk with a link work with no
+setting. Any further link on the way to where a link leads is checked the
+same way; the plain folders there get the checks they would get if a
+setting named them directly, so a link into a folder other users may write
+is as exposed as naming that folder.
+
+| A link on the path to a private file | |
+|---|---|
+| Owned by you or root, in a folder owned by you or root that only its owner can write | followed |
+| Owned by you or root, in a sticky folder such as `/tmp` | followed |
+| Owned by another account | refused |
+| In a folder its group or other users can write, without the sticky bit | refused: `chmod go-w '<folder>'` when the folder is yours, otherwise replace the link |
+| Windows: a symlink or junction owned by you, SYSTEM or Administrators, which no other account may delete, rewrite or re-permission, in a folder (owned by you, SYSTEM, Administrators or TrustedInstaller) where no other account may delete entries, delete the folder, or change its access list (WRITE_DAC) or owner (WRITE_OWNER) | followed |
+| Windows: a link whose stored target is a device path (`\??\GLOBALROOT\Device\...`), or whose reparse data is malformed | refused: the client cannot check where it leads |
+| Windows: a junction made directly in `C:\`, which inherits Authenticated Users' Modify there | refused: another account could replace it |
+| Windows: a OneDrive Files On-Demand (cloud-files) placeholder | a plain folder: it redirects nothing (what is in a synced folder can still be changed from the cloud, as the user) |
+| Windows: any other reparse point | refused |
+| More than 40 links on one path | refused as a loop |
+
+A refused path is named in one line, on stderr and in the error: the link,
+the cause and the one fix (`chmod go-w '<folder>'` for a folder you own
+that others may write, otherwise replacing the link with a folder you own
+and moving what it led to there). The frozen Python client refuses every
+link.
 
 ### Where the plugin lives: one cache folder per commit
 

@@ -46,7 +46,7 @@ elif ! docker info >/dev/null 2>&1; then
     err="$(docker info 2>&1 || true)"
     if printf '%s' "$err" | grep -qi 'permission denied'; then
         fail "docker daemon reachable only as root (socket permission denied)" \
-             "sudo usermod -aG docker \$USER   # then log out and back in (group changes need a re-login)"
+             "sudo usermod -aG docker \$USER   # then log out and back in (group changes need a re-login). Membership of the docker group is equivalent to root on this machine: that is how Docker works, not something Pseudolife adds. To avoid granting it, run the installer from an account that already uses Docker; rootless Docker and Podman are not supported yet (issue #1642)."
     else
         fail "docker daemon is not running" \
              "start Docker Desktop, or: sudo systemctl enable --now docker"

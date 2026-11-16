@@ -1296,8 +1296,11 @@ def test_windows_gate_records_a_rejected_junction_token_without_a_request(tmp_pa
     junction = tmp_path / "junction"
     server, requests = _gate_daemon("allow\n")
     env = _gate_env(tmp_path, server, PSEUDOLIFE_MCP_TOKEN_FILE=str(junction / "token"))
+    # No native client answers (#1639): the junction stays refused. The
+    # gate keeps its stderr quiet; the ledger records the refusal.
     env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory),
-               PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT="0")
+               PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT="0",
+               PSEUDOLIFE_SHIM_LAUNCHER=str(tmp_path / "no-native-client.exe"))
     try:
         pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
                  '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
@@ -1329,17 +1332,25 @@ def test_windows_private_file_fails_closed(tmp_path, unsafe):
                          HOOK.read_text(encoding="utf-8"))[0]
     junction = tmp_path / "junction"
     if unsafe == "junction":
-        env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory))
+        # No native client answers (#1639): the junction stays refused.
+        env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory),
+                   PSEUDOLIFE_SHIM_LAUNCHER=str(tmp_path / "no-native-client.exe"))
         pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
                  '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
         env["PSEUDOLIFE_TEST_FILE"] = str(junction / "token")
     else:
         function = 'powershell.exe() { return 1; }\n' + function
+    helper = re.search(r"(?ms)^private_path_trusted\(\) \{.*?^\}",
+                       HOOK.read_text(encoding="utf-8"))[0]
     try:
         result = subprocess.run(
-            [bash_exe(), "-c", function + '\nprivate_regular "$PSEUDOLIFE_TEST_FILE" 4096'],
+            [bash_exe(), "-c", helper + "\n" + function + '\nprivate_regular "$PSEUDOLIFE_TEST_FILE" 4096'],
             env=env, capture_output=True, text=True, timeout=DEADLINE)
-        assert result.returncode == 1 and result.stdout == "" and result.stderr == ""
+        assert result.returncode == 1 and result.stdout == ""
+        if unsafe == "junction":
+            assert "not reading" in result.stderr and "fix:" in result.stderr, result.stderr
+        else:
+            assert result.stderr == ""
     finally:
         if junction.exists():
             os.rmdir(junction)  # Remove the junction itself, never its target.
