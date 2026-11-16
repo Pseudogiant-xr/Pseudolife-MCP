@@ -217,10 +217,11 @@ touched, with no retrofit sweep.
   module-level state,
   conftest, suite admission or an imported helper, or their cross-file
   effect is uncertain.
-- **An integration batch** runs the local WSL full suite, the Rust harness
-  run `build` prints and, when it changes `rust/`, `cargo check`, on its
-  head before `open` pushes it, because that costs less than one CI run and
-  the suite never collects `rust/`.
+- **An integration batch** runs its full suite on the Linux box through
+  `python ops/integrate.py suite` (with the native client the hosted `test`
+  lane builds), the Rust harness run `build` prints and, when it changes
+  `rust/`, `cargo check`, on its head before `open` pushes it, because that
+  costs less than one CI run and the suite never collects `rust/`.
 - Nothing is fixed inside a batch except the one generated census commit
   (a conflicting member or a red batch's culprit is dropped with a comment),
   and it merges with a merge commit, never squash, so GitHub marks its
@@ -229,17 +230,18 @@ touched, with no retrofit sweep.
   lone PR has waited about one hosted-run cycle or is urgent or a release
   cut**, because a batch of one pays a full hour of hosted CI for one
   change.
-- **On the maintainer's Windows host, full suites run in WSL** (`pwsh
-  ops/wsl-suite.ps1`, or `pwsh ops/remote-suite.ps1` for the first free of
-  WSL and the Linux box), backgrounded and redirected, because native ones
-  stall the desktop and the host refuses them (`full-suite.windows`:
-  `refuse`).
+- **On the maintainer's Windows host, full suites run on the Linux box**
+  (`pwsh ops/remote-suite.ps1`, backgrounded and redirected), and in WSL
+  only while `~/.pseudolife-mcp/locks/pc-available` says he made this PC
+  available (`docs/dev/dev-machines.md` "Sharing"), because a suite here
+  overloads the desktop he is using and native ones stall it
+  (`full-suite.windows`: `refuse`).
 - `PSEUDOLIFE_SUITE_LOCK=off` is never a way around that refusal, because
   it only skips the queue, not the stall.
-- Both launchers test the committed HEAD (commit first; a box run needs it
-  pushed), and a PR cites machine and commit from
-  `~/.pseudolife-mcp/suite-results`; read `docs/dev/dev-machines.md` before
-  a first run on a machine.
+- Both launchers test the committed HEAD (commit first; a commit not on
+  master reaches the box as a bundle, with nothing pushed), and a PR cites
+  machine and commit from `~/.pseudolife-mcp/suite-results`; read
+  `docs/dev/dev-machines.md` before a first run on a machine.
 - **One full suite per machine at a time**, because two exhaust memory and
   kill test daemons: `tests/conftest.py` queues full runs (all of `tests/`,
   half its files, or an exclude-only `-k` / `-m`) on
@@ -338,8 +340,11 @@ touched, with no retrofit sweep.
 - **Check free space before** a Rust build, full suite, eval run or bulk
   download (`df -h /`, `Get-PSDrive`) and don't start below 8 GB, because a
   full disk kills runs mid-step.
-- **A Rust `target/` is a cache:** prefer one shared `CARGO_TARGET_DIR` per
-  machine, and `cargo clean` your own stale profiles before a big rebuild.
+- **A Rust `target/` is a cache:** keep one per worktree, or share one only
+  between builds that `cargo clean -p` their workspace's packages when the
+  checkout changes, and `cargo clean` your own stale profiles before a big
+  rebuild, because cargo reuses another checkout's units from a shared one
+  and reports its binary as yours.
 - **Below the floor, stop starting heavy work**, free only your own caches
   and tell the maintainer or your launching session; others' worktrees,
   evidence and caches are not yours, and removing a merged branch's cache
