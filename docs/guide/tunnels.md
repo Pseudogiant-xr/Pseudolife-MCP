@@ -47,7 +47,8 @@ client, which an update does unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see
 [The native client](configuration.md#the-native-client), which also says how
-to go back).
+to go back). A machine whose tunnel is set to start by itself stays on the
+Python client (see [Autostart and private storage](#autostart-and-private-storage)).
 
 ## Start or resume
 
@@ -204,6 +205,52 @@ path's owner and mode, then retry. A group-writable
 is refused this way.
 No root service or login policy is changed implicitly. An autostart service cannot keep
 a sleeping or powered-off host available.
+
+**A machine with an autostart service stays on the Python client.** The
+service starts the tunnel through the installed `pseudolife-mcp` launcher,
+and the native client cannot run a tunnel yet. So a run that would move this
+machine to the native client refuses while a tunnel service it installed is
+registered and runs that launcher, even a disabled one. An update with
+`PSEUDOLIFE_SHIM_ENGINE=native` exits 2, and the installer with it stops in
+its preflight; `runtime install --check` is the check both use. The refusal
+names the service and changes nothing. Rerun without
+`PSEUDOLIFE_SHIM_ENGINE=native` to stay on the Python client. To move anyway,
+first run the `pseudolife-mcp tunnel service remove` command the refusal
+prints (it carries the service's `--profile`, `--profile-dir` and, for a root
+service, `--system-service`), then rerun. An unattended update on the
+daemon's host instead updates the daemon alone and says why, on each run that
+installs a release, until the autostart is gone; after that, the next
+unattended run that installs a release moves the client.
+
+A saved profile without a service, or a service that runs another program,
+does not block the move. A service you made by hand (no owner marker, but its
+command is the launcher followed by `tunnel run`) is named in a warning and
+never blocks the move. The warning gives the command that disables it
+(`systemctl --user disable --now`, `launchctl bootout` and `launchctl
+disable`, or `schtasks /Change /Disable`); deleting what you wrote is left to
+you. The move then goes ahead, and [The native
+client](configuration.md#the-native-client) says how to go back. These are
+looked for:
+
+- every `*.service` in `~/.config/systemd/user`, with `%h` expanded, and in
+  `/etc/systemd/system` (as root, the product's own units there too),
+  following a symbolic link to a unit you manage elsewhere;
+- every `*.plist` in `~/Library/LaunchAgents` (`ProgramArguments`);
+- every scheduled task, in one read-only `schtasks /Query /XML`, with
+  `%VARIABLE%` in its command expanded.
+
+Not recognised: drop-in files, `ExecStart` lines continued with `\`, a
+program behind `sh -c`, `env`, `EnvironmentFile=` or `${VAR}`, the other unit
+directories (`~/.local/share/systemd/user`, `/etc/systemd/user`), a binary
+plist or one using only `Program`, a task that runs the launcher through
+PowerShell or by bare name, and, on a Windows machine already on the native
+client, any task when no profile was ever saved in `~/.pseudolife-mcp/tunnel`.
+
+On a machine already on the native client, an update warns about a tunnel
+service this product installed and prints the service manager's own
+commands that remove it, since that client has no `tunnel service` command
+(`systemctl --user disable --now` then deleting the unit, `launchctl bootout`
+then deleting the plist, or `schtasks /Delete`).
 
 Windows stores the runtime key using user-scoped DPAPI plus owner-only ACLs;
 POSIX stores it in an owner-only file, with disk encryption left to the host.

@@ -235,6 +235,17 @@ NATIVE_WORDING = [
     (re.compile(rb"(tailscale did not remove the forward \([^\r\n\"]*\))(?=[\r\n\"])"),
           rb"\1; it is still in place, so nothing changed: check `tailscale serve status`, then "
      rb"run the plan's `tailscale serve` command yourself"),
+    # The permission fix names only the least-privilege step: forwarding a
+    # port needs neither root nor an elevated shell, so the native client
+    # no longer offers either (the oracle's Linux and Windows fixes).
+    (re.compile(re.escape(b"grant your user operator rights once with "
+                          b"`sudo tailscale set --operator=$USER`, or run this as root")),
+     b"make this user Tailscale's operator once with `sudo tailscale set --operator=$USER` "
+     b"(the one privileged step; after it this user changes serves without sudo)"),
+    (re.compile(re.escape(b"run it as the Windows user logged in to Tailscale, or from an "
+                          b"elevated (administrator) shell")),
+     b"run it as the Windows user that owns this device's Tailscale configuration (the one "
+     b"signed in to the Tailscale app, or the one that turned on unattended mode)"),
 ]
 
 

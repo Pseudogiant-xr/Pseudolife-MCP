@@ -99,7 +99,7 @@ pub(super) fn refusal(request: &Request) -> Option<String> {
         || to.chars().any(|c| c.is_whitespace() || c.is_control())
     {
         return Some(
-            "--to takes an ssh target such as root@box or a ~/.ssh/config alias".to_owned(),
+            "--to takes an ssh target such as user@box or a ~/.ssh/config alias".to_owned(),
         );
     }
     let text = if request.target_checkout.is_some() {
