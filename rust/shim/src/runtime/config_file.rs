@@ -68,8 +68,10 @@ pub(super) fn write_config_with(
                 ForeignOwner::SharedSticky
             } else if owned {
                 ForeignOwner::OwnedNotWritable
-            } else {
+            } else if inside_home(parent, home_of(me).as_deref()) {
                 ForeignOwner::Foreign
+            } else {
+                ForeignOwner::ForeignOutsideHome
             };
             return Err(foreign_owner_refusal(
                 &target.display().to_string(),
@@ -172,8 +174,26 @@ enum ForeignOwner {
     /// A sticky folder another account owns (such as `/tmp`): this user may
     /// write there but replace only its own files.
     SharedSticky,
-    /// Another account owns the folder and this user cannot write it.
+    /// Another account owns the folder, inside this user's home (as one a
+    /// `sudo` run created is), and this user cannot write it.
     Foreign,
+    /// Another account owns the folder, outside this user's home (a system
+    /// or shared folder), and this user cannot write it: no ownership change
+    /// is offered, since taking over that folder hands over all of it.
+    ForeignOutsideHome,
+}
+
+/// Whether `folder` lies in `home`, both resolved, and `home` is a real home
+/// rather than `/` (which would hold every folder on the machine). Only
+/// there is giving this user the folder the narrow fix.
+#[cfg(any(unix, test))]
+fn inside_home(folder: &Path, home: Option<&Path>) -> bool {
+    let Some(home) = home else {
+        return false;
+    };
+    let resolve = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let (folder, home) = (resolve(folder), resolve(home));
+    home.parent().is_some() && folder.starts_with(&home)
 }
 
 /// The refusal for a client config another account owns (often one a `sudo`
@@ -183,10 +203,13 @@ enum ForeignOwner {
 ///   `mv` asks before replacing a file it cannot write); a folder it owns but
 ///   cannot write it can make writable first.
 /// - Only root can change who owns a file: in a shared sticky folder only the
-///   file's owner changes, otherwise the folder's too (the write creates its
-///   recovery files there). That command is for an administrator to run, so
-///   it names this account (`me`) rather than `$USER`, which would expand to
-///   the administrator.
+///   file's owner changes, and in a folder inside this user's home the
+///   folder's too (the write creates its recovery files there). That command
+///   is for an administrator to run, so it names this account (`me`) rather
+///   than `$USER`, which would expand to the administrator.
+/// - A folder outside this user's home that it cannot write gets no
+///   ownership command: taking over a system folder such as `/etc` would
+///   hand this user every other file in it.
 /// - A run as root is told to run again as the file's owner (`owner`).
 ///
 /// `quoted` and `folder_quoted` are already escaped for single quotes.
@@ -219,7 +242,10 @@ fn foreign_owner_refusal(
             "{shown} is owned by another account ({owner}), in a shared folder where only a file's owner may replace it, so it was not replaced; only root can change who owns a file, so ask whoever administers this machine to give it to {me}: sudo chown '{me_quoted}' '{quoted}'"
         ),
         ForeignOwner::Foreign => format!(
-            "{shown} is owned by another account ({owner}), in a folder another account owns and {me} cannot write, so it was not replaced; only root can change who owns them, so ask whoever administers this machine to give both to {me}: sudo chown '{me_quoted}' '{folder_quoted}' '{quoted}'"
+            "{shown} is owned by another account ({owner}), in a folder inside {me}'s home that another account owns and {me} cannot write, so it was not replaced; only root can change who owns them, so ask whoever administers this machine to give both to {me}: sudo chown '{me_quoted}' '{folder_quoted}' '{quoted}'"
+        ),
+        ForeignOwner::ForeignOutsideHome => format!(
+            "{shown} is owned by another account ({owner}), in a folder outside {me}'s home that another account owns and {me} cannot write, so it was not replaced; no ownership change is suggested, because taking over that folder would give {me} every other file in it: keep this client's config in a folder {me} owns, or have {owner} make the change"
         ),
     }
 }
@@ -227,8 +253,21 @@ fn foreign_owner_refusal(
 /// How the owner `id` is named in a message: its passwd name, or the
 /// number when it has none.
 #[cfg(unix)]
-#[allow(unsafe_code)]
 fn owner_label(id: u32) -> String {
+    user_record(id, |record| record.pw_name).unwrap_or_else(|| id.to_string())
+}
+
+/// The home folder of `id` from its passwd entry (never `$HOME`, which a
+/// `sudo` run may have kept as another account's).
+#[cfg(unix)]
+fn home_of(id: u32) -> Option<PathBuf> {
+    user_record(id, |record| record.pw_dir).map(PathBuf::from)
+}
+
+/// One text field of the passwd entry for `id`, when it has one.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn user_record(id: u32, field: fn(&libc::passwd) -> *mut libc::c_char) -> Option<String> {
     use std::ffi::CStr;
     let mut record = std::mem::MaybeUninit::<libc::passwd>::uninit();
     let mut scratch = [0; 4096];
@@ -245,17 +284,21 @@ fn owner_label(id: u32) -> String {
         ) == 0
             && !result.is_null()
     };
-    if found {
-        // SAFETY: a successful lookup initialized `record`, and `pw_name` is
-        // a NUL-terminated string inside `scratch`.
-        let name = unsafe { CStr::from_ptr(record.assume_init_ref().pw_name) };
-        if let Ok(name) = name.to_str()
-            && !name.is_empty()
-        {
-            return name.to_owned();
-        }
+    if !found {
+        return None;
     }
-    id.to_string()
+    // SAFETY: a successful lookup initialized `record`.
+    let text = field(unsafe { record.assume_init_ref() });
+    if text.is_null() {
+        return None;
+    }
+    // SAFETY: a non-null field of a found entry is a NUL-terminated string
+    // inside `scratch`.
+    let text = unsafe { CStr::from_ptr(text) };
+    text.to_str()
+        .ok()
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
 }
 
 /// The replacement keeps the original's group as well as its mode: a mode

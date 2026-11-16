@@ -555,8 +555,26 @@ fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
     let foreign = line(ForeignOwner::Foreign);
     assert!(
         foreign.contains("only root can change who owns them")
+            && foreign.contains("inside u's home")
             && foreign.ends_with(&format!("sudo chown 'u' '{folder}' '{file}'")),
         "{foreign}"
+    );
+    // A folder outside the home (a system folder such as /etc): taking it
+    // over would hand this user everything in it, so no command is offered.
+    let system = foreign_owner_refusal(
+        "/etc/x/config.toml",
+        "/etc/x/config.toml",
+        "/etc/x",
+        ForeignOwner::ForeignOutsideHome,
+        "u",
+        "root",
+    );
+    assert!(
+        system.contains("outside u's home")
+            && system.contains("every other file in it")
+            && !system.contains("chown")
+            && !system.contains("sudo"),
+        "{system}"
     );
     // A run as root is sent back to the file's owner: a copy made as root
     // would leave that account's config owned by root.
@@ -565,13 +583,33 @@ fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
         as_root.ends_with("run this again as u, without sudo") && !as_root.contains("cp '"),
         "{as_root}"
     );
-    for line in [&writable, &read_only, &shared, &foreign, &as_root] {
+    for line in [&writable, &read_only, &shared, &foreign, &system, &as_root] {
         assert!(!line.contains("$USER"), "{line}");
         assert!(!line.contains("run this as its owner"), "{line}");
     }
     // An account name with a quote is escaped for the shell.
     let odd = foreign_owner_refusal(file, file, folder, ForeignOwner::Foreign, "o'k", "root");
     assert!(odd.contains("sudo chown 'o'\\''k' "), "{odd}");
+}
+
+#[test]
+fn only_a_folder_in_a_real_home_may_be_given_to_this_user() {
+    let home = Path::new("/home/u");
+    assert!(inside_home(Path::new("/home/u/.codex"), Some(home)));
+    assert!(inside_home(Path::new("/home/u"), Some(home)));
+    // Near misses: a sibling whose name starts the same, a system folder,
+    // an account whose home is `/`, and one with no home at all.
+    assert!(!inside_home(Path::new("/home/user2/.codex"), Some(home)));
+    assert!(!inside_home(Path::new("/etc"), Some(home)));
+    assert!(!inside_home(Path::new("/etc"), Some(Path::new("/"))));
+    assert!(!inside_home(Path::new("/home/u/.codex"), None));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_home_folder_comes_from_the_passwd_entry() {
+    assert!(home_of(0).is_some_and(|home| home.is_absolute()));
+    assert_eq!(home_of(3_999_999_999), None);
 }
 
 #[cfg(unix)]
