@@ -1356,3 +1356,61 @@ fn a_task_setting_schedule_would_drop_is_named_with_both_ways_on() {
     assert!(!detail.contains("argument to"), "{detail}");
     assert!(detail.ends_with(&format!("to drop it, re-schedule it: `pseudolife-mcp update --schedule 04:30 --daemon-url {NEW}`")), "{detail}");
 }
+
+#[cfg(unix)]
+#[test]
+fn native_runtime_failure_names_the_system_cause() {
+    const CHILD: &str = "PSEUDOLIFE_CONNECT_RUNTIME_TEST";
+    if let Ok(mode) = std::env::var(CHILD) {
+        let result = run(["http://127.0.0.1:9", "--client", "gemini", "--dry-run"]
+            .into_iter()
+            .map(OsString::from)
+            .collect());
+        assert_eq!(
+            result,
+            Some(ExitCode::from(if mode == "fault" { 1 } else { 4 }))
+        );
+        return;
+    }
+    let home = std::env::temp_dir().join(format!("connect-runtime-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&home).unwrap();
+    for mode in ["fault", "control"] {
+        let mut child = if mode == "fault" {
+            let mut command = std::process::Command::new("/bin/sh");
+            command.args(["-c", "ulimit -n 4; exec \"$1\" --exact cli::connect::native_tests::native_runtime_failure_names_the_system_cause --nocapture --test-threads=1", "connect-runtime-test"])
+                .arg(std::env::current_exe().unwrap());
+            command
+        } else {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.args([
+                "--exact",
+                "cli::connect::native_tests::native_runtime_failure_names_the_system_cause",
+                "--nocapture",
+                "--test-threads=1",
+            ]);
+            command
+        };
+        let output = child
+            .env_clear()
+            .env(CHILD, mode)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9")
+            .current_dir(&home)
+            .output()
+            .unwrap();
+        let empty = std::fs::read_dir(&home).unwrap().next().is_none();
+        if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&home);
+            panic!("{mode}: {output:?}");
+        }
+        assert!(empty);
+        if mode == "fault" {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("I/O runtime"),
+                "{output:?}"
+            );
+        }
+    }
+    std::fs::remove_dir(home).unwrap();
+}

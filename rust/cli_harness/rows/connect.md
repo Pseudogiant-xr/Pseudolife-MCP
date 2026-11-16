@@ -210,7 +210,8 @@ the existing rollback and verification handling.
 | `mod.rs`: preflight backup read fails after discovery | Name the target and OS error; restore read access before running connect | Existing rollback/read-only-file contracts; this read-after-discovery race is not separately fault-injected |
 | `discover.rs`: missing string command after `is_shim` admitted it | Defensive named registration refusal | Unreachable for an unchanged parsed registration: `is_shim` already requires a string; non-shim rows remain manual |
 | `files.rs`: missing/non-Unicode basename; `pyjson.rs`: float parser fails on a scanner-admitted number | Defensive named file/number refusal | Fixed configuration basenames and the scanner make these unreachable through ordinary input; parser-domain unit tests retained |
-| `mod.rs`, `discover.rs`: runtime/signal setup or current-directory lookup fails | Name the system failure and the retry/remedy | Runtime/signal failures are not fault-injected: an exhausted-descriptor process currently fails in shared startup before connect dispatch; current-directory Unicode failure is covered above |
+| `mod.rs`: I/O runtime creation fails | Name the OS failure; resolve that system error and re-run | `native_runtime_failure_names_the_system_cause` (Unix unit subprocess with exhausted descriptors), with an unrestricted control |
+| `mod.rs`, `discover.rs`: signal setup or current-directory lookup fails | Name the system failure and the retry/remedy | Signal setup is not fault-injected; current-directory Unicode failure is covered above |
 
 No source-mutant entry points at a removed connect branch. The existing connect
 mutants continue to protect writes, backups, credentials, ordering and transport.
