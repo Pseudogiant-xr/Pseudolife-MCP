@@ -21,9 +21,10 @@
 # evals/codex_shim.py with the model, port, health TTL (--health-ttl), host,
 # CLI path, interpreter and log file read from ops/.env
 # (PSEUDOLIFE_CODEX_SHIM_*) at every start; the flags here are written into
-# that file. Changing a value later is an edit plus a rerun of this script
-# (or `python ops\shim_autostart.py restart codex`, which stops every
-# codex_shim.py on that port this account may stop).
+# that file. To change a value later, rerun this script with the new flags
+# (it rewrites that file and restarts the shim it proves is its own), or
+# edit the file and run `python ops\shim_autostart.py restart codex`, which
+# stops every codex_shim.py on that port this account may stop.
 #   OpenAI models: gpt-5.6-terra (default), gpt-5.6-sol, gpt-5.6-luna, gpt-6-sol,
 #   gpt-6-luna, gpt-6.1-sol (the list ops\install.ps1 offers; the GPT-6 ids were
 #   accepted by the Codex CLI on 2026-09-29, gpt-6.1-sol on 2026-11-08 by
@@ -51,7 +52,11 @@ param(
     [string]$Model = "gpt-5.6-terra",
     [int]$HealthTtl = 1800,
     [string]$CodexCli = "",
-    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\codex-shim.log"
+    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\codex-shim.log",
+    # How long to wait for the started shim to bind the port. Like the
+    # Claude twin it warms its health cache with one real CLI call before it
+    # binds; the same 90 s budget, not measured for the Codex CLI.
+    [int]$StartupTimeoutSec = 90
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,15 +82,24 @@ if ($NativeExe) {
 
 $taskName = "Pseudolife Codex Shim"
 # >>> task lock check >>>
-# Decide before changing anything, before the log directory and the
-# interpreter pick: a task this shell cannot replace (Administrators' or
-# another account's) is refused with the one command that removes it.
-$taskLock = Get-TaskLock $taskName
-if ($taskLock) { throw (New-TaskLockError (Format-TaskLock $taskLock)) }
+# Decide before changing anything: before the log directory, the
+# interpreter pick (which may build a venv), ops\.env and the task. A task
+# this shell cannot replace (Administrators' or another account's) is
+# refused with the one command that removes it, and so is one whose owner
+# cannot be read. A port held by anything but the shim the runner recorded
+# (its PID file, proved by PID, start time and command line) is refused
+# too: on Windows a second shim cannot bind beside it, so the task would
+# report started while the old one kept serving.
+function Get-PortListeners([int]$ShimPort) {
+    @(Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)
+}
+function Get-PortListener([int]$ShimPort) { Get-PortListeners $ShimPort | Select-Object -First 1 }
+Assert-TaskUnlocked $taskName
+$recorded = @(Get-RecordedShim $repo 'codex')
+$holder = Get-UnprovenPortHolder $Port $recorded 'codex'
+if ($holder) { throw (New-TaskLockError $holder) }
 # <<< task lock check <<<
 
-
-New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 # Fail fast if no codex CLI is findable — but do NOT bake a discovered path
 # into the task: the official installer keeps codex.exe in a rotating
@@ -134,6 +148,23 @@ if ($LASTEXITCODE -ne 0 -or -not $picked) {
 }
 $PythonExe = "$picked".Trim()
 # <<< shim python <<<
+New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
+
+# Lines the shim appended to its log after byte offset $Offset. Opened with
+# FileShare ReadWrite so the running shim's own handle is undisturbed.
+function Read-LogSince {
+    param([string]$Path, [long]$Offset)
+    if (-not (Test-Path -LiteralPath $Path)) { return @() }
+    $full = (Resolve-Path -LiteralPath $Path).ProviderPath   # .NET resolves relative to its own cwd
+    $fs = [IO.File]::Open($full, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+                          [IO.FileShare]::ReadWrite)
+    try {
+        if ($Offset -gt $fs.Length) { $Offset = 0 }   # log was rotated/truncated
+        $fs.Seek($Offset, [IO.SeekOrigin]::Begin) | Out-Null
+        $reader = New-Object IO.StreamReader($fs)
+        @(($reader.ReadToEnd() -split "`r?`n") | Where-Object { $_ })
+    } finally { $fs.Dispose() }
+}
 
 # Same detached CreateNoWindow spawner as the Claude shim task — see the
 # comment block in install-shim-autostart.ps1 for why (Windows Terminal
@@ -168,6 +199,9 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
+# Again just before the unregister: the interpreter pick above can take
+# minutes, and a task another account registered meanwhile is not ours.
+Assert-TaskUnlocked $taskName
 Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 # CIM cmdlet errors here do NOT reliably terminate even under
 # $ErrorActionPreference = "Stop" (observed live on the Claude twin: an
@@ -183,9 +217,51 @@ if (-not (Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Silen
            "PowerShell 7 window, and if it still fails, check that the ScheduledTasks module loads " +
            "(Get-Command Register-ScheduledTask).")
 }
+
+# Stop the shim already serving this port BEFORE starting the task: on
+# Windows the new instance cannot bind beside it, so the old one would keep
+# serving the old settings. Only the shim the runner recorded is stopped,
+# proved before anything changed (the task lock check block), and only
+# after the registration succeeded.
+if ($recorded.Count) {
+    Write-Host ("Stopping the running codex_shim.py the runner recorded (pid " + (($recorded | ForEach-Object ProcessId) -join ', ') +
+                ") so the new task instance can take the port...")
+    Stop-RecordedShim $recorded
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-PortListener -ShimPort $Port) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+}
+$holder = Get-PortListener -ShimPort $Port
+if ($holder) {
+    throw ("port $Port is still held by pid $($holder.OwningProcess) after stopping the recorded shim; the task is registered " +
+           "but not started. Stop that process, then run: Start-ScheduledTask -TaskPath '\' -TaskName '$taskName'")
+}
+
+$logOffset = (Test-Path $LogFile) ? (Get-Item $LogFile).Length : 0
 Start-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
-Write-Host "Registered + started '$taskName' ($Model, port $Port, health-ttl ${HealthTtl}s, python $PythonExe, log $LogFile)."
-Write-Host "To change the model, port, health TTL or CLI later: edit the PSEUDOLIFE_CODEX_SHIM_* lines in ops\.env, then rerun this script (or python ops\shim_autostart.py restart codex, which stops every codex_shim.py on that port this account may stop)."
+Write-Host "Started '$taskName'; waiting up to ${StartupTimeoutSec}s for the shim to bind 127.0.0.1:$Port (health warm-up is one real CLI call)..."
+# Affirmative verification: a listener on the port OWNED BY a codex_shim.py
+# process. "The task ran" (LastTaskResult 0) only means the spawner exited.
+$listener = $null
+$deadline = (Get-Date).AddSeconds($StartupTimeoutSec)
+while (-not $listener -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 2
+    $candidate = Get-PortListener -ShimPort $Port
+    if ($candidate) {
+        $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
+        if ($owner -and $owner.CommandLine -match 'codex_shim\.py') { $listener = $candidate }
+    }
+}
+$newLines = @(Read-LogSince -Path $LogFile -Offset $logOffset)
+if (-not $listener) {
+    $info = Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+    $tail = if ($newLines.Count -gt 0) { $newLines -join "`n" } else {
+        "(none - nothing reached $LogFile; check the CLI login with: codex login status)" }
+    throw ("shim did not bind 127.0.0.1:$Port within ${StartupTimeoutSec}s " +
+           "(task LastTaskResult $($info.LastTaskResult)). New log lines:`n$tail")
+}
+foreach ($line in @($newLines | Where-Object { $_ -match 'serving .* on |health warm|Traceback|Error' })) { Write-Host "  log: $line" }
+Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), health-ttl ${HealthTtl}s, python $PythonExe, log $LogFile)."
+Write-Host "To change the model, port, health TTL or CLI later: rerun this script with the new flags, or edit the PSEUDOLIFE_CODEX_SHIM_* lines in ops\.env and run python ops\shim_autostart.py restart codex (which stops every codex_shim.py on that port this account may stop)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

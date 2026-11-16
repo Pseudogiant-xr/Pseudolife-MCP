@@ -3458,7 +3458,9 @@ function Remove-ShimTask($name, $family) {
         return
     }
     if ($lock) {
-        $prefix = if ($lock.OtherUser) { "the $family shim task is another account's, so it was left alone" } else { "its $family shim keeps starting at logon until the task is removed" }
+        $prefix = if ($lock.Unresolved) { "the $family shim task runs as an account this shell could not resolve, so it was left alone" }
+                  elseif ($lock.OtherUser) { "the $family shim task is another account's, so it was left alone" }
+                  else { "its $family shim keeps starting at logon until the task is removed" }
         Write-Warning "${prefix}: $(Format-TaskLock $lock -Removal)"
         return
     }
@@ -3499,7 +3501,7 @@ if ($shimAutostartFamily) {
         } elseif ($autostartCode -ne 0) {
             Write-Warning "Shim autostart registration or start failed (see the message above)."
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with: & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
-            # Only on a free port: a second shim binds beside one already listening and gets no traffic.
+            # Only on a free port: on Windows a second shim fails to bind while one listens.
             if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
                 Write-Host "  Or start it manually: & `"$($script:shimInstallPath)`" extractor-shim $shimAutostartFamily --repo `"$repo`" --port $ShimPort --model $Model"
             }

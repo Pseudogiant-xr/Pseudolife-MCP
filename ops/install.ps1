@@ -3367,7 +3367,9 @@ function Remove-ShimTask($name, $family) {
         return
     }
     if ($lock) {
-        $prefix = if ($lock.OtherUser) { "the $family shim task is another account's, so it was left alone" } else { "its $family shim keeps starting at logon until the task is removed" }
+        $prefix = if ($lock.Unresolved) { "the $family shim task runs as an account this shell could not resolve, so it was left alone" }
+                  elseif ($lock.OtherUser) { "the $family shim task is another account's, so it was left alone" }
+                  else { "its $family shim keeps starting at logon until the task is removed" }
         Write-Warning "${prefix}: $(Format-TaskLock $lock -Removal)"
         return
     }
@@ -3397,7 +3399,7 @@ if ($claudeShimMode) {
             Write-Warning "Shim autostart registration or start failed: $($_.Exception.Message)"
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with:"
             Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-            # Only on a free port: a second shim binds beside one already listening and gets no traffic.
+            # Only on a free port: on Windows a second shim fails to bind while one listens.
             if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
                 Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v5.md"
             }
@@ -3414,7 +3416,7 @@ if ($claudeShimMode) {
             Write-Warning "Shim autostart registration failed: $($_.Exception.Message)"
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with:"
             Write-Host "    ops\install-codex-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
-            # Only on a free port: a second shim binds beside one already listening and gets no traffic.
+            # Only on a free port: on Windows a second shim fails to bind while one listens.
             if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
                 Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
             }

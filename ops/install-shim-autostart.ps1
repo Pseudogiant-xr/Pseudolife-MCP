@@ -27,9 +27,10 @@
 # The task runs `ops\shim_autostart.py run claude`, which reads the model,
 # prompt file, port, host, CLI path, interpreter and log file from ops/.env
 # (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written
-# into that file. Changing a value later is an edit plus a rerun of this
-# script (or `python ops\shim_autostart.py restart claude`, which stops
-# every claude_shim.py on that port this account may stop).
+# into that file. To change a value later, rerun this script with the new
+# flags (it rewrites that file and restarts the shim it proves is its own),
+# or edit the file and run `python ops\shim_autostart.py restart claude`,
+# which stops every claude_shim.py on that port this account may stop.
 #   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5-5,
 #   claude-sonnet-5, claude-haiku-5-5, claude-haiku-4-5, claude-fable-5-1,
 #   claude-fable-5 (the list ops\install.ps1 offers; any other
@@ -102,26 +103,21 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # build a venv), the log directory, ops\.env and any task. A task this
 # shell cannot replace (one registered from an elevated shell, which
 # Administrators own, or another account's) is refused with the one command
-# that removes it; the legacy name is checked first, since left behind
-# beside the new task it would start a second shim at logon. A port held by
-# anything but the shim the runner recorded (its PID file, proved by PID,
-# start time and command line) is refused too: a kill by command-line
-# pattern could reach another checkout's or another account's shim.
+# that removes it, and so is one whose owner cannot be read; the legacy name
+# is checked first, since left behind beside the new task it would start a
+# second shim at logon. A port held by anything but the shim the runner
+# recorded (its PID file, proved by PID, start time and command line) is
+# refused too: a kill by command-line pattern could reach another
+# checkout's or another account's shim.
 function Get-PortListeners([int]$ShimPort) {
     @(Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)
 }
 function Get-PortListener([int]$ShimPort) { Get-PortListeners $ShimPort | Select-Object -First 1 }
-foreach ($name in @($legacyTaskName, $taskName)) {
-    $lock = Get-TaskLock $name
-    if ($lock) { throw (New-TaskLockError (Format-TaskLock $lock -Removal:($name -eq $legacyTaskName))) }
-}
+Assert-TaskUnlocked $legacyTaskName -Removal
+Assert-TaskUnlocked $taskName
 $recorded = @(Get-RecordedShim $repo 'claude')
-$foreign = @(Get-PortListeners $Port | Where-Object { $_.OwningProcess -notin @($recorded | ForEach-Object ProcessId) } |
-    ForEach-Object OwningProcess | Select-Object -Unique)
-if ($foreign.Count) {
-    throw (New-TaskLockError ("port $Port is held by pid $($foreign -join ', '), which this run cannot prove is the shim " +
-        "ops\shim_autostart.py started from this checkout; nothing was changed. Stop that process, or pick another -Port, then rerun"))
-}
+$holder = Get-UnprovenPortHolder $Port $recorded 'claude'
+if ($holder) { throw (New-TaskLockError $holder) }
 # <<< task lock check <<<
 
 
@@ -223,6 +219,10 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
+# Again just before the unregister: the interpreter pick above can take
+# minutes, and a task another account registered meanwhile is not ours.
+Assert-TaskUnlocked $legacyTaskName -Removal
+Assert-TaskUnlocked $taskName
 Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskPath '\' -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
 # CIM cmdlet errors here do NOT reliably terminate even under
@@ -260,7 +260,7 @@ if ($recorded.Count) {
 $holder = Get-PortListener -ShimPort $Port
 if ($holder) {
     throw ("port $Port is still held by pid $($holder.OwningProcess) after stopping the recorded shim; the task is registered " +
-           "but not started. Stop that process, then run: Start-ScheduledTask -TaskName '$taskName'")
+           "but not started. Stop that process, then run: Start-ScheduledTask -TaskPath '\' -TaskName '$taskName'")
 }
 
 $logOffset = (Test-Path $LogFile) ? (Get-Item $LogFile).Length : 0
@@ -300,7 +300,7 @@ if ($startup.Count -eq 0) {
     foreach ($line in $startup) { Write-Host "  log: $line" }
 }
 Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), python $PythonExe, log $LogFile)."
-Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then rerun this script (or python ops\shim_autostart.py restart claude, which stops every claude_shim.py on that port this account may stop)."
+Write-Host "To change the model, prompt file, port or CLI later: rerun this script with the new flags, or edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env and run python ops\shim_autostart.py restart claude (which stops every claude_shim.py on that port this account may stop)."
 # >>> shim cutover >>>
 & $PythonExe (Join-Path $repo "ops/shim_cutover.py") --repo $repo --port $Port
 if ($LASTEXITCODE -ne 0) { throw "could not report daemon cutover settings" }

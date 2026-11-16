@@ -577,20 +577,32 @@ function Get-ScheduledTask {
         $PSCmdlet.WriteError($record)
         return
     }
-    if ($TaskName -eq 'Pseudolife Codex Shim') { return $global:r6siblingTask }
-    if ($Case -eq 'RollbackQueryFailure' -and $global:r6rollbackStarted) { Write-Error 'fixture scheduler query denied'; return }
-    if ($TaskName -eq 'Pseudolife Sonnet Shim') { return $global:r6legacyTask }
-    if ($global:r6stopPending -gt 0) {
-        $global:r6stopWaits++
-        if ($Case -ne 'StopTimeout') { $global:r6stopPending-- }
-        if ($global:r6stopPending -eq 0) { $global:r6fixtureTask.State='Ready' }
+    if ($Case -eq 'RollbackQueryFailure' -and $global:r6rollbackStarted -and $TaskName -ne 'Pseudolife Codex Shim') { Write-Error 'fixture scheduler query denied'; return }
+    $found = if ($TaskName -eq 'Pseudolife Codex Shim') { $global:r6siblingTask }
+             elseif ($TaskName -eq 'Pseudolife Sonnet Shim') { $global:r6legacyTask }
+             else {
+                 if ($global:r6stopPending -gt 0) {
+                     $global:r6stopWaits++
+                     if ($Case -ne 'StopTimeout') { $global:r6stopPending-- }
+                     if ($global:r6stopPending -eq 0) { $global:r6fixtureTask.State='Ready' }
+                 }
+                 if ($global:r6removePending -gt 0) {
+                     $global:r6removeWaits++
+                     if ($Case -ne 'RemovalTimeout') { $global:r6removePending-- }
+                     if ($global:r6removePending -eq 0) { $global:r6fixtureTask=$null }
+                 }
+                 $global:r6fixtureTask
+             }
+    if ($null -eq $found) {
+        # A task that does not exist answers the way the real scheduler does
+        # (measured on the Windows dev VM, 16 November 2026): an error whose
+        # id is composite with -TaskPath and named without it.
+        $absentId = if ($PSBoundParameters.ContainsKey('TaskPath')) { 'CmdletizationQuery_NotFound' } else { 'CmdletizationQuery_NotFound_TaskName' }
+        $record = [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new("No matching MSFT_ScheduledTask objects found for $TaskName"), $absentId, [Management.Automation.ErrorCategory]::ObjectNotFound, $TaskName)
+        $PSCmdlet.WriteError($record)
+        return
     }
-    if ($global:r6removePending -gt 0) {
-        $global:r6removeWaits++
-        if ($Case -ne 'RemovalTimeout') { $global:r6removePending-- }
-        if ($global:r6removePending -eq 0) { $global:r6fixtureTask=$null }
-    }
-    return $global:r6fixtureTask
+    return $found
 }
 function Get-CimInstance {
     param($ClassName, $Filter)
@@ -790,7 +802,7 @@ if ($Case -in @('LockedReplace','LockedLegacy','LockedUnchanged','LockedRemove',
         if ($caught -or $global:r6hostText -notlike "*'$taskName' already runs these settings*nothing changed*" -or $global:r6hostText -notlike '*registered from an elevated PowerShell, so Administrators own it*') { throw "an unchanged locked task was not left alone with its one line: $caught / $global:r6hostText" }
     } else {
         if ($caught -notlike "*the scheduled task '$lockedName' was registered from an elevated PowerShell, so Administrators own it*" -or $caught -notlike '*nothing was changed*' -or
-            $caught -notlike "*Unregister-ScheduledTask -TaskName '$lockedName' -Confirm:`$false*") { throw "locked task refusal lost its cause or fix: $caught" }
+            $caught -notlike "*Unregister-ScheduledTask -TaskPath '\' -TaskName '$lockedName' -Confirm:`$false*") { throw "locked task refusal lost its cause or fix: $caught" }
         $wording = if ($Case -eq 'LockedReplace') { '*To replace it with a task of your own*then rerun this command*' } else { '*To remove it, run this once*' }
         if ($caught -notlike $wording) { throw "locked task refusal has the wrong wording: $caught" }
         if ([IO.File]::ReadAllText($settings) -ne 'before') { throw 'settings were changed for a task this shell cannot change' }

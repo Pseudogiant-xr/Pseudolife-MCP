@@ -4014,12 +4014,11 @@ note as the Claude shim above for a task registered earlier from an
 elevated PowerShell; `.sh` — systemd `--user`, docker-bridge bind; both pick
 and verify the unit's interpreter exactly as the Claude shim's autostart
 does, `--python` / `-PythonExe` naming one), and writes the env triple for
-you. Unlike the Claude shim's installer, the Windows Codex installer does
-not stop a shim already serving its port: re-running it over a live shim
-starts a second listener beside the old one, which can keep answering on
-the old settings. After a re-run, run
-`python ops/shim_autostart.py restart codex`, which stops the running
-shim and starts it again. The autostart raises the shim's
+you. Like the Claude shim's installer, the Windows Codex installer stops
+the shim its runner recorded before it starts the new task, refuses when
+anything else holds the port, and waits for a `codex_shim.py` to listen
+before it reports success, so a re-run with new flags restarts the shim
+on them. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
 stale-ok window only costs one failed primary attempt before the dream

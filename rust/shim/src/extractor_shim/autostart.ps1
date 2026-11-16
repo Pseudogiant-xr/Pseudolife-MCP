@@ -287,6 +287,11 @@ function Get-TaskPrincipalSid([string]$TaskName) {
     $task = Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop
     Get-AccountSid "$($task.Principal.UserId)"
 }
+function Get-TaskPrincipalName([string]$TaskName) {
+    # The account name the task runs as, exactly as stored ('' for a group
+    # principal). Read only when it did not resolve to a SID.
+    "$((Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop).Principal.UserId)"
+}
 function Get-TaskLogonMismatch($task) {
     # '' when an enabled logon trigger fires at this user's logon (one for
     # this user, or the older one for any user's logon), else why not.
@@ -326,6 +331,13 @@ function Get-TaskLock([string]$TaskName) {
     }
     $runsAs = Get-TaskPrincipalSid $TaskName
     if ($runsAs -ne $me) {
+        # A name that does not resolve may still be this user's (a domain
+        # account offline, a renamed account): refused like another
+        # account's, but never called another account's.
+        $unresolved = if (-not $runsAs) { Get-TaskPrincipalName $TaskName } else { '' }
+        if ($unresolved) {
+            return [pscustomobject]@{ TaskName = $TaskName; Owner = (Get-TaskOwnerName $owner); Hidden = $false; OtherUser = $true; Unresolved = $unresolved }
+        }
         $who = "$(Get-TaskOwnerName $owner) own it and it runs as $(if ($runsAs) { Get-TaskOwnerName $runsAs } else { 'no single account' })"
         return [pscustomobject]@{ TaskName = $TaskName; Owner = $who; Hidden = $false; OtherUser = $true }
     }
@@ -344,7 +356,14 @@ function Format-TaskLock($lock, [switch]$Removal, [string]$Follows, [string]$Rea
         return ("a scheduled task named '$($lock.TaskName)' exists but this account cannot read it, " +
                 "so it belongs to another account on this machine; nothing was changed. Ask that account to remove it")
     }
-    $remove = "Stop-ScheduledTask -TaskName '$quoted'; Unregister-ScheduledTask -TaskName '$quoted' -Confirm:`$false"
+    $remove = "Stop-ScheduledTask -TaskPath '\' -TaskName '$quoted'; Unregister-ScheduledTask -TaskPath '\' -TaskName '$quoted' -Confirm:`$false"
+    $elevated = ("run this once in Windows PowerShell opened with Run as administrator from the Start menu " +
+                 "(not from a shell inside Claude Desktop: anthropics/claude-code#61635)")
+    if ($lock.Unresolved) {
+        return ("the scheduled task '$($lock.TaskName)' is owned by $($lock.Owner), and this shell could not resolve the account it runs as " +
+                "('$($lock.Unresolved)'), so it cannot tell whether the task is yours; nothing was changed. " +
+                "If it is yours, $elevated, then rerun this command in a normal window: $remove")
+    }
     if ($lock.OtherUser) {
         return ("the scheduled task '$($lock.TaskName)' belongs to another account ($($lock.Owner)), " +
                 "and this run never changes another account's task; nothing was changed. Ask that account or an administrator to remove it: $remove")
@@ -352,8 +371,6 @@ function Format-TaskLock($lock, [switch]$Removal, [string]$Follows, [string]$Rea
     $why = if ($lock.Owner -eq 'Administrators') {
         "was registered from an elevated PowerShell, so Administrators own it"
     } else { "is owned by $($lock.Owner)" }
-    $elevated = ("run this once in Windows PowerShell opened with Run as administrator from the Start menu " +
-                 "(not from a shell inside Claude Desktop: anthropics/claude-code#61635)")
     if ($Follows) {
         return ("the scheduled task '$($lock.TaskName)' $why and only an elevated shell can change it, " +
                 "but it reads $Follows at every start, so it keeps following these settings. " +
@@ -505,7 +522,8 @@ function Restart-UnchangedTask([string]$taskName, $ownership, [bool]$wasActive) 
     if ((Get-TaskOwnership $current) -ne $ownership) {
         throw "task $taskName registration changed; inspect its action before retrying; refusing to restart it"
     }
-    Start-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
+    try { Start-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop }
+    catch { $script:restartNotStarted = $true; throw "Task Scheduler refused to start '$taskName' from this shell: $($_.Exception.Message)" }
 }
 if ($c.Remove) {
     $script:removedRegistration = $false
@@ -779,7 +797,7 @@ try {
         elseif (Test-Path -LiteralPath $c.EnvFile) { Remove-Item -LiteralPath $c.EnvFile }
         $settingsRestored = $true
     } catch { $rollbackErrors += "restoring settings: $($_.Exception.Message)" }
-    $restartFailed = $false
+    $script:restartNotStarted = $false
     if ($replacementRegistered -and $previousXml -and $rollbackRemoved) {
         try {
             $remainingTask = Get-TaskRegistration $name
@@ -787,7 +805,7 @@ try {
                 throw "task $name registration changed; inspect its action before retrying; refusing to overwrite it with the previous registration"
             }
             Register-ScheduledTask -TaskName $name -Xml $previousXml -Force | Out-Null
-            if ($wasActive) { Start-ScheduledTask -TaskPath '\' -TaskName $name }
+            if ($wasActive) { Start-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction Stop }
         } catch { $rollbackErrors += "restoring previous task: $($_.Exception.Message)" }
     }
     if ($followsFile -and $mutated) {
@@ -814,7 +832,7 @@ try {
         # Stopping the original is not replacing its registration. Restart only
         # that unchanged task; a concurrent deletion must remain a deletion.
         try { Restart-UnchangedTask $name $originalOwnership $wasActive }
-        catch { $rollbackErrors += "recovering task state: $($_.Exception.Message)"; $restartFailed = [bool]$wasActive }
+        catch { $rollbackErrors += "recovering task state: $($_.Exception.Message)" }
     }
     if ($mutated -and $legacyWasActive) {
         try { Restart-UnchangedTask $legacy.TaskName (Get-TaskOwnership $legacy) $true }
@@ -833,10 +851,18 @@ try {
         } catch { "unreadable ($($_.Exception.Message))" }
         $state = if ($followsFile) {
             $settingsLine = if ($settingsRestored) { "$($c.EnvFile) holds its previous settings again" } else { "$($c.EnvFile) could not be put back and holds the new settings" }
-            $shimLine = if ($restartFailed) { " The shim is not running: it starts at your next logon, or now with: Start-ScheduledTask -TaskName '$name'" } else { '' }
+            # Only a start Task Scheduler refused leaves it down; that same
+            # start would be refused again, so no command is offered.
+            $shimLine = if ($script:restartNotStarted) { " The shim is not running: it starts at your next logon." } else { '' }
             "Its registration was not changed, and $settingsLine.$shimLine"
         } else { 'Restore its previous registration manually if needed; password-logon tasks require credentials that task XML does not contain.' }
-        Write-Warning "Rollback incomplete: $($rollbackErrors -join '; '). Task '$name' is $remaining. $state Original failure: $($failure.Exception.Message)" -WarningAction Continue
+        Write-Warning "Rollback incomplete: $($rollbackErrors -join '; '). Task '$name' is $remaining. Original failure: $($failure.Exception.Message). $state" -WarningAction Continue
+    } elseif ($mutated -or $replacementRegistered) {
+        # Every rollback step succeeded: say what was put back.
+        $restored = @("$($c.EnvFile) holds its previous settings again")
+        if ($replacementRegistered) { $restored += $(if ($previousXml) { 'the previous registration was restored' } else { 'the new registration was removed' }) }
+        if ($wasActive) { $restored += 'the previous shim was started again' }
+        Write-Warning ("Rolled back: " + ($restored -join ', ') + ".") -WarningAction Continue
     }
     throw $failure
 }

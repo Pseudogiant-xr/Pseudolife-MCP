@@ -52,6 +52,11 @@ function Get-TaskPrincipalSid([string]$TaskName) {
     $task = Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop
     Get-AccountSid "$($task.Principal.UserId)"
 }
+function Get-TaskPrincipalName([string]$TaskName) {
+    # The account name the task runs as, exactly as stored ('' for a group
+    # principal). Read only when it did not resolve to a SID.
+    "$((Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction Stop).Principal.UserId)"
+}
 function Get-TaskLogonMismatch($task) {
     # '' when an enabled logon trigger fires at this user's logon (one for
     # this user, or the older one for any user's logon), else why not.
@@ -91,6 +96,13 @@ function Get-TaskLock([string]$TaskName) {
     }
     $runsAs = Get-TaskPrincipalSid $TaskName
     if ($runsAs -ne $me) {
+        # A name that does not resolve may still be this user's (a domain
+        # account offline, a renamed account): refused like another
+        # account's, but never called another account's.
+        $unresolved = if (-not $runsAs) { Get-TaskPrincipalName $TaskName } else { '' }
+        if ($unresolved) {
+            return [pscustomobject]@{ TaskName = $TaskName; Owner = (Get-TaskOwnerName $owner); Hidden = $false; OtherUser = $true; Unresolved = $unresolved }
+        }
         $who = "$(Get-TaskOwnerName $owner) own it and it runs as $(if ($runsAs) { Get-TaskOwnerName $runsAs } else { 'no single account' })"
         return [pscustomobject]@{ TaskName = $TaskName; Owner = $who; Hidden = $false; OtherUser = $true }
     }
@@ -109,7 +121,14 @@ function Format-TaskLock($lock, [switch]$Removal, [string]$Follows, [string]$Rea
         return ("a scheduled task named '$($lock.TaskName)' exists but this account cannot read it, " +
                 "so it belongs to another account on this machine; nothing was changed. Ask that account to remove it")
     }
-    $remove = "Stop-ScheduledTask -TaskName '$quoted'; Unregister-ScheduledTask -TaskName '$quoted' -Confirm:`$false"
+    $remove = "Stop-ScheduledTask -TaskPath '\' -TaskName '$quoted'; Unregister-ScheduledTask -TaskPath '\' -TaskName '$quoted' -Confirm:`$false"
+    $elevated = ("run this once in Windows PowerShell opened with Run as administrator from the Start menu " +
+                 "(not from a shell inside Claude Desktop: anthropics/claude-code#61635)")
+    if ($lock.Unresolved) {
+        return ("the scheduled task '$($lock.TaskName)' is owned by $($lock.Owner), and this shell could not resolve the account it runs as " +
+                "('$($lock.Unresolved)'), so it cannot tell whether the task is yours; nothing was changed. " +
+                "If it is yours, $elevated, then rerun this command in a normal window: $remove")
+    }
     if ($lock.OtherUser) {
         return ("the scheduled task '$($lock.TaskName)' belongs to another account ($($lock.Owner)), " +
                 "and this run never changes another account's task; nothing was changed. Ask that account or an administrator to remove it: $remove")
@@ -117,8 +136,6 @@ function Format-TaskLock($lock, [switch]$Removal, [string]$Follows, [string]$Rea
     $why = if ($lock.Owner -eq 'Administrators') {
         "was registered from an elevated PowerShell, so Administrators own it"
     } else { "is owned by $($lock.Owner)" }
-    $elevated = ("run this once in Windows PowerShell opened with Run as administrator from the Start menu " +
-                 "(not from a shell inside Claude Desktop: anthropics/claude-code#61635)")
     if ($Follows) {
         return ("the scheduled task '$($lock.TaskName)' $why and only an elevated shell can change it, " +
                 "but it reads $Follows at every start, so it keeps following these settings. " +
@@ -179,6 +196,30 @@ public static class PseudolifeFinalPath {
     $final
 }
 # <<< task lock <<<
+function Assert-TaskUnlocked([string]$TaskName, [switch]$Removal) {
+    # Refuse, with the one line, a task this shell may not change; an owner
+    # that cannot be read is a refusal too, never a reason to go ahead.
+    try { $lock = Get-TaskLock $TaskName }
+    catch {
+        throw (New-TaskLockError ("could not read the owner of the scheduled task '$TaskName' ($($_.Exception.Message)); " +
+            "nothing was changed. Rerun this script; if it fails again, check that the Task Scheduler service runs: Get-Service Schedule"))
+    }
+    if ($lock) { throw (New-TaskLockError (Format-TaskLock $lock -Removal:$Removal)) }
+}
+function Get-UnprovenPortHolder([int]$Port, $Recorded, [string]$Kind) {
+    # '' when nothing but the recorded shim listens on $Port, else the one
+    # refusal line: what holds it, then the command that frees it, last.
+    $proven = @($Recorded | ForEach-Object ProcessId)
+    $foreign = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.OwningProcess -notin $proven } | ForEach-Object OwningProcess | Select-Object -Unique)
+    if (-not $foreign.Count) { return '' }
+    $who = @(foreach ($id in $foreign) {
+        $image = try { (Get-CimInstance Win32_Process -Filter "ProcessId = $id" -ErrorAction Stop).Name } catch { '' }
+        if ($image) { "pid $id ($image)" } else { "pid $id" }
+    }) -join ', '
+    ("port $Port is held by $who, which this run cannot prove is the $Kind shim ops\shim_autostart.py started from this checkout; " +
+     "nothing was changed. Pick another port (-Port here, -ShimPort in ops\install.ps1), or stop that process and rerun: Stop-Process -Id $($foreign -join ',')")
+}
 function Get-RecordedShim([string]$Repo, [string]$Kind) {
     # The shim the runner started last, proved by its PID file rather than by
     # a command-line pattern: the PID it recorded, a process started no later

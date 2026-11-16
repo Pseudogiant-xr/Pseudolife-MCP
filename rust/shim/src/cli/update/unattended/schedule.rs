@@ -601,7 +601,8 @@ fn script_failure(code: i32, output: &str, fallback: &str) -> String {
             "the scheduler script changed after it was written; nothing was run".to_owned()
         }
         _ => match last {
-            Some(line) => format!("{line}; nothing was changed"),
+            // One sentence: a line's own closing period is not doubled.
+            Some(line) => format!("{}; nothing was changed", line.trim_end_matches('.')),
             None => fallback.to_owned(),
         },
     }
@@ -1104,7 +1105,7 @@ Connection: close
         assert!(
             other
                 .message
-                .starts_with("Access is denied.; nothing was changed. ")
+                .starts_with("Access is denied; nothing was changed. ")
                 && other.message.contains("needs no elevation"),
             "{}",
             other.message
@@ -1251,7 +1252,7 @@ function Get-ScheduledTask { param($TaskName,$TaskPath,$ErrorAction)
         assert!(reason.contains("nothing was changed"), "{reason}");
         assert!(
             reason.contains(
-                "Unregister-ScheduledTask -TaskName 'Pseudolife Client Update' -Confirm:$false"
+                "Unregister-ScheduledTask -TaskPath '\\' -TaskName 'Pseudolife Client Update' -Confirm:$false"
             ),
             "{reason}"
         );
