@@ -39,7 +39,7 @@ REPO = HARNESS.parents[2]
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(REPO))
 import daemons  # noqa: E402
-from pseudolife_memory import readiness  # noqa: E402
+from rust.harness_support import readiness  # noqa: E402
 import pgdisposable  # noqa: E402
 from board import scenarios as S  # noqa: E402
 from board.norm import Normalizer, Windows  # noqa: E402

@@ -86,6 +86,66 @@ rollback safeguards. The checkout and shadow overlays remain available
 for their respective updater paths; `PSEUDOLIFE_RUST_IMAGE` must be set
 to the selected image when using them with a release.
 
+## How a release is discovered
+
+The daemon discovers releases with one unauthenticated GET to
+`https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest`.
+This is the contract for the native client's later discovery migration too;
+its current `latest_release` still reads PyPI. Use GitHub's latest release,
+not the largest version found by listing tags or releases. Do not fall back
+to PyPI or an older release when that answer is incomplete.
+
+- Require JSON booleans `draft: false` and `prerelease: false`.
+- Require `tag_name` to be `v<version>` with exactly one lowercase `v`.
+  The version has at most 32 ASCII characters and two to four nonempty
+  decimal components separated by dots, each fitting an unsigned 64-bit
+  integer. No whitespace, sign, suffix or build metadata is accepted.
+  Preserve the version's spelling, including leading zeroes, for asset
+  names and the reported version. This mirrors the client's `plain_release`
+  shape and `version_key` integer range.
+- Require all seven assets: `SHA256SUMS`, the five binary archive names in
+  the table above, and `pseudolife-compose-<version>.tar.gz`, using that exact
+  version. Each required name must occur exactly once, with `state` equal
+  to `uploaded` and an integer `size` greater than zero. Unrelated assets
+  are ignored. Discovery checks metadata only; installation still verifies
+  the checksum manifest and the downloaded bytes. The publisher verifies
+  that manifest before uploading, but uploads missing assets alphabetically:
+  `SHA256SUMS` can arrive first and is not a completion marker by itself.
+- Compare numeric component tuples lexicographically, ignoring leading
+  zeroes; if one is a prefix, the longer tuple is greater (`1.2 < 1.2.0`).
+  For the running daemon, compare its leading dotted numeric components,
+  preserving the existing prerelease-notice policy: `1.2.0-rc1` and
+  `1.2.0` have equal numeric tuples. Only a strictly greater release produces
+  the release notice. `/health` reports the accepted release even when equal
+  to or older than the running daemon.
+
+The request has no credentials, body or installed-version telemetry. Send
+`Accept: application/vnd.github+json` and the fixed User-Agent
+`pseudolife-daemon`, disable redirects, and use a five-second total timeout.
+The background task checks immediately at startup; neither startup nor a
+request waits for the result. Keep the last accepted release and its
+`checked_at` in memory through failures; restart starts with an empty cache.
+An incomplete asset set is not a new release and uses the normal configured
+interval, even before the first success. Other failures are silent and retry
+after `min(interval, 900 seconds)` until the first success, then the normal
+interval. There is no immediate retry.
+
+For HTTP 403 or 429, wait at least the normal interval. Parse `Retry-After`
+first (nonnegative integer seconds or an HTTP date), otherwise
+`X-RateLimit-Reset` (integer Unix seconds). Clamp the indicated remaining wait
+to zero through 3,600 seconds, then take the maximum with the configured
+interval; absent or invalid headers use that interval. The ordinary interval
+defaults to six hours and retains its 60-second floor. GitHub's unauthenticated
+limit is shared by source IP (60 requests per hour); the minimum interval can
+consume that entire allowance. No ETag is stored: incomplete publication and
+the last accepted version remain separate, without conditional-response state.
+
+The existing `updates.check_releases: false` setting and
+`PSEUDOLIFE_RELEASE_CHECK=0` environment override still disable all checks.
+Asset completeness does not prove that container images are published: image
+jobs still wait for the human-approved PyPI job, after native asset attachment.
+That publication-order gap is separate from release discovery.
+
 ## Image and publication gates
 
 The Rust image is

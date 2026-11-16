@@ -13,6 +13,7 @@ use serde_json::{Map, Value};
 
 use super::hook_json::quoted;
 
+mod bridge;
 mod doctor_section;
 #[cfg(windows)]
 mod dpapi;
@@ -132,6 +133,10 @@ fn parse(values: &[OsString]) -> Option<Options> {
 }
 
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
+    // The hidden bridge the vendor's tunnel-client starts (`tunnel shim`).
+    if values.first().is_some_and(|command| command == "shim") {
+        return Some(bridge::run(&values[1..]));
+    }
     let options = parse(&values)?;
     let (stdout, stderr, code) = match outcome(&options)? {
         Ok((text, code)) => (text, String::new(), code),

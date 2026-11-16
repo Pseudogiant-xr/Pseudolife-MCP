@@ -1,4 +1,5 @@
-//! Background release knowledge (`release_check.py`), never a request-path fetch.
+//! Background release discovery, never a request-path fetch.
+//! Contract: docs/dev/release-assets.md, "How a release is discovered".
 
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -8,7 +9,8 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-const PYPI_JSON: &str = "https://pypi.org/pypi/pseudolife-mcp/json";
+const GITHUB_RELEASE: &str =
+    "https://api.github.com/repos/Pseudogiant-xr/Pseudolife-MCP/releases/latest";
 const RETRY_AFTER_FAILURE_SECONDS: f64 = 900.0;
 
 #[derive(Clone, Default)]
@@ -171,32 +173,39 @@ impl ReleaseCheck {
         }))
     }
 
-    async fn run(&self, interval: f64, mut stop: watch::Receiver<bool>) {
+    async fn run(&self, interval: f64, stop: watch::Receiver<bool>) {
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
         {
             Ok(client) => client,
-            Err(e) => {
-                eprintln!("release check client failed: {e}");
-                return;
-            }
+            Err(_) => return,
         };
+        self.run_with_fetch(interval, stop, || {
+            fetch_latest(&client, |request| client.execute(request))
+        })
+        .await;
+    }
+
+    async fn run_with_fetch<F, Fut>(
+        &self,
+        interval: f64,
+        mut stop: watch::Receiver<bool>,
+        mut fetch: F,
+    ) where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = FetchResult>,
+    {
         loop {
             if *stop.borrow() {
                 return;
             }
-            let latest = tokio::select! { _ = stop.changed() => return, result = fetch_latest(&client) => result };
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs_f64();
-            self.record(latest, now);
-            let delay = if self.snapshot().latest_release.is_none() {
-                interval.min(RETRY_AFTER_FAILURE_SECONDS)
-            } else {
-                interval
-            };
+            let result =
+                tokio::select! { _ = stop.changed() => return, result = fetch() => result };
+            let now = unix_seconds();
+            let delay = result.delay(interval, self.snapshot().latest_release.is_some());
+            self.record(result.latest, now);
             let Ok(delay) = Duration::try_from_secs_f64(delay) else {
                 return;
             };
@@ -205,18 +214,142 @@ impl ReleaseCheck {
     }
 }
 
-async fn fetch_latest(client: &reqwest::Client) -> Option<String> {
-    let response = client
-        .get(PYPI_JSON)
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?;
-    let data: Value = response.json().await.ok()?;
-    let version = data.get("info")?.get("version")?.as_str()?;
-    (version_shape(version) && version_key(version).is_some()).then(|| version.into())
+#[derive(Default)]
+struct FetchResult {
+    latest: Option<String>,
+    // Incomplete publication and rate limits never use the initial-failure retry.
+    normal_schedule: bool,
+    retry_after: f64,
 }
+
+impl FetchResult {
+    fn delay(&self, interval: f64, has_cached_release: bool) -> f64 {
+        if self.normal_schedule || has_cached_release || self.latest.is_some() {
+            interval.max(self.retry_after)
+        } else {
+            interval.min(RETRY_AFTER_FAILURE_SECONDS)
+        }
+    }
+}
+
+async fn fetch_latest<F, Fut, E>(client: &reqwest::Client, send: F) -> FetchResult
+where
+    F: FnOnce(reqwest::Request) -> Fut,
+    Fut: std::future::Future<Output = Result<reqwest::Response, E>>,
+{
+    let Ok(request) = client
+        .get(GITHUB_RELEASE)
+        .header(reqwest::header::USER_AGENT, "pseudolife-daemon")
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .timeout(Duration::from_secs(5))
+        .build()
+    else {
+        return FetchResult::default();
+    };
+    let Ok(response) = send(request).await else {
+        return FetchResult::default();
+    };
+    if matches!(response.status().as_u16(), 403 | 429) {
+        return FetchResult {
+            normal_schedule: true,
+            retry_after: rate_limit_wait(response.headers(), unix_seconds()),
+            ..FetchResult::default()
+        };
+    }
+    if response.status() != reqwest::StatusCode::OK {
+        return FetchResult::default();
+    }
+    let Ok(data) = response.json::<Value>().await else {
+        return FetchResult::default();
+    };
+    release_metadata(&data)
+}
+
+fn unix_seconds() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64()
+}
+
+fn rate_limit_wait(headers: &reqwest::header::HeaderMap, now: f64) -> f64 {
+    let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
+    let seconds = |s: &str| {
+        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse::<u64>().ok())
+            .flatten()
+    };
+    let retry = header("retry-after").and_then(|s| {
+        seconds(s).map(|n| n as f64).or_else(|| {
+            chrono::DateTime::parse_from_rfc2822(s)
+                .ok()
+                .map(|date| date.timestamp() as f64 - now)
+        })
+    });
+    retry
+        .or_else(|| {
+            header("x-ratelimit-reset")
+                .and_then(seconds)
+                .map(|n| n as f64 - now)
+        })
+        .unwrap_or(0.0)
+        .clamp(0.0, 3600.0)
+}
+
+fn release_metadata(data: &Value) -> FetchResult {
+    if data["draft"] != false || data["prerelease"] != false {
+        return FetchResult::default();
+    }
+    let Some(version) = data["tag_name"].as_str().and_then(|s| s.strip_prefix('v')) else {
+        return FetchResult::default();
+    };
+    // Mirror update::plain_release and update::version_key's integer range.
+    let parts: Vec<_> = version.split('.').collect();
+    if !version_shape(version)
+        || !(2..=4).contains(&parts.len())
+        || parts.iter().any(|s| {
+            s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) || s.parse::<u64>().is_err()
+        })
+    {
+        return FetchResult::default();
+    }
+    FetchResult {
+        latest: complete_assets(data, version).then(|| version.to_owned()),
+        normal_schedule: true,
+        ..FetchResult::default()
+    }
+}
+
+fn complete_assets(data: &Value, version: &str) -> bool {
+    let Some(assets) = data["assets"].as_array() else {
+        return false;
+    };
+    // SHA256SUMS uploads first, not last. All six archives must also be present.
+    // Keep these names aligned with docs/dev/release-assets.md and its publisher.
+    let mut names = vec![
+        "SHA256SUMS".to_owned(),
+        format!("pseudolife-compose-{version}.tar.gz"),
+    ];
+    for (target, extension) in [
+        ("x86_64-unknown-linux-gnu", "tar.gz"),
+        ("aarch64-unknown-linux-gnu", "tar.gz"),
+        ("x86_64-apple-darwin", "tar.gz"),
+        ("aarch64-apple-darwin", "tar.gz"),
+        ("x86_64-pc-windows-msvc", "zip"),
+    ] {
+        names.push(format!("pseudolife-mcp-{version}-{target}.{extension}"));
+    }
+    names.iter().all(|name| {
+        let mut matches = assets.iter().filter(|asset| asset["name"] == *name);
+        matches.next().is_some_and(|asset| {
+            asset["state"] == "uploaded" && asset["size"].as_u64().is_some_and(|n| n > 0)
+        }) && matches.next().is_none()
+    })
+}
+
+#[cfg(test)]
+#[path = "release_check/tests.rs"]
+mod github_tests;
 
 #[cfg(test)]
 mod tests {
