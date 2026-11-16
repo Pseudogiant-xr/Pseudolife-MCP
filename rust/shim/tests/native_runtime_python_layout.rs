@@ -8,6 +8,7 @@
 //! client could no longer be read or run, and the native install failed with
 //! "Access is denied".
 #![allow(dead_code)]
+mod bounded_child;
 mod native_binary_fixture;
 use pseudolife_stdio::runtime::{self, BINARY, Layout};
 use std::{fs, path::PathBuf};
@@ -156,11 +157,13 @@ fn a_native_install_over_a_python_client_keeps_its_files_readable() {
     }
     fs::write(layout.root.join("000001").join("pyvenv.cfg"), b"rewritten").unwrap();
     // And the native launcher that replaced the Python one runs.
-    let result = home
-        .command(&layout.launcher)
-        .arg("--help")
-        .output()
-        .unwrap();
+    // Generous: the bound names a launcher that never exits and reaps it;
+    // it is not meant to fail a slow healthy run inside nextest's 120 s cap.
+    let result = bounded_child::output_within(
+        home.command(&layout.launcher).arg("--help"),
+        std::time::Duration::from_secs(60),
+        "the native launcher's --help",
+    );
     assert!(
         result.status.success(),
         "{}",
