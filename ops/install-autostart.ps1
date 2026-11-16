@@ -32,7 +32,7 @@ if (-not $PythonExe) {
 $taskName = "Pseudolife-MCP Daemon"
 . (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
 $lock = Get-TaskLock $taskName
-if ($lock) { throw (Format-TaskLock $lock) }
+if ($lock) { throw (New-TaskLockError (Format-TaskLock $lock -Reason "carries its settings on its own command line")) }
 $envPrefix = "`$env:PSEUDOLIFE_MCP_HOST='$BindHost'; " +
              "`$env:PSEUDOLIFE_MCP_PORT='$Port'; " +
              "`$env:PSEUDOLIFE_MCP_DATABASE_URL='$DatabaseUrl'; " +

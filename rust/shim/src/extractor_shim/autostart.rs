@@ -10,7 +10,33 @@ impl Drop for Scratch {
     }
 }
 
-pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
+/// The exit code of a refusal over a scheduled task this shell may not
+/// change (one an elevated shell registered, or another account's): the
+/// script printed its one line and changed nothing, so callers print no
+/// more than that.
+pub(super) const TASK_LOCKED_EXIT: u8 = 3;
+
+/// Why registration did not complete.
+pub(super) enum Failure {
+    /// Refused over a task this shell may not change; the line is printed.
+    Locked,
+    /// Anything else, with its message.
+    Other(String),
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Failure::Other(message)
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(message: &str) -> Self {
+        Failure::Other(message.to_owned())
+    }
+}
+
+pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     if args.is_empty() || args.iter().any(|a| a == "--help") {
         println!(
             "usage: pseudolife-mcp extractor-shim install-autostart claude|codex [--env-file PATH] [--repo PATH] [--name NAME] [--native-exe PATH] [--replace-sibling] [--startup-timeout SECONDS] [--task-logon-type Interactive|S4U] [shim settings]\nDefault config: ~/.pseudolife-mcp/extractor-shims.env. Settings include --cli, --model, --host, --port, --prompt-file, --health-ttl and --log. An explicit --repo reads that checkout's ops/.env. Registration requires systemd --user on Linux. On Windows it registers a task for this user only and needs no elevation; a task of the same name registered from an elevated PowerShell is never re-registered: when it already runs this action it is restarted with the new settings, otherwise nothing changes and the error names the one elevated command that removes it. S4U is an explicit local-only task principal for unattended hosts, and Windows lets only an elevated PowerShell register it."
@@ -150,7 +176,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
         // a service manager. An absent registration needs no external command.
         match fs::symlink_metadata(config_dir.join("systemd/user").join(&name)) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e.to_string().into()),
             Ok(_) => {}
         }
         if !std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
@@ -163,7 +189,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
     let owner_exe = config::absolute_path(&std::env::current_exe().map_err(|e| e.to_string())?)?;
     let native = config::absolute_path(&launcher.unwrap_or_else(|| owner_exe.clone()))?;
     if !native.is_file() {
-        return Err(format!("native launcher not found: {}", native.display()));
+        return Err(format!("native launcher not found: {}", native.display()).into());
     }
     let scratch = Scratch(
         std::env::temp_dir().join(format!("pseudolife-shim-install-{}", uuid::Uuid::new_v4())),
@@ -192,7 +218,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
         let script = scratch.0.join("register.ps1");
         let data = scratch.0.join("registration.json");
         fs::write(&script,include_str!("autostart.ps1")).map_err(|e|e.to_string())?;
-        fs::write(&data,serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON")).map_err(|e|e.to_string())?;
+        fs::write(&data,serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON")).map_err(|e|e.to_string())?;
         Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File"]).arg(script).arg(data).status()
     } else if cfg!(target_os="linux") {
         let script = scratch.0.join("register.sh");
@@ -202,9 +228,9 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), String> {
     .map_err(|e|format!("cannot run the platform registration helper: {e}"))?;
     if status.success() {
         Ok(())
+    } else if cfg!(windows) && status.code() == Some(i32::from(TASK_LOCKED_EXIT)) {
+        Err(Failure::Locked)
     } else {
-        Err(format!(
-            "autostart registration failed ({status}); see the diagnostic above"
-        ))
+        Err(format!("autostart registration failed ({status}); see the diagnostic above").into())
     }
 }

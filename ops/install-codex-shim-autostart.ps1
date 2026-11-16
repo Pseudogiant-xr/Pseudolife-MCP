@@ -57,6 +57,7 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 
+. (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
 # Native registration is shipped in the executable.
 if ($NativeExe) {
     $NativeExe = (Get-Command $NativeExe -ErrorAction Stop).Source
@@ -66,9 +67,28 @@ if ($NativeExe) {
     $nativeArgs += @("--health-ttl", "$HealthTtl")
     if ($CodexCli) { $nativeArgs += @("--cli", $CodexCli) }
     & $NativeExe @nativeArgs
+    # 3: a task this shell may not change, refused before any change; the
+    # native client printed the one line already.
+    if ($LASTEXITCODE -eq 3) { throw (New-TaskLockError "the native client left the Codex shim autostart task unchanged (see the line above)") }
     if ($LASTEXITCODE -ne 0) { throw "native codex autostart registration failed" }
     return
 }
+
+$taskName = "Pseudolife Codex Shim"
+# >>> task lock check >>>
+# Decide before changing anything, before the log directory and the
+# interpreter pick (see install-shim-autostart.ps1): a task Administrators
+# own that runs this checkout's runner follows ops\.env and is left
+# registered; another account's task and any other locked task is refused
+# with its reason.
+$taskLock = Get-TaskLock $taskName
+$followsFile = $false
+if ($taskLock) {
+    $mismatch = if ($taskLock.Hidden -or $taskLock.OtherUser) { '' } else { Get-TaskRunnerMismatch $taskName $repo 'codex' }
+    if ($taskLock.Hidden -or $taskLock.OtherUser -or $mismatch) { throw (New-TaskLockError (Format-TaskLock $taskLock -Reason $mismatch)) }
+    $followsFile = $true
+}
+# <<< task lock check <<<
 
 
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
@@ -121,34 +141,80 @@ if ($LASTEXITCODE -ne 0 -or -not $picked) {
 $PythonExe = "$picked".Trim()
 # <<< shim python <<<
 
-$taskName = "Pseudolife Codex Shim"
 # Same detached CreateNoWindow spawner as the Claude shim task — see the
 # comment block in install-shim-autostart.ps1 for why (Windows Terminal
 # otherwise pins a visible blank tab to the shim for its whole runtime).
 # The task's only argument is the runner: the values live in ops/.env. An
 # explicit -CodexCli is written there; without one the shim re-resolves
 # the rotating %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ path at each start.
-# >>> task lock check >>>
-# Decide before changing anything (see install-shim-autostart.ps1): a task
-# Administrators own that runs this checkout's runner follows ops\.env and
-# is left registered; any other such task is refused.
-. (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
-$taskLock = Get-TaskLock $taskName
-$followsFile = $false
-if ($taskLock) {
-    if ($taskLock.Hidden -or -not (Test-TaskRunsRunner $taskName $repo 'codex')) { throw (Format-TaskLock $taskLock) }
-    $followsFile = $true
+function Get-PortListener {
+    param([int]$ShimPort)
+    Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 }
-# <<< task lock check <<<
+if ($followsFile) {
+    # Only the shim the runner recorded is stopped, proved by its PID file
+    # (see install-shim-autostart.ps1); anything else on the port is refused
+    # before the settings are written.
+    $recorded = @(Get-RecordedShim $repo 'codex')
+    # What a failed restart puts back: the settings as they were.
+    $envFile = Join-Path $repo 'ops\.env'
+    $envBefore = if (Test-Path -LiteralPath $envFile -PathType Leaf) { [IO.File]::ReadAllBytes($envFile) } else { $null }
+    $holder = Get-PortListener -ShimPort $Port
+    if ($holder -and $holder.OwningProcess -notin @($recorded | ForEach-Object ProcessId)) {
+        throw ("port $Port is held by pid $($holder.OwningProcess), which this run cannot prove is the shim it started " +
+               "(ops\shim_autostart.py records that one in ~\.pseudolife-mcp); nothing was changed. Stop that process, then rerun")
+    }
+}
 $configArgs = @("config", "codex", "--model", $Model, "--port", "$Port", "--health-ttl", "$HealthTtl",
                 "--python", $PythonExe, "--log", $LogFile)
 if ($CodexCli) { $configArgs += @("--cli", $CodexCli) }
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") @configArgs 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
 if ($followsFile) {
-    & $PythonExe (Join-Path $repo "ops\shim_autostart.py") restart codex 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "the settings are in ops\.env, but the shim did not restart (see above); the task starts it with them at your next logon" }
-    Write-Host "Codex shim autostart: $(Format-TaskLock $taskLock -Follows 'ops\.env')"
+    $failure = $null
+    try {
+        Stop-RecordedShim $recorded
+        $deadline = (Get-Date).AddSeconds(15)
+        while ((Get-PortListener -ShimPort $Port) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+        if (Get-PortListener -ShimPort $Port) {
+            throw "port $Port did not become free after stopping the recorded shim"
+        }
+        & $PythonExe (Join-Path $repo "ops\shim_autostart.py") run codex 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "the codex shim did not start (see above)" }
+        # The runner returns once it has started the shim, not once it serves:
+        # a codex_shim.py must own the port.
+        $listener = $null
+        $deadline = (Get-Date).AddSeconds(90)
+        while (-not $listener -and (Get-Date) -lt $deadline) {
+            $candidate = Get-PortListener -ShimPort $Port
+            if ($candidate) {
+                $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
+                if ($owner -and $owner.CommandLine -match 'codex_shim\.py') { $listener = $candidate; break }
+            }
+            Start-Sleep -Seconds 2
+        }
+        if (-not $listener) {
+            throw "no codex_shim.py listens on 127.0.0.1:$Port after 90s; see $LogFile"
+        }
+    } catch { $failure = $_ }
+    if ($failure) {
+        # A failed restart leaves what was there: the previous settings,
+        # and the previous shim started again on them.
+        $restored = 'ops\.env was put back to its previous settings'
+        try {
+            # A shim the failed start left behind (the runner recorded it) goes
+            # first, so the previous one does not bind beside it.
+            Stop-RecordedShim @(Get-RecordedShim $repo 'codex')
+            if ($null -ne $envBefore) { [IO.File]::WriteAllBytes($envFile, $envBefore) }
+            elseif (Test-Path -LiteralPath $envFile) { Remove-Item -LiteralPath $envFile }
+            if ($recorded.Count) {
+                & $PythonExe (Join-Path $repo "ops\shim_autostart.py") run codex 2>&1 | Out-Host
+                $restored += $(if ($LASTEXITCODE -eq 0) { ' and the previous shim was started again' } else { ', but the previous shim did not start again (see above)' })
+            }
+        } catch { $restored = "ops\.env could not be put back ($($_.Exception.Message)); it holds the new settings" }
+        throw "$($failure.Exception.Message); $restored"
+    }
+    Write-Host "Restarted the Codex shim with the settings in ops\.env (port $Port, pid $($listener.OwningProcess)). $(Format-TaskLock $taskLock -Follows 'ops\.env')"
     return
 }
 $inner = @"

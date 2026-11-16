@@ -77,6 +77,7 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 
+. (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
 # Native registration is shipped in the executable.
 if ($NativeExe) {
     $NativeExe = (Get-Command $NativeExe -ErrorAction Stop).Source
@@ -85,9 +86,36 @@ if ($NativeExe) {
     if ($NativeTaskName) { $nativeArgs += @("--name", $NativeTaskName) }
     $nativeArgs += @("--prompt-file", (Join-Path $repo $PromptFile), "--startup-timeout", "$StartupTimeoutSec")
     & $NativeExe @nativeArgs
+    # 3: a task this shell may not change, refused before any change; the
+    # native client printed the one line already.
+    if ($LASTEXITCODE -eq 3) { throw (New-TaskLockError "the native client left the Claude shim autostart task unchanged (see the line above)") }
     if ($LASTEXITCODE -ne 0) { throw "native claude autostart registration failed" }
     return
 }
+
+$taskName = "Pseudolife Claude Shim"
+$legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
+# >>> task lock check >>>
+# Decide before changing anything, before the interpreter pick (which may
+# build a venv) and the log directory. A task this shell cannot replace
+# (one registered from an elevated shell, which Administrators own) is never
+# re-registered. If it runs this checkout's ops\shim_autostart.py, enabled
+# and at this user's logon, it reads ops\.env at every start: the settings
+# are written there and the shim restarted, and the task keeps doing its
+# job. Another account's task, and any other locked task, is refused with
+# its reason and the one command that removes it. The legacy name is
+# checked first: left behind beside the new task, it would start a second
+# shim at logon.
+$legacyLock = Get-TaskLock $legacyTaskName
+if ($legacyLock) { throw (New-TaskLockError (Format-TaskLock $legacyLock -Removal)) }
+$taskLock = Get-TaskLock $taskName
+$followsFile = $false
+if ($taskLock) {
+    $mismatch = if ($taskLock.Hidden -or $taskLock.OtherUser) { '' } else { Get-TaskRunnerMismatch $taskName $repo 'claude' }
+    if ($taskLock.Hidden -or $taskLock.OtherUser -or $mismatch) { throw (New-TaskLockError (Format-TaskLock $taskLock -Reason $mismatch)) }
+    $followsFile = $true
+}
+# <<< task lock check <<<
 
 
 $promptPath = Join-Path $repo $PromptFile
@@ -161,8 +189,6 @@ function Read-LogSince {
     } finally { $fs.Dispose() }
 }
 
-$taskName = "Pseudolife Claude Shim"
-$legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # -WindowStyle Hidden only hides a console window it still allocates — on
 # Windows 11 with Windows Terminal set as the default terminal app, WT
 # intercepts that console-allocation moment and opens a visible (blank)
@@ -181,55 +207,78 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # runner opens the log itself and starts the shim with the same hidden
 # console (no `cmd >> log` layer: the process tree is the runner, gone in
 # a second, then the shim's python).
-# >>> task lock check >>>
-# Decide before changing anything. A task this shell cannot replace (one
-# registered from an elevated shell, which Administrators own) is never
-# changed. If it already runs ops\shim_autostart.py from this checkout it
-# reads ops\.env at every start, so the settings are written there and the
-# shim restarted, and the task keeps doing its job; any other such task is
-# refused with the one elevated command that removes it. The legacy name is
-# checked first: left behind beside the new task, it would start a second
-# shim at logon.
-. (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
-$legacyLock = Get-TaskLock $legacyTaskName
-if ($legacyLock) { throw (Format-TaskLock $legacyLock -Removal) }
-$taskLock = Get-TaskLock $taskName
-$followsFile = $false
-if ($taskLock) {
-    if ($taskLock.Hidden -or -not (Test-TaskRunsRunner $taskName $repo 'claude')) { throw (Format-TaskLock $taskLock) }
-    $followsFile = $true
+if ($followsFile) {
+    # Only the shim the runner recorded is stopped, proved by its PID file
+    # (PID, start time, command line), never by a command-line pattern that
+    # could match another checkout's or another account's shim. Anything
+    # else on the port is refused before the settings are written.
+    $recorded = @(Get-RecordedShim $repo 'claude')
+    # What a failed restart puts back: the settings as they were.
+    $envFile = Join-Path $repo 'ops\.env'
+    $envBefore = if (Test-Path -LiteralPath $envFile -PathType Leaf) { [IO.File]::ReadAllBytes($envFile) } else { $null }
+    # A legacy task this user owns is still removed, before the settings are
+    # written, or it would start a second shim at logon.
+    if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
+            throw "could not remove the legacy task '$legacyTaskName' (see the message above); nothing else was changed, and it would start a second shim at logon"
+        }
+    }
+    $holder = Get-PortListener -ShimPort $Port
+    if ($holder -and $holder.OwningProcess -notin @($recorded | ForEach-Object ProcessId)) {
+        throw ("port $Port is held by pid $($holder.OwningProcess), which this run cannot prove is the shim it started " +
+               "(ops\shim_autostart.py records that one in ~\.pseudolife-mcp); nothing was changed. Stop that process, then rerun")
+    }
 }
-# <<< task lock check <<<
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
     --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
 if ($followsFile) {
     # The registered task reads ops\.env at every start: restart the shim
-    # here (no scheduler call), and leave the task as it is. A legacy task
-    # this user owns is still removed, or it would start a second shim.
-    if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
-        Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
-        if (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue) {
-            throw "could not remove the legacy task '$legacyTaskName' (see the message above); it would start a second shim at logon"
+    # here (no scheduler call), and leave the task as it is.
+    $failure = $null
+    try {
+        Stop-RecordedShim $recorded
+        $deadline = (Get-Date).AddSeconds(15)
+        while ((Get-PortListener -ShimPort $Port) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+        if (Get-PortListener -ShimPort $Port) {
+            throw "port $Port did not become free after stopping the recorded shim"
         }
-    }
-    & $PythonExe (Join-Path $repo "ops\shim_autostart.py") restart claude 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "the settings are in ops\.env, but the shim did not restart (see above); the task starts it with them at your next logon" }
-    # restart exits 0 even when the shim has not bound yet: verify it as the
-    # registration path below does, by a listener a claude_shim.py owns.
-    $listener = $null
-    $deadline = (Get-Date).AddSeconds($StartupTimeoutSec)
-    while (-not $listener -and (Get-Date) -lt $deadline) {
-        $candidate = Get-PortListener -ShimPort $Port
-        if ($candidate) {
-            $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
-            if ($owner -and $owner.CommandLine -match 'claude_shim\.py') { $listener = $candidate; break }
+        & $PythonExe (Join-Path $repo "ops\shim_autostart.py") run claude 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "the claude shim did not start (see above)" }
+        # The runner returns once it has started the shim, not once it serves:
+        # verify it as the registration path below does, by a listener a
+        # claude_shim.py owns.
+        $listener = $null
+        $deadline = (Get-Date).AddSeconds($StartupTimeoutSec)
+        while (-not $listener -and (Get-Date) -lt $deadline) {
+            $candidate = Get-PortListener -ShimPort $Port
+            if ($candidate) {
+                $owner = Get-CimInstance Win32_Process -Filter "ProcessId = $($candidate.OwningProcess)" -ErrorAction SilentlyContinue
+                if ($owner -and $owner.CommandLine -match 'claude_shim\.py') { $listener = $candidate; break }
+            }
+            Start-Sleep -Seconds 2
         }
-        Start-Sleep -Seconds 2
-    }
-    if (-not $listener) {
-        throw ("the settings are in ops\.env, but no claude_shim.py listens on 127.0.0.1:$Port after ${StartupTimeoutSec}s; " +
-               "see $LogFile (the task starts the shim with these settings at your next logon)")
+        if (-not $listener) {
+            throw "no claude_shim.py listens on 127.0.0.1:$Port after ${StartupTimeoutSec}s; see $LogFile"
+        }
+    } catch { $failure = $_ }
+    if ($failure) {
+        # A failed restart leaves what was there: the previous settings,
+        # and the previous shim started again on them.
+        $restored = 'ops\.env was put back to its previous settings'
+        try {
+            # A shim the failed start left behind (the runner recorded it) goes
+            # first, so the previous one does not bind beside it.
+            Stop-RecordedShim @(Get-RecordedShim $repo 'claude')
+            if ($null -ne $envBefore) { [IO.File]::WriteAllBytes($envFile, $envBefore) }
+            elseif (Test-Path -LiteralPath $envFile) { Remove-Item -LiteralPath $envFile }
+            if ($recorded.Count) {
+                & $PythonExe (Join-Path $repo "ops\shim_autostart.py") run claude 2>&1 | Out-Host
+                $restored += $(if ($LASTEXITCODE -eq 0) { ' and the previous shim was started again' } else { ', but the previous shim did not start again (see above)' })
+            }
+        } catch { $restored = "ops\.env could not be put back ($($_.Exception.Message)); it holds the new settings" }
+        throw "$($failure.Exception.Message); $restored"
     }
     Write-Host "Restarted the Claude shim with the settings in ops\.env (port $Port, pid $($listener.OwningProcess)). $(Format-TaskLock $taskLock -Follows 'ops\.env')"
     & $PythonExe (Join-Path $repo "ops/shim_cutover.py") --repo $repo --port $Port

@@ -3663,7 +3663,10 @@ runs the runner (an install registered before 2026-09-29 still carries
 the prompt file on its command line: `show claude` says so, `restart`
 refuses until then — `--force` restarts from `ops/.env` anyway, and the
 task's own values come back at the next logon — and one more run of the
-autostart installer switches it).
+autostart installer switches it; on Windows that older task was registered
+from an elevated PowerShell, so if the installer reports that
+Administrators own it, run the one elevated line it prints, then the
+installer again in a normal window).
 Rebuilding the daemon image alone does **not** reach the shim path.
 The Codex shim passes no prompt file at all, so it already runs the shipped
 prompt.
@@ -3928,7 +3931,8 @@ steps:
      ops/shim_autostart.py show claude` prints what the next start would
      run, and warns when the registered task or unit predates the runner
      and still carries the values on its command line (re-run the
-     installer once to switch it). The Codex shim
+     installer once to switch it; if it reports that Administrators own
+     the task, run the one elevated line it prints first). The Codex shim
      is the same with `codex` and `PSEUDOLIFE_CODEX_SHIM_*`
      (`…_HEALTH_TTL` instead of a prompt file). When no `…_CLI` is set the
      shim's own lookup applies (`PSEUDOLIFE_SHIM_CLAUDE_CLI` /

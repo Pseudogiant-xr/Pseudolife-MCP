@@ -3450,10 +3450,15 @@ function Invoke-TestLoginSetup {
 . (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
 function Remove-ShimTask($name, $family) {
     if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return }
-    $lock = $null
-    try { $lock = Get-TaskLock $name } catch { $lock = $null }
+    # A failed owner read is a refusal, never a fall-through to the delete:
+    # from an elevated shell that delete could take another account's task.
+    try { $lock = Get-TaskLock $name }
+    catch {
+        Write-Warning "could not read the owner of autostart task '$name' ($($_.Exception.Message)); nothing was changed, and its $family shim keeps starting at logon"
+        return
+    }
     if ($lock) {
-        Write-Warning "$(Format-TaskLock $lock -Removal) - until then its $family shim keeps starting at logon"
+        Write-Warning "its $family shim keeps starting at logon until the task is removed: $(Format-TaskLock $lock -Removal)"
         return
     }
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
@@ -3487,7 +3492,10 @@ if ($shimAutostartFamily) {
             & $script:shimInstallPath @autostartArgs
             $autostartCode = $LASTEXITCODE
         } catch { $autostartCode = 1 }
-        if ($autostartCode -ne 0) {
+        if ($autostartCode -eq 3) {
+            # A task this shell may not change was left as it is; the native
+            # client printed its one line, and its shim keeps serving.
+        } elseif ($autostartCode -ne 0) {
             Write-Warning "Shim autostart registration or start failed (see the message above)."
             Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with: & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
             Write-Host "  Or start it manually: & `"$($script:shimInstallPath)`" extractor-shim $shimAutostartFamily --repo `"$repo`" --port $ShimPort --model $Model"

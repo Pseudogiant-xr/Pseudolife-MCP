@@ -4,5 +4,5 @@
   "job": "guards",
   "before": "491518ebb51eefa6",
   "fingerprint": "e8f6bea60a907dc1",
-  "reason": "adds tests/test_scheduled_task_lock.py (15 pwsh-mocked cases, about 25 s in WSL) to the Rust-only step of live tests that read rust/ files; no new job, shard or setup"
+  "reason": "adds tests/test_scheduled_task_lock.py (16 pwsh-mocked cases, about 25 s in WSL) to the Rust-only step of live tests that read rust/ files; no new job, shard or setup"
 }

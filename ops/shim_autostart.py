@@ -27,7 +27,9 @@ A registration from before the runner (the task or unit still carries
 at logon: ``show`` says so, ``restart`` refuses rather than start the
 ops/.env values under a task that brings its own back at the next logon
 (``--force`` restarts from ops/.env anyway), and the fix is one more run
-of the installer.
+of the installer; on Windows such a task was registered from an elevated
+shell, so if the installer reports that Administrators own it, the one
+elevated line it prints comes first, then the installer once more.
 """
 from __future__ import annotations
 
@@ -401,6 +403,13 @@ def registration_carries_its_values(kind: str, text: str | None = None) -> bool:
     return text is not None and "shim_autostart.py" not in text
 
 
+# A task registered from an elevated shell is owned by Administrators, and a
+# normal window can neither enable, replace nor remove it; the installer says
+# so and prints the one elevated line that removes it.
+_ELEVATED_FIRST = ("; if it reports that Administrators own the task, run the one elevated line it prints, "
+                   "then run it again in a normal window")
+
+
 def registration_note(kind: str) -> str:
     """One line when the registered task or unit does not run this runner
     (an install from before it, whose command line still carries the
@@ -416,10 +425,12 @@ def registration_note(kind: str) -> str:
                 f"{installer} has run once")
     if registration_carries_its_values(kind, text):
         return (f"{where} still carries the model and the rest on its command line: at logon it starts "
-                f"those, not ops/.env. Run {installer} once to switch it to ops/.env")
+                f"those, not ops/.env. Run {installer} once to switch it to ops/.env"
+                + (_ELEVATED_FIRST if os.name == "nt" else ""))
     if os.name == "nt" and re.search(r"<Enabled>\s*false\s*</Enabled>", text, re.IGNORECASE):
         return (f"{where} is disabled: it will not start the shim at logon "
-                f"(Enable-ScheduledTask -TaskName '{spec['task']}', or run {installer} again)")
+                f"(Enable-ScheduledTask -TaskName '{spec['task']}', or run {installer} again"
+                f"{_ELEVATED_FIRST})")
     return ""
 
 
