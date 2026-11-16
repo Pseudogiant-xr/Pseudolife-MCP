@@ -566,6 +566,28 @@ fn a_probe_timeout_or_interrupt_is_named() {
 }
 
 #[test]
+fn a_stage_replaced_by_a_link_is_not_emptied_through_it() {
+    // The failure path must not list its stage through a link: here the
+    // stage is moved aside during a failing probe and a link put in its
+    // place, so a cleanup that followed it would empty the moved folder.
+    let store = Store::new();
+    let archive = release(&host());
+    let aside = store.base.join("moved-stage");
+    let mut probe = Fake::new(3);
+    let moved = aside.clone();
+    probe.during = Box::new(move |wrapper| {
+        let stage = wrapper.parent().unwrap();
+        fs::rename(stage, &moved).unwrap();
+        dir_link(&moved, stage);
+    });
+    let error = attempt(&store, &archive, &archive, &probe).unwrap_err();
+    assert!(error.contains("failed (exit 3)"), "{error}");
+    let wrapper = aside.join(binary_name(&host()));
+    assert_eq!(fs::read(&wrapper).unwrap(), b"wrapper program");
+    assert!(aside.join("LICENSE").exists() && aside.join(MANIFEST).exists());
+}
+
+#[test]
 fn a_stage_that_changes_during_the_probe_is_refused_and_removed() {
     // Something (a scan, the program itself) adds a file beside the wrapper:
     // a rerun would refuse that folder, so this call must not commit it.
