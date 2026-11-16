@@ -51536,12 +51536,12 @@
   "defer-refused-login": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 4,
+   "exit": 1,
    "stdout": "",
    "stderr": "aW52aXRlOiB0aGUgUG9zdGdyZVNRTCBjb25uZWN0aW9uIHNlbGVjdGVkIGJ5IFBTRVVET0xJRkVfTUNQX0RBVEFCQVNFX1VSTCBmYWlsZWQ7IHZlcmlmeSB0aGF0IGNvbm5lY3Rpb24gYW5kIGl0cyBjcmVkZW50aWFscyBiZWZvcmUgcmV0cnlpbmcNCg==",
    "window": [
-    1794863339.4960203,
-    1794863339.6286187
+    1794873245.2571242,
+    1794873245.3796692
    ],
    "requests": [],
    "arm": "rust",
@@ -51549,7 +51549,7 @@
     "cwd": "dir"
    },
    "before_modes": {},
-   "argv_port": "51391",
+   "argv_port": "49566",
    "ttl": 900,
    "seed_rows": [
     {
@@ -51557,64 +51557,64 @@
      "board": true,
      "owned": true,
      "code_hash": null,
-     "paired_at": 1794863309.296048,
+     "paired_at": 1794873243.790293,
      "principal": "bravo",
-     "created_at": 1794863309.244735,
+     "created_at": 1794873243.748775,
      "revoked_at": null,
      "token_hash": "217d3f53b8e94284ef6cfc5ea68648796764a3173189d2484d9d120c7178107d",
      "code_expires_at": null,
-     "paired_code_hash": "9652fb75251ce0a49bac263e6e979370eae6e5f3cb68244947c7dd0ed2a62741"
+     "paired_code_hash": "843cb7626233e71862a1b1ebd60ec171ae39f1916611c2549f450885f58473fe"
     },
     {
      "tier": "full",
      "board": true,
      "owned": true,
-     "code_hash": "903c9f145f10fc443815ad32679f1a4434c16a02b232ce08657898baa463af95",
+     "code_hash": "b6b9b6242ed27c8aa3c4047de05ce91a7aabb7a15f486288577ae7140d4f213c",
      "paired_at": null,
      "principal": "a-rather-long-principal-name.x",
-     "created_at": 1794863309.316151,
+     "created_at": 1794873243.807231,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794866909.31614,
+     "code_expires_at": 1794876843.80722,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": false,
      "owned": true,
-     "code_hash": "45516fd02e9af4294004bad5b92e749f32f9e79c0299bcd9c2f3d2edaed1c3cb",
+     "code_hash": "ac7e87ce9f6237cedefe6ba304dd6ccaa67575a186844ffeb35f6ed47d392bdc",
      "paired_at": null,
      "principal": "delta",
-     "created_at": 1794863309.314699,
+     "created_at": 1794873243.805882,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794863249.314688,
+     "code_expires_at": 1794873183.805871,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": false,
-     "code_hash": "372b05010e65405289da2c9f56a70a96e22fff8fdf1fa6ce7c112648d65553c7",
+     "code_hash": "d91c126c482f845530c66839f2e471cf750e38f5860de81de1ec503b34942d99",
      "paired_at": null,
      "principal": "echo",
-     "created_at": 1794863309.320661,
+     "created_at": 1794873243.811775,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794864209.32065,
+     "code_expires_at": 1794874143.811764,
      "paired_code_hash": null
     },
     {
      "tier": null,
      "board": true,
      "owned": true,
-     "code_hash": "b7563037aa4f64783d305528b0a2a31b06f9ab34e754093e7fd404b0de6eacd9",
+     "code_hash": "41337d67c7b3ae6fd432c480aa39f5f12c24d1d3b611013b67b7b293aee5c937",
      "paired_at": null,
      "principal": "alpha",
-     "created_at": 1794863309.241883,
+     "created_at": 1794873243.746672,
      "revoked_at": null,
      "token_hash": null,
-     "code_expires_at": 1794864209.241021,
+     "code_expires_at": 1794874143.746003,
      "paired_code_hash": null
     },
     {
@@ -51624,8 +51624,8 @@
      "code_hash": null,
      "paired_at": null,
      "principal": "charlie",
-     "created_at": 1794863309.309938,
-     "revoked_at": 1794863309.311037,
+     "created_at": 1794873243.801123,
+     "revoked_at": 1794873243.802351,
      "token_hash": null,
      "code_expires_at": null,
      "paired_code_hash": null
@@ -73354,10 +73354,10 @@
    "candidate_sha256": "9f9584f71859ca9c1cba32b9be3b277dc9ed2f71061ffc2dea30f3e4985ae514"
   },
   "defer-refused-login": {
-   "commit": "7265ae9f05c19938f6a2f9447e9a555ab61b7a87",
+   "commit": "e193c4a2644944122cb69642cb83e0f29df24f0b",
    "rust_tree": "clean",
    "platform": "windows",
-   "candidate_sha256": "9f9584f71859ca9c1cba32b9be3b277dc9ed2f71061ffc2dea30f3e4985ae514"
+   "candidate_sha256": "a838e61b15475210df7a053925bffd302156d96f75a90b9c7735911f74aa056d"
   },
   "defer-repeated-option": {
    "commit": "7265ae9f05c19938f6a2f9447e9a555ab61b7a87",

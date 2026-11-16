@@ -3835,10 +3835,10 @@
    "utc_offset": 39600,
    "exit": 5,
    "stdout": "",
-   "stderr": "cGFpcjogdGhlIGRhZW1vbiByZWZ1c2VkIHRoZSBwYWlyaW5nIGNvZGUgKHVua25vd24sIGV4cGlyZWQsIGFscmVhZHkgdXNlZCBvciByZXZva2VkKTsgYXNrIHRoZSBvcGVyYXRvciBmb3IgYSBuZXcgb25lIChgcHNldWRvbGlmZS1tY3AgaW52aXRlIDxtYWNoaW5lPmAgb24gdGhlIGRhZW1vbiBob3N0KS4gVGhlIHVudXNlZCB0b2tlbiBmaWxlIHtIT01FfVwucHNldWRvbGlmZS1tY3BccGFpcmluZy01MmY0NjcwZi50b2tlbiBjb3VsZCBub3QgYmUgcmVtb3ZlZCAoT1NFcnJvcik7IHJlbW92ZSB0aGF0IGZpbGUgYmVmb3JlIHJldHJ5aW5nIHBhaXJpbmcNCg==",
+   "stderr": "cGFpcjogcGFpcmluZyB3YXMgcmVmdXNlZDogdGhlIGRhZW1vbiByZWZ1c2VkIHRoZSBwYWlyaW5nIGNvZGUgKHVua25vd24sIGV4cGlyZWQsIGFscmVhZHkgdXNlZCBvciByZXZva2VkKTsgYXNrIHRoZSBvcGVyYXRvciBmb3IgYSBuZXcgb25lIChgcHNldWRvbGlmZS1tY3AgaW52aXRlIDxtYWNoaW5lPmAgb24gdGhlIGRhZW1vbiBob3N0KS4gVGhlIHVudXNlZCB0b2tlbiBmaWxlIHtIT01FfVwucHNldWRvbGlmZS1tY3BccGFpcmluZy04M2JjYzNlYS50b2tlbiBjb3VsZCBub3QgYmUgcmVtb3ZlZCAoT1NFcnJvcik7IHJlbW92ZSB0aGF0IGZpbGUgYmVmb3JlIHJldHJ5aW5nIHBhaXJpbmcNCg==",
    "window": [
-    1794863364.7239203,
-    1794863364.8064115
+    1794873247.5672445,
+    1794873247.649592
    ],
    "requests": [
     {
@@ -3854,7 +3854,7 @@
       "content-type": "application/json",
       "x-fixture-digest-of-a-token-file": "matches"
      },
-     "body": "{\"code\": \"ABCDEFGHJKMN\", \"token_sha256\": \"04309363b1261b454edee4dcfdafc700f6d649c82d4693ac381a8dcde98fec3b\"}"
+     "body": "{\"code\": \"ABCDEFGHJKMN\", \"token_sha256\": \"f026ec8672459e071a7d9b6eb072392ec800488f3932023151791a3bd16a693a\"}"
     }
    ],
    "arm": "rust",
@@ -3865,13 +3865,13 @@
    "before_owner_only": {},
    "db": {
     "owner_only": {
-     ".pseudolife-mcp/pairing-52f4670f.token": "ready"
+     ".pseudolife-mcp/pairing-83bcc3ea.token": "ready"
     }
    },
    "files": {
     ".pseudolife-mcp": "dir",
     "cwd": "dir",
-    ".pseudolife-mcp/pairing-52f4670f.token": "file:YTBXM21nRVJWNDBNM3JTeEhmeERMQWRudC0wSGgxOEV4RlZTRDQxMUlhaw=="
+    ".pseudolife-mcp/pairing-83bcc3ea.token": "file:PHRva2VuPg=="
    },
    "modes": {}
   },
@@ -4240,10 +4240,10 @@
    "candidate_sha256": "9f9584f71859ca9c1cba32b9be3b277dc9ed2f71061ffc2dea30f3e4985ae514"
   },
   "refusal-cleanup-fails": {
-   "commit": "7265ae9f05c19938f6a2f9447e9a555ab61b7a87",
+   "commit": "e193c4a2644944122cb69642cb83e0f29df24f0b",
    "rust_tree": "clean",
    "platform": "windows",
-   "candidate_sha256": "9f9584f71859ca9c1cba32b9be3b277dc9ed2f71061ffc2dea30f3e4985ae514"
+   "candidate_sha256": "a838e61b15475210df7a053925bffd302156d96f75a90b9c7735911f74aa056d"
   },
   "refused-auth-object-json": {
    "commit": "7265ae9f05c19938f6a2f9447e9a555ab61b7a87",
