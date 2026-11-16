@@ -72,8 +72,8 @@ only the machine it dispatches to.
   machine, local WSL or the box over SSH, and waits for whichever frees
   first; `PSEUDOLIFE_SUITE_WHERE=local|remote` forces one, and a remote run
   needs the commit pushed. Its log and a JSON result (machine, commit, exit
-  code, pytest's summary line) land in `~/.pseudolife-mcp/suite-results`.
-  It does not dispatch to the Windows VM.
+  code, pytest's summary line, whether the real native client ran) land in
+  `~/.pseudolife-mcp/suite-results`. It does not dispatch to the Windows VM.
 - **`ops/wsl-suite.ps1`** tests the worktree's committed HEAD from a copy
   on WSL's own filesystem and refuses uncommitted changes to tracked files.
   It keeps a uv environment per checkout under `~/.venvs/pseudolife` in WSL
@@ -100,6 +100,16 @@ only the machine it dispatches to.
   machine, set in its private `full-suite.lease` (`PSEUDOLIFE_SUITE_LEASE`
   overrides). Without that file a run falls back to `full-suite`, the
   Windows host's lease, and the board mislabels it.
+- **The real native client.** `PSEUDOLIFE_SUITE_NATIVE_CLIENT=1` makes
+  `ops/wsl-suite.sh` build `pseudolife-stdio` on the machine the suite runs
+  on, as the hosted `test` lane does, and run the tests that need it
+  (`docs/dev/merge-batches.md` "Validating it"). That machine needs
+  cargo through rustup, flock, and 8 GB free where the build cache lives
+  (`~/.cache/pseudolife-suite/cargo-target`, or
+  `PSEUDOLIFE_SUITE_CARGO_TARGET_DIR` set there; a general
+  `CARGO_TARGET_DIR` is not used). `ops/remote-suite.ps1` turns it on by
+  itself for an `integrate/*` branch. Every run prints `wsl-suite: real
+  client: yes|no` before pytest starts.
 
 ## Sharing
 

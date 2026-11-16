@@ -337,7 +337,7 @@ other package path is refused, label or no label.
 python ops/integrate.py status
 python ops/integrate.py build --dry-run
 python ops/integrate.py build            # with the Rust compile check when rust/ changed
-PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1
+PSEUDOLIFE_SUITE_WHERE=local pwsh ops/remote-suite.ps1 > <log> 2>&1   # builds the native client too
 python -m pytest -q -p no:cacheprovider --require-databases <the RUST_HARNESS paths build prints> > <log> 2>&1
 python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
   --harness-note "<count> passed at <head short sha>"
@@ -516,6 +516,52 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    10 minutes, a fraction of one CI run. Use `PSEUDOLIFE_SUITE_WHERE=local`
    so it runs in WSL on the unpushed branch; a run on the Linux box needs
    the commit pushed.
+   - **It runs the real native client.** The hosted `test` lane builds
+     `pseudolife-stdio` and exports `PSEUDOLIFE_NATIVE_TEST_BINARY` with
+     `PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1`
+     (`docs/dev/native-runtimes.md`), so the tests that need a real client
+     run it there. A local suite without it uses their stand-in or skips
+     them: a batch passed its local suite that way and then failed 18 of
+     them hosted (#1634). So on an `integrate/*` branch
+     `ops/remote-suite.ps1` sets `PSEUDOLIFE_SUITE_NATIVE_CLIENT=1` unless
+     the variable is set, says so before anything starts, and the run builds
+     the client from the batch head inside the place the suite runs (the
+     WSL copy, or the box). It runs `cargo build --locked -p
+     pseudolife-stdio -j 4` in `rust/`, the dev profile, as the lane does.
+     The run smoke-runs the client's `version` and exports both variables to
+     pytest. The result JSON records `real_client`, `real_client_commit` and
+     `real_client_path`.
+   - **The build cache** is one per machine, written only by these runs
+     (`~/.cache/pseudolife-suite/cargo-target`, or
+     `PSEUDOLIFE_SUITE_CARGO_TARGET_DIR`; never a general
+     `CARGO_TARGET_DIR`). Cargo keys a workspace package by its path inside
+     the workspace and judges it fresh by file times, so a cache another
+     checkout built into can hand this one that checkout's binary. So, under
+     the cache's own lock, a build that follows another checkout's first
+     runs `cargo clean -p` on the workspace's own packages; third-party
+     crates stay cached. The build holds the machine's full-suite lock (slot
+     0) while it compiles, so a full suite never runs beside it.
+   - **`open` refuses a result without it:** `real_client` must be true and
+     `real_client_commit` the batch head, and a `--suite-note` must say
+     `real client: yes`. There is no escape for a batch that "touches
+     nothing the real-client tests cover", because no tool can judge that
+     (conductor ruling, 16 November 2026).
+   - **A gate that cannot build stops, and the batch does not open.** Under
+     8 GB free where the cache lives, the run refuses before building and
+     names the space. Without cargo it refuses and names the need. A failed
+     build or a failed `version` fails the run with cargo's error. None of
+     them falls back to the stand-in. Free the space, or fix the toolchain
+     or the culprit member, and rerun.
+   - **What it matches, and what it cannot.** It matches the lane's
+     `--locked` dev-profile build and the two variables. It does not match
+     the lane's workers: the local suite keeps its workers sized to the
+     machine, where the lane runs `-n 2 --dist loadfile`. It is Linux only
+     (WSL or the Linux box), so it covers the hosted `test` lane's
+     conditions and never the macOS or Windows lite lanes'. Their
+     real-client tests are still first run by the batch's hosted CI.
+     A dev-profile Linux client is about 300 MB, over the client's 256 MiB
+     archive limit; the installer tests pack a debug-stripped copy
+     (#1556, #1560).
 2. The Rust harness Python tests run on the same head, because the full
    suite collects only `tests/` and never runs the Python tests under
    `rust/`: #877 broke `rust/daemon/harness/test_w2e_lifecycle.py`, passed

@@ -11,6 +11,21 @@
 #   $env:PSEUDOLIFE_SUITE_PROFILE='1'           # also profile the run (the
 #                                               # profile stays in WSL's
 #                                               # ~/.pseudolife-mcp/suite-profiles)
+#   $env:PSEUDOLIFE_SUITE_NATIVE_CLIENT='1'     # also build the native client
+#                                               # in WSL and run the tests that
+#                                               # need it, as the hosted `test`
+#                                               # lane does (Linux only: not the
+#                                               # macOS or Windows lanes)
+#
+# Every run says before pytest starts whether it used the real native client
+# (`wsl-suite: real client: yes|no`); off by default here, while
+# ops/remote-suite.ps1 turns it on for an integrate/* batch branch. The
+# build runs in WSL from the tested copy into one cache per machine that
+# only these runs write (PSEUDOLIFE_SUITE_CARGO_TARGET_DIR, a Linux path, else
+# WSL's ~/.cache/pseudolife-suite/cargo-target; never a general
+# CARGO_TARGET_DIR) and refuses under 8 GB free there; a failed build fails
+# the run. ops/wsl-suite.sh, after "PSEUDOLIFE_SUITE_NATIVE_CLIENT=1: build",
+# has the rest.
 #
 # A full suite on native Windows starts Git Bash processes in bursts that
 # stalled mouse input on the maintainer's host (tests/suite_lock.py carries
@@ -63,7 +78,8 @@ $forward = @(@(
     'PSEUDOLIFE_SUITE_LOCK', 'PSEUDOLIFE_SUITE_SLOTS', 'PSEUDOLIFE_TEST_CUDA',
     'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'PSEUDOLIFE_SUITE_PRUNE',
     'PSEUDOLIFE_SUITE_PRUNE_DAYS', 'PSEUDOLIFE_SUITE_KEEP', 'PSEUDOLIFE_SUITE_WORKERS',
-    'PSEUDOLIFE_SUITE_PROFILE', 'PSEUDOLIFE_SUITE_PROFILE_INTERVAL', 'HF_HUB_OFFLINE'
+    'PSEUDOLIFE_SUITE_PROFILE', 'PSEUDOLIFE_SUITE_PROFILE_INTERVAL', 'HF_HUB_OFFLINE',
+    'PSEUDOLIFE_SUITE_NATIVE_CLIENT', 'PSEUDOLIFE_SUITE_CARGO_TARGET_DIR'
 ) | Where-Object { Test-Path "env:$_" })
 # The token file only when there is no token value: under /mnt/c it shows
 # loose permissions, and the board client refuses a credential file that is

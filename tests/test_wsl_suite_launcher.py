@@ -15,6 +15,7 @@ naming another server, and only under that machine's own suite lease
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import signal
@@ -40,6 +41,12 @@ def _not_profiled(monkeypatch):
     them, or it profiles itself (seen in the first profiled run, 2026-10-20)."""
     monkeypatch.delenv("PSEUDOLIFE_SUITE_PROFILE", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_SUITE_PROFILE_DIR", raising=False)
+    # Likewise a suite run with the real native client (#1634): a launcher
+    # under test that inherited the switch would start a real cargo build.
+    for name in ("PSEUDOLIFE_SUITE_NATIVE_CLIENT", "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
+                 "PSEUDOLIFE_NATIVE_TEST_BINARY", "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
+                 "CARGO_TARGET_DIR"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _run(tmp_path: Path, *, lease_file: str | None = None, **env: str | None):
@@ -1096,3 +1103,482 @@ def test_dist_no_runs_the_full_suite_in_one_process(tmp_path):
     assert argv == ["-m", "pytest", "tests/", "-q", "-rs", "--dist", "no"]
     assert "full suite, one process (--dist no)" in proc.stdout
 
+
+
+# ── the real native client (PSEUDOLIFE_SUITE_NATIVE_CLIENT, #1634) ─────────
+#
+# The hosted `test` lane builds the native client and exports
+# PSEUDOLIFE_NATIVE_TEST_BINARY with PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED=1
+# (tests/test_ci_native_client.py pins that side). A local run that never did
+# passed an integration batch that then failed 18 real-client tests hosted.
+# Here cargo, df, uv and pytest are stubs: what is checked is the launcher's
+# contract, not a real build.
+
+_STUB_CARGO = r'''#!/bin/bash
+printf '%s|%s|%s\n' "$PWD" "${CARGO_TARGET_DIR:-}" "$*" >> "$CARGO_CALLS"
+if [ "$1" = metadata ]; then
+    printf '%s' '{"packages":[],"workspace_members":["path+file:///w/rust/shim#pseudolife-stdio@0.24.0","path+file:///w/rust/daemon#pseudolife-daemon@0.24.0"],"resolve":null}'
+    exit 0
+fi
+if [ "$1" = clean ]; then exit "${STUB_CLEAN_EXIT:-0}"; fi
+if [ -n "${STUB_CARGO_FAIL:-}" ]; then
+    echo "error[E0425]: cannot find value \`nope\` in this scope" >&2
+    exit 101
+fi
+mkdir -p "$CARGO_TARGET_DIR/debug"
+cat > "$CARGO_TARGET_DIR/debug/pseudolife-stdio" <<'EOF'
+#!/bin/sh
+if [ "$1" = version ]; then echo "pseudolife-mcp 1.2.3"; exit "${STUB_VERSION_EXIT:-0}"; fi
+exit 0
+EOF
+chmod 755 "$CARGO_TARGET_DIR/debug/pseudolife-stdio"
+'''
+
+
+def _native_run(tmp_path: Path, *args: str, df_kb: int | None = None,
+                cargo: bool = True, popen: bool = False, cwd: Path | None = None,
+                **env: str | None):
+    """Run the launcher in worktree mode with stubs for uv, cargo (which
+    writes a client that answers `version`) and, when `df_kb` is given, df.
+    pytest's stand-in records its argv and the client variables it got."""
+    home = tmp_path / "home"
+    venv_bin = home / "v" / "bin"
+    stubs = tmp_path / "stubs"
+    venv_bin.mkdir(parents=True)
+    stubs.mkdir()
+    (venv_bin / "python").write_text(
+        "#!/bin/bash\n"
+        f"printf '%s\\n' \"$@\" > '{tmp_path}/argv'\n"
+        f"printf '%s\\n' \"binary=${{PSEUDOLIFE_NATIVE_TEST_BINARY:-}}\" "
+        f"\"required=${{PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED:-}}\" "
+        f"\"switch=${{PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}}\" > '{tmp_path}/client-env'\n",
+        encoding="utf-8")
+    (stubs / "uv").write_text(f"#!/bin/sh\ntouch '{tmp_path}/uv-called'\nexit 0\n",
+                              encoding="utf-8")
+    shims = [venv_bin / "python", stubs / "uv"]
+    if cargo:
+        (stubs / "cargo").write_text(_STUB_CARGO, encoding="utf-8")
+        shims.append(stubs / "cargo")
+    if df_kb is not None:
+        (stubs / "df").write_text(
+            "#!/bin/sh\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+            f"echo '/dev/x 999999999 1 {df_kb} 1% /'\n", encoding="utf-8")
+        shims.append(stubs / "df")
+    for shim in shims:
+        shim.chmod(0o755)
+    base = {"HOME": str(home),
+            # No ~/.cargo/bin of the real user: only the stub is a cargo.
+            "PATH": f"{stubs}{os.pathsep}/usr/local/bin{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "PSEUDOLIFE_SUITE_VENV": str(home / "v"),
+            "PSEUDOLIFE_SUITE_COMMIT": None, "PSEUDOLIFE_SUITE_DISPATCHED": None,
+            "PSEUDOLIFE_SUITE_WORKERS": "0", "PSEUDOLIFE_SUITE_PRUNE": "off",
+            "PSEUDOLIFE_SUITE_LOCK": None, "PSEUDOLIFE_SUITE_LOCK_DIR": None,
+            "CARGO_CALLS": str(tmp_path / "cargo-calls")}
+    base.update(env)
+    argv = [BASH, str(SCRIPT), *args]
+    if popen:
+        return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, cwd=cwd, env=hermetic_env(**base))
+    return subprocess.run(argv, capture_output=True, text=True, timeout=120, cwd=cwd,
+                          env=hermetic_env(**base))
+
+
+def _read(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def _cargo(tmp_path: Path, command: str) -> list[str]:
+    """The stub cargo's calls of one subcommand (build, clean, metadata)."""
+    return [call for call in _read(tmp_path / "cargo-calls")
+            if call.split("|")[2].split(" ")[0] == command]
+
+
+def _head() -> str:
+    return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("value", [None, "", "0", "off", "false", "no"])
+def test_without_the_switch_the_run_says_it_has_no_real_client(tmp_path, value):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT=value)
+    assert proc.returncode == 0, proc.stderr
+    assert "wsl-suite: real client: no (PSEUDOLIFE_SUITE_NATIVE_CLIENT is off" in proc.stdout
+    assert _read(tmp_path / "cargo-calls") == []
+    assert _read(tmp_path / "client-env") == ["binary=", "required=", "switch="]
+    # Said before the environment is installed: among the run's first lines.
+    lines = proc.stdout.splitlines()
+    assert lines[0].startswith("wsl-suite: real client: no"), lines
+
+
+@_LINUX_ONLY
+@_NEEDS_GIT
+def test_the_switch_builds_the_client_as_the_hosted_lane_does_and_exports_it(tmp_path):
+    target = tmp_path / "target"
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1",
+                       PSEUDOLIFE_SUITE_CARGO_TARGET_DIR=str(target))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    # One build, from the tested checkout's rust/ (rust-toolchain.toml
+    # applies), as ci.yml's "Build the native client the installer tests run".
+    (call,) = _cargo(tmp_path, "build")
+    cwd, target_dir, cargo_args = call.split("|")
+    assert Path(cwd).parent == ROOT and Path(cwd).name == "rust" and target_dir == str(target)
+    assert cargo_args == "build --locked -p pseudolife-stdio -j 4"
+
+    # pytest gets a copy in the run's own environment, never the shared
+    # target's file another build may replace, and must run it.
+    copy = tmp_path / "home" / "v" / "native-client" / "pseudolife-stdio"
+    assert _read(tmp_path / "client-env") == [f"binary={copy}", "required=1", "switch="]
+    assert copy.read_bytes() == (target / "debug" / "pseudolife-stdio").read_bytes()
+    assert not copy.samefile(target / "debug" / "pseudolife-stdio")
+    said = [ln for ln in proc.stdout.splitlines() if ln.startswith("wsl-suite: real client: yes")]
+    assert said == [f"wsl-suite: real client: yes, pseudolife-stdio built from {_head()} "
+                    "(dev profile, --locked; pseudolife-mcp 1.2.3), "
+                    "at ~/v/native-client/pseudolife-stdio"]
+    assert _read(tmp_path / "argv")[:2] == ["-m", "pytest"]
+
+
+@_LINUX_ONLY
+def test_the_build_cache_is_one_per_machine_by_default(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    (call,) = _cargo(tmp_path, "build")
+    assert call.split("|")[1] == str(tmp_path / "home" / ".cache" / "pseudolife-suite" / "cargo-target")
+
+
+@_LINUX_ONLY
+def test_a_general_cargo_target_dir_is_never_the_cache(tmp_path):
+    # Other builds write a general one, and cargo can take their units as
+    # this checkout's (review of #1634); only these runs write the cache.
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="on",
+                       CARGO_TARGET_DIR=str(tmp_path / "shared"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    (call,) = _cargo(tmp_path, "build")
+    assert call.split("|")[1] == str(tmp_path / "home" / ".cache" / "pseudolife-suite" / "cargo-target")
+
+
+@_LINUX_ONLY
+def test_a_relative_cache_is_resolved_before_cargo_changes_directory(tmp_path):
+    # cargo would resolve it from rust/, the copy step from the launcher's
+    # directory (Codex review of #1634).
+    work = tmp_path / "launched-from"
+    work.mkdir()
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", cwd=work,
+                       PSEUDOLIFE_SUITE_CARGO_TARGET_DIR="rel-target")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    (call,) = _cargo(tmp_path, "build")
+    assert call.split("|")[1] == str(work / "rel-target")
+    assert (work / "rel-target" / "debug" / "pseudolife-stdio").is_file()
+
+
+@_LINUX_ONLY
+def test_a_build_after_another_checkouts_cleans_the_workspace_packages_first(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / ".suite-build-source").write_text("/elsewhere/other-copy\n", encoding="utf-8")
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1",
+                       PSEUDOLIFE_SUITE_CARGO_TARGET_DIR=str(target))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    (clean,) = _cargo(tmp_path, "clean")
+    assert clean.split("|")[1] == str(target)
+    assert clean.split("|")[2] == ("clean --quiet -p path+file:///w/rust/shim#pseudolife-stdio@0.24.0 "
+                                   "-p path+file:///w/rust/daemon#pseudolife-daemon@0.24.0")
+    assert "last held another checkout's build; cleaning this workspace's 2 packages" in proc.stdout
+    # Cleaned before the build, and the cache now names this checkout.
+    calls = [c.split("|")[2].split(" ")[0] for c in _read(tmp_path / "cargo-calls")]
+    assert calls.index("clean") < calls.index("build")
+    assert (target / ".suite-build-source").read_text(encoding="utf-8").strip() == str(ROOT)
+
+    # The same checkout again: its own units are there, so nothing is cleaned.
+    (tmp_path / "cargo-calls").unlink()
+    proc = _native_run(tmp_path / "again", PSEUDOLIFE_SUITE_NATIVE_CLIENT="1",
+                       PSEUDOLIFE_SUITE_CARGO_TARGET_DIR=str(target),
+                       CARGO_CALLS=str(tmp_path / "cargo-calls"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _cargo(tmp_path, "clean") == [] and len(_cargo(tmp_path, "build")) == 1
+
+
+@_LINUX_ONLY
+def test_a_fresh_cache_is_cleaned_too(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert len(_cargo(tmp_path, "clean")) == 1
+
+
+@_LINUX_ONLY
+def test_a_failed_clean_fails_the_run(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", STUB_CLEAN_EXIT="4")
+    assert proc.returncode == 4
+    assert "real client: build failed: `cargo clean` exited 4" in proc.stdout
+    assert _cargo(tmp_path, "build") == [] and not (tmp_path / "argv").exists()
+
+
+@_LINUX_ONLY
+def test_two_builds_into_one_cache_take_turns(tmp_path):
+    import fcntl
+    target = tmp_path / "target"
+    target.mkdir()
+    with open(target / ".suite-build.lock", "wb") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", popen=True,
+                           PSEUDOLIFE_SUITE_CARGO_TARGET_DIR=str(target))
+        try:
+            _wait_for_line(proc, "another run is building into")
+            assert _cargo(tmp_path, "build") == []
+        finally:
+            fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+        out, err = proc.communicate(timeout=120)
+    assert proc.returncode == 0, out + err
+    assert len(_cargo(tmp_path, "build")) == 1
+
+
+@_LINUX_ONLY
+def test_a_failed_build_fails_the_run_with_cargos_error_and_no_stand_in(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", STUB_CARGO_FAIL="1")
+    assert proc.returncode == 101
+    assert "cannot find value `nope`" in proc.stderr
+    assert "wsl-suite: real client: build failed (cargo exit 101" in proc.stdout
+    assert "not falling back to the stand-in" in proc.stdout
+    assert not (tmp_path / "argv").exists()  # pytest never ran
+
+
+@_LINUX_ONLY
+def test_a_client_whose_version_fails_fails_the_run(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", STUB_VERSION_EXIT="3")
+    assert proc.returncode == 3
+    assert "real client: build failed: the built client's `version` exited 3" in proc.stdout
+    assert not (tmp_path / "argv").exists()
+
+
+@_LINUX_ONLY
+def test_the_build_refuses_under_the_8_gb_floor(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", df_kb=8 * 1024 * 1024 - 1)
+    assert proc.returncode == 2
+    assert "under the 8 GB floor" in proc.stderr and "refusing" in proc.stderr
+    assert _read(tmp_path / "cargo-calls") == [] and not (tmp_path / "argv").exists()
+
+
+@_LINUX_ONLY
+def test_the_build_starts_at_the_8_gb_floor(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", df_kb=8 * 1024 * 1024)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert len(_cargo(tmp_path, "build")) == 1
+
+
+@_LINUX_ONLY
+def test_the_switch_needs_cargo(tmp_path):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", cargo=False)
+    assert proc.returncode == 2
+    assert "needs cargo" in proc.stderr and not (tmp_path / "argv").exists()
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("value", ["2", "yes please", "On "])
+def test_a_mistyped_switch_is_refused_before_anything_is_installed(tmp_path, value):
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT=value)
+    assert proc.returncode == 2
+    assert "PSEUDOLIFE_SUITE_NATIVE_CLIENT takes 1" in proc.stderr
+    assert not (tmp_path / "uv-called").exists()
+
+
+@_LINUX_ONLY
+def test_a_callers_own_client_is_reported_as_given_not_built(tmp_path):
+    given = tmp_path / "home" / "my-client"
+    proc = _native_run(tmp_path, PSEUDOLIFE_NATIVE_TEST_BINARY=str(given))
+    assert proc.returncode == 0, proc.stderr
+    assert ("wsl-suite: real client: yes, given by the caller (not built by this run), "
+            "at ~/my-client") in proc.stdout
+    assert _read(tmp_path / "cargo-calls") == []
+
+
+def _wait_for_line(proc: subprocess.Popen, text: str) -> None:
+    """Read the launcher's stdout until a line contains `text`."""
+    while True:
+        line = proc.stdout.readline()
+        assert line or proc.poll() is None, f"the launcher ended without saying {text!r}: {proc.stderr.read()}"
+        if text in line:
+            return
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("args", [(), ("tests/test_ci_native_client.py",)])
+def test_a_build_waits_for_a_running_full_suite_and_holds_it_off(tmp_path, args):
+    """A full or a selected run: a four-job build never overlaps a full suite
+    (CLAUDE.md "Sharing the machine")."""
+    import fcntl
+    locks = tmp_path / "home" / ".pseudolife-mcp" / "locks"
+    locks.mkdir(parents=True)
+    with open(locks / "full-suite.lock", "wb") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        proc = _native_run(tmp_path, *args, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1", popen=True)
+        try:
+            _wait_for_line(proc, "waiting for it before building")
+            assert _cargo(tmp_path, "build") == []  # it says so before it blocks
+        finally:
+            fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+        out, err = proc.communicate(timeout=120)
+    assert proc.returncode == 0, out + err
+    assert len(_cargo(tmp_path, "build")) == 1
+
+
+@_LINUX_ONLY
+def test_a_run_with_the_suite_lock_off_does_not_wait_for_it(tmp_path):
+    import fcntl
+    locks = tmp_path / "home" / ".pseudolife-mcp" / "locks"
+    locks.mkdir(parents=True)
+    with open(locks / "full-suite.lock", "wb") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1",
+                           PSEUDOLIFE_SUITE_LOCK="off")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "waiting" not in proc.stdout and len(_cargo(tmp_path, "build")) == 1
+
+
+@_LINUX_ONLY
+def test_pytest_never_inherits_the_build_locks(tmp_path):
+    # The suite's own conftest takes full-suite.lock; a descriptor left open
+    # here would make it wait on itself.
+    venv_python = tmp_path / "home" / "v" / "bin" / "python"
+    proc = _native_run(tmp_path, PSEUDOLIFE_SUITE_NATIVE_CLIENT="1")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert venv_python.exists()
+    record = tmp_path / "fds"
+    venv_python.write_text(f"#!/bin/bash\nls -l /proc/$$/fd > '{record}'\n", encoding="utf-8")
+    proc = _native_run(tmp_path / "second", PSEUDOLIFE_SUITE_NATIVE_CLIENT="1",
+                       HOME=str(tmp_path / "home"), PSEUDOLIFE_SUITE_VENV=str(tmp_path / "home" / "v"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    fds = record.read_text(encoding="utf-8")
+    assert "full-suite.lock" not in fds and ".suite-build.lock" not in fds, fds
+
+
+# ── ops/remote-suite.ps1: the batch default and the result JSON ────────────
+
+PWSH = shutil.which("pwsh")
+_STUB_WSL = r'''#!/bin/bash
+# wsl.exe as ops/remote-suite.ps1 and ops/wsl-suite.ps1 call it.
+case "$*" in
+    *wslpath*) printf '%s\n' "${@: -1}" ;;
+    *"sh -c"*) exit 0 ;;  # the suite lock probe: free
+    *wsl-suite.sh*)
+        printf 'switch=%s wslenv=%s\n' "${PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}" "${WSLENV:-}" > "$WSL_CALLS"
+        if [ "${PSEUDOLIFE_SUITE_NATIVE_CLIENT:-}" = 1 ]; then
+            echo "wsl-suite: real client: yes, pseudolife-stdio built from $PSEUDOLIFE_SUITE_COMMIT (dev profile, --locked; pseudolife-mcp 1.2.3), at ~/v/native-client/pseudolife-stdio"
+        else
+            echo "wsl-suite: real client: no (PSEUDOLIFE_SUITE_NATIVE_CLIENT is off)"
+        fi
+        echo "3 passed in 0.1s" ;;
+esac
+'''
+
+
+def _remote_suite(tmp_path: Path, branch: str, **env: str | None):
+    """ops/remote-suite.ps1 and ops/wsl-suite.ps1, committed in a repository
+    of their own on `branch`, with a wsl.exe stand-in; returns the run and
+    the result JSON it wrote."""
+    repo = tmp_path / "repo"
+    (repo / "ops").mkdir(parents=True)
+    for name in ("remote-suite.ps1", "wsl-suite.ps1"):
+        shutil.copy(ROOT / "ops" / name, repo / "ops" / name)
+    for argv in (["init", "-q", "-b", branch], ["add", "-A"],
+                 ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "x"]):
+        subprocess.run(["git", "-C", str(repo), *argv], check=True, capture_output=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "wsl.exe").write_text(_STUB_WSL, encoding="utf-8")
+    (stubs / "wsl.exe").chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    base = {"HOME": str(home), "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+            "WSL_CALLS": str(tmp_path / "wsl-calls"), "PSEUDOLIFE_SUITE_WHERE": "local",
+            "PSEUDOLIFE_SUITE_REMOTE": None, "PSEUDOLIFE_WSL_DISTRO": None,
+            "PSEUDOLIFE_LEASES_HELD": None, "WSLENV": None,
+            "PSEUDOLIFE_TEST_PG_LOGIN_FILE": str(tmp_path / "no-login")}
+    base.update(env)
+    proc = subprocess.run([PWSH, "-NoProfile", "-File", str(repo / "ops" / "remote-suite.ps1")],
+                          capture_output=True, text=True, timeout=120, env=hermetic_env(**base))
+    results = sorted((home / ".pseudolife-mcp" / "suite-results").glob("*.json"))
+    result = json.loads(results[-1].read_text(encoding="utf-8-sig")) if results else None
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+    return proc, result, head
+
+
+_NEEDS_PWSH = pytest.mark.skipif(PWSH is None, reason="needs pwsh")
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_batch_branch_runs_the_real_client_and_records_it(tmp_path):
+    proc, result, head = _remote_suite(tmp_path, "integrate/2026-11-16-batch-9")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "is an integration batch, so the run builds the native client" in proc.stdout
+    switch, wslenv = _read(tmp_path / "wsl-calls")[0].split(" ")
+    assert switch == "switch=1" and "PSEUDOLIFE_SUITE_NATIVE_CLIENT" in wslenv.split("=", 1)[1].split(":")
+    assert result["real_client"] is True and result["real_client_commit"] == head
+    assert result["real_client_path"] == "~/v/native-client/pseudolife-stdio"
+    assert result["args"] == [] and result["exit_code"] == 0
+    assert f"real client: yes, built from {head[:8]}" in proc.stdout.splitlines()[-1]
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_an_ordinary_branch_stays_without_the_real_client_and_says_so(tmp_path):
+    proc, result, _ = _remote_suite(tmp_path, "fix/something")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "integration batch" not in proc.stdout
+    assert _read(tmp_path / "wsl-calls")[0].startswith("switch= ")
+    assert result["real_client"] is False and result["real_client_commit"] is None
+    assert "real client: no" in proc.stdout.splitlines()[-1]
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+@pytest.mark.parametrize("branch, value, real", [("integrate/2026-11-16-batch-9", "0", False),
+                                                 ("fix/something", "1", True)])
+def test_the_switch_set_by_hand_wins_over_the_branch(tmp_path, branch, value, real):
+    proc, result, _ = _remote_suite(tmp_path, branch, PSEUDOLIFE_SUITE_NATIVE_CLIENT=value)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "integration batch" not in proc.stdout
+    assert result["real_client"] is real
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_failed_build_is_recorded_as_no_real_client(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_STUB_WSL", _STUB_WSL.replace(
+        'echo "wsl-suite: real client: yes, pseudolife-stdio built from $PSEUDOLIFE_SUITE_COMMIT',
+        'echo "wsl-suite: real client: build failed (cargo exit 101; its error is above)"; exit 101; echo "'))
+    proc, result, _ = _remote_suite(tmp_path, "integrate/2026-11-16-batch-9")
+    assert proc.returncode == 101
+    assert result["real_client"] is False and result["exit_code"] == 101
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_callers_own_client_is_not_shown_as_a_gate_pass(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_STUB_WSL", _STUB_WSL.replace(
+        "pseudolife-stdio built from $PSEUDOLIFE_SUITE_COMMIT (dev profile, --locked; pseudolife-mcp 1.2.3)",
+        "given by the caller (not built by this run)"))
+    proc, result, _ = _remote_suite(tmp_path, "integrate/2026-11-16-batch-9")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert result["real_client"] is True and result["real_client_commit"] is None
+    assert result["real_client_path"] == "~/v/native-client/pseudolife-stdio"
+    assert "not built by this run (ops/integrate.py open refuses it)" in proc.stdout.splitlines()[-1]
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_a_launcher_that_never_says_leaves_real_client_null(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "_STUB_WSL",
+                        _STUB_WSL.replace("wsl-suite: real client:", "something else:"))
+    proc, result, _ = _remote_suite(tmp_path, "integrate/2026-11-16-batch-9")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert result["real_client"] is None and result["real_client_commit"] is None
+    assert "real client: not reported" in proc.stdout.splitlines()[-1]
