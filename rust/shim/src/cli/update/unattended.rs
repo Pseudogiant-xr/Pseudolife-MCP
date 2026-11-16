@@ -538,6 +538,7 @@ fn run_clients(update: &mut Update) -> Result<u8> {
         return Ok(3);
     }
     refuse_checkout_shadow(&daemon)?;
+    update.refuse_tunnel_move(None)?;
     update.step(format!("the daemon runs {daemon} and this machine's shim {own}: updating this machine's clients to {daemon} unattended"));
     // Persist intent before the first step: a crash after installing the shim
     // must still retry plugin and hook work on the next run.

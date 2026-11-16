@@ -9,6 +9,7 @@ pub(crate) mod seams;
 mod shadow;
 #[cfg(unix)]
 mod signals;
+pub(crate) mod tunnel_guard;
 mod unattended;
 #[cfg(windows)]
 mod windows_job;
@@ -126,6 +127,12 @@ pub(crate) struct Update {
     pub rollback_scope: Option<String>,
     pub stopped_handover: bool,
     pub handover_port: u16,
+    /// Decides whether moving this machine's launcher to the native runtime
+    /// must be refused because a tunnel is registered to start by itself
+    /// (`tunnel_guard`); a seam so tests never ask a real service manager.
+    pub tunnel_probe: fn(Option<&Path>) -> tunnel_guard::Decision,
+    /// The probe passed once this run; later client steps do not ask again.
+    pub tunnel_checked: bool,
 }
 
 fn output(text: &str, stderr: bool) -> std::io::Result<()> {
@@ -247,6 +254,28 @@ impl Update {
             rollback_scope: None,
             stopped_handover: false,
             handover_port: 5432,
+            tunnel_probe: tunnel_guard::probe,
+            tunnel_checked: false,
+        }
+    }
+    /// Refuses, before anything is changed, a run whose client steps would
+    /// move this machine's launcher to the native runtime while a tunnel is
+    /// registered to start by itself (issue #1632). Called at the start of
+    /// every path that runs the client steps, and again by `clients` as a
+    /// backstop.
+    pub fn refuse_tunnel_move(&mut self, repo: Option<&Path>) -> Result<()> {
+        if self.tunnel_checked {
+            return Ok(());
+        }
+        match (self.tunnel_probe)(repo) {
+            tunnel_guard::Decision::Refuse(line) => Err(UpdateError::usage(line)),
+            tunnel_guard::Decision::Proceed(notes) => {
+                self.tunnel_checked = true;
+                for note in notes {
+                    self.warn(note);
+                }
+                Ok(())
+            }
         }
     }
     pub fn step(&mut self, text: impl Into<String>) {
@@ -386,10 +415,16 @@ impl Update {
     pub fn update(&mut self) -> Result<()> {
         if let Some(repo) = engine::selected_checkout(self)? {
             self.report.mode = "checkout".into();
+            if self.o.all_clients {
+                self.refuse_tunnel_move(Some(&repo))?;
+            }
             return engine::deploy(self, &repo);
         }
         if let Some(repo) = self.o.checkout.clone() {
             self.report.mode = "checkout".into();
+            if self.o.all_clients {
+                self.refuse_tunnel_move(Some(&repo))?;
+            }
             self.deploy_checkout(&repo)
         } else {
             self.report.mode = "release".into();
@@ -569,6 +604,18 @@ impl Update {
     }
     pub fn clients(&mut self, repo: Option<&Path>, source: &str, health: Option<&Value>) {
         use clients::handoff::{self, Note};
+        // Every caller refuses earlier; this only keeps a new caller from
+        // moving the launcher under a registered tunnel service.
+        if let Err(error) = self.refuse_tunnel_move(repo) {
+            self.warn(error.message.clone());
+            self.report.ok = false;
+            self.report.exit_code = error.exit_code;
+            self.report.clients = Some(json!({
+                "shim": {"state": "refused", "detail": error.message},
+                "ok": false,
+            }));
+            return;
+        }
         let own = env!("CARGO_PKG_VERSION");
         // A handed-off run never hands off again; a checkout deploy already
         // runs the checkout's own code.
@@ -721,6 +768,7 @@ impl Update {
         let current = health.as_ref().and_then(|h| h["version"].as_str());
         self.refuse_downgrade(current, &target)?;
         self.refuse_checkout_shadow(&target)?;
+        self.refuse_tunnel_move(None)?;
         self.report.mode = "clients".into();
         self.report.current = current.map(str::to_owned);
         self.report.target = Some(target.clone());

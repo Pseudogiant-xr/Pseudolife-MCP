@@ -189,6 +189,18 @@ is refused this way.
 No root service or login policy is changed implicitly. An autostart service cannot keep
 a sleeping or powered-off host available.
 
+**A machine with an autostart service stays on the Python client.** The
+service starts the tunnel through the installed `pseudolife-mcp` launcher,
+and the native client cannot run a tunnel yet. So an update that would move
+this machine to the native client (`PSEUDOLIFE_SHIM_ENGINE=native`) refuses
+while a tunnel service it installed is registered, even a disabled one. The
+refusal names the service, changes nothing and exits 2, and the tunnel keeps
+starting as before. Update without `PSEUDOLIFE_SHIM_ENGINE=native` to stay
+on the Python client. To move anyway, first run `pseudolife-mcp tunnel
+service remove --profile <name>` (with the `--profile-dir` or
+`--system-service` the service was installed with), then rerun the update.
+A saved profile without a service does not block the move.
+
 Windows stores the runtime key using user-scoped DPAPI plus owner-only ACLs;
 POSIX stores it in an owner-only file, with disk encryption left to the host.
 Private launch files exist only while the supervisor owns the process. While a

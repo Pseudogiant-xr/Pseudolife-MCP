@@ -498,6 +498,10 @@ impl Update {
                 "this host selected a checkout engine; run update --checkout <repo>; release updates leave it unchanged",
             ));
         }
+        if !self.o.daemon_only {
+            // Before the backup and the daemon: the client steps run last.
+            self.refuse_tunnel_move(None)?;
+        }
         let target = self.target_version()?;
         self.report.target = Some(target.clone());
         let before = self.daemon_health();
