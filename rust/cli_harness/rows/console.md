@@ -270,12 +270,11 @@ Linux), and removes its bookkeeping; a stand-in that never finished leaves
 
 ## Hosted CI and goldens
 
-The row runs live on both OSes in the `w1c-connection` shard. Every case is
-built from fixed bytes (the fixture echoes the request's origin and page,
+The row replays its goldens on both OSes in the `w1c-connection` shard.
+Every case is built from fixed bytes (the fixture echoes the request's origin and page,
 the origin tokenized per arm by the harness, and the stand-in's path is
-under the tokenized home), so all are golden cases. The goldens record the
-oracle at this branch, whose `pseudolife_memory/console_cli.py` differs
-from master by issue #1497's fixes: Windows from this checkout (CPython
+under the tokenized home), so all are golden cases. The original goldens
+recorded the oracle after issue #1497's fixes: Windows from this checkout (CPython
 3.11.9), Linux from a clone of the branch under WSL Ubuntu (CPython
 3.11.15).
 

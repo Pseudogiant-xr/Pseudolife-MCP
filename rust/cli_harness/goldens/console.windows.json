@@ -407,14 +407,29 @@
   "defer-int-digits": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "exit": 0,
+   "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4NCg==",
+   "stderr": "",
    "window": [
-    1794542697.7561004,
-    1794542700.1830595
+    1794852270.6551163,
+    1794852270.6913645
    ],
-   "arm": "python",
+   "requests": [
+    {
+     "method": "GET",
+     "target": "/api/console/sessions",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": ""
+    }
+   ],
+   "arm": "rust",
    "files": {
     "cwd": "dir"
    },
@@ -3439,11 +3454,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4NCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
    "stderr": "",
    "window": [
-    1794542798.9297304,
-    1794542799.2670963
+    1794852271.334627,
+    1794852271.4522614
    ],
    "requests": [
     {
@@ -3461,11 +3476,13 @@
      "body": "{\"origin\": \"{DAEMON}\"}"
     }
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
-    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUNCmhvbWUgPSBvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5kaXJuYW1lKG9zLnBhdGguYWJzcGF0aChfX2ZpbGVfXykpKQ0Kc3RhdGUgPSBvcy5wYXRoLmpvaW4oaG9tZSwgIi5zdGFuZGluIikNCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQ0KbiA9IDENCndoaWxlIFRydWU6DQogICAgdHJ5Og0KICAgICAgICBmZCA9IG9zLm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAic3RhcnRlZC0lZCIgJSBuKSwgb3MuT19DUkVBVCB8IG9zLk9fRVhDTCB8IG9zLk9fV1JPTkxZKQ0KICAgICAgICBicmVhaw0KICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6DQogICAgICAgIG4gKz0gMQ0Kb3Mud3JpdGUoZmQsIHN0cihvcy5nZXRwaWQoKSkuZW5jb2RlKCkpDQpvcy5jbG9zZShmZCkNCmxhdW5jaGVkID0gb3MucGF0aC5qb2luKGhvbWUsICJsYXVuY2hlZCIpDQpvcy5tYWtlZGlycyhsYXVuY2hlZCwgZXhpc3Rfb2s9VHJ1ZSkNCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6DQogICAganNvbi5kdW1wKHN5cy5hcmd2WzE6XSwgb3V0KQ0KZGVhZGxpbmUgPSB0aW1lLm1vbm90b25pYygpICsgMzANCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6DQogICAgdGltZS5zbGVlcCgwLjAyKQ0Kb3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJkb25lLSVkIiAlIG4pLCAidyIpLmNsb3NlKCkNCg=="
+    "launched": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUNCmhvbWUgPSBvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5kaXJuYW1lKG9zLnBhdGguYWJzcGF0aChfX2ZpbGVfXykpKQ0Kc3RhdGUgPSBvcy5wYXRoLmpvaW4oaG9tZSwgIi5zdGFuZGluIikNCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQ0KbiA9IDENCndoaWxlIFRydWU6DQogICAgdHJ5Og0KICAgICAgICBmZCA9IG9zLm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAic3RhcnRlZC0lZCIgJSBuKSwgb3MuT19DUkVBVCB8IG9zLk9fRVhDTCB8IG9zLk9fV1JPTkxZKQ0KICAgICAgICBicmVhaw0KICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6DQogICAgICAgIG4gKz0gMQ0Kb3Mud3JpdGUoZmQsIHN0cihvcy5nZXRwaWQoKSkuZW5jb2RlKCkpDQpvcy5jbG9zZShmZCkNCmxhdW5jaGVkID0gb3MucGF0aC5qb2luKGhvbWUsICJsYXVuY2hlZCIpDQpvcy5tYWtlZGlycyhsYXVuY2hlZCwgZXhpc3Rfb2s9VHJ1ZSkNCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6DQogICAganNvbi5kdW1wKHN5cy5hcmd2WzE6XSwgb3V0KQ0KZGVhZGxpbmUgPSB0aW1lLm1vbm90b25pYygpICsgMzANCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6DQogICAgdGltZS5zbGVlcCgwLjAyKQ0Kb3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJkb25lLSVkIiAlIG4pLCAidyIpLmNsb3NlKCkNCg==",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd"
    },
    "modes": {}
   },
@@ -3473,11 +3490,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0NCg==",
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMCwgImJyb3dzZXJfZXJyb3IiOiAiQlJPV1NFUiBtdXN0IG5hbWUgYSBkcml2ZS1hYnNvbHV0ZSAuZXhlLCBub3QgYSBiYXJlIG5hbWUsIHJlbGF0aXZlIHBhdGggb3Igc2NyaXB0OyBzZXQgQlJPV1NFUiB0byBhIGZ1bGwgLmV4ZSBwYXRoIChxdW90ZSBwYXRocyB3aXRoIHNwYWNlcyksIG9yIG9wZW4gdGhlIHByaW50ZWQgbGluayB5b3Vyc2VsZiJ9DQo=",
    "stderr": "",
    "window": [
-    1794542800.324627,
-    1794542800.7073233
+    1794852272.5125592,
+    1794852272.5483494
    ],
    "requests": [
     {
@@ -3495,7 +3512,7 @@
      "body": "{\"origin\": \"{DAEMON}\"}"
     }
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -3508,10 +3525,10 @@
    "utc_offset": 39600,
    "exit": 0,
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
-   "stderr": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gYnJvd3NlciBvcGVuZWQ6IGNvdWxkIG5vdCBzdGFydCB7SE9NRX1cYmluXG1pc3NpbmcuZXhlIChUaGUgc3lzdGVtIGNhbm5vdCBmaW5kIHRoZSBmaWxlIHNwZWNpZmllZC4gKG9zIGVycm9yIDIpKTsgc2V0IEJST1dTRVIgdG8gYSBmdWxsIC5leGUgcGF0aCAocXVvdGUgcGF0aHMgd2l0aCBzcGFjZXMpLCBvciBvcGVuIHRoZSBwcmludGVkIGxpbmsgeW91cnNlbGYNCg==",
    "window": [
-    1794542801.7348244,
-    1794542802.11945
+    1794852273.6897287,
+    1794852273.7256615
    ],
    "requests": [
     {
@@ -3529,7 +3546,7 @@
      "body": "{\"origin\": \"{DAEMON}\"}"
     }
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -3541,11 +3558,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMH0NCg==",
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMCwgImJyb3dzZXJfZXJyb3IiOiAidGhlIEJST1dTRVIgdmFyaWFibGUgaGFzIGFuIHVuY2xvc2VkIHF1b3RlOyBzZXQgQlJPV1NFUiB0byBhIGZ1bGwgLmV4ZSBwYXRoIChxdW90ZSBwYXRocyB3aXRoIHNwYWNlcyksIG9yIG9wZW4gdGhlIHByaW50ZWQgbGluayB5b3Vyc2VsZiJ9DQo=",
    "stderr": "",
    "window": [
-    1794542803.1799688,
-    1794542803.5718513
+    1794852274.893968,
+    1794852274.9260375
    ],
    "requests": [
     {
@@ -3563,7 +3580,7 @@
      "body": "{\"origin\": \"{DAEMON}\"}"
     }
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -3575,11 +3592,11 @@
    "home": null,
    "utc_offset": 39600,
    "exit": 0,
-   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stdout": "T3BlbmVkIHRoZSBDb25zb2xlIGluIHlvdXIgYnJvd3NlcjogY29uZmlybSB0aGUgc2lnbi1pbiB0aGVyZS4NCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
    "stderr": "",
    "window": [
-    1794542804.6025717,
-    1794542805.052289
+    1794852276.0766795,
+    1794852276.1969566
    ],
    "requests": [
     {
@@ -3597,11 +3614,13 @@
      "body": "{\"origin\": \"{DAEMON}\"}"
     }
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
-    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUNCmhvbWUgPSBvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5kaXJuYW1lKG9zLnBhdGguYWJzcGF0aChfX2ZpbGVfXykpKQ0Kc3RhdGUgPSBvcy5wYXRoLmpvaW4oaG9tZSwgIi5zdGFuZGluIikNCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQ0KbiA9IDENCndoaWxlIFRydWU6DQogICAgdHJ5Og0KICAgICAgICBmZCA9IG9zLm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAic3RhcnRlZC0lZCIgJSBuKSwgb3MuT19DUkVBVCB8IG9zLk9fRVhDTCB8IG9zLk9fV1JPTkxZKQ0KICAgICAgICBicmVhaw0KICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6DQogICAgICAgIG4gKz0gMQ0Kb3Mud3JpdGUoZmQsIHN0cihvcy5nZXRwaWQoKSkuZW5jb2RlKCkpDQpvcy5jbG9zZShmZCkNCmxhdW5jaGVkID0gb3MucGF0aC5qb2luKGhvbWUsICJsYXVuY2hlZCIpDQpvcy5tYWtlZGlycyhsYXVuY2hlZCwgZXhpc3Rfb2s9VHJ1ZSkNCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6DQogICAganNvbi5kdW1wKHN5cy5hcmd2WzE6XSwgb3V0KQ0KZGVhZGxpbmUgPSB0aW1lLm1vbm90b25pYygpICsgMzANCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6DQogICAgdGltZS5zbGVlcCgwLjAyKQ0Kb3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJkb25lLSVkIiAlIG4pLCAidyIpLmNsb3NlKCkNCg=="
+    "launched": "dir",
+    "bin/stand-in.py": "file:aW1wb3J0IGpzb24sIG9zLCBzeXMsIHRpbWUNCmhvbWUgPSBvcy5wYXRoLmRpcm5hbWUob3MucGF0aC5kaXJuYW1lKG9zLnBhdGguYWJzcGF0aChfX2ZpbGVfXykpKQ0Kc3RhdGUgPSBvcy5wYXRoLmpvaW4oaG9tZSwgIi5zdGFuZGluIikNCm9zLm1ha2VkaXJzKHN0YXRlLCBleGlzdF9vaz1UcnVlKQ0KbiA9IDENCndoaWxlIFRydWU6DQogICAgdHJ5Og0KICAgICAgICBmZCA9IG9zLm9wZW4ob3MucGF0aC5qb2luKHN0YXRlLCAic3RhcnRlZC0lZCIgJSBuKSwgb3MuT19DUkVBVCB8IG9zLk9fRVhDTCB8IG9zLk9fV1JPTkxZKQ0KICAgICAgICBicmVhaw0KICAgIGV4Y2VwdCBGaWxlRXhpc3RzRXJyb3I6DQogICAgICAgIG4gKz0gMQ0Kb3Mud3JpdGUoZmQsIHN0cihvcy5nZXRwaWQoKSkuZW5jb2RlKCkpDQpvcy5jbG9zZShmZCkNCmxhdW5jaGVkID0gb3MucGF0aC5qb2luKGhvbWUsICJsYXVuY2hlZCIpDQpvcy5tYWtlZGlycyhsYXVuY2hlZCwgZXhpc3Rfb2s9VHJ1ZSkNCndpdGggb3Blbihvcy5wYXRoLmpvaW4obGF1bmNoZWQsICJsYXVuY2gtJWQuanNvbiIgJSBuKSwgInciLCBlbmNvZGluZz0idXRmLTgiKSBhcyBvdXQ6DQogICAganNvbi5kdW1wKHN5cy5hcmd2WzE6XSwgb3V0KQ0KZGVhZGxpbmUgPSB0aW1lLm1vbm90b25pYygpICsgMzANCndoaWxlIG5vdCBvcy5wYXRoLmV4aXN0cyhvcy5wYXRoLmpvaW4oc3RhdGUsICJyZWxlYXNlIikpIGFuZCB0aW1lLm1vbm90b25pYygpIDwgZGVhZGxpbmU6DQogICAgdGltZS5zbGVlcCgwLjAyKQ0Kb3Blbihvcy5wYXRoLmpvaW4oc3RhdGUsICJkb25lLSVkIiAlIG4pLCAidyIpLmNsb3NlKCkNCg==",
+    "launched/launch-1.json": "file:WyJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCJd"
    },
    "modes": {}
   },
@@ -4303,14 +4322,30 @@
   "defer-browser-standard-name": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gYnJvd3NlciBvcGVuZWQ6IEJST1dTRVIgbXVzdCBuYW1lIGEgZHJpdmUtYWJzb2x1dGUgLmV4ZSwgbm90IGEgYmFyZSBuYW1lLCByZWxhdGl2ZSBwYXRoIG9yIHNjcmlwdDsgc2V0IEJST1dTRVIgdG8gYSBmdWxsIC5leGUgcGF0aCAocXVvdGUgcGF0aHMgd2l0aCBzcGFjZXMpLCBvciBvcGVuIHRoZSBwcmludGVkIGxpbmsgeW91cnNlbGYNCg==",
    "window": [
-    1794542835.1195073,
-    1794542837.498251
+    1794852277.268422,
+    1794852277.3024185
    ],
-   "arm": "python",
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -4321,14 +4356,30 @@
   "defer-browser-clone": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "eyJzdGF0ZSI6ICJub19kYWVtb24iLCAiZXJyb3IiOiAiW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCJ9DQo=",
+   "exit": 0,
+   "stdout": "eyJzdGF0ZSI6ICJwcmludGVkIiwgInVybCI6ICJ7REFFTU9OfS91aS8jL3NpZ25pbj9jb2RlPUFCQ0QtMTIzNCIsICJjb2RlIjogIkFCQ0QtMTIzNCIsICJvcmlnaW4iOiAie0RBRU1PTn0iLCAicHJpbmNpcGFsIjogImZpeHR1cmUiLCAiZXhwaXJlc19pbiI6IDMwMCwgImJyb3dzZXJfZXJyb3IiOiAiQlJPV1NFUiBtdXN0IG5hbWUgYSBkcml2ZS1hYnNvbHV0ZSAuZXhlLCBub3QgYSBiYXJlIG5hbWUsIHJlbGF0aXZlIHBhdGggb3Igc2NyaXB0OyBzZXQgQlJPV1NFUiB0byBhIGZ1bGwgLmV4ZSBwYXRoIChxdW90ZSBwYXRocyB3aXRoIHNwYWNlcyksIG9yIG9wZW4gdGhlIHByaW50ZWQgbGluayB5b3Vyc2VsZiJ9DQo=",
    "stderr": "",
    "window": [
-    1794542838.0671859,
-    1794542840.4749753
+    1794852278.4554868,
+    1794852278.4909675
    ],
-   "arm": "python",
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -4341,10 +4392,10 @@
    "utc_offset": 39600,
    "exit": 0,
    "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
-   "stderr": "",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gYnJvd3NlciBvcGVuZWQ6IEJST1dTRVIgbXVzdCBuYW1lIGEgZHJpdmUtYWJzb2x1dGUgLmV4ZSwgbm90IGEgYmFyZSBuYW1lLCByZWxhdGl2ZSBwYXRoIG9yIHNjcmlwdDsgc2V0IEJST1dTRVIgdG8gYSBmdWxsIC5leGUgcGF0aCAocXVvdGUgcGF0aHMgd2l0aCBzcGFjZXMpLCBvciBvcGVuIHRoZSBwcmludGVkIGxpbmsgeW91cnNlbGYNCg==",
    "window": [
-    1794542841.0326881,
-    1794542841.3970177
+    1794852279.6385677,
+    1794852279.677923
    ],
    "requests": [
     {
@@ -4375,7 +4426,7 @@
      "body": "{\"origin\": \"{DAEMON}\"}"
     }
    ],
-   "arm": "python",
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -4386,14 +4437,30 @@
   "defer-browser-bare-name": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gYnJvd3NlciBvcGVuZWQ6IGNvdWxkIG5vdCBzdGFydCB7SE9NRX1cYmluXHJlbGF0aXZlLmV4ZSAoVGhlIHN5c3RlbSBjYW5ub3QgZmluZCB0aGUgZmlsZSBzcGVjaWZpZWQuIChvcyBlcnJvciAyKSk7IHNldCBCUk9XU0VSIHRvIGEgZnVsbCAuZXhlIHBhdGggKHF1b3RlIHBhdGhzIHdpdGggc3BhY2VzKSwgb3Igb3BlbiB0aGUgcHJpbnRlZCBsaW5rIHlvdXJzZWxmDQo=",
    "window": [
-    1794542842.4502172,
-    1794542844.8474994
+    1794852280.8312643,
+    1794852280.8685696
    ],
-   "arm": "python",
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -4404,14 +4471,30 @@
   "defer-browser-batch": {
    "home": null,
    "utc_offset": 39600,
-   "exit": 3,
-   "stdout": "",
-   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gZGFlbW9uIGFuc3dlcmVkIGF0IGh0dHA6Ly8xMjcuMC4wLjE6OSAoW1dpbkVycm9yIDEwMDYxXSBObyBjb25uZWN0aW9uIGNvdWxkIGJlIG1hZGUgYmVjYXVzZSB0aGUgdGFyZ2V0IG1hY2hpbmUgYWN0aXZlbHkgcmVmdXNlZCBpdCk7IGNoZWNrIGl0IHJ1bnMgKGBwc2V1ZG9saWZlLW1jcCBkb2N0b3JgKQ0K",
+   "exit": 0,
+   "stdout": "T3BlbiB0aGlzIGxpbmsgdG8gc2lnbiBpbiB0byB0aGUgQ29uc29sZToNCiAge0RBRU1PTn0vdWkvIy9zaWduaW4/Y29kZT1BQkNELTEyMzQNCk9yIHR5cGUgdGhlIGNvZGUgQUJDRC0xMjM0IGludG8gdGhlIENvbnNvbGUncyBzaWduLWluIGRpYWxvZyBhdCB7REFFTU9OfS91aS8uIEl0IHdvcmtzIG9uY2UsIHdpdGhpbiA1IG1pbnV0ZXMuDQo=",
+   "stderr": "cHNldWRvbGlmZS1tY3AgY29uc29sZTogbm8gYnJvd3NlciBvcGVuZWQ6IEJST1dTRVIgbXVzdCBuYW1lIGEgZHJpdmUtYWJzb2x1dGUgLmV4ZSwgbm90IGEgYmFyZSBuYW1lLCByZWxhdGl2ZSBwYXRoIG9yIHNjcmlwdDsgc2V0IEJST1dTRVIgdG8gYSBmdWxsIC5leGUgcGF0aCAocXVvdGUgcGF0aHMgd2l0aCBzcGFjZXMpLCBvciBvcGVuIHRoZSBwcmludGVkIGxpbmsgeW91cnNlbGYNCg==",
    "window": [
-    1794542845.4202342,
-    1794542847.8605604
+    1794852282.0197692,
+    1794852282.0556316
    ],
-   "arm": "python",
+   "requests": [
+    {
+     "method": "POST",
+     "target": "/api/console/link",
+     "headers": {
+      "accept-encoding": "identity",
+      "authorization": "Bearer console-fixture-token",
+      "connection": "close",
+      "content-length": "36",
+      "content-type": "application/json",
+      "host": "{DAEMON}",
+      "user-agent": "Python-urllib/3.11"
+     },
+     "body": "{\"origin\": \"{DAEMON}\"}"
+    }
+   ],
+   "arm": "rust",
    "files": {
     "bin": "dir",
     "cwd": "dir",
@@ -4697,6 +4780,74 @@
     "cwd": "dir"
    },
    "modes": {}
+  }
+ },
+ "recorded_from_candidate": {
+  "defer-browser-bare-name": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "defer-browser-batch": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "defer-browser-clone": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "defer-browser-standard-name": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "defer-browser-unless": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "defer-int-digits": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "open-generic": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "open-generic-name": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "open-missing-program": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "open-shlex-error": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
+  },
+  "open-whitespace-entry": {
+   "commit": "d1f81754ae556a3af86b760baf75f9c9a80a9898",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "971f4a9ec4d6545a18f791b1f0a97fe84bb33691c1d04e798ed76f367eeceb9c"
   }
  }
 }
