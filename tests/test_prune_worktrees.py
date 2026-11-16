@@ -1462,3 +1462,82 @@ def test_a_manifest_dir_env_dep_line_names_the_owner(env, targets_root):
     assert rc == 0, out
     assert not target.exists(), out
     assert "deleted-worktree" in env.ledger_lines()[0]["note"]
+
+
+# --- Codex review of the target, clone and scratch classes -----------------
+
+def test_a_clone_that_owns_linked_worktrees_is_kept(env):
+    """A linked worktree's detached commits and index live in the clone's
+    .git; deleting the clone would destroy them."""
+    clone = _clone(env, "has-linked")
+    linked = env.tmp / "linked-elsewhere"
+    _git(clone, "worktree", "add", "-q", "--detach", str(linked))
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists() and linked.exists()
+    assert "it owns linked worktrees" in out
+
+
+def test_a_clone_with_worktree_scoped_config_is_kept(env):
+    """git also loads .git/config.worktree under extensions.worktreeConfig;
+    a filter defined there would run during status."""
+    clone = _clone(env, "wt-config")
+    marker = env.tmp / "ran.txt"
+    _git(clone, "config", "extensions.worktreeConfig", "true")
+    _git(clone, "config", "--worktree", "filter.x.clean", f"touch {marker.as_posix()}")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists() and not marker.exists()
+    assert "worktree" in out and "kept" in out
+
+
+def test_a_clone_whose_work_tree_points_elsewhere_is_kept(env):
+    """core.worktree would make status inspect another dir, hiding an
+    untracked file that exists only in the candidate."""
+    clone = _clone(env, "moved-worktree")
+    elsewhere = _clone(env, "clean-elsewhere")
+    (clone / "only-copy.txt").write_text("unique\n", encoding="utf-8")
+    _git(clone, "config", "core.worktree", str(elsewhere))
+    _backdate(clone)
+    _backdate(elsewhere)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert (clone / "only-copy.txt").exists()
+    assert "core.worktree" in out
+
+
+def test_a_target_whose_dep_info_cannot_be_read_whole_is_kept(env, targets_root, monkeypatch):
+    """Every owner must be finished, so a dep-info file read only in part
+    keeps the target rather than judging it on the owners it saw."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "huge-dep-info", gone)
+    monkeypatch.setattr(prune, "DEP_INFO_MAX_BYTES", 10)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "its owners cannot all be read" in out
+
+
+def test_a_target_pinned_by_its_finished_owner_is_kept(env, targets_root):
+    clone = _clone(env, "pinning-owner")
+    target = _target(env, "pinned-by-owner", _src(clone))
+    (clone / "rust" / ".cargo").mkdir(parents=True)
+    (clone / "rust" / ".cargo" / "config.toml").write_text(
+        f"[build]\ntarget-dir = {json.dumps(str(target))}\n", encoding="utf-8")
+    _backdate(clone)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "pinned as target-dir" in out
+
+
+def test_scratch_waits_fourteen_days_by_default(env):
+    """Maintainer ruling of 16 November 2026: unmarked scratch goes after
+    14 days idle."""
+    ten_days = _scratch(env, "ten-days", age=time.time() - 10 * 86400)
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert ten_days.exists()
+    assert "grace 14" in out

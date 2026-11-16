@@ -624,14 +624,13 @@ CARGO_FILES = {"CACHEDIR.TAG", ".rustc_info.json"}
 HOUR = 3600.0
 DEFAULT_TARGET_GRACE_HOURS = 24.0
 DEFAULT_UNOWNED_TARGET_DAYS = 14.0
-DEFAULT_SCRATCH_GRACE_DAYS = 7.0
+DEFAULT_SCRATCH_GRACE_DAYS = 14.0   # maintainer ruling, 16 November 2026
 # Harness scratchpads hold registered worktrees and evidence; tool dirs
 # hold the programs a dev machine runs. A name may only ever keep: the
 # Windows dev VM's dry run (16 November 2026) would otherwise have offered
 # its .rustup toolchain and its bin dir as scratch.
 SCRATCH_KEEP_NAMES = {"claude", "bin", "scripts", "tools"}
 SCRATCH_LOG_SUFFIXES = (".log", ".jsonl")
-DEP_INFO_PER_DIR = 400              # newest dep-info files read per dir: more owners can only keep more
 DEP_INFO_MAX_BYTES = 4 * 1024 * 1024
 
 
@@ -759,32 +758,40 @@ def source_owner(src: str, target: str, tool_homes: list[str]) -> tuple[str, str
     return ("gone", missing) if missing is not None else None
 
 
-def target_owners(target: str, profiles: list[str]) -> dict[str, str]:
-    """Owner path -> "checkout" or "gone", read from the newest dep-info
-    files of each profile dir and its deps/."""
+def target_owners(target: str, profiles: list[str]) -> tuple[dict[str, str], str | None]:
+    """(owner path -> "checkout" or "gone", why discovery is incomplete),
+    read from every dep-info file of each profile dir and its deps/. Every
+    owner must be finished, so a file that cannot be read whole makes the
+    result incomplete and the target is kept."""
     homes = _tool_homes()
     owners: dict[str, str] = {}
+    incomplete = None
     for prof in profiles:
         for d in (prof, os.path.join(prof, "deps")):
             try:
                 with os.scandir(d) as it:
                     files = [e for e in it if e.name.endswith(".d")
                              and e.is_file(follow_symlinks=False)]
-            except OSError:
+            except OSError as exc:
+                if os.path.isdir(d):
+                    incomplete = f"cannot list {d}: {exc.strerror or exc}"
                 continue
-            files.sort(key=lambda e: e.stat(follow_symlinks=False).st_mtime, reverse=True)
-            for e in files[:DEP_INFO_PER_DIR]:
+            for e in files:
                 try:
                     with open(e.path, encoding="utf-8", errors="replace") as fh:
-                        text = fh.read(DEP_INFO_MAX_BYTES)
-                except OSError:
+                        text = fh.read(DEP_INFO_MAX_BYTES + 1)
+                except OSError as exc:
+                    incomplete = f"cannot read {e.path}: {exc.strerror or exc}"
+                    continue
+                if len(text) > DEP_INFO_MAX_BYTES:
+                    incomplete = f"{e.path} is too large to read whole"
                     continue
                 for token in _dep_tokens(text):
                     found = source_owner(token, target, homes)
                     if found:
                         kind, where = found
                         owners.setdefault(where, kind)
-    return owners
+    return owners, incomplete
 
 
 def _lock_held(lock_path: str) -> bool | None:
@@ -900,7 +907,17 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
         return v
     v.passed.append("no-build-lock")
     idle = now - v.newest
-    owners = target_owners(path, profiles)
+    owners, incomplete = target_owners(path, profiles)
+    if incomplete:
+        v.failure = f"its owners cannot all be read ({incomplete}); kept"
+        return v
+    # A finished owner's own .cargo/config.toml may still pin this target.
+    owner_pins = cargo_pins(sorted(o for o, k in owners.items() if k == "checkout"),
+                            exclude=[])
+    for pin, cfg in owner_pins.items():
+        if pin == UNREADABLE_PIN or is_under(pin, npath) or is_under(npath, pin):
+            v.failure = f"pinned as target-dir by {cfg}"
+            return v
     if owners:
         for owner, kind in sorted(owners.items()):
             if kind == "checkout":
@@ -970,19 +987,31 @@ def _clone_newest(path: str, s: Scan) -> float:
 _RUNS_PROGRAMS = re.compile(
     r"^(core\.fsmonitor|core\.hookspath|core\.sshcommand|core\.pager|core\.editor"
     r"|filter\..*|diff\..*\.(textconv|command)|merge\..*\.driver|include\.path"
-    r"|includeif\..*|credential\..*)$")
+    r"|includeif\..*|credential\..*|core\.worktree|extensions\.worktreeconfig)$")
 
 
 def clone_config_problem(path: str) -> str | None:
-    cfg = os.path.join(path, ".git", "config")
-    proc = subprocess.run(["git", "config", "--file", cfg, "--name-only", "--list"],
+    """Read (never run git in) the clone's own config files. A key under
+    which git runs a program, reads another file or looks at another dir
+    (core.worktree) keeps the clone; so does a worktree-scoped config file,
+    which git would also load."""
+    gitdir = os.path.join(path, ".git")
+    if os.path.lexists(os.path.join(gitdir, "config.worktree")):
+        return "it has a worktree-scoped git config (config.worktree); kept"
+    cfg = os.path.join(gitdir, "config")
+    proc = subprocess.run(["git", "config", "--file", cfg, "--null", "--list"],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=60)
     if proc.returncode:
         return f"its git config cannot be read: {proc.stderr.strip()}"
-    for key in proc.stdout.split():
-        if _RUNS_PROGRAMS.match(key.lower()):
-            return f"its git config sets {key}, which can run a program; kept"
+    for entry in proc.stdout.split("\0"):
+        key, _, value = entry.partition("\n")
+        key = key.strip().lower()
+        if not key:
+            continue
+        if _RUNS_PROGRAMS.match(key) or (key == "core.bare" and value.strip().lower()
+                                          in ("true", "yes", "on", "1")):
+            return f"its git config sets {key}, which can run a program or move git elsewhere; kept"
     return None
 
 
@@ -1000,6 +1029,18 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
         v.failure = problem
         return v
     v.passed.append("config-runs-nothing")
+    top = git(path, "rev-parse", "--show-toplevel")
+    if top.returncode or norm(top.stdout.strip()) != norm(path):
+        v.failure = f"git does not resolve its work tree to this dir ({top.stdout.strip() or top.stderr.strip()})"
+        return v
+    linked = git(path, "worktree", "list", "--porcelain")
+    if linked.returncode:
+        v.failure = f"cannot list its worktrees: {linked.stderr.strip()}"
+        return v
+    if sum(line.startswith("worktree ") for line in linked.stdout.splitlines()) > 1:
+        v.failure = "it owns linked worktrees, whose work lives in its .git"
+        return v
+    v.passed.append("no-linked-worktrees")
     marker = keep_marker(path)
     if marker:
         v.failure = marker
@@ -1444,7 +1485,9 @@ def run_sweep(args, cfg: dict) -> int:
     def current_pins() -> dict[str, str]:
         now_registered = [norm(w.path) for w in list_worktrees(repo)]
         places = sorted(set(now_registered + [norm(c) for r in wt_norm if os.path.isdir(r)
-                                              for c in _children(r)]))
+                                              for c in _children(r)]
+                            + [norm(c) for r in clone_norm for c in _children(r)
+                               if _real_dir(os.path.join(c, ".git"))]))
         return cargo_pins(places, exclude=[])
 
     pins = current_pins() if cache_norm else {}

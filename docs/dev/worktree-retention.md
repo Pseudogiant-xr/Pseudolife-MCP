@@ -143,8 +143,9 @@ deleted when all of these hold:
   name no owner, and neither do relative paths. rustc writes workspace
   sources relative to the workspace root; the absolute ones come from a
   top-level profile `.d` file and from `# env-dep:CARGO_MANIFEST_DIR=` lines,
-  which name a crate's dir exactly. The newest 400 dep-info files of each
-  dir are read: more owners can only keep more.
+  which name a crate's dir exactly. Every dep-info file is read; one that
+  cannot be read whole keeps the target, since every owner must be finished.
+  A finished owner's own `.cargo/config.toml` pin also keeps it.
 - **Grace:** nothing in it, file or dir, was written within
   `--target-grace-hours` (default 24).
 - **No owner found:** a target whose dep-info names no owner is deleted
@@ -178,9 +179,13 @@ worktree, is deleted (renamed aside, then removed) when all of these hold:
 - It holds no link, has no keep marker, and nothing in it was written for
   the worktree grace period.
 - No running process names it.
+- Git resolves its work tree to this very dir, and it owns no linked
+  worktree (their commits and index live in its `.git`).
 - Its own `.git/config` sets nothing under which git runs a program or
   reads another file (`core.fsmonitor`, `core.hooksPath`, filters, diff
-  textconv or command, merge drivers, `include`, `credential`). A clone
+  textconv or command, merge drivers, `include`, `credential`,
+  `core.worktree`, `core.bare = true`, `extensions.worktreeConfig`), and it
+  has no `config.worktree`. A clone
   that sets one is kept and never inspected further. Every git call the
   script makes also turns `core.fsmonitor` off.
 
@@ -191,7 +196,7 @@ The home dir may be a clone root for the same reason as a target root.
 Each direct child of a `--scratch-root` is deleted when all of these hold:
 
 - It has been idle (no file or dir written) for `--scratch-grace-days`
-  (default 7).
+  (default 14).
 - It holds no link.
 - No running process names it.
 - It holds nothing kept for ever: no `.git` (a checkout), no `pyvenv.cfg`
@@ -243,7 +248,7 @@ worktree_grace_days = 3
 cache_grace_days = 7
 target_grace_hours = 24
 unowned_target_days = 14
-scratch_grace_days = 7
+scratch_grace_days = 14
 ```
 
 A dir listed under both a cache root and a target root keeps the cache rule.
