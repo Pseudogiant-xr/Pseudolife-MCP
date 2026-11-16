@@ -2705,3 +2705,62 @@ def test_a_skipped_scratch_root_overlapping_another_root_refuses(env, tmp_path, 
     assert rc != 0, out
     assert target.exists()
     assert "is skipped but overlaps the root" in out
+
+
+# --- read-only Codex pass at 56f9fdc90 -----------------------------------------
+
+def test_a_binary_whose_name_differs_only_by_underscores_stays(env, targets_root):
+    """Cargo's own my-tool.exe makes my_tool.pdb its debug info, but a
+    my_tool.exe beside it is someone's copy, not cargo's output."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "underscore-copy", gone, age=None)
+    exe = target / "debug" / "my-tool.exe"
+    exe.write_bytes(b"cargo's")
+    (target / "debug" / "my-tool.d").write_text(f"{exe}: {gone}\n", encoding="utf-8")
+    (target / "debug" / "my_tool.exe").write_bytes(b"a kept candidate")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug" / "my_tool.exe").exists()
+    assert (target / "debug" / "deps" / "libthing.rlib").exists()
+
+
+def test_an_underscored_pdb_beside_a_hyphenated_exe_is_still_cargos(env, targets_root):
+    """The near miss: the debug info cargo names with underscores goes."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "underscore-pdb", gone, age=None)
+    exe = target / "debug" / "my-tool.exe"
+    exe.write_bytes(b"cargo's")
+    (target / "debug" / "my-tool.d").write_text(f"{exe}: {gone}\n", encoding="utf-8")
+    (target / "debug" / "my_tool.pdb").write_bytes(b"debug info")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+
+
+def test_a_deps_binary_copied_to_the_profile_top_with_its_d_stays(env, targets_root):
+    """A copy of deps/app-123.exe and its .d at the profile's top names an
+    output inside deps, not at the top, so the copy is not cargo's."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "deps-copy", gone, age=None)
+    inner = target / "debug" / "deps" / "app-123.exe"
+    inner.write_bytes(b"cargo's")
+    (target / "debug" / "app-123.exe").write_bytes(b"a kept candidate")
+    (target / "debug" / "app-123.d").write_text(f"{inner}: {gone}\n", encoding="utf-8")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug" / "app-123.exe").exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a FIFO")
+def test_a_fifo_at_a_profile_top_keeps_the_profile(env, targets_root):
+    """A FIFO or socket at the top is not a file cargo writes there."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "with-fifo", gone, age=None)
+    os.mkfifo(target / "debug" / "ipc")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert os.path.lexists(target / "debug" / "ipc")

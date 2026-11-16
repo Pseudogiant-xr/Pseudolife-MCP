@@ -251,8 +251,9 @@ deleted when all of these hold:
   - profile dirs (which carry `.fingerprint` or `.cargo-lock`), including
     their `deps`, `build`, `incremental`, `examples` and `.fingerprint`
     dirs and everything in those, and the files cargo writes at their top
-    (its lock, the outputs its own top-level dep-info names, and their debug
-    info and import libraries, `-` and `_` alike);
+    (its lock, the outputs its own top-level dep-info names at that top,
+    and their debug info and import libraries under the same name; only a
+    `.pdb` may take the underscored name of a hyphenated binary);
   - target-triple dirs of profiles.
 - A profile dir counts only when its own dep-info names outputs inside it.
   A copy (`cp -r release release-pr1234`, a kept candidate build) still
@@ -261,8 +262,9 @@ deleted when all of these hold:
   anything else, whatever its age: a copied `server-good.exe`, notes, a
   folder of saved results, a link, or a binary whose dep-info is missing.
   A top-level output counts as cargo's only when its dep-info's first path
-  is absolute and inside this profile, so a binary copied in together with
-  its `.d` file (which names the profile it was built in) stays too.
+  is absolute and names this profile's top, so a binary copied in together
+  with its `.d` file (which names another profile, or this one's `deps`)
+  stays too, as does a FIFO, socket or device file.
   A user's file deeper inside cargo's own dirs (`deps`, `build`,
   `incremental`, `examples`) goes with them.
 - `tmp`, `doc` and `package` stay. Cargo writes them (test temp files,

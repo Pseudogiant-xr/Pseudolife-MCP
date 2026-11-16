@@ -882,8 +882,11 @@ def _profile_user_file(prof: str) -> str | None:
     for e in listing:
         if e.is_symlink():
             return e.name
-        if e.is_dir(follow_symlinks=False) and e.name not in CARGO_PROFILE_DIRS:
-            return e.name + "/"
+        if e.is_dir(follow_symlinks=False):
+            if e.name not in CARGO_PROFILE_DIRS:
+                return e.name + "/"
+        elif not e.is_file(follow_symlinks=False):
+            return e.name                # a FIFO, socket or device
     entries = [e for e in listing if e.is_file(follow_symlinks=False)]
     forms = _both_forms(prof)
     for e in entries:
@@ -894,23 +897,24 @@ def _profile_user_file(prof: str) -> str | None:
             except OSError:
                 continue
             tokens = _dep_tokens(first)
-            # A binary copied in with its .d names the profile it was built
-            # in, so only an output this profile holds is cargo's here.
+            # A binary copied in with its .d names the dir it was built in
+            # (another profile, or this one's deps), so only an output at
+            # this profile's top is cargo's here.
             if tokens and os.path.isabs(tokens[0]):
                 out = os.path.normcase(os.path.normpath(tokens[0]))
-                if any(is_under(out, form) and out != form for form in forms):
+                if os.path.dirname(out) in forms:
                     outputs.add(os.path.basename(tokens[0]).lower())
-    stems = {_same_name(o.split(".", 1)[0]) for o in outputs}
+    stems = {o.split(".", 1)[0] for o in outputs}
     for e in entries:
         low = e.name.lower()
         if low == ".cargo-lock" or low in outputs:
             continue
-        if low.endswith(".d") and _same_name(low[:-2]) in stems | {
-                _same_name(o.split(".", 1)[0]) for o in outputs}:
-            continue
-        same = _same_name(low)
-        if any(same == stem + suffix or same == "lib" + stem + suffix
+        if any(low == stem + suffix or low == "lib" + stem + suffix
                for stem in stems for suffix in CARGO_OUTPUT_SUFFIXES):
+            continue
+        # Only debug info takes the underscored name of a hyphenated
+        # binary; a my_tool.exe beside my-tool.exe is someone's copy.
+        if low.endswith(".pdb") and _same_name(low[:-4]) in {_same_name(s) for s in stems}:
             continue
         return e.name
     return None
