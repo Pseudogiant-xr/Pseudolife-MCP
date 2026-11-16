@@ -203,8 +203,7 @@ fn security_distrust(
 /// `C:\x`, `\??\UNC\server\share` is `\\server\share` and
 /// `\??\Volume{...}\` is `\\?\Volume{...}\`. A relative symlink's name is
 /// returned as it is, for the caller to join to the link's folder. Any
-/// other form is returned as written, so that opening it fails and the path
-/// is refused rather than guessed at.
+/// other form is an error, so the path is refused rather than guessed at.
 fn reparse_target(entry: &File, tag: u32) -> io::Result<std::path::PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::System::IO::DeviceIoControl;
@@ -261,7 +260,14 @@ fn reparse_target(entry: &File, tag: u32) -> io::Result<std::path::PathBuf> {
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
-    Ok(target_path(&wide, relative).unwrap_or_else(|| std::ffi::OsString::from_wide(&wide).into()))
+    if relative {
+        return Ok(std::ffi::OsString::from_wide(&wide).into());
+    }
+    // An unrecognised form (an NT device path, say) is refused, never walked
+    // as written: a path Win32 reads differently from the kernel could leave
+    // the folders the link really crosses unchecked.
+    target_path(&wide, false)
+        .ok_or_else(|| io::Error::other("a link target in a form this client cannot check"))
 }
 
 /// [`reparse_target`]'s mapping of a substitute name, `None` to keep it as

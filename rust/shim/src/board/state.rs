@@ -630,9 +630,15 @@ fn private_dir_at(path: &Path, leaf: bool) -> Result<()> {
 /// `FILE_FLAG_OPEN_REPARSE_POINT`, unless `path` is a link: a private folder
 /// in whose place the private-path rule accepted a link is opened where the
 /// link leads, and any other reparse point is opened as itself (and refused).
+///
+/// The rule is applied again here, not taken from the caller's earlier
+/// check, so a link made in between (where the folder was missing then) is
+/// never followed unchecked.
 #[cfg(windows)]
 fn no_follow_unless_link(path: &Path) -> u32 {
-    if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+    if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+        && crate::private_path::check_path(path).is_ok()
+    {
         0
     } else {
         0x0020_0000
