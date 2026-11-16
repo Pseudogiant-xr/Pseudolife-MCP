@@ -1064,7 +1064,10 @@ fn a_permission_refusal_names_the_least_privilege_fix_and_never_root() {
             "{stderr}"
         );
     } else if cfg!(target_os = "macos") {
-        assert!(stderr.contains("logged in to the Tailscale app"), "{stderr}");
+        assert!(
+            stderr.contains("logged in to the Tailscale app"),
+            "{stderr}"
+        );
     } else {
         assert!(
             stderr.contains("operator once with `sudo tailscale set --operator=$USER`"),

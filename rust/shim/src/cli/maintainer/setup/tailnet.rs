@@ -1,5 +1,6 @@
 //! Tailscale HTTPS ownership checks and rollback of this command's serve.
 use super::{Args, Error, Result, SETUP, system};
+use crate::cli::expose::tailscale::permission_fix;
 use serde_json::{Value, json};
 use std::{ffi::OsString, path::PathBuf};
 
@@ -204,23 +205,6 @@ pub(super) async fn off(ts: &Tailnet, https: u16) -> bool {
         .await
         .code
         == 0
-}
-/// The fix for a user Tailscale does not let change its serve config, by OS.
-/// Forwarding a port needs neither root nor an Administrator console
-/// (Tailscale's Serve documentation, "Limitations"); what it needs is a user
-/// Tailscale trusts. On Linux that is its operator, a grant made once with
-/// one privileged command; on Windows and macOS it is the account that owns
-/// the Tailscale configuration, and there is no grant to give another one.
-fn permission_fix(os: &str) -> &'static str {
-    match os {
-        "windows" => {
-            "run it as the Windows user that owns this device's Tailscale configuration (the one signed in to the Tailscale app, or the one that turned on unattended mode)"
-        }
-        "macos" => "run it as the macOS user logged in to the Tailscale app",
-        _ => {
-            "make this user Tailscale's operator once with `sudo tailscale set --operator=$USER` (the one privileged step; after it this user changes serves without sudo)"
-        }
-    }
 }
 pub(super) async fn serve(ts: &Tailnet, https: u16, port: u16) -> Result<()> {
     let output = call(
