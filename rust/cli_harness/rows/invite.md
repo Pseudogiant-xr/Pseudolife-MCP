@@ -8,14 +8,15 @@ Oracle: `pseudolife_memory/invite_cli.py`, `principal_store.py`, `principals.py`
 ## Canonical shapes (implemented)
 
 - `invite <name> [--tier T] [--board|--no-board] [--expires D] [--someone-else|--mine] [--replace] [--url U] [--port P] [--bank FP] [--json]` (v59: `--someone-else` / `--mine` set `owned`, refused before any write on a bank before v59 (`prev59` seed); a re-invite without either keeps it; on a paired row either alone changes ownership with no code; the report's `owned` member and the `for a machine that is not yours, add --someone-else (an older pseudolife-mcp refuses it: update it first)` note when neither is given, the row is the owner's and the bank has the column; one text however invite was run, since a host CLI one release behind forwards a plain invite into the daemon container exactly as a direct run looks (cases `invite-v021-forward*`: v0.21.0's argv, no `PSEUDOLIFE_DAEMON_EXEC`; `invite-forwarded`: with `PSEUDOLIFE_DAEMON_EXEC` set, as a current host CLI forwards))
-- `invite --list [--bank FP] [--json]` (v59: the owner column and its two footer lines, `-` unknown, JSON `owner`; deferred where a `config.yaml` could hold `coordination.not_owner_principals`, `PSEUDOLIFE_MCP_CONFIG` included)
+- `invite --list [--bank FP] [--json]` (v59: the owner column and its two footer lines, `-` unknown, JSON `owner`; reads `coordination.not_owner_principals` from the selected config, including `PSEUDOLIFE_MCP_CONFIG`)
 - `invite --revoke <name> [--yes] [--bank FP] [--json]`
 - `invite --version-check` (the Docker path's image probe: `pseudolife-mcp invite 1` then `pseudolife-mcp invite 2`, line 1 first for host CLIs before v59 that read only the start; the probe takes the highest line that is exactly `pseudolife-mcp invite <N>` (universal newlines: `\r\n`, then a lone `\r`, read as `\n`, then split on `\n` only; `N` ASCII digits that fit a u64), and `--someone-else` / `--mine` need 2; a forwarded invite carries only options an image from #1154 parses; with the daemon container stopped, `--list` shows an environment row's owner as unknown, `-` and JSON `null`, since the stopped daemon's `coordination.not_owner_principals` is not this host's)
 
 Producers: `docs/guide/remote-bank.md` "Adding a machine", `docs/guide/agent-isolation.md`
-step 4, the installers' help text. Each option at most once, its value the
-next argument; the name may sit anywhere among the options (argparse's single
-optional positional). The bank is reached only through a non-empty
+step 4, the installers' help text. Values may be the next argument or use
+`--option=value`; repeated flags are accepted, and repeated value options use
+the last value. Conflicting ownership or board flags are refused. The name
+may sit anywhere among the options; `--` ends option parsing. The bank is reached only through a non-empty
 `PSEUDOLIFE_MCP_DATABASE_URL` the shared native client admits.
 
 ## Exact contract items
@@ -49,39 +50,25 @@ optional positional). The bank is reached only through a non-empty
 - The HTTP request headers other than the target (User-Agent, Accept,
   Connection): the daemon reads none of them on `/health`.
 
-## Deferred before any effect
+## Native refusals
 
-An invite makes one request (`GET /health`). Everything that can still
-defer runs before it: the session is opened and set up, and `prepare` reads
-the `principals` / `meta` column types and the database clock, so nothing
-after the request can meet a value this client cannot decode or a date it
-cannot print. List and revoke make no request.
+There is no Python fallback. Argument errors name the parameter and its repair,
+without echoing its value. Invalid expiry/port values, token or tier maps,
+non-Unicode input, unsupported DSN/TLS policy, connection failures, incompatible
+schema/row values, and unprintable timestamps receive native errors. An explicit
+`--port` overrides an unused environment default. `--url` must be an ASCII
+HTTP(S) origin without credentials, path, query or fragment; the existing empty
+value and `<daemon-url>` placeholder remain supported.
 
-- The lite tier's embedded bank remains outside this transport slice: without a database URL or daemon container, native invite refuses instead of opening the embedded bank.
-- A DSN the shared client does not admit, or a connection it cannot open or
-  set up. The oracle asks `/health` first and then prints `could not connect
-  to the bank's database (<Class>)`, exit 1 (or the health refusal, when
-  that comes first); the candidate defers before any request (harness case
-  `defer-refused-login`: no request).
-- A `principals` / `meta` column of another type than the v53 DDL's, or a
-  database clock outside 1970..9999 less two days (an invite only).
-- Argparse's errors (help is a canonical 80-column snapshot),
-  repeated options, `--opt=value`, abbreviations, values that start with `-`,
-  `PSEUDOLIFE_MCP_PORT` / `--port` / `--expires` spellings other than ASCII
-  digits (and the unit), a port outside 1..65535.
-- Token or tier maps that would log a warning (malformed, duplicate, reserved
-  principal) or hold non-ASCII text.
-- A list time outside 1970-01-01..9999-12-31 (glibc prints a year before
-  1000 unpadded, Windows' `gmtime` refuses negative times: the oracle's own
-  answer depends on the host), or a non-finite one.
+Connection, session, schema and clock checks precede invite writes. Returned
+rows are decoded before COMMIT. List output is assembled before printing, so
+an invalid timestamp produces no partial list. Unsupported TLS policies stay
+refused; diagnostics never recommend dropping required verification. The lite
+bank continues to require migration to the supported daemon installation.
 
-## Declared divergences
-
-- The native session runs `RESET lock_timeout` after the shared client's
-  5 s setting, so a lock wait ends at the 10 s statement timeout as in Python
-  (`QueryCanceled`, exit 1).
-- A failure of the session settings (`SET`) themselves: Python raises it
-  uncaught; the candidate defers (it happens before any request).
+`test_pairing_native.py` exercises isolated PostgreSQL schemas, read-only
+refusals, secret-free diagnostics, and nearby valid inputs. The Rust pairing
+contract covers argument forms, URLs, token cleanup and the hash-only request.
 
 ## Harness instruments
 
@@ -94,8 +81,8 @@ cannot print. List and revoke make no request.
 
 ## Hosted CI and goldens
 
-Both Parity lanes run the row live on the disposable PostgreSQL the lease
-step provisions, and against `goldens/invite.<os>.json`. No tailscale or
+Required lanes replay `goldens/invite.<os>.json`; the native PostgreSQL tests
+use the disposable server the existing lease harness step provisions. No tailscale or
 docker can be reached on a runner either: `PATH` stays inside the home and
 the Windows Program Files default (`ProgramW6432\Tailscale`) is moved into
 it, and core's program preflight proves both before every arm. Rule
@@ -103,10 +90,10 @@ it, and core's program preflight proves both before every arm. Rule
 loads; each arm records it, and only `port <p>`, `127.0.0.1:<p>` and
 `localhost:<p>` with that exact value become `<port>` in the streams.
 
-The 39 cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
+The cases in `LIVE_ONLY` (`invite.py`) show the seeded principals in
 their output or bank dump. The oracle's writers stamp those rows with the
 wall clock and draw their codes and tokens at random in every harness
-process, so the cases run live only (`Case.golden` False).
+process, so those historical cases are excluded from golden replay (`Case.golden` False).
 The goldens hold the other 86. A `/health` with more than 100 brackets
 open at once is "not the daemon" in both arms (`expose_cli._json`'s bound,
 2026-11-13); before it, one nested past CPython's recursion limit killed

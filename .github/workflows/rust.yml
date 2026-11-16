@@ -1187,7 +1187,7 @@ jobs:
         run: |
           $binaryName = if ($IsWindows) { 'pseudolife-stdio.exe' } else { 'pseudolife-stdio' }
           $candidate = (Resolve-Path (Join-Path 'rust/target/release' $binaryName)).Path
-          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-lease-operator-differential-harness.xml')
+          python -m pytest -q -p no:cacheprovider rust/cli_harness/test_lease_operator.py rust/cli_harness/test_lease_transport.py rust/cli_harness/test_pairing_native.py -ra --durations=30 --junitxml (Join-Path $env:RUNNER_TEMP 'junit/cli-lease-operator-differential-harness.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/cli_harness --row lease_operator --golden --candidate $candidate -v --out (Join-Path $env:RUNNER_TEMP 'cli-harness-lease-operator.json')
           exit $LASTEXITCODE

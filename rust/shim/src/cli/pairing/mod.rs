@@ -32,14 +32,33 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::process::ExitCode;
 
-/// A shape or state this candidate does not answer; raised only before any
-/// effect, so the dispatcher's deferral line is the whole outcome.
-#[derive(Debug)]
-pub(super) struct Defer;
+/// A diagnostic assembled from trusted text, never from a code, DSN or URL.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Refusal {
+    message: &'static str,
+    exit: u8,
+}
 
-/// Run `invite` or `pair`; `None` defers to the dispatcher's deferral line.
+impl Refusal {
+    const fn new(message: &'static str) -> Self {
+        Self { message, exit: 4 }
+    }
+    const fn usage(message: &'static str) -> Self {
+        Self { message, exit: 2 }
+    }
+}
+
+/// Both pairing commands always answer natively, including setup failures.
 pub(super) fn run(mode: &str) -> Option<ExitCode> {
+    if !matches!(mode, "invite" | "pair") {
+        return None;
+    }
     let arguments: Vec<OsString> = std::env::args_os().skip(2).collect();
+    let json = arguments.iter().any(|arg| arg == "--json");
+    let emit = |error: Refusal| match mode {
+        "invite" => invite::refusal(error, json),
+        _ => pair::refusal(error, json),
+    };
     if arguments
         .iter()
         .take_while(|arg| *arg != "--")
@@ -53,11 +72,16 @@ pub(super) fn run(mode: &str) -> Option<ExitCode> {
         print(text.replace("\r\n", "\n").trim_end_matches('\n'));
         return Some(ExitCode::SUCCESS);
     }
-    let arguments = arguments
+    let Some(arguments) = arguments
         .into_iter()
         .map(|argument| argument.into_string().ok())
-        .collect::<Option<Vec<String>>>()?;
-    let mode = mode.to_owned();
+        .collect::<Option<Vec<String>>>()
+    else {
+        return Some(ExitCode::from(emit(Refusal::usage(
+            "an argument is not valid Unicode; supply UTF-8 arguments (use --read-code for a pairing code)",
+        ))));
+    };
+    let worker_mode = mode.to_owned();
     // A daemon answer may nest up to CPython's recursion limit (~1000
     // levels); cloning, comparing and dropping such a value recurses that
     // deep, past a debug build's 1 MiB main-thread stack.
@@ -67,18 +91,19 @@ pub(super) fn run(mode: &str) -> Option<ExitCode> {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .ok()?;
-            let code = runtime.block_on(async {
-                match mode.as_str() {
+                .map_err(|_| Refusal::new("the pairing I/O runtime could not start; free operating-system resources and retry"))?;
+            runtime.block_on(async {
+                match worker_mode.as_str() {
                     "invite" => invite::run(&arguments).await,
-                    "pair" => pair::run(&arguments).await,
-                    _ => Err(Defer),
+                    _ => pair::run(&arguments).await,
                 }
-            });
-            code.ok()
-        })
-        .ok()?;
-    worker.join().ok().flatten().map(ExitCode::from)
+            })
+        });
+    let result = match worker {
+        Ok(worker) => worker.join().unwrap_or(Err(Refusal::new("the pairing worker stopped unexpectedly; inspect invite --list and any local token file before retrying"))),
+        Err(_) => Err(Refusal::new("the pairing worker could not start; free operating-system resources and retry")),
+    };
+    Some(ExitCode::from(result.unwrap_or_else(emit)))
 }
 
 /// `print(text)`: stdout as Python's text stream writes it. A stdout that
@@ -130,12 +155,12 @@ fn sha256_hex(value: &str) -> String {
 
 /// `count` bytes from the operating system's CSPRNG (the TLS stack's own
 /// source), as `secrets` draws from `os.urandom`.
-fn random_bytes(count: usize) -> Result<Vec<u8>, Defer> {
+fn random_bytes(count: usize) -> Result<Vec<u8>, Refusal> {
     let mut buffer = vec![0; count];
     rustls::crypto::aws_lc_rs::default_provider()
         .secure_random
         .fill(&mut buffer)
-        .map_err(|_| Defer)?;
+        .map_err(|_| Refusal::new("the operating-system random source could not generate a pairing secret; restore the system random source before retrying"))?;
     Ok(buffer)
 }
 
