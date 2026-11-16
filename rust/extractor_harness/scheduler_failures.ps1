@@ -855,6 +855,9 @@ if ($Case -eq 'CustomLauncherRemoval') {
     return
 } elseif ($Case -eq 'DisabledReinstall') {
     if ($caught -or -not $global:r6enabled -or -not $global:r6fixtureTask.Settings.Enabled -or $global:r6registered -or $global:r6deleteAttempts -or $global:r6stoppedPids.Count) { throw "healthy disabled task was not enabled without restart: $caught" }
+    # It changed something, so it says what, never "nothing changed".
+    if ($global:r6hostText -notlike "*Native claude shim autostart '$taskName' was disabled and is enabled again; it already serves these settings on port 12345.*" -or
+        $global:r6hostText -like '*nothing changed*') { throw "a re-enabled task was not reported as re-enabled: $global:r6hostText" }
     Write-Output "$Case passed without real scheduler operations"
     return
 } elseif ($Case -in @('QueryFailure','QueryAccessDenied','QueryNamedAbsent')) {
