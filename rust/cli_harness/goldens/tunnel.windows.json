@@ -1019,11 +1019,47 @@
    "stdout": "eyJwcm9maWxlIjogImRvdCIsICJzdGF0ZSI6ICJyZWFkeSIsICJjYXRhbG9nIjogImN1cnJlbnQiLCAicHJpdmF0ZV9rZXlfcHJlc2VudCI6IGZhbHNlLCAia2V5X2V4cGlyeSI6IHsia25vd24iOiBmYWxzZSwgImV4cGlyZWQiOiBudWxsfSwgInJ1bnRpbWUiOiB7InJ1bm5pbmciOiBmYWxzZSwgInByb2ZpbGUiOiAiZG90IiwgInJlYWR5IjogZmFsc2UsICJrZXlfZXhwaXJ5IjogInVua25vd24ifSwgImNsb3VkIjogeyJ2ZXJpZmllZCI6IGZhbHNlLCAic3VjY2Vzc2Z1bF9jYWxscyI6IDAsICJjaGFsbGVuZ2VfY3VycmVudCI6IGZhbHNlfSwgInVwZGF0ZSI6IHsic3RhdGUiOiAibm9uZSIsICJuZWVkc19hdHRlbnRpb24iOiBmYWxzZX19DQo=",
    "stderr": "",
    "window": [
-    1791586033.6719975,
-    1791586034.3697557
+    1794807445.2586458,
+    1794807445.3382773
    ],
    "requests": [],
-   "arm": "python",
+   "arm": "rust",
+   "before": {
+    "cwd": "dir",
+    "real-dir": "dir",
+    "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
+    "tunnels": "dir",
+    "real-dir/challenge.json": "file:eyJub25jZSI6ICIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZiIsICJpZGVudGl0eSI6ICJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwgImNyZWF0ZWQiOiAxLjB9",
+    "tunnels/dot-verification": "dir",
+    "tunnels/dot.profile.json": "file:ewogICJuYW1lIjogImRvdCIsCiAgImRhZW1vbl91cmwiOiAie0RBRU1PTn0iLAogICJ0b2tlbl9maWxlIjogIntIT01FfVxcdG9rZW4iLAogICJ0dW5uZWxfaWQiOiAidHVubmVsXzAxMjMiLAogICJvcmdhbml6YXRpb25faWQiOiBudWxsLAogICJzdGF0ZSI6ICJyZWFkeSIsCiAgImNvbnNlbnQiOiB0cnVlLAogICJhdXRvc3RhcnRfY29uc2VudCI6IGZhbHNlLAogICJydW50aW1lX3ZlcnNpb24iOiBudWxsLAogICJtaW5pbXVtX2NhdGFsb2ciOiAiY3VycmVudCIsCiAgInJ1bnRpbWVfa2V5X2V4cGlyZXNfYXQiOiBudWxsLAogICJjbG91ZF92ZXJpZmljYXRpb25fZmlsZSI6IG51bGwKfQ==",
+    "tunnels/dot-verification/challenge.json": "file:eyJub25jZSI6ICIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZiIsICJpZGVudGl0eSI6ICJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwgImNyZWF0ZWQiOiAxLjB9"
+   },
+   "before_modes": {},
+   "dpapi_fixture": [],
+   "files": {
+    "cwd": "dir",
+    "real-dir": "dir",
+    "token": "file:Zml4dHVyZS1kYWVtb24tdG9rZW4=",
+    "tunnels": "dir",
+    "real-dir/challenge.json": "file:eyJub25jZSI6ICIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZiIsICJpZGVudGl0eSI6ICJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwgImNyZWF0ZWQiOiAxLjB9",
+    "tunnels/dot-verification": "dir",
+    "tunnels/dot.profile.json": "file:ewogICJuYW1lIjogImRvdCIsCiAgImRhZW1vbl91cmwiOiAie0RBRU1PTn0iLAogICJ0b2tlbl9maWxlIjogIntIT01FfVxcdG9rZW4iLAogICJ0dW5uZWxfaWQiOiAidHVubmVsXzAxMjMiLAogICJvcmdhbml6YXRpb25faWQiOiBudWxsLAogICJzdGF0ZSI6ICJyZWFkeSIsCiAgImNvbnNlbnQiOiB0cnVlLAogICJhdXRvc3RhcnRfY29uc2VudCI6IGZhbHNlLAogICJydW50aW1lX3ZlcnNpb24iOiBudWxsLAogICJtaW5pbXVtX2NhdGFsb2ciOiAiY3VycmVudCIsCiAgInJ1bnRpbWVfa2V5X2V4cGlyZXNfYXQiOiBudWxsLAogICJjbG91ZF92ZXJpZmljYXRpb25fZmlsZSI6IG51bGwKfQ==",
+    "tunnels/dot-verification/challenge.json": "file:eyJub25jZSI6ICIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZiIsICJpZGVudGl0eSI6ICJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwgImNyZWF0ZWQiOiAxLjB9"
+   },
+   "modes": {}
+  },
+  "status-challenge-junction-replaceable": {
+   "home": null,
+   "utc_offset": 39600,
+   "exit": 0,
+   "stdout": "eyJwcm9maWxlIjogImRvdCIsICJzdGF0ZSI6ICJyZWFkeSIsICJjYXRhbG9nIjogImN1cnJlbnQiLCAicHJpdmF0ZV9rZXlfcHJlc2VudCI6IGZhbHNlLCAia2V5X2V4cGlyeSI6IHsia25vd24iOiBmYWxzZSwgImV4cGlyZWQiOiBudWxsfSwgInJ1bnRpbWUiOiB7InJ1bm5pbmciOiBmYWxzZSwgInByb2ZpbGUiOiAiZG90IiwgInJlYWR5IjogZmFsc2UsICJrZXlfZXhwaXJ5IjogInVua25vd24ifSwgImNsb3VkIjogeyJ2ZXJpZmllZCI6IGZhbHNlLCAic3VjY2Vzc2Z1bF9jYWxscyI6IDAsICJjaGFsbGVuZ2VfY3VycmVudCI6IGZhbHNlfSwgInVwZGF0ZSI6IHsic3RhdGUiOiAibm9uZSIsICJuZWVkc19hdHRlbnRpb24iOiBmYWxzZX19DQo=",
+   "stderr": "cHNldWRvbGlmZS1tY3Aga2VlcHMgcHJpdmF0ZSBmaWxlcyBvbmx5IGJlaGluZCBsaW5rcyBubyBvdGhlciBhY2NvdW50IGNhbiBjaGFuZ2UsIGFuZCBOVCBBVVRIT1JJVFlcQXV0aGVudGljYXRlZCBVc2VycyBtYXkgZGVsZXRlIG9yIHJld3JpdGUgdGhlIGxpbmsge0hPTUV9XHR1bm5lbHNcZG90LXZlcmlmaWNhdGlvbjsgZml4OiByZXBsYWNlIHRoZSBsaW5rIHdpdGggYSBmb2xkZXIgeW91IG93biBhbmQgbW92ZSB3aGF0IGl0IGxlZCB0byB0aGVyZS4NCg==",
+   "window": [
+    1794807447.0186331,
+    1794807447.0811687
+   ],
+   "requests": [],
+   "arm": "rust",
    "before": {
     "cwd": "dir",
     "deep-dir": "dir",
@@ -3190,6 +3226,18 @@
   }
  },
  "recorded_from_candidate": {
+  "status-challenge-junction": {
+   "commit": "cf9550e1173cbee2fa583c66692b86382986dd1f",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "21f7b4e7b39f6c0beaf6baf3e17280d7d03ffff80f1bc903d1a31c0fe4f4e5a1"
+  },
+  "status-challenge-junction-replaceable": {
+   "commit": "cf9550e1173cbee2fa583c66692b86382986dd1f",
+   "rust_tree": "clean",
+   "platform": "windows",
+   "candidate_sha256": "21f7b4e7b39f6c0beaf6baf3e17280d7d03ffff80f1bc903d1a31c0fe4f4e5a1"
+  },
   "status-dpapi-key": {
    "commit": "08de4375e75270ec0e479a6b099bd74239e77f2c",
    "rust_tree": "clean",
