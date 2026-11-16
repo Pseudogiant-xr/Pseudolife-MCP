@@ -10,6 +10,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// How long each output pipe may stay open once the child has exited or been
+/// killed. An exiting child's own ends of its pipes close with it, so a
+/// healthy child's last bytes arrive at once; this bounds only a descendant
+/// that inherited the pipes and still holds them. It is a fixed budget of its
+/// own, not whatever is left of the child's: a loaded machine that delivers
+/// the last bytes late cannot trip it, only a pipe still open this long after
+/// the exit can.
+const PIPE_DRAIN: Duration = Duration::from_secs(10);
+
 /// Waits until `child` exits, closing its stdin first as `Child::wait` does.
 /// Past `budget` it kills and reaps the child, then panics naming `what`.
 #[allow(dead_code)] // Not every importer waits on a child it holds itself.
@@ -37,10 +46,9 @@ fn wait_until(child: &mut Child, budget: Duration, what: &str) -> Result<ExitSta
 }
 
 /// `Command::output` with a deadline: stdin is closed and stdout and stderr
-/// are captured, as `output` does. The child must exit, and its pipes close,
-/// within `budget`.
+/// are captured, as `output` does. The child must exit within `budget`, and
+/// its pipes close within PIPE_DRAIN after that.
 pub fn output_within(command: &mut Command, budget: Duration, what: &str) -> Output {
-    let started = Instant::now();
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -55,18 +63,16 @@ pub fn output_within(command: &mut Command, budget: Duration, what: &str) -> Out
             // The killed child's stderr says where it was, unless a
             // descendant still holds the pipe.
             let printed = stderr
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(PIPE_DRAIN)
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
                 .unwrap_or_else(|_| "(stderr still held open by a descendant)".into());
             panic!("{error}; its stderr:\n{printed}");
         }
     };
     let collect = |pipe: mpsc::Receiver<Vec<u8>>, name: &str| {
-        let remaining = budget.saturating_sub(started.elapsed());
-        pipe.recv_timeout(remaining.max(Duration::from_millis(100)))
-            .unwrap_or_else(|_| {
-                panic!("{what} exited, but a descendant kept its {name} open past {budget:?}")
-            })
+        pipe.recv_timeout(PIPE_DRAIN).unwrap_or_else(|_| {
+            panic!("{what} exited, but a descendant kept its {name} open for {PIPE_DRAIN:?} after")
+        })
     };
     Output {
         status,
