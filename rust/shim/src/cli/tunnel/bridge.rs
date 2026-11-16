@@ -2,8 +2,8 @@
 //!
 //! The bridge runs this runtime's own stdio shim (`<this executable> shim`)
 //! as its child, pointed at the profile's daemon with the profile's token
-//! file, and relays the newline-framed JSON-RPC both ways unchanged. It adds
-//! two duties on top of the relay:
+//! file, and relays the newline-framed JSON-RPC both ways. It adds two duties
+//! on top of the relay:
 //!
 //! - **Receipts.** A successful `memory_search` (query) or `memory_agents`
 //!   `list` (project) call whose text carries this profile's pending
@@ -11,20 +11,22 @@
 //!   owner-only, after its answer has been relayed. Nothing else does.
 //! - **Catalog gate.** With `minimum_catalog: full`, each `tools/list` is
 //!   held until `memory_toolset` reports the full tier (expanding at most
-//!   twice); otherwise the catalog is served as the daemon sets it.
+//!   twice), or refused; the gate's own calls and answers never reach the
+//!   client. Otherwise every line crosses unchanged and in order.
 //!
 //! What the bridge trusts: the profile named on its command line, as the
 //! owner-only store holds it, and the store's owner-only files (the saved
 //! challenge). What it does not: anything in the MCP stream. A nonce there is
 //! only compared with the saved challenge, never run or used to build a
 //! path; a receipt's name and fields come from the saved challenge. The
-//! bridge prints no token, key or nonce, and its child never inherits a
-//! token or daemon address from the bridge's own environment.
+//! bridge prints no token, key or nonce, and its child gets only the
+//! environment named in [`INHERITED`] plus what the profile sets.
 //!
 //! A receipt's `identity` is the challenge's, copied: this bridge checks the
 //! profile it serves is unchanged since it started, but there is no native
 //! launch identity yet to compare with the challenge's, so a reader must not
-//! take the field as proof of which launch answered until one exists.
+//! take the field as proof of which launch answered until one exists. No
+//! launcher may start this bridge for real until it checks one.
 use std::{
     collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
@@ -39,52 +41,116 @@ use std::{
 };
 
 use serde_json::{Map, Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::{Fail, store, syntax};
 
 const USAGE: &str = "tunnel shim is started by the tunnel runtime, not by hand: it needs --profile <name>, and --profile-dir <directory> for a store other than the default";
-const NOT_READY: &str =
-    "tunnel profile is not ready; finish `pseudolife-mcp tunnel setup` before its bridge can start";
-const UNREADABLE: &str =
-    "tunnel profile cannot be read safely; `pseudolife-mcp tunnel status` names the cause";
 const NO_SHIM: &str =
     "tunnel bridge could not start the stdio shim; check this install with `pseudolife-mcp doctor`";
+const SHIM_SILENT: &str = "tunnel bridge: the stdio shim exited before it answered; check the profile's daemon and this install with `pseudolife-mcp doctor`";
 const RECEIPT_FAILED: &str = "tunnel bridge: a verification receipt could not be saved; the session continues, and `pseudolife-mcp tunnel verify` can be repeated";
+const SATURATED: &str = "tunnel bridge: too many requests are unanswered to check verification calls safely; this session writes no more receipts, and a new session can verify";
+const LINE_TOO_LONG: &str =
+    "tunnel bridge: a message longer than 32 MiB arrived, so the session was ended";
+/// Changed on purpose from the Python bridge's "run pseudolife-mcp tunnel
+/// doctor": the native client has no `tunnel doctor` yet.
 const DISCOVERY_FAILED: &str =
     "Full tool discovery unavailable; run pseudolife-mcp doctor on the tunnel host.";
 
-/// What the child shim must not inherit from the bridge's environment: any
-/// `PSEUDOLIFE_MCP_TOKEN*` (a token, a token file, a daemon's token list),
-/// any daemon address, and the vendor's own API key. Everything else is
-/// inherited: the shim also reads its home, state folders, TLS and proxy
-/// settings and timeouts from the environment, and an allowlist would drop
-/// one a user relies on without a word. Names compare without case, as
-/// Windows compares them.
-fn dropped(name: &OsStr) -> bool {
-    let name = name.to_string_lossy().to_ascii_uppercase();
-    name.starts_with("PSEUDOLIFE_MCP_TOKEN")
-        || name == "PSEUDOLIFE_MCP_DAEMON_URL"
-        || name == "OPENAI_API_KEY"
+/// The only names the child shim inherits from the bridge's environment
+/// (compared without case on Windows, as Windows compares them). With no
+/// native launcher in front of it yet, the bridge is the one layer between
+/// whoever started the vendor and a shim the remote side drives, so a
+/// token, a daemon address, a board identity or a session handle never
+/// crosses: only what the shim needs to find its folders and reach its
+/// daemon.
+const INHERITED: &[&str] = &[
+    // The allowlist Python's tunnel runtime gave the vendor.
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HOME",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "LANG",
+    "LC_ALL",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    // Home on Windows without USERPROFILE, and `~user` paths
+    // (credentials::expand_user).
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERNAME",
+    // The runtime and data folders the shim resolves (lifecycle.rs,
+    // runtime/launch.rs): without them the child would pin another layout.
+    "XDG_DATA_HOME",
+    "PSEUDOLIFE_SHIM_RUNTIMES",
+    "PSEUDOLIFE_SHIM_LAUNCHER",
+    // Where this user's clients live, read by the unattended client update
+    // the shim may start (runtime/registrations.rs).
+    "XDG_CONFIG_HOME",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "PIPX_HOME",
+    "PYTHONUSERBASE",
+    // The per-call deadline a user may have set (upstream.rs).
+    "PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS",
+    // A proxy for an https daemon on another host. A profile's plain http
+    // daemon is always loopback, so HTTP_PROXY and ALL_PROXY never cross:
+    // the bearer is never handed to a proxy for a local daemon.
+    "HTTPS_PROXY",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy",
+];
+
+fn inherited(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    INHERITED.iter().any(|allowed| {
+        if cfg!(windows) {
+            allowed.eq_ignore_ascii_case(name)
+        } else {
+            *allowed == name
+        }
+    })
 }
 
 /// A JSON-RPC message the observer and the gate parse; larger lines are
 /// relayed but never parsed.
 const PARSE_LIMIT: usize = 4 * 1024 * 1024;
+/// The longest line the bridge relays. The daemon refuses an MCP request
+/// body over 4 MiB (`daemon/src/mcp/mod.rs`, `BODY_LIMIT`), so no request it
+/// would answer is longer; eight times that leaves room for long answers
+/// while one endless line can never grow the bridge's memory past it.
+const LINE_LIMIT: usize = 32 * 1024 * 1024;
 /// Calls awaiting their answer, client requests in flight, and `tools/list`
 /// requests held by the gate.
 const PENDING_LIMIT: usize = 256;
 const IN_FLIGHT_LIMIT: usize = 1024;
 const HELD_LIMIT: usize = 64;
+/// The longest string id the observer tracks, and the longest argument it
+/// keeps for a verification call: the verify prompt sends only the nonce.
+const ID_LIMIT: usize = 1024;
+const SUPPLIED_LIMIT: usize = 64 * 1024;
 /// How long a held `tools/list` waits for the catalog before it is refused.
 const GATE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the child shim gets to exit once its input closed.
 const CHILD_EXIT: Duration = Duration::from_secs(5);
-/// How long the relay outlives the client's leaving: past a held listing's
-/// wait and the shim's exit above. It bounds a shim that never takes its
-/// input and a client that stopped reading without closing.
+/// How long the relay outlives the client's input ending or its output
+/// failing: past a held listing's wait and the shim's exit above. It bounds
+/// a shim that never takes its input and a client that left without
+/// reading. The process then drains for up to CHILD_EXIT and waits as long
+/// for the child before killing it: about 40 s in all.
 const CLIENT_GONE: Duration = Duration::from_secs(30);
 /// How long the shim may take none of its waiting input before it is
 /// treated as hung and the session ends. A working shim reads its input
@@ -124,44 +190,69 @@ struct Start {
     profile: store::Profile,
 }
 
-fn prepare(values: &[OsString]) -> Result<Start, &'static str> {
+fn prepare(values: &[OsString]) -> Result<Start, String> {
     let (name, directory) = parse(values).ok_or(USAGE)?;
     let root = store::store_root(directory.as_deref()).map_err(|_| store::UNSAFE_ROOT)?;
+    let status = format!("`pseudolife-mcp tunnel status --profile {name}` names the cause");
     let profile = match store::load(&root, &name) {
         Ok(profile) => profile,
-        Err(Fail::Tunnel(message)) => return Err(message),
-        Err(Fail::Defer) => return Err(UNREADABLE),
+        Err(Fail::Tunnel(message)) => return Err(format!("{message}; {status}")),
+        Err(Fail::Defer) => return Err(format!("tunnel profile cannot be read safely; {status}")),
     };
     // A ready profile carries the user's consent and a tunnel identifier
     // (store::validate refuses one without them).
     if profile.state != "ready" {
-        return Err(NOT_READY);
+        return Err(format!(
+            "tunnel profile is not ready; finish `pseudolife-mcp tunnel setup --profile {name}` before its bridge can start"
+        ));
+    }
+    // The profile's store admits an https address with a path; the shim
+    // takes only an origin, and would exit without a word.
+    if crate::daemon_url::validate(&profile.daemon_url).is_err() {
+        return Err(format!(
+            "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs; set one with `pseudolife-mcp tunnel setup --profile {name} --daemon-url <origin>`"
+        ));
     }
     Ok(Start { root, profile })
 }
 
-/// The child's environment: the names of `inherited` it must not see, then
-/// what is set from the profile.
-fn child_environment(
+/// The child shim, as the bridge starts it: `<executable> shim`, the
+/// allowlisted part of `environment`, then the profile's daemon and token
+/// file, no daemon start and the tunnel's writer id; piped input and output,
+/// no stderr (the vendor may not drain a second stream, and the shim's
+/// diagnostics are for local clients), and on Windows no window.
+fn child_command(
+    executable: &Path,
     profile: &store::Profile,
-    inherited: impl Iterator<Item = OsString>,
-) -> (Vec<OsString>, [(&'static str, String); 3]) {
-    (
-        inherited.filter(|name| dropped(name)).collect(),
-        [
-            ("PSEUDOLIFE_MCP_DAEMON_URL", profile.daemon_url.clone()),
-            ("PSEUDOLIFE_MCP_TOKEN_FILE", profile.token_file.clone()),
-            // The bridge serves a daemon that already runs; it starts none.
-            ("PSEUDOLIFE_MCP_NO_SPAWN", "1".to_owned()),
-        ],
-    )
+    environment: impl Iterator<Item = (OsString, OsString)>,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(executable);
+    command.arg("shim").env_clear();
+    for (name, value) in environment.filter(|(name, _)| inherited(name)) {
+        command.env(name, value);
+    }
+    command
+        .env("PSEUDOLIFE_MCP_DAEMON_URL", &profile.daemon_url)
+        .env("PSEUDOLIFE_MCP_TOKEN_FILE", &profile.token_file)
+        // The bridge serves a daemon that already runs; it starts none.
+        .env("PSEUDOLIFE_MCP_NO_SPAWN", "1")
+        // As the Python runtime set it: the tunnel's calls are its own.
+        .env("PSEUDOLIFE_WRITER_ID", "tunnel")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(window_flag());
+    }
+    command
 }
 
 /// `CREATE_NO_WINDOW` for the child when this process has no console (the
 /// vendor starts the bridge with pipes only), so the console child never
 /// opens a window; with a console the child shares it. The pattern of
-/// `restore_cli/child_window.rs`, kept here so tunnel does not import
-/// restore_cli's private module.
+/// `restore_cli/child_window.rs`, kept here until that helper is shared.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 fn window_flag() -> u32 {
@@ -205,29 +296,16 @@ async fn serve(start: Start) -> ExitCode {
         crate::stderrln!("{NO_SHIM}");
         return ExitCode::FAILURE;
     };
-    let mut command = tokio::process::Command::new(executable);
-    command.arg("shim");
-    let (dropped, set) =
-        child_environment(&start.profile, std::env::vars_os().map(|(name, _)| name));
-    for key in dropped {
-        command.env_remove(key);
-    }
-    #[cfg(windows)]
-    command.creation_flags(window_flag());
-    for (key, value) in set {
-        command.env(key, value);
-    }
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        // The vendor may not drain a second stream; the shim's diagnostics
-        // are for local clients, not the cloud session.
-        .stderr(Stdio::null())
-        // The child never outlives the bridge: on a normal exit it is
-        // waited for or killed here, and if the bridge itself is killed the
-        // OS closes the bridge's end of the child's input, the only other
-        // handle to it, and the shim ends on that EOF.
-        .kill_on_drop(true);
+    let mut command = tokio::process::Command::from(child_command(
+        &executable,
+        &start.profile,
+        std::env::vars_os(),
+    ));
+    // The child never outlives the bridge: on a normal exit it is waited
+    // for or killed here, and if the bridge itself is killed the OS closes
+    // the bridge's end of the child's input, the only other handle to it,
+    // and the shim ends on that EOF.
+    command.kill_on_drop(true);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => {
@@ -246,7 +324,7 @@ async fn serve(start: Start) -> ExitCode {
         private_sink(),
     );
     let gate = Gate::new(start.profile.catalog == "full");
-    let _ = relay(
+    let relayed = relay(
         tokio::io::stdin(),
         tokio::io::stdout(),
         shim_in,
@@ -255,18 +333,70 @@ async fn serve(start: Start) -> ExitCode {
         gate,
     )
     .await;
-    match tokio::time::timeout(CHILD_EXIT, child.wait()).await {
-        Ok(Ok(status)) => ExitCode::from(
-            status
-                .code()
-                .and_then(|c| u8::try_from(c).ok())
-                .unwrap_or(1),
-        ),
+    let spoke = match relayed {
+        Ok(spoke) => spoke,
+        Err(error) => {
+            if error.kind() == std::io::ErrorKind::InvalidData {
+                crate::stderrln!("{LINE_TOO_LONG}");
+            }
+            true
+        }
+    };
+    let code = match tokio::time::timeout(CHILD_EXIT, child.wait()).await {
+        Ok(Ok(status)) => status
+            .code()
+            .and_then(|c| u8::try_from(c).ok())
+            .unwrap_or(1),
         _ => {
             let _ = child.kill().await;
-            ExitCode::FAILURE
+            1
+        }
+    };
+    if let Some(note) = silent_exit(code, spoke) {
+        crate::stderrln!("{note}");
+    }
+    ExitCode::from(code)
+}
+
+/// What to say when the shim exits with a failure before it wrote a line:
+/// its own stderr is not kept, so this is the only word the vendor gets.
+fn silent_exit(code: u8, spoke: bool) -> Option<&'static str> {
+    (code != 0 && !spoke).then_some(SHIM_SILENT)
+}
+
+/// Reads one line into `buffer`, never past `LINE_LIMIT`. Cancel-safe: a
+/// partly read line stays in `buffer` for the next call.
+async fn read_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    buffer: &mut Vec<u8>,
+) -> std::io::Result<Read> {
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(Read::End);
+        }
+        let (taken, ended) = match available.iter().position(|byte| *byte == b'\n') {
+            Some(at) => (at + 1, true),
+            None => (available.len(), false),
+        };
+        buffer.extend_from_slice(&available[..taken]);
+        reader.consume(taken);
+        if buffer.len() > LINE_LIMIT {
+            return Ok(Read::TooLong);
+        }
+        if ended {
+            return Ok(Read::Line);
         }
     }
+}
+
+/// What one [`read_line`] found.
+enum Read {
+    Line,
+    /// The end of the stream; `buffer` may hold a last line without its
+    /// newline.
+    End,
+    TooLong,
 }
 
 /// What the client's writer is handed: a line to write, or a verification
@@ -288,6 +418,10 @@ struct Relay {
     shim_closed: CancellationToken,
     /// The shim's output ended: everything else stops.
     stopping: CancellationToken,
+    /// The shim wrote at least one line.
+    shim_spoke: AtomicBool,
+    /// A line longer than LINE_LIMIT arrived on either side.
+    too_long: AtomicBool,
 }
 
 impl Relay {
@@ -325,9 +459,10 @@ impl Relay {
 }
 
 /// Relay the client's lines to the shim and the shim's lines to the client,
-/// byte for byte, until the shim's output ends. The observer only reads; the
-/// gate holds or answers `tools/list` when it is enabled, and otherwise
-/// passes every line through.
+/// byte for byte, until the shim's output ends; whether the shim wrote a
+/// line. The observer only reads; the gate holds or answers `tools/list`
+/// when it is enabled, and otherwise passes every line through. A line over
+/// LINE_LIMIT on either side ends the session (`InvalidData`).
 ///
 /// Each direction has its own reader, writer and bounded queue, so each
 /// pushes back only on its own source: a shim that is not reading its input
@@ -343,7 +478,7 @@ pub(super) async fn relay<CI, CO, SI, SO>(
     shim_out: SO,
     observer: Option<Observer>,
     gate: Gate,
-) -> std::io::Result<()>
+) -> std::io::Result<bool>
 where
     CI: AsyncRead + Unpin,
     CO: AsyncWrite + Unpin,
@@ -356,6 +491,8 @@ where
         client_ended: CancellationToken::new(),
         shim_closed: CancellationToken::new(),
         stopping: CancellationToken::new(),
+        shim_spoke: AtomicBool::new(false),
+        too_long: AtomicBool::new(false),
     };
     let (to_client, client_queue) = mpsc::channel(QUEUE);
     let (to_shim, shim_queue) = mpsc::channel(QUEUE);
@@ -388,7 +525,10 @@ where
         // What is queued is written, unless a side stopped reading for good.
         let _ = tokio::time::timeout(CHILD_EXIT, &mut rest).await;
     }
-    result
+    if relay.too_long.load(Ordering::SeqCst) {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+    }
+    result.map(|()| relay.shim_spoke.load(Ordering::SeqCst))
 }
 
 /// The client's lines, to the shim (or answered by the gate).
@@ -403,13 +543,21 @@ async fn inbound<CI: AsyncRead + Unpin>(
     let mut buffer = Vec::new();
     'read: loop {
         let read = tokio::select! {
-            read = reader.read_until(b'\n', &mut buffer) => read,
+            read = read_line(&mut reader, &mut buffer) => read,
             () = relay.client_ended.cancelled() => break,
             () = relay.stopping.cancelled() => break,
         };
-        // A read that adds nothing is the end of the stream, even when an
-        // earlier, cancelled read left an unended last line in the buffer.
-        let ended = !matches!(read, Ok(n) if n > 0);
+        let ended = match read {
+            Ok(Read::Line) => false,
+            // The end of the stream may leave a last line without its
+            // newline, even one an interrupted read began.
+            Ok(Read::End) | Err(_) => true,
+            Ok(Read::TooLong) => {
+                relay.too_long.store(true, Ordering::SeqCst);
+                relay.stopping.cancel();
+                break;
+            }
+        };
         let line = std::mem::take(&mut buffer);
         if !line.is_empty() {
             let message = message(&line);
@@ -479,16 +627,21 @@ async fn outbound<SO: AsyncRead + Unpin>(
         let deadline = relay.lock().1.deadline;
         let mut done = None;
         let actions = tokio::select! {
-            read = reader.read_until(b'\n', &mut buffer) => {
+            read = read_line(&mut reader, &mut buffer) => {
                 match read {
-                    Ok(n) if n > 0 => {}
-                    Ok(_) => done = Some(Ok(())),
+                    Ok(Read::Line) => {}
+                    Ok(Read::End) => done = Some(Ok(())),
                     Err(error) => done = Some(Err(error)),
+                    Ok(Read::TooLong) => {
+                        relay.too_long.store(true, Ordering::SeqCst);
+                        return Ok(());
+                    }
                 }
                 let line = std::mem::take(&mut buffer);
                 if line.is_empty() {
                     Vec::new()
                 } else {
+                    relay.shim_spoke.store(true, Ordering::SeqCst);
                     let message = message(&line);
                     let actions = relay.lock().1.outbound(line, message.as_ref());
                     relay.gate_changed.notify_waiters();
@@ -615,7 +768,8 @@ enum Id {
 
 fn identifier(message: &Map<String, Value>) -> Option<Id> {
     match message.get("id")? {
-        Value::String(text) => Some(Id::Text(text.clone())),
+        // A longer id is never tracked, so never credited.
+        Value::String(text) if text.len() <= ID_LIMIT => Some(Id::Text(text.clone())),
         Value::Number(number) => number
             .as_i64()
             .map(i128::from)
@@ -779,19 +933,29 @@ fn private_sink() -> Sink {
 #[derive(Clone)]
 pub(super) struct Reporter {
     said: Arc<AtomicBool>,
+    said_saturated: Arc<AtomicBool>,
     say: fn(&str),
 }
 
 impl Reporter {
     fn stderr() -> Self {
+        Self::new(|line| crate::stderrln!("{line}"))
+    }
+    fn new(say: fn(&str)) -> Self {
         Self {
             said: Arc::default(),
-            say: |line| crate::stderrln!("{line}"),
+            said_saturated: Arc::default(),
+            say,
         }
     }
     fn failed(&self) {
         if !self.said.swap(true, Ordering::SeqCst) {
             (self.say)(RECEIPT_FAILED);
+        }
+    }
+    fn saturated(&self) {
+        if !self.said_saturated.swap(true, Ordering::SeqCst) {
+            (self.say)(SATURATED);
         }
     }
 }
@@ -811,6 +975,9 @@ pub(super) struct Observer {
     /// Every client request id not yet answered: a verification call
     /// sent under an id already in flight is never credited.
     in_flight: HashSet<Id>,
+    /// More than IN_FLIGHT_LIMIT requests were unanswered at once, so the
+    /// in-flight check can no longer be trusted: no more receipts.
+    saturated: bool,
     reporter: Reporter,
     sink: Sink,
 }
@@ -822,6 +989,7 @@ impl Observer {
             binding: Binding::of(profile),
             pending: HashMap::new(),
             in_flight: HashSet::new(),
+            saturated: false,
             reporter,
             sink,
         }
@@ -836,9 +1004,16 @@ impl Observer {
         let Some(id) = identifier(message) else {
             return;
         };
+        if self.saturated {
+            return;
+        }
         if self.in_flight.len() >= IN_FLIGHT_LIMIT {
-            // Requests a client cancelled are never answered; forget them.
-            self.in_flight.clear();
+            // Some ids may never be answered (a cancelled request, say), but
+            // forgetting them would let one be reused unseen: fail closed.
+            self.saturated = true;
+            self.pending.clear();
+            self.reporter.saturated();
+            return;
         }
         // A reused id makes either answer ambiguous: neither call is
         // credited.
@@ -866,7 +1041,7 @@ impl Observer {
         let Some(Value::String(supplied)) = supplied else {
             return;
         };
-        if nonce_shaped(supplied) {
+        if supplied.len() <= SUPPLIED_LIMIT && nonce_shaped(supplied) {
             self.pending.insert(
                 id,
                 Call {
@@ -881,7 +1056,7 @@ impl Observer {
     /// A shim answer: the proof to settle, when it answers a remembered
     /// call with a success.
     fn response(&mut self, message: &Map<String, Value>) -> Option<Proof> {
-        if message.contains_key("method") {
+        if message.contains_key("method") || self.saturated {
             return None;
         }
         let id = identifier(message)?;

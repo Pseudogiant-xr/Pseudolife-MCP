@@ -248,7 +248,10 @@ fn the_hidden_bridge_refuses_plainly_without_what_it_needs() {
         &home,
         &["shim", "--profile", "dot", "--profile-dir", &dir],
         &[],
-        UNAVAILABLE,
+        &format!(
+            "{}; `pseudolife-mcp tunnel status --profile dot` names the cause\n",
+            UNAVAILABLE.trim_end()
+        ),
     );
 }
 
@@ -378,6 +381,68 @@ mod seeded {
             &home.path(&format!("tunnels/{name}.profile.json")),
             body.as_bytes(),
         );
+    }
+
+    /// The bridge for real: it starts the native shim as its child, which
+    /// answers `initialize` on its own (the profile's daemon, port 9, is
+    /// down) and ends when the client's input does. The child talks to the
+    /// profile's daemon, never to the address in the caller's environment
+    /// (the listener, which stays untouched), and nothing reaches stderr.
+    #[test]
+    fn the_bridge_serves_through_the_native_shim_and_the_profiles_daemon() {
+        use std::io::{BufRead, BufReader, Write};
+        let home = Home::new();
+        let dir = home.dir();
+        profile(&home, "dot", true);
+        let listener = Listener::new();
+        let mut command = command(&home, &listener);
+        command
+            .args(["shim", "--profile", "dot", "--profile-dir", &dir])
+            .env(
+                "PSEUDOLIFE_MCP_TOKEN",
+                "an-ambient-token-the-child-never-sees",
+            )
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"contract\",\"version\":\"1\"}}}\n")
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (sender, answer) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            let _ = BufReader::new(stdout).read_line(&mut line);
+            let _ = sender.send(line);
+        });
+        let line = answer
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("the bridge answered initialize");
+        let answer: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(answer["id"], 1, "{line}");
+        assert_eq!(
+            answer["result"]["serverInfo"]["name"], "pseudolife-memory",
+            "{line}"
+        );
+        drop(stdin);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("the bridge outlived its client");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        let mut stderr = String::new();
+        std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+        assert_eq!(status.code(), Some(0), "{stderr}");
+        assert!(stderr.is_empty(), "{stderr}");
+        listener.assert_untouched();
     }
 
     #[test]

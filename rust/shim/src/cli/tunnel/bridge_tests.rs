@@ -2,6 +2,7 @@
 //! the stdio shim, so nothing is spawned and no socket or daemon is used.
 use super::*;
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::io::{AsyncReadExt, DuplexStream, duplex};
 
@@ -71,10 +72,7 @@ impl Drop for Store {
 /// Counts the reporter's lines instead of printing them.
 static REPORTED: Mutex<usize> = Mutex::new(0);
 fn counting_reporter() -> Reporter {
-    Reporter {
-        said: Arc::default(),
-        say: |_| *REPORTED.lock().unwrap() += 1,
-    }
+    Reporter::new(|_| *REPORTED.lock().unwrap() += 1)
 }
 
 /// A sink that records each receipt instead of writing it.
@@ -823,6 +821,301 @@ async fn a_shim_that_takes_no_input_is_given_up_on() {
     drop((client_reader, fake_reader, fake_writer));
 }
 
+/// A success answer the remote side writes on stdin is relayed to the shim
+/// like any line; it never reaches the observer, so it proves nothing.
+#[tokio::test]
+async fn a_success_forged_on_stdin_proves_nothing() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let recorder = Recorder::default();
+    let request = format!("{}{}", search(1, NONCE), success(&json!(1)));
+    let (_, received) = session(
+        request.as_bytes(),
+        Some(observer(&store, "dot", recorder.sink())),
+        Gate::new(false),
+        Box::new(|m: &Map<String, Value>| {
+            // The shim refuses the search itself.
+            if m.contains_key("method") {
+                vec![format!("{}\n", json!({"jsonrpc": "2.0", "id": m["id"], "error": {"code": -32603, "message": "x"}}))]
+            } else {
+                Vec::new()
+            }
+        }),
+    )
+    .await;
+    assert_eq!(received, request.as_bytes());
+    assert!(recorder.written().is_empty());
+}
+
+/// An answer that cannot be written to the client writes no receipt.
+#[tokio::test]
+async fn an_answer_the_client_never_got_proves_nothing() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let recorder = Recorder::default();
+    let mut w = wired(
+        1 << 16,
+        Some(observer(&store, "dot", recorder.sink())),
+        Gate::new(false),
+    );
+    drop(w.client_reader);
+    w.client_writer
+        .write_all(search(1, NONCE).as_bytes())
+        .await
+        .unwrap();
+    line_of(&mut w.fake_reader).await;
+    w.fake_writer
+        .write_all(success(&json!(1)).as_bytes())
+        .await
+        .unwrap();
+    let mut rest = Vec::new();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        w.fake_reader.read_to_end(&mut rest),
+    )
+    .await
+    .expect("the shim's input closed")
+    .unwrap();
+    drop(w.fake_writer);
+    tokio::time::timeout(Duration::from_secs(30), w.relayed)
+        .await
+        .expect("the relay ended")
+        .unwrap()
+        .unwrap();
+    drop(w.client_writer);
+    assert!(recorder.written().is_empty());
+}
+
+/// A line too long to parse crosses unchanged and is never credited.
+#[tokio::test]
+async fn a_line_too_long_to_parse_crosses_and_proves_nothing() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let recorder = Recorder::default();
+    let padded = call(
+        json!(1),
+        "memory_search",
+        json!({"query": NONCE, "pad": "p".repeat(PARSE_LIMIT)}),
+    );
+    let (_, received) = session(
+        padded.as_bytes(),
+        Some(observer(&store, "dot", recorder.sink())),
+        Gate::new(false),
+        Box::new(|_: &Map<String, Value>| vec![success(&json!(1))]),
+    )
+    .await;
+    assert_eq!(received, padded.as_bytes());
+    assert!(recorder.written().is_empty());
+}
+
+/// A line past LINE_LIMIT ends the session, from either side, before it is
+/// relayed or held whole.
+#[tokio::test]
+async fn a_line_past_the_limit_ends_the_session() {
+    // From the client, with no newline ever.
+    let mut w = wired(1 << 16, None, Gate::new(false));
+    let writing = tokio::spawn(async move {
+        let chunk = vec![b'x'; 1 << 16];
+        for _ in 0..(LINE_LIMIT / chunk.len() + 2) {
+            if w.client_writer.write_all(&chunk).await.is_err() {
+                break;
+            }
+        }
+        w.client_writer
+    });
+    let ended = tokio::time::timeout(Duration::from_secs(60), w.relayed)
+        .await
+        .expect("the relay ended")
+        .unwrap();
+    assert_eq!(ended.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    let mut received = Vec::new();
+    w.fake_reader.read_to_end(&mut received).await.unwrap();
+    assert!(received.is_empty(), "part of the line was relayed");
+    drop(writing.await.unwrap());
+    // From the shim.
+    let mut w = wired(1 << 16, None, Gate::new(false));
+    let writing = tokio::spawn(async move {
+        let chunk = vec![b'y'; 1 << 16];
+        for _ in 0..(LINE_LIMIT / chunk.len() + 2) {
+            if w.fake_writer.write_all(&chunk).await.is_err() {
+                break;
+            }
+        }
+        w.fake_writer
+    });
+    let ended = tokio::time::timeout(Duration::from_secs(60), w.relayed)
+        .await
+        .expect("the relay ended")
+        .unwrap();
+    assert_eq!(ended.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    let mut out = Vec::new();
+    w.client_reader.read_to_end(&mut out).await.unwrap();
+    assert!(out.is_empty(), "part of the line was relayed");
+    drop(writing.await.unwrap());
+    drop(w.client_writer);
+}
+
+fn as_map(line: &str) -> Map<String, Value> {
+    message(line.as_bytes()).unwrap()
+}
+
+/// Past IN_FLIGHT_LIMIT unanswered requests the observer stops crediting
+/// for good: an id still unanswered from before can then never vouch for a
+/// nonce call sent under it.
+#[test]
+fn crossing_the_in_flight_limit_fails_closed() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let before = *REPORTED.lock().unwrap();
+    let mut observer = observer(&store, "dot", Recorder::default().sink());
+    observer.request(&as_map(&search(7, "plain")));
+    for n in 0..IN_FLIGHT_LIMIT as u64 {
+        observer.request(&as_map(&search(1000 + n, "plain")));
+    }
+    observer.request(&as_map(&search(7, NONCE)));
+    assert!(observer.response(&as_map(&success(&json!(7)))).is_none());
+    // Nor any later call, however fresh its id.
+    observer.request(&as_map(&search(99_999, NONCE)));
+    assert!(
+        observer
+            .response(&as_map(&success(&json!(99_999))))
+            .is_none()
+    );
+    assert!(
+        *REPORTED.lock().unwrap() > before,
+        "saturation was not reported"
+    );
+}
+
+/// What the observer keeps is bounded: a long id is never tracked and a
+/// long argument is never recorded.
+#[test]
+fn long_ids_and_long_arguments_are_never_credited() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let mut observer = observer(&store, "dot", Recorder::default().sink());
+    let long_id = json!("i".repeat(ID_LIMIT + 1));
+    observer.request(&as_map(&call(
+        long_id.clone(),
+        "memory_search",
+        json!({"query": NONCE}),
+    )));
+    assert!(observer.response(&as_map(&success(&long_id))).is_none());
+    let long_query = format!("{NONCE}{}", " ".repeat(SUPPLIED_LIMIT));
+    observer.request(&as_map(&search(1, &long_query)));
+    assert!(observer.response(&as_map(&success(&json!(1)))).is_none());
+    // The same calls within the bounds are credited.
+    observer.request(&as_map(&call(
+        json!("i"),
+        "memory_search",
+        json!({"query": NONCE}),
+    )));
+    assert!(observer.response(&as_map(&success(&json!("i")))).is_some());
+}
+
+/// A profile whose tunnel or organization changed since the bridge started,
+/// or that is no longer ready, writes nothing.
+#[tokio::test]
+async fn a_profile_changed_in_any_bound_field_writes_nothing() {
+    for change in ["tunnel_id", "organization_id", "token_file", "not ready"] {
+        let store = Store::new();
+        store.profile("dot");
+        store.challenge("dot", NONCE, now() - 5.0);
+        let mut started = store.load("dot");
+        match change {
+            "tunnel_id" => started.tunnel_id = Some("tunnel_ffff".into()),
+            "organization_id" => started.organization_id = Some("org-other".into()),
+            "token_file" => started.token_file = "/elsewhere/token".into(),
+            _ => {
+                // The saved profile is pending now: no longer ready.
+                std::fs::remove_file(store.0.join("dot.profile.json")).unwrap();
+                let token = serde_json::to_string(&store.0.join("token")).unwrap();
+                store.put(
+                    "dot.profile.json",
+                    format!("{{\"name\": \"dot\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}}}").as_bytes(),
+                );
+            }
+        }
+        let recorder = Recorder::default();
+        session(
+            search(1, NONCE).as_bytes(),
+            Some(Observer::new(
+                store.0.clone(),
+                &started,
+                counting_reporter(),
+                recorder.sink(),
+            )),
+            Gate::new(false),
+            succeeding(),
+        )
+        .await;
+        assert!(recorder.written().is_empty(), "{change}");
+    }
+}
+
+/// With the gate on, everything but the held listing crosses unchanged and
+/// in order, both ways; the gate's own call and answer never reach the
+/// client.
+#[tokio::test]
+async fn traffic_is_byte_identical_with_the_gate_on() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let lines = [
+        "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"t\",\"version\":\"1\"}}}\r\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+        "not json at all\n",
+        "{\"jsonrpc\": \"2.0\", \"id\": \"p\", \"method\": \"ping\"}\n",
+    ];
+    let list = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n";
+    let sent: String = lines.iter().copied().chain([list]).collect();
+    let mut script = toolset("full", log.clone());
+    let (out, received) = session(
+        sent.as_bytes(),
+        None,
+        Gate::new(true),
+        Box::new(move |m: &Map<String, Value>| {
+            let mut answers = script(m);
+            if m.get("method").and_then(Value::as_str) == Some("notifications/initialized") {
+                answers =
+                    vec!["{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\r\n".into()];
+            }
+            answers
+        }),
+    )
+    .await;
+    // The shim got the client's lines in order, then the gate's check, then
+    // the listing it held.
+    let received = String::from_utf8(received).unwrap();
+    let before: String = lines.concat();
+    assert!(received.starts_with(&before), "{received}");
+    let rest = &received[before.len()..];
+    let (check, held) = rest.split_once('\n').unwrap();
+    assert_eq!(
+        message(check.as_bytes()).unwrap()["params"]["name"],
+        "memory_toolset"
+    );
+    assert_eq!(held, list);
+    // The client got the shim's answers unchanged, the gate's never.
+    let answer = |id: Value| {
+        format!(
+            "{}\n",
+            json!({"jsonrpc": "2.0", "id": id, "result": {"tools": [], "tier": "full"}})
+        )
+    };
+    let expected = format!(
+        "{}{}{}{}",
+        answer(json!(0)),
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\r\n",
+        answer(json!("p")),
+        answer(json!(1)),
+    );
+    assert_eq!(String::from_utf8(out).unwrap(), expected);
+}
+
 /// A fake daemon's toolset: answers `memory_toolset` status and expand from
 /// `tier`, records the order of what it is asked, and answers the rest.
 fn toolset(start: &'static str, log: Arc<Mutex<Vec<String>>>) -> Script {
@@ -961,39 +1254,106 @@ fn the_gates_own_ids_are_refused_from_the_client() {
 }
 
 #[test]
-fn the_child_never_inherits_a_token_or_daemon_address() {
+fn the_child_gets_only_its_allowlist_and_the_profiles_connection() {
     let store = Store::new();
     store.profile("dot");
-    let inherited = [
-        "PSEUDOLIFE_MCP_TOKEN",
-        "PSEUDOLIFE_MCP_TOKEN_FILE",
-        "PSEUDOLIFE_MCP_TOKENS",
-        "pseudolife_mcp_token_file",
-        "PSEUDOLIFE_MCP_TOKEN_SOMETHING_NEW",
-        "PSEUDOLIFE_MCP_DAEMON_URL",
-        "OPENAI_API_KEY",
-        // Kept: what the shim reads for its home, state and timeouts.
-        "HOME",
-        "PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS",
-        "PSEUDOLIFE_WRITER_ID",
-        "SSL_CERT_FILE",
+    // What a coding session's shell might carry when it starts the vendor.
+    let parent = [
+        ("PSEUDOLIFE_MCP_TOKEN", "secret"),
+        ("PSEUDOLIFE_MCP_TOKEN_FILE", "/elsewhere/token"),
+        ("PSEUDOLIFE_MCP_TOKENS", "a:b"),
+        ("pseudolife_mcp_token_file", "/elsewhere/token"),
+        ("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:1"),
+        ("OPENAI_API_KEY", "sk-fixture"),
+        ("PSEUDOLIFE_CODEX_SERVER_TOKEN", "codex-secret"),
+        ("PSEUDOLIFE_CODEX_SERVER_URL", "http://127.0.0.1:2"),
+        ("PSEUDOLIFE_AGENT_STATE", "/elsewhere/state"),
+        ("PSEUDOLIFE_AGENT_STATE_DIR", "/elsewhere/agent"),
+        ("PSEUDOLIFE_AGENT_LABEL", "someone-else"),
+        ("PSEUDOLIFE_AGENT_PROJECT", "elsewhere"),
+        ("PSEUDOLIFE_AGENT_TASK", "theirs"),
+        ("CLAUDE_CODE_SESSION_ID", "their-session"),
+        ("PSEUDOLIFE_WRITER_ID", "their-writer"),
+        ("PSEUDOLIFE_MCP_SERVE_COMMAND", "[\"x\"]"),
+        ("PSEUDOLIFE_HOOK_PROBE_MS", "9"),
+        ("HTTP_PROXY", "http://proxy.example.com"),
+        ("ALL_PROXY", "http://proxy.example.com"),
+        // Kept: what the shim needs to find its folders and reach its daemon.
+        ("HOME", "/home/fixture"),
+        ("PATH", "/usr/bin"),
+        ("XDG_DATA_HOME", "/home/fixture/.local/share"),
+        ("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "120"),
+        ("HTTPS_PROXY", "http://proxy.example.com"),
+        ("SSL_CERT_FILE", "/etc/ssl/cert.pem"),
     ];
-    let (dropped, set) =
-        child_environment(&store.load("dot"), inherited.iter().map(OsString::from));
-    let expected: Vec<OsString> = inherited[..7].iter().map(OsString::from).collect();
-    assert_eq!(dropped, expected);
-    let token = store.0.join("token");
-    assert_eq!(
-        set.to_vec(),
-        [
-            ("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9".to_owned()),
-            (
-                "PSEUDOLIFE_MCP_TOKEN_FILE",
-                token.to_str().unwrap().to_owned()
-            ),
-            ("PSEUDOLIFE_MCP_NO_SPAWN", "1".to_owned()),
-        ]
+    let executable = Path::new("/opt/runtime/pseudolife-stdio");
+    let command = child_command(
+        executable,
+        &store.load("dot"),
+        parent
+            .iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value))),
     );
+    assert_eq!(command.get_program(), executable);
+    assert_eq!(command.get_args().collect::<Vec<_>>(), ["shim"]);
+    let child: HashMap<String, String> = command
+        .get_envs()
+        .filter_map(|(name, value)| Some((name.to_str()?.to_owned(), value?.to_str()?.to_owned())))
+        .collect();
+    let token = store.0.join("token");
+    let mut expected: HashMap<String, String> = [
+        ("HOME", "/home/fixture"),
+        ("PATH", "/usr/bin"),
+        ("XDG_DATA_HOME", "/home/fixture/.local/share"),
+        ("PSEUDOLIFE_MCP_PROXY_TIMEOUT_SECONDS", "120"),
+        ("HTTPS_PROXY", "http://proxy.example.com"),
+        ("SSL_CERT_FILE", "/etc/ssl/cert.pem"),
+        ("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:9"),
+        ("PSEUDOLIFE_MCP_NO_SPAWN", "1"),
+        ("PSEUDOLIFE_WRITER_ID", "tunnel"),
+    ]
+    .iter()
+    .map(|(name, value)| (name.to_string(), value.to_string()))
+    .collect();
+    expected.insert(
+        "PSEUDOLIFE_MCP_TOKEN_FILE".into(),
+        token.to_str().unwrap().into(),
+    );
+    // On Windows names compare without case: one entry per name.
+    let child: HashMap<String, String> = child
+        .into_iter()
+        .map(|(name, value)| {
+            (
+                if cfg!(windows) {
+                    name.to_uppercase()
+                } else {
+                    name
+                },
+                value,
+            )
+        })
+        .collect();
+    let expected: HashMap<String, String> = expected
+        .into_iter()
+        .map(|(name, value)| {
+            (
+                if cfg!(windows) {
+                    name.to_uppercase()
+                } else {
+                    name
+                },
+                value,
+            )
+        })
+        .collect();
+    assert_eq!(child, expected);
+}
+
+#[test]
+fn a_shim_that_fails_before_answering_is_named_once() {
+    assert_eq!(silent_exit(1, false), Some(SHIM_SILENT));
+    assert_eq!(silent_exit(0, false), None);
+    assert_eq!(silent_exit(1, true), None);
 }
 
 fn argv(values: &[&str]) -> Vec<OsString> {
@@ -1011,13 +1371,20 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
         &["--profile", ""],
         &["--profile", "dot", "--json"],
     ] {
-        assert_eq!(prepare(&argv(values)).err(), Some(USAGE), "{values:?}");
+        assert_eq!(
+            prepare(&argv(values)).err().as_deref(),
+            Some(USAGE),
+            "{values:?}"
+        );
     }
     let store = Store::new();
     let dir = store.0.to_str().unwrap();
     assert_eq!(
         prepare(&argv(&["--profile", "dot", "--profile-dir", dir])).err(),
-        Some(store::UNAVAILABLE)
+        Some(format!(
+            "{}; `pseudolife-mcp tunnel status --profile dot` names the cause",
+            store::UNAVAILABLE
+        ))
     );
     let token = serde_json::to_string(&store.0.join("token")).unwrap();
     store.put(
@@ -1029,8 +1396,21 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     );
     assert_eq!(
         prepare(&argv(&["--profile-dir", dir, "--profile", "draft"])).err(),
-        Some(NOT_READY)
+        Some("tunnel profile is not ready; finish `pseudolife-mcp tunnel setup --profile draft` before its bridge can start".to_owned())
     );
+    // The store admits an https address with a path; the shim would not.
+    store.put(
+        "web.profile.json",
+        format!(
+            "{{\"name\": \"web\", \"daemon_url\": \"https://memory.example.com/mcp\", \"token_file\": {token}, \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true}}"
+        )
+        .as_bytes(),
+    );
+    let refused = prepare(&argv(&["--profile-dir", dir, "--profile", "web"]))
+        .err()
+        .unwrap();
+    assert!(refused.contains("not an http(s) origin"), "{refused}");
+    assert!(refused.contains("--profile web --daemon-url"), "{refused}");
     store.profile("dot");
     let start = prepare(&argv(&["--profile-dir", dir, "--profile", "dot"])).unwrap();
     assert_eq!(start.root, Path::new(dir));
