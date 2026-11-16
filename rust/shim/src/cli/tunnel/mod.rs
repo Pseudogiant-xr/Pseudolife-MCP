@@ -1494,11 +1494,34 @@ mod tests {
         assert_eq!(store::key_state(&store.0, "dot"), Ok(Some(false)));
         replace(&key[..key.len() - 20]);
         assert_eq!(store::key_state(&store.0, "dot"), Ok(Some(false)));
-        replace(b"DPAPI\0sealed-fixture");
-        assert_eq!(store::key_state(&store.0, "dot"), Ok(Some(false)));
-        // Another host's protection is not this host's key.
-        replace(b"PLAIN\0fixture-tunnel-key");
-        assert_eq!(store::key_state(&store.0, "dot"), Ok(Some(false)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_key_file_holding_no_blob_is_no_key() {
+        // Needs no sealing, so it also runs in a key-based SSH logon.
+        let store = Store::new();
+        store.profile("dot", true);
+        // No DPAPI blob, an empty blob after the prefix, a prefix without
+        // its separator, and another host's protection.
+        for data in [
+            &b"DPAPI\0sealed-fixture"[..],
+            b"DPAPI\0",
+            b"DPAPI",
+            b"PLAIN\0fixture-tunnel-key",
+        ] {
+            let _ = std::fs::remove_file(store.0.join("dot.key"));
+            store.put("dot.key", data);
+            assert_eq!(
+                store::key_state(&store.0, "dot"),
+                Ok(Some(false)),
+                "{data:?}"
+            );
+            let (entry, next) = doctor_entry(&store);
+            assert_eq!(entry["private_key_present"], false, "{data:?}");
+            // No key is no unlock problem: doctor adds no line for it.
+            assert!(next.is_empty(), "{data:?}: {next:?}");
+        }
     }
 
     #[cfg(windows)]
@@ -1521,12 +1544,16 @@ mod tests {
         let options = parse(&argv(&["status", "--json"])).unwrap();
         let report = report_of(status(&options, &store.0));
         assert_eq!(report["private_key_present"], "not_verified", "{report}");
+        // verify cannot tell whether the key is finished: it defers,
+        // never "finish tunnel setup".
+        let verify_options = parse(&argv(&["verify"])).unwrap();
+        assert_eq!(verify(&verify_options, &store.0).unwrap_err(), Fail::Defer);
         let (entry, next) = doctor_entry(&store);
         assert_eq!(entry["private_key_present"], "not_verified", "{entry}");
         assert_eq!(
             next,
             [format!(
-                "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, signed in at the machine (not over a key-based SSH logon), so run this check from that account's own sign-in.",
+                "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, in a logon signed in with its password (not a key-based SSH logon), so run this check from such a logon.",
                 store.0.join("dot.key").display()
             )]
         );

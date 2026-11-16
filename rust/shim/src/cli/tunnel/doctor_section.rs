@@ -159,7 +159,7 @@ pub(in crate::cli) fn doctor_section(root: &Path) -> Option<Vec<Value>> {
             };
             if key_state == Ok(None) {
                 next.push(format!(
-                    "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, signed in at the machine (not over a key-based SSH logon), so run this check from that account's own sign-in.",
+                    "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, in a logon signed in with its password (not a key-based SSH logon), so run this check from such a logon.",
                     store::key_path(root, name).display()
                 ));
             }

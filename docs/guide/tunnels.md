@@ -40,8 +40,9 @@ it does not read, and `verify` while a process record exists or with a
 Windows (DPAPI) key it cannot unseal in this session. On Windows it unseals
 the saved key to check it: a damaged key file is no usable key, and a key
 sealed by another account, or read over a logon without the account's
-credentials (such as a key-based SSH logon), is reported as `not_verified`. `pseudolife-mcp doctor` lists saved tunnels and
-names only steps this client runs. On a host that runs a tunnel, keep the Python
+credentials (such as a key-based SSH logon), is reported as `not_verified`.
+`pseudolife-mcp doctor` lists saved tunnels and names only steps this client
+runs. On a host that runs a tunnel, keep the Python
 client, which an update does unless you opt in with
 `PSEUDOLIFE_SHIM_ENGINE=native`. A native `update` there leaves the running
 tunnel as it is and says so in its tunnel line (see

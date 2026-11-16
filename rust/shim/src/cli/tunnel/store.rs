@@ -433,8 +433,9 @@ pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
 /// (on Windows, after DPAPI unseals it), `Some(false)` when it is absent,
 /// unreadable as a private file, protected for another platform or not a
 /// key, and `None` for a Windows key that cannot be unsealed in this
-/// session: another account's or a damaged blob, or a logon without the
-/// account's credentials. `Err(Defer)` when the key file itself is a form
+/// session: another account's key, or the account's own over a logon
+/// without its credentials (a key-based SSH logon). `Err(Defer)` when the
+/// key file itself is a form
 /// this client does not open (a pipe, a link).
 pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
     let path = match checked_path(&root.join(format!("{name}.key"))) {

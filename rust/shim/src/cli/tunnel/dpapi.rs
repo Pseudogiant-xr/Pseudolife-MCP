@@ -17,9 +17,9 @@ use windows_sys::Win32::Security::Cryptography::{
 /// `ERROR_INVALID_PARAMETER` for bytes that are no DPAPI blob; measured on
 /// the Windows dev VM, 16 November 2026). `None` for any other failure,
 /// where the blob may be sound but cannot be unsealed here: another
-/// account's or machine's key (`NTE_BAD_KEY_STATE`, measured the same day),
-/// or a logon without the account's credentials, such as a key-based SSH
-/// logon.
+/// account's or machine's key, and the account's own key read over a
+/// key-based SSH logon, which holds no credentials for it (both
+/// `NTE_BAD_KEY_STATE`, measured the same day).
 #[allow(unsafe_code)]
 pub(super) fn holds_key(sealed: &[u8]) -> Option<bool> {
     let Ok(size) = u32::try_from(sealed.len()) else {
@@ -82,8 +82,8 @@ fn wipe(mut bytes: Vec<u8>) {
 /// a key file in this platform's saved form. `None`, after saying why, only
 /// in an SSH logon that cannot seal (key-based SSH carries no credentials
 /// for the account's DPAPI keys, so CryptProtectData is denied there); any
-/// other failure panics. Hosted runners and a logon with the account's
-/// credentials always run the test.
+/// other failure panics, and so does a denial on GitHub Actions, so CI can
+/// never pass these tests by skipping them.
 #[cfg(test)]
 #[allow(unsafe_code)]
 pub(super) fn seal(plain: &[u8]) -> Option<Vec<u8>> {
@@ -113,9 +113,10 @@ pub(super) fn seal(plain: &[u8]) -> Option<Vec<u8>> {
         // SAFETY: reads this thread's last-error value, set by the call above.
         let error = unsafe { GetLastError() };
         let ssh = std::env::var_os("SSH_CONNECTION").is_some();
-        if error == ERROR_ACCESS_DENIED && ssh {
+        let ci = std::env::var_os("GITHUB_ACTIONS").is_some();
+        if error == ERROR_ACCESS_DENIED && ssh && !ci {
             eprintln!(
-                "skipped: CryptProtectData is denied in this SSH logon, which holds no credentials for the account's DPAPI keys; run this test in a logon signed in at the machine (hosted runners are)"
+                "skipped: CryptProtectData is denied in this SSH logon, which holds no credentials for the account's DPAPI keys; run this test in a logon signed in with the account's password (hosted runners are)"
             );
             return None;
         }

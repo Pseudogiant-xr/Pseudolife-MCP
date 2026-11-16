@@ -75,8 +75,9 @@ these cases are recorded from the candidate, not the oracle:
   CryptUnprotectData and reported present only when it unseals to a valid
   key. A damaged blob (`ERROR_INVALID_DATA`, or `ERROR_INVALID_PARAMETER`
   for bytes that are no blob, as `saved_key()`'s stand-in) is `false`; any
-  other failure (another account's key, a logon without the account's
-  credentials) is `"not_verified"`. Cases seeded by `key()` call `set_key`,
+  other failure is `"not_verified"`: another account's key, and the
+  account's own over a key-based SSH logon, both fail with
+  `NTE_BAD_KEY_STATE` (measured on the Windows dev VM, 16 November 2026). Cases seeded by `key()` call `set_key`,
   which a key-based SSH logon cannot seal; record them in a logon signed in
   at the machine.
 - `update` never stops on a record or a key and starts, stops or signals
