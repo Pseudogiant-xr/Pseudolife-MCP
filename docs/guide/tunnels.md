@@ -29,7 +29,7 @@ process record left by a stopped tunnel as a file you can delete (a
 runs, or may run, as `stale`: it is left as it is, because this client
 cannot refresh it yet. A record it cannot judge (unreadable, or naming no
 process id) is reported as unknown and never called deletable, and a saved
-profile it cannot read is named as `unread` with the field at fault. The native
+profile it cannot read is named as `unread` with the reason, naming the field where one is at fault. The native
 client also answers the refusals of `tunnel verify` and `tunnel setup`
 before they would change anything. Every other step stops with
 `pseudolife-stdio: mode 'tunnel' is deferred in this candidate` and exit 1,

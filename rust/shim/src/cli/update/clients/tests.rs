@@ -899,7 +899,7 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
     );
     let detail = detail_of(1, "");
     assert!(
-        detail.contains("could not be started, or ended with exit 1 and printed nothing"),
+        detail.contains("could not be started, was stopped by a signal, or ended with exit 1 and printed nothing"),
         "{detail}"
     );
     assert!(!detail.contains("without a reason"), "{detail}");

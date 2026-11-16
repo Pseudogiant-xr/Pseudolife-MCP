@@ -326,12 +326,14 @@ fn tunnel_step(
                 "the installed launcher {launcher} did not answer tunnel update within {} s; {left}; run pseudolife-mcp tunnel update to see where it stops",
                 timeout.as_secs()
             ),
+            // The runner reports 128+n when this update itself took signal
+            // n while the tunnel step ran (a child's own signal reads as 1).
             None if cfg!(unix) && output.code > 128 => format!(
-                "the installed launcher {launcher} was stopped by signal {} before it answered; {left}; run pseudolife-mcp tunnel update again",
+                "this update was interrupted by signal {} while the tunnel step ran; {left}; run pseudolife-mcp tunnel update again",
                 output.code - 128
             ),
             None => format!(
-                "the installed launcher {launcher} could not be started, or ended with exit {} and printed nothing; {left}; run pseudolife-mcp tunnel update to see why",
+                "the installed launcher {launcher} could not be started, was stopped by a signal, or ended with exit {} and printed nothing; {left}; run pseudolife-mcp tunnel update to see why",
                 output.code
             ),
         };

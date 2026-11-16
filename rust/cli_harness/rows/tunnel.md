@@ -60,12 +60,15 @@ these cases are recorded from the candidate, not the oracle:
   process table under the recorded image (normcase on Windows, the resolved
   file on POSIX); process creation times are not compared. A pid that is
   gone or runs another image is a record left from a stopped tunnel. A
-  record naming no usable pid, a pid that cannot be inspected (Windows), an
+  record naming no usable pid, a pid out of range (0, or above u32), a
+  pid that cannot be inspected (Windows, or on Linux a live pid the table
+  skipped), an
   unreadable record or process table is unknown, with that one cause, and is
   never called deletable.
 - `status` reads the record: `runtime.running` is `true`, `false` or
   `"unknown"` (one cause: an unreadable record, no usable process id, an
-  unreadable process table, or a process that cannot be inspected),
+  unreadable process table, a process that cannot be inspected, or a
+  process id out of range),
   `runtime.process_record`
   names the file and what it means, and a running tunnel's cloud
   verification is `"not_checked"`. A Windows `DPAPI` key is reported
@@ -76,7 +79,7 @@ these cases are recorded from the candidate, not the oracle:
   yet; also an unknown one), and a record with no profile beside it is
   listed by file name, `leftover` when its process is gone, `stale` when it
   runs or may run. A profile `load` does not read is `unread` (named with
-  the field at fault), or `stale` when its tunnel runs or may run. The top-level state is `stale` when any entry is, else `current`,
+  the reason, the field at fault where there is one), or `stale` when its tunnel runs or may run. The top-level state is `stale` when any entry is, else `current`,
   exit 0; the top-level `detail` carries one sentence per record. A store
   `list` cannot read is refused (exit 2) naming the directory or the entry
   it stopped on, instead of deferring; so are a directory that is not

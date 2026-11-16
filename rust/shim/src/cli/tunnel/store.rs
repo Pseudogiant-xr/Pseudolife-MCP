@@ -494,7 +494,21 @@ pub(super) fn list_refusal(root: &Path) -> String {
                 "the tunnel directory {root_shown} is not a directory; move it aside, then retry"
             );
         }
-        Ok(_) => {}
+        // `list` checks the directory's ownership before any entry, so a
+        // check that cannot be decided is the cause, whatever it holds.
+        Ok(info) => match owner_only_directory(root, &info) {
+            Ok(()) => {}
+            Err(Fail::Defer) => {
+                return format!(
+                    "the permissions of the tunnel directory {root_shown} cannot be checked; make it a directory only your account can access, then retry"
+                );
+            }
+            Err(_) => {
+                return format!(
+                    "the tunnel directory {root_shown} must be owner-only; make it a directory only your account can access, then retry"
+                );
+            }
+        },
     }
     let unlisted = || {
         format!(

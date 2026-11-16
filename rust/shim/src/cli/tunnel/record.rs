@@ -129,20 +129,34 @@ pub(super) fn liveness(record: &Value, rows: &[Row]) -> Liveness {
     assess(record, rows).0
 }
 
-/// The verdict and, for `Unknown`, its cause. "Gone" needs an observation:
-/// at least one named pid, none of them running under its image. A record
-/// naming no usable pid, or a pid whose image cannot be read, is unknown.
+/// The verdict and, for `Unknown`, its cause. "Gone" needs an observation
+/// for every named process: a process id in range, absent from the table or
+/// present under another image. A record naming no usable pid, a pid out of
+/// range, a pid whose image cannot be read, or (Linux) a live pid the table
+/// skipped, is unknown; the first such cause is the one reported.
 fn assess(record: &Value, rows: &[Row]) -> (Liveness, Option<Why>) {
     let processes = crate::runtime::record_processes(record);
     if processes.is_empty() {
         return (Liveness::Unknown, Some(Why::NoProcessId));
     }
     let mut verdict = (Liveness::Gone, None);
+    let mut doubt = |why: Why| {
+        if verdict.1.is_none() {
+            verdict = (Liveness::Unknown, Some(why));
+        }
+    };
     for process in processes {
+        // No process table holds pid 0 as a tunnel, nor a pid above u32.
+        if process.pid == 0 || process.pid > u64::from(u32::MAX) {
+            doubt(Why::OutOfRange);
+            continue;
+        }
+        let mut held = false;
         for row in rows.iter().filter(|row| u64::from(row.0) == process.pid) {
+            held = true;
             let matched = match (process.exe, process.argv0) {
                 _ if row.2.as_os_str().is_empty() => {
-                    verdict = (Liveness::Unknown, Some(Why::Uninspectable));
+                    doubt(Why::Uninspectable);
                     continue;
                 }
                 // A record that kept no image is matched by pid alone.
@@ -156,8 +170,27 @@ fn assess(record: &Value, rows: &[Row]) -> (Liveness, Option<Why>) {
                 return (Liveness::Running, None);
             }
         }
+        if !held && skipped_by_table(process.pid) {
+            doubt(Why::Uninspectable);
+        }
     }
     verdict
+}
+
+/// Linux's table (`connect`'s process listing, unchanged here) skips a live
+/// pid whose image it cannot read: a relative argv[0] with an unreadable
+/// `exe` link, as for another account's or a non-dumpable process. Such a
+/// pid still has `/proc/<pid>`, so its absence from the table is no proof.
+#[cfg(target_os = "linux")]
+fn skipped_by_table(pid: u64) -> bool {
+    Path::new("/proc").join(pid.to_string()).exists()
+}
+
+/// Windows adds unopenable pids to the table itself (`table`); macOS lists
+/// every process `ps` shows.
+#[cfg(not(target_os = "linux"))]
+fn skipped_by_table(_pid: u64) -> bool {
+    false
 }
 
 /// `os.path.normcase` equality on Windows; on POSIX the two paths resolve to

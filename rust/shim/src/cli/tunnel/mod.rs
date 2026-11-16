@@ -473,13 +473,20 @@ fn update(root: &Path) -> Answer {
                 "{} is not a valid tunnel profile name (up to 64 letters, digits, '-' or '_', starting with a letter or digit, and not a reserved device name); rename it or move it out of the tunnel directory, then retry",
                 path.display()
             ),
-            None => format!("{}: {}", store::INVALID_NAME, root.display()),
+            None => format!(
+                "{} in the tunnel directory {}; rename or move out the profile file whose name is not valid, then retry",
+                store::INVALID_NAME,
+                root.display()
+            ),
         },
         Fail::Tunnel(store::NOT_OWNER_ONLY) => format!(
             "the tunnel directory {} must be owner-only; make it a directory only your account can access, then retry",
             root.display()
         ),
-        Fail::Tunnel(message) => format!("{message}: {}", root.display()),
+        Fail::Tunnel(message) => format!(
+            "{message} (tunnel directory {}); fix that, then retry",
+            root.display()
+        ),
         Fail::Defer => store::list_refusal(root),
     };
     let present = exists(root).map_err(unreadable)?;
@@ -542,8 +549,8 @@ fn update(root: &Path) -> Answer {
                 format!("{unread}; it has no tunnel process record, so no tunnel of it runs"),
             ),
             (Some(record), unread) => {
-                // A stopped tunnel of a readable profile needs nothing; an
-                // unread profile always needs the user's eye.
+                // A stopped tunnel needs nothing and leaves the update
+                // `current`; an unread profile is named so the user can fix it.
                 // `stale`: a tunnel that runs or may run; `unread`: a profile
                 // this client cannot read, whose tunnel does not run.
                 let state = match (&unread, record.liveness) {
@@ -1112,6 +1119,48 @@ mod tests {
                     "the tunnel directory {} must be owner-only; make it a directory only your account can access, then retry",
                     store.0.display()
                 )
+            );
+        }
+    }
+
+    /// `list_refusal`'s other causes: the root is a file, the root cannot be
+    /// listed (Unix, as a non-root account), and a non-UTF-8 name (Linux;
+    /// APFS refuses such names).
+    #[test]
+    fn update_names_each_listing_cause_it_observed() {
+        let store = Store::new();
+        let file = store.0.parent().unwrap().join("not-a-directory");
+        std::fs::write(&file, b"").unwrap();
+        let refused = update(&file).unwrap_err();
+        assert!(
+            refused.contains("not-a-directory is not a directory; move it aside, then retry"),
+            "{refused}"
+        );
+        #[cfg(unix)]
+        if !rustix::process::geteuid().is_root() {
+            use std::os::unix::fs::PermissionsExt;
+            let store = Store::new();
+            store.profile("dot", true);
+            // Owner-only, but not readable: the listing itself fails.
+            std::fs::set_permissions(&store.0, std::fs::Permissions::from_mode(0o300)).unwrap();
+            let refused = update(&store.0);
+            std::fs::set_permissions(&store.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let refused = refused.unwrap_err();
+            assert!(
+                refused.contains("cannot be listed; make it a directory your account can read"),
+                "{refused}"
+            );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let store = Store::new();
+            let name = std::ffi::OsStr::from_bytes(b"bad\xffname");
+            std::fs::write(store.0.join(name), b"").unwrap();
+            let refused = update(&store.0).unwrap_err();
+            assert!(
+                refused.contains("holds an entry whose name is not UTF-8 (bad\u{fffd}name)"),
+                "{refused}"
             );
         }
     }
