@@ -6,11 +6,12 @@
 //! argv (`runtime::record_processes`, shared with runtime pruning). A named
 //! process runs when its pid is in the process table with the recorded
 //! image. A pid the table does not hold, or holds under another image, is
-//! gone: the table lists every process of this account (on Windows any
-//! process its user may query; on Linux any whose image or absolute argv[0]
-//! can be read), and a tunnel runs as the account that started it. Process
-//! creation times are not compared, so a pid reused by the same program
-//! reads as running; that only ever errs towards "running".
+//! gone: the table lists every process of this account (on Linux any whose
+//! image or absolute argv[0] can be read), and a tunnel runs as the account
+//! that started it. On Windows a pid that exists but cannot be opened is
+//! unknown, never gone. Process creation times are not compared, so a pid
+//! reused by the same program reads as running; that only ever errs towards
+//! "running".
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -46,9 +47,26 @@ pub(super) struct Record {
     pub readable: bool,
 }
 
-/// This machine's process table, or `None` where it cannot be read.
+/// This machine's process table, or `None` where it cannot be read. On
+/// Windows a pid the Toolhelp snapshot holds but `OpenProcess` refuses (an
+/// elevated or another account's process) is added with an empty image, as
+/// runtime pruning adds it: such a pid is not proof that a tunnel stopped.
 pub(super) fn table() -> Option<Vec<Row>> {
-    crate::cli::process_table().ok().flatten()
+    #[allow(unused_mut, reason = "only Windows adds unopenable pids")]
+    let mut rows = crate::cli::process_table().ok().flatten()?;
+    #[cfg(windows)]
+    {
+        let (pids, completed) = crate::runtime::windows_snapshot().ok()?;
+        if !completed {
+            return None;
+        }
+        for (pid, ppid) in pids {
+            if !rows.iter().any(|row| row.0 == pid) {
+                rows.push((pid, ppid, PathBuf::new()));
+            }
+        }
+    }
+    Some(rows)
 }
 
 pub(super) fn path(root: &Path, name: &str) -> PathBuf {
@@ -89,27 +107,30 @@ pub(super) fn read(path: PathBuf, table: Option<&[Row]>) -> Option<Record> {
     })
 }
 
-/// Whether any process `record` names runs under its recorded image.
+/// Whether any process `record` names runs under its recorded image. A pid
+/// whose image cannot be read (an empty image) is unknown, never gone.
 pub(super) fn liveness(record: &Value, rows: &[Row]) -> Liveness {
-    let running = crate::runtime::record_processes(record)
-        .iter()
-        .any(|process| {
-            rows.iter()
-                .filter(|row| u64::from(row.0) == process.pid)
-                .any(|row| match (process.exe, process.argv0) {
-                    // A record that kept no image is matched by pid alone.
-                    (None, None) => true,
-                    (exe, argv0) => [exe, argv0]
-                        .into_iter()
-                        .flatten()
-                        .any(|recorded| same_image(&row.2, Path::new(recorded))),
-                })
-        });
-    if running {
-        Liveness::Running
-    } else {
-        Liveness::Gone
+    let mut verdict = Liveness::Gone;
+    for process in crate::runtime::record_processes(record) {
+        for row in rows.iter().filter(|row| u64::from(row.0) == process.pid) {
+            let matched = match (process.exe, process.argv0) {
+                _ if row.2.as_os_str().is_empty() => {
+                    verdict = Liveness::Unknown;
+                    continue;
+                }
+                // A record that kept no image is matched by pid alone.
+                (None, None) => true,
+                (exe, argv0) => [exe, argv0]
+                    .into_iter()
+                    .flatten()
+                    .any(|recorded| same_image(&row.2, Path::new(recorded))),
+            };
+            if matched {
+                return Liveness::Running;
+            }
+        }
     }
+    verdict
 }
 
 /// `os.path.normcase` equality on Windows; on POSIX the two paths resolve to
@@ -124,7 +145,19 @@ fn same_image(row: &Path, recorded: &Path) -> bool {
         fold(row) == fold(recorded)
     } else {
         let resolve = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
-        row == recorded || resolve(row) == resolve(recorded)
+        row == recorded || resolve(row) == resolve(recorded) || cut_at_space(row, recorded)
+    }
+}
+
+/// The macOS table reads `ps -o args=` up to its first whitespace, so a
+/// recorded image whose path holds a space shows only its head. Accepting
+/// that head errs only towards "running".
+fn cut_at_space(row: &Path, recorded: &Path) -> bool {
+    match (row.to_str(), recorded.to_str()) {
+        (Some(row), Some(recorded)) => recorded
+            .strip_prefix(row)
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace)),
+        _ => false,
     }
 }
 
@@ -191,6 +224,17 @@ mod tests {
         assert_eq!(liveness(&supervised, &rows), Liveness::Running);
         // A record that kept no image is matched by pid alone.
         assert_eq!(liveness(&json!({"pid": pid}), &rows), Liveness::Running);
+        // A pid that exists but whose image cannot be read (Windows
+        // `OpenProcess` refused): unknown, so its record is never called
+        // deletable.
+        let unopenable = vec![(4242, 4, PathBuf::new())];
+        let record = json!({"pid": 4242, "exe": exe});
+        assert_eq!(liveness(&record, &unopenable), Liveness::Unknown);
+        assert!(crate::runtime::record_keeps_runtime(&record, &unopenable));
+        // ...unless another process it names is running.
+        let mixed = vec![(4242, 4, PathBuf::new()), own()];
+        let record = json!({"pid": 4242, "exe": exe, "supervisor": {"pid": pid, "exe": exe}});
+        assert_eq!(liveness(&record, &mixed), Liveness::Running);
     }
 
     #[test]
@@ -253,5 +297,22 @@ mod tests {
         assert!(same_image(&link, &real));
         assert!(!same_image(&link, &base.join("other")));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_image_path_with_a_space_matches_the_head_the_macos_table_shows() {
+        let recorded = Path::new("/Users/someone/Application Support/tunnel-client");
+        // What `ps -o args=` split at whitespace yields for that process.
+        assert!(same_image(
+            Path::new("/Users/someone/Application"),
+            recorded
+        ));
+        let rows = vec![(7, 1, PathBuf::from("/Users/someone/Application"))];
+        let record = json!({"pid": 7, "exe": recorded, "argv": [recorded]});
+        assert_eq!(liveness(&record, &rows), Liveness::Running);
+        // A head that is not followed by whitespace is another image.
+        assert!(!same_image(Path::new("/Users/someone/App"), recorded));
+        assert!(!same_image(Path::new("/opt/other"), recorded));
     }
 }

@@ -816,21 +816,24 @@ fn tunnel_step_accepts_a_running_tunnel_it_cannot_refresh_as_stale() {
     let answer = r#"{"state": "stale", "needs_attention": false, "detail": "1 saved tunnel profiles checked; local client registrations preserved; tunnel dot keeps running on its current runtime (process record X); this client cannot refresh or stop it yet, so it was left as it is", "profiles": [{"profile": "dot", "state": "stale", "running": true, "detail": "..."}]}"#;
     let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(0, &format!("{answer}\n")));
     let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();
-    assert_eq!(runner.calls.borrow().as_slice(), [vec!["tunnel", "update"]]);
+    // The command reads the directory the step scanned.
+    let directory = root.to_str().unwrap();
+    assert_eq!(
+        runner.calls.borrow().as_slice(),
+        [vec!["tunnel", "update", "--profile-dir", directory]]
+    );
     assert_eq!(step["state"], "stale");
     assert_eq!(
         step["detail"],
         "1 saved tunnel profiles checked; local client registrations preserved; tunnel dot keeps running on its current runtime (process record X); this client cannot refresh or stop it yet, so it was left as it is; run by the installed native launcher"
     );
     // The ladder's verdict: a stale tunnel step is not a failed client step.
-    let report = json!({"shim": {"state": "current"}, "tunnel": step});
-    assert!(
-        report
-            .as_object()
-            .unwrap()
-            .values()
-            .all(|r| r["state"] != "failed")
-    );
+    assert!(ladder_ok(
+        &json!({"shim": {"state": "current"}, "tunnel": step})
+    ));
+    assert!(!ladder_ok(
+        &json!({"shim": {"state": "current"}, "tunnel": {"state": "failed"}})
+    ));
     // A stale answer with a failing exit is not an answer.
     let runner = Fake::new(|_: &[&str], _: Option<&Path>| output(1, answer));
     let step = tunnel_step(&root, None, launcher(&fixture), &runner).unwrap();

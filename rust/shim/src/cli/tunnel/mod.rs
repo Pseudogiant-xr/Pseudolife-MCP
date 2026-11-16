@@ -29,6 +29,18 @@ pub(super) enum Fail {
     Defer,
 }
 
+/// A command's answer: its stdout and exit, or a refusal for stderr
+/// (exit 2), which may name the file it is about.
+type Answer = Result<(String, u8), String>;
+
+fn answer(output: Output) -> Option<Answer> {
+    match output {
+        Ok(printed) => Some(Ok(printed)),
+        Err(Fail::Tunnel(message)) => Some(Err(message.to_owned())),
+        Err(Fail::Defer) => None,
+    }
+}
+
 const NO_PROFILES: &str = "No saved tunnel profiles; update does not start new setup.";
 const AMBIGUOUS: &str = "daemon connection is missing or ambiguous; pass --daemon-url and --token-file explicitly (an owner-only credential file)";
 const UNFINISHED: &str = "finish tunnel setup before requesting cloud verification";
@@ -118,8 +130,7 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     let options = parse(&values)?;
     let (stdout, stderr, code) = match outcome(&options)? {
         Ok((text, code)) => (text, String::new(), code),
-        Err(Fail::Tunnel(message)) => (String::new(), format!("{message}\n"), 2),
-        Err(Fail::Defer) => return None,
+        Err(message) => (String::new(), format!("{message}\n"), 2),
     };
     // The oracle's stdout is block-buffered: a refused stdout fails only its
     // interpreter-shutdown flush, which turns any exit into 120. An empty
@@ -142,19 +153,19 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
 
 /// The command's answer; `None` when the store root cannot be opened and
 /// the command defers.
-fn outcome(options: &Options) -> Option<Output> {
+fn outcome(options: &Options) -> Option<Answer> {
     let root = store::store_root(options.profile_dir.as_deref());
     // `update` runs unattended inside `pseudolife-mcp update`, which shows
     // its refusal: a root it cannot open is named, never deferred.
     let root = match root {
         Err(_) if options.command == Command::Update => {
-            return Some(Err(Fail::Tunnel(store::UNSAFE_ROOT)));
+            return Some(Err(store::UNSAFE_ROOT.to_owned()));
         }
         root => root.ok()?,
     };
-    Some(match options.command {
+    answer(match options.command {
         Command::Status => status(options, &root),
-        Command::Update => update(&root),
+        Command::Update => return Some(update(&root)),
         Command::Verify => verify(options, &root),
         Command::Setup => setup(options, &root),
     })
@@ -284,20 +295,28 @@ fn status(options: &Options, root: &Path) -> Output {
 
 /// What a process record says about the tunnel, in one sentence for a
 /// person, with the file it names.
-fn record_sentence(name: &str, record: &record::Record) -> String {
+fn record_sentence(name: &str, record: &record::Record, updating: bool) -> String {
     let file = record.path.display();
+    let left = if updating {
+        "; it was left as it is"
+    } else {
+        ""
+    };
     match (record.liveness, record.readable) {
-        (Liveness::Running, _) => format!(
+        (Liveness::Running, _) if updating => format!(
             "tunnel {name} keeps running on its current runtime (process record {file}); this client cannot refresh or stop it yet, so it was left as it is"
+        ),
+        (Liveness::Running, _) => format!(
+            "tunnel {name} is running (process record {file}); this client cannot refresh or stop it yet"
         ),
         (Liveness::Gone, _) => format!(
             "tunnel {name} is not running; its process record {file} is left from a tunnel that stopped and can be deleted"
         ),
         (Liveness::Unknown, false) => format!(
-            "tunnel {name}'s process record {file} is not an owner-only record this client can read, so whether the tunnel runs is unknown; it was left as it is"
+            "tunnel {name}'s process record {file} is not an owner-only record this client can read, so whether the tunnel runs is unknown{left}"
         ),
         (Liveness::Unknown, true) => format!(
-            "this machine's process table cannot be read, so whether tunnel {name} runs (process record {file}) is unknown; it was left as it is"
+            "whether tunnel {name} runs (process record {file}) cannot be checked here: the process table cannot be read, or the process it names cannot be inspected{left}"
         ),
     }
 }
@@ -351,13 +370,13 @@ fn report(
     let name = &profile.name;
     // A running tunnel's cloud verification is bound to its launch, which
     // this client does not read: not checked, rather than "not verified".
-    let cloud_checked = running != Some(Liveness::Running);
+    let cloud_checked = matches!(running, None | Some(Liveness::Gone));
     if as_json {
         let record_json = record.map_or(String::new(), |record| {
             format!(
                 ", \"process_record\": {{\"path\": {}, \"detail\": {}}}",
                 quoted(&record.path.display().to_string()),
-                quoted(&record_sentence(name, record)),
+                quoted(&record_sentence(name, record, false)),
             )
         });
         let cloud = if cloud_checked {
@@ -391,7 +410,7 @@ fn report(
         profile.state
     );
     if let Some(record) = record {
-        let sentence = record_sentence(name, record);
+        let sentence = record_sentence(name, record, false);
         let mut chars = sentence.chars();
         let first = chars.next().map(|c| c.to_uppercase().collect::<String>());
         text.push_str(&format!(
@@ -425,12 +444,12 @@ fn report(
 /// whose process is gone is named as a file to delete, and neither a record
 /// nor a key ever stops the command. Refused only for a store or profile it
 /// cannot trust (exit 2), and exit 3 when nothing is saved at all.
-fn update(root: &Path) -> Output {
+fn update(root: &Path) -> Answer {
     // A store this client cannot list is a refusal with its cause, never a
     // deferral: the update step shows the cause to the user.
     let unreadable = |fail: Fail| match fail {
-        Fail::Defer => Fail::Tunnel(store::UNREADABLE_STORE),
-        refused => refused,
+        Fail::Tunnel(message) => message.to_owned(),
+        Fail::Defer => store::UNREADABLE_STORE.to_owned(),
     };
     let present = exists(root).map_err(unreadable)?;
     let names = if present {
@@ -439,7 +458,7 @@ fn update(root: &Path) -> Output {
         Vec::new()
     };
     let orphans = if present {
-        record::orphans(root, &names)?
+        record::orphans(root, &names).map_err(unreadable)?
     } else {
         Vec::new()
     };
@@ -466,7 +485,12 @@ fn update(root: &Path) -> Output {
                 store::profile_file(root, name).display(),
                 store::unread_reason(root, name)
             )),
-            Err(refused) => return Err(refused),
+            Err(Fail::Tunnel(reason)) => {
+                return Err(format!(
+                    "{reason}: {}; fix that file or move it out of the tunnel directory, then retry",
+                    store::profile_file(root, name).display()
+                ));
+            }
         };
         let record = record::read(record::path(root, name), rows.as_deref());
         let name_q = quoted(name);
@@ -493,7 +517,7 @@ fn update(root: &Path) -> Output {
                     (Err(_), Liveness::Gone) => "not-running",
                     _ => "stale",
                 };
-                let sentence = record_sentence(name, record);
+                let sentence = record_sentence(name, record, true);
                 let sentence = match unread {
                     Ok(unread) => format!("{unread}; {sentence}"),
                     Err(_) => sentence,
@@ -921,7 +945,7 @@ mod tests {
         std::env::current_exe().unwrap()
     }
 
-    fn report_of(output: Output) -> Value {
+    fn report_of<E: std::fmt::Debug>(output: Result<(String, u8), E>) -> Value {
         let (text, code) = output.expect("answers");
         assert_eq!(code, 0, "{text}");
         serde_json::from_str(&text).unwrap()
@@ -997,9 +1021,14 @@ mod tests {
         store.profile("dot", true);
         store.record("dot", DEAD_PID, Path::new("/nonexistent/tunnel-client"));
         store.put("bad.profile.json", b"{");
-        assert_eq!(
-            update(&store.0).unwrap_err(),
-            Fail::Tunnel("tunnel profile is invalid")
+        let refused = update(&store.0).unwrap_err();
+        assert!(
+            refused.starts_with("tunnel profile is invalid: ")
+                && refused.contains("bad.profile.json")
+                && refused.ends_with(
+                    "; fix that file or move it out of the tunnel directory, then retry"
+                ),
+            "{refused}"
         );
     }
 
@@ -1100,10 +1129,7 @@ mod tests {
         // An empty --profile-dir: update names it, status still defers.
         let answer =
             |command: &str| outcome(&parse(&argv(&[command, "--profile-dir", ""])).unwrap());
-        assert_eq!(
-            answer("update"),
-            Some(Err(Fail::Tunnel(store::UNSAFE_ROOT)))
-        );
+        assert_eq!(answer("update"), Some(Err(store::UNSAFE_ROOT.to_owned())));
         assert_eq!(answer("status"), None);
         // A store root reached through a link.
         let store = Store::new();
@@ -1117,7 +1143,7 @@ mod tests {
         let link = link.to_str().unwrap();
         assert_eq!(
             outcome(&parse(&argv(&["update", "--profile-dir", link])).unwrap()),
-            Some(Err(Fail::Tunnel(store::UNSAFE_ROOT)))
+            Some(Err(store::UNSAFE_ROOT.to_owned()))
         );
     }
 
@@ -1146,7 +1172,7 @@ mod tests {
         let text = parse(&argv(&["status"])).unwrap();
         let (text, _) = status(&text, &store.0).unwrap();
         assert!(
-            text.starts_with("Profile dot: ready; runtime running=True, ready=False; cloud verification not checked by this client.\nTunnel dot keeps running"),
+            text.starts_with("Profile dot: ready; runtime running=True, ready=False; cloud verification not checked by this client.\nTunnel dot is running (process record "),
             "{text}"
         );
     }

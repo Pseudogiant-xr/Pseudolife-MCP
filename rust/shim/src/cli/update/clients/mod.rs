@@ -60,14 +60,18 @@ pub fn run_steps(
     {
         report["tunnel"] = tunnel;
     }
-    report["ok"] = json!(
-        report
-            .as_object()
-            .unwrap()
-            .values()
-            .all(|r| r["state"] != "failed")
-    );
+    report["ok"] = json!(ladder_ok(&report));
     report
+}
+
+/// The ladder passes unless a step failed; `stale`, `skipped` and the
+/// other states are reported, not failures.
+fn ladder_ok(report: &Value) -> bool {
+    report
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|r| r["state"] != "failed")
 }
 
 fn check_autostart(_repo: Option<&Path>) -> Value {
@@ -252,9 +256,17 @@ fn tunnel_step(
                 json!({"state":"skipped","detail":"running tunnels were not refreshed: no installed native launcher; rerun native setup, then pseudolife-mcp tunnel update"}),
             ));
         };
+        // The command reads the very directory this step scanned: its own
+        // default home can differ (USERPROFILE against HOME under WSL).
+        let directory = root.to_str().ok_or_else(|| {
+            format!(
+                "{} is not a Unicode path, so its tunnels cannot be checked; run pseudolife-mcp tunnel update --profile-dir <that directory> yourself",
+                root.display()
+            )
+        })?;
         let output = runner.run(
             &launcher,
-            &["tunnel", "update"],
+            &["tunnel", "update", "--profile-dir", directory],
             None,
             Duration::from_secs(60 + 90 * count),
             &[],

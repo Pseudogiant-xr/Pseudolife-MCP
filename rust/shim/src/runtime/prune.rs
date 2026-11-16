@@ -78,8 +78,18 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
     Ok(())
 }
 #[cfg(windows)]
-#[allow(unsafe_code)]
 fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
+    let (pids, completed) = windows_snapshot()?;
+    windows_snapshot_evidence(rows, &pids, completed)
+}
+
+/// Every `(pid, parent pid)` in a Toolhelp snapshot, and whether the walk
+/// completed. Shared with `tunnel status` and `tunnel update`, which read a
+/// pid the snapshot holds but `OpenProcess` refuses as "unknown", as
+/// pruning keeps it.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub(crate) fn windows_snapshot() -> Result<(Vec<(u32, u32)>, bool)> {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, ERROR_NO_MORE_FILES, GetLastError, INVALID_HANDLE_VALUE},
         System::Diagnostics::ToolHelp::{
@@ -104,7 +114,7 @@ fn verify_process_evidence(rows: &mut Vec<Process>) -> Result<()> {
         CloseHandle(snapshot);
         completed
     };
-    windows_snapshot_evidence(rows, &pids, completed)
+    Ok((pids, completed))
 }
 
 #[cfg(any(windows, test))]
@@ -252,7 +262,14 @@ pub fn tunnel_runtimes(
         let name = name
             .to_str()
             .ok_or("tunnel record filename is not Unicode")?;
-        if !name.ends_with(".process.json") && !name.ends_with(".reload.json") {
+        // Windows opens `dot.PROCESS.JSON` for `dot.process.json`, so case
+        // folds there as the tunnel commands' own reads do.
+        let folded = if cfg!(windows) {
+            name.to_ascii_lowercase()
+        } else {
+            name.to_owned()
+        };
+        if !folded.ends_with(".process.json") && !folded.ends_with(".reload.json") {
             continue;
         }
         let bytes = crate::board::state::read(&entry.path(), 1024 * 1024)

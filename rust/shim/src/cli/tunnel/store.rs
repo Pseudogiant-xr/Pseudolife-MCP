@@ -456,7 +456,7 @@ pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
 /// The store's listing failed in a way no refusal above names (an entry
 /// that is not a regular file, a name this client cannot fold, an
 /// unreadable directory).
-pub(super) const UNREADABLE_STORE: &str = "the tunnel directory holds entries this client does not read; make it a directory only your account can access, holding only tunnel profile files, then retry";
+pub(super) const UNREADABLE_STORE: &str = "the tunnel directory cannot be listed, or holds an entry this client does not read (a *.profile.json that is not a regular file, or a file name that is not UTF-8, or not ASCII on Windows); move that one entry out, keeping every .key and .process.json file, then retry";
 
 /// The root a command's `ProfileStore(args.profile_dir)` opens. Its checks
 /// run outside the oracle's error handler (a traceback): every failure defers.
