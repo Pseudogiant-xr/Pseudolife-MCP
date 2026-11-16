@@ -362,7 +362,11 @@ def test_docker_group_advice_says_it_is_root_equivalent(tmp_path, script) -> Non
     out = proc.stdout
     assert proc.returncode != 0, out
     line = next(row for row in out.splitlines() if "sudo usermod -aG docker" in row)
-    assert "sudo usermod -aG docker $USER, then log out and back in" in line, line
+    assert "sudo usermod -aG docker $USER   # then log out and back in" in line, line
+    # The fix pastes as it is: the command, then prose behind a comment.
+    fix = line.split("fix: ", 1)[1]
+    parsed = subprocess.run([bash, "-n", "-c", fix], capture_output=True, text=True, timeout=10)
+    assert parsed.returncode == 0, (fix, parsed.stderr)
     for claim in ("equivalent to root on this machine", "not something Pseudolife adds",
                   "an account that already uses Docker", "not supported yet (issue #1642)"):
         assert claim in line, line

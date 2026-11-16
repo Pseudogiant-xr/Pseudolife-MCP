@@ -519,7 +519,7 @@ mod windows {
 fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
     let file = "/home/u/.codex/config.toml";
     let folder = "/home/u/.codex";
-    let replace = "cp '/home/u/.codex/config.toml' '/home/u/.codex/config.toml.mine' && mv -f '/home/u/.codex/config.toml.mine' '/home/u/.codex/config.toml'";
+    let replace = "copy=$(mktemp '/home/u/.codex/config.toml.XXXXXX') && cp '/home/u/.codex/config.toml' \"$copy\" && mv -f \"$copy\" '/home/u/.codex/config.toml'";
     let line = |case| foreign_owner_refusal(file, file, folder, case, "u", "root");
     // A folder this user can write: a copy it owns replaces the file.
     let writable = line(ForeignOwner::Writable);

@@ -199,7 +199,11 @@ fn foreign_owner_refusal(
     me: &str,
     owner: &str,
 ) -> String {
-    let replace = format!("cp '{quoted}' '{quoted}.mine' && mv -f '{quoted}.mine' '{quoted}'");
+    // mktemp creates the copy's name exclusively, so no existing file or
+    // link there is overwritten or followed.
+    let replace = format!(
+        "copy=$(mktemp '{quoted}.XXXXXX') && cp '{quoted}' \"$copy\" && mv -f \"$copy\" '{quoted}'"
+    );
     let me_quoted = me.replace('\'', "'\\''");
     match case {
         ForeignOwner::RunAsRoot => format!(
