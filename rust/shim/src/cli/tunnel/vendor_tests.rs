@@ -582,6 +582,15 @@ fn an_install_removes_stale_stages_and_leaves_anything_else() {
     crate::board::state::private_dir(&odd.join("nested")).unwrap();
     age(&odd, Duration::from_secs(2 * 3600));
     let foreign = stage(".runtime-old", &["notes.txt", "x y"], true);
+    // Near misses: plausible file names, but folder names no installer
+    // generates (a word, nine characters, a 32-character non-hex suffix).
+    let backup = stage(".runtime-backup", &["notes.txt"], true);
+    let nine = stage(".runtime-abcd12345", &["LICENSE"], true);
+    let not_hex = stage(
+        ".runtime-0123456789abcdef0123456789abcdeg",
+        &["LICENSE"],
+        true,
+    );
     let other = stage("keep-me", &["LICENSE"], true);
     let archive = release(&host());
     ensure_with(&store.root, pin_of(&archive), &Probe::new(0), |_, _| {
@@ -589,7 +598,7 @@ fn an_install_removes_stale_stages_and_leaves_anything_else() {
     })
     .unwrap();
     assert!(!ours.exists() && !python.exists(), "{:?}", store.listing());
-    for kept in [&fresh, &odd, &foreign, &other] {
+    for kept in [&fresh, &odd, &foreign, &backup, &nine, &not_hex, &other] {
         assert!(kept.exists(), "{kept:?} removed: {:?}", store.listing());
     }
 }

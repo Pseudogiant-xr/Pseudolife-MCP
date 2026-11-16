@@ -223,10 +223,11 @@ fn ensure_with(
 }
 
 /// Remove stages earlier installs left (`STALE_STAGE`): only an owner-only
-/// plain folder named as an install names its stage (this client's
-/// `.runtime-<uuid>`, or the Python client's `.runtime-<8 characters>`)
-/// that holds only regular files an install writes. Anything else is left
-/// as it is; a failure here never stops the install.
+/// plain folder named exactly as an install names its stage (this client's
+/// `.runtime-<32 lowercase hex>`, or the Python client's `mkdtemp`
+/// `.runtime-<8 of a-z, 0-9, _>`) that holds only regular files an install
+/// writes. Anything else is left as it is; a failure here never stops the
+/// install.
 fn sweep_stale_stages(root: &Path) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
@@ -236,12 +237,15 @@ fn sweep_stale_stages(root: &Path) {
         let Some(suffix) = name.to_str().and_then(|n| n.strip_prefix(".runtime-")) else {
             continue;
         };
-        if suffix.is_empty()
-            || suffix.len() > 32
-            || !suffix
+        let uuid = suffix.len() == 32
+            && suffix
                 .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        {
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        let mkdtemp = suffix.len() == 8
+            && suffix
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        if !uuid && !mkdtemp {
             continue;
         }
         let stage = entry.path();
