@@ -372,7 +372,8 @@ if ($Case -in @('InitialForeignTask','DeleteReplacedTask','TaskQueryFailure','St
         [CmdletBinding()] param($TaskName,$TaskPath)
         $global:r6queries++
         if ($Case -eq 'TaskAbsent') {
-            Write-Error -Message 'fixture task does not exist' -ErrorId 'CmdletizationQuery_NotFound_TaskName' -Category ObjectNotFound
+            # The scheduler's real absence ids: composite with -TaskPath, named without.
+            Write-Error -Message 'fixture task does not exist' -ErrorId $(if ($PSBoundParameters.ContainsKey('TaskPath')) { 'CmdletizationQuery_NotFound' } else { 'CmdletizationQuery_NotFound_TaskName' }) -Category ObjectNotFound
             return
         }
         if ($Case -eq 'TaskQueryFailure' -or ($Case -eq 'StopQueryFailure' -and $global:r6queries -ge 2) -or ($Case -eq 'RemovalQueryFailure' -and $global:r6deleteAttempts)) {
@@ -569,7 +570,7 @@ function Get-ScheduledTask {
             ($Case -eq 'QueryRemovalRetry' -and $global:r6deleteAttempts -gt 0)))
     if ($fault) {
         $global:r6queryFaults++
-        $id = if ($Case -eq 'QueryNamedAbsent') { 'CmdletizationQuery_NotFound_TaskName' }
+        $id = if ($Case -eq 'QueryNamedAbsent') { $(if ($PSBoundParameters.ContainsKey('TaskPath')) { 'CmdletizationQuery_NotFound' } else { 'CmdletizationQuery_NotFound_TaskName' }) }
               elseif ($Case -eq 'QueryAccessDenied') { 'HRESULT 0x80070005' }
               else { 'HRESULT 0x80070002' }
         $record = [Management.Automation.ErrorRecord]::new([InvalidOperationException]::new('fixture task query failed'), $id, [Management.Automation.ErrorCategory]::NotSpecified, $TaskName)

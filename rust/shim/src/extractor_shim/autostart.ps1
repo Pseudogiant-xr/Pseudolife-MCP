@@ -423,7 +423,10 @@ function Get-TaskRegistration([string]$taskName, [datetime]$deadline = (Get-Date
     while ($true) {
         try { return Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop }
         catch {
-            if ($_.FullyQualifiedErrorId -eq 'CmdletizationQuery_NotFound_TaskName,Get-ScheduledTask') { return }
+            # Named absence. With -TaskPath the query is composite and the
+            # id drops its _TaskName suffix (measured on the Windows dev VM,
+            # 16 November 2026, Windows PowerShell 5.1 and PowerShell 7).
+            if ($_.FullyQualifiedErrorId -in @('CmdletizationQuery_NotFound,Get-ScheduledTask', 'CmdletizationQuery_NotFound_TaskName,Get-ScheduledTask')) { return }
             if ($_.FullyQualifiedErrorId -ne 'HRESULT 0x80070002,Get-ScheduledTask' -or (Get-Date) -ge $deadline) { throw }
         }
         Start-Sleep -Milliseconds 200
