@@ -862,7 +862,8 @@ try {
         $restored = @("$($c.EnvFile) holds its previous settings again")
         if ($replacementRegistered) { $restored += $(if ($previousXml) { 'the previous registration was restored' } else { 'the new registration was removed' }) }
         if ($wasActive) { $restored += 'the previous shim was started again' }
-        Write-Warning ("Rolled back: " + ($restored -join ', ') + ".") -WarningAction Continue
+        # Information, not a warning: nothing was left half-done.
+        Write-Host ("Rolled back: " + ($restored -join ', ') + ".")
     }
     throw $failure
 }

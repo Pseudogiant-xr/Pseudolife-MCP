@@ -785,6 +785,7 @@ if ($Case -in @('LockedReplace','LockedLegacy','LockedUnchanged','LockedRemove',
     if (-not $untouched) { throw "a task this shell cannot change was changed: $caught" }
     if ($Case -eq 'LockedFollowsFails') {
         if ($caught -notlike '*failed its health check*' -or [IO.File]::ReadAllText($settings) -ne 'before') { throw "a failed restart of a locked task did not restore its settings: $caught / $global:r6warningText" }
+        if ($global:r6hostText -notlike '*Rolled back: *holds its previous settings again, the previous shim was started again.*') { throw "a complete rollback did not say what it put back: $global:r6hostText" }
     } elseif ($Case -eq 'LockedTriggerOther') {
         # Same action, but its logon trigger is another account's: refused.
         if ($caught -notlike "*the scheduled task '$taskName' was registered from an elevated PowerShell*has no enabled logon trigger for this user*" -or
@@ -894,6 +895,7 @@ if ($Case -eq 'QueryStopFailure') {
     if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -lt 15) { throw 'rejected deletion did not await its deadline' }
 } elseif ($Case -eq 'DelayedRemoval') {
     if ($global:r6stopWaits -lt 3 -or $global:r6removeWaits -lt 3 -or $global:r6warningText) { throw 'rollback did not await delayed scheduler stop and removal' }
+    if ($global:r6hostText -notlike '*Rolled back: *holds its previous settings again*') { throw "a complete rollback did not say what it put back: $global:r6hostText" }
 } elseif ($Case -eq 'StopTimeout') {
     if ($global:r6registered -or -not $global:r6fixtureTask -or $global:r6warningText -notlike '*did not stop*') { throw 'stop timeout did not preserve the failure and remaining task' }
     if (($global:r6clock - [datetime]'2026-01-01').TotalSeconds -lt 15) { throw 'stop timeout did not await its deadline' }

@@ -749,3 +749,40 @@ def test_the_checkout_is_named_as_the_runner_names_it(tmp_path: Path) -> None:
         proc = _run(_read(LOCK) + f"Get-CanonicalPath '{other}'\n", shell)
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.strip() == str(Path(other).resolve()), (shell, proc.stdout)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the runner's command line is a Windows command line")
+@pytest.mark.parametrize("kind", ["claude", "codex"])
+@pytest.mark.parametrize("checkout_name", ["checkout", "check out"])
+def test_the_runners_real_command_line_is_proved(tmp_path: Path, kind: str, checkout_name: str) -> None:
+    """The proof matches the command line ops/shim_autostart.py really
+    starts: its shim_argv quoted by subprocess.list2cmdline (the Popen rule
+    on Windows), with and without a space in the checkout path, for both
+    kinds; the same line on another port is not proved."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shim_autostart_under_test", ROOT / "ops" / "shim_autostart.py")
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    repo = tmp_path / checkout_name
+    repo.mkdir()
+    home = tmp_path / "home"
+    (home / ".pseudolife-mcp").mkdir(parents=True)
+    settings = {"python": str(tmp_path / "py dir" / "python.exe"), "host": "127.0.0.1", "port": "8086", "model": "m",
+                "prompt_file": str(repo / "evals" / "prompts" / "p.md"), "health_ttl": "1800", "cli": ""}
+    command = subprocess.list2cmdline(runner.shim_argv(kind, repo.resolve(), settings))
+    digest = hashlib.sha256(str(repo.resolve()).encode("utf-8")).hexdigest()[:8]
+    pid_file = home / ".pseudolife-mcp" / f"{kind}-shim-{digest}.pid"
+    env = {**os.environ, "USERPROFILE": str(home), "HOME": str(home)}
+    for recorded_port, proved in (("8086", "4242"), ("8099", "")):
+        pid_file.write_text(f"4242 {recorded_port}\n", encoding="utf-8")
+        quoted = command.replace("'", "''")
+        script = (_read(LOCK) +
+                  f"(Get-Item -LiteralPath '{pid_file}').LastWriteTime = [datetime]'2026-01-01T00:00:10'\n"
+                  "function Get-CimInstance { param($ClassName, $Filter, $ErrorAction)\n"
+                  f"  $row = [pscustomobject]@{{ ProcessId = 4242; ParentProcessId = 1; CreationDate = [datetime]'2026-01-01'; CommandLine = '{quoted}' }}\n"
+                  "  if ($Filter -match '^ProcessId = 4242$' -or -not $Filter) { $row } }\n"
+                  f"(@(Get-RecordedShim '{repo}' '{kind}') | ForEach-Object {{ $_.ProcessId }}) -join ','\n")
+        for shell in _shells():
+            proc = _run(script, shell, env=env)
+            assert proc.returncode == 0, (shell, proc.stderr)
+            assert proc.stdout.strip() == proved, (shell, kind, checkout_name, recorded_port, command, proc.stdout)

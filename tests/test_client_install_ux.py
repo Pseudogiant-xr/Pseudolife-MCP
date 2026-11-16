@@ -655,7 +655,8 @@ def test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bin
     assert "StartupTimeoutSec = 90" in ps           # the poll budget
     # A holder this run cannot prove is refused before anything changes, and
     # one still there after the recorded shim stopped blocks the start.
-    assert before.index("which this run cannot prove is the shim") < before.index("Unregister-ScheduledTask")
+    assert before.index("Get-UnprovenPortHolder $Port $recorded 'claude'") < before.index("Unregister-ScheduledTask")
+    assert "which this run cannot prove is the $Kind shim" in _read("ops/scheduled_task_lock.ps1")
     assert before.index(register) < before.index("is still held by pid")
     assert "registration or start failed" in _read("ops/install.ps1")
     # (b) affirmative verification after the start: listener poll, the two
