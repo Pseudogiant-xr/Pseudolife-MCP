@@ -2050,6 +2050,9 @@ def run_sweep(args, cfg: dict) -> int:
                 left["runs from here"] += 1
             elif harness_managed(wt.path):
                 left["harness-managed"] += 1
+            elif any(is_under(p, r) or is_under(r, p) for r in scratch_norm):
+                # A scratch root is list only, also when a worktree root reaches it.
+                left["at or around a scratch root"] = left.get("at or around a scratch root", 0) + 1
             elif not any(is_under(p, r) and p != r for r in wt_norm):
                 left["outside roots"] += 1
             else:
@@ -2114,8 +2117,12 @@ def run_sweep(args, cfg: dict) -> int:
         if any(is_under(h, n) for h in here):
             left["runs from here"] += 1
             return False
-        if n in seen or n in registered or any(is_under(n, r) or is_under(r, n)
-                                               for r in registered):
+        if n in seen:
+            return False
+        # A listing shows a registered worktree (and says what keeps it);
+        # only a delete class leaves it to the worktree rule.
+        if destructive and (n in registered or any(is_under(n, r) or is_under(r, n)
+                                                   for r in registered)):
             return False
         seen.add(n)
         return True

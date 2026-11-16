@@ -2311,3 +2311,25 @@ def test_named_scratch_rows_still_show_size_and_last_write(env):
     assert rc == 0, out
     row = next(line for line in out.splitlines() if "claude-session" in line)
     assert "5.0 kB" in row and "last write 30.0 days ago" in row, row
+
+
+# --- final read-only Codex pass ----------------------------------------------
+
+def test_a_worktree_root_that_is_also_a_scratch_root_removes_no_worktree(env):
+    """A scratch root is list only, also when a worktree root reaches it."""
+    wt = env.add("under-scratch-wt")
+    (env.wt_root / ".pseudolife-scratch-root").write_text("", encoding="utf-8")
+    rc, out = run(env, "--worktree-root", str(env.wt_root), "--scratch-root", str(env.wt_root),
+                  "--apply", roots=False)
+    assert rc == 0, out
+    assert env.registered(wt) and wt.exists()
+    assert "at or around a scratch root: 1" in out
+
+
+def test_a_scratch_listing_shows_a_registered_worktree_and_what_keeps_it(env):
+    wt = env.add("listed-wt")
+    (env.wt_root / ".pseudolife-scratch-root").write_text("", encoding="utf-8")
+    rc, out = run(env, "--scratch-root", str(env.wt_root), roots=False)
+    assert rc == 0, out
+    row = next(line for line in out.splitlines() if "listed-wt" in line)
+    assert "registered worktree" in row, row
