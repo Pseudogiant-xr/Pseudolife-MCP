@@ -232,7 +232,9 @@ impl Registered {
             Kind::SystemUnit => {
                 format!("systemctl disable --now {name} && rm {file} && systemctl daemon-reload")
             }
-            Kind::LaunchAgent => format!("launchctl bootout gui/$(id -u)/{name} && rm {file}"),
+            // bootout fails only for a job not loaded (already stopped), which
+            // must not keep its plist: `;`, not `&&`.
+            Kind::LaunchAgent => format!("launchctl bootout gui/$(id -u)/{name} ; rm {file}"),
             Kind::Task => format!("{}schtasks /Delete /TN {name} /F", powershell_note(&name)),
         }
     }
@@ -244,7 +246,7 @@ impl Registered {
             Kind::UserUnit => format!("systemctl --user disable --now {name}"),
             Kind::SystemUnit => format!("systemctl disable --now {name}"),
             Kind::LaunchAgent => format!(
-                "launchctl bootout gui/$(id -u)/{name} && launchctl disable gui/$(id -u)/{name}"
+                "launchctl bootout gui/$(id -u)/{name} ; launchctl disable gui/$(id -u)/{name}"
             ),
             Kind::Task => format!(
                 "{}schtasks /Change /TN {name} /Disable",

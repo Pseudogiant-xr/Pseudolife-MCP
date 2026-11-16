@@ -538,7 +538,8 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
     };
     assert!(
         lines[0].contains(
-            "Remove it with: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot && rm "
+            // An already-unloaded job still gets its plist removed.
+            "Remove it with: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot ; rm "
         ),
         "{lines:?}"
     );
