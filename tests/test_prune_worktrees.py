@@ -1363,7 +1363,7 @@ def test_scratch_holding_logs_evidence_checkouts_or_venvs_is_kept(env):
     assert rc == 0, out
     assert all(p.exists() for p in kept), out
     for reason in ("holds a log", "holds evidence or logs", "holds a git checkout",
-                   "holds a virtual environment", "a harness's scratch root"):
+                   "holds a virtual environment", "a harness's scratchpad or a tool dir"):
         assert reason in out, out
 
 
@@ -1423,3 +1423,19 @@ def test_a_scratch_tree_of_new_empty_dirs_is_not_idle(env):
     assert rc == 0, out
     assert path.exists()
     assert "in grace period" in out
+
+
+def test_tool_dirs_under_a_scratch_root_are_kept(env):
+    """The Windows dev VM's dry run (16 November 2026) offered its .rustup
+    toolchain as scratch when C:\dev was named a scratch root. Hidden dirs,
+    tool dir names and rustup or cargo homes are kept; a name may only keep."""
+    kept = [_scratch(env, ".rustup"),
+            _scratch(env, "bin", "uv.exe"),
+            _scratch(env, "rustup-home", "toolchains/stable/x", "settings.toml"),
+            _scratch(env, "cargo-home", "registry/index/x", "bin/cargo.exe")]
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert all(p.exists() for p in kept), out
+    for reason in ("a hidden settings or tool dir", "a harness's scratchpad or a tool dir",
+                   "a rustup or cargo home"):
+        assert reason in out, out

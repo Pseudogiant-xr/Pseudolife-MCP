@@ -625,8 +625,11 @@ HOUR = 3600.0
 DEFAULT_TARGET_GRACE_HOURS = 24.0
 DEFAULT_UNOWNED_TARGET_DAYS = 14.0
 DEFAULT_SCRATCH_GRACE_DAYS = 7.0
-# Harness scratchpads hold registered worktrees and evidence.
-SCRATCH_KEEP_NAMES = {"claude"}
+# Harness scratchpads hold registered worktrees and evidence; tool dirs
+# hold the programs a dev machine runs. A name may only ever keep: the
+# Windows dev VM's dry run (16 November 2026) would otherwise have offered
+# its .rustup toolchain and its bin dir as scratch.
+SCRATCH_KEEP_NAMES = {"claude", "bin", "scripts", "tools"}
 SCRATCH_LOG_SUFFIXES = (".log", ".jsonl")
 DEP_INFO_PER_DIR = 40               # newest dep-info files read per dir
 DEP_INFO_MAX_BYTES = 4 * 1024 * 1024
@@ -1067,7 +1070,16 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
     v = Verdict("scratch", path)
     name = os.path.basename(path).lower()
     if name in SCRATCH_KEEP_NAMES:
-        v.failure = "a harness's scratch root"
+        v.failure = f"a harness's scratchpad or a tool dir ({os.path.basename(path)})"
+        return v
+    if name.startswith("."):
+        v.failure = f"a hidden settings or tool dir ({os.path.basename(path)})"
+        return v
+    if (os.path.isdir(os.path.join(path, "toolchains"))
+            and os.path.isfile(os.path.join(path, "settings.toml"))) or (
+            os.path.isdir(os.path.join(path, "registry"))
+            and os.path.isdir(os.path.join(path, "bin"))):
+        v.failure = "a rustup or cargo home"
         return v
     if "evidence" in name or name == "logs" or name.endswith("-logs"):
         v.failure = f"holds evidence or logs ({os.path.basename(path)})"

@@ -195,7 +195,15 @@ Each direct child of a `--scratch-root` is deleted when all of these hold:
   for evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included.
   Logs and evidence are kept for ever by the maintainer's ruling of
   16 November 2026.
-- It is not `claude`, the Claude Code scratchpad root.
+- It is not `claude` (the Claude Code scratchpad root), `bin`, `scripts` or
+  `tools`, not a hidden dir (name starting with `.`), and not a rustup home
+  (`toolchains/` with `settings.toml`) or cargo home (`registry/` with
+  `bin/`). A name may only keep.
+
+Name only dirs that hold nothing but scratch as scratch roots: a dev
+machine's work dir and the system temp dir, never a dir that also holds
+tools or checkouts. The Windows dev VM's first dry run, with `C:\dev` named a
+scratch root, offered its `.rustup` toolchain until the rules above kept it.
 
 The system temp dir may be named as a scratch root on purpose. It stays
 protected for every other class.
