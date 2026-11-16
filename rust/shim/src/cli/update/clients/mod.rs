@@ -7,8 +7,6 @@ mod plugin;
 mod tests;
 
 use crate::runtime::{self, registrations};
-#[cfg(test)]
-pub(crate) use command::Output;
 pub(crate) use command::{NativeRunner, Runner};
 use serde_json::{Value, json};
 use std::{

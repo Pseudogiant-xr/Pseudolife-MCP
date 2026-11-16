@@ -33,16 +33,17 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ffi::OsString,
     fs,
     io::{self, Cursor, Read, Write},
     path::{Path, PathBuf},
-    time::Duration,
+    process::{Command, Stdio},
+    time::{Duration, Instant},
 };
 
 use sha2::{Digest, Sha256};
 
 use super::store;
-use crate::cli::update::clients::{NativeRunner, Runner};
 
 pub(super) const VERSION: &str = "0.0.15";
 
@@ -119,6 +120,113 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 /// The whole download's bound: the largest pinned archive (28.9 MB) in 15
 /// minutes needs about 32 KB/s.
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(900);
+/// A connection that cannot be made, or a transfer that stalls, fails long
+/// before the whole bound (the Python client allowed 60 s per operation).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The only environment the vendor program sees: the frozen Python client's
+/// launch allowlist (`child_environment`), so no token or API key in the
+/// caller's environment reaches it. The supervisor's real launch (T6b) must
+/// use the same rule.
+const PROBE_ENVIRONMENT: [&str; 15] = [
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HOME",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "LANG",
+    "LC_ALL",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
+/// The probe's own exit codes for outcomes the program did not choose.
+const PROBE_TIMED_OUT: i32 = 124;
+const PROBE_NOT_STARTED: i32 = 126;
+
+/// How the downloaded program is checked: `program --help` run in `cwd` with
+/// exactly `env`, answering its exit code (`PROBE_TIMED_OUT`,
+/// `PROBE_NOT_STARTED`, or 128 + n for signal n).
+pub(super) trait Probe {
+    fn help(&self, program: &Path, cwd: &Path, env: &[(OsString, OsString)]) -> i32;
+}
+
+/// The real probe: stdin, stdout and stderr closed, no window of its own
+/// when this process has none, and the program killed at `PROBE_TIMEOUT`.
+/// `--help` starts no children, so the program alone is stopped.
+struct SystemProbe;
+impl Probe for SystemProbe {
+    fn help(&self, program: &Path, cwd: &Path, env: &[(OsString, OsString)]) -> i32 {
+        let mut command = Command::new(program);
+        command
+            .arg("--help")
+            .current_dir(cwd)
+            .env_clear()
+            .envs(env.iter().map(|(key, value)| (key, value)))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(crate::cli::restore_cli::child_window::child_window_flag());
+        }
+        let Ok(mut child) = command.spawn() else {
+            return PROBE_NOT_STARTED;
+        };
+        let deadline = Instant::now() + PROBE_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return exit_code(status),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50))
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return PROBE_TIMED_OUT;
+                }
+            }
+        }
+    }
+}
+
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return 128 + signal;
+        }
+    }
+    status.code().unwrap_or(1)
+}
+
+/// The allowlisted part of `vars` (names compared without case on Windows,
+/// where the environment ignores it).
+fn probe_environment(
+    vars: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    vars.into_iter()
+        .filter(|(key, _)| {
+            key.to_str().is_some_and(|key| {
+                PROBE_ENVIRONMENT.iter().any(|allowed| {
+                    if cfg!(windows) {
+                        allowed.eq_ignore_ascii_case(key)
+                    } else {
+                        *allowed == key
+                    }
+                })
+            })
+        })
+        .collect()
+}
 /// An interrupted install (a kill, a closed terminal, Ctrl-C during the
 /// probe) leaves its stage behind. An install in progress writes into its
 /// stage within seconds and holds it for at most the probe after that, so a
@@ -201,7 +309,7 @@ fn url(pin: &Pin) -> String {
 /// copy is there.
 pub(super) fn ensure(root: &Path) -> Result<Installed, String> {
     let pin = pin_for(std::env::consts::OS, std::env::consts::ARCH)?;
-    ensure_with(root, pin, &NativeRunner, download)
+    ensure_with(root, pin, &SystemProbe, download)
 }
 
 /// `ensure` with its effects injected: the pin, the `--help` probe and the
@@ -209,17 +317,19 @@ pub(super) fn ensure(root: &Path) -> Result<Installed, String> {
 fn ensure_with(
     root: &Path,
     pin: Pin,
-    runner: &dyn Runner,
+    probe: &dyn Probe,
     fetch: impl FnOnce(&str, u64) -> Result<Vec<u8>, String>,
 ) -> Result<Installed, String> {
     prepare_root(root)?;
+    // Before reuse too: a stage an interrupted install left beside a
+    // runtime that later installed would otherwise never go.
+    sweep_stale_stages(root);
     let target = root.join(folder_name(&pin));
     if let Some(installed) = installed(&target, &pin)? {
         return Ok(installed);
     }
-    sweep_stale_stages(root);
     let archive = fetch(&url(&pin), pin.size)?;
-    install(root, pin, &archive, runner, UNPACKED_LIMIT)
+    install(root, pin, &archive, probe, UNPACKED_LIMIT)
 }
 
 /// Remove stages earlier installs left (`STALE_STAGE`): only an owner-only
@@ -422,19 +532,19 @@ fn install(
     root: &Path,
     pin: Pin,
     archive: &[u8],
-    runner: &dyn Runner,
+    probe: &dyn Probe,
     unpacked_limit: u64,
 ) -> Result<Installed, String> {
     let got = archive.len() as u64;
     if got < pin.size {
         return Err(format!(
-            "the tunnel runtime download ended early ({got} of {} bytes); nothing was installed; retry",
+            "the tunnel runtime download ended early ({got} of {} bytes); nothing was installed; retry, and if this repeats and the host reaches the internet through a proxy or a sign-in portal, check that it passes downloads from github.com unchanged",
             pin.size
         ));
     }
     if got > pin.size {
         return Err(format!(
-            "the tunnel runtime download is larger than the pinned release ({got} bytes, expected {}); nothing was installed; retry, and report it if it repeats",
+            "the tunnel runtime download is larger than the pinned release ({got} bytes, expected {}); nothing was installed; if the host reaches the internet through a proxy or a sign-in portal, check that it passes downloads from github.com unchanged, then retry",
             pin.size
         ));
     }
@@ -472,7 +582,7 @@ fn install(
                     break;
                 }
                 total += read as u64;
-                // zip 9 already fails a member that unpacks past its declared
+                // zip =9.0.5 already fails a member that unpacks past its declared
                 // size, and the declared total is capped above, so this count
                 // is the cap's own guard should the reader ever change.
                 if total > unpacked_limit {
@@ -508,18 +618,15 @@ fn install(
             .and_then(|()| opened.file.sync_all())
             .map_err(|_| unwritable(root, "its checksums.json cannot be written"))?;
         drop(opened);
-        let probe = runner.run(
+        let code = probe.help(
             &stage.join(binary_name(&pin)),
-            &["--help"],
-            None,
-            PROBE_TIMEOUT,
-            &[],
+            &stage,
+            &probe_environment(std::env::vars_os()),
         );
-        if probe.code != 0 {
-            // NativeRunner's own codes: 124 for its timeout, 128 + n for a
-            // signal; anything else is the program's exit or a failed start.
-            let outcome = match probe.code {
-                124 => format!("did not finish within {} s", PROBE_TIMEOUT.as_secs()),
+        if code != 0 {
+            let outcome = match code {
+                PROBE_TIMED_OUT => format!("did not finish within {} s", PROBE_TIMEOUT.as_secs()),
+                PROBE_NOT_STARTED => "could not be started".to_owned(),
                 code if code > 128 => "was interrupted".to_owned(),
                 code => format!("failed (exit {code})"),
             };
@@ -549,11 +656,12 @@ fn install(
                 binary: target.join(binary_name(&pin)),
                 changed: true,
             }),
-            // Another install may have won the rename; otherwise say what
-            // the rename met (often a scan holding the new files a moment).
-            Err(error) => installed(&target, &pin)?.ok_or_else(|| {
+            // Another install may have won the rename. Otherwise the usual
+            // cause is a scan holding the new files a moment; the OS text is
+            // not passed on, since it can suggest an elevated prompt.
+            Err(_) => installed(&target, &pin)?.ok_or_else(|| {
                 format!(
-                    "the tunnel runtime could not be moved into {}: {error}; nothing was installed; retry",
+                    "the tunnel runtime could not be moved into {}; nothing was installed; if a security scan is checking the new files, wait a minute, then retry",
                     target.display()
                 )
             }),
@@ -563,8 +671,10 @@ fn install(
         return result;
     }
     // The stage is this call's own fresh folder: remove the files in it,
-    // whatever put them there, then the folder; a leftover is named.
-    if let Ok(entries) = fs::read_dir(&stage) {
+    // whatever put them there, then the folder; a leftover is named. It is
+    // listed only while it is still a plain folder, never through a link.
+    let plain = fs::symlink_metadata(&stage).is_ok_and(|info| info.is_dir());
+    if let Some(entries) = plain.then(|| fs::read_dir(&stage).ok()).flatten() {
         for entry in entries.flatten() {
             if entry
                 .file_type()
@@ -688,35 +798,40 @@ fn remove_retry(remove: impl Fn() -> io::Result<()>) {
 /// digest of whatever comes back.
 fn download(url: &str, limit: u64) -> Result<Vec<u8>, String> {
     use futures::StreamExt;
-    let failed = |why: String| {
-        format!(
-            "could not download the tunnel runtime from {url}: {why}; check that this host can reach github.com over HTTPS, then retry"
-        )
-    };
+    /// Why a download stopped, by where the next step lies.
+    enum Stop {
+        Network(String),
+        TooLarge,
+        Local(&'static str),
+    }
     let owned = url.to_owned();
     // A private runtime avoids nesting Tokio runtimes in synchronous callers
     // (as `runtime::install_source` does).
-    std::thread::spawn(move || -> Result<Vec<u8>, String> {
+    let outcome = std::thread::spawn(move || -> Result<Vec<u8>, Stop> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|_| "no I/O runtime could be started".to_owned())?;
+            .map_err(|_| Stop::Local("no I/O runtime could be started"))?;
         runtime.block_on(async move {
             let cause = |error: reqwest::Error| {
-                if error.is_timeout() {
-                    format!("it took longer than {} s", TRANSFER_TIMEOUT.as_secs())
+                Stop::Network(if error.is_timeout() {
+                    "the server stopped answering in time".to_owned()
                 } else if let Some(status) = error.status() {
                     format!("the server answered HTTP {}", status.as_u16())
+                } else if error.is_connect() {
+                    "no connection could be made (a proxy or security product that inspects HTTPS must be trusted by this system)".to_owned()
                 } else {
-                    "the connection failed".to_owned()
-                }
+                    "the transfer failed".to_owned()
+                })
             };
             let client = reqwest::Client::builder()
                 .https_only(true)
                 .user_agent("pseudolife-mcp")
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
                 .timeout(TRANSFER_TIMEOUT)
                 .build()
-                .map_err(|_| "no HTTPS client could be built".to_owned())?;
+                .map_err(|_| Stop::Local("no HTTPS client could be built"))?;
             let response = client
                 .get(&owned)
                 .send()
@@ -724,14 +839,14 @@ fn download(url: &str, limit: u64) -> Result<Vec<u8>, String> {
                 .and_then(reqwest::Response::error_for_status)
                 .map_err(cause)?;
             if response.content_length().is_some_and(|n| n > limit) {
-                return Err("it is larger than the pinned release".to_owned());
+                return Err(Stop::TooLarge);
             }
             let mut stream = response.bytes_stream();
             let mut bytes = Vec::new();
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(cause)?;
                 if bytes.len() as u64 + chunk.len() as u64 > limit {
-                    return Err("it is larger than the pinned release".to_owned());
+                    return Err(Stop::TooLarge);
                 }
                 bytes.extend_from_slice(&chunk);
             }
@@ -739,8 +854,16 @@ fn download(url: &str, limit: u64) -> Result<Vec<u8>, String> {
         })
     })
     .join()
-    .map_err(|_| failed("the download worker failed".to_owned()))?
-    .map_err(failed)
+    .unwrap_or(Err(Stop::Local("the download worker failed")));
+    outcome.map_err(|stop| match stop {
+        Stop::Network(why) => format!(
+            "could not download the tunnel runtime from {url}: {why}; check that this host can reach github.com over HTTPS, then retry"
+        ),
+        Stop::TooLarge => "the tunnel runtime download is larger than the pinned release; nothing was installed; if the host reaches the internet through a proxy or a sign-in portal, check that it passes downloads from github.com unchanged, then retry".to_owned(),
+        Stop::Local(why) => format!(
+            "the tunnel runtime download could not start ({why}); nothing was installed; retry, and if it repeats, report it"
+        ),
+    })
 }
 
 #[cfg(test)]

@@ -1,12 +1,11 @@
 //! In-process tests of the vendor runtime: archives are built in memory and
 //! injected, the download is a closure and the `--help` probe a fake
-//! `Runner`, so nothing here touches the network or starts a process.
+//! `Probe`, so nothing here touches the network or starts a process.
 use std::{cell::RefCell, io::Write as _};
 
 use zip::write::SimpleFileOptions;
 
 use super::*;
-use crate::cli::update::clients::Output;
 
 /// A disposable owner-only tunnel store.
 struct Store {
@@ -44,14 +43,21 @@ impl Drop for Store {
     }
 }
 
+/// One `--help` probe as the install asked for it.
+struct Call {
+    program: PathBuf,
+    cwd: PathBuf,
+    env: Vec<(OsString, OsString)>,
+}
+
 /// The `--help` probe: answers `code`, records each call and checks the
 /// program it is asked to run exists at that moment.
-struct Probe {
+struct Fake {
     code: i32,
-    calls: RefCell<Vec<(PathBuf, Vec<String>)>>,
+    calls: RefCell<Vec<Call>>,
     during: Box<dyn Fn(&Path)>,
 }
-impl Probe {
+impl Fake {
     fn new(code: i32) -> Self {
         Self {
             code,
@@ -60,25 +66,16 @@ impl Probe {
         }
     }
 }
-impl Runner for Probe {
-    fn run(
-        &self,
-        executable: &Path,
-        args: &[&str],
-        _cwd: Option<&Path>,
-        _timeout: Duration,
-        _env: &[(&str, &str)],
-    ) -> Output {
-        assert!(executable.is_file(), "probe of a missing {executable:?}");
-        (self.during)(executable);
-        self.calls.borrow_mut().push((
-            executable.to_owned(),
-            args.iter().map(|a| a.to_string()).collect(),
-        ));
-        Output {
-            code: self.code,
-            bytes: vec![],
-        }
+impl Probe for Fake {
+    fn help(&self, program: &Path, cwd: &Path, env: &[(OsString, OsString)]) -> i32 {
+        assert!(program.is_file(), "probe of a missing {program:?}");
+        (self.during)(program);
+        self.calls.borrow_mut().push(Call {
+            program: program.to_owned(),
+            cwd: cwd.to_owned(),
+            env: env.to_vec(),
+        });
+        self.code
     }
 }
 
@@ -138,7 +135,7 @@ fn attempt(
     store: &Store,
     pinned: &[u8],
     archive: &[u8],
-    probe: &Probe,
+    probe: &Fake,
 ) -> Result<Installed, String> {
     install(&store.root, pin_of(pinned), archive, probe, UNPACKED_LIMIT)
 }
@@ -147,7 +144,7 @@ fn attempt(
 fn refused(archive: &[u8], fragment: &str) {
     let store = Store::new();
     let before = store.listing();
-    let probe = Probe::new(0);
+    let probe = Fake::new(0);
     let error = attempt(&store, archive, archive, &probe).unwrap_err();
     assert!(error.contains(fragment), "{fragment:?} not in {error:?}");
     assert!(error.contains("nothing was installed"), "{error}");
@@ -159,7 +156,7 @@ fn refused(archive: &[u8], fragment: &str) {
 fn a_pinned_archive_installs_flat_owner_only_and_probed() {
     let store = Store::new();
     let archive = release(&host());
-    let probe = Probe::new(0);
+    let probe = Fake::new(0);
     let fetched = RefCell::new(Vec::new());
     let installed = ensure_with(&store.root, pin_of(&archive), &probe, |url, size| {
         fetched.borrow_mut().push((url.to_owned(), size));
@@ -182,12 +179,21 @@ fn a_pinned_archive_installs_flat_owner_only_and_probed() {
     assert!(fetched.borrow()[0].0.starts_with(
         "https://github.com/openai/tunnel-client/releases/download/v0.0.15/tunnel-client-v0.0.15-"
     ));
-    // One probe, of the staged wrapper, with --help only.
+    // One probe, of the staged wrapper, run in the stage with only the
+    // allowlisted environment.
     let calls = probe.calls.borrow();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].1, ["--help"]);
-    let staged = calls[0].0.parent().unwrap();
+    let staged = calls[0].program.parent().unwrap();
     assert_eq!(staged.parent().unwrap(), store.root);
+    assert_eq!(calls[0].cwd, staged);
+    assert_eq!(calls[0].env, probe_environment(std::env::vars_os()));
+    for (key, _) in &calls[0].env {
+        let key = key.to_str().unwrap().to_ascii_uppercase();
+        assert!(
+            PROBE_ENVIRONMENT.contains(&key.as_str()),
+            "{key} reached the probe"
+        );
+    }
     assert!(
         staged
             .file_name()
@@ -231,11 +237,11 @@ fn a_rerun_reuses_the_verified_runtime_and_changes_nothing() {
     let store = Store::new();
     let archive = release(&host());
     let pin = pin_of(&archive);
-    ensure_with(&store.root, pin, &Probe::new(0), |_, _| Ok(archive.clone())).unwrap();
+    ensure_with(&store.root, pin, &Fake::new(0), |_, _| Ok(archive.clone())).unwrap();
     let before = store.listing();
     let folder = store.root.join(folder_name(&pin));
     let manifest = fs::read(folder.join(MANIFEST)).unwrap();
-    let probe = Probe::new(0);
+    let probe = Fake::new(0);
     let again = ensure_with(
         &store.root,
         pin,
@@ -282,7 +288,7 @@ fn a_folder_in_the_python_clients_layout_is_reused() {
     let installed = ensure_with(
         &store.root,
         pin,
-        &Probe::new(0),
+        &Fake::new(0),
         |_, _| -> Result<Vec<u8>, String> { panic!("downloaded") },
     )
     .unwrap();
@@ -296,7 +302,7 @@ fn a_wrong_digest_is_refused_and_leaves_nothing() {
     let mut other = archive.clone();
     let last = other.len() - 1;
     other[last] ^= 1;
-    let probe = Probe::new(0);
+    let probe = Fake::new(0);
     let error = attempt(&store, &archive, &other, &probe).unwrap_err();
     assert!(
         error.contains("does not match the checksum this client pins"),
@@ -312,7 +318,7 @@ fn a_short_or_oversized_download_is_refused_and_leaves_nothing() {
     let store = Store::new();
     let archive = release(&host());
     let short = &archive[..archive.len() - 1];
-    let error = attempt(&store, &archive, short, &Probe::new(0)).unwrap_err();
+    let error = attempt(&store, &archive, short, &Fake::new(0)).unwrap_err();
     assert!(
         error.contains(&format!(
             "ended early ({} of {} bytes)",
@@ -323,7 +329,7 @@ fn a_short_or_oversized_download_is_refused_and_leaves_nothing() {
     );
     let mut long = archive.clone();
     long.push(0);
-    let error = attempt(&store, &archive, &long, &Probe::new(0)).unwrap_err();
+    let error = attempt(&store, &archive, &long, &Fake::new(0)).unwrap_err();
     assert!(error.contains("larger than the pinned release"), "{error}");
     assert!(store.listing().is_empty());
 }
@@ -332,7 +338,7 @@ fn a_short_or_oversized_download_is_refused_and_leaves_nothing() {
 fn a_fetch_failure_is_returned_and_leaves_nothing() {
     let store = Store::new();
     let pin = host();
-    let error = ensure_with(&store.root, pin, &Probe::new(0), |_, _| {
+    let error = ensure_with(&store.root, pin, &Fake::new(0), |_, _| {
         Err("offline".to_owned())
     })
     .unwrap_err();
@@ -469,7 +475,7 @@ fn the_unpacked_total_is_capped_and_a_member_past_its_declared_size_refused() {
     ]);
     let pin = pin_of(&archive);
     // Declared sizes over the cap: refused before a stage exists.
-    let error = install(&store.root, pin, &archive, &Probe::new(0), 4096).unwrap_err();
+    let error = install(&store.root, pin, &archive, &Fake::new(0), 4096).unwrap_err();
     assert!(
         error.contains("its members declare more than the size cap"),
         "{error}"
@@ -484,7 +490,7 @@ fn the_unpacked_total_is_capped_and_a_member_past_its_declared_size_refused() {
     let local = lying.windows(4).rposition(|w| w == b"PK\x03\x04").unwrap();
     lying[local + 22..local + 26].copy_from_slice(&1u32.to_le_bytes());
     let pin = pin_of(&lying);
-    let error = install(&store.root, pin, &lying, &Probe::new(0), 4096 + 2).unwrap_err();
+    let error = install(&store.root, pin, &lying, &Fake::new(0), 4096 + 2).unwrap_err();
     // The reader stops at the declared size, before the counted cap.
     assert!(error.contains("a member is corrupt"), "{error}");
     assert!(store.listing().is_empty(), "{:?}", store.listing());
@@ -494,13 +500,54 @@ fn the_unpacked_total_is_capped_and_a_member_past_its_declared_size_refused() {
 fn a_failed_probe_is_refused_and_leaves_nothing() {
     let store = Store::new();
     let archive = release(&host());
-    let probe = Probe::new(3);
+    let probe = Fake::new(3);
     let error = attempt(&store, &archive, &archive, &probe).unwrap_err();
     assert!(
         error.contains("check `tunnel-client --help` failed (exit 3)"),
         "{error}"
     );
     assert_eq!(probe.calls.borrow().len(), 1);
+    assert!(store.listing().is_empty(), "{:?}", store.listing());
+}
+
+#[test]
+fn the_probe_environment_is_exactly_the_allowlist() {
+    let pair = |key: &str, value: &str| (OsString::from(key), OsString::from(value));
+    let given = vec![
+        pair("PATH", "/usr/bin"),
+        pair("HOME", "/home/someone"),
+        pair("SSL_CERT_FILE", "/etc/ssl/cert.pem"),
+        pair("PSEUDOLIFE_MCP_TOKEN", "secret-token"),
+        pair("PSEUDOLIFE_MCP_TOKEN_FILE", "/home/someone/token"),
+        pair("OPENAI_API_KEY", "sk-secret"),
+        pair("AWS_SECRET_ACCESS_KEY", "secret"),
+        pair("PATHX", "not PATH"),
+        pair("LD_PRELOAD", "/tmp/evil.so"),
+    ];
+    let kept = probe_environment(given);
+    assert_eq!(
+        kept,
+        vec![
+            pair("PATH", "/usr/bin"),
+            pair("HOME", "/home/someone"),
+            pair("SSL_CERT_FILE", "/etc/ssl/cert.pem"),
+        ]
+    );
+    // Windows ignores the case of names; elsewhere a lower-case name is
+    // another variable.
+    let mixed = probe_environment(vec![
+        pair("Path", "C:\\Windows"),
+        pair("SystemRoot", "C:\\Windows"),
+    ]);
+    assert_eq!(mixed.len(), if cfg!(windows) { 2 } else { 0 });
+}
+
+#[test]
+fn a_probe_that_cannot_start_is_named() {
+    let store = Store::new();
+    let archive = release(&host());
+    let error = attempt(&store, &archive, &archive, &Fake::new(PROBE_NOT_STARTED)).unwrap_err();
+    assert!(error.contains("--help` could not be started"), "{error}");
     assert!(store.listing().is_empty(), "{:?}", store.listing());
 }
 
@@ -512,7 +559,7 @@ fn a_probe_timeout_or_interrupt_is_named() {
     ] {
         let store = Store::new();
         let archive = release(&host());
-        let error = attempt(&store, &archive, &archive, &Probe::new(code)).unwrap_err();
+        let error = attempt(&store, &archive, &archive, &Fake::new(code)).unwrap_err();
         assert!(error.contains(says), "{error}");
         assert!(store.listing().is_empty(), "{:?}", store.listing());
     }
@@ -524,7 +571,7 @@ fn a_stage_that_changes_during_the_probe_is_refused_and_removed() {
     // a rerun would refuse that folder, so this call must not commit it.
     let store = Store::new();
     let archive = release(&host());
-    let mut probe = Probe::new(0);
+    let mut probe = Fake::new(0);
     probe.during = Box::new(|wrapper| {
         fs::write(wrapper.with_file_name("scan.log"), b"added").unwrap();
     });
@@ -534,23 +581,41 @@ fn a_stage_that_changes_during_the_probe_is_refused_and_removed() {
     assert!(store.listing().is_empty(), "{:?}", store.listing());
 }
 
-/// Set a folder's modification time `by` into the past.
-fn age(dir: &Path, by: Duration) {
+/// Set the modification time of `path` itself (a folder, or a link or
+/// junction, never what it points at) `by` into the past.
+fn age(path: &Path, by: Duration) {
+    let when = std::time::SystemTime::now() - by;
     #[cfg(unix)]
-    let handle = fs::File::open(dir).unwrap();
+    {
+        let since = when.duration_since(std::time::UNIX_EPOCH).unwrap();
+        let stamp = rustix::fs::Timespec {
+            tv_sec: since.as_secs() as _,
+            tv_nsec: since.subsec_nanos() as _,
+        };
+        rustix::fs::utimensat(
+            rustix::fs::CWD,
+            path,
+            &rustix::fs::Timestamps {
+                last_access: stamp,
+                last_modification: stamp,
+            },
+            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+        )
+        .unwrap();
+    }
     #[cfg(windows)]
-    let handle = {
+    {
         use std::os::windows::fs::OpenOptionsExt;
-        // FILE_WRITE_ATTRIBUTES, opened as a folder (BACKUP_SEMANTICS).
+        // FILE_WRITE_ATTRIBUTES on the entry itself (BACKUP_SEMANTICS for a
+        // folder, OPEN_REPARSE_POINT so a junction is not followed).
         fs::OpenOptions::new()
             .access_mode(0x0100)
-            .custom_flags(0x0200_0000)
-            .open(dir)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(path)
             .unwrap()
-    };
-    handle
-        .set_modified(std::time::SystemTime::now() - by)
-        .unwrap();
+            .set_modified(when)
+            .unwrap();
+    }
 }
 
 #[test]
@@ -593,7 +658,7 @@ fn an_install_removes_stale_stages_and_leaves_anything_else() {
     );
     let other = stage("keep-me", &["LICENSE"], true);
     let archive = release(&host());
-    ensure_with(&store.root, pin_of(&archive), &Probe::new(0), |_, _| {
+    ensure_with(&store.root, pin_of(&archive), &Fake::new(0), |_, _| {
         Ok(archive.clone())
     })
     .unwrap();
@@ -604,16 +669,107 @@ fn an_install_removes_stale_stages_and_leaves_anything_else() {
 }
 
 #[test]
+fn a_stale_stage_beside_an_installed_runtime_is_removed_on_reuse() {
+    let store = Store::new();
+    let archive = release(&host());
+    let pin = pin_of(&archive);
+    install(&store.root, pin, &archive, &Fake::new(0), UNPACKED_LIMIT).unwrap();
+    // An install interrupted in its probe left this stage behind.
+    let left = store.root.join(".runtime-00112233445566778899aabbccddeeff");
+    crate::board::state::private_dir(&left).unwrap();
+    crate::board::state::atomic_create(&left.join(binary_name(&pin)), b"partial").unwrap();
+    age(&left, Duration::from_secs(2 * 3600));
+    let again = ensure_with(
+        &store.root,
+        pin,
+        &Fake::new(0),
+        |_, _| -> Result<Vec<u8>, String> { panic!("a verified runtime is downloaded again") },
+    )
+    .unwrap();
+    assert!(!again.changed);
+    assert!(!left.exists(), "{:?}", store.listing());
+}
+
+/// An aged directory link named like a stage, pointing at `target`.
+fn stage_link(store: &Store, name: &str, target: &Path) -> PathBuf {
+    let link = store.root.join(name);
+    dir_link(target, &link);
+    age(&link, Duration::from_secs(2 * 3600));
+    link
+}
+
+#[test]
+fn the_sweep_never_follows_a_link_or_takes_a_folder_others_can_use() {
+    let store = Store::new();
+    // A folder outside the store holding names an install writes: what a
+    // sweep following a link would empty.
+    let victim = store.base.join("victim");
+    crate::board::state::private_dir(&victim).unwrap();
+    for name in ["LICENSE", "NOTICE", MANIFEST] {
+        crate::board::state::atomic_create(&victim.join(name), b"keep").unwrap();
+    }
+    // A junction (Windows) or symlink (POSIX) named exactly like a stage.
+    let link = stage_link(&store, ".runtime-ffeeddccbbaa99887766554433221100", &victim);
+    // A real, aged stage holding a link to that folder.
+    let holder = store.root.join(".runtime-aabbccddeeff00112233445566778899");
+    crate::board::state::private_dir(&holder).unwrap();
+    crate::board::state::atomic_create(&holder.join("LICENSE"), b"x").unwrap();
+    let inner = holder.join("NOTICE");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(victim.join("NOTICE"), &inner).unwrap();
+    #[cfg(windows)]
+    dir_link(&victim, &inner);
+    age(&holder, Duration::from_secs(2 * 3600));
+    // An aged stage others can read and enter (POSIX modes).
+    #[cfg(unix)]
+    let shared = {
+        use std::os::unix::fs::PermissionsExt;
+        let shared = store.root.join(".runtime-0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f");
+        crate::board::state::private_dir(&shared).unwrap();
+        crate::board::state::atomic_create(&shared.join("LICENSE"), b"x").unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o755)).unwrap();
+        age(&shared, Duration::from_secs(2 * 3600));
+        shared
+    };
+    let archive = release(&host());
+    ensure_with(&store.root, pin_of(&archive), &Fake::new(0), |_, _| {
+        Ok(archive.clone())
+    })
+    .unwrap();
+    for name in ["LICENSE", "NOTICE", MANIFEST] {
+        assert_eq!(
+            fs::read(victim.join(name)).unwrap(),
+            b"keep",
+            "{name} under the link"
+        );
+    }
+    assert!(fs::symlink_metadata(&link).is_ok(), "the link was removed");
+    assert!(
+        fs::symlink_metadata(&inner).is_ok(),
+        "the link inside a stage was removed"
+    );
+    assert!(
+        holder.join("LICENSE").exists(),
+        "a stage holding a link was swept"
+    );
+    #[cfg(unix)]
+    assert!(
+        shared.join("LICENSE").exists(),
+        "a stage others can use was swept"
+    );
+}
+
+#[test]
 fn an_install_that_finished_meanwhile_is_kept_and_the_stage_removed() {
     let store = Store::new();
     let archive = release(&host());
     let pin = pin_of(&archive);
     // A first install, moved aside to stand in for a concurrent one.
-    install(&store.root, pin, &archive, &Probe::new(0), UNPACKED_LIMIT).unwrap();
+    install(&store.root, pin, &archive, &Fake::new(0), UNPACKED_LIMIT).unwrap();
     let folder = store.root.join(folder_name(&pin));
     let aside = store.root.join("aside");
     fs::rename(&folder, &aside).unwrap();
-    let mut probe = Probe::new(0);
+    let mut probe = Fake::new(0);
     let (from, to) = (aside.clone(), folder.clone());
     probe.during = Box::new(move |_| fs::rename(&from, &to).unwrap());
     let installed = install(&store.root, pin, &archive, &probe, UNPACKED_LIMIT).unwrap();
@@ -669,14 +825,14 @@ fn broken_install_is_refused(fragment: &str, break_it: impl FnOnce(&Path, &Pin))
     let store = Store::new();
     let archive = release(&host());
     let pin = pin_of(&archive);
-    install(&store.root, pin, &archive, &Probe::new(0), UNPACKED_LIMIT).unwrap();
+    install(&store.root, pin, &archive, &Fake::new(0), UNPACKED_LIMIT).unwrap();
     let folder = store.root.join(folder_name(&pin));
     break_it(&folder, &pin);
     let before = store.listing();
     let error = ensure_with(
         &store.root,
         pin,
-        &Probe::new(0),
+        &Fake::new(0),
         |_, _| -> Result<Vec<u8>, String> { panic!("a broken runtime is downloaded over") },
     )
     .unwrap_err();
@@ -829,7 +985,7 @@ fn a_store_root_reached_through_a_link_is_refused_and_nothing_is_written() {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&store.root, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let probe = Probe::new(0);
+    let probe = Fake::new(0);
     let archive = release(&host());
     let error = ensure_with(&link.join("inner"), pin_of(&archive), &probe, |_, _| {
         Ok(archive.clone())

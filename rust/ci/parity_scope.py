@@ -134,7 +134,7 @@ DAEMON = ("cli", "cli-store", "cli-startup", "eval")
 # entries carry one row set: each one's rows and its other users' (doctor
 # shares update's Codex hook checks; console reads doctor's registration
 # search; expose, move and conductor_watch read connect's helpers; tunnel's
-# vendor runtime probes through update's command runner).
+# vendor runtime takes restore_cli's windowless child flag).
 UPDATE_CYCLE = ("update", "doctor", "console", "connect", "expose", "move", "conductor_watch",
                 "restore", "backup", "migrate_flat", "tunnel")
 SHIM_COMMANDS = {

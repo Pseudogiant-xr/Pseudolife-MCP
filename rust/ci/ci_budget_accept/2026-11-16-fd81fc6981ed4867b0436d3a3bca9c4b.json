@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "e72a4c8e3e97db5a",
-  "fingerprint": "f355998e424ff03c",
-  "reason": "rust/ci/parity_scope.py: tunnel joins UPDATE_CYCLE (tunnel/vendor.rs imports update's Runner); tunnel's row runs in w1c-connection, which update's cycle already reached through move, expose and console, so no suite, shard or matrix entry changes (checked: reached() of 11 cycle paths identical, SUITES and SHARDS unchanged)"
-}
