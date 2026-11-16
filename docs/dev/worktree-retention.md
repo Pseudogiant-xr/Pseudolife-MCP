@@ -135,12 +135,14 @@ deleted when all of these hold:
   counts as finished when one of these is true:
   - **Gone:** the source path no longer exists, and no existing ancestor of
     it is a checkout.
-  - **Merged:** it is a worktree or clone whose HEAD, and for a clone every
-    local branch, is a commit of the main repository on `origin/master`.
+  - **Merged:** it is a worktree whose HEAD, or a clone whose every ref
+    and reflog entry, is a commit of the main repository on `origin/master`.
 
   The main checkout is never finished. Paths under the cargo or rustup
   home, inside the target itself, or on a drive this machine does not have
-  name no owner, and neither do relative paths. rustc writes workspace
+  name no owner, and neither do relative paths, a path with no drive read
+  on Windows (a WSL path), or a path gone below a mount point or an empty
+  dir on Linux (the drive may be absent). rustc writes workspace
   sources relative to the workspace root; the absolute ones come from a
   top-level profile `.d` file and from `# env-dep:CARGO_MANIFEST_DIR=` lines,
   which name a crate's dir exactly. Every dep-info file is read; one that
@@ -152,7 +154,13 @@ deleted when all of these hold:
   only after `--unowned-target-days` (default 14) idle.
 - **No build holds it:** no build holds cargo's lock on any profile's
   `.cargo-lock`. The script takes the lock without waiting and releases it
-  at once.
+  at once. A lock file it cannot open (another user's build, a read-only
+  file, a sharing violation) counts as held, and a target with no lock file
+  in any profile is kept.
+- **No process uses it:** no running process names it on its command line
+  or (on Linux) works in it; when the process list cannot be read, it is
+  kept. A server started from `target/release` days ago and idle since is
+  exactly the case.
 - **The usual cache checks:** it is not pinned by a `.cargo/config.toml`,
   and it holds no link, junction or mount point.
 
@@ -171,14 +179,20 @@ or anything above the home never is.
 A child of a `--clone-root` with its own `.git` dir, and not a registered
 worktree, is deleted (renamed aside, then removed) when all of these hold:
 
-- Its HEAD and every local branch are commits of the main repository on
-  `origin/master`. A clone's remote may be a bundle or another machine's
+- Every ref (branches, tags, remote-tracking refs, notes) and every reflog
+  entry is a commit of the main repository on `origin/master`. A commit left
+  on a detached HEAD lives only in the reflog; one held by a tag only in the
+  tag. A clone's remote may be a bundle or another machine's
   path, so "pushed" means nothing here; a commit the main repository lacks
   exists only in that clone.
-- It has no stash, and it is clean by the worktree rule's whitelist.
+- It has no stash, and it is clean by the worktree rule's whitelist, with
+  submodule changes shown. A clone holding submodules (`.git/modules`) or a
+  file marked assume-unchanged or skip-worktree is kept, since status can
+  hide their changes.
 - It holds no link, has no keep marker, and nothing in it was written for
   the worktree grace period.
-- No running process names it.
+- No running process names it or (on Linux) works in it, and it is not
+  the checkout this run works from.
 - Git resolves its work tree to this very dir, and it owns no linked
   worktree (their commits and index live in its `.git`).
 - Its own `.git/config` sets nothing under which git runs a program or
@@ -200,8 +214,13 @@ Each direct child of a `--scratch-root` is deleted when all of these hold:
 - It holds no link.
 - No running process names it.
 - It holds nothing kept for ever: no `.git` (a checkout), no `pyvenv.cfg`
-  (a virtual environment), no `*.log` or `*.jsonl` file, and nothing named
-  for evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included.
+  (a virtual environment), no `*.log` or `*.jsonl` file, nothing named for
+  evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included, no
+  results, database, model or program (`*.json`, `*.csv`, `*.tsv`,
+  `*.parquet`, `*.db`, `*.sqlite*`, `*.gguf`, `*.safetensors`, `*.onnx`,
+  `*.pt`, `*.pth`, `*.ckpt`, `*.exe`, `*.dll`, `*.so`, `*.dylib`, an
+  executable file on Linux and macOS, a `PG_VERSION`), no socket, pipe or
+  device, and no other user's file.
   Logs and evidence are kept for ever by the maintainer's ruling of
   16 November 2026.
 - It is not `claude` (the Claude Code scratchpad root), `bin`, `scripts` or
@@ -217,7 +236,9 @@ scratch root, offered its `.rustup` toolchain until the rules above kept it.
 The system temp dir may be named as a scratch root on purpose. It stays
 protected for every other class.
 
-When the process list cannot be read, no clone or scratch dir is deleted.
+When the process list cannot be read, no target, clone or scratch dir is
+deleted. Every period, in the config and on the command line, must be a
+finite number, 0 or more.
 
 ### Never touched
 

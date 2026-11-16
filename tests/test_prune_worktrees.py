@@ -1486,11 +1486,15 @@ def test_a_clone_with_worktree_scoped_config_is_kept(env):
     marker = env.tmp / "ran.txt"
     _git(clone, "config", "extensions.worktreeConfig", "true")
     _git(clone, "config", "--worktree", "filter.x.clean", f"touch {marker.as_posix()}")
+    # Map every path to the filter, so a status run would fire it.
+    (clone / ".git" / "info").mkdir(exist_ok=True)
+    (clone / ".git" / "info" / "attributes").write_text("* filter=x\n", encoding="utf-8")
+    (clone / "README.md").write_text("touched\n", encoding="utf-8")
     _backdate(clone)
     rc, out = run_clones(env, "--apply")
     assert rc == 0, out
     assert clone.exists() and not marker.exists()
-    assert "worktree" in out and "kept" in out
+    assert "extensions.worktreeconfig" in out or "config.worktree" in out
 
 
 def test_a_clone_whose_work_tree_points_elsewhere_is_kept(env):
@@ -1541,3 +1545,185 @@ def test_scratch_waits_fourteen_days_by_default(env):
     assert rc == 0, out
     assert ten_days.exists()
     assert "grace 14" in out
+
+
+# --- Opus review of the target, clone and scratch classes ------------------
+
+def test_a_commit_held_only_by_a_tag_keeps_the_clone(env):
+    clone = _clone(env, "tagged")
+    (clone / "t.txt").write_text("only on a tag\n", encoding="utf-8")
+    _git(clone, "add", "t.txt")
+    _git(clone, "commit", "-qm", "tagged work")
+    _git(clone, "tag", "before-rebase")
+    _git(clone, "reset", "-q", "--hard", "origin/master")
+    _git(clone, "reflog", "expire", "--expire=now", "--all")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "a ref or reflog entry" in out
+
+
+def test_a_commit_left_on_a_detached_head_keeps_the_clone(env):
+    clone = _clone(env, "detached-work")
+    _git(clone, "checkout", "-q", "--detach")
+    (clone / "d.txt").write_text("only in the reflog\n", encoding="utf-8")
+    _git(clone, "add", "d.txt")
+    _git(clone, "commit", "-qm", "detached work")
+    _git(clone, "checkout", "-q", "master")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "a ref or reflog entry" in out
+
+
+def test_an_assume_unchanged_file_keeps_the_clone(env):
+    clone = _clone(env, "hidden-change")
+    _git(clone, "update-index", "--assume-unchanged", "README.md")
+    (clone / "README.md").write_text("changed but hidden\n", encoding="utf-8")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "assume-unchanged or skip-worktree" in out
+
+
+def test_a_clone_with_submodules_is_kept(env):
+    clone = _clone(env, "with-modules")
+    (clone / ".git" / "modules" / "sub").mkdir(parents=True)
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "it holds submodules" in out
+
+
+def test_the_clone_this_run_works_in_is_kept(env, monkeypatch):
+    clone = _clone(env, "runs-here")
+    _backdate(clone)
+    monkeypatch.chdir(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "runs from here: 1" in out
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="reads /proc")
+def test_a_shell_left_in_a_clone_keeps_it(env):
+    clone = _clone(env, "shell-inside")
+    _backdate(clone)
+    child = subprocess.Popen(["sleep", "60"], cwd=clone)
+    try:
+        rc, out = run_clones(env, "--apply")
+    finally:
+        child.kill()
+        child.wait()
+    assert rc == 0, out
+    assert clone.exists()
+    assert f"in use by process {child.pid}" in out
+
+
+def test_a_target_named_by_a_running_process_is_kept(env, targets_root, monkeypatch):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "served", gone)
+    monkeypatch.setattr(prune, "list_processes",
+                        lambda: [(999998, 1, f"{target / 'release' / 'server'} --port 1")])
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "in use by process 999998" in out
+
+
+def test_a_lock_file_that_cannot_be_opened_counts_as_held(env, targets_root, monkeypatch):
+    """Another user's build, a read-only file or a sharing violation must
+    not read as "no build"."""
+    import errno
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "unopenable", gone)
+    real_open = prune.os.open
+
+    def refuses(path, *a, **kw):
+        if str(path).endswith(".cargo-lock"):
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(prune.os, "open", refuses)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "a build holds cargo's lock" in out
+
+
+def test_a_target_with_no_lock_file_is_kept(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "no-lock", gone, age=None)
+    (target / "debug" / ".cargo-lock").unlink()
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "no cargo build lock found" in out
+
+
+def test_a_failed_partial_target_delete_keeps_cargos_markers(env, targets_root, monkeypatch):
+    """If a profile dir cannot go, the markers stay, so a later sweep still
+    sees a target and finishes it."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "half", gone, age=None)
+    (target / "mutant-src").mkdir()
+    (target / "tmp").mkdir()
+    (target / "tmp" / "x").write_bytes(b"x")
+    _backdate(target)
+    real = prune.delete_cache
+
+    def debug_in_use(path):
+        if os.path.basename(path) == "debug":
+            return "in use or access denied, skipped: held open"
+        return real(path)
+
+    monkeypatch.setattr(prune, "delete_cache", debug_in_use)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 1, out
+    assert (target / "CACHEDIR.TAG").exists() and (target / ".rustc_info.json").exists()
+    assert (target / "debug").exists() and not (target / "tmp").exists()
+    assert "cargo's markers kept" in out
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="a driveless path is absolute on POSIX")
+def test_a_wsl_path_read_on_windows_names_no_owner(tmp_path):
+    assert prune.source_owner("/home/u/repo/rust/src/lib.rs", str(tmp_path / "t"),
+                              prune._tool_homes()) is None
+
+
+def test_scratch_holding_results_models_databases_or_programs_is_kept(env):
+    kept = [_scratch(env, "results", "out/summary.json"),
+            _scratch(env, "model", "weights.gguf"),
+            _scratch(env, "pgdata", "PG_VERSION"),
+            _scratch(env, "tool-install", "python.exe")]
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert all(p.exists() for p in kept), out
+    assert "holds results, a database, a model or a program" in out
+
+
+def test_periods_must_be_finite_numbers(env):
+    env.config.write_text(f"repo = {json.dumps(str(env.repo))}\nscratch_grace_days = nan\n",
+                          encoding="utf-8")
+    rc, out = run(env, "--config", str(env.config), roots=False)
+    assert rc == 2 and "scratch_grace_days must be a number of days" in out
+    with pytest.raises(SystemExit):
+        prune.parse_args(["--scratch-grace-days", "nan"])
+    with pytest.raises(SystemExit):
+        prune.parse_args(["--target-grace-hours", "-1"])
+
+
+def test_every_git_call_turns_fsmonitor_off(env):
+    """core.fsmonitor names a program git runs on status; the main repo's
+    own setting must not run either."""
+    marker = env.tmp / "fsmonitor-ran.txt"
+    _git(env.repo, "config", "core.fsmonitor", f"touch {marker.as_posix()}")
+    env.add("watched")
+    rc, out = run(env)
+    assert rc == 0, out
+    assert not marker.exists()

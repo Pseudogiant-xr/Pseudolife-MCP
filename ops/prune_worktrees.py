@@ -45,7 +45,9 @@ configured by default. Runbook: docs/dev/worktree-retention.md.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
+import math
 import os
 import re
 import shutil
@@ -281,7 +283,8 @@ def keep_marker(wt: str) -> str | None:
 def status_problem(wt: str) -> str | None:
     # matching: an ignored dir is reported as the path its pattern matched
     # (pkg/__pycache__/), not collapsed to a parent that holds nothing else.
-    proc = git(wt, "status", "--porcelain=v1", "-z", "--ignored=matching")
+    proc = git(wt, "status", "--porcelain=v1", "-z", "--ignored=matching",
+               "--ignore-submodules=none")
     if proc.returncode:
         return f"git status failed: {proc.stderr.strip()}"
     tokens = proc.stdout.split("\0")
@@ -567,7 +570,11 @@ def _rmtree(path: str) -> None:
     """``shutil.rmtree`` that clears the read-only bit Windows puts on git's
     object files, then retries that one entry. The tree was scanned first
     and holds no link, and this runs only inside the renamed-aside copy."""
-    def retry(func, entry, _exc):
+    def retry(func, entry, exc):
+        # Only Windows marks files read-only in a way that blocks deletion,
+        # and never through a link (one made after the scan).
+        if sys.platform != "win32" or is_link(os.lstat(entry)):
+            raise exc if isinstance(exc, BaseException) else exc[1]
         os.chmod(entry, stat.S_IWRITE | stat.S_IREAD)
         func(entry)
 
@@ -631,6 +638,11 @@ DEFAULT_SCRATCH_GRACE_DAYS = 14.0   # maintainer ruling, 16 November 2026
 # its .rustup toolchain and its bin dir as scratch.
 SCRATCH_KEEP_NAMES = {"claude", "bin", "scripts", "tools"}
 SCRATCH_LOG_SUFFIXES = (".log", ".jsonl")
+# Results, databases, models and programs: never scratch, whatever the age.
+SCRATCH_KEEP_SUFFIXES = (".json", ".csv", ".tsv", ".parquet", ".db", ".sqlite", ".sqlite3",
+                         ".gguf", ".safetensors", ".onnx", ".pt", ".pth", ".ckpt",
+                         ".exe", ".dll", ".so", ".dylib")
+SCRATCH_KEEP_FILES = {"pg_version"}             # a PostgreSQL data dir
 DEP_INFO_MAX_BYTES = 4 * 1024 * 1024
 
 
@@ -718,11 +730,17 @@ def _dep_tokens(text: str) -> list[str]:
     return out
 
 
+def _both_forms(path: str) -> list[str]:
+    """A path as written and as resolved: dep-info paths are not resolved,
+    so a junctioned or symlinked home must match either way."""
+    return sorted({os.path.normcase(os.path.abspath(path)), norm(path)})
+
+
 def _tool_homes() -> list[str]:
     home = Path.home()
     homes = [os.environ.get("CARGO_HOME") or str(home / ".cargo"),
              os.environ.get("RUSTUP_HOME") or str(home / ".rustup")]
-    return [norm(h) for h in homes]
+    return [form for h in homes for form in _both_forms(h)]
 
 
 def source_owner(src: str, target: str, tool_homes: list[str]) -> tuple[str, str] | None:
@@ -734,11 +752,15 @@ def source_owner(src: str, target: str, tool_homes: list[str]) -> tuple[str, str
     if not os.path.isabs(src):
         return None
     drive = os.path.splitdrive(src)[0]
+    # A WSL path read on Windows (/home/..., /mnt/c/...) has no drive; it
+    # would resolve against this drive's root and look gone.
+    if sys.platform == "win32" and not drive:
+        return None
     if not os.path.isdir((drive + os.sep) if drive else os.sep):
         return None
     path = os.path.normpath(src)
     npath = os.path.normcase(path)
-    if is_under(npath, os.path.normcase(os.path.abspath(target))) or any(
+    if any(is_under(npath, t) for t in _both_forms(target)) or any(
             is_under(npath, h) for h in tool_homes):
         return None
     missing, cur = None, path
@@ -747,6 +769,11 @@ def source_owner(src: str, target: str, tool_homes: list[str]) -> tuple[str, str
         if parent == cur:
             return None
         missing, cur = cur, parent
+    if missing is not None and sys.platform != "win32" and (
+            os.path.ismount(cur) or (_real_dir(cur) and not os.listdir(cur))):
+        # Gone below a mount point, or below an empty dir that may be an
+        # unmounted one: the drive may simply be absent, so it says nothing.
+        return None
     probe = cur if _real_dir(cur) else os.path.dirname(cur)
     while True:
         if os.path.lexists(os.path.join(probe, ".git")):
@@ -797,11 +824,12 @@ def target_owners(target: str, profiles: list[str]) -> tuple[dict[str, str], str
 def _lock_held(lock_path: str) -> bool | None:
     """True when another process holds cargo's build lock on ``lock_path``,
     False when this process could take it (it is released at once), None
-    when the file cannot be opened (no lock file: no build holds it)."""
+    when there is no lock file. Any other failure to open it (another
+    user's build, a read-only file, a sharing violation) counts as held."""
     try:
         fd = os.open(lock_path, os.O_RDWR)
-    except OSError:
-        return None
+    except OSError as exc:
+        return None if exc.errno == errno.ENOENT else True
     try:
         if sys.platform == "win32":
             import msvcrt
@@ -854,19 +882,75 @@ def checkout_unfinished(repo: str, root: str, main: str) -> str | None:
     reason = merged_in_main(repo, head.stdout.strip())
     if reason:
         return reason
-    if os.path.isdir(os.path.join(root, ".git")):       # a clone: its branches too
-        refs = git(root, "for-each-ref", "--format=%(objectname)", "refs/heads")
-        if refs.returncode:
-            return f"cannot list branches: {refs.stderr.strip()}"
-        for sha in sorted(set(refs.stdout.split())):
-            reason = merged_in_main(repo, sha)
-            if reason:
-                return f"a local branch: {reason}"
+    if os.path.isdir(os.path.join(root, ".git")):
+        # A clone: every ref (tags, remote-tracking refs, notes; the stash is
+        # checked on its own) and every reflog entry, since a commit left on
+        # a detached HEAD lives only in the reflog.
+        refs = git(root, "for-each-ref", "--format=%(objectname) %(refname)")
+        logs = git(root, "reflog", "show", "--all", "--format=%H")
+        if refs.returncode or logs.returncode:
+            return f"cannot list its refs: {(refs.stderr or logs.stderr).strip()}"
+        shas = {line.split()[0] for line in refs.stdout.splitlines()
+                if len(line.split()) == 2 and not line.split()[1].startswith("refs/stash")}
+        shas |= set(logs.stdout.split())
+        reason = all_on_master(repo, sorted(shas))
+        if reason:
+            return f"a ref or reflog entry: {reason}"
     return None
 
 
+def all_on_master(repo: str, shas: list[str]) -> str | None:
+    """None when every commit in ``shas`` is in the main repository and on
+    origin/master (two git calls, however many); otherwise the reason."""
+    if not shas:
+        return None
+    check = subprocess.run(["git", "--no-optional-locks", "-C", repo, "cat-file",
+                            "--batch-check=%(objectname) %(objecttype)"],
+                           input="".join(f"{sha}^{{commit}}\n" for sha in shas),
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=600)
+    if check.returncode:
+        return f"cannot check commits: {check.stderr.strip()}"
+    for sha, line in zip(shas, check.stdout.splitlines()):
+        if not line.endswith(" commit"):
+            return f"commit {sha[:10]} exists only in that checkout"
+    extra = git(repo, "rev-list", "--max-count=1", *shas, "--not", MASTER, timeout=600)
+    if extra.returncode:
+        return f"merge check failed: {extra.stderr.strip()}"
+    if extra.stdout.strip():
+        return f"commit {extra.stdout.strip()[:10]} is not on origin/master"
+    return None
+
+
+def cwd_inside(path: str) -> int | None:
+    """PID of a process (not this one) whose working dir is ``path`` or
+    inside it, where /proc shows it (Linux); a shell left in a dir names it
+    on no command line. Other users' processes cannot be read and are not
+    seen."""
+    if not os.path.isdir("/proc/self"):
+        return None
+    root = os.path.realpath(path).rstrip("/")
+    me = os.getpid()
+    for name in os.listdir("/proc"):
+        if not name.isdigit() or int(name) == me:
+            continue
+        try:
+            cwd = os.readlink(f"/proc/{name}/cwd")
+        except OSError:
+            continue
+        if cwd == root or cwd.startswith(root + "/"):
+            return int(name)
+    return None
+
+
+def process_in(path: str, procs) -> int | None:
+    pid = process_naming(path, procs)
+    return pid if pid is not None else cwd_inside(path)
+
+
 def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
-                    unowned_days: float, now: float, pins: dict[str, str]) -> Verdict:
+                    unowned_days: float, now: float, pins: dict[str, str],
+                    procs=None) -> Verdict:
     v = Verdict("target", path)
     try:
         st = os.lstat(path)
@@ -900,12 +984,29 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
         v.failure = f"reparse point or symlink: {s.links[0]}"
         return v
     v.passed.append("no-reparse-points")
-    cargo, profiles, foreign = target_layout(path)
+    try:
+        cargo, profiles, foreign = target_layout(path)
+    except OSError as exc:
+        v.failure = f"walk error (failing closed): {exc.strerror or exc}"
+        return v
+    if not any(os.path.isfile(os.path.join(p, ".cargo-lock")) for p in profiles):
+        # Cargo keeps one in every profile it builds; none found means the
+        # probe below cannot speak for a build.
+        v.failure = "no cargo build lock found in any profile; kept"
+        return v
     holder = build_lock_holder(profiles)
     if holder:
         v.failure = f"a build holds cargo's lock ({os.path.basename(holder)})"
         return v
     v.passed.append("no-build-lock")
+    if procs is None:
+        v.failure = "process check unavailable; kept"
+        return v
+    pid = process_in(path, procs)
+    if pid is not None:
+        v.failure = f"in use by process {pid}"
+        return v
+    v.passed.append("no-process-uses-it")
     idle = now - v.newest
     owners, incomplete = target_owners(path, profiles)
     if incomplete:
@@ -943,8 +1044,12 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
     if foreign:
         # Only what is deleted counts: the size and the ledger leave out
         # what stays.
-        kept = sum(scan(os.path.join(path, n)).bytes if _real_dir(os.path.join(path, n))
-                   else os.lstat(os.path.join(path, n)).st_size for n in foreign)
+        try:
+            kept = sum(scan(os.path.join(path, n)).bytes if _real_dir(os.path.join(path, n))
+                       else os.lstat(os.path.join(path, n)).st_size for n in foreign)
+        except OSError as exc:
+            v.failure = f"walk error (failing closed): {exc.strerror or exc}"
+            return v
         v.bytes = max(v.bytes - kept, 0)
         v.note = (v.note or "") + f"; kept, not cargo's ({human(kept)}): " + ", ".join(foreign)
     return v
@@ -953,23 +1058,32 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
 def delete_target(path: str) -> str | None:
     """Delete the entries cargo's layout explains; anything else stays.
     Whole when nothing else is there (renamed aside first)."""
-    cargo, _profiles, foreign = target_layout(path)
+    try:
+        cargo, _profiles, foreign = target_layout(path)
+    except OSError as exc:
+        return f"in use or access denied, skipped: {exc.strerror or exc}"
     if not foreign:
         return delete_cache(path)
-    errors = []
-    for name in cargo:
-        entry = os.path.join(path, name)
-        if _real_dir(entry):
-            err = delete_cache(entry)
-        else:
-            try:
-                os.remove(entry)
-                err = None
-            except OSError as exc:
-                err = f"{exc.strerror or exc}"
+    # The markers go last, and only when everything else went: a target
+    # that lost them is no longer one, and no later sweep would see the rest.
+    dirs = [n for n in cargo if n not in CARGO_FILES]
+    errors, deleted = [], 0
+    for name in dirs:
+        err = delete_cache(os.path.join(path, name))
         if err:
             errors.append(f"{name}: {err}")
-    return "; ".join(errors) or None
+        else:
+            deleted += 1
+    if errors:
+        if deleted == 0 and all(": in use" in e for e in errors):
+            return "in use or access denied, skipped: " + "; ".join(errors)
+        return "deleted in part (cargo's markers kept, so a later sweep finishes it): " + "; ".join(errors)
+    for name in (n for n in cargo if n in CARGO_FILES):
+        try:
+            os.remove(os.path.join(path, name))
+        except OSError as exc:
+            errors.append(f"{name}: {exc.strerror or exc}")
+    return ("deleted in part: " + "; ".join(errors)) if errors else None
 
 
 def _clone_newest(path: str, s: Scan) -> float:
@@ -1033,6 +1147,18 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
     if top.returncode or norm(top.stdout.strip()) != norm(path):
         v.failure = f"git does not resolve its work tree to this dir ({top.stdout.strip() or top.stderr.strip()})"
         return v
+    if os.path.lexists(os.path.join(path, ".git", "modules")):
+        v.failure = "it holds submodules, whose work git status may not show"
+        return v
+    flagged = git(path, "ls-files", "-v")
+    if flagged.returncode:
+        v.failure = f"git ls-files failed: {flagged.stderr.strip()}"
+        return v
+    hidden = [line[2:] for line in flagged.stdout.splitlines()
+              if line[:1].islower() or line[:1] == "S"]
+    if hidden:
+        v.failure = f"a file is marked assume-unchanged or skip-worktree ({hidden[0]}), so status may hide its changes"
+        return v
     linked = git(path, "worktree", "list", "--porcelain")
     if linked.returncode:
         v.failure = f"cannot list its worktrees: {linked.stderr.strip()}"
@@ -1086,11 +1212,11 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
     if procs is None:
         v.failure = "process check unavailable; kept"
         return v
-    pid = process_naming(path, procs)
+    pid = process_in(path, procs)
     if pid is not None:
         v.failure = f"in use by process {pid}"
         return v
-    v.passed.append("no-process-names-it")
+    v.passed.append("no-process-uses-it")
     return v
 
 
@@ -1121,8 +1247,17 @@ def scratch_reason(path: str) -> str | None:
                 continue                      # scan() reports links
             if stat.S_ISDIR(st.st_mode):
                 stack.append(e.path)
-            elif low.endswith(SCRATCH_LOG_SUFFIXES):
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                return f"holds a socket, pipe or device ({e.name})"
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                return f"holds another user's file ({e.name})"
+            if low.endswith(SCRATCH_LOG_SUFFIXES):
                 return f"holds a log ({e.name})"
+            if low.endswith(SCRATCH_KEEP_SUFFIXES) or low in SCRATCH_KEEP_FILES:
+                return f"holds results, a database, a model or a program ({e.name})"
+            if sys.platform != "win32" and st.st_mode & 0o111:
+                return f"holds a program ({e.name})"
     return None
 
 
@@ -1174,11 +1309,11 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
     if procs is None:
         v.failure = "process check unavailable; kept"
         return v
-    pid = process_naming(path, procs)
+    pid = process_in(path, procs)
     if pid is not None:
         v.failure = f"in use by process {pid}"
         return v
-    v.passed.append("no-process-names-it")
+    v.passed.append("no-process-uses-it")
     return v
 
 
@@ -1255,7 +1390,8 @@ def load_config(path: Path) -> dict:
         raise Refusal(f'{path}: repo must be a path string, e.g. repo = "<checkout>"')
     for key in GRACE_KEYS:
         value = data.get(key, 0)
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value < 0):
             unit = "hours" if key.endswith("_hours") else "days"
             raise Refusal(f"{path}: {key} must be a number of {unit}, 0 or more")
     return data
@@ -1439,7 +1575,10 @@ def run_sweep(args, cfg: dict) -> int:
         temps = protected_temp_roots()
         for root in roots:
             n = norm(root)
-            if n in temps:
+            if too_broad(root):
+                print(f"note: {root} is a drive root or the home dir (or above it); "
+                      "never used as a root")
+            elif n in temps:
                 out.append(n)
             elif harness_managed(root):
                 print(f"note: {root} is harness-managed; its contents are left alone")
@@ -1506,9 +1645,10 @@ def run_sweep(args, cfg: dict) -> int:
                 continue
             verdicts.append(evaluate_cache(child, grace_days=cgrace, now=now, pins=pins))
 
-    procs = list_processes() if (clone_norm or scratch_norm) else None
-    if (clone_norm or scratch_norm) and procs is None:
-        print("note: the process list cannot be read here, so no clone or scratch dir is removed")
+    procs = list_processes() if (target_norm or clone_norm or scratch_norm) else None
+    if (target_norm or clone_norm or scratch_norm) and procs is None:
+        print("note: the process list cannot be read here, so no target, clone or "
+              "scratch dir is removed")
     if target_norm and not pins:
         pins = current_pins()
     # A dir is judged once: one listed under a cache root keeps the cache rule.
@@ -1516,6 +1656,9 @@ def run_sweep(args, cfg: dict) -> int:
 
     def candidate(child: str) -> bool:
         n = norm(child)
+        if any(is_under(h, n) for h in here):
+            left["runs from here"] += 1
+            return False
         if n in seen or n in registered or any(is_under(n, r) for r in registered):
             return False
         seen.add(n)
@@ -1526,8 +1669,8 @@ def run_sweep(args, cfg: dict) -> int:
             if is_cargo_target(child) and candidate(child):
                 verdicts.append(evaluate_target(
                     child, repo=repo, main=main, grace_hours=tgrace, unowned_days=unowned,
-                    now=now, pins=pins))
-            elif _real_dir(child) and norm(child) not in seen:
+                    now=now, pins=pins, procs=procs))
+            elif _real_dir(child) and norm(child) not in seen and not is_cargo_target(child):
                 left["not a cargo target"] = left.get("not a cargo target", 0) + 1
     for root in clone_norm:
         for child in _children(root):
@@ -1570,7 +1713,8 @@ def run_sweep(args, cfg: dict) -> int:
     def apply_marked(v: Verdict) -> tuple[Verdict, str]:
         if v.kind == "target":
             again = evaluate_target(v.path, repo=repo, main=main, grace_hours=tgrace,
-                                    unowned_days=unowned, now=time.time(), pins=current_pins())
+                                    unowned_days=unowned, now=time.time(), pins=current_pins(),
+                                    procs=list_processes())
         elif v.kind == "clone":
             again = evaluate_clone(v.path, repo=repo, main=main, grace_days=wgrace,
                                    now=time.time(), procs=list_processes())
@@ -1823,6 +1967,13 @@ def run_owner(args, cfg: dict) -> int:
     return rc
 
 
+def _period(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number of hours or days, 0 or more")
+    return value
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Reclaim finished git worktrees and stale build caches. "
@@ -1837,9 +1988,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                    help="a dir whose worktrees may be removed (repeatable)")
     p.add_argument("--cache-root", action="append", default=[],
                    help="a dir whose immediate subdirs are caches (repeatable)")
-    p.add_argument("--worktree-grace-days", type=float, default=None,
+    p.add_argument("--worktree-grace-days", type=_period, default=None,
                    help=f"default {DEFAULT_WORKTREE_GRACE_DAYS:g}")
-    p.add_argument("--cache-grace-days", type=float, default=None,
+    p.add_argument("--cache-grace-days", type=_period, default=None,
                    help=f"default {DEFAULT_CACHE_GRACE_DAYS:g}")
     p.add_argument("--target-root", action="append", default=[],
                    help="a dir whose cargo target subdirs are judged by their owners (repeatable)")
@@ -1847,11 +1998,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                    help="a dir whose standalone git clones may be removed (repeatable)")
     p.add_argument("--scratch-root", action="append", default=[],
                    help="a dir whose idle scratch subdirs may be removed (repeatable)")
-    p.add_argument("--target-grace-hours", type=float, default=None,
+    p.add_argument("--target-grace-hours", type=_period, default=None,
                    help=f"default {DEFAULT_TARGET_GRACE_HOURS:g}")
-    p.add_argument("--unowned-target-days", type=float, default=None,
+    p.add_argument("--unowned-target-days", type=_period, default=None,
                    help=f"default {DEFAULT_UNOWNED_TARGET_DAYS:g}")
-    p.add_argument("--scratch-grace-days", type=float, default=None,
+    p.add_argument("--scratch-grace-days", type=_period, default=None,
                    help=f"default {DEFAULT_SCRATCH_GRACE_DAYS:g}")
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help=argparse.SUPPRESS)
     p.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER, help=argparse.SUPPRESS)
