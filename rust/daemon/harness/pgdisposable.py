@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import psycopg
 from psycopg import sql
-from pseudolife_memory.storage.schema import assert_disposable_database, refuse_production_database
+from rust.harness_support.database_guard import assert_disposable_database, refuse_production_database
 from rust.cli_harness.pg_create import create_from_default_template
 from rust.cli_harness.run_names import RunNames
 

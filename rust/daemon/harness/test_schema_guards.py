@@ -1,4 +1,4 @@
-"""Harness prefix checks supplement, and never replace, the oracle guard."""
+"""Harness prefix checks supplement, and never replace, the bank guard."""
 import os
 import sys
 import unittest
@@ -9,7 +9,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2]))
 sys.path.insert(0, str(HERE))
 import pgdisposable as pg
-from pseudolife_memory.storage import schema
+from rust.harness_support import database_guard as schema
 
 
 class DisposableGuards(unittest.TestCase):
