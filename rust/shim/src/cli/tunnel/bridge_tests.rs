@@ -1,9 +1,9 @@
 //! The bridge over in-memory streams: a scripted fake shim stands in for
 //! the stdio shim, so nothing is spawned and no socket or daemon is used.
 use super::*;
-use std::path::Path;
+
 use std::sync::Mutex;
-use tokio::io::{AsyncReadExt, DuplexStream, duplex};
+use tokio::io::{AsyncReadExt, duplex};
 
 const NONCE: &str = "0123456789abcdef0123456789abcdef";
 const OTHER_NONCE: &str = "fedcba9876543210fedcba9876543210";
@@ -116,13 +116,15 @@ async fn session(
     gate: Gate,
     mut script: Script,
 ) -> (Vec<u8>, Vec<u8>) {
-    let (mut client, bridge_client) = duplex(1 << 20);
-    let (bridge_shim, shim) = duplex(1 << 20);
-    let (client_in, client_out) = tokio::io::split(bridge_client);
-    let (shim_out, shim_in) = tokio::io::split(bridge_shim);
+    // One pipe per direction, as stdin and stdout are: dropping a writer
+    // ends its reader's stream (a split half's drop would not).
+    let (mut client_writer, client_in) = duplex(1 << 20);
+    let (client_out, mut client_reader) = duplex(1 << 20);
+    let (shim_in, fake_reader) = duplex(1 << 20);
+    let (mut fake_writer, shim_out) = duplex(1 << 20);
     let fake = tokio::spawn(async move {
-        let (reader, mut writer) = tokio::io::split::<DuplexStream>(shim);
-        let mut reader = BufReader::new(reader);
+        let mut reader = BufReader::new(fake_reader);
+        let writer = &mut fake_writer;
         let mut received = Vec::new();
         let mut line = Vec::new();
         while reader.read_until(b'\n', &mut line).await.unwrap() > 0 {
@@ -134,18 +136,23 @@ async fn session(
             }
             line.clear();
         }
-        drop(writer);
+        drop(fake_writer);
         received
     });
-    client.write_all(client_bytes).await.unwrap();
+    client_writer.write_all(client_bytes).await.unwrap();
     let relayed = tokio::spawn(relay(
         client_in, client_out, shim_in, shim_out, observer, gate,
     ));
-    client.shutdown().await.unwrap();
-    let mut out = Vec::new();
-    client.read_to_end(&mut out).await.unwrap();
-    relayed.await.unwrap().unwrap();
-    (out, fake.await.unwrap())
+    drop(client_writer);
+    // A relay that never ends fails the test instead of hanging it.
+    tokio::time::timeout(Duration::from_secs(30), async move {
+        let mut out = Vec::new();
+        client_reader.read_to_end(&mut out).await.unwrap();
+        relayed.await.unwrap().unwrap();
+        (out, fake.await.unwrap())
+    })
+    .await
+    .expect("the relay ended once both sides closed")
 }
 
 fn call(id: Value, tool: &str, arguments: Value) -> String {

@@ -283,11 +283,11 @@ where
             shim_in = None;
         }
         let deadline = gate.deadline;
-        let actions = tokio::select! {
+        let (actions, proof) = tokio::select! {
             read = client_in.read_until(b'\n', &mut inbound), if client_open => match read {
                 Ok(0) | Err(_) => {
                     client_open = false;
-                    Vec::new()
+                    (Vec::new(), None)
                 }
                 Ok(_) => {
                     let line = std::mem::take(&mut inbound);
@@ -295,7 +295,7 @@ where
                     if let (Some(observer), Some(message)) = (observer.as_mut(), message.as_ref()) {
                         observer.request(message);
                     }
-                    gate.inbound(line, message.as_ref())
+                    (gate.inbound(line, message.as_ref()), None)
                 }
             },
             read = shim_out.read_until(b'\n', &mut outbound) => match read {
@@ -305,17 +305,14 @@ where
                     let line = std::mem::take(&mut outbound);
                     let message = message(&line);
                     let actions = gate.outbound(line, message.as_ref());
-                    if let (Some(observer), Some(message)) = (observer.as_mut(), message.as_ref())
-                        && let Some(proof) = observer.response(message)
-                    {
-                        // Settled after the answer below is relayed, on the
-                        // blocking pool, so the stream never waits for disk.
-                        receipts.spawn_blocking(move || proof.settle());
-                    }
-                    actions
+                    let proof = observer
+                        .as_mut()
+                        .zip(message.as_ref())
+                        .and_then(|(observer, message)| observer.response(message));
+                    (actions, proof)
                 }
             },
-            () = sleep_until(deadline), if deadline.is_some() => gate.expire(),
+            () = sleep_until(deadline), if deadline.is_some() => (gate.expire(), None),
         };
         let mut client_gone = false;
         for action in actions {
@@ -342,6 +339,12 @@ where
         if client_gone {
             break Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
         }
+        if let Some(proof) = proof {
+            // Settled once its answer has been relayed, on the blocking
+            // pool, so the stream never waits for the disk.
+            receipts.spawn_blocking(move || proof.settle());
+        }
+        while receipts.try_join_next().is_some() {}
     };
     drop(shim_in);
     while receipts.join_next().await.is_some() {}
