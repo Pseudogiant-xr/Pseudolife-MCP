@@ -133,9 +133,10 @@ DAEMON = ("cli", "cli-store", "cli-startup", "eval")
 # code. A user's rows must cover what it imports, so around a cycle the four
 # entries carry one row set: each one's rows and its other users' (doctor
 # shares update's Codex hook checks; console reads doctor's registration
-# search; expose, move and conductor_watch read connect's helpers).
+# search; expose, move and conductor_watch read connect's helpers; tunnel's
+# vendor runtime takes restore_cli's windowless child flag).
 UPDATE_CYCLE = ("update", "doctor", "console", "connect", "expose", "move", "conductor_watch",
-                "restore", "backup", "migrate_flat")
+                "restore", "backup", "migrate_flat", "tunnel")
 SHIM_COMMANDS = {
     # The conservative import scan also sees update's private backup module,
     # and restore_cli (move's native module among them) imports backup
