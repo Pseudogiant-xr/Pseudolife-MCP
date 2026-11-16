@@ -202,27 +202,36 @@ fn a_lite_bank_is_refused_plainly_without_touching_it() {
 #[test]
 fn argument_and_path_shapes_have_native_answers() {
     let home = Home::new("argv");
+    archive(
+        &home.cwd().join("a.zip"),
+        &[("manifest.json", "{\"format_version\":1}")],
+    );
     let before = home.entries();
-    let cases: &[(&str, &[&str])] = &[
-        ("export", &["--ou", "x.zip"]),
-        ("export", &["--out=x.zip"]),
-        ("export", &["--out", "a.zip", "--out", "b.zip"]),
-        ("export", &["--out"]),
-        ("export", &["--out", ""]),
-        ("export", &["--out", "-x.zip"]),
-        ("export", &["--force"]),
-        ("export", &["-h"]),
-        ("export", &["--help", "--out", "x.zip"]),
-        ("export", &["extra"]),
-        ("import", &[]),
-        ("import", &["a.zip", "b.zip"]),
-        ("import", &["--force", "--force", "a.zip"]),
-        ("import", &["-a.zip"]),
-        ("import", &["a.zip", "--out", "x"]),
-        ("import", &["a.zip", "--data-dir"]),
-        ("import", &["a.zip", "--data-dir", "d", "--data-dir", "e"]),
+    let connection = "PostgreSQL connection failed";
+    let cases: &[(&str, &[&str], &str)] = &[
+        ("export", &["--ou", "x.zip"], "unexpected argument"),
+        ("export", &["--out=x.zip"], connection),
+        ("export", &["--out", "a.zip", "--out", "b.zip"], connection),
+        ("export", &["--out"], "needs a value"),
+        ("export", &["--out", ""], "empty path"),
+        ("export", &["--out", "-x.zip"], "needs a value"),
+        ("export", &["--force"], "unexpected argument"),
+        ("export", &["-h"], ""),
+        ("export", &["--help", "--out", "x.zip"], ""),
+        ("export", &["extra"], "unexpected argument"),
+        ("import", &[], "archive path is missing"),
+        ("import", &["a.zip", "b.zip"], "unexpected argument"),
+        ("import", &["--force", "--force", "a.zip"], connection),
+        ("import", &["-a.zip"], "unexpected argument"),
+        ("import", &["a.zip", "--out", "x"], "unexpected argument"),
+        ("import", &["a.zip", "--data-dir"], "needs a value"),
+        (
+            "import",
+            &["a.zip", "--data-dir", "d", "--data-dir", "e"],
+            connection,
+        ),
     ];
-    for (mode, argv) in cases {
+    for (mode, argv, cause) in cases {
         let output = home
             .command(mode)
             .args(*argv)
@@ -232,7 +241,7 @@ fn argument_and_path_shapes_have_native_answers() {
         if argv.contains(&"-h") || argv.contains(&"--help") {
             assert_eq!(output.status.code(), Some(0));
         } else {
-            assert_native_refusal(&output, "refused:");
+            assert_native_refusal(&output, cause);
         }
     }
     // Spellings whose printed form Python's Path would rewrite.
@@ -256,7 +265,14 @@ fn argument_and_path_shapes_have_native_answers() {
                 .env("PSEUDOLIFE_MCP_DATABASE_URL", UNREACHABLE)
                 .output()
                 .unwrap();
-            assert_native_refusal(&output, "refused:");
+            let cause = if mode == "import" {
+                "archive"
+            } else if *value == "nul.zip" {
+                "--out"
+            } else {
+                connection
+            };
+            assert_native_refusal(&output, cause);
         }
     }
     assert_eq!(home.entries(), before);

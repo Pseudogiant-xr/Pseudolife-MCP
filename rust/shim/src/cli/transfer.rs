@@ -192,21 +192,39 @@ fn parse(mode: &str, arguments: &[OsString]) -> Result<Request, String> {
 /// Connection diagnostics omit DSNs and credentials.
 fn database_refusal(error: crate::pg::Error) -> String {
     use crate::pg::Error;
-    let fix = match &error {
-        Error::UnsupportedOption(_) | Error::AmbientControl(_) => {
-            "remove the named unsupported setting"
-        }
-        Error::RootCertificate | Error::HostnameRules => {
-            "configure sslrootcert and a server certificate matching the DSN host"
-        }
-        Error::Connection | Error::SessionSetup | Error::Shutdown => {
-            "restore access to the database configured by PSEUDOLIFE_MCP_DATABASE_URL and retry"
-        }
-        Error::InvalidOption(_) | Error::InvalidDsn => {
-            "correct PSEUDOLIFE_MCP_DATABASE_URL and retry"
-        }
+    // An unescaped password can be parsed as an option name. Never render
+    // the parser's error payload, even when it looks like a setting name.
+    let (cause, fix) = match error {
+        Error::UnsupportedOption(_) | Error::InvalidOption(_) | Error::InvalidDsn => (
+            "unsupported or malformed PostgreSQL DSN option or syntax",
+            "correct PSEUDOLIFE_MCP_DATABASE_URL using supported options and quoted or percent-encoded values",
+        ),
+        Error::AmbientControl(_) => (
+            "unsupported PostgreSQL environment setting",
+            "remove unsupported PG environment settings and configure PSEUDOLIFE_MCP_DATABASE_URL directly",
+        ),
+        Error::RootCertificate => (
+            "PostgreSQL sslrootcert is not understood or unavailable",
+            "configure sslrootcert with an accessible trusted server certificate",
+        ),
+        Error::HostnameRules => (
+            "PostgreSQL server certificate does not match the required hostname rules",
+            "configure sslrootcert and a server certificate matching the DSN host",
+        ),
+        Error::Connection => (
+            "PostgreSQL connection failed",
+            "restore database access and retry",
+        ),
+        Error::SessionSetup => (
+            "PostgreSQL session setup failed",
+            "restore database access and retry",
+        ),
+        Error::Shutdown => (
+            "PostgreSQL connection shutdown failed",
+            "restore database access and retry",
+        ),
     };
-    format!("PSEUDOLIFE_MCP_DATABASE_URL: {error} — {fix}.")
+    format!("PSEUDOLIFE_MCP_DATABASE_URL: {cause} — {fix}.")
 }
 
 fn emit(stream: &mut dyn Write, text: &str) -> bool {

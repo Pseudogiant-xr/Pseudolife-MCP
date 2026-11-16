@@ -5,9 +5,15 @@
   `--option=value` and ordinary filesystem path spellings are accepted.
 - Export normalizes timestamp rendering to UTC and supports PostgreSQL's
   infinite timestamps and years outside 1–9999.
+- Export limits database lock waits to five seconds and names competing
+  database work when that limit is reached.
 - Import validates archive structure before connecting and commits schema
   initialization and imported data together. A refused import rolls back
   schema repairs too. With `--force`, connected clients now wait, including
   readers, until the import finishes; previously only writes waited during
   the data import. Stop the daemon before importing unless those connections
   are known to be inert.
+- Schema initialization's timeout limits are restored before import checks
+  or loads data. Database failures name their SQLSTATE without blaming
+  archive values for timeouts or deadlocks; malformed database settings
+  never echo parsed option names that could contain password fragments.

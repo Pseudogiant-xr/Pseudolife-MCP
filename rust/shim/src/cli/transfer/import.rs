@@ -580,7 +580,10 @@ async fn check(pass: Pass<'_>, checks: &mut Vec<(String, String)>) -> Result<(),
         columns.sort_unstable();
         columns.dedup();
         client.batch_execute(&statements).await.map_err(|error| {
-            if let Some(db) = error.as_db_error() {
+            if let Some(db) = error
+                .as_db_error()
+                .filter(|db| db.code().code().starts_with("22"))
+            {
                 refuse(
                     format!(
                         "cast validation for {} was rejected by PostgreSQL (SQLSTATE {})",
@@ -766,13 +769,8 @@ async fn process(
     Ok(())
 }
 
-async fn transaction(
-    client: &Client,
-    archive: &mut Archive,
-    columns: &[Vec<Column>],
-    legacy: bool,
-) -> Result<Vec<(&'static str, u64)>, Stop> {
-    let fail = |_| Stop::Fail;
+async fn lock_empty_target(client: &Client) -> Result<(), Stop> {
+    let fail = |error| Stop::Refuse(sql::refusal(error, "lock and inspect the import target"));
     sql::execute(
         client,
         &format!(
@@ -801,6 +799,16 @@ async fn transaction(
             held.join(", ")
         )));
     }
+    Ok(())
+}
+
+async fn transaction(
+    client: &Client,
+    archive: &mut Archive,
+    columns: &[Vec<Column>],
+    legacy: bool,
+) -> Result<Vec<(&'static str, u64)>, Stop> {
+    let fail = |_| Stop::Fail;
     sql::execute(
         client,
         "DELETE FROM meta WHERE key = 'curation_listing_spelling_v2'",
@@ -893,8 +901,13 @@ async fn admit(
         .await
         .map_err(|error| match error {
             super::schema::Error::Refused(message) => Stop::SchemaRefuse(message),
-            super::schema::Error::Db => Stop::Fail,
+            super::schema::Error::Db(error) => {
+                Stop::Refuse(sql::refusal(error, "initialize import schema"))
+            }
         })?;
+    // Refuse a populated target before the database-dependent dry pass, and
+    // retain these locks so no writer can invalidate the emptiness check.
+    lock_empty_target(client).await?;
     let live = sql::scalar(
         client,
         "SELECT atttypmod FROM pg_attribute \

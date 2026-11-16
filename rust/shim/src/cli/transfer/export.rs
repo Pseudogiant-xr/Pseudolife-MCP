@@ -452,8 +452,26 @@ async fn snapshot(
     .await
     .map_err(|error| Stop::Refuse(sql::refusal(error, "read meta.schema_version")))?;
     if version.as_deref() != Some(BUILD_SCHEMA) {
+        let stamp = version
+            .as_deref()
+            .and_then(|value| value.parse::<i64>().ok());
+        let supported: i64 = BUILD_SCHEMA.parse().expect("build schema version");
+        let (cause, fix) = match stamp {
+            Some(stamp) if stamp > supported => (
+                "newer than this client",
+                "run pseudolife-mcp update and export with a release that supports the bank",
+            ),
+            Some(stamp) if stamp > 0 && stamp < supported => (
+                "older than this client",
+                "use the matching daemon release to upgrade the bank before exporting",
+            ),
+            _ => (
+                "missing or not understood",
+                "restore the bank from a backup with a valid schema stamp",
+            ),
+        };
         return Err(Stop::Refuse(format!(
-            "meta.schema_version is not {BUILD_SCHEMA}, the schema this export roster supports — use the matching daemon release to upgrade the bank before exporting."
+            "meta.schema_version is {cause} (this client supports {BUILD_SCHEMA}) — {fix}."
         )));
     }
     let version = Value::Int(BUILD_SCHEMA.into());

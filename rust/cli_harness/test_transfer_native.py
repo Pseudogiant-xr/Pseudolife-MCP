@@ -5,6 +5,11 @@ from pathlib import Path
 import subprocess
 import sys
 import zipfile
+from contextlib import contextmanager
+import socket
+import struct
+import threading
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -60,6 +65,101 @@ def refused(result, cause):
     assert " — " in stderr, stderr
 
 
+@contextmanager
+def query_probe(bank, *, cast_error=None):
+    """Relay to real test PostgreSQL, probing the schema/data boundary on its session.
+
+    Only simple-query SQL is inspected; authentication frames are never recorded.
+    SHOW results inserted before the import's table lock are consumed here, so
+    the native client receives exactly the response to its original request.
+    """
+    address = urlsplit(_bank.url(bank))
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    listener.settimeout(15)
+    state = {"settings": [], "cast_injected": False, "errors": []}
+    sockets, workers = [listener], []
+    pending = [0]
+
+    def read_exact(stream, count):
+        data = bytearray()
+        while len(data) < count:
+            part = stream.recv(count - len(data))
+            if not part:
+                raise EOFError
+            data.extend(part)
+        return bytes(data)
+
+    def relay(source, target, frontend):
+        try:
+            while True:
+                kind = read_exact(source, 1)
+                length = read_exact(source, 4)
+                payload = read_exact(source, struct.unpack("!I", length)[0] - 4)
+                if frontend and kind == b"Q":
+                    statement = payload[:-1].decode("utf-8")
+                    if statement.startswith("SET LOCAL lock_timeout = '5s'; LOCK TABLE"):
+                        pending[0] = 2
+                        payload = b"SHOW statement_timeout; SHOW lock_timeout; " + payload
+                    elif cast_error and statement.startswith("SELECT CAST(") and " AS vector(" in statement:
+                        state["cast_injected"] = True
+                        payload = ("DO $$BEGIN RAISE EXCEPTION 'fixture cast failure' "
+                                   f"USING ERRCODE = '{cast_error}'; END$$;\0").encode()
+                    length = struct.pack("!I", len(payload) + 4)
+                elif not frontend and pending[0] and kind in (b"T", b"D", b"C"):
+                    if kind == b"D":
+                        size = struct.unpack("!i", payload[2:6])[0]
+                        state["settings"].append(payload[6:6 + size].decode())
+                    elif kind == b"C":
+                        pending[0] -= 1
+                    continue
+                target.sendall(kind + length + payload)
+        except (EOFError, ConnectionError, OSError):
+            pass
+        finally:
+            try:
+                target.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def accept():
+        try:
+            client, _ = listener.accept()
+            backend = socket.create_connection((address.hostname, address.port or 5432), timeout=15)
+            sockets.extend((client, backend))
+            client.settimeout(60)
+            backend.settimeout(60)
+            length = read_exact(client, 4)
+            backend.sendall(length + read_exact(client, struct.unpack("!I", length)[0] - 4))
+            reverse = threading.Thread(target=relay, args=(backend, client, False))
+            workers.append(reverse)
+            reverse.start()
+            relay(client, backend, True)
+        except (EOFError, ConnectionError, OSError) as error:
+            state["errors"].append(type(error).__name__)
+
+    worker = threading.Thread(target=accept)
+    worker.start()
+    workers.append(worker)
+    credentials = address.netloc.rsplit("@", 1)[0]
+    dsn = address._replace(netloc=f"{credentials}@127.0.0.1:{listener.getsockname()[1]}",
+                           query="sslmode=disable").geturl()
+    try:
+        yield dsn, state
+    finally:
+        for stream in sockets:
+            try:
+                stream.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            stream.close()
+        for thread in workers:
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "PostgreSQL probe did not stop"
+        assert not state["errors"], "PostgreSQL probe could not establish its connection"
+
+
 @pytest.mark.parametrize("mode", ["export", "import"])
 @pytest.mark.parametrize("flag", ["-h", "--help"])
 def test_help_is_independent_of_terminal_width(native, mode, flag):
@@ -95,6 +195,30 @@ def test_dsn_refusal_is_specific_and_does_not_echo_credentials(native):
     assert "fixture-secret" not in result[2]
 
 
+@pytest.mark.parametrize("mode", ["export", "import"])
+@pytest.mark.parametrize("shape", ["keyword-space", "uri-question", "missing-host", "bad-port", "bad-option"])
+def test_malformed_dsn_never_echoes_credential_fragments(native, tmp_path, mode, shape):
+    left, right = "CredentialCanaryLeft", "CredentialCanaryRight"
+    values = {
+        "keyword-space": f"host=127.0.0.1 password={left} {right} dbname=unused",
+        "uri-question": f"postgresql://user:{left}?{right}=tail@127.0.0.1/unused",
+        "missing-host": f"postgresql://user:{left}{right}@/unused",
+        "bad-port": f"postgresql://user:{left}{right}@127.0.0.1:bad/unused",
+        "bad-option": f"postgresql://user:{left}{right}@127.0.0.1/unused?connect_timeout={right}",
+    }
+    archive(tmp_path / "bank.zip")
+    args = (mode, "bank.zip") if mode == "import" else (mode, "--out", "out.zip")
+    result = native(*args, dsn=values[shape])
+    leaked = any(part in result[1] + result[2] for part in (left, right))
+    assert not leaked, "credential fragment reached native output (redacted)"
+    refused(result, "PSEUDOLIFE_MCP_DATABASE_URL")
+    near = f"postgresql://user:{left}%3F{right}@127.0.0.1:9/unused?connect_timeout=1"
+    result = native(*args, dsn=near)
+    leaked = any(part in result[1] + result[2] for part in (left, right))
+    assert not leaked, "credential fragment reached native output (redacted)"
+    refused(result, "PostgreSQL connection failed")
+
+
 @pytest.mark.parametrize("extra", [{"TZ": "UTC"}, {"HOME": None, "LOCALAPPDATA": None},
                                    {"PYTHONINTMAXSTRDIGITS": "0"}])
 def test_default_export_ignores_python_only_environment(native, extra):
@@ -104,7 +228,7 @@ def test_default_export_ignores_python_only_environment(native, extra):
 def test_native_dsn_options_are_preserved(native):
     refused(native("export", extra={"PSEUDOLIFE_MCP_DATABASE_URL":
             "postgresql://nobody@127.0.0.1:9/pl_cf_absent?options=-c%20timezone%3DUTC"}),
-            "unsupported PostgreSQL DSN option: options")
+            "unsupported or malformed PostgreSQL DSN option or syntax")
     refused(native("export", extra={"PSEUDOLIFE_MCP_DATABASE_URL":
             "postgresql://nobody@127.0.0.1:9/pl_cf_absent?connect_timeout=1&application_name=transfer-test"}),
             "PostgreSQL connection failed")
@@ -187,6 +311,76 @@ def bank():
         _bank.drop(name)
 
 
+@pytest.mark.parametrize("statement,lock", [("0", "0"), ("73s", "17s")])
+def test_schema_initialization_restores_session_timeouts(native, tmp_path, bank, statement, lock):
+    with _bank.connect(bank) as conn:
+        conn.execute(f'ALTER DATABASE "{bank}" SET statement_timeout = \'{statement}\'')
+        conn.execute(f'ALTER DATABASE "{bank}" SET lock_timeout = \'{lock}\'')
+        conn.commit()
+    with _bank.connect(bank) as conn:
+        expected = [conn.execute("SHOW " + setting).fetchone()[0]
+                    for setting in ("statement_timeout", "lock_timeout")]
+    archive(tmp_path / "bank.zip", members={"meta.jsonl": '{"key":"timeout_probe","value":true}'})
+    with query_probe(bank) as (dsn, probe):
+        result = native("import", "bank.zip", dsn=dsn)
+    assert result[0] == 0 and not result[2]
+    assert probe["settings"] == expected
+
+
+@pytest.mark.parametrize("state", ["40P01", "57014", "57P01"])
+def test_cast_database_failures_do_not_blame_archive(native, tmp_path, bank, state):
+    vector = "[" + ",".join(["0"] * 1024) + "]"
+    archive(tmp_path / "bank.zip", members={"entries.jsonl": json.dumps(
+        {"id": 1, "band": "test", "text": "cast probe", "embedding": vector, "ts": 1})})
+    before = _bank.dump(bank)
+    with query_probe(bank, cast_error=state) as (dsn, probe):
+        result = native("import", "bank.zip", dsn=dsn)
+    assert probe["cast_injected"]
+    refused(result, state)
+    assert "retry" in result[2]
+    assert "correct the archive fields" not in result[2]
+    assert _bank.dump(bank) == before
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+def test_mid_load_failure_rolls_back_all_tables_and_schema(native, tmp_path, bank, fresh):
+    if fresh:
+        _bank.drop(bank)
+        _bank.create(bank, schema=False)
+    else:
+        with _bank.connect(bank) as conn:
+            conn.execute("UPDATE meta SET value='54' WHERE key='schema_version'")
+            conn.commit()
+    # Explicit IDs avoid PostgreSQL's non-transactional nextval side effects.
+    row = {"id": 1, "canonical": "duplicate", "display": "duplicate", "created_at": 1}
+    archive(tmp_path / "bank.zip", members={
+        "meta.jsonl": '{"key":"inserted_before_failure","value":true}',
+        "entities.jsonl": json.dumps(row) + "\n" + json.dumps(row)})
+    before = _bank.dump(bank)
+    result = native("import", "bank.zip", dsn=_bank.url(bank))
+    assert result[0] == 1 and "archive rows were not committed" in result[2]
+    assert _bank.dump(bank) == before
+
+
+def test_fresh_bank_admission_refusal_leaves_no_schema(native, tmp_path, bank):
+    _bank.drop(bank)
+    _bank.create(bank, schema=False)
+    before = _bank.dump(bank)
+    archive(tmp_path / "bank.zip", members={"entries.jsonl": '{"id":1,"embedding":"[1,2]"}'})
+    refused(native("import", "bank.zip", dsn=_bank.url(bank)), "entries.embedding")
+    assert _bank.dump(bank) == before
+
+
+def test_nonempty_refusal_precedes_database_value_checks(native, tmp_path, bank):
+    with _bank.connect(bank) as conn:
+        conn.execute("INSERT INTO episodes (id,title,started_at) VALUES ('kept','existing',1)")
+        conn.commit()
+    archive(tmp_path / "bank.zip", members={"entries.jsonl": '{"id":1,"embedding":"[1,2]"}'})
+    before = _bank.dump(bank)
+    refused(native("import", "bank.zip", dsn=_bank.url(bank)), "target bank is not empty")
+    assert _bank.dump(bank) == before
+
+
 @pytest.mark.parametrize("member,row,cause", [
     ("episodes.jsonl", '{"id":"x","started_at":"bad"}', "episodes.started_at"),
     ("entries.jsonl", '{"surprise":1e39}', "entries.surprise"),
@@ -247,6 +441,30 @@ def test_export_schema_refusals_leave_no_files(native, tmp_path, bank, sql, caus
     assert _bank.dump(bank) == before
 
 
+@pytest.mark.parametrize("stamp,cause,fix", [
+    ("60", "newer than this client", "pseudolife-mcp update"),
+    ("54", "older than this client", "upgrade the bank"),
+    (None, "missing or not understood", "restore the bank"),
+    ('"invalid"', "missing or not understood", "restore the bank"),
+])
+def test_export_schema_refusal_identifies_which_side_is_behind(native, tmp_path, bank, stamp, cause, fix):
+    with _bank.connect(bank) as conn:
+        if stamp is None:
+            conn.execute("DELETE FROM meta WHERE key='schema_version'")
+        else:
+            conn.execute("UPDATE meta SET value=%s::jsonb WHERE key='schema_version'", (stamp,))
+        conn.commit()
+    result = native("export", "--out", "bank.zip", dsn=_bank.url(bank))
+    refused(result, cause)
+    assert fix in result[2]
+    assert not (tmp_path / "bank.zip").exists()
+    with _bank.connect(bank) as conn:
+        conn.execute("INSERT INTO meta (key,value) VALUES ('schema_version','59') "
+                     "ON CONFLICT (key) DO UPDATE SET value=excluded.value")
+        conn.commit()
+    assert native("export", "--out", "bank.zip", dsn=_bank.url(bank))[0] == 0
+
+
 @pytest.mark.parametrize("timestamp", ["infinity", "-infinity", "12000-01-01 00:00:00+00", "2026-01-01 00:00:00+00"])
 def test_export_native_timestamps_ignore_session_rendering(native, tmp_path, bank, timestamp):
     with _bank.connect(bank) as conn:
@@ -259,6 +477,21 @@ def test_export_native_timestamps_ignore_session_rendering(native, tmp_path, ban
     with zipfile.ZipFile(tmp_path / "bank.zip") as source:
         row = json.loads(source.read("chronicle_events.jsonl"))
     assert row["occurred_at"].startswith(timestamp.split(" ")[0])
+
+
+@pytest.mark.parametrize("timestamp", ["infinity", "12000-01-01 00:00:00+00"])
+def test_import_extended_timestamps_ignore_session_rendering(native, tmp_path, bank, timestamp):
+    with _bank.connect(bank) as conn:
+        conn.execute(f'ALTER DATABASE "{bank}" SET timezone = \'America/New_York\'')
+        conn.execute(f'ALTER DATABASE "{bank}" SET datestyle = \'SQL, DMY\'')
+        conn.commit()
+    row = dict(id=1, occurred_at=timestamp, recorded_at=1, actor="a", actor_norm="a",
+               description="test", description_norm="test")
+    archive(tmp_path / "bank.zip", members={"chronicle_events.jsonl": json.dumps(row)})
+    result = native("import", "bank.zip", dsn=_bank.url(bank))
+    assert result[0] == 0 and not result[2]
+    with _bank.connect(bank) as conn:
+        assert conn.execute("SELECT occurred_at = %s::timestamptz FROM chronicle_events", (timestamp,)).fetchone()[0]
 
 
 def test_export_json_limit_refusal_and_near_miss(native, tmp_path, bank):
@@ -346,7 +579,8 @@ def test_import_schema_lock_failure_rolls_back_and_near_miss(native, tmp_path, b
     with _bank.connect(bank) as conn:
         conn.execute("LOCK TABLE episodes IN ACCESS SHARE MODE")
         code, stdout, stderr = native("import", "bank.zip", "--force", dsn=_bank.url(bank))
-        assert code == 1 and not stdout and "archive rows were not committed" in stderr
+        assert code == 1 and not stdout and "55P03" in stderr
+        assert "stop competing database work and retry" in stderr
         conn.rollback()
     assert _bank.dump(bank) == before
     assert native("import", "bank.zip", dsn=_bank.url(bank))[0] == 0

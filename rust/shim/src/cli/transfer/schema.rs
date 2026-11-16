@@ -16,11 +16,11 @@ const RESTORE: &str = "(`pseudolife-mcp restore --backup-file <dump> --state-arc
 
 pub(super) enum Error {
     Refused(String),
-    Db,
+    Db(tokio_postgres::Error),
 }
 impl From<tokio_postgres::Error> for Error {
-    fn from(_: tokio_postgres::Error) -> Self {
-        Self::Db
+    fn from(error: tokio_postgres::Error) -> Self {
+        Self::Db(error)
     }
 }
 
@@ -137,7 +137,25 @@ async fn execute(client: &Client) -> Result<(), Error> {
 
 /// The caller owns the transaction: schema and imported rows commit together.
 pub(super) async fn ensure(client: &Client) -> Result<(), Error> {
-    execute(client).await
+    let settings = client
+        .query_one(
+            "SELECT current_setting('statement_timeout'), current_setting('lock_timeout')",
+            &[],
+        )
+        .await?;
+    let statement: String = settings.get(0);
+    let lock: String = settings.get(1);
+    execute(client).await?;
+    // The plan's SET LOCAL limits cover schema work only, even though import
+    // now owns the transaction that also commits the data.
+    client
+        .batch_execute(&format!(
+            "SET LOCAL statement_timeout = {}; SET LOCAL lock_timeout = {}",
+            super::sql::text(&statement),
+            super::sql::text(&lock)
+        ))
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]

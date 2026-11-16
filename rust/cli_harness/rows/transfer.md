@@ -28,6 +28,9 @@ One repeatable-read, read-only snapshot validates the table roster, schema
 version, column types and JSON values before creating an archive. Unknown
 public tables, missing exported tables and unsupported column types are
 refused rather than silently omitted. Non-UTF8 databases are refused.
+An older bank needs a matching daemon upgrade; a newer bank needs a newer
+client. A missing or invalid schema stamp requires restoring a valid bank.
+Database lock waits are bounded to five seconds and refusals include SQLSTATE.
 
 The snapshot sets UTC and ISO timestamp rendering locally. Finite timestamps
 in years 1–9999 retain their ISO spelling; infinity, negative infinity and
@@ -55,6 +58,11 @@ rolls back schema repairs as well as rows. A fresh database remains supported.
 The server checks UUID, vector and timestamp input against the actual column
 types before row insertion. Unsupported value/type combinations identify the
 column; a PostgreSQL cast refusal also includes SQLSTATE.
+Only data-exception SQLSTATEs blame archive values. Other database failures
+name the failed operation and advise retrying. The adapter restores the
+session's timeout settings immediately after the schema plan, so its
+30-second statement limit does not cap the data load. The nonempty-target
+check runs under the import locks before target-dependent value validation.
 
 Schema DDL locks last until that transaction ends. With `--force`, connected
 clients can wait on reads as well as writes for the whole import. Without
