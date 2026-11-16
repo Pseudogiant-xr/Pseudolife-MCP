@@ -121,8 +121,19 @@ starting with `#` is a comment:
 
 `PSEUDOLIFE_RUST_CHECK_WHERE=local` runs the check on the host that runs
 `build`, and `=remote` refuses to run without the file. The machine needs
-PowerShell 7 (`pwsh` on `PATH` for ssh sessions), git with network access
-to origin, and rustup's cargo. The far half (`ops/rust-check-remote.ps1`)
+PowerShell 7.2 or later (`pwsh` on `PATH` for ssh sessions), git with
+network access to origin, and rustup's cargo. The far half refuses, as not
+run, in four cases:
+- while the machine's full-suite lock
+  (`~/.pseudolife-mcp/locks/full-suite.lock`) is held, so a compile check
+  never overlaps a full suite;
+- below 8 GB free on the clone's drive, so a full disk never reads as a red
+  batch;
+- while `<repo>.rust-check-no-hooks` exists. Its git runs with
+  `core.hooksPath` pointed at that path, so a hook a batch's build script
+  wrote into the clone never runs;
+- when a killed `worktree add` left `<repo>.rust-check` without its `.git`.
+  Remove that folder by hand and build again. The far half (`ops/rust-check-remote.ps1`)
 keeps three things beside the clone: the gate worktree `<repo>.rust-check`,
 its own target directory `<repo>.rust-check-target`, and the lock file
 `<repo>.rust-check.lock`. It removes its private ref and the bundle after

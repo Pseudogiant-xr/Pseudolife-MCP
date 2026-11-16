@@ -20,20 +20,32 @@
 # nonce so no line cargo passes through (a member's proc macro can print)
 # can stand in for it: `rust-check <nonce>: cargo exit N` once cargo ran
 # (its exit code), else `rust-check <nonce>: not run: <cause>` with exit 3.
-# Needs PowerShell 7, git and rustup's cargo on PATH.
+# Needs PowerShell 7.2 or later, git and rustup's cargo on PATH. It refuses,
+# as not run, while the machine's full-suite lock is held or its drive has
+# under 8 GB free, so it neither overlaps a full suite nor reads a full disk
+# as a red batch.
 param(
     [Parameter(Mandatory)] [string] $Repo,
     [Parameter(Mandatory)] [string] $Base,
     [Parameter(Mandatory)] [string] $Head,
     [Parameter(Mandatory)] [string] $Ref,
     [string] $Nonce = '',
-    [int] $LockWaitSeconds = 1200
+    [int] $LockWaitSeconds = 1200,
+    # CLAUDE.md "Disk space": no Rust build below 8 GB free.
+    [double] $MinFreeGB = 8
 )
 
 $ErrorActionPreference = 'Stop'
 # A native command's stderr (git's progress, cargo's whole output) is output
 # here, never a terminating error.
 $PSNativeCommandUseErrorActionPreference = $false
+# Without this a cmdlet's progress record can reach stderr as CLIXML after
+# the verdict line, which then is not the last line and reads as "not run":
+# 1 run in 20 of the end-to-end test on the Windows dev VM, 16 November 2026.
+$ProgressPreference = 'SilentlyContinue'
+# git never prompts here: a prompt would hang the run until its timeout.
+$env:GIT_TERMINAL_PROMPT = '0'
+$env:GCM_INTERACTIVE = 'Never'
 
 $tag = if ($Nonce) { "rust-check ${Nonce}:" } else { 'rust-check:' }
 
@@ -46,7 +58,11 @@ function Invoke-Git {
     # git's own words are kept for the cause; its exit code decides. Its
     # stderr, merged here, must not stop the script.
     $ErrorActionPreference = 'Continue'
-    $out = & git @args 2>&1 | ForEach-Object { "$_" }
+    # No hook runs: core.hooksPath names a directory that does not exist, so
+    # a hook one batch's build script wrote into the clone cannot run in the
+    # next batch's checkout.
+    $hooks = if ($script:noHooks) { @('-c', "core.hooksPath=$script:noHooks") } else { @() }
+    $out = & git @hooks @args 2>&1 | ForEach-Object { "$_" }
     [pscustomobject]@{ Code = $LASTEXITCODE; Text = (($out | Select-Object -Last 3) -join ' ').Trim() }
 }
 
@@ -57,6 +73,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $Repo '.git'))) { Stop-Check "no git
 # Beside the clone, whatever spelling repo= used (a trailing separator would
 # put the gate inside it).
 $Repo = (Resolve-Path -LiteralPath $Repo).ProviderPath.TrimEnd([char]92, [char]47)
+$noHooks = "$Repo.rust-check-no-hooks"
+if (Test-Path -LiteralPath $noHooks) { Stop-Check "$([IO.Path]::GetFileName($noHooks)) exists beside the clone; it must not (hooks would run from it): remove it" }
 
 $data = [Console]::In.ReadToEnd()
 try { $bytes = [Convert]::FromBase64String($data) } catch { Stop-Check "the bundle on stdin is not base64" }
@@ -96,10 +114,34 @@ Get-ChildItem -LiteralPath (Split-Path -Parent $Repo) -Filter "$(Split-Path -Lea
 
 $verdict = $null
 $failure = $null
+$suiteHold = $null
 # `break` leaves the do-block with a cause, so the cleanup below always runs
 # and the verdict is written after it.
 try {
     do {
+        # The machine's full-suite lock, found as tests/suite_lock.py finds it,
+        # held until the cleanup below, so a suite that starts meanwhile
+        # queues behind the check instead of overlapping it. It is taken
+        # the way the suite takes it: a lock on byte 0 on Windows
+        # (msvcrt.locking there; the file stays openable, as the suite opens
+        # it before locking), flock elsewhere (.NET's FileShare.None).
+        $locks = if ($env:PSEUDOLIFE_SUITE_LOCK_DIR) { $env:PSEUDOLIFE_SUITE_LOCK_DIR } else { Join-Path $HOME '.pseudolife-mcp/locks' }
+        $null = New-Item -ItemType Directory -Force -Path $locks
+        $suitePath = Join-Path $locks 'full-suite.lock'
+        try {
+            if ($IsWindows) {
+                $suiteHold = [IO.File]::Open($suitePath, 'OpenOrCreate', 'ReadWrite', 'ReadWrite')
+                $suiteHold.Lock(0, 1)
+            } else {
+                $suiteHold = [IO.File]::Open($suitePath, 'OpenOrCreate', 'ReadWrite', 'None')
+            }
+        } catch [System.IO.IOException] {
+            if ($suiteHold) { $suiteHold.Dispose(); $suiteHold = $null }
+            $failure = "a full suite holds this machine (its full-suite.lock); a compile check does not overlap one, so build again once it ends"
+            break
+        }
+        $free = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($Repo)).AvailableFreeSpace / 1GB
+        if ($free -lt $MinFreeGB) { $failure = "only $([math]::Round($free, 1)) GB free on the clone's drive; the floor is $MinFreeGB GB (CLAUDE.md, Disk space)"; break }
         $r = Invoke-Git -C $Repo fetch --quiet origin master
         if ($r.Code -ne 0) { $failure = "the clone cannot fetch origin (git exit $($r.Code): $($r.Text))"; break }
         $r = Invoke-Git -C $Repo cat-file -e "$Base^{commit}"
@@ -151,6 +193,7 @@ try {
 } finally {
     $null = Invoke-Git -C $Repo update-ref -d $private
     Remove-Item -LiteralPath $bundle -Force -ErrorAction SilentlyContinue
+    if ($suiteHold) { $suiteHold.Dispose() }
     $lock.Dispose()
 }
 if ($null -ne $failure) { Stop-Check $failure }

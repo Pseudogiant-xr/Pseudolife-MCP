@@ -57,7 +57,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 LABEL = "ready-to-batch"
@@ -179,7 +179,8 @@ except OSError:
 # and one of 16 KB was refused as "not properly encoded", so the far half
 # (17 KB encoded) cannot ride on the command line itself.
 RUST_CHECK_BOOTSTRAP = base64.b64encode(
-    ("& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString("
+    ("$ProgressPreference = 'SilentlyContinue'; "
+     "& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString("
      "[Convert]::FromBase64String([Console]::In.ReadLine()))))").encode("utf-16-le")
 ).decode("ascii")
 # A cold check on the Windows dev VM is minutes, a warm one seconds; this
@@ -314,6 +315,11 @@ class Plan:
         if not path.is_file():
             return None
         raw = json.loads(path.read_text(encoding="utf-8"))
+        # A field this loader does not know (one a newer or reverted tool
+        # wrote) is dropped, so a plan crosses tool versions; a missing one
+        # takes its default.
+        known = {f.name for f in fields(Plan)}
+        raw = {k: v for k, v in raw.items() if k in known}
         raw["merged"] = [Member(**m) for m in raw["merged"]]
         for d in raw["dropped"]:
             d.pop("waiting", None)   # census waiters, from plans built before 2026-10-27
@@ -2144,6 +2150,8 @@ def _rust_check_remote() -> tuple[dict[str, str] | None, str]:
         return None, f"{RUST_CHECK_WHERE_ENV} must be local or remote, not {where!r}"
     if where == "local":
         return None, ""
+    if RUST_CHECK_REMOTE.exists() and not RUST_CHECK_REMOTE.is_file():
+        return None, f"{RUST_CHECK_REMOTE} is not a file; make it one or remove it"
     if not RUST_CHECK_REMOTE.is_file():
         if where == "remote":
             return None, (f"{RUST_CHECK_WHERE_ENV}=remote, but there is no "
@@ -2151,13 +2159,23 @@ def _rust_check_remote() -> tuple[dict[str, str] | None, str]:
         return None, ""
     try:
         text = RUST_CHECK_REMOTE.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as exc:
+        # Windows PowerShell 5.1's `>` and Out-File write UTF-16.
+        return None, (f"cannot read {RUST_CHECK_REMOTE.name} as UTF-8 ({exc.reason}); "
+                      "write it as UTF-8 (pwsh 7, or Set-Content -Encoding utf8)")
     except OSError as exc:
         return None, f"cannot read {RUST_CHECK_REMOTE.name}: {exc}"
     cfg: dict[str, str] = {}
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
         m = re.match(r"\s*([a-z_]+)\s*=\s*(.*?)\s*$", line)
-        if m and not line.lstrip().startswith("#"):
-            cfg[m.group(1)] = m.group(2)
+        if not m or m.group(1) not in ("ssh", "repo", "role"):
+            return None, (f"{RUST_CHECK_REMOTE.name} line {number} is not one of ssh=, repo= "
+                          "or role=")
+        if m.group(1) in cfg:
+            return None, f"{RUST_CHECK_REMOTE.name} gives {m.group(1)}= twice"
+        cfg[m.group(1)] = m.group(2)
     bad = f"{RUST_CHECK_REMOTE.name} needs"
     # An ssh destination that starts with "-" would be read as an option.
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@-]*", cfg.get("ssh", "")):
@@ -2183,6 +2201,10 @@ def _cargo_verdict(code: int, lines: list[str]) -> tuple[str, str]:
 
 
 def _ps_literal(value: str) -> str:
+    """A PowerShell single-quoted literal. ASCII only, since PowerShell also
+    takes the typographic quotes (U+2018 to U+201B) as quotes."""
+    if not value.isascii():
+        raise Refusal(f"refusing a non-ASCII value for the far half: {value!r}")
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -2206,15 +2228,21 @@ def _remote_rust_check(plan: Plan, cfg: dict[str, str]) -> tuple[str, str]:
     # The verdict line carries a nonce no member code sees (it travels on
     # stdin, not argv), so a line cargo passes through cannot stand in for it.
     nonce = secrets.token_hex(16)
-    script = ("& {\n" + RUST_CHECK_REMOTE_SCRIPT + "\n} -Repo " + _ps_literal(cfg["repo"])
-              + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
-              + " -Ref " + _ps_literal(ref) + " -Nonce " + _ps_literal(nonce))
+    try:
+        script = ("& {\n" + RUST_CHECK_REMOTE_SCRIPT + "\n} -Repo " + _ps_literal(cfg["repo"])
+                  + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
+                  + " -Ref " + _ps_literal(ref) + " -Nonce " + _ps_literal(nonce))
+    except Refusal as exc:
+        return f"not run: {exc}", ""
     # stdin carries the script (its first line) and then the bundle; the
     # command line carries only RUST_CHECK_BOOTSTRAP, since an encoded
     # command past about 8 KB is refused through Windows' ssh.exe.
     data = base64.b64encode(script.encode("utf-8")).decode("ascii") + "\n" + data
+    # Nothing is forwarded to the machine where a member's build script runs.
     argv = [*RUST_CHECK_SSH, "-o", "BatchMode=yes", "-o", "ConnectTimeout=20",
-            "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4", cfg["ssh"],
+            "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4",
+            "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ForwardX11=no",
+            cfg["ssh"],
             f"pwsh -NoProfile -NonInteractive -EncodedCommand {RUST_CHECK_BOOTSTRAP}"]
     print(f"  running `{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/ on {plan.head[:12]} "
           f"on the {role} (the batch goes there as a git bundle; nothing is pushed)")

@@ -518,7 +518,22 @@ plan says. Notes:
   copy, because a target shared between copies hands back another copy's
   units.
 - Run remotely, it runs in that machine's own environment; nothing from
-  the operator's environment is sent.
+  the operator's environment is sent, and ssh forwards no agent, port or
+  display. The far half withholds the same credential-shaped variables
+  from cargo, and its git runs no hooks. Still, a member's build script or
+  proc macro runs as that machine's ssh user, with the network open.
+  - It can read every file that user can, and use that user's stored
+    credentials.
+  - It can leave files that outlive the batch, such as the persistent
+    target directory.
+  So keep that user's credentials to what the check needs. Hosted CI
+  still gates every merge.
+- **A plan crosses tool versions.** `Plan.load` drops a field it does not
+  know and gives a missing one its default. So a plan built by one version
+  of the tool can be opened and merged by another. A plan written with a
+  remote configured carries `rust_check_where`, and a loader from before
+  this change (`Plan(**raw)` with no filter) refuses it with a TypeError.
+  That matters only for a batch that reverts this change.
 - It runs member build scripts and proc macros, as the full suite runs
   member code, with the operator's environment minus credential-shaped
   variables, as the census script runs without tokens: names with `TOKEN`,

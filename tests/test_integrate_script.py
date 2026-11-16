@@ -2347,6 +2347,9 @@ def test_a_configured_remote_runs_the_compile_check_there_and_pushes_nothing(wor
     # PowerShell 7 as one encoded command.
     argv = call["argv"]
     assert "BatchMode=yes" in argv and "dev-vm" in argv
+    # Nothing is forwarded to the machine where member build scripts run.
+    for option in ("ForwardAgent=no", "ClearAllForwardings=yes", "ForwardX11=no"):
+        assert option in argv, option
     assert argv[-1] == ("pwsh -NoProfile -NonInteractive -EncodedCommand "
                         + integrate.RUST_CHECK_BOOTSTRAP)
     script = _vm_script(call)
@@ -2518,6 +2521,9 @@ def test_without_a_remote_config_the_check_runs_here_exactly_as_before(world, ca
     ("ssh=dev-vm\nrepo=C:\\dev\\x\u2019; calc; \u2019\n", "repo="),
     ("ssh=dev-vm\nrepo=C:\\dev\\$(calc)\n", "repo="),
     ("ssh=-oProxyCommand=calc\nrepo=C:\\dev\\x\n", "ssh="),
+    # A typo or a repeated key is named, not silently ignored or overridden.
+    ("ssh=dev-vm\nrepo=C:\\dev\\x\nrol=Windows dev VM\n", "line 3 is not one of"),
+    ("ssh=dev-vm\nssh=other\nrepo=C:\\dev\\x\n", "ssh= twice"),
 ])
 def test_a_malformed_remote_config_is_not_run(world, capsys, text, cause):
     _rust_member(world)
@@ -2528,6 +2534,56 @@ def test_a_malformed_remote_config_is_not_run(world, capsys, text, cause):
     record = _plan(world)["rust_check"]
     assert record.startswith("not run") and cause in record, record
     assert world.cargo_calls() == [] and world.ssh_calls() == []
+
+
+def test_a_utf16_config_is_refused_by_name_not_a_traceback(world, capsys):
+    # Windows PowerShell 5.1's `>` and Out-File write UTF-16 with a BOM.
+    _rust_member(world)
+    integrate.RUST_CHECK_REMOTE.write_bytes(VM_CONFIG.encode("utf-16"))
+
+    assert _build("--dry-run") == 0
+    out = capsys.readouterr().out
+    assert "would not run" in out and "as UTF-8" in out
+
+    assert _build() == 1
+    capsys.readouterr()
+    record = _plan(world)["rust_check"]
+    assert record.startswith("not run") and "as UTF-8" in record and "Set-Content" in record
+    assert world.cargo_calls() == [] and world.ssh_calls() == []
+
+
+def test_a_directory_in_place_of_the_config_is_refused(world, capsys):
+    _rust_member(world)
+    integrate.RUST_CHECK_REMOTE.mkdir()
+
+    assert _build() == 1
+    capsys.readouterr()
+    assert "is not a file" in _plan(world)["rust_check"]
+    assert world.cargo_calls() == [] and world.ssh_calls() == []
+
+
+def test_a_plan_field_this_loader_does_not_know_is_dropped(world, capsys):
+    # A plan written by a newer tool (or read by a reverted one) still opens.
+    _rust_member(world)
+    world.configure_remote()
+    assert _build() == 0, capsys.readouterr()
+    path = Path(_git(world.work, "rev-parse", "--git-path", f"integrate-plans/{DATE}-batch-1.json"))
+    raw = json.loads((world.work / path).read_text(encoding="utf-8"))
+    raw["a_field_from_a_later_tool"] = {"anything": 1}
+    (world.work / path).write_text(json.dumps(raw), encoding="utf-8")
+    capsys.readouterr()
+
+    assert _open(world) == 0, capsys.readouterr()
+
+
+def test_a_non_ascii_value_never_reaches_the_far_half():
+    # PowerShell takes U+2018 to U+201B as quotes too; `--date` feeds the
+    # branch name, which reaches the far half's -Ref.
+    assert integrate._ps_literal("integrate/2026-11-16-batch-1") == "'integrate/2026-11-16-batch-1'"
+    assert integrate._ps_literal("it's") == "'it''s'"
+    for value in ("x’; calc; ’", "x‘y", "x‛y"):
+        with pytest.raises(integrate.Refusal, match="non-ASCII"):
+            integrate._ps_literal(value)
 
 
 def test_a_bad_config_names_its_own_fix(world, capsys):
@@ -2589,10 +2645,37 @@ needs_pwsh = pytest.mark.skipif(_PWSH is None, reason="the far half needs PowerS
 
 _FAKE_FAR_CARGO = r'''
 import json, os, sys
+
+def suite_lock_free():
+    """Whether a full suite could take its lock now, as tests/suite_lock.py
+    takes it (_try_lock), while this stand-in runs as cargo."""
+    path = os.path.join(os.environ["PSEUDOLIFE_SUITE_LOCK_DIR"], "full-suite.lock")
+    try:
+        handle = open(path, "a+b")
+    except OSError:
+        return False
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return True
+    except OSError:
+        return False
+    finally:
+        handle.close()
+
 with open(os.environ["FAKE_FAR_CARGO_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(),
                           "target": os.environ.get("CARGO_TARGET_DIR"),
-                          "env": dict(os.environ)}) + "\n")
+                          "env": dict(os.environ),
+                          "suite_lock_free": suite_lock_free()}) + "\n")
 code = int(os.environ.get("FAKE_FAR_CARGO_EXIT", "0"))
 if code:
     sys.stderr.write("error[E0061]: this function takes 3 arguments\n")
@@ -2642,6 +2725,11 @@ class Far:
         monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
         monkeypatch.setenv("FAKE_FAR_CARGO_LOG", str(self.cargo_log))
         monkeypatch.delenv("FAKE_FAR_CARGO_EXIT", raising=False)
+        # The far half probes the machine's full-suite lock; never this
+        # machine's real one (a suite running these tests holds it).
+        self.locks = tmp_path / "locks"
+        self.locks.mkdir()
+        monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(self.locks))
         self.n = 0
 
     def batch(self) -> tuple[str, str, str]:
@@ -2733,6 +2821,93 @@ def test_the_far_half_withholds_what_the_local_check_withholds():
     value = re.search(r"\$secretValue = '(.*)'", script).group(1)
     assert name == integrate.SECRET_ENV_RE.pattern
     assert value == integrate.URL_CREDENTIALS_RE.pattern
+
+
+@needs_pwsh
+def test_a_drive_under_the_floor_is_not_run_never_a_red_batch(far):
+    head, ref, data = far.batch()
+
+    proc = far.run(head, ref, data, extra=("-MinFreeGB", "1000000000"))
+
+    assert proc.returncode == 3, proc.stderr
+    assert "GB free on the clone's drive; the floor is" in _verdict(proc)
+    assert far.cargo_calls() == [] and far.leftovers() == []
+
+
+def _hold_suite_lock(path: Path):
+    """Take the full-suite lock as tests/suite_lock.py's _try_lock takes it."""
+    handle = open(path, "a+b")
+    if os.name == "nt":
+        import msvcrt
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return handle
+
+
+@needs_pwsh
+def test_a_held_full_suite_lock_is_not_run(far):
+    # A compile check never starts while a full suite runs on the machine.
+    head, ref, data = far.batch()
+    held = _hold_suite_lock(far.locks / "full-suite.lock")
+    try:
+        proc = far.run(head, ref, data)
+    finally:
+        held.close()
+
+    assert proc.returncode == 3, proc.stderr
+    assert "a full suite holds this machine" in _verdict(proc)
+    assert far.cargo_calls() == []
+
+
+@needs_pwsh
+def test_a_suite_that_starts_during_the_check_waits_for_it(far):
+    # Codex (final-head review): a probe let go at once let a suite take its
+    # lock while cargo ran. The far half holds it until its cleanup, in a way
+    # the suite's own lock sees, and lets it go after; also when the lock
+    # file did not exist before.
+    head, ref, data = far.batch()
+    assert not (far.locks / "full-suite.lock").exists()
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 0, proc.stderr
+    (call,) = far.cargo_calls()
+    assert call["suite_lock_free"] is False, "a suite could start beside the check"
+    _hold_suite_lock(far.locks / "full-suite.lock").close()   # free again afterwards
+
+
+@needs_pwsh
+def test_a_hook_a_batch_left_in_the_clone_does_not_run(far, tmp_path):
+    # A member's build script can write the clone's .git/hooks; the next
+    # checkout in the gate must not run what it wrote.
+    head, ref, data = far.batch()
+    marker = tmp_path / "hook-ran"
+    hooks = far.repo / ".git" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    for name in ("post-checkout", "reference-transaction"):
+        hook = hooks / name
+        hook.write_text(f"#!/bin/sh\necho {name} >> '{marker.as_posix()}'\n", encoding="utf-8",
+                        newline="\n")
+        hook.chmod(0o755)
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 0, proc.stderr
+    assert not marker.exists(), marker.read_text(encoding="utf-8")
+
+
+@needs_pwsh
+def test_a_no_hooks_path_that_exists_is_refused(far):
+    head, ref, data = far.batch()
+    Path(f"{far.repo}.rust-check-no-hooks").mkdir()
+
+    proc = far.run(head, ref, data)
+
+    assert proc.returncode == 3 and "must not" in _verdict(proc), proc.stderr
+    assert far.cargo_calls() == []
 
 
 @needs_pwsh

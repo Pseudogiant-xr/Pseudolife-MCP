@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "5d59b56aa5766fd5",
+  "fingerprint": "d5eacc86bd528116",
+  "reason": "Adds 20 picked node ids of tests/test_integrate_script.py: the batch compile check's far half (ops/rust-check-remote.ps1) on real pwsh, git and file locks. The same 20 tests (23 with the helpers' near misses) took 85-94 s natively on the Windows dev VM (16 November 2026, two runs), so the job's measured minutes hold within about two minutes; the job is re-measured from its batch's hosted runs."
+}
