@@ -334,9 +334,11 @@ pub fn hook_command(arguments: Vec<std::ffi::OsString>) -> u8 {
 /// nested links cost what they are, not what their prefixes repeat), the
 /// links being resolved (one met again is a loop), and how many links the
 /// check has followed. A link is remembered by its filesystem identity
-/// together with where it leads, so an identity two objects share (a
-/// filesystem without stable file IDs) cannot excuse walking a different
-/// target, and an identity that is zero is never remembered at all.
+/// together with the destination it resolves to here, so an identity two
+/// entries share (a filesystem without stable file IDs, or a hard-linked
+/// symlink whose relative target resolves against each entry's own folder)
+/// can never excuse walking a different destination; an identity that is
+/// zero is never remembered at all.
 #[derive(Default)]
 struct Walk {
     accepted: HashSet<LinkKey>,
@@ -383,7 +385,15 @@ impl Walk {
                 if let Some(cause) = distrust {
                     return refuse(cause);
                 }
-                let key = (identity.1 != 0).then(|| (identity, target.clone()));
+                // Where the link leads: absolute, or relative to the folder
+                // holding it. The OS resolves `..` in what follows as it does
+                // in the lookup itself, so the walk checks the very folders
+                // the open will cross.
+                let resolved = match prefix.parent() {
+                    Some(holder) => holder.join(&target),
+                    None => target.clone(),
+                };
+                let key = (identity.1 != 0).then(|| (identity, resolved.clone()));
                 if key.as_ref().is_some_and(|key| self.accepted.contains(key)) {
                     return Ok(());
                 }
@@ -394,14 +404,6 @@ impl Walk {
                 if self.links > MAX_LINKS || looped {
                     return refuse(Cause::TooManyLinks);
                 }
-                // Where the link leads: absolute, or relative to the folder
-                // holding it. The OS resolves `..` in what follows as it does
-                // in the lookup itself, so the walk checks the very folders
-                // the open will cross.
-                let resolved = match prefix.parent() {
-                    Some(holder) => holder.join(&target),
-                    None => target.clone(),
-                };
                 self.walk(&resolved)?;
                 if let Some(key) = key {
                     self.resolving.remove(&key);

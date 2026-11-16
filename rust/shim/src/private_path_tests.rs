@@ -440,6 +440,32 @@ mod posix {
     }
 
     #[test]
+    fn hard_linked_relative_symlinks_are_walked_at_each_destination() {
+        // `a/l` and `a/b/l` are one symlink (a hard link: one inode, one
+        // stored target `child`), but a relative target resolves against
+        // each entry's own folder: `a/child` and `a/b/child` are different
+        // places, and the second leads through a link in a folder others
+        // may write (Codex review of 327d5d4e6, P1).
+        let scratch = Scratch::new("hardlinked");
+        let a = scratch.0.join("a");
+        dir(&a);
+        dir(&a.join("b"));
+        dir(&a.join("child"));
+        let shared = scratch.0.join("shared");
+        dir(&shared);
+        dir(&scratch.0.join("real"));
+        symlink(scratch.0.join("real"), shared.join("x")).unwrap();
+        symlink(shared.join("x"), a.join("b/child")).unwrap();
+        symlink("child", a.join("l")).unwrap();
+        fs::hard_link(a.join("l"), a.join("b/l")).unwrap();
+        mode(&shared, 0o777);
+        symlink(a.join("l/../b/l"), scratch.0.join("outer")).unwrap();
+        let refusal = check_ancestors(&scratch.0.join("outer/file")).unwrap_err();
+        assert_eq!(refusal.element, shared.join("x"), "{refusal}");
+        mode(&shared, 0o700);
+    }
+
+    #[test]
     fn a_token_file_that_is_itself_a_link_is_still_refused() {
         // T6: the leaf rule is unchanged.
         let scratch = Scratch::new("leaf");
