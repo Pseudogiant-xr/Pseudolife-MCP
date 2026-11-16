@@ -21,8 +21,8 @@
 # can stand in for it: `rust-check <nonce>: cargo exit N` once cargo ran
 # (its exit code), else `rust-check <nonce>: not run: <cause>` with exit 3.
 # Needs PowerShell 7.2 or later, git and rustup's cargo on PATH. It refuses,
-# as not run, while the machine's full-suite lock is held or its drive has
-# under 8 GB free, so it neither overlaps a full suite nor reads a full disk
+# as not run, while the machine's full-suite lock is held or the filesystem
+# beside the clone has under 8 GB free, so it neither overlaps a full suite nor reads a full disk
 # as a red batch.
 param(
     [Parameter(Mandatory)] [string] $Repo,
@@ -64,6 +64,27 @@ function Invoke-Git {
     $hooks = if ($script:noHooks) { @('-c', "core.hooksPath=$script:noHooks") } else { @() }
     $out = & git @hooks @args 2>&1 | ForEach-Object { "$_" }
     [pscustomobject]@{ Code = $LASTEXITCODE; Text = (($out | Select-Object -Last 3) -join ' ').Trim() }
+}
+
+function Get-FreeBytes([string] $path) {
+    # The free space of the filesystem holding $path: the mounted volume whose
+    # root is the longest prefix of it, since GetPathRoot gives "/" for every
+    # Linux path, so a clone on its own mount would be judged by the root's.
+    $sep = [IO.Path]::DirectorySeparatorChar
+    $cmp = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    $full = [IO.Path]::GetFullPath($path).TrimEnd([char]92, [char]47) + $sep
+    $best = $null
+    foreach ($d in [IO.DriveInfo]::GetDrives()) {
+        try {
+            if (-not $d.IsReady) { continue }
+            $root = $d.RootDirectory.FullName.TrimEnd([char]92, [char]47) + $sep
+            if ($full.StartsWith($root, $cmp) -and (-not $best -or $root.Length -gt $best.Root.Length)) {
+                $best = [pscustomobject]@{ Root = $root; Free = $d.AvailableFreeSpace }
+            }
+        } catch { }
+    }
+    if ($best) { return $best.Free }
+    return [IO.DriveInfo]::new([IO.Path]::GetPathRoot($full)).AvailableFreeSpace
 }
 
 if ($Head -notmatch '^[0-9a-f]{40}$' -or $Base -notmatch '^[0-9a-f]{40}$') { Stop-Check "the head and base must be full commit ids" }
@@ -140,8 +161,8 @@ try {
             $failure = "a full suite holds this machine (its full-suite.lock); a compile check does not overlap one, so build again once it ends"
             break
         }
-        $free = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($Repo)).AvailableFreeSpace / 1GB
-        if ($free -lt $MinFreeGB) { $failure = "only $([math]::Round($free, 1)) GB free on the clone's drive; the floor is $MinFreeGB GB (CLAUDE.md, Disk space)"; break }
+        $free = (Get-FreeBytes (Split-Path -Parent $Repo)) / 1GB
+        if ($free -lt $MinFreeGB) { $failure = "only $([math]::Round($free, 1)) GB free where the gate copy and its target live (beside the clone); the floor is $MinFreeGB GB (CLAUDE.md, Disk space)"; break }
         $r = Invoke-Git -C $Repo fetch --quiet origin master
         if ($r.Code -ne 0) { $failure = "the clone cannot fetch origin (git exit $($r.Code): $($r.Text))"; break }
         $r = Invoke-Git -C $Repo cat-file -e "$Base^{commit}"

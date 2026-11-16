@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -2890,8 +2891,44 @@ def test_a_drive_under_the_floor_is_not_run_never_a_red_batch(far):
     proc = far.run(head, ref, data, extra=("-MinFreeGB", "1000000000"))
 
     assert proc.returncode == 3, proc.stderr
-    assert "GB free on the clone's drive; the floor is" in _verdict(proc)
+    assert "GB free where the gate copy and its target live" in _verdict(proc)
+    assert "the floor is" in _verdict(proc)
     assert far.cargo_calls() == [] and far.leftovers() == []
+
+
+@needs_pwsh
+@pytest.mark.skipif(os.name == "nt", reason="needs a mount other than / (a tmpfs)")
+def test_the_floor_is_judged_on_the_filesystem_beside_the_clone(far):
+    # The root's free space is not the clone's when the clone sits on its own
+    # mount (GetPathRoot gives "/" for every Linux path): a floor between the
+    # two decides differently for each.
+    root = os.stat("/").st_dev
+    mount = next((d for d in (far.tmp, Path("/dev/shm"))
+                  if d.is_dir() and os.stat(d).st_dev != root), None)
+    if mount is None:
+        pytest.skip("no filesystem but / to put the clone on")
+    root_free = shutil.disk_usage("/").free / 2**30
+    there = shutil.disk_usage(mount).free / 2**30
+    if abs(root_free - there) < 4:
+        pytest.skip(f"{mount} ({there:.1f} GB free) and / ({root_free:.1f} GB) are too close")
+    home = Path(tempfile.mkdtemp(prefix="w26-far-floor-", dir=mount))
+    try:
+        far.repo = home / "far"
+        _git(far.tmp, "clone", "-q", str(far.origin), str(far.repo))
+        head, ref, data = far.batch()
+        floor = (root_free + there) / 2
+
+        proc = far.run(head, ref, data, extra=("-MinFreeGB", f"{floor:.1f}"))
+
+        if there < floor:
+            assert proc.returncode == 3, proc.stderr
+            assert "GB free where the gate copy and its target live" in _verdict(proc)
+            assert far.cargo_calls() == []
+        else:
+            assert proc.returncode == 0, proc.stderr
+            assert _verdict(proc) == "rust-check: cargo exit 0"
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def _hold_suite_lock(path: Path):

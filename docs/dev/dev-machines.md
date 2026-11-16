@@ -150,7 +150,8 @@ run, in four cases:
 - while the machine's full-suite lock
   (`~/.pseudolife-mcp/locks/full-suite.lock`) is held, so a compile check
   never overlaps a full suite;
-- below 8 GB free on the clone's drive, so a full disk never reads as a red
+- below 8 GB free on the filesystem beside the clone (where the gate copy and
+  its target live, its own mount included), so a full disk never reads as a red
   batch;
 - while `<repo>.rust-check-no-hooks` exists. Its git runs with
   `core.hooksPath` pointed at that path, so a hook a batch's build script
