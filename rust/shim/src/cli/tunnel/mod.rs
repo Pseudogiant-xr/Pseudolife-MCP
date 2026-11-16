@@ -19,6 +19,7 @@ mod dpapi;
 mod record;
 mod store;
 mod syntax;
+mod vendor;
 
 pub(super) use doctor_section::doctor_section;
 use record::Liveness;
