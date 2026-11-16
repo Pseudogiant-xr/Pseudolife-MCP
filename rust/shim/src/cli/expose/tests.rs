@@ -1042,6 +1042,41 @@ fn off_permission_refusal_names_the_fix() {
 }
 
 #[test]
+fn a_permission_refusal_names_the_least_privilege_fix_and_never_root() {
+    let mut fake = Fake::free();
+    fake.bg = Step {
+        code: 1,
+        err: "Access denied: serve config denied\n".into(),
+        effect: Effect::Nothing,
+        ..Step::default()
+    };
+    let (_, stderr, code) = drive(&fake, &["tailscale", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_REFUSED);
+    // Forwarding a port needs no root and no administrator shell, so the
+    // refusal never sends the user to one.
+    let lowered = stderr.to_lowercase();
+    for word in ["as root", "elevated", "administrator"] {
+        assert!(!lowered.contains(word), "{word}: {stderr}");
+    }
+    if cfg!(windows) {
+        assert!(
+            stderr.contains("owns this device's Tailscale configuration"),
+            "{stderr}"
+        );
+    } else if cfg!(target_os = "macos") {
+        assert!(
+            stderr.contains("logged in to the Tailscale app"),
+            "{stderr}"
+        );
+    } else {
+        assert!(
+            stderr.contains("operator once with `sudo tailscale set --operator=$USER`"),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
 fn the_permission_pattern_needs_its_exact_signal() {
     let refused = |err: &str| {
         permission_refused(&Proc {

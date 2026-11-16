@@ -173,7 +173,11 @@ def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
     assert "    if native_install; then" in ensure
     install = sh[sh.index("native_install() {"):]
     install = install[:install.index("\n}\n")]
-    assert '--version "$NATIVE_VERSION" | tail -1)" || return 1' in install
+    # The install's status is captured rather than piped, so exit 3 (a
+    # refused move, issue #1632) can be told apart; any other failure still
+    # returns 1 instead of exiting.
+    assert '--version "$NATIVE_VERSION")" || native_install_status=$?' in install
+    assert '[ "$native_install_status" = 0 ] || return 1' in install
     assert "|| return 1" in install.split("SHIM_PATH=", 1)[0]
 
 

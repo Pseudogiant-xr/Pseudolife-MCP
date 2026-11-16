@@ -1,5 +1,6 @@
 """Claude and Codex installer UX guards."""
 
+import os
 import re
 import shutil
 import subprocess
@@ -335,6 +336,44 @@ def test_preflight_checks_buildx_on_both_platforms() -> None:
     docker in test_installer_client_only.py."""
     assert "docker buildx version" in _read("ops/preflight.sh")
     assert "docker buildx version" in _read("ops/preflight.ps1")
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,
+                    reason="runs ops/preflight*.sh under a POSIX bash")
+@pytest.mark.parametrize("script", ["ops/preflight.sh", "ops/preflight-native.sh"])
+def test_docker_group_advice_says_it_is_root_equivalent(tmp_path, script) -> None:
+    """A user the docker socket refuses is still told the group command, and
+    told plainly that the docker group is root-equivalent (how Docker works,
+    not something Pseudolife adds), with the alternative available today and
+    the rootless issue; the README says the same beside the same command."""
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    docker = stub / "docker"
+    docker.write_text("#!/bin/sh\n"
+                      "echo 'permission denied while trying to connect to the docker API' >&2\n"
+                      "exit 1\n")
+    docker.chmod(0o755)
+    # The bash first on PATH runs it (macOS's 3.2 in its lane), and its
+    # folder stays on PATH for anything the script starts.
+    bash = shutil.which("bash")
+    env = {"PATH": f"{stub}:{os.path.dirname(bash)}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    proc = subprocess.run([bash, str(ROOT / script), "--client", "generic"],
+                          capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
+    out = proc.stdout
+    assert proc.returncode != 0, out
+    line = next(row for row in out.splitlines() if "sudo usermod -aG docker" in row)
+    assert "sudo usermod -aG docker $USER   # then log out and back in" in line, line
+    # The fix pastes as it is: the command, then prose behind a comment.
+    fix = line.split("fix: ", 1)[1]
+    parsed = subprocess.run([bash, "-n", "-c", fix], capture_output=True, text=True, timeout=10)
+    assert parsed.returncode == 0, (fix, parsed.stderr)
+    for claim in ("equivalent to root on this machine", "not something Pseudolife adds",
+                  "an account that already uses Docker", "not supported yet (issue #1642)"):
+        assert claim in line, line
+    readme = " ".join(_read("README.md").split())
+    for claim in ("`sudo usermod -aG docker $USER`", "is equivalent to root on that machine",
+                  "not something Pseudolife adds", "issues/1642"):
+        assert claim in readme, claim
 
 
 def test_installers_wire_gemini_via_shim_and_http() -> None:

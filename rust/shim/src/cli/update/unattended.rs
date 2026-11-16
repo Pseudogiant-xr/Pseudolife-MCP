@@ -445,8 +445,21 @@ fn run_inner(
         })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "clients not moved".into());
+    // The guard kept the clients on the Python client (issue #1632): say
+    // so, and do not send anyone to a shim runtime that was not installed.
+    let (clients, session) = if update.tunnel_refused.is_some() {
+        (
+            "clients not moved: a tunnel autostart service keeps this machine on the Python client (the log names it)".to_owned(),
+            "",
+        )
+    } else {
+        (
+            clients,
+            "Start a new session to run on the new shim runtime; ",
+        )
+    };
     let text = format!(
-        "Pseudolife-MCP: the daemon was updated unattended from {current} to {latest} (backup taken; rollback tag {}; {clients}). Start a new session to run on the new shim runtime; the log is {}.{}",
+        "Pseudolife-MCP: the daemon was updated unattended from {current} to {latest} (backup taken; rollback tag {}; {clients}). {session}The log is {}.{}",
         update
             .report
             .rollback
@@ -538,6 +551,7 @@ fn run_clients(update: &mut Update) -> Result<u8> {
         return Ok(3);
     }
     refuse_checkout_shadow(&daemon)?;
+    update.refuse_tunnel_move(None)?;
     update.step(format!("the daemon runs {daemon} and this machine's shim {own}: updating this machine's clients to {daemon} unattended"));
     // Persist intent before the first step: a crash after installing the shim
     // must still retry plugin and hook work on the next run.

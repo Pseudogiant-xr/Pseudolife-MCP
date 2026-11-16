@@ -118,10 +118,14 @@ the checks around it:
   skips the question, and a run with no terminal and no `--yes` exits 2
   without changing anything.
 - A user Tailscale does not let change the serve config is refused with
-  the fix for the OS: on Linux, `sudo tailscale set --operator=$USER` (or
-  run as root); on Windows, run it as the user logged in to Tailscale or
-  from an elevated shell; on macOS, as the user logged in to the Tailscale
-  app.
+  the fix for the OS. Forwarding a port needs neither root nor an
+  administrator shell; it needs a user Tailscale trusts. On Linux, make your
+  user Tailscale's operator once with `sudo tailscale set --operator=$USER`
+  (the one privileged step; afterwards you change serves without sudo). On
+  Windows, run it as the user that owns the device's Tailscale
+  configuration (the one signed in to the Tailscale app, or the one that
+  turned on unattended mode). On macOS, run it as the user logged in to the
+  Tailscale app.
 - Afterwards it reads the serve status back and reports what is there. If
   `tailscale serve` failed but the forward appeared anyway, it removes the
   forward again, checks, and exits 5. If no forward appeared, nothing
@@ -855,11 +859,11 @@ without one, move uses the target's installed CLI and needs its clone-free
 on that host. Both target containers must belong to the same compose stack.
 
 ```bash
-pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
-pseudolife-mcp move --to root@box             # confirms the move and any new exposure
+pseudolife-mcp move --to user@box --dry-run   # the plan; changes nothing
+pseudolife-mcp move --to user@box             # confirms the move and any new exposure
 ```
 
-`--to` is anything `ssh` accepts (`root@box`, or a `~/.ssh/config` alias).
+`--to` is anything `ssh` accepts (`user@box`, or a `~/.ssh/config` alias).
 Key-based ssh is required: every remote command runs as `ssh -o
 BatchMode=yes` with keepalives (`ServerAliveInterval=15`,
 `ServerAliveCountMax=4`), and nothing ever types a password. A dropped
@@ -891,7 +895,7 @@ environment onto the target host first (Portainer: **Stacks > your stack >
 Editor**), then name those paths:
 
 ```bash
-pseudolife-mcp move --to root@box --target-release \
+pseudolife-mcp move --to user@box --target-release \
   --target-compose-file /srv/stack.yml --target-env-file /srv/stack.env \
   --target-url http://100.64.0.9:8765 --dry-run
 ```
