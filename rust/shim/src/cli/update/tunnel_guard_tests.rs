@@ -833,7 +833,7 @@ fn a_task_command_that_did_not_decode_still_counts_as_the_launcher() {
     let f = Fixture::new();
     f.python_launcher();
     let mut xml = format!(
-        "<Task><RegistrationInfo><Source>{OWNER}{HEX}</Source></RegistrationInfo><Actions><Exec><Command>C:\\Users\\Zo"
+        "<Task><RegistrationInfo><Source>{OWNER}{HEX}</Source></RegistrationInfo><Actions><Exec><Command>C:\\Users\\&lt;user&gt;\\Zo"
     )
     .into_bytes();
     xml.push(0xeb);
@@ -844,7 +844,7 @@ fn a_task_command_that_did_not_decode_still_counts_as_the_launcher() {
     let registry = Registry::new(
         0,
         TASKS,
-        format!("<Task><RegistrationInfo><Source>{OWNER}{HEX}</Source></RegistrationInfo><Actions><Exec><Command>C:\\Users\\Zo&#235;\\x.exe</Command></Exec></Actions></Task>").into_bytes(),
+        format!("<Task><RegistrationInfo><Source>{OWNER}{HEX}</Source></RegistrationInfo><Actions><Exec><Command>C:\\Users\\&lt;user&gt;\\Zo&#235;\\x.exe</Command></Exec></Actions></Task>").into_bytes(),
     );
     refused(update(&f, &windows(), &registry));
 }
@@ -887,8 +887,8 @@ fn printed_paths_survive_a_paste() {
     assert_eq!(quote("/home/u/my store", false), "'/home/u/my store'");
     assert_eq!(quote("/a/it's;$x", false), "'/a/it'\\''s;$x'");
     assert_eq!(
-        quote(r"C:\Users\u\it's (x)", true),
-        r"'C:\Users\u\it''s (x)'"
+        quote(r"C:\Users\<user>\it's (x)", true),
+        r"'C:\Users\<user>\it''s (x)'"
     );
 }
 
