@@ -130,6 +130,7 @@ RUST_HARNESS = (
     "rust/daemon/harness/test_w2d_rerank_check.py",
     "rust/daemon/harness/test_w2d_trace_compare.py", "rust/cli_harness/test_update_row.py",
     "rust/cli_harness/test_cli_harness.py",
+    "rust/cli_harness/test_console_browser.py",
     "rust/ci",
 )
 RUST_HARNESS_COMMAND = ("python -m pytest -q -p no:cacheprovider --require-databases "
