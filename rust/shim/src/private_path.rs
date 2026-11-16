@@ -263,6 +263,18 @@ pub fn check_path(path: &Path) -> Result<(), Refusal> {
     Walk::default().walk(path)
 }
 
+/// How many distinct links [`check_ancestors`] follows for `path`: for the
+/// tests that each link costs one against [`MAX_LINKS`], however it is
+/// spelled when the walk meets it.
+#[cfg(test)]
+pub(crate) fn links_followed(path: &Path) -> Result<usize, Refusal> {
+    let mut walk = Walk::default();
+    if let Some(parent) = path.parent() {
+        walk.walk(parent)?;
+    }
+    Ok(walk.links)
+}
+
 /// The refusal line for the folders above `path`, when there is one.
 pub fn explain(path: &Path) -> Option<String> {
     check_ancestors(path)
@@ -353,7 +365,8 @@ impl Walk {
                 cause: Box::new(cause),
             })
         };
-        if self.accepted.contains(prefix) {
+        let key = link_key(prefix);
+        if self.accepted.contains(&key) {
             return Ok(());
         }
         match inspect(prefix) {
@@ -363,7 +376,7 @@ impl Walk {
                     return refuse(cause);
                 }
                 self.links += 1;
-                if self.links > MAX_LINKS || !self.resolving.insert(prefix.to_path_buf()) {
+                if self.links > MAX_LINKS || !self.resolving.insert(key.clone()) {
                     return refuse(Cause::TooManyLinks);
                 }
                 // Where the link leads: absolute, or relative to the folder
@@ -375,8 +388,8 @@ impl Walk {
                     None => target.clone(),
                 };
                 self.walk(&resolved)?;
-                self.resolving.remove(prefix);
-                self.accepted.insert(prefix.to_path_buf());
+                self.resolving.remove(&key);
+                self.accepted.insert(key);
                 Ok(())
             }
             Ok(Entry::Other(tag)) => refuse(Cause::NotALink { tag }),
@@ -384,6 +397,38 @@ impl Walk {
                 detail: error.to_string(),
             }),
         }
+    }
+}
+
+/// The one name a link is remembered by within a check. On Windows it is
+/// the verbatim form of the path Win32 opens, so a link met once by a DOS
+/// path (as callers give it) and once in a verbatim target (as links store
+/// it) counts once against [`MAX_LINKS`], while names Win32 would normalise
+/// into another object (`state.` and `state`) stay distinct. Elsewhere a
+/// path is its own name.
+fn link_key(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::Component;
+        let verbatim = matches!(
+            path.components().next(),
+            Some(Component::Prefix(prefix)) if prefix.kind().is_verbatim()
+        );
+        if verbatim {
+            return path.to_path_buf();
+        }
+        let Ok(full) = std::path::absolute(path) else {
+            return path.to_path_buf();
+        };
+        let text = full.to_string_lossy();
+        match text.strip_prefix(r"\\") {
+            Some(unc) => PathBuf::from(format!(r"\\?\UNC\{unc}")),
+            None => PathBuf::from(format!(r"\\?\{text}")),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
     }
 }
 

@@ -611,6 +611,38 @@ mod windows {
     }
 
     #[test]
+    fn nested_junctions_reached_by_both_spellings_are_counted_once_each() {
+        // Each junction's target runs through the junctions before it, so the
+        // walk meets each one by the path as given (a DOS path) and again in
+        // a target (a verbatim path). Counted once each, 21 stay well under
+        // the 40-link cap (Codex review of 73649236d, P2).
+        let scratch = Scratch::new("nested-junctions");
+        let mut folder = scratch.0.clone();
+        let mut made = 0;
+        for level in 0..40 {
+            let real = folder.join(format!("r{level}"));
+            // Windows stops resolving such a chain itself at some depth
+            // (ERROR_CANT_RESOLVE_FILENAME); the test stops there too.
+            if fs::create_dir(&real).is_err() {
+                break;
+            }
+            let link = folder.join(format!("l{level}"));
+            make_junction_for_test(&link, &real).unwrap();
+            folder = link;
+            made += 1;
+        }
+        eprintln!("nested junctions Windows resolves: {made}");
+        assert!(made >= 7, "only {made} nested junctions could be made");
+        // The deepest folder Windows still resolves, behind `made` links.
+        assert_eq!(
+            check_ancestors(&folder.join("token")),
+            Ok(()),
+            "{made} links"
+        );
+        assert_eq!(links_followed(&folder.join("token")), Ok(made));
+    }
+
+    #[test]
     fn a_junction_to_a_trailing_dot_name_is_checked_at_that_name() {
         // `state.` and `state` are different objects, but Win32 normalises a
         // plain `...\state.` to `...\state`. The trusted outer junction leads
