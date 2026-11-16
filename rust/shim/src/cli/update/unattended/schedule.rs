@@ -567,11 +567,22 @@ fn run_windows_script(script: &str) -> Result<(i32, String)> {
 
 /// The registration failure a Windows task script's exit code means.
 fn registration_failure(code: i32, output: &str) -> UpdateError {
-    UpdateError::usage(script_failure(
+    const NEXT: &str = "This per-user daily task needs no elevation; check that the Windows ScheduledTasks PowerShell module is available (Get-Command Register-ScheduledTask) and run this command again in a normal PowerShell";
+    let message = script_failure(
         code,
         output,
-        "Task Scheduler registration failed. This per-user daily task needs no elevation; check that the Windows ScheduledTasks PowerShell module is available (Get-Command Register-ScheduledTask) and run this command again in a normal PowerShell",
-    ))
+        &format!("Task Scheduler registration failed. {NEXT}"),
+    );
+    // The script's own last line says what failed; the next step follows it.
+    UpdateError::usage(
+        if matches!(code, TASK_LOCKED | TASK_OWNER_UNREAD | SCRIPT_CHANGED)
+            || message.ends_with(NEXT)
+        {
+            message
+        } else {
+            format!("{message}. {NEXT}")
+        },
+    )
 }
 
 /// The true line for a Windows task script that exited `code`: its own
@@ -1091,7 +1102,10 @@ Connection: close
         );
         let other = registration_failure(1, "Access is denied.");
         assert!(
-            other.message.contains("needs no elevation"),
+            other
+                .message
+                .starts_with("Access is denied.; nothing was changed. ")
+                && other.message.contains("needs no elevation"),
             "{}",
             other.message
         );

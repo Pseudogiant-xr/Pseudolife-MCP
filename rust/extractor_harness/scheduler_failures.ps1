@@ -453,7 +453,8 @@ exit `$process.ExitCode
     $expectedFailure = 'not a recognized shim registration'
 } elseif ($Case -eq 'PasswordRollback') {
     $global:r6fixtureTask = [PSCustomObject]@{ TaskName=$taskName; State='Ready'; Principal=[PSCustomObject]@{LogonType='Password'}; Actions=@([PSCustomObject]@{Execute=$writer;Arguments=('extractor-shim claude --env-file "' + $settings + '"')}) }
-    $expectedFailure = 'original fixture startup failure'
+    # A start the fixture refuses is reported as Task Scheduler's refusal.
+    $expectedFailure = "Task Scheduler refused to start '$taskName' from this shell: original fixture startup failure"
 } elseif ($Case -in @('LegacyMigration','LegacyJuly','LegacyDetached','LockedLegacy')) {
     $taskName = 'Pseudolife Claude Shim'
     $arguments = 'extractor-shim claude --env-file "' + $settings + '"'
@@ -544,7 +545,8 @@ exit `$process.ExitCode
     if ($Case -eq 'QueryStopFailure') { $expectedFailure = 'could not confirm task fixture-native stopped: fixture task query failed; inspect its scheduler state' }
     if ($Case -in @('QueryFailure','QueryAccessDenied')) { $expectedFailure = 'fixture task query failed' }
 } else {
-    $expectedFailure = 'original fixture startup failure'
+    # A start the fixture refuses is reported as Task Scheduler's refusal.
+    $expectedFailure = "Task Scheduler refused to start '$taskName' from this shell: original fixture startup failure"
 }
 if ($Case -in @('InstallUnverifiedPreflight','InstallUnverifiedLate','RemoveUnverifiedPreflight')) {
     # The unknown candidate uses the same provider/settings, but does not own
@@ -699,7 +701,8 @@ function Start-ScheduledTask {
     }
     if ($Case -in @('DelayedRemoval','RemovalTimeout')) { $global:r6fixtureTask.State='Running' }
     $global:r6startupFailed=$true
-    throw $expectedFailure
+    # The scheduler's own error; the script reports it as a refused start.
+    throw ($expectedFailure -replace "^Task Scheduler refused to start '[^']*' from this shell: ", '')
 }
 function Invoke-WebRequest {
     if ($Case -eq 'TaskRemovedDuringHealth') { $global:r6fixtureTask=$null; $global:r6healthRemoved=$true; throw 'fixture removed task during health wait' }
