@@ -1223,7 +1223,12 @@ mod tests {
         let printed = line
             .split(" (in PowerShell: ")
             .nth(1)
-            .and_then(|rest| rest.strip_suffix("), then retry."))
+            // The command ends at "), then retry."; when elevation is
+            // needed follows it.
+            .and_then(|rest| {
+                rest.split_once("), then retry. ")
+                    .map(|(command, _)| command)
+            })
             .unwrap_or_else(|| panic!("{line}"));
         // Each call of the printed line must succeed, not only the last.
         for call in printed.split("; ") {
