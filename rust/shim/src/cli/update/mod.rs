@@ -271,10 +271,22 @@ impl Update {
     /// every path that runs the client steps, and again by `clients` as a
     /// backstop.
     pub fn refuse_tunnel_move(&mut self, repo: Option<&Path>) -> Result<()> {
+        self.tunnel_check(repo, false)
+    }
+    /// The same check where a release deploy is about to update the daemon:
+    /// an unattended run does not leave the daemon behind every night for a
+    /// client-side service, so it updates the daemon alone (as with
+    /// `--daemon-only`), skips the client steps and warns instead.
+    pub fn refuse_tunnel_move_before_daemon(&mut self) -> Result<()> {
+        self.tunnel_check(None, true)
+    }
+    fn tunnel_check(&mut self, repo: Option<&Path>, before_daemon: bool) -> Result<()> {
         if self.tunnel_checked {
             return Ok(());
         }
-        let mover = if self.o.unattended {
+        let mover = if self.o.unattended && before_daemon {
+            tunnel_guard::Mover::UnattendedDaemon
+        } else if self.o.unattended {
             tunnel_guard::Mover::Unattended
         } else if self.report.mode == "checkout" {
             tunnel_guard::Mover::Checkout
@@ -282,6 +294,14 @@ impl Update {
             tunnel_guard::Mover::Update
         };
         match (self.tunnel_probe)(mover, repo) {
+            tunnel_guard::Decision::Refuse(line)
+                if mover == tunnel_guard::Mover::UnattendedDaemon =>
+            {
+                self.o.daemon_only = true;
+                self.tunnel_checked = true;
+                self.warn(line);
+                Ok(())
+            }
             tunnel_guard::Decision::Refuse(line) => Err(UpdateError::usage(line)),
             tunnel_guard::Decision::Proceed(notes) => {
                 self.tunnel_checked = true;

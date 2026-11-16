@@ -397,7 +397,7 @@ fn a_service_that_runs_another_program_does_not_move_with_the_launcher() {
 }
 
 #[test]
-fn a_unit_without_the_owner_marker_is_not_this_products() {
+fn a_unit_without_the_owner_marker_is_only_warned_about() {
     let f = Fixture::new();
     f.python_launcher();
     let marked = f.unit(&f.launcher());
@@ -415,7 +415,16 @@ fn a_unit_without_the_owner_marker_is_not_this_products() {
     );
     f.write(".config/systemd/user/other-tunnel-dot.service", &marked);
     f.write(".config/systemd/user/pseudolife-tunnel-.service", &marked);
-    assert_eq!(update(&f, &linux(), &Untouched), Decision::Proceed(vec![]));
+    let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
+        panic!("not this product's marker: never a refusal");
+    };
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.contains("looks like a tunnel service made by hand")),
+        "{lines:?}"
+    );
 }
 
 #[test]
@@ -459,8 +468,14 @@ fn an_already_native_machine_moves_on_and_says_how_to_stop_the_failing_service()
     );
     assert!(
         lines[0].contains(&format!(
-            "remove it with: systemctl --user disable --now pseudolife-tunnel-dot.service; rm {}; systemctl --user daemon-reload",
-            quote(&unit.to_string_lossy(), false)
+            "remove it with: systemctl --user disable --now pseudolife-tunnel-dot.service && rm {} && systemctl --user daemon-reload; the Python client's record of it, {}, can be deleted too",
+            quote(&unit.to_string_lossy(), false),
+            quote(
+                &PathBuf::from(f.store())
+                    .join("pseudolife-tunnel-dot.service-owner")
+                    .to_string_lossy(),
+                false
+            )
         )),
         "{lines:?}"
     );
@@ -489,8 +504,9 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         panic!()
     };
     assert!(
-        lines[0]
-            .contains("remove it with: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot; rm "),
+        lines[0].contains(
+            "remove it with: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot && rm "
+        ),
         "{lines:?}"
     );
     let registry = Registry::new(
@@ -525,7 +541,7 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
     };
     assert!(
         lines[0].contains(
-            "remove it with: as root, systemctl disable --now pseudolife-tunnel-dot.service; rm "
+            "remove it with: systemctl disable --now pseudolife-tunnel-dot.service && rm "
         ),
         "{lines:?}"
     );
@@ -615,9 +631,15 @@ fn a_registered_launchd_job_refuses() {
     let foreign =
         plist(&f.launcher()).replace("<key>PseudolifeTunnelOwner</key>", "<key>Owner</key>");
     fs::write(&job, foreign).unwrap();
-    assert_eq!(
-        update(&f, &Host::Mac, &Untouched),
-        Decision::Proceed(vec![])
+    let Decision::Proceed(lines) = update(&f, &Host::Mac, &Untouched) else {
+        panic!("not this product's marker: never a refusal");
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.contains("looks like a tunnel service made by hand")),
+        "{lines:?}"
     );
 }
 
@@ -679,7 +701,7 @@ fn a_task_definition_printed_without_a_byte_order_mark_is_read() {
 }
 
 #[test]
-fn a_task_of_that_name_without_the_marker_moves() {
+fn a_task_of_that_name_without_the_marker_is_only_warned_about() {
     let f = Fixture::new();
     f.python_launcher();
     let registry = Registry::new(
@@ -687,7 +709,16 @@ fn a_task_of_that_name_without_the_marker_moves() {
         "\"\\pseudolife-tunnel-dot\",\"N/A\",\"Ready\"\r\n",
         task_xml("someone else", &f.launcher(), "tunnel run"),
     );
-    assert_eq!(update(&f, &windows(), &registry), Decision::Proceed(vec![]));
+    let Decision::Proceed(lines) = update(&f, &windows(), &registry) else {
+        panic!("not this product's marker: never a refusal");
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.contains("looks like a tunnel service made by hand")),
+        "{lines:?}"
+    );
 }
 
 #[test]
@@ -700,7 +731,7 @@ fn a_task_scheduler_that_does_not_answer_proceeds_with_one_line() {
     };
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
-        notes[0].contains("could not be listed (schtasks /Query exited 1)"),
+        notes[0].contains("could not be listed (schtasks could not be started)"),
         "{notes:?}"
     );
 }
@@ -788,7 +819,7 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
     );
     let unattended = refusal(std::slice::from_ref(&service), false, Mover::Unattended);
     assert!(
-        unattended.contains("this unattended run leaves the machine as it is, its daemon included"),
+        unattended.contains("Nothing was changed; this unattended run leaves the client as it is"),
         "{unattended}"
     );
     assert!(
@@ -875,7 +906,195 @@ fn a_windows_launcher_is_python_only_with_a_distlib_selector() {
 }
 
 #[test]
+fn the_root_unit_removal_pastes_and_says_why_root() {
+    let f = Fixture::new();
+    f.native_launcher();
+    let system = f.path.join("etc-systemd-system");
+    fs::create_dir_all(&system).unwrap();
+    let unit = system.join("pseudolife-tunnel-dot.service");
+    fs::write(&unit, f.unit(&f.launcher())).unwrap();
+    let Decision::Proceed(lines) = update(
+        &f,
+        &Host::Linux {
+            system: Some(system),
+        },
+        &Untouched,
+    ) else {
+        panic!()
+    };
+    assert!(
+        lines[0].contains(&format!(
+            "remove it with: systemctl disable --now pseudolife-tunnel-dot.service && rm {} && systemctl daemon-reload (a system unit: root installed it, so only root can remove it);",
+            quote(&unit.to_string_lossy(), false)
+        )),
+        "{lines:?}"
+    );
+    assert!(!lines[0].contains("as root,"), "{lines:?}");
+}
+
+#[test]
+fn schtasks_failures_are_said_as_what_happened() {
+    let started = |code: i32, bytes: &[u8]| {
+        failed(&Output {
+            code,
+            bytes: bytes.to_vec(),
+        })
+    };
+    assert_eq!(started(124, b""), "schtasks did not answer within 30 s");
+    assert_eq!(started(1, b""), "schtasks could not be started");
+    assert_eq!(
+        started(1, b"ERROR: Access is denied.\r\n"),
+        "schtasks /Query exited 1"
+    );
+    assert_eq!(started(2, b""), "schtasks /Query exited 2");
+}
+
+#[test]
+fn the_could_not_check_note_names_a_stop_command_and_a_public_page() {
+    let note = unchecked("x could not be read", Kind::UserUnit);
+    assert!(
+        note.contains("stop it with systemctl --user disable --now <unit>"),
+        "{note}"
+    );
+    assert!(note.contains(NATIVE_CLIENT_DOCS), "{note}");
+    assert!(
+        !note.contains("docs/guide/configuration.md describes"),
+        "{note}"
+    );
+    assert!(unchecked("x", Kind::Task).contains("schtasks /Change /TN <task> /Disable"));
+    assert!(unchecked("x", Kind::LaunchAgent).contains("launchctl bootout gui/$(id -u)/<label>"));
+}
+
+#[test]
+fn unit_files_are_read_from_home_even_when_userprofile_is_set() {
+    // The Python client wrote them under Path.home(), which is HOME; a WSL
+    // session may export a Windows USERPROFILE as well (issue #1632 review).
+    let env = |key: &str| match key {
+        "HOME" => Some(std::ffi::OsString::from("/home/u")),
+        "USERPROFILE" => Some(std::ffi::OsString::from("/mnt/c/Users/u")),
+        _ => None,
+    };
+    assert_eq!(definition_home(false, env), PathBuf::from("/home/u"));
+    let empty = |key: &str| (key == "HOME").then(std::ffi::OsString::new);
+    assert_eq!(
+        definition_home(false, empty),
+        dirs::home_dir().unwrap_or_default()
+    );
+}
+
+#[test]
+fn a_service_made_by_hand_is_warned_about_never_refused() {
+    let f = Fixture::new();
+    f.python_launcher();
+    let launcher = f.launcher();
+    // No owner marker, any name: the command is this launcher, then tunnel run.
+    let hand = f.write(
+        ".config/systemd/user/my-chatgpt-tunnel.service",
+        &format!("[Service]\nExecStart={launcher} tunnel run --profile dot\nRestart=always\n"),
+    );
+    let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
+        panic!("a hand-made service is not this product's signal: no refusal");
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with(&format!(
+            "systemd user unit {} looks like a tunnel service made by hand",
+            hand.display()
+        )),
+        "{lines:?}"
+    );
+    assert!(
+        lines[0].contains("once this machine runs the native client it fails at each start"),
+        "{lines:?}"
+    );
+    assert!(
+        lines[0].contains(
+            "remove it with: systemctl --user disable --now my-chatgpt-tunnel.service && rm "
+        ),
+        "{lines:?}"
+    );
+    assert!(
+        lines[0].contains("rerun without PSEUDOLIFE_SHIM_ENGINE=native"),
+        "{lines:?}"
+    );
+    // On a native machine the same unit is still named, without the stay hint.
+    let g = Fixture::new();
+    g.native_launcher();
+    g.write(
+        ".config/systemd/user/my-chatgpt-tunnel.service",
+        &format!("[Service]\nExecStart={} tunnel run\n", g.launcher()),
+    );
+    let Decision::Proceed(lines) = update(&g, &linux(), &Untouched) else {
+        panic!()
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains("on this client it fails at each start"),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_unit_that_only_mentions_the_launcher_is_not_a_tunnel_service() {
+    let f = Fixture::new();
+    f.python_launcher();
+    let launcher = f.launcher();
+    f.write(
+        ".config/systemd/user/comment.service",
+        &format!("# runs {launcher} tunnel run\n[Service]\nExecStart=/usr/bin/true\n"),
+    );
+    f.write(
+        ".config/systemd/user/other-command.service",
+        &format!("[Service]\nExecStartPre={launcher} tunnel run\nExecStart={launcher} serve\n"),
+    );
+    f.write(
+        ".config/systemd/user/another-program.service",
+        "[Service]\nExecStart=/usr/local/bin/pseudolife-mcp tunnel run\n",
+    );
+    f.write(
+        "Library/LaunchAgents/other.plist",
+        &plist("/usr/bin/true").replace("<key>PseudolifeTunnelOwner</key>", "<key>Owner</key>"),
+    );
+    assert_eq!(update(&f, &linux(), &Untouched), Decision::Proceed(vec![]));
+    assert_eq!(
+        update(&f, &Host::Mac, &Untouched),
+        Decision::Proceed(vec![])
+    );
+}
+
+#[test]
+fn a_hand_made_task_of_that_name_is_warned_about() {
+    let f = Fixture::new();
+    f.python_launcher();
+    let registry = Registry::new(
+        0,
+        TASKS,
+        task_xml("made by hand", &f.launcher(), "tunnel run --profile dot"),
+    );
+    let Decision::Proceed(lines) = update(&f, &windows(), &registry) else {
+        panic!()
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with(
+            "scheduled task \\pseudolife-tunnel-dot looks like a tunnel service made by hand"
+        ),
+        "{lines:?}"
+    );
+    assert!(
+        lines[0].contains("remove it with: schtasks /Delete /TN \"\\pseudolife-tunnel-dot\" /F"),
+        "{lines:?}"
+    );
+}
+
+#[test]
 fn printed_paths_survive_a_paste() {
+    assert_eq!(
+        quote("/a\\b", false),
+        "'/a\\b'",
+        "a backslash is plain only to PowerShell"
+    );
+    assert_eq!(quote(r"C:\x\y", true), r"C:\x\y");
     assert_eq!(
         quote("/home/u/.pseudolife-mcp/tunnel", false),
         "/home/u/.pseudolife-mcp/tunnel"
@@ -957,6 +1176,42 @@ mod update {
             update.refuse_tunnel_move(None).unwrap_err();
             assert_eq!(MOVER.lock().unwrap().pop(), Some(expected), "{mode}");
         }
+    }
+
+    static DAEMON: std::sync::Mutex<Vec<Mover>> = std::sync::Mutex::new(Vec::new());
+    fn record_daemon(mover: Mover, _: Option<&Path>) -> Decision {
+        DAEMON.lock().unwrap().push(mover);
+        Decision::Refuse("fixture refusal".into())
+    }
+
+    #[test]
+    fn an_unattended_daemon_update_goes_on_alone_and_warns() {
+        // The daemon is not left behind every night for a client-side
+        // service: the run becomes --daemon-only and says why.
+        let mut update = quiet();
+        update.tunnel_probe = record_daemon;
+        update.o.unattended = true;
+        update.refuse_tunnel_move_before_daemon().unwrap();
+        assert_eq!(DAEMON.lock().unwrap().pop(), Some(Mover::UnattendedDaemon));
+        assert!(update.o.daemon_only, "the client steps are skipped");
+        assert!(update.tunnel_checked);
+        assert_eq!(update.report.exit_code, 0);
+        assert_eq!(
+            update.report.steps,
+            vec!["WARNING: fixture refusal".to_string()]
+        );
+        // An attended run at the same point still refuses.
+        let mut attended = quiet();
+        attended.tunnel_probe = record_daemon;
+        assert_eq!(
+            attended
+                .refuse_tunnel_move_before_daemon()
+                .unwrap_err()
+                .exit_code,
+            2
+        );
+        assert_eq!(DAEMON.lock().unwrap().pop(), Some(Mover::Update));
+        assert!(!attended.o.daemon_only);
     }
 
     #[test]

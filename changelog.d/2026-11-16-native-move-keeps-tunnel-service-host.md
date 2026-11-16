@@ -10,7 +10,8 @@
   every 5 seconds without end. This covers the update bridge from a Python
   client, `--clients-only`, a client machine, a release deploy (after its
   "nothing to do" check), a checkout `--all` deploy and unattended client
-  updates.
+  updates. An unattended update on the daemon's host updates the daemon
+  alone instead of refusing, and warns at each run.
 - Both native installers ask the staged client first (`runtime install
   --check`, exit 3 to refuse) and stop in their preflight, before the host
   changes. `runtime install` itself refuses the same move with exit 3, and
@@ -20,6 +21,9 @@
   `pseudolife-mcp tunnel service remove` command, then rerun).
 - On a machine already on the native client, an update with such a service
   goes on and warns, naming the service manager's commands that remove it.
+- A service made by hand (no owner marker, but its command is the launcher
+  followed by `tunnel run`) gets the same kind of warning and never a
+  refusal.
 - Detection only reads. On Linux and macOS it reads the unit and plist
   files, and on Windows it runs `schtasks /Query`. A saved tunnel profile
   without a service, or a service that runs another program, still moves.

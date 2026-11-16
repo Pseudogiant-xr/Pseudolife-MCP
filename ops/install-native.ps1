@@ -356,6 +356,7 @@ $script:nativeProbed = $false
 # changed" (the try/finally at the end). nativeInstalledAt names the native
 # client once it is installed.
 $script:nativeHostChanging = $false
+$script:nativeKeptPython = $false
 $script:nativeInstalledAt = $null
 $script:nativePartWaySaid = $false
 $script:nativeRunDone = $false
@@ -550,7 +551,9 @@ function Initialize-NativeClient {
     # itself refuses the same move later.
     $check = $null
     try { $check = Invoke-NativeBounded $script:nativeStaged @("runtime", "install", "--check") } catch { $check = $null }
-    if ($check -and -not $check.TimedOut) {
+    if ($check -and $check.TimedOut) {
+        [Console]::Error.WriteLine("  the tunnel-service check did not answer in $NativeProbeSeconds s; runtime install checks again later")
+    } elseif ($check) {
         $says = "$($check.Err)$($check.Out)".Trim()
         if ($check.Code -eq 3) {
             if ($says) { [Console]::Error.WriteLine($says) }

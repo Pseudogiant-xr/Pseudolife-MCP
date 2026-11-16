@@ -424,6 +424,7 @@ NATIVE_STAGED=""
 # changed" (native_exit). NATIVE_INSTALLED_AT names the native client once
 # it is installed.
 NATIVE_HOST_CHANGING=""
+NATIVE_KEPT_PYTHON=""
 NATIVE_INSTALLED_AT=""
 NATIVE_PART_WAY_SAID=""
 native_target() {  # echoes this host's release target triple, or nothing
@@ -674,6 +675,8 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     if [ "$native_check_status" = 3 ]; then
         printf '%s\n' "$native_check_says" >&2
         native_refuse "a tunnel is registered to start by itself through this machine's Python client, and the native client cannot run a tunnel yet (the line above names it)" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native to keep the Python client, or first remove the autostart with the command the line above prints, then rerun."
+    elif [ "$native_check_status" = 124 ]; then
+        echo "  the tunnel-service check did not answer in $NATIVE_PROBE_SECONDS s; runtime install checks again later" >&2
     elif [ "$native_check_status" = 0 ] && [ -n "$native_check_says" ]; then
         printf '%s\n' "$native_check_says" >&2
     fi

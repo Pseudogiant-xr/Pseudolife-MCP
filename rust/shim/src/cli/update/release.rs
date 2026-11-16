@@ -564,8 +564,9 @@ impl Update {
         if !self.o.daemon_only {
             // Before the backup and the daemon, since the client steps run
             // last; and outside the default-engine attempt, whose early
-            // refusals fall back to the host's own engine.
-            self.refuse_tunnel_move(None)?;
+            // refusals fall back to the host's own engine. An unattended
+            // run updates the daemon alone instead of refusing.
+            self.refuse_tunnel_move_before_daemon()?;
         }
         if defaulted {
             // The default never blocks an ordinary update: a move that refuses

@@ -2702,3 +2702,25 @@ def test_runtime_install_refuses_the_move_before_reading_its_archive(tmp_path):
         assert "rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native" in result.stderr
         assert launcher.read_bytes() == before
         assert not Path(env["PSEUDOLIFE_SHIM_RUNTIMES"]).exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the systemd user unit is the Linux registration")
+def test_the_unit_under_home_is_found_when_userprofile_points_elsewhere(tmp_path):
+    # A WSL session may export a Windows USERPROFILE beside HOME; the Python
+    # client wrote the unit under HOME, so the guard reads it there.
+    binary = _native_binary()
+    if not binary:
+        pytest.skip("set PSEUDOLIFE_RUST_BINARY")
+    with _client_machine(tmp_path) as env:
+        launcher, unit = _python_client_with_tunnel_service(env)
+        elsewhere = tmp_path / "windows-profile"
+        elsewhere.mkdir()
+        env = {**env, "USERPROFILE": str(elsewhere),
+               # The layout follows its own override, as the installers set it.
+               "PSEUDOLIFE_SHIM_LAUNCHER": str(launcher)}
+        # The registration is read where runtime::home() looks: USERPROFILE.
+        (elsewhere / ".claude.json").write_text((Path(env["HOME"]) / ".claude.json").read_text())
+        result = subprocess.run([binary, "update", "--clients-only", "--tag", "0.21.1"], env=env, cwd=tmp_path,
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert f"Registered: systemd user unit {unit}" in result.stdout + result.stderr

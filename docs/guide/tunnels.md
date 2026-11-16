@@ -200,12 +200,17 @@ names the service and changes nothing. Rerun without
 `PSEUDOLIFE_SHIM_ENGINE=native` to stay on the Python client. To move anyway,
 first run the `pseudolife-mcp tunnel service remove` command the refusal
 prints (it carries the service's `--profile`, `--profile-dir` and, for a root
-service, `--system-service`), then rerun. A saved profile without a service,
-or a service that runs another program, does not block the move. On a
+service, `--system-service`), then rerun. An unattended update on the
+daemon's host updates the daemon alone instead and says why at each run.
+
+A saved profile without a service, or a service that runs another program,
+does not block the move. A service you made by hand (no owner marker, but its
+command is the launcher followed by `tunnel run`) is named in a warning, with
+the commands that remove it, and does not block the move either. On a
 machine already on the native client, an update warns about such a service
 and prints the service manager's own commands that remove it, since that
 client has no `tunnel service` command (`systemctl --user disable --now`
-and deleting the unit, `launchctl bootout` and deleting the plist, or
+then deleting the unit, `launchctl bootout` then deleting the plist, or
 `schtasks /Delete`).
 
 Windows stores the runtime key using user-scoped DPAPI plus owner-only ACLs;

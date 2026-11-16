@@ -202,11 +202,11 @@ def test_fresh_install_and_rerun_use_the_verified_archive(tmp_path):
     assert "nothing changed" in second.stdout
 
 
-@pytest.mark.skipif(INSTALL != "stub", reason="the refusing stand-in is the shell stub; the real client refuses only on a registered tunnel service")
+@pytest.mark.skipif(WINDOWS, reason="the refusing stand-in is a shell script; on Windows the fixture is a real client")
 def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     # The staged client's runtime install --check exits 3 (issue #1632): the
     # preflight refuses, and nothing was changed.
-    result = _run(INSTALL, tmp_path, 'Install-ShimOnce | Out-Null; Write-Host "INSTALLED"',
+    result = _run("stub", tmp_path, 'Install-ShimOnce | Out-Null; Write-Host "INSTALLED"',
                   extra_env={"STUB_REFUSE_TUNNEL": "1"})
     assert result.returncode == 1, result.stderr + result.stdout
     assert "INSTALLED" not in result.stdout
@@ -216,12 +216,12 @@ def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
     assert not (tmp_path / "home" / "runtimes").exists()
 
 
-@pytest.mark.skipif(INSTALL != "stub", reason="the refusing stand-in is the shell stub; the real client refuses only on a registered tunnel service")
+@pytest.mark.skipif(WINDOWS, reason="the refusing stand-in is a shell script; on Windows the fixture is a real client")
 def test_a_refused_move_keeps_the_python_client_and_says_so(tmp_path):
     # Should runtime install itself refuse after the preflight passed, the
     # installer keeps the Python client and says so (issue #1632).
     body = 'if (Install-ShimOnce) { Write-Host "OK" } else { Write-Host "KEPT changing=$($script:nativeHostChanging)" }'
-    result = _run(INSTALL, tmp_path, body, extra_env={"STUB_REFUSE_TUNNEL_LATE": "1"})
+    result = _run("stub", tmp_path, body, extra_env={"STUB_REFUSE_TUNNEL_LATE": "1"})
     assert result.returncode == 0, result.stderr + result.stdout
     out = result.stdout + result.stderr
     assert "KEPT changing=" in result.stdout and "changing=True" not in result.stdout, out
