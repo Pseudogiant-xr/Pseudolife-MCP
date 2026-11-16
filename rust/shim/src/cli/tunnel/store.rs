@@ -611,7 +611,7 @@ pub(super) fn list(root: &Path) -> Result<Vec<String>, Fail> {
 }
 
 #[cfg(unix)]
-fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
+pub(super) fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
     use std::os::unix::fs::MetadataExt;
     if info.uid() != rustix::process::geteuid().as_raw() || info.mode() & 0o077 != 0 {
         return Err(Fail::Tunnel(NOT_OWNER_ONLY));
@@ -620,7 +620,7 @@ fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
 }
 
 #[cfg(windows)]
-fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), Fail> {
+pub(super) fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), Fail> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,

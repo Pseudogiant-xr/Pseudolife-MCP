@@ -16,6 +16,7 @@ use super::hook_json::quoted;
 mod record;
 mod store;
 mod syntax;
+mod vendor;
 
 use record::Liveness;
 use store::{Profile, exists, occupied};
