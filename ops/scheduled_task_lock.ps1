@@ -207,13 +207,16 @@ function Assert-TaskUnlocked([string]$TaskName, [switch]$Removal) {
     if ($lock) { throw (New-TaskLockError (Format-TaskLock $lock -Removal:$Removal)) }
 }
 function Get-UnchangedServingPid([string]$TaskName, $Action, [int]$Port, $Recorded, $EnvBefore, [string]$EnvPath,
-                                 [string[]]$AlsoAbsent = @()) {
+                                 [string[]]$AlsoAbsent = @(), $EnvWrittenBefore) {
     # The pid serving the port when a rerun has nothing to do, else 0. All of:
-    # ops\.env byte for byte what it was before this run's config write; this
-    # user's task registered with exactly this action, enabled, Interactive
-    # and limited, with an enabled logon trigger naming this user; no legacy
-    # twin left; and every listener on the port the shim the runner recorded.
-    if ($null -eq $EnvBefore -or -not (Test-Path -LiteralPath $EnvPath)) { return 0 }
+    # ops\.env byte for byte what it was before this run's config write, and
+    # last written before the recorded shim started (an edit, or a failed
+    # run's write, after that start is not what it serves); this user's task
+    # registered with exactly this action, enabled, Interactive and limited,
+    # with an enabled logon trigger naming this user; no legacy twin left;
+    # and every listener on the port the shim the runner recorded.
+    if ($null -eq $EnvBefore -or $null -eq $EnvWrittenBefore -or -not (Test-Path -LiteralPath $EnvPath)) { return 0 }
+    if (-not @($Recorded).Count -or @($Recorded | Where-Object { -not $_.CreationDate -or $_.CreationDate -le $EnvWrittenBefore }).Count) { return 0 }
     if ([Convert]::ToBase64String([byte[]]$EnvBefore) -ne [Convert]::ToBase64String([IO.File]::ReadAllBytes($EnvPath))) { return 0 }
     $task = Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task -or $task.Settings.Enabled -eq $false) { return 0 }

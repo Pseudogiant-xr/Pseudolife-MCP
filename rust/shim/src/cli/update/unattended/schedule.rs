@@ -534,7 +534,7 @@ fn windows_script_bootstrap(path: &std::path::Path, digest: &str) -> Result<Stri
         .to_str()
         .ok_or_else(|| UpdateError::usage("the temporary scheduler script path must be UTF-8"))?;
     Ok(format!(
-        "$b=[IO.File]::ReadAllBytes({});$s=[Security.Cryptography.SHA256]::Create();$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{digest}'){{[Console]::Error.WriteLine('the scheduler script changed after it was written; nothing was run');exit {SCRIPT_CHANGED}}};. ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b)))",
+        "$b=[IO.File]::ReadAllBytes({});$s=[Security.Cryptography.SHA256]::Create();$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{digest}'){{[Console]::Error.WriteLine('the scheduler script changed after it was written; nothing was run');exit {SCRIPT_CHANGED}}};try{{. ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b)))}}catch{{[Console]::Out.WriteLine(($_.Exception.Message -replace '\\s+',' ').Trim());exit 1}}",
         powershell_literal(path)?
     ))
 }
@@ -1173,6 +1173,31 @@ Connection: close
         let check = bootstrap.find(&format!("if($h -ne '{digest}')")).unwrap();
         assert!(check < bootstrap.find("[scriptblock]::Create").unwrap());
         assert!(bootstrap.contains(&format!("exit {SCRIPT_CHANGED}")));
+        // A terminating error is reported as its own message on stdout, the
+        // stream run_cli returns, never as a formatted record or CLIXML.
+        let run = bootstrap.find("try{. ([scriptblock]::Create").unwrap();
+        assert!(bootstrap[run..].contains("catch{[Console]::Out.WriteLine(($_.Exception.Message"));
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_script_that_throws_reports_only_its_message() {
+        let (code, output) = run_windows_script(
+            "$ErrorActionPreference='Stop';[Console]::Out.WriteLine('working');throw \"fixture scheduler failure`nsecond line\"",
+        )
+        .unwrap();
+        assert_eq!(code, 1, "{output}");
+        assert_eq!(
+            output.trim_end(),
+            "working\nfixture scheduler failure second line",
+            "{output}"
+        );
+        assert_eq!(
+            script_failure(code, &output, "x"),
+            "fixture scheduler failure second line; nothing was changed"
+        );
+        // An exit code the script chooses still reaches the caller.
+        let (code, _) = run_windows_script("exit 3").unwrap();
+        assert_eq!(code, 3);
     }
     #[cfg(windows)]
     #[test]

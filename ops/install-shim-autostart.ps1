@@ -196,6 +196,7 @@ function Read-LogSince {
 # The settings file as it was, so a rerun that changes nothing can say so.
 $envPath = Join-Path $repo "ops\.env"
 $envBefore = if (Test-Path -LiteralPath $envPath) { [IO.File]::ReadAllBytes($envPath) } else { $null }
+$envWritten = if ($null -ne $envBefore) { (Get-Item -LiteralPath $envPath).LastWriteTime } else { $null }
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
     --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
@@ -224,7 +225,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
 
 # A rerun over this user's own task that already runs these settings, with
 # the shim it recorded serving the port, changes nothing and says so.
-$servingPid = Get-UnchangedServingPid $taskName $action $Port $recorded $envBefore $envPath -AlsoAbsent @($legacyTaskName)
+$servingPid = Get-UnchangedServingPid $taskName $action $Port $recorded $envBefore $envPath -AlsoAbsent @($legacyTaskName) -EnvWrittenBefore $envWritten
 if ($servingPid) {
     Write-Host "'$taskName' is already registered and serving these settings on port $Port (pid $servingPid); nothing changed."
     return

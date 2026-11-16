@@ -445,7 +445,7 @@ def test_a_rerun_over_its_own_serving_task_changes_nothing(tmp_path: Path) -> No
         "enabled": "$true", "execute": "powershell.exe", "arguments": "-EncodedCommand AAA", "actions": 1,
         "logon": "Interactive", "runlevel": "Limited", "trigger_user": "HOST\\this-user", "trigger_enabled": "$true",
         "trigger_class": "MSFT_TaskLogonTrigger", "legacy": "$false", "listeners": "4242", "recorded": "4242",
-        "before": "same", "task": "$true",
+        "before": "same", "task": "$true", "started": "2026-01-01T00:00:10", "written": "2026-01-01T00:00:05",
     }
     near_misses = {
         "settings changed": {"before": "other"}, "settings file new": {"before": "none"},
@@ -456,6 +456,10 @@ def test_a_rerun_over_its_own_serving_task_changes_nothing(tmp_path: Path) -> No
         "trigger disabled": {"trigger_enabled": "$false"}, "no logon trigger": {"trigger_class": "MSFT_TaskTimeTrigger"},
         "legacy left": {"legacy": "$true"}, "not serving": {"listeners": ""},
         "unproven listener": {"listeners": "4242, 4343"}, "nothing recorded": {"recorded": ""},
+        # ops\.env edited, or written by a failed run, after the shim started:
+        # the shim may serve older settings than the file holds.
+        "settings written after the shim started": {"written": "2026-01-01T00:00:20"},
+        "settings written as the shim started": {"written": "2026-01-01T00:00:10"},
     }
 
     def run(case: dict) -> str:
@@ -472,9 +476,9 @@ def test_a_rerun_over_its_own_serving_task_changes_nothing(tmp_path: Path) -> No
                   f"    Triggers = @([pscustomobject]@{{ CimClass = [pscustomobject]@{{ CimClassName = '{case['trigger_class']}' }}; UserId = '{case['trigger_user']}'; Enabled = {case['trigger_enabled']} }}) }} }}\n"
                   "function Get-NetTCPConnection { param($LocalPort, $State, $ErrorAction) "
                   f"@({case['listeners']}) | ForEach-Object {{ [pscustomobject]@{{ OwningProcess = $_ }} }} }}\n"
-                  f"$recorded = @(@({case['recorded']}) | ForEach-Object {{ [pscustomobject]@{{ ProcessId = $_ }} }})\n"
+                  f"$recorded = @(@({case['recorded']}) | ForEach-Object {{ [pscustomobject]@{{ ProcessId = $_; CreationDate = [datetime]'{case['started']}' }} }})\n"
                   "$action = [pscustomobject]@{ Execute = 'powershell.exe'; Arguments = '-EncodedCommand AAA' }\n"
-                  f"'PID ' + (Get-UnchangedServingPid 'Task' $action 8086 $recorded {before} '{env_ps}' -AlsoAbsent @('Legacy'))\n")
+                  f"'PID ' + (Get-UnchangedServingPid 'Task' $action 8086 $recorded {before} '{env_ps}' -AlsoAbsent @('Legacy') -EnvWrittenBefore ([datetime]'{case['written']}'))\n")
         proc = _run(script)
         assert proc.returncode == 0, proc.stderr
         return proc.stdout.strip()
@@ -488,7 +492,8 @@ def test_a_rerun_over_its_own_serving_task_changes_nothing(tmp_path: Path) -> No
         text = _read(ROOT / "ops" / script)
         snap = text.index("$envBefore = ")
         config = text.index('ops\\shim_autostart.py") config claude' if "codex" not in script else 'ops\\shim_autostart.py") @configArgs')
-        decide = text.index(f"$servingPid = Get-UnchangedServingPid $taskName $action $Port $recorded $envBefore $envPath{absent}\n")
+        decide = text.index(f"$servingPid = Get-UnchangedServingPid $taskName $action $Port $recorded $envBefore $envPath{absent} -EnvWrittenBefore $envWritten\n")
+        assert snap < text.index("$envWritten = ") < config
         assert snap < config < text.index("$action = New-ScheduledTaskAction") < decide
         assert decide < text.index("Assert-TaskUnlocked $taskName", decide) < text.index("Unregister-ScheduledTask")
         assert "nothing changed.\"\n    return\n}" in text[decide:]
