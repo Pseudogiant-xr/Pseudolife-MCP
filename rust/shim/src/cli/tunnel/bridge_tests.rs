@@ -492,6 +492,8 @@ async fn traffic_is_byte_identical_with_and_without_the_observer() {
 fn toolset(start: &'static str, log: Arc<Mutex<Vec<String>>>) -> Script {
     let mut tier = start;
     Box::new(move |message| {
+        // Value indexing answers null for a missing key (Map indexing panics).
+        let message = &Value::Object(message.clone());
         let method = message["method"].as_str().unwrap_or_default().to_owned();
         let id = message["id"].clone();
         if message["params"]["name"] == "memory_toolset" {
@@ -683,14 +685,14 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     );
     let token = serde_json::to_string(&store.0.join("token")).unwrap();
     store.put(
-        "dot.profile.json",
+        "draft.profile.json",
         format!(
-            "{{\"name\": \"dot\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}}}"
+            "{{\"name\": \"draft\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}}}"
         )
         .as_bytes(),
     );
     assert_eq!(
-        prepare(&argv(&["--profile-dir", dir, "--profile", "dot"])).err(),
+        prepare(&argv(&["--profile-dir", dir, "--profile", "draft"])).err(),
         Some(NOT_READY)
     );
     store.profile("dot");
