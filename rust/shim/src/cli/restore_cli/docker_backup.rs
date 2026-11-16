@@ -400,10 +400,12 @@ pub(super) fn backup<D: Docker, H: Host>(
         match ownership_steps::repair_state(&mut bank, checked, data_dir, &stamp) {
             Ok(repaired) => host.info(&repaired.line()),
             // An interrupt stops here: nothing is rotated after a Ctrl-C.
-            Err(Stop(_, 130)) => {
+            Err(Stop(message, 130)) => {
                 failed(
                     host,
-                    "the backup above is complete, but its ownership repair was interrupted; nothing was rotated",
+                    &format!(
+                        "the backup above is complete, but its ownership repair was {message}; nothing was rotated. Run the backup again to finish the repair"
+                    ),
                 );
                 return 130;
             }
@@ -878,6 +880,18 @@ mod tests {
             !host.info.iter().any(|l| l.starts_with("rotated out:")),
             "{:?}",
             host.info
+        );
+        // It names the undo list it wrote before the change, and the step left.
+        let errors = host.errors.join("\n");
+        let logs: Vec<_> = fs::read_dir(dir.0.join("ownership-repair"))
+            .unwrap()
+            .collect();
+        assert_eq!(logs.len(), 1);
+        let log = logs[0].as_ref().unwrap().path();
+        assert!(errors.contains(&log.display().to_string()), "{errors}");
+        assert!(
+            errors.contains("Run the backup again to finish the repair"),
+            "{errors}"
         );
         assert_eq!(
             names(&out).len(),

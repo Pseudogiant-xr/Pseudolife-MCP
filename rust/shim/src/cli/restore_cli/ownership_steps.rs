@@ -12,7 +12,7 @@ use super::{
     bank::{BULK, Bank, Step, Stop},
     docker::Docker,
 };
-use crate::cli::ownership::{self, Part, Preflight, Repaired};
+use crate::cli::ownership::{self, Failed, Part, Preflight, Repaired};
 
 impl<D: Docker> ownership::Docker for Bank<'_, D> {
     fn docker(&mut self, args: &[String]) -> (i32, String) {
@@ -33,7 +33,7 @@ impl<D: Docker> ownership::Docker for Bank<'_, D> {
     }
     fn remove(&mut self, name: &str) {
         // Runs to its end even after an interrupt.
-        self.quiet(&["rm", "-f", name]);
+        self.quiet(&["rm", "-f", "-v", name]);
     }
 }
 
@@ -42,13 +42,18 @@ pub(super) fn log_dir(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("ownership-repair")
 }
 
-fn stop<D: Docker>(bank: &Bank<'_, D>, message: String) -> Stop {
+/// An interrupt keeps what the helper said: it names the undo list a
+/// repair wrote before it changed anything.
+fn stop<D: Docker>(bank: &Bank<'_, D>, failed: Failed) -> Stop {
     if bank.docker.interrupted() {
-        Stop("interrupted".into(), 130)
+        Stop(format!("{INTERRUPTED}{}", failed.message), 130)
     } else {
-        Stop(message, 1)
+        Stop(failed.message, 1)
     }
 }
+
+/// The start of an interrupted ownership step's message.
+pub(super) const INTERRUPTED: &str = "interrupted: ";
 
 /// Probe the daemon's volumes (`container`, its `docker inspect` object as
 /// the bank's selection read it) and repair its model cache when it needs
@@ -60,7 +65,7 @@ pub(super) fn preflight<D: Docker>(
     stamp: &str,
 ) -> Step<Option<Preflight>> {
     ownership::preflight(bank, container, &log_dir(data_dir), stamp, |_| Ok(()))
-        .map_err(|message| stop(bank, message))
+        .map_err(|failed| stop(bank, failed))
 }
 
 /// Repair the state volume after its archive exists, then probe again.
@@ -77,7 +82,7 @@ pub(super) fn repair_state<D: Docker>(
         &log_dir(data_dir),
         stamp,
     )
-    .map_err(|message| stop(bank, message))
+    .map_err(|failed| stop(bank, failed))
 }
 
 /// After restore replaced the state: probe it again (the archive may hold

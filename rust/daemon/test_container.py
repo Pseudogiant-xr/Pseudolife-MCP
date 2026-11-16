@@ -698,29 +698,34 @@ class OwnershipRepairOnRealEngineTest(unittest.TestCase):
                               "-printf", "%U:%G %p\\n").stdout.decode()
         return dict(line.split(" ", 1)[::-1] for line in listing.splitlines())
 
-    def product_mounts(self, part=None):
-        """The mounts cli::ownership gives each helper: the probe every one
-        (nested writable included), a state helper /data with the nested
-        volume read-only, a models helper only /models."""
-        data, nested, models = self.volumes
-        state = ["--mount", f"type=volume,src={data},dst=/data",
-                 "--mount", f"type=volume,src={nested},dst=/data/nested" + (",readonly=true" if part else "")]
-        model = ["--mount", f"type=volume,src={models},dst=/models"]
-        return {None: state + model, "state": state, "models": model}[part]
+    # The mounts and roots cli::ownership gives each helper, from the file
+    # ownership::tests checks against the product's argv.
+    SHARED = json.loads((ROOT / "rust/shim/src/cli/ownership/helpers.json").read_text(encoding="utf-8"))
 
-    def run_helper(self, image, mode, part, *roots):
+    def product(self, helper):
+        """One helper's mounts (this run's volumes standing in for state,
+        nested and models) and roots, exactly as the shared file has them."""
+        names = dict(zip(("state", "nested", "models"), self.volumes))
+        mounts = []
+        for spec in self.SHARED["helpers"][helper]["mounts"]:
+            fields = [f"src={names[f[4:]]}" if f.startswith("src=") else f for f in spec.split(",")]
+            mounts += ["--mount", ",".join(fields)]
+        return mounts, self.SHARED["helpers"][helper]["roots"]
+
+    def run_helper(self, image, mode, helper):
         # The flags of cli::ownership's helper_argv, pinned by its argv tests.
+        mounts, roots = self.product(helper)
         return self.docker("run", "--rm", *self.USERS[mode], "--security-opt", "no-new-privileges", "--network", "none",
                            "--read-only", "--log-driver", "none", "--no-healthcheck", "--pull", "never",
-                           "--pids-limit", "256", *self.product_mounts(part), "--entrypoint", "/bin/sh", image,
+                           "--pids-limit", "256", *mounts, "--entrypoint", "/bin/sh", image,
                            "-c", self.ENTRY.read_text(encoding="utf-8"), "provision-daemon-models", mode, *roots,
                            check=False)
 
     def test_the_repair_gives_root_owned_trees_to_10001_and_a_10001_container_can_use_them(self):
-        # The roots are the product's (ownership::tests pins them): the probe
-        # walks the top-level mounts, then the nested writable one; the list
-        # and the repair walk only the top-level mount of their part.
-        probe_roots = ("/data", "/models", "/data/nested")
+        # The mounts and roots are the product's (helpers.json, which
+        # ownership::tests checks): the probe walks the top-level mounts, then
+        # the nested writable one; the list and the repair walk only the
+        # top-level mount of their part, the nested one mounted read-only.
         for index, image in enumerate(self.IMAGES):
             with self.subTest(image=image):
                 if index:
@@ -743,7 +748,7 @@ class OwnershipRepairOnRealEngineTest(unittest.TestCase):
                     echo m > /models/m/w; chmod 600 /models/m/w; chmod 700 /models/m
                     echo v > /models/readable; chmod 644 /models/readable
                     chown 10001:10001 /data /models""")
-                before = self.run_helper(image, "--probe-access", None, *probe_roots)
+                before = self.run_helper(image, "--probe-access", "probe")
                 self.assertEqual(before.returncode, 0, before.stderr)
                 fields = ownership_records(before.stdout)
                 unusable = [fields[i + 2] for i in range(2, len(fields) - 2) if fields[i] == "U"]
@@ -760,14 +765,14 @@ class OwnershipRepairOnRealEngineTest(unittest.TestCase):
                 self.assertEqual(fields[fields.index("/data/owner-ro") - 1], "O")
 
                 undo, records = {}, {}
-                for part, root in (("state", "/data"), ("models", "/models")):
-                    listed = self.run_helper(image, "--list-root-owned", part, root)
+                for part in ("state", "models"):
+                    listed = self.run_helper(image, "--list-root-owned", part)
                     self.assertEqual(listed.returncode, 0, listed.stderr)
                     fields = ownership_records(listed.stdout)
                     undo.update({fields[i + 2]: fields[i + 1] for i in range(2, len(fields) - 3, 3) if fields[i] == "L"})
                     if part == "state":
                         self.assertEqual(self.owners(image)["/data/rootdir"], "0:0", "the listing changes nothing")
-                    repaired = self.run_helper(image, "--repair-ownership", part, root)
+                    repaired = self.run_helper(image, "--repair-ownership", part)
                     self.assertEqual(repaired.returncode, 0, repaired.stderr)
                     fields = ownership_records(repaired.stdout)
                     records.update({fields[i + 2]: fields[i + 1] for i in range(2, len(fields) - 3, 3) if fields[i] == "C"})
@@ -786,7 +791,7 @@ class OwnershipRepairOnRealEngineTest(unittest.TestCase):
                 self.assertEqual(owners["/data/link"], "10001:10001")
                 self.assertEqual(owners["/data/rootdir/deep/f"], "10001:10001")
 
-                after = self.run_helper(image, "--probe-access", None, *probe_roots)
+                after = self.run_helper(image, "--probe-access", "probe")
                 fields = ownership_records(after.stdout)
                 left = [fields[i + 2] for i in range(2, len(fields) - 2) if fields[i] == "U"]
                 self.assertTrue(left and all(p.startswith("/data/nested") for p in left), left)

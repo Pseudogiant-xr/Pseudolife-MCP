@@ -603,6 +603,47 @@ pub(crate) trait Docker {
 /// ("nothing was deployed", "Nothing was restored").
 pub(crate) type Refusal = String;
 
+/// A repair (or a preflight that ran one) that failed, with what it had
+/// already changed: every failure after a change names that change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Failed {
+    pub message: Refusal,
+    /// What a repair had changed before the failure (its undo list).
+    pub changed: Option<Repaired>,
+}
+
+impl From<Refusal> for Failed {
+    fn from(message: Refusal) -> Self {
+        Failed {
+            message,
+            changed: None,
+        }
+    }
+}
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// A failure after the repair changed owners: it never says "nothing was
+/// changed", and it names the undo list.
+fn after_change(message: Refusal, repaired: &Repaired) -> Failed {
+    let message = message.trim_end_matches("; nothing was changed").to_owned();
+    let message = match &repaired.log {
+        Some(log) => format!(
+            "{message}; before this, the repair changed only the owners listed in {}",
+            log.display()
+        ),
+        None => message,
+    };
+    Failed {
+        message,
+        changed: (repaired.changed > 0).then(|| repaired.clone()),
+    }
+}
+
 /// The root an exit-71 walk names in its last `E` record.
 fn failed_root(output: &str) -> Option<String> {
     let answer = decode(output)?;
@@ -785,8 +826,36 @@ fn unreadable_root(path: &[u8]) -> Refusal {
     )
 }
 
-/// The refusal for an unusable entry in a mount the user added.
-fn nested_unusable(entry: &Unusable, mount: &Mount) -> Refusal {
+/// The refusal for an unusable entry in a mount the user added. `probe`
+/// names the directory above a mount point the account cannot reach.
+fn nested_unusable(entry: &Unusable, mount: &Mount, probe: &Probe) -> Refusal {
+    let source = if mount.kind == "bind" {
+        format!("the host directory {}", shown(mount.source.as_bytes()))
+    } else {
+        format!("the volume {}", shown(mount.source.as_bytes()))
+    };
+    if entry.owner == "?" {
+        // Not the mount's own owner: a directory above its mount point that
+        // uid 10001 cannot search (one the probe saw, unusable or its own).
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        let above = probe
+            .unusable
+            .iter()
+            .map(|u| u.path.as_slice())
+            .chain(probe.owner_fixable.iter().map(Vec::as_slice))
+            .filter(|candidate| {
+                let candidate = String::from_utf8_lossy(candidate);
+                candidate != path && below(&path, &candidate)
+            })
+            .max_by_key(|candidate| candidate.len())
+            .map(shown);
+        let above = above.as_deref().unwrap_or("a directory above it");
+        return format!(
+            "the daemon account (uid 10001) cannot reach {}, where {source} is mounted below the daemon's {}: {above} does not let that account search it. Give uid 10001 search permission on {above} (as its owner, chmod u+x), then retry; nothing was changed",
+            entry.shown(),
+            mount.part.noun()
+        );
+    }
     let (what, fix) = if mount.kind == "bind" {
         (
             format!("the host directory {}", shown(mount.source.as_bytes())),
@@ -837,7 +906,7 @@ pub(crate) fn repair(
     part: Part,
     log_dir: &Path,
     stamp: &str,
-) -> Result<Repaired, Refusal> {
+) -> Result<Repaired, Failed> {
     // A host directory as the root on a rootless or user-remapped engine:
     // uid 0 there is not root on the host, so the repair would hand host
     // files to an unrelated uid. Detected, never guessed.
@@ -850,7 +919,8 @@ pub(crate) fn repair(
             shown(root.as_bytes()),
             shown(mount.source.as_bytes()),
             shown(mount.source.as_bytes())
-        ));
+        )
+        .into());
     }
     // 1. What root owns, listed by a uid-0 helper that cannot chown.
     let (code, output, finished) = run(docker, |name| list_argv(layout, part, name));
@@ -860,7 +930,8 @@ pub(crate) fn repair(
             "cannot list what root owns in the daemon's {} before repairing it, so nothing was changed: {}",
             part.noun(),
             walk_failure(if finished { -1 } else { code }, &output, &layout.image)
-        ));
+        )
+        .into());
     }
     let listed: Vec<Visited> = listed.into_iter().map(|(_, v)| v).collect();
     let mut log = None;
@@ -893,12 +964,20 @@ pub(crate) fn repair(
                 .and_then(|()| file.sync_all());
         }
         if !finished || !complete {
-            return Err(format!(
-                "the ownership repair of the daemon's {} did not finish, so some of the entries listed in {} may still be root-owned: {}",
-                part.noun(),
-                path.display(),
-                walk_failure(if finished { -1 } else { code }, &output, &layout.image)
-            ));
+            let changed = records.iter().filter(|(t, _)| *t == b'C').count();
+            return Err(Failed {
+                message: format!(
+                    "the ownership repair of the daemon's {} did not finish, so some of the entries listed in {} may still be root-owned: {}",
+                    part.noun(),
+                    path.display(),
+                    walk_failure(if finished { -1 } else { code }, &output, &layout.image)
+                ),
+                changed: Some(Repaired {
+                    part,
+                    changed,
+                    log: Some(path),
+                }),
+            });
         }
         log = Some((path, records.iter().filter(|(t, _)| *t == b'C').count()));
     }
@@ -907,14 +986,17 @@ pub(crate) fn repair(
         changed: log.as_ref().map_or(0, |(_, n)| *n),
         log: log.map(|(path, _)| path),
     };
-    // 4. Probe again.
-    let after = probe(docker, layout)?;
+    // 4. Probe again. Every failure from here names what was changed.
+    let after = probe(docker, layout).map_err(|message| after_change(message, &repaired))?;
     if let Some(root) = after.unreadable_roots.first() {
-        return Err(unreadable_root(root));
+        return Err(after_change(unreadable_root(root), &repaired));
     }
     let left = after.of(layout, part);
     if !left.is_empty() {
-        return Err(unfixable(&left, part, repaired.log.as_deref()));
+        return Err(Failed {
+            message: unfixable(&left, part, repaired.log.as_deref()),
+            changed: (repaired.changed > 0).then(|| repaired.clone()),
+        });
     }
     // A nested mount judged only now (it was below what this repair fixed).
     if let Some((entry, mount)) = after
@@ -922,14 +1004,9 @@ pub(crate) fn repair(
         .into_iter()
         .find(|(_, mount)| mount.part == part)
     {
-        return Err(format!(
-            "{}; the repair of the daemon's {} itself changed only the owners listed in {}",
-            nested_unusable(entry, mount).trim_end_matches("; nothing was changed"),
-            part.noun(),
-            repaired.log.as_deref().map_or_else(
-                || "no list (nothing was root-owned)".into(),
-                |l| l.display().to_string()
-            )
+        return Err(after_change(
+            nested_unusable(entry, mount, &after),
+            &repaired,
         ));
     }
     Ok(repaired)
@@ -963,13 +1040,13 @@ pub(crate) fn preflight(
     log_dir: &Path,
     stamp: &str,
     admit: impl FnOnce(&[&Unusable]) -> Result<(), Refusal>,
-) -> Result<Option<Preflight>, Refusal> {
+) -> Result<Option<Preflight>, Failed> {
     let Some(layout) = layout(container)? else {
         return Ok(None);
     };
     let first = probe(docker, &layout)?;
     if let Some(root) = first.unreadable_roots.first() {
-        return Err(unreadable_root(root));
+        return Err(unreadable_root(root).into());
     }
     // A nested mount the probe cannot even reach (`?`) because a top-level
     // directory above it needs the repair is judged after that repair.
@@ -987,7 +1064,7 @@ pub(crate) fn preflight(
         .into_iter()
         .find(|(entry, mount)| !deferred(entry, mount.part))
     {
-        return Err(nested_unusable(entry, mount));
+        return Err(nested_unusable(entry, mount, &first).into());
     }
     admit(&first.of(&layout, Part::State))?;
     let models = if first.of(&layout, Part::Models).is_empty() {

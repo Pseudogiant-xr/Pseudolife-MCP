@@ -13,7 +13,7 @@ use std::{
 use serde_json::Value;
 
 use super::{Result, Update, UpdateError, data_dir, stamp};
-use crate::cli::ownership::{self, Part, Preflight, Repaired};
+use crate::cli::ownership::{self, Failed, Part, Preflight, Repaired};
 
 impl ownership::Docker for Update {
     fn docker(&mut self, args: &[String]) -> (i32, String) {
@@ -61,6 +61,15 @@ impl Update {
         UpdateError::new(format!("{message}; nothing was deployed"))
     }
 
+    /// A failed repair: what it changed before failing joins the lines
+    /// repeated after the refusal, as a finished repair's would.
+    fn ownership_failed(&mut self, failed: Failed) -> UpdateError {
+        if let Some(changed) = failed.changed.filter(|c| c.changed > 0) {
+            self.ownership_changes.push(changed.line());
+        }
+        self.ownership_refusal(failed.message)
+    }
+
     fn ownership_note(&mut self, repaired: &Repaired) {
         self.step(repaired.line());
         if repaired.changed > 0 {
@@ -83,7 +92,7 @@ impl Update {
                 _ => Ok(()),
             }
         })
-        .map_err(|message| self.ownership_refusal(message))?;
+        .map_err(|failed| self.ownership_failed(failed))?;
         if let Some(models) = checked.as_ref().and_then(|c| c.models.clone()) {
             self.ownership_note(&models);
         }
@@ -128,7 +137,7 @@ impl Update {
             }
             let repaired =
                 ownership::repair(self, &checked.layout, Part::State, &directory, &log_stamp())
-                    .map_err(|message| self.ownership_refusal(message))?;
+                    .map_err(|failed| self.ownership_failed(failed))?;
             self.ownership_note(&repaired);
             Ok(backups)
         } else {
@@ -139,7 +148,7 @@ impl Update {
             ));
             let repaired =
                 ownership::repair(self, &checked.layout, Part::State, &directory, &log_stamp())
-                    .map_err(|message| self.ownership_refusal(message))?;
+                    .map_err(|failed| self.ownership_failed(failed))?;
             self.ownership_note(&repaired);
             let backups = backup(self)?;
             if !archived(&backups) {

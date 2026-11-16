@@ -114,6 +114,11 @@ pub(super) struct Fake {
     /// a repair of their root changes them (uid 0 entries only).
     pub(super) unusable: Vec<(&'static str, &'static str)>,
     pub(super) repaired: Vec<String>,
+    /// From the second probe on (after a restore's swap): more unusable
+    /// entries, and a root the account owns but cannot read.
+    pub(super) late_unusable: Vec<(&'static str, &'static str)>,
+    pub(super) late_unreadable: Option<&'static str>,
+    pub(super) probes: usize,
 }
 
 impl Docker for Fake {
@@ -269,8 +274,15 @@ impl Docker for Fake {
                     .unwrap();
                 let at = a.iter().position(|w| *w == mode).unwrap();
                 let roots: Vec<String> = a[at + 1..].iter().map(|r| (*r).to_owned()).collect();
-                let left: Vec<(&str, &str)> = self
-                    .unusable
+                if mode == "--probe-access" {
+                    self.probes += 1;
+                }
+                let late = self.probes >= 2 || mode != "--probe-access" && self.probes >= 1;
+                let mut all = self.unusable.clone();
+                if late {
+                    all.extend(self.late_unusable.iter().cloned());
+                }
+                let left: Vec<(&str, &str)> = all
                     .iter()
                     .filter(|(_, path)| !self.repaired.iter().any(|r| r == path))
                     .cloned()
@@ -290,6 +302,9 @@ impl Docker for Fake {
                     "--probe-access" => {
                         for (owner, path) in &left {
                             fields.extend(["U".into(), (*owner).into(), (*path).into()]);
+                        }
+                        if let Some(root) = self.late_unreadable.filter(|_| late) {
+                            fields.extend(["R".into(), root.into()]);
                         }
                     }
                     "--list-root-owned" => {
@@ -1651,4 +1666,76 @@ fn a_restored_state_the_repair_cannot_fix_is_reported_with_the_data_restored() {
     assert_eq!(host.errors.len(), 3, "{errors}");
     let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
     assert!(!labels.iter().any(|l| l == "start d"), "{labels:?}");
+}
+
+#[test]
+fn the_restore_message_is_true_for_every_cause_that_can_follow_a_completed_swap() {
+    let mut nested = volume_daemon();
+    nested["Mounts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!(
+            {"Type": "bind", "Source": "/srv/extra", "Destination": "/data/extra", "RW": true}
+        ));
+    let mut bind = volume_daemon();
+    bind["Mounts"] = serde_json::json!([
+        {"Type": "bind", "Source": "/srv/state", "Destination": "/data", "RW": true}
+    ]);
+    type Cause = (
+        Value,
+        Vec<(&'static str, &'static str)>,
+        Option<&'static str>,
+        &'static str,
+    );
+    let causes: Vec<Cause> = vec![
+        // Another owner's entry the repair cannot change.
+        (
+            volume_daemon(),
+            vec![("999", "/data/theirs")],
+            None,
+            "uid 999 owns it",
+        ),
+        // A root the account owns but cannot read.
+        (
+            volume_daemon(),
+            vec![],
+            Some("/data"),
+            "cannot read or enter it",
+        ),
+        // A mount the user added below /data.
+        (nested, vec![("0", "/data/extra/f")], None, "/srv/extra"),
+        // A bind root on an engine that cannot say it is not remapped.
+        (bind, vec![("0", "/data/old")], None, "rootless or remaps"),
+    ];
+    for (running, late, unreadable, cause) in causes {
+        let mut setup = Setup::new(true);
+        setup.plan.running = running;
+        let mut docker = Fake {
+            late_unusable: late,
+            late_unreadable: unreadable,
+            ..Fake::default()
+        };
+        let mut host = ready_host();
+        assert_ne!(setup.run(&mut docker, &mut host), 0, "{cause}");
+        let errors = host.errors.join("\n");
+        assert_eq!(
+            host.errors.first().map(String::as_str),
+            Some("restore: the database and state were restored completely."),
+            "{errors}"
+        );
+        assert!(
+            host.errors[1].starts_with("The daemon d was left stopped, because the check")
+                && host.errors[1].contains(cause),
+            "{errors}"
+        );
+        for false_claim in ["nothing was changed", "then retry"] {
+            assert!(!errors.contains(false_claim), "{false_claim:?} in {errors}");
+        }
+        assert_eq!(
+            host.errors[2],
+            "Once that is fixed, finish the restore with:\n  docker start d"
+        );
+        let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
+        assert!(!labels.iter().any(|l| l == "start d"), "{labels:?}");
+    }
 }

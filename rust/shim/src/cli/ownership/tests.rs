@@ -326,7 +326,7 @@ fn the_uid_0_helpers_get_only_their_capabilities_and_their_own_parts_mounts() {
 
 #[test]
 fn the_probe_walks_nested_mounts_and_the_uid_0_helpers_get_them_read_only_and_unwalked() {
-    // test_container.py's real-engine case mirrors exactly these roots.
+    // A bind below /data (the real-engine case runs helpers.json instead).
     let found = layout_of(&with_nested()).unwrap();
     let probe = probe_argv(&found, "n");
     assert_eq!(
@@ -361,7 +361,9 @@ fn an_unusable_nested_mount_is_refused_with_its_source_before_anything_changes()
     );
     let mut docker = fake(vec![(0, unusable)]);
     let dir = scratch();
-    let error = preflight(&mut docker, &with_nested(), dir.path(), "s", |_| Ok(())).unwrap_err();
+    let error = preflight(&mut docker, &with_nested(), dir.path(), "s", |_| Ok(()))
+        .unwrap_err()
+        .message;
     assert_eq!(modes(&docker), ["--probe-access"]);
     assert!(
         error.contains("/data/extra/x") && error.contains("/srv/exports"),
@@ -406,7 +408,9 @@ fn a_nested_mount_hidden_by_a_root_owned_parent_is_judged_after_the_repair() {
     // Still unusable after it: refused as the user's mount, naming its source.
     let still = answer("probe-access", &[&[b"U", b"999", b"/data/extra/x"]], true);
     let mut docker = fake(vec![(0, listed), (0, repaired), (0, still)]);
-    let error = repair(&mut docker, &checked.layout, Part::State, dir.path(), "t").unwrap_err();
+    let error = repair(&mut docker, &checked.layout, Part::State, dir.path(), "t")
+        .unwrap_err()
+        .message;
     assert!(
         error.contains("/srv/exports") && error.contains("changed only the owners listed in"),
         "{error}"
@@ -418,7 +422,9 @@ fn a_root_the_account_owns_but_cannot_read_is_refused_never_passed() {
     let blind = answer("probe-access", &[&[b"R", b"/data"]], true);
     let mut docker = fake(vec![(0, blind)]);
     let dir = scratch();
-    let error = preflight(&mut docker, &container(), dir.path(), "s", |_| Ok(())).unwrap_err();
+    let error = preflight(&mut docker, &container(), dir.path(), "s", |_| Ok(()))
+        .unwrap_err()
+        .message;
     assert!(
         error.contains("owns /data but cannot read or enter it"),
         "{error}"
@@ -441,7 +447,9 @@ fn a_bind_root_on_a_remapped_or_unknown_engine_is_never_repaired() {
         let mut docker = fake(vec![]);
         docker.info = (info.0, info.1.into());
         let dir = scratch();
-        let error = repair(&mut docker, &found, Part::State, dir.path(), "s").unwrap_err();
+        let error = repair(&mut docker, &found, Part::State, dir.path(), "s")
+            .unwrap_err()
+            .message;
         assert_eq!(modes(&docker), ["info"], "{info:?}");
         assert!(
             error.contains("/srv/state") && error.contains("nothing was changed"),
@@ -632,7 +640,9 @@ fn the_undo_list_is_written_before_the_change_or_nothing_changes() {
     let blocked = dir.path().join("not-a-dir");
     fs::write(&blocked, "").unwrap();
     let found = layout_of(&container()).unwrap();
-    let error = repair(&mut docker, &found, Part::State, &blocked, "s").unwrap_err();
+    let error = repair(&mut docker, &found, Part::State, &blocked, "s")
+        .unwrap_err()
+        .message;
     assert_eq!(modes(&docker), ["--list-root-owned"]);
     assert!(error.contains("so nothing was changed"), "{error}");
 }
@@ -648,7 +658,9 @@ fn a_repair_that_did_not_finish_keeps_the_full_list_and_removes_its_helper() {
     let mut docker = fake(vec![(0, listed), (130, "command interrupted".into())]);
     let dir = scratch();
     let found = layout_of(&container()).unwrap();
-    let error = repair(&mut docker, &found, Part::State, dir.path(), "s").unwrap_err();
+    let error = repair(&mut docker, &found, Part::State, dir.path(), "s")
+        .unwrap_err()
+        .message;
     assert_eq!(
         modes(&docker),
         ["--list-root-owned", "--repair-ownership", "rm"]
@@ -674,7 +686,9 @@ fn a_second_failed_probe_refuses_with_the_path_and_the_one_fix_and_changes_nothi
     let mut docker = fake(vec![(0, nothing), (0, unusable)]);
     let dir = scratch();
     let found = layout_of(&container()).unwrap();
-    let error = repair(&mut docker, &found, Part::State, dir.path(), "s").unwrap_err();
+    let error = repair(&mut docker, &found, Part::State, dir.path(), "s")
+        .unwrap_err()
+        .message;
     // Nothing root-owned: no chown helper at all, only the probe again.
     assert_eq!(modes(&docker), ["--list-root-owned", "--probe-access"]);
     assert!(error.contains("/data/theirs"), "{error}");
@@ -696,7 +710,8 @@ fn a_refusing_caller_stops_before_any_repair() {
         assert_eq!(state.len(), 1);
         Err("refused".into())
     })
-    .unwrap_err();
+    .unwrap_err()
+    .message;
     assert_eq!(error, "refused");
     assert_eq!(modes(&docker), ["--probe-access"]);
 }
@@ -768,7 +783,8 @@ fn no_message_tells_anyone_to_run_something_as_root() {
             Path::new("/nonexistent-dir"),
             "s",
         )
-        .unwrap_err(),
+        .unwrap_err()
+        .message,
     );
     for message in messages {
         let lower = message.to_lowercase();
@@ -802,4 +818,103 @@ fn the_configured_user_decides_whether_an_exec_can_read_root_owned_state() {
         );
     }
     assert!(runs_as_root(&json!({})));
+}
+
+/// The helpers' mounts and the roots after their mode word.
+fn mounts_and_roots(argv: &[String]) -> (Vec<String>, Vec<String>) {
+    let mounts = argv
+        .windows(2)
+        .filter(|pair| pair[0] == "--mount")
+        .map(|pair| pair[1].clone())
+        .collect();
+    let at = argv
+        .iter()
+        .position(|a| a == "provision-daemon-models")
+        .unwrap();
+    (mounts, argv[at + 2..].to_vec())
+}
+
+#[test]
+fn the_shared_helpers_file_is_exactly_the_products_mounts_and_roots() {
+    // rust/daemon/test_container.py runs the real engine from this file.
+    let shared: Value = serde_json::from_str(include_str!("helpers.json")).unwrap();
+    let found = layout_of(&shared["container"]).unwrap();
+    let expected = |key: &str| {
+        let list = |field: &str| -> Vec<String> {
+            shared["helpers"][key][field]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_owned())
+                .collect()
+        };
+        (list("mounts"), list("roots"))
+    };
+    assert_eq!(
+        mounts_and_roots(&probe_argv(&found, "n")),
+        expected("probe")
+    );
+    for (part, key) in [(Part::State, "state"), (Part::Models, "models")] {
+        assert_eq!(
+            mounts_and_roots(&list_argv(&found, part, "n")),
+            expected(key)
+        );
+        assert_eq!(
+            mounts_and_roots(&repair_argv(&found, part, "n")),
+            expected(key)
+        );
+    }
+}
+
+#[test]
+fn a_failure_after_the_repair_changed_owners_names_them_and_never_says_nothing_changed() {
+    let listed = answer("list-root-owned", &[&[b"L", b"0", b"/data/a"]], true);
+    let repaired = answer("repair-ownership", &[&[b"C", b"0", b"/data/a"]], true);
+    let blind = answer("probe-access", &[&[b"R", b"/data/a/x"]], true);
+    let mut docker = fake(vec![(0, listed), (0, repaired), (0, blind)]);
+    let dir = scratch();
+    let found = layout_of(&container()).unwrap();
+    let failed = repair(&mut docker, &found, Part::State, dir.path(), "s").unwrap_err();
+    let log = only_log(dir.path());
+    assert!(
+        !failed.message.contains("nothing was changed"),
+        "{}",
+        failed.message
+    );
+    assert!(
+        failed.message.contains(&format!(
+            "the repair changed only the owners listed in {}",
+            log.display()
+        )),
+        "{}",
+        failed.message
+    );
+    let changed = failed.changed.unwrap();
+    assert_eq!((changed.changed, changed.log), (1, Some(log)));
+}
+
+#[test]
+fn an_unreachable_nested_mount_names_the_directory_above_it_not_the_host_directory() {
+    let mut daemon = container();
+    daemon["Mounts"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"Type": "bind", "Source": "/srv/x", "Destination": "/data/a/x", "RW": true}));
+    // /data/a is the account's own but not searchable (O), so /data/a/x is `?`.
+    let blind = answer(
+        "probe-access",
+        &[&[b"O", b"/data/a"], &[b"U", b"?", b"/data/a/x"]],
+        true,
+    );
+    let mut docker = fake(vec![(0, blind)]);
+    let dir = scratch();
+    let error = preflight(&mut docker, &daemon, dir.path(), "s", |_| Ok(()))
+        .unwrap_err()
+        .message;
+    assert!(error.contains("cannot reach /data/a/x"), "{error}");
+    assert!(
+        error.contains("/data/a does not let that account search it"),
+        "{error}"
+    );
+    assert!(!error.contains("change the owner of /srv/x"), "{error}");
 }

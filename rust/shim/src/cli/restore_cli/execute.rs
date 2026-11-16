@@ -782,7 +782,7 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         );
         // The data is in place: what is left on a failure is the daemon's
         // start, never the restore again (`report`).
-        self.ownership_after_restore = restored.as_ref().is_err_and(|Stop(_, code)| *code != 130);
+        self.ownership_after_restore = restored.is_err();
         if let Some(repaired) = step(restored)? {
             self.host.info(&repaired.line());
         }
@@ -930,10 +930,11 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         self.bank.docker.set_interruptible(false);
         let plan = self.plan();
         let daemon = plan.daemon.clone();
-        let cause = if interrupted {
-            "restore was interrupted".to_owned()
-        } else {
-            stop.0.clone()
+        let cause = match stop.0.strip_prefix(ownership_steps::INTERRUPTED) {
+            // An interrupted ownership step names its undo list.
+            Some(rest) => format!("restore was interrupted ({rest})"),
+            None if interrupted => "restore was interrupted".to_owned(),
+            None => stop.0.clone(),
         };
         let retry = self.retry_command();
         let recovery = self.recovery_text();
@@ -1090,7 +1091,12 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                 lines.push("restore: the database and state were restored completely.".to_owned());
                 lines.push(format!(
                     "The daemon {daemon} was left stopped, because the check that its account (uid 10001) can use the restored state failed: {}.",
-                    cause.trim_end_matches('.').replace(", then retry", "")
+                    // The data is restored: no "retry" and no "nothing was
+                    // changed" from the cause reaches this sentence.
+                    cause
+                        .trim_end_matches('.')
+                        .replace(", then retry", "")
+                        .replace("; nothing was changed", "")
                 ));
                 lines.push(format!(
                     "Once that is fixed, finish the restore with:\n  docker start {}",
