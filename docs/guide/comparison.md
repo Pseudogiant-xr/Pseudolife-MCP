@@ -175,8 +175,9 @@ This one is checkable rather than assertable, which is the point. Pull the
 network, run a dream, and watch it produce facts. Or read
 `ops/docker-compose.yml`: the extractor container is never published to
 the host, and the only endpoint the daemon calls with memory content is
-the one you configure. (Since 2026-09-29 the daemon also asks PyPI for
-the newest release every six hours, a version number and nothing else,
+the one you configure. (The daemon also asks `api.github.com` for
+the latest stable release with complete native assets every six hours,
+sending no credentials or memory content,
 so the session briefing can say when an update is out; `updates:
 check_releases: false` in `config.yaml` turns that off, see
 [Configuration](configuration.md#being-told-and-the-unattended-client-half-updates).)

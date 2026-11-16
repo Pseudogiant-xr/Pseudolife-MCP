@@ -4862,19 +4862,27 @@ An invalid bearer map is still refused.
 
 ```yaml
 updates:
-  check_releases: true          # ask PyPI for the newest release, on a background thread
+  check_releases: true          # check GitHub releases in the background
   check_interval_seconds: 21600 # every six hours; 60 is the floor
   unattended_clients: false     # the shim may take the client half of an update by itself
 ```
 
-With `check_releases` on (the default) the daemon reads the newest
-release from PyPI once per interval on its own thread, never on a request,
-keeps the last good answer, and serves it on `/health` as
+With `check_releases` on (the default) the daemon reads GitHub's latest
+stable release from `api.github.com` once per interval in the background,
+never on a request. Once its native assets are complete, it keeps that answer
+and serves it on `/health` as
 `updates.latest_release` (with `checked_at`). When that release is newer
 than the daemon, the session-start briefing opens with one line naming
 the command: `release X is available (daemon Y[, plugin Z]) — run
 pseudolife-mcp update`, and no second line about the plugin, since that
-command moves both. A daemon with no route to PyPI offers nothing;
+command moves both. The GitHub release must carry all five native archives,
+the compose bundle and `SHA256SUMS` before it is offered. The check sends no
+credentials or memory content. A daemon with no route to GitHub and no cached
+answer offers nothing; failures retain an earlier successful answer.
+The first check runs at startup, without delaying startup; subsequent checks
+use the configured interval. An incomplete release waits for that interval;
+other failures before the first success retry after at most 15 minutes.
+GitHub rate-limit responses can extend a short interval by up to an hour.
 `check_releases: false` makes no request at all. The plugin-behind,
 daemon-behind and hooks-differ notices, `pseudolife-mcp doctor` and the
 shim's own version line all name `pseudolife-mcp update` (or its

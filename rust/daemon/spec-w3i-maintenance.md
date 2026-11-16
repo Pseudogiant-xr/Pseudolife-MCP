@@ -1,5 +1,10 @@
 # Background maintenance contract
 
+This records the original Python maintenance contract. The Rust daemon's
+release discovery now follows [How a release is discovered](../../docs/dev/release-assets.md#how-a-release-is-discovered):
+GitHub release metadata with the complete native asset set replaces PyPI's
+`info.version`. The health fields and update-notice format are unchanged.
+
 Canonical producer: shipped daemon configuration, PyPI's `info.version`
 string, and PostgreSQL rows written by the Python service.
 
