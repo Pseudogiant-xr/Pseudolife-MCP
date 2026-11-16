@@ -159,9 +159,13 @@ a root, whatever the configuration says.
 - **Look again just before the delete.**
   - The process list is taken again right before each target or clone is
     renamed aside, not once per run.
-  - After the rename, the aside copy is scanned again. A file written
-    since its last checks began, a new link or a process using it puts the
-    copy back under its own name, and the dir is kept.
+  - After the rename, the aside copy is scanned again. Any of these puts
+    the copy back under its own name, and the dir is kept:
+    - a file or dir written since its last checks began (each dir's own
+      time read fresh, so a copy that keeps its old file times, `cp -p`,
+      still shows);
+    - a new link;
+    - a process using it.
   - If putting it back fails, nothing is deleted. The row says where the
     copy is, and the run exits 1.
 - **Rename aside, then delete.**
@@ -231,18 +235,19 @@ deleted when all of these hold:
   inside it:
   - profile dirs (which carry `.fingerprint` or `.cargo-lock`), including
     their `deps`, `build`, `incremental`, `examples` and `.fingerprint`
-    dirs, every file cargo writes at their top, and any other file there
-    that is not newer than the profile's newest fingerprint;
+    dirs and everything in those, and the files cargo writes at their top
+    (its lock, the outputs its own top-level dep-info names, and their debug
+    info and import libraries, `-` and `_` alike);
   - target-triple dirs of profiles;
   - `tmp`, `doc` and `package`, by name, with everything in them.
 - A profile dir counts only when its own dep-info names outputs inside it.
   A copy (`cp -r release release-pr1234`, a kept candidate build) still
   names the original, so it stays as a foreign entry.
-- A profile dir also stays, as a foreign entry, when its top level holds a
-  file cargo does not write there (not an output its own dep-info names,
-  nor that output's debug info or import library) that is newer than the
-  profile's newest fingerprint: a copied `server-good.exe` or notes kept
-  beside the build.
+- A profile dir also stays, as a foreign entry, when its top level holds
+  anything else, whatever its age: a copied `server-good.exe`, notes, a
+  folder of saved results, a link, or a binary whose dep-info is missing.
+  A user's file deeper inside cargo's own dirs (`deps`, `build`,
+  `incremental`, `examples`) goes with them.
 - `criterion` (benchmark measurements, not a cache) stays by name.
 - Anything else, such as copied candidate binaries or mutation-test
   sources, stays, and the row names it.
@@ -295,6 +300,15 @@ worktree, is deleted (renamed aside, then removed) when all of these hold:
   - a hook script of its own (any file in `.git/hooks` not ending in
     `.sample`);
   - `criterion` measurements under its `rust/target`.
+- **No other checkout borrows its objects.**
+  - A checkout made with `git clone --shared` or `--reference` names this
+    clone's object dir in its `objects/info/alternates`. Every registered
+    worktree and every child of every configured root is read for such a
+    file, and a match keeps the clone.
+  - A borrower outside the configured roots cannot be seen.
+  - The objects such a borrower loses are then all commits already on
+    `origin/master`, so it can be repaired by pointing its alternates at
+    the main repository.
 
 The home dir may be a clone root for the same reason as a target root.
 
@@ -321,8 +335,12 @@ identity rather than path.
   file, not a link, owned by the user on Linux and macOS. Without it the run
   refuses and says how to opt in.
 - **What each row shows:** each direct child's size, when it was last
-  written (arrival times counted), and which keep rule holds it. A row
-  where no rule holds it reads `list only; nothing keeps it`.
+  written (arrival times counted), and which keep rule holds it, measured
+  before any label. A row where no rule holds it reads `list only; nothing
+  keeps it`.
+- **Overlapping roots:** nothing at, under or around a scratch root is a
+  candidate for the cache, target or clone class either, so naming the same
+  dir under two roots removes nothing there.
 - **A nested marker** inside a child changes nothing; only the root's own
   counts.
 
