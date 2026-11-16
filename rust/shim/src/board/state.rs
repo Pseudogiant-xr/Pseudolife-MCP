@@ -797,11 +797,12 @@ fn report_folder_once(path: &Path, line: &str) {
 }
 /// When the repair of a folder's access list needs elevation, and why: its
 /// owner always holds the right to change that list, and an elevated process
-/// creates folders owned by Administrators, whose rights, like SYSTEM's, an
-/// ordinary token does not carry. A folder this account owns needs no
-/// elevation.
+/// creates folders owned by Administrators, whose rights only an elevated
+/// token carries. Not even an elevated token holds SYSTEM's, so a folder
+/// SYSTEM owns has to be taken over first. A folder this account owns needs
+/// no elevation.
 #[cfg(windows)]
-const ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER: &str = "An ordinary prompt is enough when this account owns the folder; a folder owned by Administrators (as one an elevated process created is) or by SYSTEM needs an elevated prompt, because an ordinary token holds neither owner's right to change its access list.";
+const ELEVATION_ONLY_FOR_ADMINISTRATORS_OWNER: &str = "An ordinary prompt is enough when this account owns the folder; a folder owned by Administrators (as one an elevated process created is) needs an elevated prompt, because only an elevated token holds that owner's right to change its access list; one owned by SYSTEM must first be taken over by an administrator (takeown, from an elevated prompt), since no prompt holds SYSTEM's right.";
 /// The line for a file an earlier client's folder protection emptied, with
 /// the repair of `folder`. Git Bash rewrites the /reset and /T switches, so
 /// the command is given for PowerShell or cmd.
@@ -1768,7 +1769,8 @@ mod tests {
             // Elevation is conditional on the owner, and the line says why.
             assert!(
                 line.contains("An ordinary prompt is enough when this account owns the folder")
-                    && line.contains("an ordinary token holds neither owner's right"),
+                    && line.contains("only an elevated token holds that owner's right")
+                    && line.contains("owned by SYSTEM must first be taken over"),
                 "{line}"
             );
             assert!(!line.contains("from an elevated prompt if"), "{line}");

@@ -233,6 +233,11 @@ pub(super) async fn serve(ts: &Tailnet, https: u16, port: u16) -> Result<()> {
         ],
     )
     .await;
+    // Wordings of a refused change. "must be root/admin" is matched only so
+    // a refusal worded that way is still recognised as a permission one: it
+    // appears in the line only as Tailscale's own quoted detail, and the fix
+    // given after it names no root step, because forwarding a port needs
+    // none (see `permission_fix`).
     let permission = regex::Regex::new(
         r"(?i)access denied|permission denied|not permitted|--operator\b|unauthori[sz]ed|must be (?:root|admin)",
     )

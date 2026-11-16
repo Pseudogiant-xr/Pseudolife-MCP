@@ -241,17 +241,24 @@ mod modes {
         };
         let content = fs::read(&path).unwrap();
         let error = write_config(&path, &content, b"after").unwrap_err();
-        // As root the fixture's folder is this user's, so the fix is a copy
-        // this user owns; /etc is root's, so there only root can fix it.
-        let fix = if rustix::process::getuid().as_raw() == 0 {
-            "mv -f"
+        // As root it is sent back to the file's owner, never told to copy the
+        // file as root; anyone else meets /etc, which only root can give
+        // them, by their own account name.
+        let me = rustix::process::getuid().as_raw();
+        if me == 0 {
+            assert!(
+                error.contains("is owned by nobody")
+                    && error.ends_with("run this again as nobody, without sudo"),
+                "{error}"
+            );
         } else {
-            "sudo chown"
-        };
-        assert!(
-            error.contains("is owned by another account") && error.contains(fix),
-            "{error}"
-        );
+            let name = account_name(me);
+            assert!(
+                error.contains("is owned by another account (root)")
+                    && error.ends_with(&format!("sudo chown '{name}' '/etc' '/etc/passwd'")),
+                "{error}"
+            );
+        }
         assert_eq!(fs::read(&path).unwrap(), content);
         assert!(
             !fs::read_dir(path.parent().unwrap()).unwrap().any(|e| e
@@ -513,14 +520,15 @@ fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
     let file = "/home/u/.codex/config.toml";
     let folder = "/home/u/.codex";
     let replace = "cp '/home/u/.codex/config.toml' '/home/u/.codex/config.toml.mine' && mv -f '/home/u/.codex/config.toml.mine' '/home/u/.codex/config.toml'";
+    let line = |case| foreign_owner_refusal(file, file, folder, case, "u", "root");
     // A folder this user can write: a copy it owns replaces the file.
-    let writable = foreign_owner_refusal(file, file, folder, FolderAccess::Writable);
+    let writable = line(ForeignOwner::Writable);
     assert!(
         writable.ends_with(&format!("(no root needed): {replace}")),
         "{writable}"
     );
     // A folder it owns but cannot write: it makes it writable first.
-    let read_only = foreign_owner_refusal(file, file, folder, FolderAccess::OwnedNotWritable);
+    let read_only = line(ForeignOwner::OwnedNotWritable);
     assert!(
         read_only.ends_with(&format!(
             "(no root needed): chmod u+wx '{folder}' && {replace}"
@@ -530,16 +538,43 @@ fn a_foreign_owned_config_names_the_least_privilege_fix_for_its_folder() {
     for line in [&writable, &read_only] {
         assert!(!line.contains("sudo"), "{line}");
     }
-    // Only another account's folder it cannot write leaves root as the one
-    // fix: of the folder too, where the write makes its recovery files, and
-    // the line says why root is needed.
-    let foreign = foreign_owner_refusal(file, file, folder, FolderAccess::Foreign);
+    // Only root can change who owns a file. The command is for an
+    // administrator, so it names this account, never `$USER` (which would be
+    // the administrator in their shell): in a shared sticky folder the file
+    // alone, otherwise the folder too, where the write makes its recovery
+    // files; and the line says why root is needed.
+    let shared = line(ForeignOwner::SharedSticky);
+    assert!(
+        shared.contains("only root can change who owns a file")
+            && shared.ends_with(&format!("sudo chown 'u' '{file}'")),
+        "{shared}"
+    );
+    let foreign = line(ForeignOwner::Foreign);
     assert!(
         foreign.contains("only root can change who owns them")
-            && foreign.ends_with(&format!("sudo chown \"$USER\" '{folder}' '{file}'")),
+            && foreign.ends_with(&format!("sudo chown 'u' '{folder}' '{file}'")),
         "{foreign}"
     );
-    for line in [&writable, &read_only, &foreign] {
+    // A run as root is sent back to the file's owner: a copy made as root
+    // would leave that account's config owned by root.
+    let as_root = foreign_owner_refusal(file, file, folder, ForeignOwner::RunAsRoot, "root", "u");
+    assert!(
+        as_root.ends_with("run this again as u, without sudo") && !as_root.contains("cp '"),
+        "{as_root}"
+    );
+    for line in [&writable, &read_only, &shared, &foreign, &as_root] {
+        assert!(!line.contains("$USER"), "{line}");
         assert!(!line.contains("run this as its owner"), "{line}");
     }
+    // An account name with a quote is escaped for the shell.
+    let odd = foreign_owner_refusal(file, file, folder, ForeignOwner::Foreign, "o'k", "root");
+    assert!(odd.contains("sudo chown 'o'\\''k' "), "{odd}");
+}
+
+#[cfg(unix)]
+#[test]
+fn account_names_resolve_and_fall_back_to_the_number() {
+    assert_eq!(account_name(0), "root");
+    // A uid with no account (not -2, 4294967294, which macOS gives nobody).
+    assert_eq!(account_name(3_999_999_999), "3999999999");
 }

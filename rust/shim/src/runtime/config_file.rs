@@ -45,32 +45,39 @@ pub(super) fn write_config_with(
         let me = rustix::process::getuid().as_raw();
         if meta.uid() != me {
             // What decides the fix is whether this user can replace a file
-            // in that folder: write and search on it, and with the sticky
-            // bit also its ownership (a sticky folder lets only the owners
-            // of the folder or the file replace it).
+            // in that folder: write and search on it, and in a sticky folder
+            // also owning the folder (there only the owners of the folder or
+            // of the file may replace it). A run as root is told to run as
+            // the file's owner instead: a copy made as root would leave that
+            // account's config owned by root, the very thing refused here.
             let folder = fs::metadata(parent).ok();
             let owned = folder.as_ref().is_some_and(|folder| folder.uid() == me);
             let sticky = folder
                 .as_ref()
                 .is_some_and(|folder| folder.mode() & 0o1000 != 0);
-            let writable = rustix::fs::access(
+            let folder_writable = rustix::fs::access(
                 parent,
                 rustix::fs::Access::WRITE_OK | rustix::fs::Access::EXEC_OK,
             )
-            .is_ok()
-                && (!sticky || owned || me == 0);
-            let access = if writable {
-                FolderAccess::Writable
+            .is_ok();
+            let case = if me == 0 {
+                ForeignOwner::RunAsRoot
+            } else if folder_writable && (!sticky || owned) {
+                ForeignOwner::Writable
+            } else if folder_writable {
+                ForeignOwner::SharedSticky
             } else if owned {
-                FolderAccess::OwnedNotWritable
+                ForeignOwner::OwnedNotWritable
             } else {
-                FolderAccess::Foreign
+                ForeignOwner::Foreign
             };
             return Err(foreign_owner_refusal(
                 &target.display().to_string(),
                 &shown,
                 &parent.display().to_string().replace('\'', "'\\''"),
-                access,
+                case,
+                &account_name(me),
+                &account_name(meta.uid()),
             ));
         }
         if meta.nlink() != 1 {
@@ -152,46 +159,98 @@ pub(super) fn write_config_with(
     result.map_err(|error: String| format!("{error}; recovery files: {}", recovery.display()))
 }
 
-/// Whether this user can replace a file in a client config's folder.
+/// Why this user cannot simply replace a client config another account owns.
 #[cfg(any(unix, test))]
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum FolderAccess {
-    /// It can: no privilege is needed.
+enum ForeignOwner {
+    /// This run is as root, on another account's file.
+    RunAsRoot,
+    /// This user can replace a file in the folder: no privilege is needed.
     Writable,
-    /// It owns the folder but cannot write it: it can make it writable.
+    /// This user owns the folder but cannot write it: it can make it writable.
     OwnedNotWritable,
+    /// A sticky folder another account owns (such as `/tmp`): this user may
+    /// write there but replace only its own files.
+    SharedSticky,
     /// Another account owns the folder and this user cannot write it.
     Foreign,
 }
 
 /// The refusal for a client config another account owns (often one a `sudo`
-/// run created), naming the narrowest fix. Where this user can replace a file
-/// in the folder, a copy this user owns replaces it with no privilege at all
-/// (`mv -f`, because a plain `mv` asks before replacing a file it cannot
-/// write); a folder it owns but cannot write it can first make writable. Only
-/// when another account owns a folder this user cannot write does ownership
-/// have to change, of the folder (the write creates its recovery files
-/// there) and the file, and only root can do that. `quoted` and
-/// `folder_quoted` are already escaped for single quotes.
+/// run created), naming the narrowest fix.
+/// - Where this user can replace a file in the folder, a copy it owns
+///   replaces the file with no privilege at all (`mv -f`, because a plain
+///   `mv` asks before replacing a file it cannot write); a folder it owns but
+///   cannot write it can make writable first.
+/// - Only root can change who owns a file: in a shared sticky folder only the
+///   file's owner changes, otherwise the folder's too (the write creates its
+///   recovery files there). That command is for an administrator to run, so
+///   it names this account (`me`) rather than `$USER`, which would expand to
+///   the administrator.
+/// - A run as root is told to run again as the file's owner (`owner`).
+///
+/// `quoted` and `folder_quoted` are already escaped for single quotes.
 #[cfg(any(unix, test))]
 fn foreign_owner_refusal(
     shown: &str,
     quoted: &str,
     folder_quoted: &str,
-    access: FolderAccess,
+    case: ForeignOwner,
+    me: &str,
+    owner: &str,
 ) -> String {
     let replace = format!("cp '{quoted}' '{quoted}.mine' && mv -f '{quoted}.mine' '{quoted}'");
-    match access {
-        FolderAccess::Writable => format!(
-            "{shown} is owned by another account, so it was not replaced; this user can write its folder, so replace it with a copy this user owns (no root needed): {replace}"
+    let me_quoted = me.replace('\'', "'\\''");
+    match case {
+        ForeignOwner::RunAsRoot => format!(
+            "{shown} is owned by {owner}, and this run is as root, so it was not replaced: a copy written as root would leave {owner}'s config owned by root; run this again as {owner}, without sudo"
         ),
-        FolderAccess::OwnedNotWritable => format!(
-            "{shown} is owned by another account, so it was not replaced; this user owns its folder but cannot write it, so make the folder writable and replace the file with a copy this user owns (no root needed): chmod u+wx '{folder_quoted}' && {replace}"
+        ForeignOwner::Writable => format!(
+            "{shown} is owned by another account ({owner}), so it was not replaced; this user can write its folder, so replace it with a copy this user owns (no root needed): {replace}"
         ),
-        FolderAccess::Foreign => format!(
-            "{shown} is owned by another account, in a folder another account owns and this user cannot write, so it was not replaced; only root can change who owns them, so ask whoever administers this machine to give both to this user: sudo chown \"$USER\" '{folder_quoted}' '{quoted}'"
+        ForeignOwner::OwnedNotWritable => format!(
+            "{shown} is owned by another account ({owner}), so it was not replaced; this user owns its folder but cannot write it, so make the folder writable and replace the file with a copy this user owns (no root needed): chmod u+wx '{folder_quoted}' && {replace}"
+        ),
+        ForeignOwner::SharedSticky => format!(
+            "{shown} is owned by another account ({owner}), in a shared folder where only a file's owner may replace it, so it was not replaced; only root can change who owns a file, so ask whoever administers this machine to give it to {me}: sudo chown '{me_quoted}' '{quoted}'"
+        ),
+        ForeignOwner::Foreign => format!(
+            "{shown} is owned by another account ({owner}), in a folder another account owns and {me} cannot write, so it was not replaced; only root can change who owns them, so ask whoever administers this machine to give both to {me}: sudo chown '{me_quoted}' '{folder_quoted}' '{quoted}'"
         ),
     }
+}
+
+/// The account name of `uid`, or the number when it has no name.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn account_name(uid: u32) -> String {
+    use std::ffi::CStr;
+    let mut record = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut scratch = [0; 4096];
+    let mut result = std::ptr::null_mut();
+    // SAFETY: getpwuid_r fills `record` and points its strings into
+    // `scratch`; both outlive every read below.
+    let found = unsafe {
+        libc::getpwuid_r(
+            uid,
+            record.as_mut_ptr(),
+            scratch.as_mut_ptr(),
+            scratch.len(),
+            &mut result,
+        ) == 0
+            && !result.is_null()
+    };
+    if found {
+        // SAFETY: a successful lookup initialized `record`, and `pw_name` is
+        // a NUL-terminated string inside `scratch`.
+        let name = unsafe { CStr::from_ptr(record.assume_init_ref().pw_name) };
+        if let Ok(name) = name.to_str()
+            && !name.is_empty()
+        {
+            return name.to_owned();
+        }
+    }
+    uid.to_string()
 }
 
 /// The replacement keeps the original's group as well as its mode: a mode

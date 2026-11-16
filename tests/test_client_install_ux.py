@@ -353,8 +353,11 @@ def test_docker_group_advice_says_it_is_root_equivalent(tmp_path, script) -> Non
                       "echo 'permission denied while trying to connect to the docker API' >&2\n"
                       "exit 1\n")
     docker.chmod(0o755)
-    env = {"PATH": f"{stub}:/usr/bin:/bin", "HOME": str(tmp_path)}
-    proc = subprocess.run(["bash", str(ROOT / script), "--client", "generic"],
+    # The bash first on PATH runs it (macOS's 3.2 in its lane), and its
+    # folder stays on PATH for anything the script starts.
+    bash = shutil.which("bash")
+    env = {"PATH": f"{stub}:{os.path.dirname(bash)}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    proc = subprocess.run([bash, str(ROOT / script), "--client", "generic"],
                           capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
     out = proc.stdout
     assert proc.returncode != 0, out
