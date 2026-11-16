@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "e72a4c8e3e97db5a",
+  "fingerprint": "33b408320649d20d",
+  "reason": "Only a comment in rust/ci/parity_scope.py changed (the expose entry's note on why its rows include move's); every suite, row, shard and budget the parity matrix resolves is unchanged, so the measured parity-checks cost holds."
+}

@@ -1456,7 +1456,7 @@
    "p": "rust/shim",
    "d": [
     "Crate pseudolife-stdio, released as the pseudolife-mcp binary: the stdio shim and the CLI in one program, installed as a numbered runtime (runtime.json kind native) behind the same launcher as the Python runtimes",
-    "Native: update (with the client-handoff-v1 hand-off), backup and restore of a Docker bank, connect, console, conductor-watch, doctor and the hook leaves; move only as --dry-run; the expose change step and most of tunnel print \"mode '<mode>' is deferred in this candidate\" and exit 1 (rust/shim/src/cli.rs dispatch)",
+    "Native: update (with the client-handoff-v1 hand-off), backup and restore of a Docker bank, connect, console, conductor-watch, doctor and the hook leaves; expose (its change step included); move only as --dry-run; most of tunnel prints \"mode '<mode>' is deferred in this candidate\" and exit 1 (rust/shim/src/cli.rs dispatch)",
     "Refuses a lite-tier bank, serve and embedded (cli/retired.rs); starts a local daemon only from PSEUDOLIFE_MCP_SERVE_COMMAND",
     "Opt-in in 0.24.0: a Python client's update moves the machine to it (update_bridge.py) only with PSEUDOLIFE_SHIM_ENGINE=native, when the release's archive for its platform downloads, verifies and runs; without it the update keeps Python and, on a 0.23.x hand-off where a native build exists, prints the opt-in command"
    ]

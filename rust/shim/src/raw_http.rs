@@ -19,6 +19,9 @@ pub struct Observation {
     pub requested: &'static str,
     pub refused_phase: Option<&'static str>,
     pub credential_failed: bool,
+    /// Why the credential file was refused, when a fresh look at the
+    /// folders above it says (`private_path::explain`).
+    pub credential_detail: Option<String>,
     pub dispatched: bool,
     pub response_phase: Option<&'static str>,
     pub status: Option<u16>,

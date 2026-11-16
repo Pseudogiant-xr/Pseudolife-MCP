@@ -18,6 +18,7 @@ pub(super) const UNAVAILABLE: &str = "private tunnel file is unavailable or not 
 const TOO_LARGE: &str = "private tunnel file is too large";
 const INVALID_PROFILE: &str = "tunnel profile is invalid";
 pub(super) const INVALID_NAME: &str = "invalid tunnel profile name";
+pub(super) const NOT_OWNER_ONLY: &str = "tunnel profile directory must be owner-only";
 const EXPIRY: &str = "key expiry requires an ISO date or timestamp with timezone";
 const FIELDS: [&str; 12] = [
     "name",
@@ -227,6 +228,67 @@ pub(super) fn load(root: &Path, name: &str) -> Result<Profile, Fail> {
     Ok(profile)
 }
 
+/// The profile file a person would look for, even when its path cannot be
+/// checked.
+pub(super) fn profile_file(root: &Path, name: &str) -> PathBuf {
+    root.join(format!("{name}.profile.json"))
+}
+
+/// `run` could not open the store root: an empty `--profile-dir`, no home
+/// directory to resolve, or a link or junction on its path.
+pub(super) const UNSAFE_ROOT: &str = "the tunnel directory cannot be opened safely (an empty --profile-dir, no home directory, or a link or junction on its path); point it at a plain directory your account owns, then retry";
+
+/// Why `load(root, name)` deferred, in plain words naming the file or field
+/// this client does not read (for a person; no field value is repeated).
+pub(super) fn unread_reason(root: &Path, name: &str) -> &'static str {
+    const FILE: &str = "the profile file cannot be opened safely here (a pipe, or a link or junction this client does not follow)";
+    let Ok(path) = profile_path(root, name) else {
+        return FILE;
+    };
+    let payload = match private_read(&path, 65536) {
+        Err(_) => return FILE,
+        Ok(data) => match json_loads(&data) {
+            Admit::Yes(Value::Object(payload)) => payload,
+            _ => {
+                return "the profile file uses JSON this client does not read (a byte-order mark, a UTF-16 or UTF-32 encoding, NaN or Infinity, or very deep nesting)";
+            }
+        },
+    };
+    let path_field = |key: &str| {
+        text(&payload, key)
+            .flatten()
+            .is_some_and(|value| match absolute_reference(value) {
+                Err(Fail::Defer) => true,
+                Ok(true) => checked_path(Path::new(value)) == Err(Fail::Defer),
+                _ => false,
+            })
+    };
+    if text(&payload, "daemon_url")
+        .flatten()
+        .is_some_and(|url| validate_url(url) == Err(Fail::Defer))
+    {
+        return "its daemon_url is a URL form this client does not read";
+    }
+    if path_field("token_file") {
+        return "its token_file is a path form this client does not read (a UNC or device path)";
+    }
+    if text(&payload, "runtime_version")
+        .flatten()
+        .is_some_and(|version| !version.is_ascii())
+    {
+        return "its runtime_version is not plain ASCII digits";
+    }
+    if let Some(Value::String(value)) = field(&payload, "runtime_key_expires_at")
+        && matches!(parse_expiry(value), Admit::Defer)
+    {
+        return "its runtime_key_expires_at uses a timestamp spelling this client does not read (a fraction of other than 3 or 6 digits, hour 24, or an unusual offset)";
+    }
+    if path_field("cloud_verification_file") {
+        return "its cloud_verification_file is a path form this client does not read (a UNC or device path)";
+    }
+    "it holds a value this client does not read"
+}
+
 fn field<'a>(payload: &'a Map<String, Value>, key: &str) -> Option<&'a Value> {
     payload.get(key).filter(|value| !value.is_null())
 }
@@ -361,31 +423,149 @@ pub(super) fn validate(payload: &Map<String, Value>) -> Result<Profile, Fail> {
     })
 }
 
-/// `_key_present`: `ProfileStore.read_key` succeeds. A Windows DPAPI key
-/// would need CryptUnprotectData, which this leaf does not call: deferred.
+/// `_key_present`: `ProfileStore.read_key` succeeds. A Windows key this
+/// session cannot unseal is deferred rather than called absent.
 pub(super) fn key_present(root: &Path, name: &str) -> Result<bool, Fail> {
+    key_state(root, name)?.ok_or(Fail::Defer)
+}
+
+/// The private key's presence: `Some(true)` when it reads as a valid key
+/// (on Windows, after DPAPI unseals it), `Some(false)` when it is absent,
+/// unreadable as a private file, protected for another platform or not a
+/// key, and `None` for a Windows key that cannot be unsealed in this
+/// session: another account's key, or the account's own over a logon
+/// without its credentials (a key-based SSH logon). `Err(Defer)` when the
+/// key file itself is a form
+/// this client does not open (a pipe, a link).
+pub(super) fn key_state(root: &Path, name: &str) -> Result<Option<bool>, Fail> {
     let path = match checked_path(&root.join(format!("{name}.key"))) {
         Ok(path) => path,
-        Err(Fail::Tunnel(_)) => return Ok(false),
+        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let data = match private_read(&path, 16384) {
         Ok(data) => data,
-        Err(Fail::Tunnel(_)) => return Ok(false),
+        Err(Fail::Tunnel(_)) => return Ok(Some(false)),
         Err(Fail::Defer) => return Err(Fail::Defer),
     };
     let (prefix, encoded) = match data.iter().position(|b| *b == 0) {
         Some(index) => (&data[..index], &data[index + 1..]),
         None => (&data[..], &[][..]),
     };
-    if cfg!(windows) {
-        return if prefix == b"DPAPI" {
-            Err(Fail::Defer)
-        } else {
-            Ok(false)
-        };
+    #[cfg(windows)]
+    {
+        if prefix != b"DPAPI" {
+            return Ok(Some(false));
+        }
+        Ok(super::dpapi::holds_key(encoded))
     }
-    Ok(prefix == b"PLAIN" && crate::credentials::decode_token(encoded).is_ok())
+    #[cfg(not(windows))]
+    Ok(Some(
+        prefix == b"PLAIN" && crate::credentials::decode_token(encoded).is_ok(),
+    ))
+}
+
+/// The key file `key_state` reads, for a person.
+pub(super) fn key_path(root: &Path, name: &str) -> PathBuf {
+    root.join(format!("{name}.key"))
+}
+
+/// The first `*.profile.json` in `root` whose stem `list` refuses as a
+/// profile name, matched as `list` matches it.
+pub(super) fn invalid_profile_entry(root: &Path) -> Option<PathBuf> {
+    fs::read_dir(root).ok()?.flatten().find_map(|entry| {
+        let file_name = entry.file_name();
+        let text = file_name.to_str()?;
+        let folded = if cfg!(windows) {
+            text.to_ascii_lowercase()
+        } else {
+            text.to_owned()
+        };
+        folded.strip_suffix(".profile.json")?;
+        // The stem exactly as `list` takes it: case-sensitively, so a
+        // Windows `dot.PROFILE.JSON` keeps its whole name and is refused.
+        let stem = text.strip_suffix(".profile.json").unwrap_or(text);
+        (!valid_name(stem)).then(|| entry.path())
+    })
+}
+
+/// Why listing `root` deferred, naming the root or the one entry it stopped
+/// on, with its fix: a root that cannot be inspected, is not a directory or
+/// cannot be listed; a file name that is not UTF-8 (or, on Windows, not
+/// ASCII); a `*.profile.json` that is not a regular file. Each entry named
+/// blocks `list`; with several, fixing one may reveal the next. The
+/// ownership check runs first, as in `list`, so the closing sentence is
+/// reached only if the directory changed between the two reads.
+pub(super) fn list_refusal(root: &Path) -> String {
+    let root_shown = root.display();
+    let keep = "keeping every .key and .process.json file, then retry";
+    match fs::metadata(root) {
+        Err(_) => {
+            return format!(
+                "the tunnel directory {root_shown} cannot be inspected; make it a directory your account can read, then retry"
+            );
+        }
+        Ok(info) if !info.is_dir() => {
+            return format!(
+                "the tunnel directory {root_shown} is not a directory; move it aside, then retry"
+            );
+        }
+        // `list` checks the directory's ownership before any entry, so a
+        // check that cannot be decided is the cause, whatever it holds.
+        Ok(info) => match owner_only_directory(root, &info) {
+            Ok(()) => {}
+            Err(Fail::Defer) => {
+                return format!(
+                    "the permissions of the tunnel directory {root_shown} cannot be checked; make it a directory only your account can access, then retry"
+                );
+            }
+            Err(_) => {
+                return format!(
+                    "the tunnel directory {root_shown} must be owner-only; make it a directory only your account can access, then retry"
+                );
+            }
+        },
+    }
+    let unlisted = || {
+        format!(
+            "the tunnel directory {root_shown} cannot be listed; make it a directory your account can read, then retry"
+        )
+    };
+    let Ok(entries) = fs::read_dir(root) else {
+        return unlisted();
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return unlisted();
+        };
+        let file_name = entry.file_name();
+        let Some(text) = file_name.to_str() else {
+            return format!(
+                "the tunnel directory {root_shown} holds an entry whose name is not UTF-8 ({}); move that one entry out, {keep}",
+                file_name.to_string_lossy()
+            );
+        };
+        if cfg!(windows) && !text.is_ascii() {
+            return format!(
+                "the tunnel directory {root_shown} holds {text}, whose name is not plain ASCII; move that one entry out, {keep}"
+            );
+        }
+        let folded = if cfg!(windows) {
+            text.to_ascii_lowercase()
+        } else {
+            text.to_owned()
+        };
+        if folded.ends_with(".profile.json") && !entry.file_type().is_ok_and(|kind| kind.is_file())
+        {
+            return format!(
+                "{} is not a regular file; move it out of the tunnel directory, {keep}",
+                entry.path().display()
+            );
+        }
+    }
+    format!(
+        "the permissions of the tunnel directory {root_shown} cannot be checked; make it a directory only your account can access, then retry"
+    )
 }
 
 /// The root a command's `ProfileStore(args.profile_dir)` opens. Its checks
@@ -450,7 +630,7 @@ pub(super) fn list(root: &Path) -> Result<Vec<String>, Fail> {
 fn owner_only_directory(_root: &Path, info: &Metadata) -> Result<(), Fail> {
     use std::os::unix::fs::MetadataExt;
     if info.uid() != rustix::process::geteuid().as_raw() || info.mode() & 0o077 != 0 {
-        return Err(Fail::Tunnel("tunnel profile directory must be owner-only"));
+        return Err(Fail::Tunnel(NOT_OWNER_ONLY));
     }
     Ok(())
 }
@@ -472,7 +652,7 @@ fn owner_only_directory(root: &Path, _info: &Metadata) -> Result<(), Fail> {
     match crate::credentials::windows_security::validate(&directory) {
         Ok(_) => Ok(()),
         Err(error) if error.0 == "credential file must be owner-only" => {
-            Err(Fail::Tunnel("tunnel profile directory must be owner-only"))
+            Err(Fail::Tunnel(NOT_OWNER_ONLY))
         }
         // Link-count or handle failures are outside the oracle's ACL check.
         Err(_) => Err(Fail::Defer),
