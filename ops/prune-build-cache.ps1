@@ -135,6 +135,18 @@ if ($DryRun) {
     return
 }
 
+# Dangling images only: no -a/--all and no filter, so Docker removes only
+# untagged images that no container (running or stopped) uses. It runs
+# before the cache passes so they see whatever it frees. Never fatal.
+if ($PruneDanglingImages) {
+    docker image prune --force | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "docker image prune (dangling images) failed (retention otherwise succeeded)."
+    } else {
+        Write-Host "==> Build-cache retention: removed dangling images (docker image prune --force)."
+    }
+}
+
 # Age pass — the normal policy, always runs.
 docker builder prune --all --force --filter "until=${MaxAgeHours}h" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "docker builder prune (age pass) failed" }
@@ -174,18 +186,6 @@ if ($afterAge -gt $capBytes) {
 $after = Get-BuildCacheBytes
 Write-Host ("==> Build-cache retention: {0} -> {1} (reclaimed {2})." -f `
     (Format-Bytes $before), (Format-Bytes $after), (Format-Bytes ($before - $after)))
-
-# Dangling images only: no -a/--all and no filter, so Docker removes only
-# untagged images that no container (running or stopped) uses. Their layers
-# also pin build cache the passes above could not free. Never fatal.
-if ($PruneDanglingImages) {
-    docker image prune --force | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "docker image prune (dangling images) failed (retention otherwise succeeded)."
-    } else {
-        Write-Host "==> Build-cache retention: removed dangling images (docker image prune --force)."
-    }
-}
 
 # fstrim returns freed blocks to the vhdx free list. It does NOT shrink the
 # host file — only an elevated offline compact does (ops\compact-docker-vhdx.ps1).

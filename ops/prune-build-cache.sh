@@ -216,6 +216,17 @@ if [ "$DRY_RUN" = "1" ]; then
     exit 0
 fi
 
+# Dangling images only: no -a/--all and no filter, so Docker removes only
+# untagged images that no container (running or stopped) uses. It runs
+# before the cache passes so they see whatever it frees. Never fatal.
+if [ "$PRUNE_DANGLING" = "1" ]; then
+    if docker image prune --force > /dev/null; then
+        echo "==> Build-cache retention: removed dangling images (docker image prune --force)."
+    else
+        echo "WARNING: docker image prune (dangling images) failed (retention otherwise succeeded)." >&2
+    fi
+fi
+
 # Age pass — the normal policy, always runs.
 docker builder prune --all --force --filter "until=${MAX_AGE_HOURS}h" > /dev/null
 
@@ -251,17 +262,6 @@ fi
 
 after="$(build_cache_bytes)"
 echo "==> Build-cache retention: $(format_bytes "$before") -> $(format_bytes "$after") (reclaimed $(format_bytes $(( before - after ))))."
-
-# Dangling images only: no -a/--all and no filter, so Docker removes only
-# untagged images that no container (running or stopped) uses. Their layers
-# also pin build cache the passes above could not free. Never fatal.
-if [ "$PRUNE_DANGLING" = "1" ]; then
-    if docker image prune --force > /dev/null; then
-        echo "==> Build-cache retention: removed dangling images (docker image prune --force)."
-    else
-        echo "WARNING: docker image prune (dangling images) failed (retention otherwise succeeded)." >&2
-    fi
-fi
 
 # fstrim returns freed blocks to the vhdx free list; it does NOT shrink the
 # host file. Windows/WSL only, never fatal.

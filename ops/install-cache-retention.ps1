@@ -37,9 +37,20 @@ function Get-RegisteredScriptPath([string]$Argument) {
     } catch {
         return $null
     }
-    $m = [regex]::Match($cmd, "& '((?:[^']|'')+\.ps1)'")
+    # PowerShell treats the typographic single quotes as quotes too, and
+    # escaping doubles each of them; undo that per character.
+    $m = [regex]::Match($cmd, "& '((?:[^'‘’‚‛]|['‘’‚‛]{2})+\.ps1)'")
     if (-not $m.Success) { return $null }
-    return $m.Groups[1].Value -replace "''", "'"
+    return $m.Groups[1].Value -replace "(['‘’‚‛])\1", '$1'
+}
+
+function Test-RegisteredExecutable([string]$Execute) {
+    # Task Scheduler expands environment variables and accepts a quoted
+    # path; a bare name resolves against the machine PATH.
+    $path = [Environment]::ExpandEnvironmentVariables($Execute.Trim().Trim('"'))
+    if (-not $path) { return $false }
+    if ([IO.Path]::IsPathRooted($path)) { return [bool](Test-Path -LiteralPath $path) }
+    return [bool](Get-Command $path -CommandType Application -ErrorAction SilentlyContinue)
 }
 
 if ($Check) {
@@ -50,28 +61,42 @@ if ($Check) {
         exit 1
     }
     $problems = @()
-    $execute = $task.Actions[0].Execute
-    if (-not $execute -or -not (Test-Path -LiteralPath $execute)) {
+    $action = @($task.Actions) | Select-Object -First 1
+    $execute = if ($action) { "$($action.Execute)" } else { "" }
+    if (-not $action) {
+        $problems += "it has no action to run"
+    } elseif (-not (Test-RegisteredExecutable $execute)) {
         $problems += "its pwsh is missing: $execute (PowerShell was moved or reinstalled)"
     }
-    $registeredScript = Get-RegisteredScriptPath $task.Actions[0].Arguments
-    if (-not $registeredScript) {
+    $registeredScript = if ($action) { Get-RegisteredScriptPath "$($action.Arguments)" }
+    if ($action -and -not $registeredScript) {
         $problems += "its command names no retention script"
-    } elseif (-not (Test-Path -LiteralPath $registeredScript -PathType Leaf)) {
+    } elseif ($registeredScript -and -not (Test-Path -LiteralPath $registeredScript -PathType Leaf)) {
         $problems += "its retention script is missing: $registeredScript"
     }
     $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($info -and [int64]$info.LastTaskResult -eq $fileNotFound) {
-        $problems += "its last run ($($info.LastRunTime)) could not start: the file to run was not found (0x80070002)"
-    }
+    $last = if ($info) { [int64]$info.LastTaskResult } else { $null }
     if ($problems.Count) {
         Write-Host "'$taskName' cannot run as registered:"
         foreach ($p in $problems) { Write-Host "  - $p" }
+        if ($last -eq $fileNotFound) {
+            Write-Host "  - its last run ($($info.LastRunTime)) could not start: the file to run was not found (0x80070002)"
+        }
         Write-Host "Fix: re-run ops\install-cache-retention.ps1 from the permanent checkout; it re-registers in place."
         exit 1
     }
-    $when = if ($info) { " Last run: $($info.LastRunTime), result $($info.LastTaskResult)." } else { "" }
-    Write-Host "'$taskName' can run: $execute -> $registeredScript.$when"
+    Write-Host "'$taskName' can run: $execute -> $registeredScript"
+    # Task Scheduler keeps the last run's result until the next run, so a
+    # result recorded under an earlier registration outlives a repair.
+    if ($last -eq $fileNotFound) {
+        Write-Host "Note: its last run ($($info.LastRunTime)) could not start (0x80070002), before the files it names now existed or under an earlier registration. Confirm with: Start-ScheduledTask -TaskName '$taskName', then -Check again."
+    } elseif ($last -eq 267011) {
+        Write-Host "It has not run yet."
+    } elseif ($null -ne $last -and $last -ne 0) {
+        Write-Host "Note: its last run ($($info.LastRunTime)) ended with result $last; see $runLog"
+    } elseif ($info) {
+        Write-Host "Last run: $($info.LastRunTime), result 0."
+    }
     if (Test-Path -LiteralPath $runLog) { Write-Host "Last run's output: $runLog" }
     exit 0
 }
@@ -134,16 +159,25 @@ if (-not $execute -or -not (Test-Path -LiteralPath $execute)) {
 # a single-quoted string) so a path like C:\Users\O'Brien\... doesn't break
 # the decoded command — which would fail silently until Task Scheduler
 # actually invokes it, unattended.
-function Quote([string]$s) { "'" + ($s -replace "'", "''") + "'" }
-# The run writes its output and exit code to $runLog, and refuses in that
-# log (exit 2) when the retention script it was registered with is gone,
-# such as after the checkout moved, instead of failing with nothing written.
+function Quote([string]$s) {
+    # Doubles every character PowerShell reads as a single quote, the
+    # typographic ones included (a path like O’Brien).
+    "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($s) + "'"
+}
+# The run writes its output and result to $runLog, and refuses in that log
+# (exit 2) when the retention script it was registered with is gone, such
+# as after the checkout moved, instead of failing with nothing written. The
+# result is the script's own: it throws on a real failure (exit 1, the error
+# in the log) and only warns on a nonfatal step such as fstrim, so the last
+# native command's exit code says nothing about the run.
 $missing = "FAILED: the retention script is missing: $script. Re-run ops\install-cache-retention.ps1 from the permanent checkout."
 $inner = "New-Item -ItemType Directory -Force $(Quote $stateDir) | Out-Null; " +
     "if (-not (Test-Path -LiteralPath $(Quote $script) -PathType Leaf)) { " +
     "((Get-Date -Format o) + ' ' + $(Quote $missing)) | Out-File -Encoding utf8 $(Quote $runLog); exit 2 }; " +
-    "& $(Quote $script) -MaxAgeHours $MaxAgeHours -MaxUsedSpaceGB $MaxUsedSpaceGB -PruneDanglingImages *>&1 | Out-File -Encoding utf8 $(Quote $runLog); " +
-    "`$code = `$LASTEXITCODE; ((Get-Date -Format o) + ' exit ' + `$code) | Out-File -Append -Encoding utf8 $(Quote $runLog); exit `$code"
+    "`$code = 0; try { " +
+    "& $(Quote $script) -MaxAgeHours $MaxAgeHours -MaxUsedSpaceGB $MaxUsedSpaceGB -PruneDanglingImages *>&1 | Out-File -Encoding utf8 $(Quote $runLog) " +
+    "} catch { `$code = 1; ((Get-Date -Format o) + ' FAILED: ' + `$_) | Out-File -Append -Encoding utf8 $(Quote $runLog) }; " +
+    "((Get-Date -Format o) + ' exit ' + `$code) | Out-File -Append -Encoding utf8 $(Quote $runLog); exit `$code"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
 $action = New-ScheduledTaskAction -Execute $execute `

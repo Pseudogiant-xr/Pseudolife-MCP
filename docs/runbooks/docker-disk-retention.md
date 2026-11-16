@@ -71,7 +71,8 @@ all, which is exactly how 51.87GB piled up by 2026-07-28.
 to the registered `prune-build-cache.ps1` call (same defaults: 168h /
 20GB), with `-PruneDanglingImages`. The task is named `Pseudolife-MCP
 Docker cache retention` and runs `pwsh.exe`, by absolute path, with a
-base64-encoded command. Each run writes its output and exit code to
+base64-encoded command. Each run writes its output and result (exit 0, or
+the error the script threw and exit 1) to
 `~/.pseudolife-mcp/cache-retention-last.log`, and a run whose retention
 script is gone writes that, with the fix, and exits 2. `StartWhenAvailable` is set on
 purpose — a desktop is often off at 03:00 on a Sunday, and a run that
