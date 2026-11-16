@@ -1130,6 +1130,22 @@ fn exec_start_is_read_with_the_spacing_and_prefixes_systemd_accepts() {
         None
     );
     assert_eq!(unit_command("ExecStart=/home/u/it's tunnel run\n"), None);
+    // A later word that does not decode is never printed as a value: the
+    // profile comes from the unit's name and no --profile-dir is guessed.
+    let f = Fixture::new();
+    f.python_launcher();
+    f.write(
+        ".config/systemd/user/pseudolife-tunnel-dot.service",
+        &format!(
+            "# {OWNER}{HEX}\n[Service]\nExecStart={} tunnel run --profile \\x64ot --profile-dir /x\\ y\n",
+            escaped(&f.launcher())
+        ),
+    );
+    let line = refused(update(&f, &linux(), &Untouched));
+    assert!(
+        line.contains("(pseudolife-mcp tunnel service remove --profile dot)"),
+        "{line}"
+    );
     // A later word that does not decode leaves a known program known.
     assert_eq!(
         unit_command("ExecStart=/usr/bin/python3 /opt/tunnel\\x20runner/launch.py\n").unwrap()[0],

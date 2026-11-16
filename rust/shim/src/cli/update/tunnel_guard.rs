@@ -44,6 +44,8 @@ const OWNER: &str = "PseudolifeTunnelOwner:";
 const PREFIX: &str = "pseudolife-tunnel-";
 const ENGINE: &str = "PSEUDOLIFE_SHIM_ENGINE";
 const DEFINITION_LIMIT: u64 = 1024 * 1024;
+/// A command word after the program that did not decode as systemd would.
+const UNDECODED: &str = "\u{0}undecoded";
 const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const NATIVE_CLIENT_DOCS: &str = "https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/docs/guide/configuration.md#the-native-client";
 
@@ -139,14 +141,20 @@ struct Scan {
 }
 
 impl Registered {
+    /// A flag's value, unless it did not decode (then the caller falls back,
+    /// rather than print a command that cannot run).
     fn argument(&self, flag: &str) -> Option<&str> {
         let command = self.command.as_ref()?;
         let at = command.iter().position(|a| a == flag)?;
-        command.get(at + 1).map(String::as_str)
+        command
+            .get(at + 1)
+            .map(String::as_str)
+            .filter(|value| *value != UNDECODED)
     }
     fn profile(&self) -> String {
         let named = self
             .argument("--profile")
+            .filter(|name| plain_name(name))
             .map(str::to_owned)
             .unwrap_or_else(|| {
                 let stem = self.name.trim_start_matches('\\');
@@ -713,6 +721,12 @@ fn unit_command(text: &str) -> Option<Vec<String>> {
         }
         if !clear && words.is_empty() {
             return None;
+        }
+        if !clear {
+            // Kept in its place so later flags line up, but never read as a
+            // value (`Registered::argument`).
+            words.push(UNDECODED.to_owned());
+            continue;
         }
         words.push(word.replace("%%", "%").replace("$$", "$"));
     }
