@@ -616,7 +616,7 @@ struct Wired {
     client_reader: DuplexStream,
     fake_reader: DuplexStream,
     fake_writer: DuplexStream,
-    relayed: tokio::task::JoinHandle<std::io::Result<()>>,
+    relayed: tokio::task::JoinHandle<std::io::Result<bool>>,
 }
 fn wired(size: usize, observer: Option<Observer>, gate: Gate) -> Wired {
     let (client_writer, client_in) = duplex(size);
