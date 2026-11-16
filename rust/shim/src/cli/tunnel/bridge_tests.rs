@@ -15,6 +15,11 @@ impl std::ops::Deref for RunNonce {
         &self.0
     }
 }
+impl serde::Serialize for RunNonce {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self)
+    }
+}
 impl std::fmt::Display for RunNonce {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self)
