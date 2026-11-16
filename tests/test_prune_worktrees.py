@@ -1155,10 +1155,16 @@ def test_entries_cargo_does_not_explain_are_kept(env, targets_root):
     (target / "cand-final.exe").write_bytes(b"binary")
     (target / "tmp").mkdir()
     _backdate(target)
+    total = sum(f.stat().st_size for f in target.rglob("*") if f.is_file())
     rc, out = run_targets(env, "--apply")
     assert rc == 0, out
     assert sorted(p.name for p in target.iterdir()) == ["cand-final.exe", "mutant-src"]
-    assert "kept, not cargo's: cand-final.exe, mutant-src" in out
+    assert "kept, not cargo's (0.0 kB): cand-final.exe, mutant-src" in out
+    [line] = env.ledger_lines()
+    kept = (target / "cand-final.exe").stat().st_size + sum(
+        f.stat().st_size for f in (target / "mutant-src").rglob("*") if f.is_file())
+    assert line["bytes"] == total - kept, (
+        "only what was deleted is counted")
 
 
 def test_a_target_with_no_owner_waits_for_the_unowned_period(env, targets_root):

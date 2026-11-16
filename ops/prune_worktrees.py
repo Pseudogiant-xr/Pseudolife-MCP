@@ -909,7 +909,12 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
         v.passed.append("unowned-idle")
     v.passed.append("grace")
     if foreign:
-        v.note = (v.note or "") + "; kept, not cargo's: " + ", ".join(foreign)
+        # Only what is deleted counts: the size and the ledger leave out
+        # what stays.
+        kept = sum(scan(os.path.join(path, n)).bytes if _real_dir(os.path.join(path, n))
+                   else os.lstat(os.path.join(path, n)).st_size for n in foreign)
+        v.bytes = max(v.bytes - kept, 0)
+        v.note = (v.note or "") + f"; kept, not cargo's ({human(kept)}): " + ", ".join(foreign)
     return v
 
 
