@@ -435,6 +435,8 @@ mod posix {
         }
         assert_eq!(check_ancestors(&folder.join("token")), Ok(()));
         assert_eq!(check_path(&folder), Ok(()));
+        // Each of the 12 links counts once, by its own device and inode.
+        assert_eq!(links_followed(&folder.join("token")), Ok(12));
     }
 
     #[test]
