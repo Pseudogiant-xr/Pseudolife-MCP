@@ -5,11 +5,11 @@
 //! A record names the tunnel process and its supervisor by pid, image and
 //! argv (`runtime::record_processes`, shared with runtime pruning). A named
 //! process runs when its pid is in the process table with the recorded
-//! image. A pid the table does not hold, or holds under another image, is
-//! gone: the table lists every process of this account (on Linux any whose
-//! image or absolute argv[0] can be read), and a tunnel runs as the account
-//! that started it. On Windows a pid that exists but cannot be opened is
-//! unknown, never gone. Process creation times are not compared, so a pid
+//! image. A pid the table holds under another image, or one no process
+//! holds, is gone. A pid that exists but whose image cannot be read is
+//! unknown, never gone: on Windows the table carries it with an empty
+//! image; on Linux the table skips it and `/proc/<pid>` shows it. A pid of
+//! 0, above u32, or not a whole number is unknown too. Process creation times are not compared, so a pid
 //! reused by the same program reads as running; that only ever errs towards
 //! "running".
 use std::path::{Path, PathBuf};
@@ -145,6 +145,19 @@ fn assess(record: &Value, rows: &[Row]) -> (Liveness, Option<Why>) {
             verdict = (Liveness::Unknown, Some(why));
         }
     };
+    // An identity whose pid is present but not a whole number names a
+    // process nobody can look for: not an observation of a stopped one.
+    if [Some(record), record.get("supervisor"), record.get("target")]
+        .into_iter()
+        .flatten()
+        .any(|identity| {
+            identity
+                .get("pid")
+                .is_some_and(|pid| pid.as_u64().is_none())
+        })
+    {
+        doubt(Why::NoProcessId);
+    }
     for process in processes {
         // No process table holds pid 0 as a tunnel, nor a pid above u32.
         if process.pid == 0 || process.pid > u64::from(u32::MAX) {
@@ -181,9 +194,28 @@ fn assess(record: &Value, rows: &[Row]) -> (Liveness, Option<Why>) {
 /// pid whose image it cannot read: a relative argv[0] with an unreadable
 /// `exe` link, as for another account's or a non-dumpable process. Such a
 /// pid still has `/proc/<pid>`, so its absence from the table is no proof.
+/// Only a live user process counts: `/proc/<n>` also resolves for a thread
+/// id (`Tgid` differs), a zombie (`State: Z`) and a kernel thread (an empty
+/// cmdline), none of which can be a running tunnel. A `status` that exists
+/// but cannot be read counts, the safe direction.
 #[cfg(target_os = "linux")]
 fn skipped_by_table(pid: u64) -> bool {
-    Path::new("/proc").join(pid.to_string()).exists()
+    let base = Path::new("/proc").join(pid.to_string());
+    let status = match std::fs::read_to_string(base.join("status")) {
+        Ok(status) => status,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return base.exists(),
+    };
+    let field = |name: &str| {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .map(str::trim)
+    };
+    let process = field("Tgid:") == Some(pid.to_string().as_str());
+    let zombie = field("State:").is_some_and(|state| state.starts_with('Z'));
+    let kernel = std::fs::read(base.join("cmdline")).is_ok_and(|cmdline| cmdline.is_empty());
+    process && !zombie && !kernel
 }
 
 /// Windows adds unopenable pids to the table itself (`table`); macOS lists
@@ -274,7 +306,7 @@ mod tests {
         let reused = json!({"pid": pid, "exe": "/nonexistent/tunnel-client", "argv": ["/nonexistent/tunnel-client"]});
         assert_eq!(liveness(&reused, &rows), Liveness::Gone);
         // A pid no table holds.
-        let dead = json!({"pid": u64::from(pid) + 1, "exe": exe});
+        let dead = json!({"pid": DEAD, "exe": exe});
         assert_eq!(liveness(&dead, &rows), Liveness::Gone);
         // No process identity at all.
         // No usable process id: nothing was observed, so unknown.
@@ -287,7 +319,7 @@ mod tests {
             assert_eq!(liveness(&record, &rows), Liveness::Unknown, "{record}");
         }
         // A live supervisor keeps the record running though its child died.
-        let supervised = json!({"pid": u64::from(pid) + 1, "exe": "/nonexistent/tunnel-client",
+        let supervised = json!({"pid": DEAD, "exe": "/nonexistent/tunnel-client",
             "supervisor": {"pid": pid, "exe": exe}});
         assert_eq!(liveness(&supervised, &rows), Liveness::Running);
         // A record that kept no image is matched by pid alone.
@@ -326,6 +358,17 @@ mod tests {
         assert_eq!(assess(&record, &rows).0, Liveness::Unknown);
         // A real pid alone that no table holds is observed gone.
         assert_eq!(assess(&json!({"pid": DEAD}), &rows).0, Liveness::Gone);
+        // A present but unusable pid beside a dead one: not observed.
+        for record in [
+            json!({"pid": DEAD, "supervisor": {"pid": "x"}}),
+            json!({"pid": DEAD, "target": {"pid": -1}}),
+        ] {
+            assert_eq!(
+                assess(&record, &rows),
+                (Liveness::Unknown, Some(Why::NoProcessId)),
+                "{record}"
+            );
+        }
     }
 
     /// Linux: the process table skips a live pid whose image it cannot read
@@ -340,6 +383,24 @@ mod tests {
             assess(&record, &[]),
             (Liveness::Unknown, Some(Why::Uninspectable))
         );
+        // A thread id of this process also has /proc/<tid>, but no tunnel
+        // runs under it: gone, as observed.
+        let tid = std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+            .find(|tid| *tid != pid);
+        if let Some(tid) = tid {
+            assert_eq!(
+                assess(&json!({"pid": tid}), &[]).0,
+                Liveness::Gone,
+                "thread {tid}"
+            );
+        }
+        // A kernel thread (kthreadd, pid 2, where it is visible) is no tunnel.
+        if std::fs::read("/proc/2/cmdline").is_ok_and(|cmdline| cmdline.is_empty()) {
+            assert_eq!(assess(&json!({"pid": 2}), &[]).0, Liveness::Gone);
+        }
     }
 
     /// A pid no process table holds on any platform.

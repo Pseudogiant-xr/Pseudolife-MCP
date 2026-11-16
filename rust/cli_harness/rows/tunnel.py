@@ -60,7 +60,8 @@ def _home(rel: str) -> str:
 DIR = _home("tunnels")
 DAEMON = "{DAEMON}"  # replaced in setup by the arm's listener URL
 # A tunnel process record whose process is gone.
-DEAD_RECORD = json.dumps({"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode()
+DEAD_RECORD = json.dumps({"pid": 4294967001, "created": 0.0, "exe": "none",
+                          "argv": ["none"]}).encode()
 
 
 # --- guard: the caller's real ~/.pseudolife-mcp, by metadata only --------------
@@ -676,8 +677,9 @@ def cases() -> list[core.Case]:
         case("update-corrupt-profile", ["update", "--profile-dir", DIR], profile("alpha"),
              private("tunnels/dot.profile.json", b"{")),
         # process records: read for liveness (pid and image), never acted on.
-        # pid 1 runs another image on Linux and is no process on Windows, so
-        # both read the record as left from a tunnel that stopped.
+        # The pid fits a u32 but no host holds it (above Linux's pid_max, not
+        # a multiple of four for Windows), so every host reads the record as
+        # left from a tunnel that stopped.
         status("status-process-record", ready(), private("tunnels/dot.process.json", DEAD_RECORD)),
         status("status-process-record-text", ready(),
                private("tunnels/dot.process.json", DEAD_RECORD), json_out=False),

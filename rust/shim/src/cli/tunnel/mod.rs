@@ -1123,6 +1123,22 @@ mod tests {
         }
     }
 
+    /// An out-of-range process id reaches the update's own words.
+    #[test]
+    fn update_reports_an_out_of_range_process_id_as_unknown() {
+        let store = Store::new();
+        store.profile("dot", true);
+        store.put("dot.process.json", br#"{"pid": 0}"#);
+        let report = report_of(update(&store.0));
+        assert_eq!(report["state"], "stale", "{report}");
+        let detail = report["profiles"][0]["detail"].as_str().unwrap();
+        assert!(
+            detail.contains("names a process id out of range")
+                && !detail.contains("can be deleted"),
+            "{detail}"
+        );
+    }
+
     /// `list_refusal`'s other causes: the root is a file, the root cannot be
     /// listed (Unix, as a non-root account), and a non-UTF-8 name (Linux;
     /// APFS refuses such names).
@@ -1148,6 +1164,17 @@ mod tests {
             let refused = refused.unwrap_err();
             assert!(
                 refused.contains("cannot be listed; make it a directory your account can read"),
+                "{refused}"
+            );
+            // A parent the account cannot search: the root cannot even be
+            // inspected.
+            let parent = store.0.parent().unwrap().to_owned();
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let refused = update(&store.0);
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let refused = refused.unwrap_err();
+            assert!(
+                refused.contains("cannot be inspected; make it a directory your account can read"),
                 "{refused}"
             );
         }

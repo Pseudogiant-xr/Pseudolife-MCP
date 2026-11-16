@@ -332,8 +332,13 @@ fn tunnel_step(
                 "this update was interrupted by signal {} while the tunnel step ran; {left}; run pseudolife-mcp tunnel update again",
                 output.code - 128
             ),
+            // The runner gives 1 for a spawn failure and for a child a
+            // signal ended (no exit code); any other code is the child's.
+            None if output.code == 1 => format!(
+                "the installed launcher {launcher} could not be started, was stopped by a signal, or ended with exit 1 and printed nothing; {left}; run pseudolife-mcp tunnel update to see why"
+            ),
             None => format!(
-                "the installed launcher {launcher} could not be started, was stopped by a signal, or ended with exit {} and printed nothing; {left}; run pseudolife-mcp tunnel update to see why",
+                "the installed launcher {launcher} ended with exit {} and printed nothing; {left}; run pseudolife-mcp tunnel update to see why",
                 output.code
             ),
         };

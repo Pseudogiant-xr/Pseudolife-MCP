@@ -903,6 +903,21 @@ fn tunnel_step_fails_an_invalid_store_with_its_cause() {
         "{detail}"
     );
     assert!(!detail.contains("without a reason"), "{detail}");
+    // Another code with no output is the child's own exit.
+    let detail = detail_of(7, "");
+    assert!(
+        detail.contains("ended with exit 7 and printed nothing") && !detail.contains("signal"),
+        "{detail}"
+    );
+    // 128+n: this update itself took signal n while the step ran.
+    #[cfg(unix)]
+    {
+        let detail = detail_of(130, "");
+        assert!(
+            detail.contains("this update was interrupted by signal 2 while the tunnel step ran"),
+            "{detail}"
+        );
+    }
     // A last line too long to show is not "printed nothing".
     let long: &'static str = Box::leak("x".repeat(2000).into_boxed_str());
     let detail = detail_of(2, long);

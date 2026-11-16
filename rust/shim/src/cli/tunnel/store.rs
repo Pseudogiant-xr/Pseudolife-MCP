@@ -477,9 +477,9 @@ pub(super) fn invalid_profile_entry(root: &Path) -> Option<PathBuf> {
 /// on, with its fix: a root that cannot be inspected, is not a directory or
 /// cannot be listed; a file name that is not UTF-8 (or, on Windows, not
 /// ASCII); a `*.profile.json` that is not a regular file. Each entry named
-/// blocks `list`; with several, fixing one may reveal the next. With none,
-/// the deferral came from the owner-only permission check itself (Windows:
-/// the directory's access control could not be read).
+/// blocks `list`; with several, fixing one may reveal the next. The
+/// ownership check runs first, as in `list`, so the closing sentence is
+/// reached only if the directory changed between the two reads.
 pub(super) fn list_refusal(root: &Path) -> String {
     let root_shown = root.display();
     let keep = "keeping every .key and .process.json file, then retry";
