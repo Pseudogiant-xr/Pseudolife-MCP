@@ -26,8 +26,11 @@ reads `serve status --json` back and reports the state it finds. Only
 argument spellings outside the canonical form defer (below).
 
 The question itself (stdin a terminal) is not cased here: the row's stdin
-is never a terminal. The Rust tests in `rust/shim/src/cli/expose/tests.rs`
-drive it, and every outcome after the change, through a fake host.
+is a pipe, or the null device in `off-null-stdin` and
+`tailscale-null-stdin`. The Rust tests in `rust/shim/src/cli/expose/tests.rs`
+drive the question's outcomes, and every outcome after the change, through
+a fake host (`Fake`); what they do not reach is listed under "Declared
+divergences".
 
 ## The stand-in `tailscale` (no case can reach the real one)
 
@@ -157,7 +160,11 @@ has to work, not match Python):
   removed) is named and nothing is changed (the oracle goes ahead).
 - On Windows, stdin redirected from `NUL` is no terminal (the oracle's
   `isatty()` says it is, then reads end of input as "declined"): without
-  `--yes` the run refuses naming `--yes`.
+  `--yes` the run refuses naming `--yes`. Cased: `off-null-stdin` and
+  `tailscale-null-stdin`, recorded from the candidate (on Linux the null
+  device is no terminal to either arm).
+- A forward put in place (by `expose tailscale`) or removed (by `off`)
+  while the question waited is the goal met: one line, exit 0.
 - A serve interrupted by Ctrl-C with nothing on the port says it was
   interrupted (exit 130), not that tailscale refused it.
 - Help at a width other than 80 columns is argparse's 80-column text
@@ -168,27 +175,55 @@ has to work, not match Python):
   (timed out after 30s)`). On POSIX a timed-out read is answered rather
   than deferred; on both OSes, after the kill, the child gets up to 2 s to
   exit and its pipes up to 2 s more.
-- `off` whose read-back finds something other than this daemon's forward
-  on the port reports `removed: this daemon's forward on tailnet port N`
-  and warns, naming what serves the port now.
+- `off` judges its removal by the port's handler itself: while that is
+  still a forward to `127.0.0.1:N` (Funnel switched on meanwhile reads as
+  someone else's port, but would hide it), it reports that the forward is
+  still in place (exit 4). Once it is gone and something else serves the
+  port, it reports `removed: this daemon's forward on tailnet port N` and
+  warns, naming what serves the port now.
 - From the change on, Ctrl-C is held: the `tailscale` child receives the
   same interrupt, and the state read back is still reported, with a
   warning that the run was interrupted.
 - A write to stdout or stderr that fails exits 1 (never the deferral
-  line, which would claim nothing ran). Not cased.
+  line, which would claim nothing ran).
 
-Apart from the wording, these shapes are not cased in this row (they need
-a terminal, a timing, or a stand-in behaviour the oracle reacts to
-differently); the Rust tests in `rust/shim/src/cli/expose/` cover each.
+What covers these. Cased in this row: the wording (`expose-native-wording`),
+the permission read-back (`*-permission`), the null device (`*-null-stdin`)
+and `help-width`. The Rust tests in `rust/shim/src/cli/expose/` drive every
+other outcome through `Fake`, and the runner's timeout through real
+children: `sh` on POSIX, and on Windows the test binary re-executed as a
+wedged child (`a_wedged_program_on_windows_is_killed_reaped_and_reported`).
+Not covered by any committed test, because `Fake` stands in for them:
+
+- the real terminal question (`Real::ask`): its end of input, Ctrl-C and
+  the 200 ms grace. A pseudo-terminal run in WSL on 16 November 2026
+  showed n and end of input exit 2 and Ctrl-C exit 130, all three with no
+  change, and y going ahead.
+- `Real::interactive` on a Windows console: only the `NUL` case is cased.
+- the write-failure exit 1.
+
+Declared limits:
+
+- A Ctrl-C after "y", during the re-read of the port (a few milliseconds),
+  is held by the interrupt listener rather than ending the run: the serve
+  then goes ahead unless the `tailscale` child stopped on the same
+  interrupt.
+- Only the direct `tailscale` child is killed at the timeout; a wrapper
+  script's own children are not.
 
 ## Hosted CI and goldens
 
-The row runs live on both OSes in the `w1c-connection` shard, and its
-mutants in the `expose-0` source-mutant shard. Every case is built from
-fixed bytes, so all are golden cases. Both goldens bind `c6c3b6d4` (git),
-the commit of the Python fixes of 2026-11-13 (the lookup, unreadable
-output, addresses): Windows from this checkout (CPython 3.11.9), Linux from
-a WSL Ubuntu clone of the branch (CPython 3.11.15).
+The row's goldens are replayed on both OSes in the `w1c-connection` shard,
+and its mutants run against the oracle in the `expose-0` source-mutant
+shard. Every case is built from fixed bytes, so all are golden cases. The
+oracle-recorded cases bind `c6c3b6d4` (git), the commit of the Python fixes
+of 2026-11-13 (the lookup, unreadable output, addresses): Windows from this
+checkout (CPython 3.11.9), Linux from a WSL Ubuntu clone of the branch
+(CPython 3.11.15). The cases that make the change, `help-width`,
+`int-digits` and the null-device cases were recorded from the native
+client with `--record-candidate --write`; each golden's
+`recorded_from_candidate` names the commit and the binary's SHA-256 per
+case.
 
 Local evidence (2026-11-13, after the Python fixes): Windows workstation,
 153/153 live and golden and all 8 mutants caught; WSL Ubuntu, 153/153 live
@@ -199,3 +234,9 @@ converted cases (lookup, unreadable output, addresses, ports) differed in
 100-bracket boundary. Before the port, the row's first 133 cases against
 the deferring binary: 127 differed, and the 6 that matched were declared
 deferrals. Hosted runs are CI's.
+
+Local evidence (16 November 2026, the native change): WSL Ubuntu and the
+Windows dev VM. Live against the oracle, every case matches but the
+declared differences that are not wording (`help-width`, the two
+`*-permission` cases, and on Windows the two `*-null-stdin` cases); each
+golden replays every case.

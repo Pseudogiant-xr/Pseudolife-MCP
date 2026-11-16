@@ -447,16 +447,44 @@ fn a_forward_replaced_while_off_asks_is_never_removed() {
     );
     assert!(fake.mutations().is_empty());
     assert_eq!(fake.serve_state(), theirs);
-    // Removed by someone else meanwhile: nothing to do, and nothing done.
+    // Removed by someone else meanwhile: the goal is met, in one line.
     let mut fake = Fake::ours().at_terminal(Answer::Yes);
     fake.meanwhile = Some(json!({}));
-    let (_, stderr, code) = drive(&fake, &["off", "--port", PORT]);
-    assert_eq!(code, EXIT_REFUSED);
+    let (stdout, stderr, code) = drive(&fake, &["off", "--port", PORT]);
+    assert_eq!((code, stderr.as_str()), (EXIT_OK, ""));
     assert!(
-        stderr.contains("it now serves nothing; nothing changed"),
-        "{stderr}"
+        stdout.ends_with("not exposed: nothing serves tailnet port 8443\n"),
+        "{stdout}"
     );
     assert!(fake.mutations().is_empty());
+}
+
+#[test]
+fn a_forward_put_in_place_while_the_question_waits_is_already_exposed() {
+    let mut fake = Fake::free().at_terminal(Answer::Yes);
+    fake.meanwhile = Some(json!({"TCP": {PORT: {"TCPForward": "127.0.0.1:8443"}}}));
+    let (stdout, stderr, code) = drive(&fake, &["tailscale", "--port", PORT]);
+    assert_eq!((code, stderr.as_str()), (EXIT_OK, ""));
+    assert_eq!(stdout, format!("already exposed: clients use {URL}\n"));
+    assert!(fake.mutations().is_empty());
+}
+
+#[test]
+fn a_timed_out_serve_that_printed_no_link_names_the_check_to_make() {
+    let mut fake = Fake::free();
+    fake.bg = Step {
+        code: 124,
+        err: "timed out after 30s".into(),
+        timed_out: true,
+        effect: Effect::Nothing,
+        ..Step::default()
+    };
+    let (_, stderr, code) = drive(&fake, &["tailscale", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_REFUSED);
+    assert_eq!(
+        stderr,
+        "expose: `tailscale serve` did not finish within 30s; nothing changed. Check that Tailscale answers (`tailscale status`), then rerun `pseudolife-mcp expose tailscale --port 8443`\n"
+    );
 }
 
 #[test]
@@ -541,7 +569,7 @@ fn a_serve_that_comes_up_as_something_else_is_named_and_left_alone() {
     assert_eq!(code, EXIT_UNDONE);
     assert_eq!(
         stderr,
-        "expose: after `tailscale serve` (exit 0), tailnet port 8443 serves a TCP forward to 127.0.0.1:8443, TLS terminated for node.example.com, not the forward this command asked for; left alone. Check `tailscale serve status`, and remove it with `tailscale serve --tcp=8443 off` if you do not want it\n"
+        "expose: after `tailscale serve` (exit 0), tailnet port 8443 serves a TCP forward to 127.0.0.1:8443, TLS terminated for node.example.com, not the forward this command asked for; left alone. Check `tailscale serve status`\n"
     );
     assert_eq!(fake.mutations(), vec![words(&SERVE)], "no removal");
 }
@@ -722,7 +750,7 @@ fn a_timed_out_serve_names_what_it_asked_for_and_changes_nothing() {
     assert_eq!(code, EXIT_REFUSED);
     assert_eq!(
         stderr,
-        "expose: `tailscale serve` did not finish within 30s (https://login.example.com/f/serve?node=n1); nothing changed. If it printed a link, open it to enable Serve for this tailnet, then rerun `pseudolife-mcp expose tailscale --port 8443`\n"
+        "expose: `tailscale serve` did not finish within 30s (https://login.example.com/f/serve?node=n1); nothing changed. Open that link to enable Serve for this tailnet, then rerun `pseudolife-mcp expose tailscale --port 8443`\n"
     );
     assert_eq!(fake.calls(), reads_then(&SERVE));
     assert_eq!(fake.serve_state(), json!({}));
@@ -894,7 +922,7 @@ fn off_that_does_not_remove_the_forward_says_so() {
         assert_eq!(
             stderr,
             format!(
-                "expose: tailscale did not remove the forward ({why}); it is still in place, so nothing changed\n"
+                "expose: tailscale did not remove the forward ({why}); it is still in place, so nothing changed: check `tailscale serve status`, then rerun this command or run the plan's `tailscale serve` command yourself\n"
             )
         );
         assert_eq!(
@@ -902,6 +930,41 @@ fn off_that_does_not_remove_the_forward_says_so() {
             json!({"TCP": {PORT: {"TCPForward": "127.0.0.1:8443"}}})
         );
     }
+}
+
+#[test]
+fn off_never_claims_a_removal_that_funnel_on_the_port_hides() {
+    // The removal did nothing, and Funnel was switched on meanwhile: the
+    // port reads as foreign, but this daemon's forward is still there.
+    let mut fake = Fake::ours();
+    fake.off.effect = Effect::Nothing;
+    let still = json!({"TCP": {PORT: {"TCPForward": "127.0.0.1:8443"}},
+                       "AllowFunnel": {"n.example.com:8443": true}});
+    fake.meanwhile_off = Some(still.clone());
+    let (stdout, stderr, code) = drive(&fake, &["off", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_REFUSED, "{stdout}{stderr}");
+    assert!(!stdout.contains("removed"), "{stdout}");
+    assert!(
+        stderr.starts_with("expose: tailscale did not remove the forward (exit 0)"),
+        "{stderr}"
+    );
+    assert_eq!(fake.serve_state(), still);
+}
+
+#[test]
+fn off_reports_the_removal_and_names_what_serves_the_port_after_it() {
+    let mut fake = Fake::ours();
+    fake.meanwhile_off = Some(json!({"TCP": {PORT: {"HTTPS": true}}}));
+    let (stdout, stderr, code) = drive(&fake, &["off", "--port", PORT, "--yes"]);
+    assert_eq!(code, EXIT_OK);
+    assert!(
+        stdout.ends_with("removed: this daemon's forward on tailnet port 8443\n"),
+        "{stdout}"
+    );
+    assert_eq!(
+        stderr,
+        "tailnet port 8443 now serves HTTPS, which this command did not create; left alone\n"
+    );
 }
 
 #[test]

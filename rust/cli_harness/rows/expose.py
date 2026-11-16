@@ -233,7 +233,8 @@ NATIVE_WORDING = [
      b"the serve did not take (`tailscale serve` exited 0, but the serve status does not "
      b"show the forward); nothing changed. Check `tailscale serve status`, then rerun"),
     (re.compile(rb"(tailscale did not remove the forward \([^\r\n\"]*\))(?=[\r\n\"])"),
-     rb"\1; it is still in place, so nothing changed"),
+     rb"\1; it is still in place, so nothing changed: check `tailscale serve status`, then "
+     rb"rerun this command or run the plan's `tailscale serve` command yourself"),
 ]
 
 
@@ -315,7 +316,7 @@ def _loopback_only(value) -> bool:
 
 def case(case_id: str, argv: list[str], *, scenario_=None, daemon=None, port=None,
          rules=(), env=None, extra=None, platforms=("windows", "linux"), timeout=40.0,
-         expect_output=False) -> Case:
+         expect_output=False, null_stdin_stdout=False) -> Case:
     full = ["expose", *argv]
     if not _names_port(full):
         raise AssertionError(f"{case_id}: a tailscale case must name its port")
@@ -327,7 +328,7 @@ def case(case_id: str, argv: list[str], *, scenario_=None, daemon=None, port=Non
     return Case(case_id, full, env={**ENV, **(env or {})}, rules=rules,
                 setup=_scenario_setup(scenario_, port, extra), after=_after,
                 platforms=platforms, timeout=timeout, expect_output=expect_output,
-                daemon=daemon, programs=PROGRAMS)
+                daemon=daemon, programs=PROGRAMS, null_stdin_stdout=null_stdin_stdout)
 
 
 def at(port_value: str = "{DAEMON_PORT}") -> list[str]:
@@ -532,6 +533,10 @@ def cases() -> list[Case]:
     add(case("off-no-terminal", ["off"], scenario_=s(serve=OURS)))
     add(case("off-no-terminal-json", ["off", "--json", "--port", "8443"], port="8443",
              scenario_=s(serve=OURS)))
+    # stdin and stdout the null device: on Windows NUL is a character device
+    # but no console, so the native client refuses naming --yes (the oracle's
+    # isatty() says terminal, then reads end of input as declined).
+    add(case("off-null-stdin", ["off"], scenario_=s(serve=OURS), null_stdin_stdout=True))
     # off: the change, read back.
     add(case("off-yes", ["off", "--yes"], scenario_=s(serve=OURS)))
     add(case("off-yes-json", ["off", "--yes", "--json"], scenario_=s(serve=json.dumps(
@@ -612,6 +617,8 @@ def cases() -> list[Case]:
     # tailscale: the change, read back, and the probe through the address
     # (loopback here, so it reaches the fixture daemon: the same bank).
     add(case("tailscale-yes", ["tailscale", *at(), "--yes"], daemon=healthy, scenario_=s()))
+    add(case("tailscale-null-stdin", ["tailscale", *at()], daemon=healthy, scenario_=s(),
+             null_stdin_stdout=True))
     add(case("tailscale-yes-json", ["tailscale", *at(), "--yes", "--json"],
              daemon=healthy, scenario_=s()))
     add(case("tailscale-yes-bankless", ["tailscale", *at(), "--yes"],

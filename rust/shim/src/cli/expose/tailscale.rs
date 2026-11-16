@@ -495,6 +495,15 @@ fn funnelled(config: Option<&Dict>, port: u16) -> bool {
         })
 }
 
+/// The background handler on the port is still a forward to
+/// `127.0.0.1:<port>`, whatever else is set on it or on the port (Funnel,
+/// TLS): what `serve --tcp=N off` removes, so what a removal is judged by.
+pub(super) fn still_forwards(config: &Dict, port: u16) -> bool {
+    matches!(handler(Some(config), port), Some(J::Dict(handler))
+        if pyjson::get(handler, "TCPForward").and_then(J::as_str)
+            == Some(format!("127.0.0.1:{port}").as_str()))
+}
+
 /// `_port_state(config, port)`, the detail as code units.
 pub(super) fn port_state(config: &Dict, port: u16) -> (State, Option<Vec<u16>>) {
     let sessions: Vec<&J> = dict(pyjson::get(config, "Foreground"))
@@ -662,6 +671,95 @@ mod tests {
     fn state(text: &str, port: u16) -> (State, Option<String>) {
         let (state, detail) = port_state(&read(text), port);
         (state, detail.map(|units| String::from_utf16_lossy(&units)))
+    }
+
+    /// Re-executed by the Windows timeout test: run with its own full name
+    /// as the filter it prints its process id and wedges; in any other run
+    /// (a plain `--ignored` run included) it returns at once.
+    #[test]
+    #[ignore = "a helper the Windows timeout test re-executes"]
+    fn wedge_helper() {
+        use std::io::Write;
+        if std::env::args().any(|arg| arg == WEDGE_HELPER) {
+            println!("wedged pid={}", std::process::id());
+            let _ = std::io::stdout().flush();
+            std::thread::sleep(Duration::from_secs(120));
+        }
+    }
+
+    const WEDGE_HELPER: &str = "cli::expose::tailscale::tests::wedge_helper";
+
+    /// The Windows kill path: a child still running at the bound (this test
+    /// binary, re-executed as [`wedge_helper`]; a console program that
+    /// shares this console, so no window opens) is killed and reaped, what
+    /// it printed is kept, and the answer is the timeout's.
+    #[cfg(windows)]
+    #[allow(unsafe_code)]
+    #[tokio::test]
+    async fn a_wedged_program_on_windows_is_killed_reaped_and_reported() {
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+        };
+        let me = Binary {
+            path: std::env::current_exe().expect("the test binary"),
+            shown: "the test binary".into(),
+        };
+        let started = std::time::Instant::now();
+        let ran = run_within(
+            &me,
+            &[
+                WEDGE_HELPER,
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ],
+            Duration::from_secs(10),
+        )
+        .await;
+        let elapsed = started.elapsed();
+        assert!(ran.timed_out, "{ran:?}");
+        assert!(!ran.succeeded());
+        assert_eq!((ran.code, ran.err.as_str()), (124, "timed out after 10s"));
+        // The bound, then at most 2 s to reap and 2 s to drain.
+        assert!(elapsed < Duration::from_secs(16), "{elapsed:?}");
+        let pid: u32 = ran
+            .out
+            .split("wedged pid=")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|pid| pid.parse().ok())
+            .unwrap_or_else(|| panic!("the helper printed its pid: {ran:?}"));
+        // SAFETY: a process handle opened here and closed before returning.
+        let gone = unsafe {
+            let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+            if handle.is_null() {
+                true
+            } else {
+                let waited = WaitForSingleObject(handle, 2000);
+                CloseHandle(handle);
+                waited == WAIT_OBJECT_0
+            }
+        };
+        assert!(gone, "the wedged child {pid} is still running");
+    }
+
+    #[test]
+    fn a_forward_is_judged_by_its_handler_whatever_else_is_on_the_port() {
+        let config = read(
+            r#"{"TCP": {"8765": {"TCPForward": "127.0.0.1:8765", "TerminateTLS": "n"}}, "AllowFunnel": {"n:8765": true}}"#,
+        );
+        assert!(still_forwards(&config, 8765));
+        assert!(!still_forwards(
+            &read(r#"{"TCP": {"8765": {"HTTPS": true}}}"#),
+            8765
+        ));
+        assert!(!still_forwards(
+            &read(r#"{"TCP": {"9": {"TCPForward": "127.0.0.1:8765"}}}"#),
+            8765
+        ));
+        assert!(!still_forwards(&read("{}"), 8765));
     }
 
     #[test]

@@ -430,7 +430,7 @@ async fn consent(
     args: &Args,
     mut report: Report,
     question: &str,
-    (binary, expected): (&Binary, State),
+    (binary, expected, url): (&Binary, State, Option<&str>),
 ) -> Result<Report, Out> {
     if args.yes {
         return Ok(report);
@@ -443,25 +443,25 @@ async fn consent(
     if !host.show(&stdout, &stderr) {
         return Err(report.fail_text(
             EXIT_FAILED,
-            "could not write the plan to the terminal, so nothing changed",
+            "could not write the plan to the terminal, so nothing changed: rerun with stdout and stderr open, or pass --yes to skip the question",
         ));
     }
     match host.ask(question).await {
-        Answer::Yes => unchanged(host, binary, args.port, expected, report).await,
+        Answer::Yes => unchanged(host, binary, (args.port, expected, url), report).await,
         Answer::No => Err(report.fail_text(EXIT_USAGE, NOT_CONFIRMED)),
         Answer::Interrupted => Err(report.fail_text(EXIT_INTERRUPTED, INTERRUPTED)),
     }
 }
 
-/// The port read again after the question: unchanged goes ahead; anything
-/// else (another serve put there meanwhile, or this one removed) is named
-/// and nothing is changed.
+/// The port read again after the question: unchanged goes ahead; already
+/// in the state asked for (this daemon's forward put there, or removed,
+/// meanwhile) is the goal met, in one line; anything else is named and
+/// nothing is changed.
 async fn unchanged(
     host: &impl Host,
     binary: &Binary,
-    port: u16,
-    expected: State,
-    report: Report,
+    (port, expected, url): (u16, State, Option<&str>),
+    mut report: Report,
 ) -> Result<Report, Out> {
     let (state, detail) = match read_back(host, binary, port).await {
         Ok(now) => now,
@@ -469,13 +469,27 @@ async fn unchanged(
             return Err(report.fail_text(
                 EXIT_REFUSED,
                 &format!(
-                    "could not read the serve state again after the answer ({why}); nothing changed"
+                    "could not read the serve state again after the answer ({why}); nothing changed: check `tailscale serve status`, then rerun"
                 ),
             ));
         }
     };
     if state == expected {
         return Ok(report);
+    }
+    match (expected, state, url) {
+        (State::None, State::Ours, Some(url)) => {
+            report.state = Some("already_exposed");
+            report.url = Some(url.to_owned());
+            report.say_text(&format!("already exposed: clients use {url}"));
+            return Err(report.finish(EXIT_OK));
+        }
+        (State::Ours, State::None, _) => {
+            report.state = Some("not_exposed");
+            report.say_text(&format!("not exposed: nothing serves tailnet port {port}"));
+            return Err(report.finish(EXIT_OK));
+        }
+        _ => {}
     }
     let now = match state {
         State::None => units("nothing"),
@@ -658,9 +672,7 @@ async fn serve(
                     ran(&proc)
                 )),
                 detail.unwrap_or_default(),
-                units(&format!(
-                    ", not the forward this command asked for; left alone. Check `tailscale serve status`, and remove it with `tailscale serve --tcp={port} off` if you do not want it"
-                )),
+                units(", not the forward this command asked for; left alone. Check `tailscale serve status`"),
             ]
             .concat();
             return report.fail(EXIT_UNDONE, &line);
@@ -678,11 +690,20 @@ async fn serve(
             );
         }
         (false, State::None) if proc.timed_out => {
-            let said = printed(&proc).map_or_else(String::new, |said| format!(" ({said})"));
+            let said = printed(&proc);
+            let step = if said
+                .as_deref()
+                .is_some_and(|said| said.starts_with("https://"))
+            {
+                "Open that link to enable Serve for this tailnet"
+            } else {
+                "Check that Tailscale answers (`tailscale status`)"
+            };
+            let said = said.map_or_else(String::new, |said| format!(" ({said})"));
             return report.fail_text(
                 EXIT_REFUSED,
                 &format!(
-                    "`tailscale serve` did not finish within {}s{said}; nothing changed. If it printed a link, open it to enable Serve for this tailnet, then rerun `pseudolife-mcp expose tailscale --port {port}`",
+                    "`tailscale serve` did not finish within {}s{said}; nothing changed. {step}, then rerun `pseudolife-mcp expose tailscale --port {port}`",
                     tailscale::TIMEOUT.as_secs()
                 ),
             );
@@ -815,7 +836,17 @@ async fn probe(host: &impl Host, report: &mut Report, url: &str, bank: &J) {
 async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report) -> Out {
     host.hold_interrupts();
     let proc = host.run(binary, &words(&off_words(port))).await;
-    let after = read_back(host, binary, port).await;
+    // Judged by the handler itself: Funnel switched on meanwhile reads as
+    // someone else's port, but would hide a forward still in place.
+    let after = tailscale::serve_config(host, binary).await.map(|config| {
+        let (state, detail) = tailscale::port_state(&config, port);
+        let state = if tailscale::still_forwards(&config, port) {
+            State::Ours
+        } else {
+            state
+        };
+        (state, detail)
+    });
     note_interrupt(host, &mut report);
     match after {
         Err(why) => report.fail_text(
@@ -831,7 +862,7 @@ async fn remove(host: &impl Host, binary: &Binary, port: u16, mut report: Report
         Ok((State::Ours, _)) => report.fail_text(
             EXIT_REFUSED,
             &format!(
-                "tailscale did not remove the forward ({}); it is still in place, so nothing changed",
+                "tailscale did not remove the forward ({}); it is still in place, so nothing changed: check `tailscale serve status`, then rerun this command or run the plan's `tailscale serve` command yourself",
                 ran(&proc)
             ),
         ),
@@ -951,7 +982,15 @@ async fn expose(host: &impl Host, args: &Args, mut report: Report) -> Out {
     report.say_text(&format!("  run      tailscale {}", serve_args.join(" ")));
     report.say_text(&format!("  clients  {url}"));
     let question = format!("expose this daemon on the tailnet at {url}? [y/N] ");
-    let report = match consent(host, args, report, &question, (&binary, State::None)).await {
+    let report = match consent(
+        host,
+        args,
+        report,
+        &question,
+        (&binary, State::None, Some(&url)),
+    )
+    .await
+    {
         Ok(report) => report,
         Err(out) => return out,
     };
@@ -998,11 +1037,11 @@ async fn off(host: &impl Host, args: &Args, mut report: Report) -> Out {
             report.say_text("plan:");
             report.say_text(&format!("  run      tailscale {}", off_args.join(" ")));
             let question = format!("remove the tailnet forward on port {port}? [y/N] ");
-            let report = match consent(host, args, report, &question, (&binary, State::Ours)).await
-            {
-                Ok(report) => report,
-                Err(out) => return out,
-            };
+            let report =
+                match consent(host, args, report, &question, (&binary, State::Ours, None)).await {
+                    Ok(report) => report,
+                    Err(out) => return out,
+                };
             remove(host, &binary, port, report).await
         }
     }
