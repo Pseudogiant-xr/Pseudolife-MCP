@@ -528,15 +528,11 @@ fn permission_refused(proc: &Proc) -> bool {
     !proc.succeeded() && !proc.timed_out && pattern.is_match(&proc.err)
 }
 
-/// `_permission_fix()`: what lets this user change the serve config.
+/// `_permission_fix()`: what lets this user change the serve config, worded
+/// once for `expose` and `maintainer setup`
+/// ([`crate::cli::maintainer::setup::tailscale_permission_fix`]).
 fn permission_fix() -> &'static str {
-    if cfg!(windows) {
-        "run it as the Windows user logged in to Tailscale, or from an elevated (administrator) shell"
-    } else if cfg!(target_os = "macos") {
-        "run it as the macOS user logged in to the Tailscale app"
-    } else {
-        "grant your user operator rights once with `sudo tailscale set --operator=$USER`, or run this as root"
-    }
+    crate::cli::maintainer::setup::tailscale_permission_fix(std::env::consts::OS)
 }
 
 /// Said only once the serve state was read back unchanged.

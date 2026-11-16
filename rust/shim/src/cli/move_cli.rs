@@ -31,7 +31,7 @@ const HELP: &str = concat!(
     "\n",
     "options:\n",
     "  -h, --help            show this help message and exit\n",
-    "  --to SSH-TARGET       the target host as ssh takes it (root@box, or a\n",
+    "  --to SSH-TARGET       the target host as ssh takes it (user@box, or a\n",
     "                        ~/.ssh/config alias)\n",
     "  --target-checkout PATH\n",
     "                        the checkout on the target (default ~/src/Pseudolife-\n",
@@ -60,7 +60,7 @@ const HELP: &str = concat!(
     "  --json                one JSON report on stdout\n",
 );
 const REQUIRED: &str = "pseudolife-mcp move: error: the following arguments are required: --to\n";
-const BAD_TO: &str = "move: --to takes an ssh target such as root@box or a ~/.ssh/config alias\n";
+const BAD_TO: &str = "move: --to takes an ssh target such as user@box or a ~/.ssh/config alias\n";
 const BAD_URL: &str = "move: --target-url must be an http(s) origin such as http://100.64.0.2:8765 \
                        (no path, query or credentials)\n";
 const BAD_CHECKOUT: &str = "move: --target-checkout holds a control character\n";

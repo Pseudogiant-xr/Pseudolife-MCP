@@ -205,6 +205,26 @@ pub(super) async fn off(ts: &Tailnet, https: u16) -> bool {
         .code
         == 0
 }
+/// The fix for a user Tailscale does not let change its serve config, by OS.
+/// Forwarding a port needs neither root nor an Administrator console
+/// (Tailscale's Serve documentation, "Limitations"); what it needs is a user
+/// Tailscale trusts. On Linux that is its operator, a grant made once with
+/// one privileged command; on Windows and macOS it is the account that owns
+/// the Tailscale configuration, and there is no grant to give another one.
+/// The one wording for `maintainer setup` and `expose` (which calls it as
+/// [`super::tailscale_permission_fix`]), keyed by `std::env::consts::OS` so
+/// either platform's text is testable anywhere.
+pub(crate) fn permission_fix(os: &str) -> &'static str {
+    match os {
+        "windows" => {
+            "run it as the Windows user that owns this device's Tailscale configuration (the one signed in to the Tailscale app, or the one that turned on unattended mode)"
+        }
+        "macos" => "run it as the macOS user logged in to the Tailscale app",
+        _ => {
+            "make this user Tailscale's operator once with `sudo tailscale set --operator=$USER` (the one privileged step; after it this user changes serves without sudo)"
+        }
+    }
+}
 pub(super) async fn serve(ts: &Tailnet, https: u16, port: u16) -> Result<()> {
     let output = call(
         &ts.binary,
@@ -216,21 +236,20 @@ pub(super) async fn serve(ts: &Tailnet, https: u16, port: u16) -> Result<()> {
         ],
     )
     .await;
+    // Wordings of a refused change. "must be root/admin" is matched only so
+    // a refusal worded that way is still recognised as a permission one: it
+    // appears in the line only as Tailscale's own quoted detail, and the fix
+    // given after it names no root step, because forwarding a port needs
+    // none (see `permission_fix`).
     let permission = regex::Regex::new(
         r"(?i)access denied|permission denied|not permitted|--operator\b|unauthori[sz]ed|must be (?:root|admin)",
     )
     .unwrap();
     if output.code != 0 && permission.is_match(&output.err) {
-        let fix = if cfg!(windows) {
-            "run it as the Windows user logged in to Tailscale, or from an elevated (administrator) shell"
-        } else if cfg!(target_os = "macos") {
-            "run it as the macOS user logged in to the Tailscale app"
-        } else {
-            "grant your user operator rights once with `sudo tailscale set --operator=$USER`, or run this as root"
-        };
         return Err(Error::refused(format!(
-            "tailscale refused the change for this user ({}): {fix}",
-            output.detail()
+            "tailscale refused the change for this user ({}): {}",
+            output.detail(),
+            permission_fix(std::env::consts::OS)
         )));
     }
     let after=configuration(ts).await.map_err(|e|Error::new(format!("the serve command ran but its result could not be read ({e}): check `tailscale serve status`"),5))?;
@@ -277,6 +296,23 @@ pub(super) async fn serve(ts: &Tailnet, https: u16, port: u16) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_refused_serve_names_the_least_privilege_fix_and_never_root() {
+        let linux = permission_fix("linux");
+        assert!(
+            linux.contains("`sudo tailscale set --operator=$USER`"),
+            "{linux}"
+        );
+        assert!(linux.contains("once"), "{linux}");
+        for os in ["linux", "windows", "macos", "freebsd"] {
+            let fix = permission_fix(os).to_lowercase();
+            for word in ["as root", "elevated", "administrator"] {
+                assert!(!fix.contains(word), "{os}: {fix}");
+            }
+        }
+        assert!(permission_fix("windows").contains("owns this device's Tailscale configuration"));
+        assert!(permission_fix("macos").contains("logged in to the Tailscale app"));
+    }
     #[test]
     fn foreign_serves_and_public_funnel_are_never_owned() {
         let ours = json!({"TCP":{"8443":{"HTTPS":true}},"Web":{"node.invalid:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8765"}}}}});
