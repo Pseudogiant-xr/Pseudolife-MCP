@@ -262,26 +262,12 @@ fn child_command(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(window_flag());
+        // CREATE_NO_WINDOW only when this process has no console: the
+        // vendor starts the bridge with pipes only, and a console child of a
+        // console-less parent would open a window.
+        command.creation_flags(crate::cli::restore_cli::child_window::child_window_flag());
     }
     command
-}
-
-/// `CREATE_NO_WINDOW` for the child when this process has no console (the
-/// vendor starts the bridge with pipes only), so the console child never
-/// opens a window; with a console the child shares it. The pattern of
-/// `restore_cli/child_window.rs`, kept here until that helper is shared.
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn window_flag() -> u32 {
-    use windows_sys::Win32::System::Console::GetConsoleProcessList;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut members = [0_u32; 1];
-    // SAFETY: `members` is a writable buffer of the length passed; the call
-    // writes at most that many process ids and returns the console's
-    // process count (0 when no console is attached, or on failure).
-    let count = unsafe { GetConsoleProcessList(members.as_mut_ptr(), members.len() as u32) };
-    if count == 0 { CREATE_NO_WINDOW } else { 0 }
 }
 
 pub(super) fn run(values: &[OsString]) -> ExitCode {
