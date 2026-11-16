@@ -69,10 +69,19 @@ impl Drop for Store {
     }
 }
 
-/// Counts the reporter's lines instead of printing them.
-static REPORTED: Mutex<usize> = Mutex::new(0);
+/// A reporter that keeps its lines instead of printing them.
 fn counting_reporter() -> Reporter {
-    Reporter::new(|_| *REPORTED.lock().unwrap() += 1)
+    recording_reporter().0
+}
+fn recording_reporter() -> (Reporter, Arc<Mutex<Vec<String>>>) {
+    let said = Arc::new(Mutex::new(Vec::new()));
+    let kept = said.clone();
+    (
+        Reporter::new(Arc::new(move |line: &str| {
+            kept.lock().unwrap().push(line.to_owned())
+        })),
+        said,
+    )
 }
 
 /// A sink that records each receipt instead of writing it.
@@ -127,7 +136,8 @@ async fn session(
         let mut line = Vec::new();
         while reader.read_until(b'\n', &mut line).await.unwrap() > 0 {
             received.extend_from_slice(&line);
-            if let Some(message) = message(&line) {
+            let unmarked = line.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&line);
+            if let Ok(Value::Object(message)) = serde_json::from_slice(unmarked) {
                 for answer in script(&message) {
                     writer.write_all(answer.as_bytes()).await.unwrap();
                 }
@@ -439,10 +449,15 @@ async fn a_receipt_that_cannot_be_saved_is_reported_once_and_the_session_goes_on
         ),
         search(3, "after")
     );
-    let before = *REPORTED.lock().unwrap();
+    let (reporter, said) = recording_reporter();
     let (out, received) = session(
         request.as_bytes(),
-        Some(observer(&store, "dot", failing)),
+        Some(Observer::new(
+            store.0.clone(),
+            &store.load("dot"),
+            reporter,
+            failing,
+        )),
         Gate::new(false),
         succeeding(),
     )
@@ -455,8 +470,7 @@ async fn a_receipt_that_cannot_be_saved_is_reported_once_and_the_session_goes_on
         success(&json!(3))
     );
     assert_eq!(out, expected.as_bytes());
-    // Other tests may report too; this session reported exactly once.
-    assert_eq!(*REPORTED.lock().unwrap() - before, 1);
+    assert_eq!(*said.lock().unwrap(), [RECEIPT_FAILED]);
 }
 
 /// Every line, whatever it is, crosses unchanged, with or without the
@@ -469,7 +483,7 @@ async fn traffic_is_byte_identical_with_and_without_the_observer() {
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n",
         search(2, NONCE),
-        "not json at all\n",
+        "\r\n",
         // A last line without its newline.
         "{\"jsonrpc\": \"2.0\", \"id\": \"tail\", \"method\": \"ping\"}",
     );
@@ -892,27 +906,139 @@ async fn an_answer_the_client_never_got_proves_nothing() {
     assert!(recorder.written().is_empty());
 }
 
-/// A line too long to parse crosses unchanged and is never credited.
+/// A request padded past PARSE_LIMIT, which the shim would compact and
+/// answer, ends the session before it is relayed: it can never vouch for a
+/// nonce call under its id.
 #[tokio::test]
-async fn a_line_too_long_to_parse_crosses_and_proves_nothing() {
+async fn a_padded_request_past_the_parse_limit_ends_the_session() {
     let store = Store::new();
     store.profile("dot");
     store.challenge("dot", NONCE, now() - 5.0);
     let recorder = Recorder::default();
-    let padded = call(
-        json!(1),
-        "memory_search",
-        json!({"query": NONCE, "pad": "p".repeat(PARSE_LIMIT)}),
+    let padded = format!(
+        "{{\"jsonrpc\":\"2.0\",\"id\":7,{}\"method\":\"tools/call\",\"params\":{{\"name\":\"memory_search\",\"arguments\":{{\"query\":\"plain\"}}}}}}\n",
+        " ".repeat(PARSE_LIMIT + 1024)
     );
-    let (_, received) = session(
-        padded.as_bytes(),
+    let mut w = wired(
+        1 << 20,
         Some(observer(&store, "dot", recorder.sink())),
         Gate::new(false),
-        Box::new(|_: &Map<String, Value>| vec![success(&json!(1))]),
+    );
+    let writing = tokio::spawn(async move {
+        w.client_writer
+            .write_all(search(7, NONCE).as_bytes())
+            .await
+            .unwrap();
+        let _ = w.client_writer.write_all(padded.as_bytes()).await;
+        w.client_writer
+    });
+    let fake = tokio::spawn(async move {
+        // The shim answers whatever reaches it, as a success under id 7.
+        let mut reader = BufReader::new(w.fake_reader);
+        let mut line = Vec::new();
+        while reader.read_until(b'\n', &mut line).await.unwrap_or(0) > 0 {
+            if line.windows(5).any(|window| window == b"plain") {
+                let _ = w.fake_writer.write_all(success(&json!(7)).as_bytes()).await;
+            }
+            line.clear();
+        }
+    });
+    let ended = tokio::time::timeout(Duration::from_secs(60), w.relayed)
+        .await
+        .expect("the relay ended")
+        .unwrap();
+    assert_eq!(ended.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    drop(writing.await.unwrap());
+    let _ = fake.await;
+    drop(w.client_reader);
+    assert!(recorder.written().is_empty());
+}
+
+/// A request this bridge cannot parse but the shim can (a byte order mark
+/// before it, which the SDK strips) switches the observer off for the
+/// session: its answer can never vouch for a nonce call under its id.
+#[tokio::test]
+async fn a_request_the_bridge_cannot_read_switches_receipts_off() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let recorder = Recorder::default();
+    let (reporter, said) = recording_reporter();
+    let request = format!("{}\u{feff}{}", search(7, NONCE), search(7, "plain"));
+    let (_, received) = session(
+        request.as_bytes(),
+        Some(Observer::new(
+            store.0.clone(),
+            &store.load("dot"),
+            reporter,
+            recorder.sink(),
+        )),
+        Gate::new(false),
+        Box::new(|m: &Map<String, Value>| {
+            // Only the marked plain search is answered, with a success.
+            if m["params"]["arguments"]["query"] == "plain" {
+                vec![success(&m["id"])]
+            } else {
+                Vec::new()
+            }
+        }),
     )
     .await;
-    assert_eq!(received, padded.as_bytes());
+    assert_eq!(received, request.as_bytes());
     assert!(recorder.written().is_empty());
+    assert_eq!(*said.lock().unwrap(), [UNPARSED]);
+}
+
+/// Two requests under one id, one of them answered: the other is still
+/// outstanding, so a nonce call sent under that id now is never credited
+/// by the late answer.
+#[tokio::test]
+async fn a_duplicate_id_answered_once_still_blocks_its_reuse() {
+    let store = Store::new();
+    store.profile("dot");
+    store.challenge("dot", NONCE, now() - 5.0);
+    let recorder = Recorder::default();
+    let mut w = wired(
+        1 << 16,
+        Some(observer(&store, "dot", recorder.sink())),
+        Gate::new(false),
+    );
+    // A slow plain search, then a ping, both under id 7.
+    let ping = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}\n";
+    w.client_writer
+        .write_all(format!("{}{ping}", search(7, "plain")).as_bytes())
+        .await
+        .unwrap();
+    line_of(&mut w.fake_reader).await;
+    line_of(&mut w.fake_reader).await;
+    // The ping is answered first; the client has its answer.
+    w.fake_writer
+        .write_all(success(&json!(7)).as_bytes())
+        .await
+        .unwrap();
+    assert_eq!(line_of(&mut w.client_reader).await["id"], 7);
+    // The nonce call under id 7, then the slow search's success.
+    w.client_writer
+        .write_all(search(7, NONCE).as_bytes())
+        .await
+        .unwrap();
+    line_of(&mut w.fake_reader).await;
+    w.fake_writer
+        .write_all(success(&json!(7)).as_bytes())
+        .await
+        .unwrap();
+    assert_eq!(line_of(&mut w.client_reader).await["id"], 7);
+    drop(w.client_writer);
+    drop(w.fake_writer);
+    tokio::time::timeout(Duration::from_secs(30), w.relayed)
+        .await
+        .expect("the relay ended")
+        .unwrap()
+        .unwrap();
+    assert!(
+        recorder.written().is_empty(),
+        "a late answer vouched for the nonce call"
+    );
 }
 
 /// A line past LINE_LIMIT ends the session, from either side, before it is
@@ -974,8 +1100,13 @@ fn crossing_the_in_flight_limit_fails_closed() {
     let store = Store::new();
     store.profile("dot");
     store.challenge("dot", NONCE, now() - 5.0);
-    let before = *REPORTED.lock().unwrap();
-    let mut observer = observer(&store, "dot", Recorder::default().sink());
+    let (reporter, said) = recording_reporter();
+    let mut observer = Observer::new(
+        store.0.clone(),
+        &store.load("dot"),
+        reporter,
+        Recorder::default().sink(),
+    );
     observer.request(&as_map(&search(7, "plain")));
     for n in 0..IN_FLIGHT_LIMIT as u64 {
         observer.request(&as_map(&search(1000 + n, "plain")));
@@ -989,10 +1120,7 @@ fn crossing_the_in_flight_limit_fails_closed() {
             .response(&as_map(&success(&json!(99_999))))
             .is_none()
     );
-    assert!(
-        *REPORTED.lock().unwrap() > before,
-        "saturation was not reported"
-    );
+    assert_eq!(*said.lock().unwrap(), [SATURATED]);
 }
 
 /// What the observer keeps is bounded: a long id is never tracked and a
@@ -1403,11 +1531,54 @@ fn the_child_gets_only_its_allowlist_and_the_profiles_connection() {
     assert_eq!(child, expected);
 }
 
+/// The child starts from a cleared environment, not the bridge's own: a
+/// shell in the shim's place prints what it got. The test's process carries
+/// cargo's variables, which an uncleared child would inherit.
+#[cfg(unix)]
+#[test]
+fn the_child_starts_from_a_cleared_environment() {
+    let store = Store::new();
+    store.profile("dot");
+    let folder = store.0.parent().unwrap().join("fake-shim");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("shim"), "env\n").unwrap();
+    assert!(std::env::var_os("CARGO_MANIFEST_DIR").is_some());
+    let mut command = child_command(
+        Path::new("/bin/sh"),
+        &store.load("dot"),
+        [
+            ("PATH", "/usr/bin:/bin"),
+            ("CLAUDE_CODE_SESSION_ID", "sentinel-session"),
+        ]
+        .into_iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+    );
+    command.current_dir(&folder).stdin(Stdio::null());
+    let output = command.output().unwrap();
+    assert!(output.status.success());
+    let environment = String::from_utf8(output.stdout).unwrap();
+    let names: Vec<&str> = environment
+        .lines()
+        .filter_map(|line| line.split_once('=').map(|(name, _)| name))
+        .collect();
+    assert!(!names.contains(&"CARGO_MANIFEST_DIR"), "{environment}");
+    assert!(!names.contains(&"CLAUDE_CODE_SESSION_ID"), "{environment}");
+    assert!(
+        environment
+            .lines()
+            .any(|line| line == "PSEUDOLIFE_WRITER_ID=tunnel")
+    );
+    assert!(environment.lines().any(|line| line == "PATH=/usr/bin:/bin"));
+}
+
 #[test]
 fn a_shim_that_fails_before_answering_is_named_once() {
-    assert_eq!(silent_exit(1, false), Some(SHIM_SILENT));
-    assert_eq!(silent_exit(0, false), None);
-    assert_eq!(silent_exit(1, true), None);
+    assert_eq!(silent_exit(1, false, false), Some(SHIM_SILENT));
+    assert_eq!(silent_exit(0, false, false), None);
+    assert_eq!(silent_exit(1, true, false), None);
+    // Stopped by the bridge, not exited: named as such.
+    assert_eq!(silent_exit(1, false, true), Some(SHIM_STOPPED));
+    assert_eq!(silent_exit(1, true, true), None);
 }
 
 fn argv(values: &[&str]) -> Vec<OsString> {
@@ -1450,7 +1621,7 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
     );
     assert_eq!(
         prepare(&argv(&["--profile-dir", dir, "--profile", "draft"])).err(),
-        Some("tunnel profile is not ready; finish `pseudolife-mcp tunnel setup --profile draft` before its bridge can start".to_owned())
+        Some("tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `pseudolife-mcp tunnel status --profile draft` shows what is missing".to_owned())
     );
     // The store admits an https address with a path; the shim would not.
     store.put(
@@ -1464,7 +1635,7 @@ fn the_bridge_needs_its_profile_and_a_ready_one() {
         .err()
         .unwrap();
     assert!(refused.contains("not an http(s) origin"), "{refused}");
-    assert!(refused.contains("--profile web --daemon-url"), "{refused}");
+    assert!(refused.contains("tunnel status --profile web"), "{refused}");
     store.profile("dot");
     let start = prepare(&argv(&["--profile-dir", dir, "--profile", "dot"])).unwrap();
     assert_eq!(start.root, Path::new(dir));

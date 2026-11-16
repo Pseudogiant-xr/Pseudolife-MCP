@@ -51,10 +51,11 @@ const USAGE: &str = "tunnel shim is started by the tunnel runtime, not by hand: 
 const NO_SHIM: &str =
     "tunnel bridge could not start the stdio shim; check this install with `pseudolife-mcp doctor`";
 const SHIM_SILENT: &str = "tunnel bridge: the stdio shim exited before it answered; check the profile's daemon and this install with `pseudolife-mcp doctor`";
+const SHIM_STOPPED: &str = "tunnel bridge: the stdio shim stopped responding and was stopped; check the profile's daemon and this install with `pseudolife-mcp doctor`";
 const RECEIPT_FAILED: &str = "tunnel bridge: a verification receipt could not be saved; the session continues, and `pseudolife-mcp tunnel verify` can be repeated";
 const SATURATED: &str = "tunnel bridge: too many requests are unanswered to check verification calls safely; this session writes no more receipts, and a new session can verify";
-const LINE_TOO_LONG: &str =
-    "tunnel bridge: a message longer than 32 MiB arrived, so the session was ended";
+const UNPARSED: &str = "tunnel bridge: the client sent a line this bridge cannot read; this session writes no more receipts, and a new session can verify";
+const LINE_TOO_LONG: &str = "tunnel bridge: a message longer than this bridge relays arrived (4 MiB from the client, 32 MiB from the shim), so the session was ended";
 /// Changed on purpose from the Python bridge's "run pseudolife-mcp tunnel
 /// doctor": the native client has no `tunnel doctor` yet.
 const DISCOVERY_FAILED: &str =
@@ -128,10 +129,14 @@ fn inherited(name: &OsStr) -> bool {
 /// A JSON-RPC message the observer and the gate parse; larger lines are
 /// relayed but never parsed.
 const PARSE_LIMIT: usize = 4 * 1024 * 1024;
-/// The longest line the bridge relays. The daemon refuses an MCP request
-/// body over 4 MiB (`daemon/src/mcp/mod.rs`, `BODY_LIMIT`), so no request it
-/// would answer is longer; eight times that leaves room for long answers
-/// while one endless line can never grow the bridge's memory past it.
+/// The longest line the bridge relays from the shim, which leaves room for
+/// long answers while one endless line can never grow the bridge's memory
+/// past it. From the client the cap is PARSE_LIMIT: the daemon refuses an MCP
+/// request body over 4 MiB (`daemon/src/mcp/mod.rs`, `BODY_LIMIT`), so no
+/// request it would answer is longer, and every client line the bridge
+/// relays is one it could parse. The worst case held at once is then about
+/// (QUEUE + 2) lines a direction: some 264 MiB from the client and 2.1 GiB
+/// from the shim, plus HELD_LIMIT listings of 4 MiB.
 const LINE_LIMIT: usize = 32 * 1024 * 1024;
 /// Calls awaiting their answer, client requests in flight, and `tools/list`
 /// requests held by the gate.
@@ -203,14 +208,14 @@ fn prepare(values: &[OsString]) -> Result<Start, String> {
     // (store::validate refuses one without them).
     if profile.state != "ready" {
         return Err(format!(
-            "tunnel profile is not ready; finish `pseudolife-mcp tunnel setup --profile {name}` before its bridge can start"
+            "tunnel profile is not ready: its setup is unfinished, and this client cannot set a tunnel up yet; `pseudolife-mcp tunnel status --profile {name}` shows what is missing"
         ));
     }
     // The profile's store admits an https address with a path; the shim
     // takes only an origin, and would exit without a word.
     if crate::daemon_url::validate(&profile.daemon_url).is_err() {
         return Err(format!(
-            "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs; set one with `pseudolife-mcp tunnel setup --profile {name} --daemon-url <origin>`"
+            "the profile's daemon address is not an http(s) origin (no path, query or credentials), which the stdio shim needs, and this client cannot change a saved profile yet; `pseudolife-mcp tunnel status --profile {name}` names its file"
         ));
     }
     Ok(Start { root, profile })
@@ -342,33 +347,41 @@ async fn serve(start: Start) -> ExitCode {
             true
         }
     };
-    let code = match tokio::time::timeout(CHILD_EXIT, child.wait()).await {
-        Ok(Ok(status)) => status
-            .code()
-            .and_then(|c| u8::try_from(c).ok())
-            .unwrap_or(1),
+    let (code, killed) = match tokio::time::timeout(CHILD_EXIT, child.wait()).await {
+        Ok(Ok(status)) => (
+            status
+                .code()
+                .and_then(|c| u8::try_from(c).ok())
+                .unwrap_or(1),
+            false,
+        ),
         _ => {
             let _ = child.kill().await;
-            1
+            (1, true)
         }
     };
-    if let Some(note) = silent_exit(code, spoke) {
+    if let Some(note) = silent_exit(code, spoke, killed) {
         crate::stderrln!("{note}");
     }
     ExitCode::from(code)
 }
 
-/// What to say when the shim exits with a failure before it wrote a line:
+/// What to say when the shim ends with a failure before it wrote a line:
 /// its own stderr is not kept, so this is the only word the vendor gets.
-fn silent_exit(code: u8, spoke: bool) -> Option<&'static str> {
-    (code != 0 && !spoke).then_some(SHIM_SILENT)
+fn silent_exit(code: u8, spoke: bool, killed: bool) -> Option<&'static str> {
+    if killed && !spoke {
+        Some(SHIM_STOPPED)
+    } else {
+        (code != 0 && !spoke).then_some(SHIM_SILENT)
+    }
 }
 
-/// Reads one line into `buffer`, never past `LINE_LIMIT`. Cancel-safe: a
+/// Reads one line into `buffer`, never past `limit`. Cancel-safe: a
 /// partly read line stays in `buffer` for the next call.
 async fn read_line<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     buffer: &mut Vec<u8>,
+    limit: usize,
 ) -> std::io::Result<Read> {
     loop {
         let available = reader.fill_buf().await?;
@@ -381,7 +394,7 @@ async fn read_line<R: AsyncBufRead + Unpin>(
         };
         buffer.extend_from_slice(&available[..taken]);
         reader.consume(taken);
-        if buffer.len() > LINE_LIMIT {
+        if buffer.len() > limit {
             return Ok(Read::TooLong);
         }
         if ended {
@@ -543,7 +556,7 @@ async fn inbound<CI: AsyncRead + Unpin>(
     let mut buffer = Vec::new();
     'read: loop {
         let read = tokio::select! {
-            read = read_line(&mut reader, &mut buffer) => read,
+            read = read_line(&mut reader, &mut buffer, PARSE_LIMIT) => read,
             () = relay.client_ended.cancelled() => break,
             () = relay.stopping.cancelled() => break,
         };
@@ -564,8 +577,13 @@ async fn inbound<CI: AsyncRead + Unpin>(
             let actions = {
                 let mut state = relay.lock();
                 let (observer, gate) = &mut *state;
-                if let (Some(observer), Some(message)) = (observer.as_mut(), message.as_ref()) {
-                    observer.request(message);
+                match (observer.as_mut(), message.as_ref()) {
+                    (Some(observer), Some(message)) => observer.request(message),
+                    // The shim may read a line this bridge cannot (a byte
+                    // order mark, say): the observer would never see a
+                    // request the shim answers. Not mirrored: fail closed.
+                    (Some(observer), None) if !line.trim_ascii().is_empty() => observer.unparsed(),
+                    _ => {}
                 }
                 gate.inbound(line, message.as_ref())
             };
@@ -627,7 +645,7 @@ async fn outbound<SO: AsyncRead + Unpin>(
         let deadline = relay.lock().1.deadline;
         let mut done = None;
         let actions = tokio::select! {
-            read = read_line(&mut reader, &mut buffer) => {
+            read = read_line(&mut reader, &mut buffer, LINE_LIMIT) => {
                 match read {
                     Ok(Read::Line) => {}
                     Ok(Read::End) => done = Some(Ok(())),
@@ -745,7 +763,10 @@ async fn write_shim<SI: AsyncWrite + Unpin>(
             Ok(Err(_)) => open = false,
             Err(_) => {
                 // A line the shim has not taken for a minute: it is hung,
-                // and a shutdown of its input would wait the same way.
+                // and a shutdown of its input would wait the same way. On
+                // Unix dropping the writer closes the shim's input; on
+                // Windows the blocked write keeps the pipe until `serve`
+                // kills the shim after CHILD_EXIT.
                 relay.stopping.cancel();
                 drop(writer);
                 relay.shim_closed.cancel();
@@ -962,31 +983,33 @@ fn private_sink() -> Sink {
 /// Says once per bridge that a receipt could not be saved.
 #[derive(Clone)]
 pub(super) struct Reporter {
-    said: Arc<AtomicBool>,
-    said_saturated: Arc<AtomicBool>,
-    say: fn(&str),
+    said: Arc<std::sync::Mutex<HashSet<&'static str>>>,
+    say: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
 impl Reporter {
     fn stderr() -> Self {
-        Self::new(|line| crate::stderrln!("{line}"))
+        Self::new(Arc::new(|line| crate::stderrln!("{line}")))
     }
-    fn new(say: fn(&str)) -> Self {
+    fn new(say: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
         Self {
             said: Arc::default(),
-            said_saturated: Arc::default(),
             say,
         }
     }
-    fn failed(&self) {
-        if !self.said.swap(true, Ordering::SeqCst) {
-            (self.say)(RECEIPT_FAILED);
+    /// Says `line` the first time only.
+    fn once(&self, line: &'static str) {
+        let first = self
+            .said
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(line);
+        if first {
+            (self.say)(line);
         }
     }
-    fn saturated(&self) {
-        if !self.said_saturated.swap(true, Ordering::SeqCst) {
-            (self.say)(SATURATED);
-        }
+    fn failed(&self) {
+        self.once(RECEIPT_FAILED);
     }
 }
 
@@ -1002,11 +1025,15 @@ pub(super) struct Observer {
     root: PathBuf,
     binding: Binding,
     pending: HashMap<Id, Call>,
-    /// Every client request id not yet answered: a verification call
-    /// sent under an id already in flight is never credited.
-    in_flight: HashSet<Id>,
-    /// More than IN_FLIGHT_LIMIT requests were unanswered at once, so the
-    /// in-flight check can no longer be trusted: no more receipts.
+    /// How many client requests under each id are not yet answered: a
+    /// verification call sent while another under its id is outstanding is
+    /// never credited, however the answers interleave.
+    in_flight: HashMap<Id, u32>,
+    /// All outstanding requests, which IN_FLIGHT_LIMIT bounds.
+    outstanding: usize,
+    /// The in-flight check can no longer be trusted (too many unanswered
+    /// requests, or a client line this bridge could not read): no more
+    /// receipts this session.
     saturated: bool,
     reporter: Reporter,
     sink: Sink,
@@ -1018,7 +1045,8 @@ impl Observer {
             root,
             binding: Binding::of(profile),
             pending: HashMap::new(),
-            in_flight: HashSet::new(),
+            in_flight: HashMap::new(),
+            outstanding: 0,
             saturated: false,
             reporter,
             sink,
@@ -1037,17 +1065,18 @@ impl Observer {
         if self.saturated {
             return;
         }
-        if self.in_flight.len() >= IN_FLIGHT_LIMIT {
-            // Some ids may never be answered (a cancelled request, say), but
-            // forgetting them would let one be reused unseen: fail closed.
-            self.saturated = true;
-            self.pending.clear();
-            self.reporter.saturated();
+        if self.outstanding >= IN_FLIGHT_LIMIT {
+            // Some requests may never be answered (a cancelled one, say),
+            // but forgetting them would let an id be reused unseen.
+            self.fail_closed(SATURATED);
             return;
         }
-        // A reused id makes either answer ambiguous: neither call is
-        // credited.
-        let reused = !self.in_flight.insert(id.clone());
+        // A reused id makes every answer under it ambiguous: no call under
+        // it is credited while another is outstanding.
+        let count = self.in_flight.entry(id.clone()).or_insert(0);
+        *count += 1;
+        self.outstanding += 1;
+        let reused = *count > 1;
         self.pending.remove(&id);
         if reused
             || self.pending.len() >= PENDING_LIMIT
@@ -1083,6 +1112,20 @@ impl Observer {
         }
     }
 
+    /// A non-blank client line the bridge relays without reading it.
+    fn unparsed(&mut self) {
+        if !self.saturated {
+            self.fail_closed(UNPARSED);
+        }
+    }
+
+    /// No more receipts this session; says why once.
+    fn fail_closed(&mut self, why: &'static str) {
+        self.saturated = true;
+        self.pending.clear();
+        self.reporter.once(why);
+    }
+
     /// A shim answer: the proof to settle, when it answers a remembered
     /// call with a success.
     fn response(&mut self, message: &Map<String, Value>) -> Option<Proof> {
@@ -1090,7 +1133,13 @@ impl Observer {
             return None;
         }
         let id = identifier(message)?;
-        self.in_flight.remove(&id);
+        if let Some(count) = self.in_flight.get_mut(&id) {
+            *count -= 1;
+            self.outstanding -= 1;
+            if *count == 0 {
+                self.in_flight.remove(&id);
+            }
+        }
         let call = self.pending.remove(&id)?;
         succeeded(message).then(|| Proof {
             root: self.root.clone(),
