@@ -1296,8 +1296,8 @@ def test_windows_gate_records_a_rejected_junction_token_without_a_request(tmp_pa
     junction = tmp_path / "junction"
     server, requests = _gate_daemon("allow\n")
     env = _gate_env(tmp_path, server, PSEUDOLIFE_MCP_TOKEN_FILE=str(junction / "token"))
-    # No native client answers (#1639): the junction stays refused, and the
-    # hook says why on stderr.
+    # No native client answers (#1639): the junction stays refused. The
+    # gate keeps its stderr quiet; the ledger records the refusal.
     env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory),
                PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT="0",
                PSEUDOLIFE_SHIM_LAUNCHER=str(tmp_path / "no-native-client.exe"))
@@ -1307,8 +1307,7 @@ def test_windows_gate_records_a_rejected_junction_token_without_a_request(tmp_pa
         _digest(tmp_path, 3, "", ring=False)
         _agent(tmp_path)
         result, _ = _run(env)
-        assert (result.returncode, result.stdout, requests) == (0, "", [])
-        assert "not reading" in result.stderr and "fix:" in result.stderr, result.stderr
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
         lines = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
         assert len(lines) == 1
         stamp, *fields = lines[0].split("\t")
