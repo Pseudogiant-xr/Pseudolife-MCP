@@ -33,8 +33,8 @@ retry). Harness-managed checkouts (``.claude/worktrees``, ``.t3/worktrees``,
 ``.codex/worktrees``, temp dirs) are never removed.
 
 Sweep mode also judges cargo targets by the checkouts their dep-info names
-(``--target-root``), standalone clones (``--clone-root``) and idle scratch
-dirs (``--scratch-root``); see the section "cargo targets, standalone
+(``--target-root``), and lists, never removes, standalone clones
+(``--clone-root``) and scratch dirs (``--scratch-root``); see the section "cargo targets, standalone
 clones, scratch dirs" below.
 
 Every removal appends a JSON line to ``~/.pseudolife-mcp/retention-ledger.jsonl``.
@@ -151,17 +151,19 @@ def is_link(st: os.stat_result) -> bool:
 
 
 _MOUNTS: list[set[str] | None] = []
+MOUNTINFO = "/proc/self/mountinfo"
 
 
 def _mount_points() -> set[str] | None:
     """Every mount point this process sees (Linux, from mountinfo), read
-    once per run; None where /proc is missing, so the walk asks
+    once per run and again before each delete's second look; None where
+    /proc is missing, so the walk asks
     os.path.ismount instead. A bind mount on the same filesystem has the
     same st_dev, so only this list shows it."""
     if not _MOUNTS:
         found: set[str] | None = None
         try:
-            with open("/proc/self/mountinfo", encoding="utf-8", errors="replace") as fh:
+            with open(MOUNTINFO, encoding="utf-8", errors="replace") as fh:
                 found = set()
                 for line in fh:
                     fields = line.split()
@@ -727,6 +729,8 @@ def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
     except OSError as exc:
         return f"in use or access denied, skipped: {exc.strerror or exc}"
     if checked_at is not None:
+        procs = list_processes()
+        _MOUNTS.clear()          # a bind mount made during the run must be seen
         late = scan(trash)
         try:
             root_moved = os.lstat(trash).st_mtime > before_root
@@ -735,7 +739,6 @@ def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
         # Read every dir's own time fresh: on Windows a listing gives a
         # subdir's time from its parent's index, which can be stale.
         fresh_dirs = _newest_dir_fresh(trash)
-        procs = list_processes()
         user = process_in(trash, procs) if procs is not None else -1
         why = (late.error and f"cannot scan it again ({late.error})"
                or (late.links and f"a link appeared ({late.links[0]})")
@@ -749,7 +752,8 @@ def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
                 os.rename(trash, path)
             except OSError as exc:
                 return (f"kept aside at {trash}, nothing deleted: {why}, and renaming it back "
-                        f"failed ({exc.strerror or exc}); move it back by hand")
+                        f"failed ({exc.strerror or exc}); to put it back, rename {trash} "
+                        f"to {path}")
             return f"in use or access denied, skipped: {why}; renamed back"
     try:
         _rmtree(_long(trash))
@@ -772,19 +776,20 @@ def delete_cache(path: str, *, checked_at: float | None = None) -> str | None:
 #   idle for the unowned period. A build holding cargo's lock keeps it.
 #   Entries cargo's layout does not explain stay, listed.
 # * A **clone** is a standalone git checkout (its own .git dir, not a
-#   worktree). It is removed when every commit it holds is in the main
-#   repository and on origin/master, it has no stash, is clean, holds no
-#   link and has been idle for the worktree grace period.
+#   worktree). Clones are list only: each row names the first rule that
+#   keeps it (a commit not on origin/master in the main repository, a stash,
+#   a dirty tree, a borrower of its objects, a user file in its rust/target,
+#   ...) or says nothing does, for a person removing it by hand. No class
+#   deletes anything at, inside or around a clone.
 # * A **scratch** dir is a direct child of a scratch root its user marked
 #   with a .pseudolife-scratch-root file. Scratch is list only: each row says
 #   which keep rule holds the dir, or that none does, and when it was last
 #   written; nothing under a scratch root is removed.
 
 CARGO_TAG_SIGNATURE = "Signature: 8a477f597d28d172789f06886806bc55"
-# Inside a verified target, the names the Cargo book's build-cache layout
-# gives (target/tmp is CARGO_TARGET_TMPDIR); a profile dir proves itself by
-# its own .fingerprint or .cargo-lock.
-CARGO_NAMED_DIRS = {"tmp", "doc", "package"}
+# Inside a verified target a profile dir proves itself by its own
+# .fingerprint or .cargo-lock; tmp, doc and package carry no such sign, so
+# they are kept like any foreign entry.
 # Suffixes of the files cargo uplifts beside an output it names in the
 # profile's top-level dep-info (debug info, import libraries, metadata).
 CARGO_OUTPUT_SUFFIXES = ("", ".exe", ".pdb", ".dll", ".lib", ".dll.lib", ".exp", ".dll.exp",
@@ -880,6 +885,7 @@ def _profile_user_file(prof: str) -> str | None:
         if e.is_dir(follow_symlinks=False) and e.name not in CARGO_PROFILE_DIRS:
             return e.name + "/"
     entries = [e for e in listing if e.is_file(follow_symlinks=False)]
+    forms = _both_forms(prof)
     for e in entries:
         if e.name.endswith(".d"):
             try:
@@ -888,8 +894,12 @@ def _profile_user_file(prof: str) -> str | None:
             except OSError:
                 continue
             tokens = _dep_tokens(first)
-            if tokens:
-                outputs.add(os.path.basename(tokens[0]).lower())
+            # A binary copied in with its .d names the profile it was built
+            # in, so only an output this profile holds is cargo's here.
+            if tokens and os.path.isabs(tokens[0]):
+                out = os.path.normcase(os.path.normpath(tokens[0]))
+                if any(is_under(out, form) and out != form for form in forms):
+                    outputs.add(os.path.basename(tokens[0]).lower())
     stems = {_same_name(o.split(".", 1)[0]) for o in outputs}
     for e in entries:
         low = e.name.lower()
@@ -950,9 +960,6 @@ def target_layout(path: str) -> tuple[list[str], list[str], list[str], list[str]
                     profiles.append(full)
                 else:
                     foreign.append(name)
-                continue
-            if name in CARGO_NAMED_DIRS:
-                cargo.append(name)
                 continue
             inner = [os.path.join(full, n) for n in os.listdir(full)]
             if inner and all(_real_dir(p) and _is_profile_dir(p) for p in inner):
@@ -1368,7 +1375,11 @@ def delete_target(path: str, *, checked_at: float | None = None) -> str | None:
         else:
             deleted += 1
     if errors:
-        if deleted == 0 and all(": in use" in e for e in errors):
+        aside = [e for e in errors if ": kept aside" in e]
+        if deleted == 0 and all(": in use" in e or ": kept aside" in e for e in errors):
+            if aside:
+                # Nothing was deleted: say where the folder is, write no ledger line.
+                return "kept aside, nothing deleted: " + "; ".join(errors)
             return "in use or access denied, skipped: " + "; ".join(errors)
         return "deleted in part (cargo's markers kept, so a later sweep finishes it): " + "; ".join(errors)
     return None
@@ -1551,6 +1562,9 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
                  if not h.endswith(".sample")]
     except FileNotFoundError:
         hooks = []
+    except OSError as exc:
+        v.failure = f"cannot list its hooks (failing closed): {exc.strerror or exc}"
+        return v
     if hooks:
         v.failure = f"it has a hook script of its own ({hooks[0]})"
         return v
@@ -1559,6 +1573,22 @@ def evaluate_clone(path: str, *, repo: str, main: str, grace_days: float,
             v.failure = "its rust/target holds criterion measurements, which are not a cache"
             return v
         dirnames[:] = [d for d in dirnames if d not in ("deps", "build", "incremental", ".fingerprint")]
+    rust_target = os.path.join(path, "rust", "target")
+    if os.path.lexists(rust_target):
+        # Ignored files there are not in git status; only cargo's own
+        # layout is a cache.
+        if not is_cargo_target(rust_target):
+            v.failure = "its rust/target is not a cargo target by its markers, so not known to be a cache"
+            return v
+        try:
+            foreign = target_layout(rust_target)[2]
+        except OSError as exc:
+            v.failure = f"cannot read its rust/target (failing closed): {exc.strerror or exc}"
+            return v
+        if foreign:
+            v.failure = ("its rust/target holds entries cargo does not write there, which are "
+                         f"not a cache: {', '.join(foreign)}")
+            return v
     linked = git(path, "worktree", "list", "--porcelain")
     if linked.returncode:
         v.failure = f"cannot list its worktrees: {linked.stderr.strip()}"
@@ -2059,6 +2089,28 @@ def run_sweep(args, cfg: dict) -> int:
     wt_norm, cache_norm = usable(wt_roots), usable(cache_roots)
     target_norm, clone_norm = usable_marked(target_roots), usable_marked(clone_roots)
     scratch_norm = usable_scratch(scratch_roots)
+    for root in scratch_roots:
+        n = norm(root)
+        if n in scratch_norm:
+            continue
+        for other in [*wt_roots, *cache_roots, *target_roots]:
+            o = norm(other)
+            if is_under(o, n) or is_under(n, o):
+                raise Refusal(f"scratch root {root} is skipped but overlaps the root {other}, "
+                              "so that root could reach it; give roots that do not overlap. "
+                              "Nothing was changed")
+    # Clones are list only: no deleting class judges a dir at, inside or
+    # around one (a child of any clone root, skipped roots included, that
+    # holds .git).
+    clones_seen = sorted({norm(c) for r in clone_roots for c in _children(norm(r))
+                          if os.path.lexists(os.path.join(c, ".git"))})
+
+    def list_only_hit(n: str) -> str | None:
+        if any(is_under(n, r) or is_under(r, n) for r in scratch_norm):
+            return "at or around a scratch root"
+        if any(is_under(n, c) or is_under(c, n) for c in clones_seen):
+            return "at or around a clone"
+        return None
     worktrees = list_worktrees(repo)
     registered = [norm(w.path) for w in worktrees]
     main = worktrees[0].path
@@ -2078,9 +2130,9 @@ def run_sweep(args, cfg: dict) -> int:
                 left["runs from here"] += 1
             elif harness_managed(wt.path):
                 left["harness-managed"] += 1
-            elif any(is_under(p, r) or is_under(r, p) for r in scratch_norm):
-                # A scratch root is list only, also when a worktree root reaches it.
-                left["at or around a scratch root"] = left.get("at or around a scratch root", 0) + 1
+            elif (hit := list_only_hit(p)):
+                # Scratch and clones are list only, also when a worktree root reaches them.
+                left[hit] = left.get(hit, 0) + 1
             elif not any(is_under(p, r) and p != r for r in wt_norm):
                 left["outside roots"] += 1
             else:
@@ -2113,16 +2165,15 @@ def run_sweep(args, cfg: dict) -> int:
         for child in _children(root):
             if not os.path.isdir(child) and not os.path.islink(child):
                 continue
-            nchild = norm(child)
-            if any(is_under(nchild, r) or is_under(r, nchild) for r in scratch_norm):
-                left["at or around a scratch root"] = left.get("at or around a scratch root", 0) + 1
+            hit = list_only_hit(norm(child))
+            if hit:
+                left[hit] = left.get(hit, 0) + 1
                 continue
             verdicts.append(evaluate_cache(child, grace_days=cgrace, now=now, pins=pins))
 
     procs = list_processes() if (target_norm or clone_norm or scratch_norm) else None
     if (target_norm or clone_norm or scratch_norm) and procs is None:
-        print("note: the process list cannot be read here, so no target, clone or "
-              "scratch dir is removed")
+        print("note: the process list cannot be read here, so no target is removed")
     if target_norm and not pins:
         pins = current_pins()
     def borrowed() -> dict[str, str]:
@@ -2138,9 +2189,10 @@ def run_sweep(args, cfg: dict) -> int:
 
     def candidate(child: str, destructive: bool = True) -> bool:
         n = norm(child)
-        if destructive and any(is_under(n, r) or is_under(r, n) for r in scratch_norm):
-            # A scratch root is list only, also when another root reaches it.
-            left["at or around a scratch root"] = left.get("at or around a scratch root", 0) + 1
+        hit = list_only_hit(n) if destructive else None
+        if hit:
+            # Scratch and clones are list only, also when another root reaches them.
+            left[hit] = left.get(hit, 0) + 1
             return False
         if any(is_under(h, n) for h in here):
             left["runs from here"] += 1
@@ -2165,9 +2217,13 @@ def run_sweep(args, cfg: dict) -> int:
                 left["not a cargo target"] = left.get("not a cargo target", 0) + 1
     for root in clone_norm:
         for child in _children(root):
-            if _real_dir(os.path.join(child, ".git")) and candidate(child):
-                verdicts.append(evaluate_clone(child, repo=repo, main=main, grace_days=wgrace,
-                                               now=now, procs=procs, borrowed=borrowed()))
+            if _real_dir(os.path.join(child, ".git")) and candidate(child, destructive=False):
+                v = evaluate_clone(child, repo=repo, main=main, grace_days=wgrace,
+                                   now=now, procs=procs, borrowed=borrowed())
+                if v.ok:
+                    v.note = ("list only; nothing keeps it (every commit on origin/master, "
+                              "clean, idle); remove it by hand if no one needs it")
+                verdicts.append(v)
             elif _real_dir(child) and norm(child) not in seen:
                 left["not a clone"] = left.get("not a clone", 0) + 1
     # Scratch is list only: every row says what holds it (or that nothing
@@ -2217,21 +2273,16 @@ def run_sweep(args, cfg: dict) -> int:
             again = evaluate_target(v.path, repo=repo, main=main, grace_hours=tgrace,
                                     unowned_days=unowned, now=time.time(), pins=current_pins(),
                                     procs=list_processes())
-        elif v.kind == "clone":
-            again = evaluate_clone(v.path, repo=repo, main=main, grace_days=wgrace,
-                                   now=time.time(), procs=list_processes(), borrowed=borrowed())
         else:
-            raise Refusal(f"a {v.kind} row reached the delete path")    # never: scratch is list only
+            # Never: clone and scratch rows are list only.
+            raise Refusal(f"a {v.kind} row reached the delete path")
         if not again.ok:
             again.failure = f"changed since scan: {again.failure}"
             return again, "keep"
-        if v.kind == "target":
-            _c, _p, _f, lock_dirs = target_layout(v.path)
-            with _BuildLocks(lock_dirs) as free:
-                err = (delete_target(v.path, checked_at=checked_at) if free else
-                       "in use or access denied, skipped: a build took cargo's lock")
-        else:
-            err = delete_cache(v.path, checked_at=checked_at)
+        _c, _p, _f, lock_dirs = target_layout(v.path)
+        with _BuildLocks(lock_dirs) as free:
+            err = (delete_target(v.path, checked_at=checked_at) if free else
+                   "in use or access denied, skipped: a build took cargo's lock")
         if err and err.startswith("in use"):
             again.failure = err
             return again, "keep"
@@ -2260,7 +2311,7 @@ def run_sweep(args, cfg: dict) -> int:
     for i, v in enumerate(verdicts):
         if not v.ok:
             rows.append((v, "keep"))
-        elif v.kind == "scratch":
+        elif v.kind in ("scratch", "clone"):
             rows.append((v, "list only"))
         elif not args.apply:
             rows.append((v, "would remove"))
@@ -2303,6 +2354,11 @@ def _totals(rows, left, applied: bool, swept_worktrees) -> None:
     for kind in ("worktree", "cache", "target", "clone", "scratch"):
         mine = [(v, verdict) for v, verdict in rows if v.kind == kind]
         if kind not in ("worktree", "cache") and not mine:
+            continue
+        if kind in ("clone", "scratch"):
+            free = [v for v, _ in mine if v.ok]
+            print(f"{kind}{'es' if kind == 'scratch' else 's'}: {len(mine)} listed, never removed; {len(free)} with nothing "
+                  f"keeping them, {human(sum(v.bytes for v in free))}")
             continue
         go = [v for v, verdict in mine if verdict in ("removed", "would remove")]
         counts = {state: sum(verdict == state for _, verdict in mine)
@@ -2506,9 +2562,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--target-root", action="append", default=[],
                    help="a dir whose cargo target subdirs are judged by their owners (repeatable)")
     p.add_argument("--clone-root", action="append", default=[],
-                   help="a dir whose standalone git clones may be removed (repeatable)")
+                   help="a dir whose standalone git clones are listed with what keeps each, "
+                        "never removed (repeatable)")
     p.add_argument("--scratch-root", action="append", default=[],
-                   help="a dir whose idle scratch subdirs may be removed (repeatable)")
+                   help="a dir whose scratch subdirs are listed with what keeps each, never "
+                        "removed; it needs a .pseudolife-scratch-root file (repeatable)")
     p.add_argument("--target-grace-hours", type=_period, default=None,
                    help=f"default {DEFAULT_TARGET_GRACE_HOURS:g}")
     p.add_argument("--unowned-target-days", type=_period, default=None,

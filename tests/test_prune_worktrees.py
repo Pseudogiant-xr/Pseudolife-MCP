@@ -1172,8 +1172,8 @@ def test_entries_cargo_does_not_explain_are_kept(env, targets_root):
     assert rc == 0, out
     # Cargo's markers stay beside foreign entries, so the dir stays a target.
     assert sorted(p.name for p in target.iterdir()) == [
-        ".rustc_info.json", "CACHEDIR.TAG", "cand-final.exe", "mutant-src"]
-    assert "kept, not cargo's (" in out and "): cand-final.exe, mutant-src" in out
+        ".rustc_info.json", "CACHEDIR.TAG", "cand-final.exe", "mutant-src", "tmp"]
+    assert "kept, not cargo's (" in out and "): cand-final.exe, mutant-src, tmp" in out
     [line] = env.ledger_lines()
     kept = (target / "cand-final.exe").stat().st_size + sum(
         f.stat().st_size for f in (target / "mutant-src").rglob("*") if f.is_file()) + sum(
@@ -1275,14 +1275,14 @@ def run_clones(env: Env, *argv: str) -> tuple[int, str]:
                *argv, roots=False)
 
 
-def test_a_merged_clean_idle_clone_is_removed(env):
+def test_a_merged_clean_idle_clone_is_listed_with_nothing_keeping_it(env):
     clone = _clone(env, "pr-check")
     _backdate(clone)
-    rc, out = run_clones(env, "--apply")
+    rc, out = run_clones(env)
     assert rc == 0, out
-    assert not clone.exists(), out
-    [line] = env.ledger_lines()
-    assert line["kind"] == "clone" and line["complete"] is True
+    assert clone.exists(), out
+    row = next(line for line in out.splitlines() if "pr-check" in line)
+    assert "list only" in row and "nothing keeps it" in row, row
 
 
 def test_a_clone_whose_commit_exists_only_there_is_kept(env):
@@ -1696,9 +1696,8 @@ def test_a_failed_partial_target_delete_keeps_cargos_markers(env, targets_root, 
     sees a target and finishes it."""
     gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
     target = _target(env, "half", gone, age=None)
+    _profile(target, "release", gone)
     (target / "mutant-src").mkdir()
-    (target / "tmp").mkdir()
-    (target / "tmp" / "x").write_bytes(b"x")
     _backdate(target)
     real = prune.delete_cache
 
@@ -1711,7 +1710,7 @@ def test_a_failed_partial_target_delete_keeps_cargos_markers(env, targets_root, 
     rc, out = run_targets(env, "--apply")
     assert rc == 1, out
     assert (target / "CACHEDIR.TAG").exists() and (target / ".rustc_info.json").exists()
-    assert (target / "debug").exists() and not (target / "tmp").exists()
+    assert (target / "debug").exists() and not (target / "release").exists()
     assert "cargo's markers kept" in out
 
 
@@ -2271,7 +2270,8 @@ def test_a_clone_another_clone_borrows_objects_from_is_kept(env):
 
 
 def test_a_root_that_is_also_a_scratch_root_deletes_nothing(env):
-    """A scratch root is list only even when a clone root reaches it."""
+    """A scratch root is list only, and so is a clone root reaching it: the
+    clone is listed once, by the clone rule, and stays."""
     clone = _clone(env, "under-scratch")
     _backdate(clone)
     root = env.tmp / "clones"
@@ -2279,8 +2279,9 @@ def test_a_root_that_is_also_a_scratch_root_deletes_nothing(env):
     rc, out = run(env, "--clone-root", str(root), "--scratch-root", str(root), "--apply",
                   roots=False)
     assert rc == 0, out
-    assert clone.exists()
-    assert "at or around a scratch root: 1" in out
+    assert clone.exists() and (clone / ".git").is_dir()
+    assert sum("under-scratch" in line for line in out.splitlines()) == 1, out
+    assert env.ledger_lines() == []
 
 
 def test_a_timestamp_preserving_copy_after_the_checks_renames_back(env, targets_root, monkeypatch):
@@ -2349,3 +2350,358 @@ def test_a_lent_clone_is_kept_when_only_a_linked_worktree_of_the_borrower_is_see
     assert rc == 0, out
     assert lender.exists()
     assert "another checkout borrows its objects" in out
+
+
+# --- conductor's round 3 -------------------------------------------------------
+
+def _profile(target: Path, name: str, *sources: Path) -> Path:
+    """Another profile dir as cargo writes it, naming its outputs inside it."""
+    prof = target / name
+    deps = prof / "deps"
+    deps.mkdir(parents=True)
+    (prof / ".fingerprint").mkdir()
+    (prof / ".cargo-lock").write_bytes(b"")
+    (deps / "libthing.rlib").write_bytes(b"x" * 1000)
+    (deps / "thing-1234.d").write_text(
+        f"{deps / 'libthing.rlib'}: " + " ".join(str(s) for s in sources) + "\n",
+        encoding="utf-8")
+    return prof
+
+
+def test_clones_are_list_only_even_with_apply(env):
+    """Conductor's ruling (round 3): the clone class never deletes."""
+    clone = _clone(env, "done-clone")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists() and (clone / ".git").is_dir()
+    row = next(line for line in out.splitlines() if "done-clone" in line)
+    assert "list only" in row and "nothing keeps it" in row, row
+    assert "clones: 1 listed, never removed; 1 with nothing keeping them" in out
+    assert env.ledger_lines() == []
+
+
+def test_a_clone_row_never_reaches_the_delete_path(env, monkeypatch):
+    clone = _clone(env, "no-delete")
+    _backdate(clone)
+    calls = []
+    monkeypatch.setattr(prune, "delete_cache", lambda *a, **kw: calls.append(a) or None)
+    monkeypatch.setattr(prune, "delete_target", lambda *a, **kw: calls.append(a) or None)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert calls == [] and clone.exists()
+
+
+def test_a_clone_whose_rust_target_holds_a_user_file_says_so(env):
+    clone = _clone(env, "kept-binary")
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    _target(env, "target", gone, root=clone / "rust")
+    (clone / "rust" / "target" / "debug" / "server-good.exe").write_bytes(b"keep me")
+    (clone / ".git" / "info").mkdir(exist_ok=True)
+    (clone / ".git" / "info" / "exclude").write_text("rust/target/\n", encoding="utf-8")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    row = next(line for line in out.splitlines() if "kept-binary" in line)
+    assert "its rust/target holds entries cargo does not write there" in row, row
+    assert "debug" in row, row
+
+
+def test_a_clone_whose_hooks_cannot_be_listed_is_kept_with_the_reason(env):
+    clone = _clone(env, "odd-hooks")
+    hooks = clone / ".git" / "hooks"
+    for f in hooks.iterdir():
+        f.unlink()
+    hooks.rmdir()
+    hooks.write_text("not a dir", encoding="utf-8")
+    _backdate(clone)
+    rc, out = run_clones(env)
+    assert rc == 0, out
+    row = next(line for line in out.splitlines() if "odd-hooks" in line)
+    assert "cannot list its hooks" in row, row
+
+
+def test_tmp_doc_and_package_stay_without_cargo_provenance(env, targets_root):
+    """S6: cargo writes these too, but nothing in them says cargo wrote
+    them, so they are kept like any foreign entry."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "named-dirs", gone, age=None)
+    for name in ("tmp", "doc", "package"):
+        (target / name).mkdir()
+        (target / name / "notes.txt").write_text("mine\n", encoding="utf-8")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not (target / "debug").exists()
+    for name in ("tmp", "doc", "package"):
+        assert (target / name / "notes.txt").exists(), name
+    assert "kept, not cargo's (" in out and "doc, package, tmp" in out
+
+
+def test_a_binary_copied_in_with_its_dep_info_keeps_the_profile(env, targets_root):
+    """S2: a .d file copied in beside its binary names the profile it was
+    built in, so the binary is not cargo's output here."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "copied-pair", gone, age=None)
+    elsewhere = env.tmp / "other-target" / "release" / "server-good.exe"
+    (target / "debug" / "server-good.exe").write_bytes(b"a kept candidate")
+    (target / "debug" / "server-good.d").write_text(f"{elsewhere}: {gone}\n", encoding="utf-8")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug" / "server-good.exe").exists()
+    assert (target / "debug" / "deps" / "libthing.rlib").exists()
+
+
+def test_an_output_named_inside_the_profile_is_still_cargos(env, targets_root):
+    """The near miss of the copied pair: cargo's own top-level output and
+    its .d file, naming this profile, are deleted with it."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "own-output", gone, age=None)
+    exe = target / "debug" / "app.exe"
+    exe.write_bytes(b"built here")
+    (target / "debug" / "app.d").write_text(f"{exe}: {gone}\n", encoding="utf-8")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+
+
+def _fail_rename_back(monkeypatch):
+    """Rename aside works; renaming back fails, after a second look that
+    always finds a late write."""
+    real_rename = prune.os.rename
+
+    def rename(src, dst, *a, **kw):
+        if ".retention-" in os.path.basename(str(src)):
+            raise PermissionError(13, "Access is denied")
+        return real_rename(src, dst, *a, **kw)
+
+    monkeypatch.setattr(prune.os, "rename", rename)
+    monkeypatch.setattr(prune, "_newest_dir_fresh", lambda path: float("inf"))
+
+
+def test_a_failed_rename_back_of_a_whole_target_says_where_it_is(env, targets_root, monkeypatch):
+    """S3: nothing was deleted, so no ledger line, and the row says how to
+    put the folder back."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "stuck-aside", gone)
+    _fail_rename_back(monkeypatch)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 1, out
+    [aside] = [p for p in targets_root.iterdir() if ".retention-" in p.name]
+    assert (aside / "debug" / "deps" / "libthing.rlib").exists()
+    assert not target.exists()
+    assert "kept aside at" in out and "nothing deleted" in out
+    assert "to put it back, rename" in out
+    assert "deleted in part" not in out
+    assert env.ledger_lines() == []
+
+
+def test_a_failed_rename_back_of_one_profile_is_not_a_partial_delete(env, targets_root,
+                                                                     monkeypatch):
+    """S3, per-profile path (a foreign entry keeps the dir): a profile kept
+    aside is reported as nothing deleted, with no ledger line."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "stuck-profile", gone, age=None)
+    (target / "notes.txt").write_text("mine\n", encoding="utf-8")
+    _backdate(target)
+    _fail_rename_back(monkeypatch)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 1, out
+    [aside] = [p for p in target.iterdir() if ".retention-" in p.name]
+    assert (aside / "deps" / "libthing.rlib").exists()
+    assert "kept aside, nothing deleted" in out and "to put it back, rename" in out
+    assert "deleted in part" not in out
+    assert env.ledger_lines() == []
+
+
+def test_a_kept_aside_profile_beside_a_deleted_one_is_partial(env, targets_root, monkeypatch):
+    """When one profile went and another is stuck aside, something was
+    deleted: a partial ledger line, and the row names the aside folder."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "half-aside", gone, age=None)
+    _profile(target, "release", gone)
+    (target / "notes.txt").write_text("mine\n", encoding="utf-8")
+    _backdate(target)
+    real = prune.delete_cache
+
+    def debug_stuck(path, **kw):
+        if os.path.basename(path) == "debug":
+            return f"kept aside at {path}.x, nothing deleted: late write, and renaming it back failed"
+        return real(path, **kw)
+
+    monkeypatch.setattr(prune, "delete_cache", debug_stuck)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 1, out
+    assert not (target / "release").exists()
+    assert "deleted in part" in out and "kept aside at" in out
+    [line] = env.ledger_lines()
+    assert line["complete"] is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="mountinfo is Linux's")
+def test_a_bind_mount_made_during_the_run_is_seen_by_the_second_look(env, targets_root,
+                                                                     monkeypatch):
+    """S8: the mount list is read again after the rename aside."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "mounted-late", gone)
+    info = env.tmp / "mountinfo"
+    info.write_text("22 1 0:1 / / rw - ext4 /dev/sda1 rw\n", encoding="utf-8")
+    monkeypatch.setattr(prune, "MOUNTINFO", str(info))
+    monkeypatch.setattr(prune, "_MOUNTS", [])
+    real_rename = prune.os.rename
+
+    def rename_then_mount(src, dst, *a, **kw):
+        real_rename(src, dst, *a, **kw)
+        if ".retention-" in os.path.basename(str(dst)):
+            inner = os.path.join(str(dst), "debug", "deps")
+            with open(info, "a", encoding="utf-8") as fh:
+                fh.write(f"99 22 0:1 /x {inner} rw - ext4 /dev/sda1 rw\n")
+
+    monkeypatch.setattr(prune.os, "rename", rename_then_mount)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug" / "deps" / "libthing.rlib").exists()
+    assert "a link appeared" in out and "renamed back" in out
+
+
+@pytest.mark.parametrize("names", [
+    ("GIT_DIR",), ("GIT_WORK_TREE",), ("GIT_INDEX_FILE",), ("GIT_COMMON_DIR",),
+    ("GIT_OBJECT_DIRECTORY",), ("GIT_ALTERNATE_OBJECT_DIRECTORIES",), ("GIT_NAMESPACE",),
+    ("GIT_CEILING_DIRECTORIES",), ("GIT_DISCOVERY_ACROSS_FILESYSTEM",), ("GIT_CONFIG",),
+    ("GIT_CONFIG_PARAMETERS",), ("GIT_CONFIG_GLOBAL",), ("GIT_CONFIG_SYSTEM",),
+    ("GIT_CONFIG_NOSYSTEM",), ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"),
+])
+def test_every_git_redirect_variable_is_scrubbed(monkeypatch, names):
+    for name in names:
+        monkeypatch.setenv(name, "x")
+    env = prune.git_env()
+    assert not any(k.upper() in names for k in env), names
+    assert env["GIT_NO_LAZY_FETCH"] == "1" and env["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_a_config_count_pair_cannot_redirect_a_clones_work_tree(env, monkeypatch):
+    """Behaviour, not just the env: an inherited GIT_CONFIG_COUNT that would
+    move the clone's work tree elsewhere is not seen by git."""
+    clone = _clone(env, "count-pair")
+    _backdate(clone)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.worktree")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(env.tmp))
+    rc, out = run_clones(env)
+    assert rc == 0, out
+    row = next(line for line in out.splitlines() if "count-pair" in line)
+    assert "nothing keeps it" in row, row
+
+
+def _marked_scratch_root(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".pseudolife-scratch-root").write_text("", encoding="utf-8")
+    return path
+
+
+def test_a_target_inside_a_scratch_root_is_not_deleted(env, targets_root):
+    """S7: a target root that is also a scratch root deletes nothing there."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "in-scratch", gone)
+    _marked_scratch_root(targets_root)
+    rc, out = run_targets(env, "--scratch-root", str(targets_root), "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "at or around a scratch root: 1" in out
+
+
+def test_a_target_around_a_scratch_root_is_not_deleted(env, targets_root):
+    """S7, the other direction: a target that contains a scratch root."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "around-scratch", gone, age=None)
+    _marked_scratch_root(target / "debug" / "scratch")
+    _backdate(target)
+    rc, out = run_targets(env, "--scratch-root", str(target / "debug" / "scratch"), "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "at or around a scratch root: 1" in out
+
+
+def test_a_sibling_named_like_a_scratch_root_is_still_judged(env, targets_root):
+    """S7 near miss: a prefix of the name is not inside the root."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    _marked_scratch_root(targets_root / "scratch")
+    target = _target(env, "scratch-old", gone)
+    rc, out = run_targets(env, "--scratch-root", str(targets_root / "scratch"), "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+
+
+def test_a_cache_dir_inside_a_scratch_root_is_not_deleted(env):
+    root = _marked_scratch_root(env.tmp / "shared")
+    stale = root / "old-slice"
+    stale.mkdir()
+    (stale / "x.bin").write_bytes(b"x")
+    _backdate(stale)
+    rc, out = run(env, "--cache-root", str(root), "--scratch-root", str(root), "--apply",
+                  roots=False)
+    assert rc == 0, out
+    assert stale.exists()
+    assert "at or around a scratch root: 1" in out
+
+
+def test_a_cache_root_that_is_also_a_clone_root_deletes_no_clone(env):
+    """S7: clones are list only, also when a cache root reaches them; the
+    plain cache dir beside them is still judged."""
+    clone = _clone(env, "in-cache-root")
+    root = env.tmp / "clones"
+    stale = root / "old-slice"
+    stale.mkdir()
+    (stale / "x.bin").write_bytes(b"x")
+    _backdate(clone)
+    _backdate(stale)
+    rc, out = run(env, "--cache-root", str(root), "--clone-root", str(root), "--apply",
+                  roots=False)
+    assert rc == 0, out
+    assert clone.exists() and (clone / ".git").is_dir()
+    assert not stale.exists(), out
+    assert "at or around a clone: 1" in out
+
+
+def test_a_target_inside_a_clone_is_not_deleted(env):
+    """S7: a target root inside a clone reaches a list-only dir."""
+    clone = _clone(env, "with-target")
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "target", gone, root=clone / "rust")
+    _backdate(clone)
+    rc, out = run(env, "--target-root", str(clone / "rust"), "--clone-root",
+                  str(env.tmp / "clones"), "--apply", roots=False)
+    assert rc == 0, out
+    assert target.exists()
+    assert "at or around a clone: 1" in out
+
+
+def test_a_target_beside_clones_in_one_root_is_still_judged(env):
+    """S7 near miss: one root holding both clones and targets (the WSL
+    home) still deletes the target, never the clone."""
+    clone = _clone(env, "beside")
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "beside-target", gone, root=env.tmp / "clones")
+    _backdate(clone)
+    root = str(env.tmp / "clones")
+    rc, out = run(env, "--target-root", root, "--clone-root", root, "--apply", roots=False)
+    assert rc == 0, out
+    assert not target.exists(), out
+    assert clone.exists()
+
+
+def test_a_skipped_scratch_root_overlapping_another_root_refuses(env, tmp_path, monkeypatch):
+    """N2: a scratch root left out (here the home dir, too broad) must not
+    leave what is under it to a deleting class."""
+    home = tmp_path / "home" / "user"
+    _marked_scratch_root(home)
+    monkeypatch.setattr(prune.Path, "home", classmethod(lambda cls: home))
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "under-home", gone, root=home / "targets")
+    rc, out = run(env, "--target-root", str(home / "targets"), "--scratch-root", str(home),
+                  "--apply", roots=False)
+    assert rc != 0, out
+    assert target.exists()
+    assert "is skipped but overlaps the root" in out
