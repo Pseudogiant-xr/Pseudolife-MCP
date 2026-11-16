@@ -516,14 +516,18 @@ like a red suite ("Validating it", step 3). A check that could not start
 run. Once the batch pull request is open, `open` resumes it whatever its
 plan says. Notes:
 
-- Run locally, it honours `CARGO_TARGET_DIR`, so point that at the
-  machine's shared target directory to keep it warm; a cold check in a
-  fresh worktree otherwise fills its own `rust/target`, so mind the 8 GB
-  free-disk floor. If another cargo holds that directory, the check waits
-  for its lock ("Blocking waiting for file lock"). On a dev machine the gate
-  worktree keeps its own target directory beside the clone, one per source
-  copy, because a target shared between copies hands back another copy's
-  units.
+- Run locally, it honours `CARGO_TARGET_DIR`. Leave it unset in the
+  checkout that builds batches, so the check keeps that checkout's own `rust/target`
+  warm from one batch to the next, and do not point it at a directory
+  other checkouts build into: cargo can reuse another checkout's units from
+  a shared one and report a check that never compiled this tree (CLAUDE.md,
+  "Disk space"). A cold check fills `rust/target`, so mind the 8 GB
+  free-disk floor.
+  If another cargo holds that directory, the check waits for its lock
+  ("Blocking waiting for file lock").
+- On a dev machine (`rust-check.remote`) the gate worktree keeps its own
+  target directory beside the clone, one per source copy, for the same
+  reason: a target shared between copies hands back another copy's units.
 - Run remotely, it runs in that machine's own environment; nothing from
   the operator's environment is sent, and ssh forwards no agent, port or
   display. The far half withholds the same credential-shaped variables

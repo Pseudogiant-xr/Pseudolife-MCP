@@ -73,6 +73,17 @@ printf '%s\n' "$*" >>"$NATIVE_CALLS"
 case "$1" in
     version) [ -z "$STUB_HANG_VERSION" ] || sleep 600; echo "pseudolife-mcp 9.8.7"; [ -z "$STUB_BROKEN" ] || { echo "GLIBC_2.35 not found" >&2; exit 1; } ;;
     runtime)
+        if [ "$2" = install ] && [ "$3" = --check ]; then
+            if [ -n "$STUB_REFUSE_TUNNEL" ]; then
+                echo "runtime install refused: this machine stays on the Python client: a tunnel is registered to start by itself" >&2
+                exit 3
+            fi
+            exit 0
+        fi
+        if [ -n "$STUB_REFUSE_TUNNEL_LATE" ]; then
+            echo "runtime install refused: this machine stays on the Python client: a tunnel is registered to start by itself" >&2
+            exit 3
+        fi
         if [ -z "$STUB_NO_LAUNCHER" ]; then
             mkdir -p "$(dirname "$PSEUDOLIFE_SHIM_LAUNCHER")"
             cp "$0" "$PSEUDOLIFE_SHIM_LAUNCHER"; chmod 755 "$PSEUDOLIFE_SHIM_LAUNCHER"
@@ -210,7 +221,7 @@ def test_fresh_install_verifies_the_archive_and_installs_it_natively(tmp_path):
     assert f"Native client {VERSION} installed at" in result.stdout
     calls = _calls(tmp_path)
     assert calls[0] == "version"
-    install = next(c for c in calls if c.startswith("runtime install"))
+    install = next(c for c in calls if c.startswith("runtime install --archive"))
     downloads = tmp_path / "home/.pseudolife-mcp/downloads" / VERSION
     assert install == (f"runtime install --archive {_p(downloads / ASSET)} "
                        f"--sha256sums {_p(downloads / 'SHA256SUMS')} --version {VERSION}")
@@ -301,7 +312,8 @@ def test_a_release_with_this_installers_protocol_or_newer_installs(tmp_path, lev
     assert result.returncode == 0, result.stderr
     assert "OK=1" in result.stdout
     calls = _calls(tmp_path)
-    assert calls.index("installer --capability") < next(i for i, c in enumerate(calls) if c.startswith("runtime install"))
+    assert calls.index("installer --capability") < calls.index("runtime install --check") < next(
+        i for i, c in enumerate(calls) if c.startswith("runtime install --archive"))
 
 
 @pytest.mark.parametrize("moves, status", [("moved", 0), ("current", 0), ("left", 1)])
@@ -338,10 +350,38 @@ def test_a_reported_launcher_that_does_not_exist_is_not_success(tmp_path):
     assert "the native client could not be installed" in result.stderr
 
 
+def test_a_registered_tunnel_service_refuses_before_anything_changes(tmp_path):
+    # The staged client's runtime install --check exits 3 when a tunnel
+    # registered to start by itself runs this machine's Python client
+    # (issue #1632): the preflight refuses, and nothing was changed.
+    result = _run(tmp_path, "native_stage; echo STAGED", env={"STUB_REFUSE_TUNNEL": "1"})
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "STAGED" not in result.stdout
+    assert "runtime install refused: this machine stays on the Python client" in result.stderr
+    assert "a tunnel is registered to start by itself through this machine's Python client" in result.stderr
+    # The verified download is kept for the rerun; nothing else changed.
+    assert "Nothing else was changed: the download in" in result.stderr
+    assert not any(c.startswith("runtime install --archive") for c in _calls(tmp_path))
+    assert not (tmp_path / "home" / "runtimes").exists()
+
+
+def test_a_refused_move_keeps_the_python_client_and_says_so(tmp_path):
+    # Should runtime install itself refuse after the preflight passed, the
+    # installer keeps the Python client and says so (issue #1632).
+    result = _run(tmp_path, 'native_stage; ensure_shim; echo "OK=${SHIM_OK:-unset} CHANGING=${NATIVE_HOST_CHANGING:-unset}"',
+                  env={"STUB_REFUSE_TUNNEL_LATE": "1"})
+    assert result.returncode == 0, result.stderr
+    assert "OK=unset CHANGING=unset" in result.stdout
+    assert "runtime install refused: this machine stays on the Python client" in result.stderr
+    assert "this machine keeps the Python client" in result.stderr
+    assert "rerun the installer, which reuses" not in result.stderr
+    assert not (tmp_path / "home" / "runtimes").exists()
+
+
 def test_one_run_installs_the_client_once(tmp_path):
     result = _run(tmp_path, "native_stage; ensure_shim; ensure_shim; shim_registration_migrates codex || true")
     assert result.returncode == 0, result.stderr
-    assert sum(c.startswith("runtime install") for c in _calls(tmp_path)) == 1
+    assert sum(c.startswith("runtime install --archive") for c in _calls(tmp_path)) == 1
 
 
 def test_an_archive_url_with_credentials_refuses_without_printing_them(tmp_path):

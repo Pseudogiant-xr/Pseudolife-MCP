@@ -306,6 +306,11 @@ covers saved-instance checks and an explicitly disposable mail proof.
 dormant ([Turning the board on](docs/guide/configuration.md#turning-the-board-on)).
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
+Membership of the `docker` group is equivalent to root on that machine:
+that is how Docker works, not something Pseudolife adds. To avoid granting
+it, run the installer from an account that already uses Docker; rootless
+Docker and Podman are not supported yet
+([#1642](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/1642)).
 Docker Engine also needs the buildx plugin, which Docker Desktop bundles:
 the Dockerfiles' `RUN --mount` caches need BuildKit, and without buildx the
 build dies with "the --mount option requires BuildKit". The preflight
