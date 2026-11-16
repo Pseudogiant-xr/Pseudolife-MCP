@@ -13,6 +13,8 @@ use serde_json::{Map, Value};
 
 use super::hook_json::quoted;
 
+#[cfg(windows)]
+mod dpapi;
 mod record;
 mod store;
 mod syntax;
@@ -1458,5 +1460,134 @@ mod tests {
         ] {
             assert!(!ok(shape), "{shape:?}");
         }
+    }
+
+    /// The doctor entry for `dot`, as one JSON text and its `next` lines.
+    fn doctor_entry(store: &Store) -> (Value, Vec<String>) {
+        let entries = doctor_section(&store.0).expect("a tunnel section");
+        let entry = entries
+            .into_iter()
+            .find(|entry| entry["profile"] == "dot")
+            .expect("an entry for dot");
+        let next = entry["next"]
+            .as_array()
+            .map(|lines| lines.iter().map(|l| l.as_str().unwrap().to_owned()).collect())
+            .unwrap_or_default();
+        assert!(!entry.to_string().contains("Python"), "{entry}");
+        (entry, next)
+    }
+
+    const FAILED_REFRESH: &[u8] =
+        b"{\"id\": \"0123456789abcdef0123456789abcdef\", \"state\": \"failed\"}";
+
+    #[test]
+    fn doctor_names_tunnel_status_where_it_answers_beside_a_process_record() {
+        let store = Store::new();
+        store.profile("dot", true);
+        store.key("dot");
+        store.put("dot.reload.result.json", FAILED_REFRESH);
+        store.record("dot", DEAD_PID, Path::new("/nonexistent/tunnel-client"));
+        let (entry, next) = doctor_entry(&store);
+        assert_eq!(entry["runtime"]["process_record"], true, "{entry}");
+        assert_eq!(
+            next[0],
+            "Last tunnel refresh: failed; needs attention: pseudolife-mcp tunnel status --profile dot shows the outcome and the key's state."
+        );
+        // The advice is true: native `tunnel status` answers this store.
+        let options = parse(&argv(&["status", "--json"])).unwrap();
+        assert!(status(&options, &store.0).is_ok());
+    }
+
+    #[test]
+    fn doctor_names_the_file_a_profile_could_not_be_read_from_without_naming_python() {
+        let store = Store::new();
+        store.put("bad.profile.json", b"{not json");
+        store.profile("dot", false);
+        let entries = doctor_section(&store.0).expect("a tunnel section");
+        let bad = &entries[0];
+        assert_eq!(bad["profile"], "bad");
+        let recovery = bad["recovery"].as_str().unwrap();
+        assert!(!recovery.contains("Python"), "{recovery}");
+        assert_eq!(
+            recovery,
+            format!(
+                "Check that {} is an owner-only file holding a tunnel profile; if it is left from an abandoned setup, move it aside; this client cannot set a tunnel up yet.",
+                store.0.join("bad.profile.json").display()
+            )
+        );
+    }
+
+    #[test]
+    fn doctor_names_the_expiry_date_and_where_to_create_a_new_key() {
+        let store = Store::new();
+        store.put(
+            "dot.profile.json",
+            format!(
+                "{{\"name\": \"dot\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {}, \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true, \"runtime_key_expires_at\": \"2020-01-01T00:00:00+00:00\"}}",
+                serde_json::to_string(&store.0.join("token")).unwrap()
+            )
+            .as_bytes(),
+        );
+        let (_, next) = doctor_entry(&store);
+        assert_eq!(
+            next,
+            ["The tunnel key expired on 2020-01-01T00:00:00+00:00; create a new restricted key at https://platform.openai.com/settings/organization/api-keys."]
+        );
+    }
+
+    /// A key file as the Python client's `set_key` writes it on Windows.
+    #[cfg(windows)]
+    fn sealed(key: &[u8]) -> Vec<u8> {
+        [&b"DPAPI\0"[..], &dpapi::seal(key)].concat()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_protected_key_is_unsealed_and_checked() {
+        let store = Store::new();
+        store.profile("dot", true);
+        store.put("dot.key", &sealed(b"fixture-tunnel-key"));
+        assert_eq!(store::key_present(&store.0, "dot"), Ok(true));
+        let options = parse(&argv(&["status", "--json"])).unwrap();
+        let report = report_of(status(&options, &store.0));
+        assert_eq!(report["private_key_present"], true, "{report}");
+        let (entry, next) = doctor_entry(&store);
+        assert_eq!(entry["private_key_present"], true, "{entry}");
+        assert!(next.is_empty(), "{next:?}");
+        // Without a launch record, verify refuses on the identity read
+        // instead of handing the key to another client.
+        let verify_options = parse(&argv(&["verify"])).unwrap();
+        assert_eq!(
+            verify(&verify_options, &store.0).unwrap_err(),
+            Fail::Tunnel(store::UNAVAILABLE)
+        );
+        // It unseals, but not to a key.
+        std::fs::remove_file(store.0.join("dot.key")).unwrap();
+        store.put("dot.key", &sealed(b"two words"));
+        assert_eq!(store::key_present(&store.0, "dot"), Ok(false));
+        // Another host's protection is not this host's key.
+        std::fs::remove_file(store.0.join("dot.key")).unwrap();
+        store.put("dot.key", b"PLAIN\0fixture-tunnel-key");
+        assert_eq!(store::key_present(&store.0, "dot"), Ok(false));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_key_this_session_cannot_unseal_is_named_not_guessed() {
+        let store = Store::new();
+        store.profile("dot", true);
+        // Not a DPAPI blob: what any key reads like to an account or a
+        // session that cannot unseal it.
+        store.put("dot.key", b"DPAPI\0sealed-fixture");
+        assert_eq!(store::key_state(&store.0, "dot"), Ok(None));
+        let (entry, next) = doctor_entry(&store);
+        assert_eq!(entry["private_key_present"], "not_verified", "{entry}");
+        assert_eq!(
+            next,
+            [format!(
+                "The saved tunnel key {} cannot be unlocked in this session: a Windows-protected key opens only for the account that saved it, signed in with its password (not over a key-based SSH logon), so run this check from such a session.",
+                store.0.join("dot.key").display()
+            )]
+        );
     }
 }
