@@ -34,6 +34,8 @@ def _load():
 
 
 prune = _load()
+REAL_ARRIVAL = prune._arrival        # before any fixture replaces it
+REAL_LIST_PROCESSES = prune.list_processes
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -164,7 +166,15 @@ def env(tmp_path, monkeypatch):
     # CARGO_TARGET_DIR or the host's process table.
     monkeypatch.setattr(prune, "protected_temp_roots", lambda: [])
     monkeypatch.setattr(prune, "list_processes", lambda: [])
+    # Files made here arrive now; tests age them by mtime alone, and the
+    # arrival rule has its own test.
+    monkeypatch.setattr(prune, "_arrival", lambda st: 0.0)
     monkeypatch.delenv("CARGO_TARGET_DIR", raising=False)
+    for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(var, raising=False)
+    # Never the developer's own cargo config or toolchain homes.
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo-home"))
+    monkeypatch.setenv("RUSTUP_HOME", str(tmp_path / "rustup-home"))
     monkeypatch.chdir(tmp_path)
     return Env(tmp_path)
 
@@ -1035,12 +1045,13 @@ def _target(env: Env, name: str, *sources: Path, age: float | None = OLD,
     (path / "CACHEDIR.TAG").write_text(SIGNATURE, encoding="utf-8")
     (path / ".rustc_info.json").write_text("{}", encoding="utf-8")
     (deps / "libthing.rlib").write_bytes(b"x" * 1000)
-    if sources:
-        escaped = " ".join(str(s).replace(" ", "\\ ") for s in sources)
-        (deps / "thing-1234.d").write_text(
-            f"{deps / 'libthing.rlib'}: {escaped}\n\n"
-            + "".join(f"{str(s).replace(' ', chr(92) + ' ')}:\n" for s in sources),
-            encoding="utf-8")
+    # Cargo names its outputs inside the profile, which is how a profile is
+    # known to be cargo's own and not a copy.
+    escaped = " ".join(str(s).replace(" ", "\\ ") for s in sources)
+    (deps / "thing-1234.d").write_text(
+        f"{deps / 'libthing.rlib'}: {escaped}\n\n"
+        + "".join(f"{str(s).replace(' ', chr(92) + ' ')}:\n" for s in sources),
+        encoding="utf-8")
     if age is not None:
         _backdate(path, age)
     return path
@@ -1158,11 +1169,14 @@ def test_entries_cargo_does_not_explain_are_kept(env, targets_root):
     total = sum(f.stat().st_size for f in target.rglob("*") if f.is_file())
     rc, out = run_targets(env, "--apply")
     assert rc == 0, out
-    assert sorted(p.name for p in target.iterdir()) == ["cand-final.exe", "mutant-src"]
+    # Cargo's markers stay beside foreign entries, so the dir stays a target.
+    assert sorted(p.name for p in target.iterdir()) == [
+        ".rustc_info.json", "CACHEDIR.TAG", "cand-final.exe", "mutant-src"]
     assert "kept, not cargo's (0.0 kB): cand-final.exe, mutant-src" in out
     [line] = env.ledger_lines()
     kept = (target / "cand-final.exe").stat().st_size + sum(
-        f.stat().st_size for f in (target / "mutant-src").rglob("*") if f.is_file())
+        f.stat().st_size for f in (target / "mutant-src").rglob("*") if f.is_file()) + sum(
+        (target / n).stat().st_size for n in ("CACHEDIR.TAG", ".rustc_info.json"))
     assert line["bytes"] == total - kept, (
         "only what was deleted is counted")
 
@@ -1334,6 +1348,9 @@ def test_a_registered_worktree_is_not_a_clone(env):
 # --- sweep mode: scratch dirs ----------------------------------------------
 
 def run_scratch(env: Env, *argv: str) -> tuple[int, str]:
+    root = env.tmp / "scratch"
+    root.mkdir(exist_ok=True)
+    (root / prune.SCRATCH_ROOT_MARKER).write_text("", encoding="utf-8")
     return run(env, "--repo", str(env.repo), "--config", str(env.config),
                "--ledger", str(env.ledger), "--scratch-root", str(env.tmp / "scratch"),
                *argv, roots=False)
@@ -1763,3 +1780,234 @@ def test_many_commits_are_checked_without_a_long_command_line(env):
     argv overflowed it and aborted the sweep."""
     sha = _git(env.repo, "rev-parse", "origin/master")
     assert prune.all_on_master(str(env.repo), [sha] * 900) is None
+
+
+# --- conductor's review of #1654 (16 November 2026) -------------------------
+
+def test_an_unmarked_scratch_root_refuses_the_run(env):
+    """B1: a root becomes a scratch root only by a marker its user put there,
+    so a misnamed root (the temp dir's parent, which holds a WSL disk image)
+    refuses the run and says how to opt in."""
+    root = env.tmp / "unmarked"
+    old = root / "wsl"
+    old.mkdir(parents=True)
+    (old / "ext4.vhdx").write_bytes(b"disk")
+    _backdate(old)
+    rc, out = run(env, "--scratch-root", str(root), "--apply", roots=False)
+    assert rc == 2, out
+    assert old.exists()
+    assert prune.SCRATCH_ROOT_MARKER in out and "create" in out
+
+
+def test_a_marked_scratch_root_is_swept(env):
+    old = _scratch(env, "w3runnertemp", "a/b.bin")
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert not old.exists()
+
+
+def test_the_temp_dir_as_a_scratch_root_is_list_only(env, monkeypatch):
+    """B1 ruling 2: the temp dir needs the marker too, and even then nothing
+    there is removed in this change."""
+    old = _scratch(env, "w3runnertemp", "a/b.bin")
+    temp = prune.norm(env.tmp / "scratch")
+    monkeypatch.setattr(prune, "protected_temp_roots", lambda: [temp])
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert old.exists()
+    assert "list only" in out
+
+
+def test_scratch_holding_images_archives_bundles_patches_or_keys_is_kept(env):
+    kept = [_scratch(env, n, f) for n, f in (
+        ("disk", "ext4.vhdx"), ("backup", "bank.dump"), ("archive", "old.zip"),
+        ("bundle", "w17.bundle"), ("patch", "fix.patch"), ("key", "id.pem"))]
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert all(p.exists() for p in kept), out
+
+
+def test_an_empty_scratch_dir_is_kept_as_a_possible_lock_dir(env):
+    empty = env.tmp / "scratch" / "some-lease"
+    empty.mkdir(parents=True)
+    _backdate(empty)
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert empty.exists()
+    assert "holds no bytes" in out
+
+
+def test_harness_name_prefixes_are_kept_and_the_near_miss_is_not(env):
+    kept = [_scratch(env, n) for n in ("claude-wsl-lease", "codex-artifact-1", "t3-tmp")]
+    near = _scratch(env, "notclaude")
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert all(p.exists() for p in kept), out
+    assert not near.exists(), out
+
+
+def test_an_inherited_git_dir_cannot_make_a_clone_read_as_merged(env, monkeypatch):
+    """B2: GIT_DIR from a caller (a hook) would point every check at the main
+    repository, where the clone's unmerged branch does not exist."""
+    clone = _clone(env, "side-under-git-dir")
+    _git(clone, "checkout", "-qb", "side")
+    (clone / "side.txt").write_text("side\n", encoding="utf-8")
+    _git(clone, "add", "side.txt")
+    _git(clone, "commit", "-qm", "side work")
+    _git(clone, "checkout", "-q", "master")
+    _backdate(clone)
+    monkeypatch.setenv("GIT_DIR", str(env.repo / ".git"))
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "a ref or reflog entry" in out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX mount points")
+def test_a_bind_mount_inside_a_scratch_dir_keeps_it(env, monkeypatch):
+    """S1: a bind mount on the same filesystem has the same st_dev; only the
+    mount list shows it."""
+    old = _scratch(env, "has-mount", "data/x.bin")
+    mounted = os.path.normpath(str(old / "data"))
+    monkeypatch.setattr(prune, "_mount_points", lambda: {mounted})
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert old.exists()
+    assert "mount point" in out
+
+
+def test_a_copied_profile_dir_in_a_target_is_foreign(env, targets_root):
+    """S2: a copy of a profile (a kept candidate build) still names the
+    original's outputs, so it is not cargo's own and stays."""
+    import shutil
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "with-copy", gone, age=None)
+    shutil.copytree(target / "debug", target / "debug-pr1234")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert (target / "debug-pr1234").exists() and not (target / "debug").exists()
+    assert "debug-pr1234" in out
+
+
+def test_a_second_run_at_once_is_refused(env):
+    """S3: one retention run at a time."""
+    lock = prune.RunLock(env.ledger.parent / "locks" / "retention.lock")
+    with lock:
+        rc, out = run(env)
+    assert rc == 2, out
+    assert "another retention run" in out
+
+
+@pytest.mark.parametrize("root", ["", "relative/dir"])
+def test_an_empty_or_relative_root_is_refused(env, root):
+    """S4: an unset variable would otherwise sweep the current dir."""
+    rc, out = run(env, "--scratch-root", root, roots=False)
+    assert rc == 2, out
+    assert "empty or relative" in out
+
+
+def test_a_scratch_dir_that_just_arrived_is_not_idle(env, monkeypatch):
+    """S5: a folder moved or extracted into a root keeps its old mtimes; its
+    arrival (creation on Windows, change time on POSIX) counts."""
+    monkeypatch.setattr(prune, "_arrival", REAL_ARRIVAL)
+    extracted = _scratch(env, "extracted", "a/b.bin")      # mtimes 30 days old
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert extracted.exists()
+    assert "in grace period" in out
+
+
+def test_an_owner_path_that_cannot_be_read_keeps_the_target(env, targets_root, monkeypatch):
+    """S7: a dir the sweep cannot read may hold a live owner."""
+    gone = env.tmp / "unreadable-owner" / "rust" / "src" / "lib.rs"
+    target = _target(env, "unreadable", gone)
+    real = prune.os.lstat
+
+    def denies(path, *a, **kw):
+        if "unreadable-owner" in str(path):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real(path, *a, **kw)
+
+    monkeypatch.setattr(prune.os, "lstat", denies)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "its owners cannot all be read" in out
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="reads /proc")
+def test_a_running_program_from_a_target_keeps_it(env, targets_root, monkeypatch):
+    """S9: the executable path counts, not only the command line."""
+    import shutil
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "server", gone, age=None)
+    (target / "debug" / "app").write_bytes(Path(shutil.which("sleep")).read_bytes())
+    os.chmod(target / "debug" / "app", 0o755)
+    _backdate(target)
+    monkeypatch.setattr(prune, "list_processes", REAL_LIST_PROCESSES)
+    child = subprocess.Popen(["renamed-argv0", "60"], executable=str(target / "debug" / "app"))
+    try:
+        rc, out = run_targets(env, "--apply")
+    finally:
+        child.kill()
+        child.wait()
+    assert rc == 0, out
+    assert target.exists()
+    assert f"in use by process {child.pid}" in out
+
+
+def test_a_commit_no_ref_or_reflog_holds_keeps_the_clone(env):
+    """S11: with reflogs off, a commit left on a detached HEAD is held by
+    nothing but its object."""
+    clone = _clone(env, "no-reflog")
+    _git(clone, "config", "core.logAllRefUpdates", "false")
+    _git(clone, "reflog", "expire", "--expire=now", "--all")
+    _git(clone, "checkout", "-q", "--detach")
+    (clone / "d.txt").write_text("object only\n", encoding="utf-8")
+    _git(clone, "add", "d.txt")
+    _git(clone, "commit", "-qm", "object only")
+    _git(clone, "checkout", "-q", "master")
+    _git(clone, "reflog", "expire", "--expire=now", "--all")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "a ref or reflog entry" in out
+
+
+def test_untracked_files_show_whatever_the_clone_config_says(env):
+    """N2: status.showUntrackedFiles=no in a clone must not hide work."""
+    clone = _clone(env, "hides-untracked")
+    _git(clone, "config", "status.showUntrackedFiles", "no")
+    (clone / "only-here.txt").write_text("unique\n", encoding="utf-8")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "uncommitted changes" in out
+
+
+def test_a_dotted_target_dir_pin_keeps_the_target(env, targets_root):
+    """N6: ``build.target-dir = ...`` pins as the table form does."""
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "dotted-pin", gone)
+    holder = env.add("dotted-holder")
+    (holder / ".cargo").mkdir()
+    (holder / ".cargo" / "config.toml").write_text(
+        f"build.target-dir = {json.dumps(str(target))}\n", encoding="utf-8")
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "pinned as target-dir" in out
+
+
+def test_a_clone_whose_git_dir_names_a_commondir_is_kept(env):
+    """N12: commondir makes git read another dir's config and objects."""
+    clone = _clone(env, "commondir")
+    (clone / ".git" / "commondir").write_text(str(env.repo / ".git") + "\n", encoding="utf-8")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "commondir" in out

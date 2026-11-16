@@ -150,6 +150,39 @@ def is_link(st: os.stat_result) -> bool:
         getattr(st, "st_file_attributes", 0) & _REPARSE)
 
 
+_MOUNTS: list[set[str] | None] = []
+
+
+def _mount_points() -> set[str] | None:
+    """Every mount point this process sees (Linux, from mountinfo), read
+    once per run; None where /proc is missing, so the walk asks
+    os.path.ismount instead. A bind mount on the same filesystem has the
+    same st_dev, so only this list shows it."""
+    if not _MOUNTS:
+        found: set[str] | None = None
+        try:
+            with open("/proc/self/mountinfo", encoding="utf-8", errors="replace") as fh:
+                found = set()
+                for line in fh:
+                    fields = line.split()
+                    if len(fields) > 4:
+                        found.add(os.path.normpath(
+                            fields[4].replace("\\040", " ").replace("\\011", "\t")))
+        except OSError:
+            found = None
+        _MOUNTS.append(found)
+    return _MOUNTS[0]
+
+
+def _arrival(st: os.stat_result) -> float:
+    """When an entry arrived where it is: its creation time on Windows and
+    its change time on POSIX (a rename or an extraction sets it), so a
+    folder moved or unpacked into a root is not idle on arrival."""
+    if sys.platform == "win32":
+        return getattr(st, "st_birthtime", None) or st.st_ctime
+    return st.st_ctime
+
+
 @dataclass
 class Scan:
     bytes: int = 0
@@ -160,11 +193,20 @@ class Scan:
     first_file: str | None = None
 
 
-def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
+def scan(root: str, *, skip_mtime=lambda rel: False, arrival: bool = False) -> Scan:
     """One lstat walk (never following a link): size, newest mtime, and
-    every symlink or reparse point. Any OSError fails closed."""
+    every symlink, reparse point or mount point. Any OSError fails closed.
+    With ``arrival``, an entry's arrival time counts as a write too."""
     out = Scan()
     base = _long(root)
+    mounts = _mount_points() if sys.platform != "win32" else set()
+
+    def is_mount(path: str) -> bool:
+        if sys.platform == "win32":
+            return False
+        if mounts is None:
+            return os.path.ismount(path)
+        return os.path.normpath(path) in mounts
     # A POSIX mount (bind or other) is a plain dir to lstat; a different
     # device fails closed. Windows mount points are reparse points already.
     try:
@@ -173,7 +215,10 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
         out.error = f".: {exc.strerror or exc}"
         return out
     root_dev = root_st.st_dev if sys.platform != "win32" else None
-    out.newest_dir = root_st.st_mtime
+    if is_mount(base):
+        out.links.append(". (mount point)")
+        return out
+    out.newest_dir = max(root_st.st_mtime, _arrival(root_st) if arrival else 0.0)
     stack = [("", base)]
     while stack:
         rel_dir, abs_dir = stack.pop()
@@ -194,30 +239,48 @@ def scan(root: str, *, skip_mtime=lambda rel: False) -> Scan:
                 out.links.append(rel)
                 continue
             if stat.S_ISDIR(st.st_mode):
-                if root_dev is not None and st.st_dev != root_dev:
+                if (root_dev is not None and st.st_dev != root_dev) or is_mount(entry.path):
                     out.links.append(f"{rel} (mount point)")
                     continue
-                out.newest_dir = max(out.newest_dir, st.st_mtime)
+                out.newest_dir = max(out.newest_dir, st.st_mtime,
+                                     _arrival(st) if arrival else 0.0)
                 stack.append((rel, entry.path))
                 continue
             out.bytes += st.st_size
             if out.first_file is None:
                 out.first_file = rel
             if not skip_mtime(rel):
-                out.newest = max(out.newest, st.st_mtime)
+                out.newest = max(out.newest, st.st_mtime, _arrival(st) if arrival else 0.0)
     return out
 
 
 # --- git -------------------------------------------------------------------
 
-def git(cwd: str, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
-    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
-    # core.fsmonitor and gpg.program (through log.showSignature) name
-    # programs git runs on status and on reflog or log; never one here.
-    return subprocess.run(["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
-                           "-c", "log.showSignature=false", "-C", cwd, *args],
+# Variables that point git at another repository, work tree, index or
+# object store: inherited from a caller (a hook sets GIT_DIR), they would
+# make every check here read the wrong repository.
+_GIT_REDIRECTS = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                  "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                  "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
+                  "GIT_DISCOVERY_ACROSS_FILESYSTEM"}
+# core.fsmonitor and gpg.program (through log.showSignature) name programs
+# git runs on status and on reflog or log; never one here.
+GIT_SAFE = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
+            "-c", "log.showSignature=false"]
+
+
+def git_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k.upper() not in _GIT_REDIRECTS}
+    # A partial clone would otherwise fetch from its promisor remote.
+    env.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1")
+    return env
+
+
+def git(cwd: str, *args: str, timeout: float = 120, input: str | None = None
+        ) -> subprocess.CompletedProcess:
+    return subprocess.run([*GIT_SAFE, "-C", cwd, *args], input=input,
                           capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", env=env, timeout=timeout)
+                          errors="replace", env=git_env(), timeout=timeout)
 
 
 @dataclass
@@ -285,7 +348,7 @@ def status_problem(wt: str) -> str | None:
     # matching: an ignored dir is reported as the path its pattern matched
     # (pkg/__pycache__/), not collapsed to a parent that holds nothing else.
     proc = git(wt, "status", "--porcelain=v1", "-z", "--ignored=matching",
-               "--ignore-submodules=none")
+               "--untracked-files=all", "--ignore-submodules=none")
     if proc.returncode:
         return f"git status failed: {proc.stderr.strip()}"
     tokens = proc.stdout.split("\0")
@@ -391,7 +454,7 @@ def evaluate_worktree(repo: str, wt: Worktree, *, grace_days: float | None,
     return v
 
 
-_TARGET_DIR = re.compile(r"""^\s*target-dir\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')""",
+_TARGET_DIR = re.compile(r"""^\s*(?:build\.)?target-dir\s*=\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')""",
                          re.M)
 
 
@@ -451,8 +514,8 @@ def list_processes() -> list[tuple[int, int, str]] | None:
                 return None
             script = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
                       "Get-CimInstance Win32_Process | ForEach-Object { "
-                      "\"{0}`t{1}`t{2}\" -f $_.ProcessId, $_.ParentProcessId, "
-                      "($_.CommandLine -replace '[\\r\\n]', ' ') }")
+                      "\"{0}`t{1}`t{2} {3}\" -f $_.ProcessId, $_.ParentProcessId, "
+                      "($_.CommandLine -replace '[\\r\\n]', ' '), $_.ExecutablePath }")
             proc = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", script],
                                   capture_output=True, text=True, encoding="utf-8",
                                   errors="replace", timeout=120)
@@ -465,6 +528,8 @@ def list_processes() -> list[tuple[int, int, str]] | None:
                     out.append((int(parts[0]), int(parts[1]), parts[2]))
             return out or None
         if os.path.isdir("/proc/self"):
+            if _proc_hides_others():
+                return None             # other users' processes are invisible
             out = []
             for name in os.listdir("/proc"):
                 if not name.isdigit():
@@ -475,7 +540,12 @@ def list_processes() -> list[tuple[int, int, str]] | None:
                 except OSError:
                     continue
                 ppid = int(statline.rsplit(")", 1)[1].split()[1])
-                out.append((int(name), ppid, raw.replace(b"\0", b" ").decode(errors="replace")))
+                cmd = raw.replace(b"\0", b" ").decode(errors="replace")
+                try:
+                    cmd += " " + os.readlink(f"/proc/{name}/exe")    # the executable too
+                except OSError:
+                    pass
+                out.append((int(name), ppid, cmd))
             return out
         proc = subprocess.run(["ps", "-axww", "-o", "pid=,ppid=,command="],
                               capture_output=True, text=True, timeout=60)
@@ -489,6 +559,22 @@ def list_processes() -> list[tuple[int, int, str]] | None:
         return out
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
         return None
+
+
+def _proc_hides_others() -> bool:
+    """True when /proc is mounted with hidepid, so a listing would show only
+    this user's processes and look like nobody else uses anything."""
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                fields = line.split()
+                if len(fields) > 4 and fields[4] == "/proc":
+                    opts = line.rsplit(" - ", 1)[-1]
+                    if re.search(r"hidepid=(1|2|invisible|noaccess)", opts):
+                        return True
+    except OSError:
+        pass
+    return False
 
 
 def _fold(text: str) -> str:
@@ -638,11 +724,22 @@ DEFAULT_SCRATCH_GRACE_DAYS = 14.0   # maintainer ruling, 16 November 2026
 # Windows dev VM's dry run (16 November 2026) would otherwise have offered
 # its .rustup toolchain and its bin dir as scratch.
 SCRATCH_KEEP_NAMES = {"claude", "bin", "scripts", "tools"}
+# Harness dirs and their lock dirs start with these (claude-wsl-lease,
+# codex-artifact-session-*); a name may only keep.
+SCRATCH_KEEP_PREFIXES = ("claude", "codex", "t3")
+# A scratch root is one the user named on purpose by putting this file in
+# it; without it a run refuses that root (a misnamed root such as the temp
+# dir's parent would otherwise put a WSL disk image in reach).
+SCRATCH_ROOT_MARKER = ".pseudolife-scratch-root"
 SCRATCH_LOG_SUFFIXES = (".log", ".jsonl")
 # Results, databases, models and programs: never scratch, whatever the age.
 SCRATCH_KEEP_SUFFIXES = (".json", ".csv", ".tsv", ".parquet", ".db", ".sqlite", ".sqlite3",
                          ".gguf", ".safetensors", ".onnx", ".pt", ".pth", ".ckpt",
-                         ".exe", ".dll", ".so", ".dylib")
+                         ".exe", ".dll", ".so", ".dylib",
+                         # disk images, archives and backups, bundles, patches, keys
+                         ".vhdx", ".vhd", ".img", ".iso", ".qcow2", ".vmdk",
+                         ".tar", ".tgz", ".gz", ".zip", ".7z", ".bak", ".dump", ".sql",
+                         ".bundle", ".patch", ".diff", ".pem", ".key")
 SCRATCH_KEEP_FILES = {"pg_version"}             # a PostgreSQL data dir
 DEP_INFO_MAX_BYTES = 4 * 1024 * 1024
 
@@ -676,31 +773,66 @@ def _real_dir(path: str) -> bool:
     return stat.S_ISDIR(st.st_mode) and not is_link(st)
 
 
-def target_layout(path: str) -> tuple[list[str], list[str], list[str]]:
-    """(entries cargo's layout explains, profile dirs, foreign entries) at
-    the top of a verified target. A target-triple dir counts when every
-    entry in it is a profile dir."""
-    cargo, profiles, foreign = [], [], []
+def _profile_built_here(prof: str) -> bool:
+    """True when a dep-info file of this profile dir names an output inside
+    it: cargo writes absolute output paths, so a copied profile (a kept
+    candidate build, ``cp -r release release-pr1234``) still names the
+    original and is not cargo's own."""
+    forms = _both_forms(prof)
+    for d in (prof, os.path.join(prof, "deps")):
+        try:
+            with os.scandir(d) as it:
+                files = [e.path for e in it if e.name.endswith(".d")
+                         and e.is_file(follow_symlinks=False)][:20]
+        except OSError:
+            continue
+        for f in files:
+            try:
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    first = fh.readline(65536)
+            except OSError:
+                continue
+            tokens = _dep_tokens(first)
+            if tokens and os.path.isabs(tokens[0]):
+                out = os.path.normcase(os.path.normpath(tokens[0]))
+                if any(is_under(out, form) for form in forms):
+                    return True
+    return False
+
+
+def target_layout(path: str) -> tuple[list[str], list[str], list[str], list[str]]:
+    """(entries cargo's layout explains, its profile dirs, foreign entries,
+    every dir that carries a build lock) at the top of a verified target.
+    A profile dir counts only when its own dep-info names outputs inside
+    it; a target-triple dir counts when every entry in it is such a
+    profile. Anything else is foreign and stays."""
+    cargo, profiles, foreign, lock_dirs = [], [], [], []
     for name in sorted(os.listdir(path)):
         full = os.path.join(path, name)
         if _real_dir(full):
             if _is_profile_dir(full):
-                cargo.append(name)
-                profiles.append(full)
+                lock_dirs.append(full)
+                if _profile_built_here(full):
+                    cargo.append(name)
+                    profiles.append(full)
+                else:
+                    foreign.append(name)
                 continue
             if name in CARGO_NAMED_DIRS:
                 cargo.append(name)
                 continue
             inner = [os.path.join(full, n) for n in os.listdir(full)]
             if inner and all(_real_dir(p) and _is_profile_dir(p) for p in inner):
-                cargo.append(name)
-                profiles.extend(inner)
-                continue
+                lock_dirs.extend(inner)
+                if all(_profile_built_here(p) for p in inner):
+                    cargo.append(name)
+                    profiles.extend(inner)
+                    continue
         elif name in CARGO_FILES and os.path.isfile(full) and not os.path.islink(full):
             cargo.append(name)
             continue
         foreign.append(name)
-    return cargo, profiles, foreign
+    return cargo, profiles, foreign, lock_dirs
 
 
 _ENV_DEP_MANIFEST = "# env-dep:CARGO_MANIFEST_DIR="
@@ -765,7 +897,12 @@ def source_owner(src: str, target: str, tool_homes: list[str]) -> tuple[str, str
             is_under(npath, h) for h in tool_homes):
         return None
     missing, cur = None, path
-    while not os.path.lexists(cur):
+    while True:
+        try:
+            os.lstat(cur)
+            break
+        except (FileNotFoundError, NotADirectoryError):
+            pass                        # truly absent; any other error is raised
         parent = os.path.dirname(cur)
         if parent == cur:
             return None
@@ -815,7 +952,12 @@ def target_owners(target: str, profiles: list[str]) -> tuple[dict[str, str], str
                     incomplete = f"{e.path} is too large to read whole"
                     continue
                 for token in _dep_tokens(text):
-                    found = source_owner(token, target, homes)
+                    try:
+                        found = source_owner(token, target, homes)
+                    except OSError as exc:
+                        # A dir that cannot be read may hold a live owner.
+                        incomplete = f"cannot look at {token}: {exc.strerror or exc}"
+                        continue
                     if found:
                         kind, where = found
                         owners.setdefault(where, kind)
@@ -889,11 +1031,18 @@ def checkout_unfinished(repo: str, root: str, main: str) -> str | None:
         # a detached HEAD lives only in the reflog.
         refs = git(root, "for-each-ref", "--format=%(objectname) %(refname)")
         logs = git(root, "reflog", "show", "--all", "--format=%H")
-        if refs.returncode or logs.returncode:
-            return f"cannot list its refs: {(refs.stderr or logs.stderr).strip()}"
+        # Every commit object too: one no ref and no reflog holds (logging
+        # off, or an expired reflog) is still unique work.
+        objects = git(root, "cat-file", "--batch-all-objects",
+                      "--batch-check=%(objecttype) %(objectname)", timeout=600)
+        if refs.returncode or logs.returncode or objects.returncode:
+            return ("cannot list its refs and commits: "
+                    f"{(refs.stderr or logs.stderr or objects.stderr).strip()}")
         shas = {line.split()[0] for line in refs.stdout.splitlines()
                 if len(line.split()) == 2 and not line.split()[1].startswith("refs/stash")}
         shas |= set(logs.stdout.split())
+        shas |= {line.split()[1] for line in objects.stdout.splitlines()
+                 if line.startswith("commit ")}
         reason = all_on_master(repo, sorted(shas))
         if reason:
             return f"a ref or reflog entry: {reason}"
@@ -905,21 +1054,15 @@ def all_on_master(repo: str, shas: list[str]) -> str | None:
     origin/master (two git calls, however many); otherwise the reason."""
     if not shas:
         return None
-    check = subprocess.run(["git", "--no-optional-locks", "-C", repo, "cat-file",
-                            "--batch-check=%(objectname) %(objecttype)"],
-                           input="".join(f"{sha}^{{commit}}\n" for sha in shas),
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=600)
+    check = git(repo, "cat-file", "--batch-check=%(objectname) %(objecttype)",
+                input="".join(f"{sha}^{{commit}}\n" for sha in shas), timeout=600)
     if check.returncode:
         return f"cannot check commits: {check.stderr.strip()}"
     for sha, line in zip(shas, check.stdout.splitlines()):
         if not line.endswith(" commit"):
             return f"commit {sha[:10]} exists only in that checkout"
-    extra = subprocess.run(["git", "--no-optional-locks", "-C", repo, "rev-list",
-                            "--max-count=1", "--stdin"],
-                           input="".join(f"{sha}\n" for sha in shas) + f"^{MASTER}\n",
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=600)
+    extra = git(repo, "rev-list", "--max-count=1", "--stdin",
+                input="".join(f"{sha}\n" for sha in shas) + f"^{MASTER}\n", timeout=600)
     if extra.returncode:
         return f"merge check failed: {extra.stderr.strip()}"
     if extra.stdout.strip():
@@ -990,16 +1133,19 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
         return v
     v.passed.append("no-reparse-points")
     try:
-        cargo, profiles, foreign = target_layout(path)
+        cargo, profiles, foreign, lock_dirs = target_layout(path)
     except OSError as exc:
         v.failure = f"walk error (failing closed): {exc.strerror or exc}"
+        return v
+    if not [n for n in cargo if n not in CARGO_FILES]:
+        v.failure = "nothing of cargo's own to delete (every profile here was built elsewhere); kept"
         return v
     if not any(os.path.isfile(os.path.join(p, ".cargo-lock")) for p in profiles):
         # Cargo keeps one in every profile it builds; none found means the
         # probe below cannot speak for a build.
         v.failure = "no cargo build lock found in any profile; kept"
         return v
-    holder = build_lock_holder(profiles)
+    holder = build_lock_holder(lock_dirs)
     if holder:
         v.failure = f"a build holds cargo's lock ({os.path.basename(holder)})"
         return v
@@ -1013,7 +1159,7 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
         return v
     v.passed.append("no-process-uses-it")
     idle = now - v.newest
-    owners, incomplete = target_owners(path, profiles)
+    owners, incomplete = target_owners(path, lock_dirs)
     if incomplete:
         v.failure = f"its owners cannot all be read ({incomplete}); kept"
         return v
@@ -1050,8 +1196,9 @@ def evaluate_target(path: str, *, repo: str, main: str, grace_hours: float,
         # Only what is deleted counts: the size and the ledger leave out
         # what stays.
         try:
+            stays = foreign + [n for n in cargo if n in CARGO_FILES]   # markers stay too
             kept = sum(scan(os.path.join(path, n)).bytes if _real_dir(os.path.join(path, n))
-                       else os.lstat(os.path.join(path, n)).st_size for n in foreign)
+                       else os.lstat(os.path.join(path, n)).st_size for n in stays)
         except OSError as exc:
             v.failure = f"walk error (failing closed): {exc.strerror or exc}"
             return v
@@ -1064,13 +1211,14 @@ def delete_target(path: str) -> str | None:
     """Delete the entries cargo's layout explains; anything else stays.
     Whole when nothing else is there (renamed aside first)."""
     try:
-        cargo, _profiles, foreign = target_layout(path)
+        cargo, _profiles, foreign, _locks = target_layout(path)
     except OSError as exc:
         return f"in use or access denied, skipped: {exc.strerror or exc}"
     if not foreign:
         return delete_cache(path)
-    # The markers go last, and only when everything else went: a target
-    # that lost them is no longer one, and no later sweep would see the rest.
+    # With foreign entries, cargo's markers stay: the dir remains a target
+    # (with nothing of cargo's own left, a later sweep keeps it and names
+    # the rest), and a delete that stopped part-way is finished later.
     dirs = [n for n in cargo if n not in CARGO_FILES]
     errors, deleted = [], 0
     for name in dirs:
@@ -1083,12 +1231,41 @@ def delete_target(path: str) -> str | None:
         if deleted == 0 and all(": in use" in e for e in errors):
             return "in use or access denied, skipped: " + "; ".join(errors)
         return "deleted in part (cargo's markers kept, so a later sweep finishes it): " + "; ".join(errors)
-    for name in (n for n in cargo if n in CARGO_FILES):
-        try:
-            os.remove(os.path.join(path, name))
-        except OSError as exc:
-            errors.append(f"{name}: {exc.strerror or exc}")
-    return ("deleted in part: " + "; ".join(errors)) if errors else None
+    return None
+
+
+class _BuildLocks:
+    """Cargo's build locks of a target, held across its rename and delete
+    on POSIX, where a rename succeeds under a running build; a build that
+    starts meanwhile waits on the lock. On Windows the rename itself fails
+    while any file in the tree is open, and an open lock file would make
+    it fail always, so nothing is held there."""
+
+    def __init__(self, lock_dirs: list[str]) -> None:
+        self.paths = [os.path.join(d, ".cargo-lock") for d in lock_dirs]
+        self.fds: list[int] = []
+
+    def __enter__(self) -> bool:
+        if sys.platform == "win32":
+            return True
+        import fcntl
+        for path in self.paths:
+            try:
+                fd = os.open(path, os.O_RDWR)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return False
+            self.fds.append(fd)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return False
+        return True
+
+    def __exit__(self, *exc) -> None:
+        for fd in self.fds:
+            os.close(fd)
 
 
 def _clone_newest(path: str, s: Scan) -> float:
@@ -1116,12 +1293,14 @@ def clone_config_problem(path: str) -> str | None:
     (core.worktree) keeps the clone; so does a worktree-scoped config file,
     which git would also load."""
     gitdir = os.path.join(path, ".git")
+    if os.path.lexists(os.path.join(gitdir, "commondir")):
+        return "its .git names another dir's config and objects (commondir); kept"
     if os.path.lexists(os.path.join(gitdir, "config.worktree")):
         return "it has a worktree-scoped git config (config.worktree); kept"
     cfg = os.path.join(gitdir, "config")
-    proc = subprocess.run(["git", "config", "--file", cfg, "--null", "--list"],
+    proc = subprocess.run([*GIT_SAFE, "config", "--file", cfg, "--null", "--list"],
                           capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", timeout=60)
+                          errors="replace", env=git_env(), timeout=60)
     if proc.returncode:
         return f"its git config cannot be read: {proc.stderr.strip()}"
     for entry in proc.stdout.split("\0"):
@@ -1273,7 +1452,16 @@ def scratch_reason(path: str) -> str | None:
 def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
                      registered: list[str]) -> Verdict:
     v = Verdict("scratch", path)
-    name = os.path.basename(path).lower()
+    base = os.path.basename(path)
+    name = base.lower()
+    if sys.platform == "win32" and base != base.rstrip(" ."):
+        # Win32 drops a trailing dot or space, so later calls would reach
+        # another dir than the one judged here by name.
+        v.failure = f"a name ending in a dot or space ({base!r}); kept"
+        return v
+    if name.startswith(SCRATCH_KEEP_PREFIXES):
+        v.failure = f"a harness's scratchpad or a tool dir ({base})"
+        return v
     if name in SCRATCH_KEEP_NAMES:
         v.failure = f"a harness's scratchpad or a tool dir ({os.path.basename(path)})"
         return v
@@ -1296,7 +1484,7 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
     if any(is_under(r, npath) or is_under(npath, r) for r in registered):
         v.failure = "holds or sits inside a registered worktree"
         return v
-    s = scan(path)
+    s = scan(path, arrival=True)
     v.bytes, v.newest = s.bytes, max(s.newest, s.newest_dir)
     if s.error:
         v.failure = f"walk error (failing closed): {s.error}"
@@ -1315,6 +1503,10 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
                      f"ago, grace {grace_days:g})")
         return v
     v.passed.append("grace")
+    if s.bytes == 0:
+        # Frees nothing, and may be a lock dir some process made with mkdir.
+        v.failure = "holds no bytes (it may be a lock dir); kept"
+        return v
     if procs is None:
         v.failure = "process check unavailable; kept"
         return v
@@ -1324,6 +1516,37 @@ def evaluate_scratch(path: str, *, grace_days: float, now: float, procs,
         return v
     v.passed.append("no-process-uses-it")
     return v
+
+
+# --- one run at a time -------------------------------------------------------
+
+class RunLock:
+    """One retention run at a time per state dir: a second run (a scheduled
+    sweep beside a hand run, or a WSL leg seeing the same drive) refuses."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.fd: int | None = None
+
+    def __enter__(self) -> "RunLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(self.fd)
+            self.fd = None
+            raise Refusal(f"another retention run holds {self.path}; nothing was changed")
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
 
 
 # --- config, ledger, output ------------------------------------------------
@@ -1528,6 +1751,10 @@ def run_sweep(args, cfg: dict) -> int:
     if not (wt_roots or cache_roots or target_roots or clone_roots or scratch_roots):
         print(NO_ROOTS)
         return 0
+    for root in [*wt_roots, *cache_roots, *target_roots, *clone_roots, *scratch_roots]:
+        if not root or not os.path.isabs(root):
+            raise Refusal(f"root {root!r} is empty or relative; give each root as an "
+                          "absolute path; nothing was changed")
     wgrace = args.worktree_grace_days
     if wgrace is None:
         wgrace = float(cfg.get("worktree_grace_days", DEFAULT_WORKTREE_GRACE_DAYS))
@@ -1577,9 +1804,11 @@ def run_sweep(args, cfg: dict) -> int:
                 out.append(n)
         return out
 
-    def usable_scratch(roots: list[str]) -> list[str]:
-        # The system temp dir is protected everywhere else; here it may be
-        # named on purpose, since scratch rules keep checkouts and logs.
+    def usable_scratch(roots: list[str]) -> list[tuple[str, bool]]:
+        """(root, list only) per scratch root. A root must carry the marker
+        file its user put there on purpose, the temp dir included; without
+        it the whole run refuses and says how to opt in. The temp dir is
+        list only: it holds too many things whose names say nothing."""
         out = []
         temps = protected_temp_roots()
         for root in roots:
@@ -1587,15 +1816,16 @@ def run_sweep(args, cfg: dict) -> int:
             if too_broad(root):
                 print(f"note: {root} is a drive root or the home dir (or above it); "
                       "never used as a root")
-            elif n in temps:
-                out.append(n)
-            elif harness_managed(root):
+                continue
+            if n not in temps and harness_managed(root):
                 print(f"note: {root} is harness-managed; its contents are left alone")
-            elif too_broad(root):
-                print(f"note: {root} is a drive root or the home dir (or above it); "
-                      "never used as a root")
-            else:
-                out.append(n)
+                continue
+            if not os.path.isfile(os.path.join(n, SCRATCH_ROOT_MARKER)):
+                raise Refusal(f"scratch root {root} has no {SCRATCH_ROOT_MARKER} file, so it is "
+                              "not known to hold only scratch; if every dir in it may go after "
+                              f"its idle period, create {os.path.join(root, SCRATCH_ROOT_MARKER)} "
+                              "and run again; nothing was changed")
+            out.append((n, n in temps))
         return out
 
     wt_norm, cache_norm = usable(wt_roots), usable(cache_roots)
@@ -1668,7 +1898,8 @@ def run_sweep(args, cfg: dict) -> int:
         if any(is_under(h, n) for h in here):
             left["runs from here"] += 1
             return False
-        if n in seen or n in registered or any(is_under(n, r) for r in registered):
+        if n in seen or n in registered or any(is_under(n, r) or is_under(r, n)
+                                               for r in registered):
             return False
         seen.add(n)
         return True
@@ -1688,11 +1919,15 @@ def run_sweep(args, cfg: dict) -> int:
                                                now=now, procs=procs))
             elif _real_dir(child) and norm(child) not in seen:
                 left["not a clone"] = left.get("not a clone", 0) + 1
-    for root in scratch_norm:
+    list_only: set[str] = set()
+    for root, only_list in scratch_norm:
         for child in _children(root):
             if _real_dir(child) and candidate(child):
-                verdicts.append(evaluate_scratch(child, grace_days=sgrace, now=now,
-                                                 procs=procs, registered=registered))
+                v = evaluate_scratch(child, grace_days=sgrace, now=now, procs=procs,
+                                     registered=registered)
+                if only_list:
+                    list_only.add(norm(child))
+                verdicts.append(v)
 
     rows: list[tuple[Verdict, str]] = []
     ledger_ok = [True]
@@ -1734,7 +1969,13 @@ def run_sweep(args, cfg: dict) -> int:
         if not again.ok:
             again.failure = f"changed since scan: {again.failure}"
             return again, "keep"
-        err = delete_target(v.path) if v.kind == "target" else delete_cache(v.path)
+        if v.kind == "target":
+            _c, _p, _f, lock_dirs = target_layout(v.path)
+            with _BuildLocks(lock_dirs) as free:
+                err = (delete_target(v.path) if free else
+                       "in use or access denied, skipped: a build took cargo's lock")
+        else:
+            err = delete_cache(v.path)
         if err and err.startswith("in use"):
             again.failure = err
             return again, "keep"
@@ -1760,13 +2001,16 @@ def run_sweep(args, cfg: dict) -> int:
     for i, v in enumerate(verdicts):
         if not v.ok:
             rows.append((v, "keep"))
+        elif v.kind == "scratch" and norm(v.path) in list_only:
+            v.note = "the temp dir is list only"
+            rows.append((v, "list only"))
         elif not args.apply:
             rows.append((v, "would remove"))
         else:
             try:
                 rows.append(apply_worktree(targets[i], v) if v.kind == "worktree"
                             else apply_cache(v) if v.kind == "cache" else apply_marked(v))
-            except (Refusal, subprocess.TimeoutExpired) as exc:
+            except (Refusal, subprocess.TimeoutExpired, OSError) as exc:
                 # One row's git failure must not hide the rows already done.
                 v.failure = f"could not finish: {exc}"
                 rows.append((v, "failed"))
@@ -2022,7 +2266,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         cfg = load_config(args.config)
-        return run_owner(args, cfg) if args.mine else run_sweep(args, cfg)
+        with RunLock(args.ledger.parent / "locks" / "retention.lock"):
+            return run_owner(args, cfg) if args.mine else run_sweep(args, cfg)
     except Refusal as exc:
         print(f"refused: {exc}")
         return 2
