@@ -1,0 +1,16 @@
+### Security (2026-11-16 — a home or data folder behind a symlink or junction works, while links other accounts can change stay refused) [#1639]
+- **What users saw:** the native client refused to keep its token file, board state and other private files under any symlink or junction. A user whose home is reached through one (a `/home` linked to another volume, macOS `/var`, a Windows profile behind a junction, a data folder moved to another disk with a link) could not use it at all, and the board said only `invalid_state`.
+- **Accepted now:** a link that no other account could have made or can change. On Linux and macOS, the link is owned by the user or root, and so is the folder holding it, which is not group- or world-writable unless it is sticky (as `/tmp` is). On Windows, a symlink or junction owned by the user, SYSTEM or Administrators, which no other account may delete or rewrite, in a folder where no other account may delete entries or change permissions.
+- **Following a link:** the folders the link leads to are checked the same way, so a trusted link cannot lead through an untrusted one, and more than 40 links on one path are refused as a loop.
+- **Cloud placeholders:** a Windows cloud-files placeholder (OneDrive Files On-Demand, `IO_REPARSE_TAG_CLOUD` to `_CLOUD_F`) counts as a plain folder, because it redirects nothing.
+- **Still refused:**
+  - a link another account owns;
+  - a link in a folder others can write without the sticky bit, the group included;
+  - another user's link in `/tmp`;
+  - on Windows, a junction another account may delete or rewrite (for example one made directly in `C:\`, which inherits Authenticated Users' Modify there), or one in a folder where another account may delete entries;
+  - any other kind of Windows reparse point;
+  - a private file that is itself a link (unchanged).
+- **The message:** a refusal names the link, the cause and one fix (`chmod go-w '<folder>'`, or the folder the link leads to). The board, the shim's startup warning, the MCP error for an unusable token file and the native `doctor` all show it, in place of a bare `invalid_state`.
+- **The plugin hooks** (the Stop gate, session start and end, coordination start, the subagent board) apply the same rule. They ask the installed native client through a hidden `pseudolife-mcp private-path-check` only when a folder above the token file is a link. Without a native client they keep refusing, and now say why on stderr. `plugin/hooks/hooks.json` is unchanged, so Codex users re-approve nothing.
+- **Python client:** the frozen Python client still refuses every link.
+- **Install and update:** neither changes anything on the host.

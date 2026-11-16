@@ -1180,10 +1180,11 @@ fn native_update_checkout_rollback_to_rust_keeps_its_model_overlay() {
 }
 
 /// macOS keeps the temporary folder below a symlink (`/var` ->
-/// `/private/var`), and private state refuses any redirected ancestor, so a
+/// `/private/var`), and private state refused any redirected ancestor, so a
 /// scratch folder made under the raw path failed there (the hand-off's report
 /// folder, the Codex marketplace refresh). Built here with a symlinked
-/// temporary root on any Unix.
+/// temporary root on any Unix. Since #1639 a link no other account can
+/// change is accepted too; the scratch folder is still made where it leads.
 #[cfg(unix)]
 #[test]
 fn private_scratch_resolves_a_symlinked_temporary_folder() {
@@ -1195,8 +1196,8 @@ fn private_scratch_resolves_a_symlinked_temporary_folder() {
     fs::create_dir_all(&real).unwrap();
     let link = base.join("var");
     std::os::unix::fs::symlink(&real, &link).unwrap();
-    // The defect: private state below the link is refused as a redirect.
-    assert!(crate::board::state::private_dir(&link.join("direct")).is_err());
+    // A link only this user can change no longer refuses private state (#1639).
+    assert!(crate::board::state::private_dir(&link.join("direct")).is_ok());
     let made = seams::private_scratch_in(link.clone(), "pseudolife-test").unwrap();
     assert!(made.starts_with(&real), "{}", made.display());
     assert_eq!(

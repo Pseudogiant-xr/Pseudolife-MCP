@@ -79,9 +79,21 @@ mod windows {
         );
     }
 
+    /// A junction above the token file is followed only when no other
+    /// account can remove or replace it (#1639). The folder holding it is
+    /// given its access list here, so the result does not depend on what
+    /// the temporary folder passes on (this host's TEMP lets other groups
+    /// write; a hosted runner's does not).
     #[test]
-    fn test_windows_reparse_ancestor_is_rejected() {
+    fn test_windows_reparse_ancestor_is_followed_only_when_no_one_else_can_change_it() {
         let home = DisposableHome::new();
+        // Others may delete entries in the folder holding the junction; the
+        // entry is not inherited, so the junction itself carries none of it.
+        dacl(
+            &home.0,
+            "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x40;;;AU)",
+        )
+        .unwrap();
         fs::create_dir(home.path("real")).unwrap();
         home.private_token("real/token", b"fixture-secret");
         let redirect = home.path("redirect");
@@ -103,6 +115,20 @@ mod windows {
                 .0,
             "credential path must not contain redirects"
         );
+        // Only this user, SYSTEM and Administrators may change the folder:
+        // the junction is followed.
+        dacl(
+            &home.0,
+            "D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        )
+        .unwrap();
+        assert!(
+            CredentialProvider::new(None, Some(redirect.join("token")))
+                .unwrap()
+                .snapshot()
+                .is_ok()
+        );
+        fs::remove_dir(&redirect).unwrap(); // the junction only, not its target
     }
 
     #[test]

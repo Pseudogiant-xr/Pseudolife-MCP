@@ -204,15 +204,33 @@ fn test_symlink_and_symlink_ancestor_are_rejected() {
     );
     fs::create_dir(home.path("real")).unwrap();
     let token = home.private_token("real/token", b"fixture-secret");
-    symlink(token.parent().unwrap(), home.path("redirect")).unwrap();
+    // A link another account could replace (its folder is world-writable)
+    // is refused (#1639).
+    fs::create_dir(home.path("shared")).unwrap();
+    symlink(token.parent().unwrap(), home.path("shared/redirect")).unwrap();
+    set_mode(&home.path("shared"), 0o777);
     assert_eq!(
-        CredentialProvider::new(None, Some(home.path("redirect/token")))
+        CredentialProvider::new(None, Some(home.path("shared/redirect/token")))
             .unwrap()
             .snapshot()
             .unwrap_err()
             .0,
         "credential path must not contain redirects"
     );
+    set_mode(&home.path("shared"), 0o700);
+    // A link only this user can change is followed.
+    symlink(token.parent().unwrap(), home.path("redirect")).unwrap();
+    assert!(
+        CredentialProvider::new(None, Some(home.path("redirect/token")))
+            .unwrap()
+            .snapshot()
+            .is_ok()
+    );
+}
+#[cfg(unix)]
+fn set_mode(path: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
 }
 
 #[test]

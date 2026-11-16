@@ -576,14 +576,27 @@ fn an_inaccessible_tunnel_parent_is_unknown_evidence() {
 #[cfg(unix)]
 #[test]
 fn redirected_tunnel_roots_and_missing_children_are_unknown_evidence() {
+    use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new();
     let real = f.path.join("real");
     fs::create_dir(&real).unwrap();
-    let redirected = f.path.join("redirected");
+    // A link another account could replace: in a folder others may write.
+    let shared = f.path.join("shared");
+    fs::create_dir(&shared).unwrap();
+    let redirected = shared.join("redirected");
     std::os::unix::fs::symlink(&real, &redirected).unwrap();
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
     for root in [&redirected, &redirected.join("absent")] {
         assert!(prune::tunnel_runtimes(&f.layout, root, &[]).is_err());
     }
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+    // A tunnel root that is itself a link is still unknown evidence; a
+    // missing child below a link only this user can change is just missing
+    // (the private-path rule, #1639).
+    let trusted = f.path.join("trusted");
+    std::os::unix::fs::symlink(&real, &trusted).unwrap();
+    assert!(prune::tunnel_runtimes(&f.layout, &trusted, &[]).is_err());
+    assert!(prune::tunnel_runtimes(&f.layout, &trusted.join("absent"), &[]).is_ok());
 }
 
 #[test]
