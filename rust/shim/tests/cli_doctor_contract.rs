@@ -1060,7 +1060,7 @@ mod tunnel_profiles {
         let line = entries[0]["next"][0].as_str().unwrap().to_owned();
         assert!(
             line.ends_with(
-                "pseudolife-mcp tunnel status --profile dot shows the outcome and the key's state."
+                "pseudolife-mcp tunnel status --profile dot --json shows the outcome and the key's state."
             ),
             "{line}"
         );
