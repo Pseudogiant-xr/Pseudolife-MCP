@@ -399,6 +399,14 @@ pub(super) fn backup<D: Docker, H: Host>(
     if let Some(checked) = ownership.as_ref().filter(|c| !c.state_usable()) {
         match ownership_steps::repair_state(&mut bank, checked, data_dir, &stamp) {
             Ok(repaired) => host.info(&repaired.line()),
+            // An interrupt stops here: nothing is rotated after a Ctrl-C.
+            Err(Stop(_, 130)) => {
+                failed(
+                    host,
+                    "the backup above is complete, but its ownership repair was interrupted; nothing was rotated",
+                );
+                return 130;
+            }
             Err(Stop(message, code)) => {
                 failed(
                     host,
@@ -830,6 +838,51 @@ mod tests {
                 .any(|l| l.contains(&log.display().to_string())),
             "{:?}",
             host.info
+        );
+    }
+
+    #[test]
+    fn an_interrupted_state_repair_rotates_nothing() {
+        // Where the repair falls in the calls, from one uninterrupted run.
+        let at = {
+            let dir = Dir::new();
+            let mut docker = volume_fake();
+            docker.unusable = vec![("0", "/data/old")];
+            backup(
+                &mut docker,
+                &mut ready_host(),
+                &request(&dir.0.join("b")),
+                &dir.0,
+            );
+            docker
+                .calls
+                .iter()
+                .position(|c| label(c) == "repair /data")
+                .unwrap()
+        };
+        let dir = Dir::new();
+        let out = dir.0.join("backups");
+        fs::create_dir_all(&out).unwrap();
+        for day in 1..=4 {
+            pair(&out, day, 0, 30);
+        }
+        let before = names(&out).len();
+        let mut docker = volume_fake();
+        docker.unusable = vec![("0", "/data/old")];
+        docker.interrupt_at = Some(at);
+        docker.interruptible = true;
+        let mut host = ready_host();
+        let code = backup(&mut docker, &mut host, &request(&out), &dir.0);
+        assert_eq!(code, 130, "{:?}", host.errors);
+        assert!(
+            !host.info.iter().any(|l| l.starts_with("rotated out:")),
+            "{:?}",
+            host.info
+        );
+        assert_eq!(
+            names(&out).len(),
+            before + 2,
+            "the old pairs stay, the new pair too"
         );
     }
 

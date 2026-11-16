@@ -375,6 +375,45 @@ fn an_unusable_nested_mount_is_refused_with_its_source_before_anything_changes()
 }
 
 #[test]
+fn a_nested_mount_hidden_by_a_root_owned_parent_is_judged_after_the_repair() {
+    // /data is root 0700, so the probe cannot even reach /data/extra (`?`).
+    let first = answer(
+        "probe-access",
+        &[&[b"U", b"0", b"/data"], &[b"U", b"?", b"/data/extra"]],
+        true,
+    );
+    let mut docker = fake(vec![(0, first.clone())]);
+    let dir = scratch();
+    let checked = preflight(&mut docker, &with_nested(), dir.path(), "s", |_| Ok(()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        checked.state,
+        [Unusable {
+            owner: "0".into(),
+            path: b"/data".to_vec()
+        }]
+    );
+    // Healthy once /data is repaired: no refusal.
+    let listed = answer("list-root-owned", &[&[b"L", b"0", b"/data"]], true);
+    let repaired = answer("repair-ownership", &[&[b"C", b"0", b"/data"]], true);
+    let mut docker = fake(vec![
+        (0, listed.clone()),
+        (0, repaired.clone()),
+        (0, usable()),
+    ]);
+    repair(&mut docker, &checked.layout, Part::State, dir.path(), "s").unwrap();
+    // Still unusable after it: refused as the user's mount, naming its source.
+    let still = answer("probe-access", &[&[b"U", b"999", b"/data/extra/x"]], true);
+    let mut docker = fake(vec![(0, listed), (0, repaired), (0, still)]);
+    let error = repair(&mut docker, &checked.layout, Part::State, dir.path(), "t").unwrap_err();
+    assert!(
+        error.contains("/srv/exports") && error.contains("changed only the owners listed in"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_root_the_account_owns_but_cannot_read_is_refused_never_passed() {
     let blind = answer("probe-access", &[&[b"R", b"/data"]], true);
     let mut docker = fake(vec![(0, blind)]);

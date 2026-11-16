@@ -916,6 +916,22 @@ pub(crate) fn repair(
     if !left.is_empty() {
         return Err(unfixable(&left, part, repaired.log.as_deref()));
     }
+    // A nested mount judged only now (it was below what this repair fixed).
+    if let Some((entry, mount)) = after
+        .nested(layout)
+        .into_iter()
+        .find(|(_, mount)| mount.part == part)
+    {
+        return Err(format!(
+            "{}; the repair of the daemon's {} itself changed only the owners listed in {}",
+            nested_unusable(entry, mount).trim_end_matches("; nothing was changed"),
+            part.noun(),
+            repaired.log.as_deref().map_or_else(
+                || "no list (nothing was root-owned)".into(),
+                |l| l.display().to_string()
+            )
+        ));
+    }
     Ok(repaired)
 }
 
@@ -955,7 +971,22 @@ pub(crate) fn preflight(
     if let Some(root) = first.unreadable_roots.first() {
         return Err(unreadable_root(root));
     }
-    if let Some((entry, mount)) = first.nested(&layout).first() {
+    // A nested mount the probe cannot even reach (`?`) because a top-level
+    // directory above it needs the repair is judged after that repair.
+    let deferred = |entry: &Unusable, part: Part| {
+        entry.owner == "?"
+            && first.of(&layout, part).iter().any(|above| {
+                below(
+                    &String::from_utf8_lossy(&entry.path),
+                    &String::from_utf8_lossy(&above.path),
+                )
+            })
+    };
+    if let Some((entry, mount)) = first
+        .nested(&layout)
+        .into_iter()
+        .find(|(entry, mount)| !deferred(entry, mount.part))
+    {
         return Err(nested_unusable(entry, mount));
     }
     admit(&first.of(&layout, Part::State))?;
