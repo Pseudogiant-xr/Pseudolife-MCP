@@ -5282,8 +5282,14 @@ def _after_drop_opened(world, capsys, checks: list[dict], **closed) -> str:
     assert _build("--after-drop", "900") == 0, capsys.readouterr()
     assert integrate.main(["open"]) == 0, capsys.readouterr()
     world.gh.pr(901)["statusCheckRollup"] = checks
+    head = _git(world.work, "rev-parse", "HEAD")
+    # As GitHub lists them: a workflow run is in progress while any of its
+    # checks is.
+    running = any(integrate._unfinished(c) for c in checks)
+    world.gh.run_lists[head] = [{"status": "IN_PROGRESS" if running else "COMPLETED",
+                                 "name": "CI", "databaseId": 1}]
     capsys.readouterr()
-    return _git(world.work, "rev-parse", "HEAD")
+    return head
 
 
 def _comments_on(world, number: int) -> list[str]:
@@ -5502,7 +5508,7 @@ def test_after_drop_merge_waits_for_test_on_the_new_head(world, capsys):
 
     assert integrate.main(["merge"]) == 2
 
-    assert "cannot carry (test)" in capsys.readouterr().err and _merge_calls(world) == []
+    assert "cannot carry (test" in capsys.readouterr().err and _merge_calls(world) == []
 
 
 @pytest.mark.parametrize("old", ["SKIPPED", "NEUTRAL", "FAILURE", "missing"])
@@ -5929,7 +5935,7 @@ def test_after_drop_says_a_summary_job_waits_for_the_carried_jobs_it_needs(world
     assert integrate.main(["merge"]) == 2
 
     err = capsys.readouterr().err
-    assert "cannot carry (Parity / ubuntu-latest)" in err
+    assert "cannot carry (Parity / ubuntu-latest" in err
     assert ("Parity / ubuntu-latest did not pass on #900's head, so it must pass on this one; "
             "it needs Parity checks / ubuntu-latest, which is carried but still running") in err
     assert "the fast path saves no time here" in err
@@ -5975,3 +5981,75 @@ def test_after_drop_takes_a_file_a_workflow_names_only_in_a_comment(world, capsy
                                 12: {"d.txt": "d\n"}})
 
     assert _build("--after-drop", "900") == 0, capsys.readouterr()
+
+
+@pytest.mark.parametrize("path", [
+    "rust/.config/nextest.toml", "pytest.ini", "rust/clippy.toml", "rust/rustfmt.toml",
+    "frontend/tsconfig.json", "frontend/vite.config.ts", ".python-version"])
+def test_after_drop_refuses_a_dropped_member_changing_a_tools_own_settings(world, capsys, path):
+    # Codex review of 5291a869 (P1): `cargo nextest` reads .config/nextest.toml
+    # with no workflow naming it.
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"}, 11: {path: "x = 1\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 2
+
+    err = capsys.readouterr().err
+    assert "changes code every test or job shares" in err and path in err
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_after_drop_needs_a_job_that_failed_on_the_closed_head_to_run_here(world, capsys,
+                                                                          settled):
+    # Codex review of 5291a869 (P2): a job that failed on the closed head and
+    # is not reported on the new one yet is waited for, and refused once
+    # every run there finished without it.
+    head = _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest")],
+        rollup=[_run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), _run("Rust daemon / disposable image", "FAILURE")])
+    world.gh.run_lists[head] = [{"status": "COMPLETED" if settled else "IN_PROGRESS",
+                                 "name": "Rust", "databaseId": 2}]
+
+    assert integrate.main(["merge"]) == 2
+
+    err = capsys.readouterr().err
+    if settled:
+        assert "Rust daemon / disposable image did not pass on #900's head (failure)" in err
+        assert "never ran on #901's head" in err
+    else:
+        assert "Rust daemon / disposable image (not reported here yet" in err
+    assert _merge_calls(world) == []
+
+
+def test_after_drop_ignores_a_job_that_passed_on_the_closed_head_and_is_absent_here(world, capsys):
+    # The near miss: absent here and successful there is not waited for.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"), _run("Parity / windows-latest")],
+        rollup=[_run("scope"), _run("test", "FAILURE"), _run("Parity / ubuntu-latest"),
+                _run("Parity / windows-latest"), _run("Rust daemon / disposable image")])
+
+    assert integrate.main(["merge"]) == 0, capsys.readouterr()
+
+
+def test_after_drop_merge_reads_every_check_again_after_the_comment(world, capsys):
+    # Codex review of 5291a869 (P1): a carried job that fails while the
+    # comment is posted refuses the click.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+        _run("Parity / windows-latest"), _run("Rust / windows-latest", None, status="QUEUED")])
+    original = world.gh.__class__.__call__
+
+    def red_on_comment(self, *args, input=None):
+        out = original(self, *args, input=input)
+        if list(args[:2]) == ["pr", "comment"]:
+            self.pr(901)["statusCheckRollup"][-1] = _run(
+                "Rust / windows-latest", "FAILURE", started="2026-10-21T11:00:00Z")
+        return out
+
+    world.gh.__class__ = type("RedOnComment", (world.gh.__class__,), {"__call__": red_on_comment})
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "Rust / windows-latest (FAILURE)" in capsys.readouterr().err
+    assert _merge_calls(world) == []

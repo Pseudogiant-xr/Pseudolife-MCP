@@ -719,13 +719,17 @@ below). A job still running on the new head is not waited for when it
 concluded `SUCCESS` on the closed batch's head. A job that was skipped,
 neutral, failed, cancelled or missing there must pass on the new head. A
 required lane the new head never reported counts as carried only once
-every workflow run on the new head has finished. Any check that has
-finished red on the new head refuses the merge, carried or not, so a
-carried job that fails before the click is a failure. Before it merges,
-`merge` posts a comment on the batch pull request (and prints it): each
-carried job with its run on the closed head, each job that passed on the
-new head, and the state of every check at that moment. It then reads every
-check again and merges with the head pinned.
+every workflow run on the new head has finished. A job that did not pass on
+the closed head and has not appeared on the new one is waited for; once
+every run on the new head has finished without it, the fast path refuses.
+Any check that has finished red or cancelled on the new head refuses the
+merge, carried or not, and so does a failure whose rerun is still running,
+so a carried job that fails before the click is a failure. Before it
+merges, `merge` reads every check again and posts a comment on the batch
+pull request (and prints it): each carried job with its run on the closed
+head, each job that passed on the new head, and the state of every check
+at that moment. It reads every check once more after the comment and
+merges with the head pinned.
 
 **When it applies.** `build --after-drop` checks each of these itself and
 refuses, naming the one that failed and building nothing, unless all hold:
@@ -742,8 +746,14 @@ refuses, naming the one that failed and building nothing, unless all hold:
   under `tests/` but `tests/test_*.py`, any `conftest.py`, Python under
   `rust/` other than `test_*.py`, `.github/`, `ops/integrate.py`,
   dependency manifests and lock files (`pyproject.toml`, `uv.lock`,
-  requirements files, any `Cargo.toml` or `Cargo.lock`), and JSON under
-  `rust/ci/`;
+  requirements files, any `Cargo.toml` or `Cargo.lock`, the Rust toolchain
+  file, `package.json` and the npm lock files), JSON under `rust/ci/`, the
+  settings a runner, linter or build tool reads by itself (anything under a
+  `.config/` or `.cargo/` folder, `pytest.ini`, `clippy.toml`,
+  `rustfmt.toml`, `tsconfig*.json`, `vite.config.*` and the like), any path
+  a workflow's steps, inputs or filters name (a CI script, a Dockerfile; a
+  comment does not count), and a test module another Python file imports
+  (a shared fixture);
 - the new head differs from the closed one only in the dropped members'
   files and the batch's generated metadata.
 

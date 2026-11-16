@@ -2391,6 +2391,13 @@ AFTER_DROP_MANIFESTS = frozenset({"pyproject.toml", "uv.lock", "setup.py", "setu
                                   "rust-toolchain", "package.json", "package-lock.json",
                                   "pnpm-lock.yaml", "yarn.lock"})
 AFTER_DROP_REQUIREMENTS_RE = re.compile(r"requirements[^/]*\.txt")
+# Settings a test runner, linter or build tool reads by itself, with no
+# workflow naming them (`cargo nextest` reads .config/nextest.toml).
+AFTER_DROP_TOOL_CONFIG = frozenset({"pytest.ini", "tox.ini", ".coveragerc", "clippy.toml",
+                                    ".clippy.toml", "rustfmt.toml", ".rustfmt.toml",
+                                    "deny.toml", ".python-version", ".nvmrc", ".npmrc"})
+AFTER_DROP_TOOL_CONFIG_RE = re.compile(r"(tsconfig[^/]*\.json|(vite|vitest|eslint|prettier)"
+                                       r"\.config\.[^/]+|\.eslintrc[^/]*|\.prettierrc[^/]*)")
 # The job that must pass on the new head itself, never carried, and the job
 # whose success makes a skipped one stand (both in ci.yml, workflow "CI").
 AFTER_DROP_TEST = "test"
@@ -2411,7 +2418,8 @@ def _after_drop_shared(path: str) -> bool:
         or name == "conftest.py"
         or (path.startswith("rust/") and path.endswith(".py") and not name.startswith("test_"))
         or path.startswith(".github/")
-        or "/.cargo/" in f"/{path}"
+        or "/.cargo/" in f"/{path}" or "/.config/" in f"/{path}"
+        or name in AFTER_DROP_TOOL_CONFIG or bool(AFTER_DROP_TOOL_CONFIG_RE.fullmatch(name))
         or path == "ops/integrate.py"
         or name in AFTER_DROP_MANIFESTS
         or bool(AFTER_DROP_REQUIREMENTS_RE.fullmatch(name))
@@ -2771,6 +2779,25 @@ def _after_drop_merge(plan: Plan, view: dict) -> tuple[list[str], list[str], lis
             carried.append(f"{name}: carried (absent here once every run on this head "
                            f"finished), success on #{record['batch']}'s head "
                            f"{record['head'][:12]} ({url(source)})")
+    # A job that did not pass on the closed head must pass on this one, even
+    # one not reported here yet.
+    for key, check in sorted(old.items(), key=lambda kv: _check_name(kv[1])):
+        name = _check_name(check)
+        if key in new or name in REQUIRED_CHECKS:
+            continue
+        state = "" if _unfinished(check) else _check_state(check)
+        if state in PASSING:
+            continue
+        if not settled:
+            waiting.append(f"{name} (not reported here yet; it did not pass on "
+                           f"#{record['batch']})")
+        else:
+            raise Refusal(f"{name} did not pass on #{record['batch']}'s head "
+                          f"({(state or 'unfinished').lower()}) and never ran on #{plan.pr}'s "
+                          f"head {plan.head[:12]}, whose runs have all finished, so nothing "
+                          "shows it passing; a batch built after a drop needs it to pass on "
+                          f"its new head ({AFTER_DROP_DOC}). Rerun it on #{plan.pr}, or close "
+                          "it and build again without --after-drop")
     report = [f"Fast path after a drop ({AFTER_DROP_DOC}): #{record['batch']} closed red at "
               f"{record['head'][:12]}; this batch, at {plan.head[:12]}, leaves out "
               + ", ".join(f"#{d['number']}" for d in record["dropped"]) + "."]
@@ -3559,6 +3586,12 @@ def merge(args: argparse.Namespace) -> int:
             text = "\n".join(report)
             print(text)
             gh("pr", "comment", str(n), "--body-file", "-", input=text + "\n")
+            # And once more after the comment, just before the click: a check
+            # that turned red while it was posted refuses the merge.
+            view = json.loads(gh("pr", "view", str(n), "--json",
+                                 "headRefName,headRefOid,baseRefName,state,"
+                                 "isCrossRepository,statusCheckRollup"))
+            _refuse_unmergeable(plan, view)
         try:
             gh("pr", "merge", str(n), "--merge", "--admin",
                "--match-head-commit", plan.head)
