@@ -3474,12 +3474,29 @@ function Invoke-TestLoginSetup {
 # A mode switch must tear down the OTHER family's autostart: an abandoned
 # shim task keeps making real CLI calls at every /health refresh, forever,
 # on a plan whose owner believes it is turned off. Best-effort like the
-# registration below (unelevated removal fails; warn with the manual step).
+# registration below. A task this user owns is removed without elevation;
+# one registered from an elevated shell (Administrators own it) is left
+# alone, read-only, with the one elevated command that removes it.
+. (Join-Path $PSScriptRoot "scheduled_task_lock.ps1")
 function Remove-ShimTask($name, $family) {
-    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return }
-    Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
-    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
-        Write-Warning "could not remove autostart task '$name' (needs an ELEVATED pwsh opened from the Start menu, not from inside Claude Desktop) - its shim keeps starting at logon until you remove it"
+    if (-not (Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction SilentlyContinue)) { return }
+    # A failed owner read is a refusal, never a fall-through to the delete:
+    # from an elevated shell that delete could take another account's task.
+    try { $lock = Get-TaskLock $name }
+    catch {
+        Write-Warning "could not read the owner of autostart task '$name' ($($_.Exception.Message)); nothing was changed, and its $family shim keeps starting at logon"
+        return
+    }
+    if ($lock) {
+        $prefix = if ($lock.Unresolved) { "the $family shim task runs as an account this shell could not resolve, so it was left alone" }
+                  elseif ($lock.OtherUser) { "the $family shim task is another account's, so it was left alone" }
+                  else { "its $family shim keeps starting at logon until the task is removed" }
+        Write-Warning "${prefix}: $(Format-TaskLock $lock -Removal)"
+        return
+    }
+    Unregister-ScheduledTask -TaskPath '\' -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+    if (Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction SilentlyContinue) {
+        Write-Warning "could not remove autostart task '$name' (Task Scheduler refused; see the message above) - its $family shim keeps starting at logon until you remove it: Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false"
     } else {
         Step "Removed autostart task '$name' (the $family shim): extractor mode $Extractor does not use it, and an abandoned shim keeps making real CLI calls at every health refresh (a running shim process, if any, persists until logoff)"
     }
@@ -3493,12 +3510,12 @@ if (-not $claudeShimMode -and -not $ClientOnly) {
 $shimAutostartFamily = if ($claudeShimMode) { "claude" } elseif ($codexShimMode) { "codex" } else { $null }
 if ($shimAutostartFamily) {
     $familyLabel = if ($shimAutostartFamily -eq "claude") { "Claude" } else { "Codex" }
-    Step "Registering the $familyLabel shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
+    Step "Registering the $familyLabel shim autostart (Task Scheduler, for this user; no elevation needed)..."
     $autostartArgs = @("extractor-shim", "install-autostart", $shimAutostartFamily, "--repo", $repo, "--port", "$ShimPort", "--model", $Model)
     $rerun = "pseudolife-mcp " + ($autostartArgs -join " ")
     if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
         Write-Warning "Shim autostart was not registered: the native client is unavailable (see above)."
-        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu: $rerun"
+        Write-Host "  Re-run later in a normal (not elevated) pwsh: $rerun"
     } else {
         $autostartCode = 1
         # The stable launcher, not the numbered runtime it starts: the task
@@ -3508,10 +3525,16 @@ if ($shimAutostartFamily) {
             & $script:shimInstallPath @autostartArgs
             $autostartCode = $LASTEXITCODE
         } catch { $autostartCode = 1 }
-        if ($autostartCode -ne 0) {
-            Write-Warning "Shim autostart registration or start failed (usually elevation - see the message above)."
-            Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop): & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
-            Write-Host "  Or start it manually: & `"$($script:shimInstallPath)`" extractor-shim $shimAutostartFamily --repo `"$repo`" --port $ShimPort --model $Model"
+        if ($autostartCode -eq 3) {
+            # A task this shell may not change was left as it is; the native
+            # client printed its one line, and its shim keeps serving.
+        } elseif ($autostartCode -ne 0) {
+            Write-Warning "Shim autostart registration or start failed (see the message above)."
+            Write-Host "  Re-run later in a normal (not elevated) pwsh once the message above is dealt with: & `"$($script:shimInstallPath)`" $($autostartArgs -join ' ')"
+            # Only on a free port: on Windows a second shim fails to bind while one listens.
+            if (-not (Get-NetTCPConnection -LocalPort $ShimPort -State Listen -ErrorAction SilentlyContinue)) {
+                Write-Host "  Or start it manually: & `"$($script:shimInstallPath)`" extractor-shim $shimAutostartFamily --repo `"$repo`" --port $ShimPort --model $Model"
+            }
         }
     }
 }

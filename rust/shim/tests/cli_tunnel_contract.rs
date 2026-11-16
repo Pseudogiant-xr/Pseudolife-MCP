@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 //! `tunnel`: file-only answers, refusals before any effect, and deferrals
 //! that change nothing and open no connection. Seeded profiles need
-//! owner-only files: those cells run on Unix (chmod); the differential
-//! harness row covers both platforms against the Python oracle.
+//! owner-only files: the `seeded` cells run on Unix (chmod); the bridge's
+//! `serve()` cell seeds through the native client's own private-file
+//! helpers, so it runs on every platform. The differential harness row
+//! covers both platforms against the Python oracle.
 mod common;
 use common::cli::{cleared_command, native_text};
 use std::{
@@ -131,7 +133,6 @@ fn unported_commands_and_argv_shapes_defer_without_effect() {
         &["run", "--profile-dir", &dir],
         &["start", "--profile-dir", &dir],
         &["stop", "--profile-dir", &dir],
-        &["shim", "--profile-dir", &dir],
         &["service", "preview", "--profile-dir", &dir],
         &["service", "install", "--profile-dir", &dir],
         &["service", "status", "--profile-dir", &dir],
@@ -217,6 +218,129 @@ fn setup_resuming_an_existing_profile_defers() {
         &["setup", "--profile-dir", &dir, "--tunnel-id", "nope"],
         &[],
     );
+}
+
+const SHIM_USAGE: &str = "tunnel shim is started by the tunnel runtime, not by hand: it needs --profile <name>, and --profile-dir <directory> for a store other than the default
+";
+
+#[test]
+fn the_hidden_bridge_refuses_plainly_without_what_it_needs() {
+    let home = Home::new();
+    let dir = home.dir();
+    // Not offered anywhere in the help.
+    let help = cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("tunnel shim"));
+    // Started by hand, or without its profile: one line naming what it
+    // needs, nothing written, no daemon contacted, no shim started.
+    for args in [
+        &["shim"][..],
+        &["shim", "--profile-dir", &dir],
+        &["shim", "--profile"],
+        &["shim", "--profile", "dot", "--profile", "dot"],
+        &["shim", "--profile", "dot", "--json"],
+    ] {
+        assert_refused(&home, args, &[], SHIM_USAGE);
+    }
+    // A profile that is not saved is refused by the store, before any spawn.
+    assert_refused(
+        &home,
+        &["shim", "--profile", "dot", "--profile-dir", &dir],
+        &[],
+        &format!(
+            "{}; `pseudolife-mcp tunnel status --profile dot --profile-dir {}` names the cause\n",
+            UNAVAILABLE.trim_end(),
+            shell_quoted(&dir)
+        ),
+    );
+}
+
+/// A ready profile, written as the native client writes private files so
+/// the store's owner-only checks accept it on every platform.
+fn seed_ready_profile(home: &Home) {
+    let root = home.path("tunnels");
+    pseudolife_stdio::board::state::private_dir(&root).unwrap();
+    let token = serde_json::to_string(&home.path("token")).unwrap();
+    let body = format!(
+        "{{\"name\": \"dot\", \"daemon_url\": \"http://127.0.0.1:9\", \"token_file\": {token}, \"tunnel_id\": \"tunnel_0123\", \"state\": \"ready\", \"consent\": true}}"
+    );
+    pseudolife_stdio::board::state::atomic_create(&root.join("dot.profile.json"), body.as_bytes())
+        .unwrap();
+}
+
+/// The bridge for real: it starts the native shim as its child, which
+/// answers `initialize` on its own (the profile's daemon, port 9, is
+/// down) and ends when the client's input does. The child talks to the
+/// profile's daemon, never to the address in the caller's environment
+/// (the listener, which stays untouched), and nothing reaches stderr.
+#[test]
+fn the_bridge_serves_through_the_native_shim_and_the_profiles_daemon() {
+    use std::io::{BufRead, BufReader, Write};
+    let home = Home::new();
+    let dir = home.dir();
+    seed_ready_profile(&home);
+    let listener = Listener::new();
+    let mut command = command(&home, &listener);
+    command
+        .args(["shim", "--profile", "dot", "--profile-dir", &dir])
+        .env(
+            "PSEUDOLIFE_MCP_TOKEN",
+            "an-ambient-token-the-child-never-sees",
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"contract\",\"version\":\"1\"}}}\n")
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (sender, answer) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = sender.send(line);
+    });
+    let line = answer
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .expect("the bridge answered initialize");
+    let answer: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(answer["id"], 1, "{line}");
+    assert_eq!(
+        answer["result"]["serverInfo"]["name"], "pseudolife-memory",
+        "{line}"
+    );
+    drop(stdin);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            panic!("the bridge outlived its client");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+    assert_eq!(status.code(), Some(0), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    listener.assert_untouched();
+}
+
+/// The single-quoted spelling the native client's advice uses for a path
+/// (`update::seams::quote`).
+fn shell_quoted(text: &str) -> String {
+    if cfg!(windows) {
+        format!("'{}'", text.replace('\'', "''"))
+    } else {
+        format!("'{}'", text.replace('\'', "'\"'\"'"))
+    }
 }
 
 #[test]

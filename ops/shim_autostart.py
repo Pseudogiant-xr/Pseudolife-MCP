@@ -10,8 +10,9 @@ The scheduled task (Windows) and the systemd --user unit (Linux) that the
 autostart installers register run ``run <kind>`` and nothing else, so the
 model, prompt file, port, host, CLI path, interpreter and log file are
 read from ``ops/.env`` at every start. Changing a default is then an edit
-plus ``restart`` — no elevation; Task Scheduler needs an elevated shell
-only to REGISTER a task, which stays a one-time install step. The
+plus ``restart`` — no re-registration; registering the task stays a
+one-time install step, and needs no elevation (a task for this user only).
+The
 installers' flags (``-Model`` / ``--model`` and so on) keep working: they
 are written into ``ops/.env`` by ``config``, and any flag given to ``run``
 overrides the file for that start.
@@ -26,7 +27,9 @@ A registration from before the runner (the task or unit still carries
 at logon: ``show`` says so, ``restart`` refuses rather than start the
 ops/.env values under a task that brings its own back at the next logon
 (``--force`` restarts from ops/.env anyway), and the fix is one more run
-of the installer, elevated on Windows.
+of the installer; on Windows such a task was registered from an elevated
+shell, so if the installer reports that Administrators own it, the one
+elevated line it prints comes first, then the installer once more.
 """
 from __future__ import annotations
 
@@ -218,7 +221,12 @@ def write_config(repo: Path, kind: str, settings: dict) -> tuple[Path, list[str]
     for key in sorted(existing):
         out.append(f"{key}={_quote(existing[key])}")
     out.append(BLOCK_END)
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    text = "\n".join(out) + "\n"
+    # Unchanged settings leave the file untouched, its modification time
+    # included: the Windows autostart installers decide "nothing changed"
+    # only when the recorded shim started after the file was last written.
+    if path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
     return path, sorted(moved)
 
 
@@ -400,6 +408,13 @@ def registration_carries_its_values(kind: str, text: str | None = None) -> bool:
     return text is not None and "shim_autostart.py" not in text
 
 
+# A task registered from an elevated shell is owned by Administrators, and a
+# normal window can neither enable, replace nor remove it; the installer says
+# so and prints the one elevated line that removes it.
+_ELEVATED_FIRST = ("; if it reports that Administrators own the task, run the one elevated line it prints, "
+                   "then run it again in a normal window")
+
+
 def registration_note(kind: str) -> str:
     """One line when the registered task or unit does not run this runner
     (an install from before it, whose command line still carries the
@@ -407,20 +422,20 @@ def registration_note(kind: str) -> str:
     spec = KINDS[kind]
     where = f"the scheduled task '{spec['task']}'" if os.name == "nt" else f"the unit {spec['unit']}"
     installer = spec["installer"] + (".ps1" if os.name == "nt" else ".sh")
-    elevated = " (elevated)" if os.name == "nt" else ""
     text = _registered_command(kind)
     if text is None:
         if os.name != "nt" and not shutil.which("systemctl"):
             return ""
         return (f"{where} is not registered: the shim will not start at logon until "
-                f"{installer} has run once{elevated}")
+                f"{installer} has run once")
     if registration_carries_its_values(kind, text):
         return (f"{where} still carries the model and the rest on its command line: at logon it starts "
-                f"those, not ops/.env. Run {installer} once{elevated} to switch it to ops/.env")
+                f"those, not ops/.env. Run {installer} once to switch it to ops/.env"
+                + (_ELEVATED_FIRST if os.name == "nt" else ""))
     if os.name == "nt" and re.search(r"<Enabled>\s*false\s*</Enabled>", text, re.IGNORECASE):
         return (f"{where} is disabled: it will not start the shim at logon "
-                f"(Enable-ScheduledTask -TaskName '{spec['task']}' from an elevated PowerShell, "
-                f"or run {installer} again)")
+                f"(Enable-ScheduledTask -TaskName '{spec['task']}', or run {installer} again"
+                f"{_ELEVATED_FIRST})")
     return ""
 
 

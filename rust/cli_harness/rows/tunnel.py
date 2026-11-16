@@ -894,10 +894,10 @@ MUTANTS = [
            ("status-expired-text", "status-expiry-date-only")),
     # review round 1
     Mutant("tunnel-saved-url-connect", "tunnel", "shim/src/cli/tunnel/store.rs",
-           "        Some(Some(url)) => validate_url(url)?,\n",
-           "        Some(Some(url)) => {\n            validate_url(url)?;\n"
+           "            validate_url(url)?;\n            url.to_owned()\n",
+           "            validate_url(url)?;\n"
            "            let _ = std::net::TcpStream::connect(url.trim_start_matches(\"http://\"));\n"
-           "        }\n",
+           "            url.to_owned()\n",
            ("status-pending-json",)),
     Mutant("tunnel-challenge-bound", "tunnel", "shim/src/cli/tunnel/mod.rs",
            "        Ok(data) if data.iter().filter(|b| matches!(b, b'[' | b'{')).count() > 100 => {",

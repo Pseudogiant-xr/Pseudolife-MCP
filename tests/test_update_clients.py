@@ -1825,7 +1825,7 @@ def test_an_autostart_task_that_still_carries_the_model_is_named_after_the_ladde
     informational: it never fails the run, and an unregistered kind (no
     CLI extractor shim here) says nothing."""
     note = ("the scheduled task 'Pseudolife Claude Shim' still carries the model and the rest on its command "
-            "line: at logon it starts those, not ops/.env. Run ops/install-shim-autostart.ps1 once (elevated)")
+            "line: at logon it starts those, not ops/.env. Run ops/install-shim-autostart.ps1 once")
     cli.autostart["registered"] = {"claude": "old command line --model old-model"}
     cli.autostart["notes"] = {"claude": note, "codex": "the unit is not registered"}
     report = uc.run_steps((), repo=ROOT, source="unused")

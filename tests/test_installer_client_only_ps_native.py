@@ -1026,8 +1026,12 @@ def _copy_repo(tmp_path: Path) -> Path:
     """The files a client-only run reads, in a scratch checkout: a bug that
     wrote ops/.env or the compose override must not touch the real tree."""
     repo = tmp_path / "repo"
-    for rel in ("ops/install-native.ps1", "ops/install-hook.ps1", "ops/client_credentials.py",
-                "ops/.env.example", "examples/CLAUDE.memory.md", "pyproject.toml"):
+    # ops/scheduled_task_lock.ps1: the native installer dot-sources it at stage 12a
+    # (the scheduled-task owner helpers) on every run. The installer only
+    # runs from a checkout, where the file is always beside it.
+    for rel in ("ops/install-native.ps1", "ops/install-hook.ps1", "ops/scheduled_task_lock.ps1",
+                "ops/client_credentials.py", "ops/.env.example", "examples/CLAUDE.memory.md",
+                "pyproject.toml"):
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, repo / rel)
     return repo

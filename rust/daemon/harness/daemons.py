@@ -21,7 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
-from pseudolife_memory import readiness  # noqa: E402  the one readiness contract
+from rust.harness_support import readiness  # noqa: E402
 
 # Environment variables the daemons read that must never leak in from the
 # caller's shell (a real token, a real bank, a real config).
@@ -52,7 +52,7 @@ class Daemon:
     def start(self, wait_s: float = 120.0, expect_exit: bool = False,
               stages: tuple[str, ...] | None = None) -> "Daemon":
         """Start the daemon and wait until its /health reports ``ready:
-        true`` (pseudolife_memory/readiness.py): a 503 or ``ready: false``
+        true``: a 503 or ``ready: false``
         is a daemon still starting. ``stages`` waits only until those
         startup stages are no longer pending, whatever the status, for a
         daemon that cannot become ready by design (no embedding model, a
