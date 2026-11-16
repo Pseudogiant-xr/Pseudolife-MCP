@@ -122,17 +122,340 @@ A cache root that contains a git worktree, or sits inside one, is skipped
 whole. A drive root, the home dir or any of its ancestors is never used as
 a root, whatever the configuration says.
 
+### Rules every new class shares
+
+- **One run at a time per OS home.**
+  - A second run there (a scheduled sweep beside a hand run) refuses while
+    `~/.pseudolife-mcp/locks/retention.lock` (beside the ledger) is held.
+  - A Windows run and a WSL run lock different files, so they can judge
+    one drive at once. The second one's rename aside of a dir then fails,
+    which keeps that dir, so the cost is a partial row, not lost data.
+- **Absolute roots only.** An empty or relative root refuses the run, so an
+  unset variable cannot sweep the current dir.
+- **List-only dirs stay out of every deleting class.** Nothing at, inside
+  or around a scratch root, or at, inside or around a clone (a child of a
+  clone root that holds `.git`, skipped roots included), is a candidate for
+  the worktree, cache or target class. A target or cache dir beside a clone
+  in the same root is still judged. A scratch root that is skipped (too
+  broad or harness-managed) but overlaps another root refuses the run.
+  Owner mode (`--mine`) does not read these roots: it is the owner's word
+  on their own worktree and cache.
+- **No link, junction or mount point.** One anywhere in a candidate keeps
+  it whole. On Linux the mount list (`/proc/self/mountinfo`) is read too,
+  because a bind mount on the same filesystem looks like a plain dir. It is
+  read again for the second look below, so a mount made during the run is
+  seen.
+- **No process uses it.** No process names it on its command line or runs
+  an executable from inside it (the CIM `ExecutablePath` on Windows,
+  `/proc/<pid>/exe` on Linux). On Linux, no process may work in it either.
+  When the process list cannot be read, or `/proc` hides other users'
+  processes (`hidepid`), nothing is removed. A process whose command line
+  and executable both live elsewhere, or one the sweep cannot see (an
+  elevated Windows process), is not seen. On Windows the rename aside then
+  fails while any file inside is open, which keeps it.
+- **No inherited git environment.** The script clears every variable that
+  points git elsewhere (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+  `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`,
+  `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`,
+  `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`) for every
+  git call.
+  - It also clears the caller's config (`GIT_CONFIG`, which alone can hide a
+    `pseudolife.keep` marker; `GIT_CONFIG_PARAMETERS` and the
+    `GIT_CONFIG_COUNT`/`KEY`/`VALUE` family from a parent's `git -c`;
+    `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`), so git
+    reads the user's own files from their usual places.
+  - It sets `GIT_NO_LAZY_FETCH=1` and `GIT_NO_REPLACE_OBJECTS=1`, and passes
+    `-c core.fsmonitor=false -c log.showSignature=false`.
+- **Look again just before the delete.**
+  - The process list is taken again right before each target is renamed
+    aside, not once per run.
+  - After the rename, the aside copy is scanned again. Any of these puts
+    the copy back under its own name, and the dir is kept:
+    - a file or dir written since its last checks began (each dir's own
+      time read fresh, so a copy that keeps its old file times, `cp -p`,
+      still shows);
+    - a new link or mount point;
+    - a process using it (the list is taken before the scan, so the scan is
+      the last step before the delete).
+  - If putting it back fails, nothing is deleted and no ledger line is
+    written. The row says `kept aside at <aside path>, nothing deleted` and
+    how to put it back (rename the aside path to the dir's own name), and
+    the run exits 1. In a target deleted one profile at a time, a profile
+    stuck aside beside one that went makes the row `partial`, and it names
+    the aside path.
+- **Rename aside, then delete.**
+  - A candidate is renamed to `.<name>.retention-<pid>-<epoch-seconds>` in
+    its own parent, then deleted.
+  - A delete that stops part-way leaves that dir, and the row says
+    `partial` and names it. No later run finishes it: remove it by hand
+    after a look.
+  - No rule treats a dir with a similar name specially, so the name cannot
+    be used to make anything deletable.
+
+### Target rule (cargo targets judged by their owners)
+
+A child of a `--target-root` is a candidate only when it carries cargo's
+own markers: a `CACHEDIR.TAG` with cargo's signature **and** a
+`.rustc_info.json`. A uv virtual environment carries the same tag, so the
+tag alone proves nothing, and any other child is only counted. A target is
+deleted when all of these hold:
+
+- **Every owner is finished.** Its owners are the checkouts its dep-info
+  files (`<profile>/*.d`, `<profile>/deps/*.d`) name as sources. An owner
+  counts as finished when one of these is true:
+  - **Gone:** the source path no longer exists, and no existing ancestor of
+    it is a checkout.
+  - **Merged:** it is a worktree whose HEAD, or a clone whose every commit
+    (rule below), is a commit of the main repository on `origin/master`.
+
+  The main checkout is never finished. Some paths name no owner:
+  - a path under the cargo or rustup home, or inside the target itself;
+  - a path on a drive this machine does not have;
+  - a relative path;
+  - a path with no drive read on Windows (a WSL path);
+  - a path gone below a mount point or an empty dir on Linux (the drive
+    may be absent).
+
+  rustc writes workspace sources relative to the workspace root. The
+  absolute ones come from a top-level profile `.d` file and from
+  `# env-dep:CARGO_MANIFEST_DIR=` lines, which name a crate's dir exactly.
+
+  Every dep-info file is read. A file that cannot be read whole, or a path
+  that cannot be looked at (permission denied), keeps the target, since
+  every owner must be finished. A finished owner's own `.cargo/config.toml`
+  pin also keeps it.
+
+  A live owner that appears only through relative paths is not found, so a
+  target used only by `cargo check` or `cargo test` from a live checkout
+  can be deleted after its grace period. That costs a rebuild.
+- **Grace:** nothing in it, file or dir, was written within
+  `--target-grace-hours` (default 24).
+- **No owner found:** a target whose dep-info names no owner is deleted
+  only after `--unowned-target-days` (default 14) idle.
+- **No build holds it:**
+  - No build holds cargo's lock on any profile's `.cargo-lock`.
+  - A lock file the script cannot open (another user's build, a read-only
+    file, a sharing violation) counts as held.
+  - A target with no lock file in any profile is kept.
+  - On Linux and macOS the script holds every profile's lock across the
+    rename and the delete, so a build that starts meanwhile waits.
+  - On Windows it takes each lock without waiting and releases it at once,
+    because an open lock file would make the rename fail every time; there
+    the rename itself fails while any file in the tree is open.
+- **The usual cache checks:** it is not pinned by a `.cargo/config.toml`
+  (the `[build]` table form or the dotted `build.target-dir` form).
+
+**What is deleted:**
+- Only the entries cargo's layout explains, each whole, with everything
+  inside it:
+  - profile dirs (which carry `.fingerprint` or `.cargo-lock`), including
+    their `deps`, `build`, `incremental`, `examples` and `.fingerprint`
+    dirs and everything in those, and the files cargo writes at their top
+    (its lock, the outputs its own top-level dep-info names at that top,
+    and their debug info and import libraries under the same name; only a
+    `.pdb` may take the underscored name of a hyphenated binary);
+  - target-triple dirs of profiles.
+- A profile dir counts only when its own dep-info names outputs inside it.
+  A copy (`cp -r release release-pr1234`, a kept candidate build) still
+  names the original, so it stays as a foreign entry.
+- A profile dir also stays, as a foreign entry, when its top level holds
+  anything else, whatever its age: a copied `server-good.exe`, notes, a
+  folder of saved results, a link, or a binary whose dep-info is missing.
+  A top-level output counts as cargo's only when its dep-info's first path
+  is absolute and names this profile's top, so a binary copied in together
+  with its `.d` file (which names another profile, or this one's `deps`)
+  stays too, as does a FIFO, socket or device file.
+  A user's file deeper inside cargo's own dirs (`deps`, `build`,
+  `incremental`, `examples`) goes with them.
+- `tmp`, `doc` and `package` stay. Cargo writes them (test temp files,
+  rustdoc output, `cargo package` crates), but nothing in them says cargo
+  wrote them, and a person may keep their own files there.
+- Anything else stays too, and the row names it: copied candidate binaries,
+  mutation-test sources, `criterion` benchmark measurements (kept as an
+  unknown dir, not by name).
+- **What a kept entry leaves behind:** the entry itself, `CACHEDIR.TAG` and
+  `.rustc_info.json`. The profiles go, the dir stays a target, and every
+  later sweep keeps it and names what is there, until a person removes it
+  (for an old `tmp`, `doc` or `package` that is usually all that is left).
+- When nothing foreign is there, the whole target is renamed aside and
+  deleted.
+
+The home dir may be a target root, because WSL workers leave targets
+directly in it and only marked children are ever candidates. A drive root
+or anything above the home never is.
+
+### Clone rule (standalone checkouts, list only)
+
+**The clone class is list only**, with or without `--apply` (conductor's
+ruling, round 3). Nothing under a clone root is removed by this script, and
+no other class deletes a clone (see the shared rules). Each row is for the
+person who removes a clone by hand: its size, and the first rule below that
+holds it, or `list only; nothing keeps it (every commit on origin/master,
+clean, idle); remove it by hand if no one needs it`. Two gaps keep removal
+out of this change: user files in a clone's build tree, and borrowers of
+its objects the sweep cannot see. Both are filed as a follow-up.
+
+A child of a `--clone-root` with its own `.git` dir, and not a registered
+worktree, shows `nothing keeps it` when all of these hold:
+
+- **Every commit object in the clone is a commit of the main repository on
+  `origin/master`.** That covers every ref (branches, tags,
+  remote-tracking refs, notes) and every reflog entry. It also covers every
+  commit the object store holds (`git cat-file --batch-all-objects`), so a
+  commit left on a detached HEAD with logging off, or one whose reflog
+  entry expired, still keeps the clone. A clone's remote may be a bundle or
+  another machine's path, so "pushed" means nothing here.
+- **It has no stash, and it is clean by the worktree rule's whitelist.**
+  Untracked files are always shown (`--untracked-files=all`, whatever the
+  clone's config says), and so are submodule changes. A clone holding
+  submodules (`.git/modules`) or a file marked assume-unchanged or
+  skip-worktree is kept, since status can hide their changes.
+- **It holds no link, has no keep marker, and nothing in it was written for
+  the worktree grace period.**
+- **It is not the checkout this run works from.**
+- **Git resolves its work tree to this very dir, and it owns no linked
+  worktree** (their commits and index live in its `.git`).
+- **Its own `.git` names no other dir (`commondir`), and its config sets
+  nothing under which git runs a program or reads another file.** The keys
+  that keep it:
+  - `core.fsmonitor`, `core.hooksPath`, `core.alternateRefsCommand`;
+  - filters, diff textconv or command, `diff.external`, merge drivers;
+  - `include`, `credential`, `gpg.*`, `log.showSignature`;
+  - `core.worktree`, `core.bare = true`, `extensions.worktreeConfig`.
+
+  A clone with a `config.worktree` file is kept too. Such a clone is never
+  inspected further.
+- **No work lives only in its `.git`.** These keep it:
+  - an operation in progress or left over (`rebase-apply`, `rebase-merge`,
+    `sequencer`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`,
+    `BISECT_LOG`);
+  - a hook script of its own (any file in `.git/hooks` not ending in
+    `.sample`);
+  - `criterion` measurements under its `rust/target`;
+  - a `rust/target` that is not a cargo target by its markers, or that
+    holds anything the target rule would keep (a copied binary, notes,
+    `tmp`, `doc`, `package`), since git status does not show ignored
+    files.
+- **No other checkout borrows its objects.**
+  - A checkout made with `git clone --shared` or `--reference` names this
+    clone's object dir in its `objects/info/alternates`. Every registered
+    worktree and every child of every configured root is read for such a
+    file (for a linked worktree, in the git dir its `.git` file points to
+    and that dir's `commondir`), and a match keeps the clone.
+  - Not seen: a borrower outside the configured roots or nested deeper in
+    one, one through a chain of alternates or a submodule's git dir, and
+    one using `GIT_ALTERNATE_OBJECT_DIRECTORIES`. Before removing a clone
+    by hand, search the machine for `objects/info/alternates` files naming
+    it.
+  - A borrower that lost its lender can be repaired from the main
+    repository only for objects reachable from commits on `origin/master`,
+    not for trees and blobs the lender wrote but never committed.
+
+The home dir may be a clone root for the same reason as a target root.
+
+### Scratch rule (list only)
+
+**The scratch class is list only**, everywhere, with or without `--apply`
+and with or without a marker (conductor's ruling of 16 November 2026).
+Nothing under a scratch root is ever removed by this script.
+
+**Why list only:** two reviews in a row found ways for an earlier removal
+rule to delete data that existed nowhere else:
+- a folder moved in under a name an earlier run had seen inherited the old
+  "first seen" time;
+- the temp dir under another spelling (a WSL `/mnt/c/...` path, macOS
+  `/tmp`, a redirected `TEMP`) escaped "temp is list only".
+
+Build trees are where the space is. Removal may come back later as its own
+change for the disposable Windows dev VM only, designed around folder
+identity rather than path.
+
+**The listing:**
+- **Opting in:** a scratch root is listed only when it holds a
+  `.pseudolife-scratch-root` file its user created on purpose: a regular
+  file, not a link, owned by the user on Linux and macOS. Without it the run
+  refuses and says how to opt in.
+- **What each row shows:** each direct child's size, when it was last
+  written (arrival times counted), and which keep rule holds it, measured
+  before any label. A row where no rule holds it reads `list only; nothing
+  keeps it`.
+- **Overlapping roots:** nothing at, under or around a scratch root is a
+  candidate for the worktree, cache or target class either, so naming the
+  same dir under two roots removes nothing there. A clone in a scratch
+  root is listed once, by the clone rule. A registered worktree in a
+  scratch root is listed, with the rule that keeps it.
+- **A nested marker** inside a child changes nothing; only the root's own
+  counts.
+
+**The keep rules, shown as labels:**
+- **Idle:** not idle for `--scratch-grace-days` (default 14). Idle means no
+  file or dir under it written, created or moved in; the creation time on
+  Windows and the change time on POSIX count.
+- **Bytes:** holds no bytes (it may be a lock dir).
+- **Checkouts and repositories:** a `.git`; a git repository (a dir
+  holding `HEAD`, `objects` and `refs`); a `pyvenv.cfg`; a
+  `.pseudolife-keep`.
+- **Logs and evidence:** a `*.log` or `*.jsonl` file; anything named for
+  evidence or logs (`*evidence*`, `logs`, `*-logs`), itself included.
+- **Results, databases, models and programs:** `*.json`, `*.csv`, `*.tsv`,
+  `*.parquet`, `*.db`, `*.sqlite*`, `*.gguf`, `*.safetensors`, `*.onnx`,
+  `*.pt`, `*.pth`, `*.ckpt`, `*.exe`, `*.dll`, `*.so`, `*.dylib`, an
+  executable file on Linux and macOS, a `PG_VERSION`.
+- **Disk images, archives and backups, bundles, patches and keys:**
+  `*.vhdx`, `*.vhd`, `*.img`, `*.iso`, `*.qcow2`, `*.vmdk`, `*.vdi`, `*.ova`,
+  `*.tar`, `*.tgz`, `*.gz`, `*.xz`, `*.zst`, `*.bz2`, `*.zip`, `*.7z`,
+  `*.rar`, `*.bak`, `*.dump`, `*.sql`, `*.bundle`, `*.patch`, `*.diff`,
+  `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.kdbx`, `id_rsa`, `id_ed25519`,
+  `id_ecdsa`, `id_dsa`.
+- **Special files:** a socket, pipe or device, and another user's file.
+- **Names:**
+  - a name starting with `claude`, `codex` or `t3`;
+  - `bin`, `scripts` or `tools`;
+  - a hidden dir;
+  - a name ending in a dot or space on Windows;
+  - a rustup or cargo home.
+- **Worktrees:** a registered worktree inside or around it.
+
+Every period, in the config and on the command line, must be a finite
+number, 0 or more.
+
+### Deviations from the approved design (for the maintainer)
+
+- **The merged rule's part (b), "the checkout did work of its own", and the
+  `gh` merged-PR lookup are not implemented.** Every commit must already be
+  on `origin/master` and the checkout clean and idle, so nothing unique can
+  be lost without them. Part (b) would also have kept every merged review
+  checkout, whose HEAD is its creation commit, for ever. A fresh checkout
+  is protected by the grace period.
+- **The scratch class is list only** (conductor's ruling of 16 November
+  2026); the approved removal of idle scratch is not built.
+- **The clone class is list only** (conductor's ruling, round 3); the
+  approved removal of merged clones waits for the follow-up on user files
+  in a clone's build tree and on unseen borrowers.
+- **`tmp`, `doc` and `package` in a target are kept,** not deleted by name.
+- **On Windows the cargo build lock is not held across a target's
+  delete;** the rename aside, which fails while a file in the tree is open,
+  stands in for it.
+- **A half-deleted aside dir is not finished by the next run;** it is
+  reported and left for a person.
+- **A dry run starts nothing:** with no sightings there is no grace clock
+  to start, so the PC's week of dry runs shows what would go without
+  changing when it goes. A `~/.pseudolife-mcp/scratch-sightings.json` left
+  by an early test build of the scratch class is never read; delete it.
+
 ### Never touched
 
 The script touches nothing outside a configured root. It never touches
 harness-managed checkouts (`.claude/worktrees`, `.t3/worktrees`,
 `.codex/worktrees`) or temp dirs, even when one is configured as a root.
-The report only counts what it left alone there.
+A temp dir named as a marked scratch root is listed and nothing more, as is
+every scratch root. The report only counts what it left alone there.
 
 ## Configuration
 
-Roots come from flags (`--repo`, `--worktree-root` and `--cache-root`, the
-last two repeatable) or from a private file. Flags win. The tree ships no
+Roots come from flags or from a private file, and flags win. The flags are
+`--repo`, `--worktree-root`, `--cache-root`, `--target-root`, `--clone-root`
+and `--scratch-root`; every root flag is repeatable. The tree ships no
 machine-specific defaults. With no roots configured, a sweep prints how to
 configure them and exits 0 without touching anything.
 
@@ -142,9 +465,18 @@ configure them and exits 0 without touching anything.
 repo = "<main checkout>"
 worktree_roots = ["<dir holding your worktrees>"]
 cache_roots = ["<dir holding one CARGO_TARGET_DIR slice per branch>"]
+target_roots = ["<dir holding cargo target dirs, judged by owner>"]
+clone_roots = ["<dir holding standalone clones>"]
+scratch_roots = ["<dir holding scratch dirs>"]
 worktree_grace_days = 3
 cache_grace_days = 7
+target_grace_hours = 24
+unowned_target_days = 14
+scratch_grace_days = 14
 ```
+
+A dir listed under both a cache root and a target root keeps the cache rule.
+Use one or the other for a given root.
 
 `--repo` defaults to the checkout the script lives in.
 
@@ -183,6 +515,8 @@ refused one by one. It is 1 when any row ends in one of these:
   that row, and every row is still printed;
 - a cache deleted only in part (the rest stays in a `.<name>.retention-*`
   dir beside it, named in the output);
+- a dir kept aside because renaming it back failed (the row names the
+  aside path; nothing was deleted and no ledger line was written);
 - a failed `git worktree prune`, or a ledger that could not be written.
 
 It is 2 for a refused run (failed fetch, bad repo or bad config). Config
@@ -200,7 +534,13 @@ Every removal appends one JSON line to
 true only for a confirmed full removal. Otherwise `state` says why:
 `partial` (files were left behind) or `unknown` (the outcome could not be
 confirmed). That is the path, size and reason the disk rule asks for. A
-dry run writes nothing.
+dry run deletes nothing and writes no ledger line; every run, dry or not,
+takes the run lock file beside the ledger.
+
+**Before the PC's week of dry runs:** give `--target-root` as a flag, not
+in `retention.toml`. The weekly Scheduled Task below runs with `--apply`
+and the roots in that file, so a target root written there is applied at
+its next run. Clone and scratch roots only list, there too.
 
 ## The weekly Scheduled Task (Windows)
 

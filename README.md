@@ -769,8 +769,9 @@ the running daemon's bearer settings: restore the original env file, or
 use the explicit [auth handover recipe](docs/guide/configuration.md#changing-daemon-bearer-settings)
 when the change is intentional.
 
-You are told when it is time: the daemon checks PyPI for the newest
-release in the background (`updates.check_releases`, on by default) and
+You are told when it is time: the daemon checks GitHub for the latest stable
+release with complete native assets in the background (`updates.check_releases`,
+on by default) and
 every session's briefing then opens with `release X is available — run
 pseudolife-mcp update`. With `updates.unattended_clients: true` in
 `config.yaml` (off by default) a Docker-tier shim on the daemon's host

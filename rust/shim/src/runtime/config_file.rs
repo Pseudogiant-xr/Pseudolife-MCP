@@ -646,7 +646,11 @@ mod windows_config_security {
         } else {
             "client configuration must be owned by this user and not writable by other users"
         };
-        let not_owner = "it is owned by another account, so it was not replaced; run this as its owner, or take ownership of it as this user (takeown /f \"<path>\")";
+        // An elevated client makes Administrators the owner of what it
+        // writes. Taking such a file back needs no elevation where this
+        // account has full control of it, as in its own profile (Windows dev
+        // VM, 16 November 2026, UAC-style filtered token: takeown exited 0).
+        let not_owner = "it is owned by another account, so it was not replaced; a file an elevated PowerShell wrote is owned by Administrators, and this account can take it back from a normal PowerShell, with no elevation, when it has full control of the file (as it does in its own profile): takeown /f \"<path>\"";
         // SAFETY: the borrowed file handle and aligned token buffer remain live
         // throughout inspection. Descriptor owns every ACL/ACE/SID pointer.
         // ACE and SID bounds are checked before their contents are inspected.

@@ -308,7 +308,7 @@ def _base_hashes(dsn: str) -> dict[str, Counter] | None:
     if not base:
         return None
     if base not in _BASE_HASHES:
-        from pseudolife_memory.storage.schema import refuse_production_database
+        from rust.harness_support.database_guard import refuse_production_database
         refuse_production_database(base)
         if not re.fullmatch(r"pl_cf_mir_[a-z0-9_]{1,40}", base):
             raise ValueError(f"refusing base database {base!r}: expected pl_cf_mir_*")

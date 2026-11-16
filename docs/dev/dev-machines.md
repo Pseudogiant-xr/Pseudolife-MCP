@@ -124,6 +124,48 @@ only the machine it dispatches to.
   itself for an `integrate/*` branch. Every run prints `wsl-suite: real
   client: yes|no` before pytest starts.
 
+## Batch compile check
+
+`python ops/integrate.py build` runs a batch's Rust compile check on a dev
+machine when `~/.pseudolife-mcp/locks/rust-check.remote` exists on the host
+that runs `build` (`docs/dev/merge-batches.md`, "Where it runs"). On the
+maintainer's setup that machine is the Windows dev VM. The tool reads the
+file and never writes it. It holds one `key=value` per line, and a line
+starting with `#` is a comment:
+
+- `ssh=`: the machine's `~/.ssh/config` alias (required). ssh runs with
+  `BatchMode=yes`, so it needs a key that works without a prompt.
+- `repo=`: the path of a clone of this repository there (required), in
+  letters, digits, spaces and `_ . : \ / ~ -` only, since it travels as a
+  PowerShell literal. Keep a clone of its own for the check, so nobody
+  else's worktrees or prunes touch it.
+- `role=`: what the batch body calls the machine, one of `Windows dev VM`,
+  `Linux dev box` or `remote dev machine` (the default), so never its name.
+
+`PSEUDOLIFE_RUST_CHECK_WHERE=local` runs the check on the host that runs
+`build`, and `=remote` refuses to run without the file. The machine needs
+PowerShell 7.2 or later (`pwsh` on `PATH` for ssh sessions), git with
+network access to origin, and rustup's cargo. The far half refuses, as not
+run, in four cases:
+- while the machine's full-suite lock
+  (`~/.pseudolife-mcp/locks/full-suite.lock`) is held, so a compile check
+  never overlaps a full suite;
+- below 8 GB free on the filesystem beside the clone (where the gate copy and
+  its target live, its own mount included), so a full disk never reads as a red
+  batch;
+- while `<repo>.rust-check-no-hooks` exists. Its git runs with
+  `core.hooksPath` pointed at that path, so a hook a batch's build script
+  wrote into the clone never runs;
+- when a killed `worktree add` left `<repo>.rust-check` without its `.git`.
+  Remove that folder by hand and build again. The far half (`ops/rust-check-remote.ps1`)
+keeps three things beside the clone: the gate worktree `<repo>.rust-check`,
+its own target directory `<repo>.rust-check-target`, and the lock file
+`<repo>.rust-check.lock`. It removes its private ref and the bundle after
+every run, and sweeps those a killed run left before it starts. Its
+verdict is its last line, tagged with a nonce `build` sends on stdin, so
+no line cargo passes through can stand in for it. The target is a cache,
+so a cold check refills it.
+
 ## Sharing
 
 The rules are in `CLAUDE.md` ("Sharing the machine"); this section holds the

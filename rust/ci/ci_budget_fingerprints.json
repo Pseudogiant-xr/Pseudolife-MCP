@@ -3,12 +3,12 @@
   "workflows": {
     "ci.yml": {
       "frontend": "1917ccf176734abe",
-      "guards": "491518ebb51eefa6",
+      "guards": "e8f6bea60a907dc1",
       "lock-resolve": "8a6a510bef8d635b",
       "scope": "fea2d407b8bf12cd",
       "test": "492e9b9ddbe2b98f",
       "test-lite-macos": "80749dd59844bee1",
-      "test-lite-windows": "5d59b56aa5766fd5"
+      "test-lite-windows": "954d6243529019c3"
     },
     "python-freeze.yml": {
       "python-freeze": "966b18bec375a6a2"
