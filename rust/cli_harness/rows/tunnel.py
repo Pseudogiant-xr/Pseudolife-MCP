@@ -304,11 +304,11 @@ def key(name="dot", *, rel="tunnels", raw: bytes | None = None, plain_file=False
 
 def saved_key():
     """The key file as this platform's saved setup holds one, for cases
-    whose candidate decides from its form alone (``update`` reads no key;
-    ``status`` reports a ``DPAPI`` key unverified). On Windows the bytes are
-    a ``DPAPI``-prefixed stand-in: ``set_key``'s CryptProtectData needs the
-    account's logon credentials, which a key-authenticated SSH session (the
-    Windows dev VM, where these cases are recorded) does not hold."""
+    whose candidate does not need it to unseal (``update`` reads no key). On
+    Windows the bytes are a ``DPAPI``-prefixed stand-in that is no DPAPI
+    blob, so ``status`` reports no usable key, and these cases also record
+    in a key-authenticated SSH session, which cannot seal with
+    CryptProtectData."""
     return key(raw=b"DPAPI\0fixture-sealed-key") if core.WINDOWS else key()
 
 
@@ -353,6 +353,53 @@ def junction(rel: str, target_rel: str, *, dangling=False):
         _junction(target, arm.home / Path(rel))
         if dangling:
             shutil.rmtree(target)
+    return seed
+
+
+def replaceable(rel: str):
+    """Give the junction at ``rel`` itself (not where it leads) an access list
+    that lets Authenticated Users delete or rewrite it: a link another
+    account could replace, which private paths never follow (#1639). Set
+    through the Windows API on a handle opened without following it."""
+    def seed(arm):
+        import ctypes  # noqa: PLC0415 (Windows only)
+        from ctypes import wintypes  # noqa: PLC0415
+        advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                       ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+                                       wintypes.HANDLE]
+        advapi.GetSecurityDescriptorDacl.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL), ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.BOOL)]
+        advapi.SetSecurityInfo.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.DWORD,
+                                           ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                           ctypes.c_void_p]
+        descriptor = ctypes.c_void_p()
+        # This user, SYSTEM and Administrators, and Modify for Authenticated
+        # Users (which includes DELETE and write rights on the link itself).
+        assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1301bf;;;AU)", 1,
+            ctypes.byref(descriptor), None), ctypes.get_last_error()
+        try:
+            present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+            dacl = ctypes.c_void_p()
+            assert advapi.GetSecurityDescriptorDacl(descriptor, ctypes.byref(present),
+                                                    ctypes.byref(dacl), ctypes.byref(defaulted))
+            # WRITE_DAC | READ_CONTROL; backup semantics, the reparse point itself.
+            handle = kernel.CreateFileW(str(arm.home / Path(rel)), 0x00040000 | 0x00020000,
+                                        0x7, None, 3, 0x02000000 | 0x00200000, None)
+            assert handle not in (None, wintypes.HANDLE(-1).value), ctypes.get_last_error()
+            try:
+                # SE_FILE_OBJECT; DACL | PROTECTED_DACL.
+                result = advapi.SetSecurityInfo(handle, 1, 0x4 | 0x80000000, None, None,
+                                                dacl, None)
+                assert result == 0, result
+            finally:
+                kernel.CloseHandle(handle)
+        finally:
+            kernel.LocalFree(descriptor)
     return seed
 
 
@@ -624,9 +671,21 @@ def cases() -> list[core.Case]:
                mkdir("tunnels/dot-verification"),
                symlink("tunnels/dot-verification/challenge.json", "deep.json"),
                platforms=("linux",)),
+        # A junction only this user can change is followed (#1639): the
+        # challenge behind it is read as status-challenge-present reads one
+        # from a plain folder. One another account could replace is not: the
+        # challenge behind it (past the native bound, so a read would show)
+        # is never read.
         status("status-challenge-junction", ready(),
+               private("real-dir/challenge.json",
+                       json.dumps({"nonce": REFRESH_ID, "identity": "a" * 64,
+                                   "created": 1.0}).encode()),
+               junction("tunnels/dot-verification", "real-dir"),
+               platforms=("windows",), skip_if=no_junctions),
+        status("status-challenge-junction-replaceable", ready(),
                private("deep-dir/challenge.json", DEEP),
                junction("tunnels/dot-verification", "deep-dir"),
+               replaceable("tunnels/dot-verification"),
                platforms=("windows",), skip_if=no_junctions),
         # status: refusals (exit 2, sanitized stderr)
         status("status-missing-profile", prepared()),
@@ -683,10 +742,10 @@ def cases() -> list[core.Case]:
         status("status-process-record", ready(), private("tunnels/dot.process.json", DEAD_RECORD)),
         status("status-process-record-text", ready(),
                private("tunnels/dot.process.json", DEAD_RECORD), json_out=False),
-        # A Windows DPAPI key is present on disk, not verified (no unprotect).
+        # A Windows key file whose DPAPI blob is damaged: no usable key.
         case("status-dpapi-key", ["status", "--profile-dir", DIR], ready(), saved_key(),
              platforms=("windows",)),
-        # JSON pins the key's state: present on disk, not verified.
+        # JSON pins the key's state: false, the blob does not unseal.
         status("status-dpapi-key-json", ready(), saved_key(), platforms=("windows",)),
         case("update-ready-key", ["update", "--profile-dir", DIR], ready(), saved_key(),
              rules=("tunnel-dpapi-key",)),
@@ -711,9 +770,11 @@ def cases() -> list[core.Case]:
         case("verify-ready-wrong-key", ["verify", "--profile-dir", DIR], ready(),
              key(raw=WRONG_PREFIX)),
         # a finished profile without a launch record fails its identity read
-        # before begin_challenge writes (POSIX keys; a Windows key is DPAPI)
+        # before begin_challenge writes. On Windows ``set_key`` seals the key
+        # with DPAPI and the candidate unseals it, so the case records only
+        # in a logon that holds the account's credentials (not key-based SSH).
         case("verify-ready-key-no-record", ["verify", "--profile-dir", DIR], ready(), key(),
-             platforms=("linux",)),
+             rules=("tunnel-dpapi-key",)),
         case("verify-missing", ["verify", "--profile-dir", DIR], prepared()),
         case("verify-invalid-name", ["verify", "--profile-dir", DIR, "--profile", "x y"]),
         # setup: refusals before the daemon handshake
@@ -743,8 +804,6 @@ def cases() -> list[core.Case]:
         case("setup-invalid-name", ["setup", "--profile-dir", DIR, "--profile", "bad.name",
                                     *explicit()]),
         # declared deferrals: the candidate defers and changes nothing
-        defer("defer-verify-dpapi-key", ["verify", "--profile-dir", DIR], ready(), key(),
-              platforms=("windows",)),
         defer("defer-verify-process-record", ["verify", "--profile-dir", DIR], ready(), key(),
               private("tunnels/dot.process.json", json.dumps(
                   {"pid": 1, "created": 0.0, "exe": "none", "argv": ["none"]}).encode())),

@@ -425,9 +425,11 @@ pub(crate) fn private_scratch_in(
     base: PathBuf,
     prefix: &str,
 ) -> std::result::Result<PathBuf, String> {
+    // A link that leads nowhere (a dangling TMPDIR) cannot be resolved.
+    let dangling = std::fs::symlink_metadata(&base).is_ok() && std::fs::metadata(&base).is_err();
     let scratch = resolved(base).join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
     crate::board::state::private_dir(&scratch).map_err(|cause| {
-        if cause == "invalid_state" {
+        if cause == "invalid_state" || dangling {
             format!(
                 "could not create the private folder {}: one of its parent folders is a link that could not be resolved, or the folder could not be made private; set {} to a real folder you own, then retry",
                 scratch.display(),

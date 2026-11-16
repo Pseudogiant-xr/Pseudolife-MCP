@@ -149,8 +149,9 @@ SHIM_COMMANDS = {
     # expose reads them too, and connect's stdin check (UPDATE_CYCLE).
     "connect": UPDATE_CYCLE, "doctor": ("doctor", "console"), "console": ("console",),
     "conductor_watch": ("conductor_watch",),
-    # The import scan also reads move's help text ("use `expose status`")
-    # as a use of expose, so expose's rows include move's.
+    # expose's rows include move's, added while the import scan still read
+    # move's help text ("use `expose status`") as a use of expose; the scan
+    # reads code only now, so they are wider than it requires.
     "expose": ("expose", "move", "console", "conductor_watch"),
     # maintainer imports update's code, so it reaches the cycle's rows.
     "maintainer": ("maintainer", "maintainer_setup") + UPDATE_CYCLE,

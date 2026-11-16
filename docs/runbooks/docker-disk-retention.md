@@ -20,11 +20,13 @@ automate aggressively.
 | Trigger | Script | Default policy |
 |---|---|---|
 | After every healthy deploy | `ops/update.ps1` / `.sh` (`pseudolife_memory/update_cli.py`, or the native updater), the build-cache prune after health (last) | age 168h, 20GB ceiling, fstrim |
-| Weekly, if registered | Scheduled Task → `ops/prune-build-cache.ps1` | age 168h, 20GB ceiling, fstrim |
+| Weekly, if registered | Scheduled Task → `ops/prune-build-cache.ps1 -PruneDanglingImages` | age 168h, 20GB ceiling, dangling images, fstrim |
 
 The deploy hook only passes `-MaxAgeHours`; `-MaxUsedSpaceGB` therefore
 takes its own default (20GB), so the two triggers enforce the identical
-ceiling, and both run `fstrim` (neither passes `-NoTrim`).
+ceiling, and both run `fstrim` (neither passes `-NoTrim`). Only the weekly
+task removes dangling images: the deploy hook does not pass
+`-PruneDanglingImages`, so a deploy touches no image.
 
 ### The deploy hook
 
@@ -61,13 +63,18 @@ all, which is exactly how 51.87GB piled up by 2026-07-28.
 ```powershell
 .\ops\install-cache-retention.ps1                          # Sunday 03:00, defaults
 .\ops\install-cache-retention.ps1 -DayOfWeek Wednesday -At 21:00
+.\ops\install-cache-retention.ps1 -Check                   # can the registered task run? (read-only)
 .\ops\install-cache-retention.ps1 -Unregister              # remove it
 ```
 
 `-MaxAgeHours` / `-MaxUsedSpaceGB` on the installer pass straight through
 to the registered `prune-build-cache.ps1` call (same defaults: 168h /
-20GB). The task is named `Pseudolife-MCP Docker cache retention` and runs
-`pwsh.exe` with a base64-encoded command; `StartWhenAvailable` is set on
+20GB), with `-PruneDanglingImages`. The task is named `Pseudolife-MCP
+Docker cache retention` and runs `pwsh.exe`, by absolute path, with a
+base64-encoded command. Each run writes its output and result (exit 0, or
+the error the script threw and exit 1) to
+`~/.pseudolife-mcp/cache-retention-last.log`, and a run whose retention
+script is gone writes that, with the fix, and exits 2. `StartWhenAvailable` is set on
 purpose — a desktop is often off at 03:00 on a Sunday, and a run that
 silently never happens is the exact failure this task exists to close.
 
@@ -114,6 +121,12 @@ Get-ScheduledTaskInfo -TaskName 'Pseudolife-MCP Docker cache retention'
   package directory, which changes on every Store update). **A registration
   made before that date keeps the defect — re-run
   `ops\install-cache-retention.ps1` once to pick up the fix.**
+  It recurred on 2026-11-16 another way: the host replaced the Store install
+  with the MSI one, and the registered alias left with the Store package. The
+  installer now prefers the MSI path (`%ProgramFiles%\PowerShell\7\pwsh.exe`,
+  the same across every 7.x update), refuses to register a pwsh that does not
+  exist, and `-Check` names a registered pwsh that has since gone. No run can
+  report a missing pwsh itself, because it never starts.
 - `LastRunTime` should be within the last week once the task has run at all;
   right after a Sunday the machine was off for, expect it shortly after the
   next boot instead, courtesy of `StartWhenAvailable`.
@@ -121,19 +134,16 @@ Get-ScheduledTaskInfo -TaskName 'Pseudolife-MCP Docker cache retention'
 **`NextRunTime` cannot detect the failure this section exists for.** It is
 computed from the trigger alone, so a task whose action points at a deleted
 worktree still reports a healthy, upcoming `NextRunTime` every week while
-never doing anything. To actually check the registration is live, verify the
-baked-in script path still exists:
+never doing anything. To actually check the registration is live, run:
 
 ```powershell
-$t = Get-ScheduledTask -TaskName 'Pseudolife-MCP Docker cache retention'
-$cmd = [Text.Encoding]::Unicode.GetString(
-    [Convert]::FromBase64String(($t.Actions[0].Arguments -split '-EncodedCommand ')[-1]))
-$path = ([regex]::Match($cmd, "'([^']+\.ps1)'")).Groups[1].Value
-"target: $path"
-"exists: $(Test-Path $path)"
+.\ops\install-cache-retention.ps1 -Check
 ```
 
-`exists: False` — or a `target:` under a worktree path — means re-run
+It reads the registration and changes nothing. It exits 1 and names each
+reason the task cannot run (its pwsh missing, its baked-in script missing,
+a last run that ended 0x80070002), or exits 0 and names what it runs. A
+failure, or a script path under a worktree, means re-run
 `ops\install-cache-retention.ps1` from the permanent checkout. That is the
 check to run; `NextRunTime` only tells you a trigger exists.
 
@@ -244,12 +254,16 @@ their records without freeing those bytes. List them with `docker image ls
 --filter reference='*:*-pre-*'`, and remove the ones you no longer need
 with `docker image rm <tag>`, keeping the newest last-good one.
 
-**What these scripts will never do:** touch images (that's
+**What these scripts will never do:** remove a tagged image (that's
 `ops/prune-rollbacks.ps1` / `.sh`), touch containers, or run
 `docker system prune` or any volume command. All four are **enforced**, not
 just intended: `tests/test_ops_prune_build_cache.py` fails the run outright if
 `system prune`, `rmi` / `image rm`, any `volume` verb, or any container verb
-(`container`, `docker rm` / `stop` / `kill`) reaches its docker stub. The
+(`container`, `docker rm` / `stop` / `kill`) reaches its docker stub. The one
+image call, made only with `-PruneDanglingImages` / `--prune-dangling-images`,
+must be exactly `docker image prune --force`: no `-a` (which would take every
+image no container uses, rollback tags included) and no filter. Docker then
+removes only untagged images that no container, running or stopped, uses. The
 container verbs were added to that list on 2026-07-29 — until then this
 guarantee was documented but unguarded, so treat a pre-that-date branch as
 convention only.
