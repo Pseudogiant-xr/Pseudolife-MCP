@@ -5,10 +5,14 @@
 #   ops\prune-build-cache.ps1                  # age 168h, ceiling 20GB, trim
 #   ops\prune-build-cache.ps1 -DryRun          # report only; mutate nothing
 #   ops\prune-build-cache.ps1 -MaxAgeHours 24  # tighter age policy
+#   ops\prune-build-cache.ps1 -PruneDanglingImages  # also `docker image prune --force`
 #
 # Build cache is pure derived data: over-pruning costs rebuild time and
-# nothing else. This script ONLY ever calls `docker builder prune`. It never
-# removes images (ops\prune-rollbacks.ps1 owns rollback-tag retention), never
+# nothing else. This script calls `docker builder prune` and, only with
+# -PruneDanglingImages (the weekly task passes it), `docker image prune
+# --force` with no -a/--all and no filter: Docker then removes only untagged
+# images that no container, running or stopped, uses. It never removes a
+# tagged image (ops\prune-rollbacks.ps1 owns rollback-tag retention), never
 # touches containers, and never runs `docker system prune` or any volume
 # command — the bank lives in the external ops_pseudolife_* volumes.
 #
@@ -40,7 +44,8 @@ param(
     [ValidateRange(0, 876000)][int]$MaxAgeHours = 168,
     [ValidateRange(0, 100000)][int]$MaxUsedSpaceGB = 20,
     [switch]$DryRun,
-    [switch]$NoTrim
+    [switch]$NoTrim,
+    [switch]$PruneDanglingImages
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,11 +125,26 @@ if ($DryRun) {
     } else {
         Write-Host "    ceiling pass: skipped (post-age size would be within the ceiling)."
     }
+    if ($PruneDanglingImages) {
+        Write-Host "    images      : docker image prune --force (dangling, unused images only)"
+    }
     if (-not $NoTrim) {
         Write-Host "    trim        : wsl -d docker-desktop -e sh -c `"fstrim -v /mnt/docker-desktop-disk`""
     }
     Write-Host "==> DRY RUN complete: nothing was changed."
     return
+}
+
+# Dangling images only: no -a/--all and no filter, so Docker removes only
+# untagged images that no container (running or stopped) uses. It runs
+# before the cache passes so they see whatever it frees. Never fatal.
+if ($PruneDanglingImages) {
+    docker image prune --force | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "docker image prune (dangling images) failed (retention otherwise succeeded)."
+    } else {
+        Write-Host "==> Build-cache retention: removed dangling images (docker image prune --force)."
+    }
 }
 
 # Age pass — the normal policy, always runs.
