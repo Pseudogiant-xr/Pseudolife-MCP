@@ -687,6 +687,8 @@ mod tests {
         }
     }
 
+    /// The helper's full name, as the Windows timeout test filters on it.
+    #[cfg(windows)]
     const WEDGE_HELPER: &str = "cli::expose::tailscale::tests::wedge_helper";
     const WEDGE_MARKER: &str = "pseudolife-expose-wedge-helper-marker";
 
