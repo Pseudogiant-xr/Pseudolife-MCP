@@ -1008,3 +1008,391 @@ def test_partial_cache_delete_is_recorded_as_partial(env, monkeypatch):
     assert "deleted in part" in out and "1 partial (see rows)" in out
     assert [(l["kind"], l["complete"], l["state"]) for l in env.ledger_lines()] == [
         ("cache", False, "partial")]
+
+
+# --- sweep mode: cargo targets judged by their owners -----------------------
+#
+# Disk retention design of 16 November 2026 (maintainer-approved): a cargo
+# target is removed when every checkout its dep-info names is gone or
+# merged, after a grace period; with no owner found, only after 14 days
+# idle. Everything is decided by an exact marker, never by a name.
+
+SIGNATURE = "Signature: 8a477f597d28d172789f06886806bc55\n"
+
+
+def _target(env: Env, name: str, *sources: Path, age: float | None = OLD,
+            root: Path | None = None) -> Path:
+    """A cargo target dir as cargo leaves it: the tag, .rustc_info.json, a
+    debug profile with its lock and fingerprints, and a dep-info file
+    naming ``sources``."""
+    path = (root or env.tmp / "targets") / name
+    deps = path / "debug" / "deps"
+    deps.mkdir(parents=True)
+    (path / "debug" / ".fingerprint").mkdir()
+    (path / "debug" / ".cargo-lock").write_bytes(b"")
+    (path / "CACHEDIR.TAG").write_text(SIGNATURE, encoding="utf-8")
+    (path / ".rustc_info.json").write_text("{}", encoding="utf-8")
+    (deps / "libthing.rlib").write_bytes(b"x" * 1000)
+    if sources:
+        escaped = " ".join(str(s).replace(" ", "\\ ") for s in sources)
+        (deps / "thing-1234.d").write_text(
+            f"{deps / 'libthing.rlib'}: {escaped}\n\n"
+            + "".join(f"{str(s).replace(' ', chr(92) + ' ')}:\n" for s in sources),
+            encoding="utf-8")
+    if age is not None:
+        _backdate(path, age)
+    return path
+
+
+def _src(checkout: Path) -> Path:
+    src = checkout / "rust" / "src" / "lib.rs"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("// source\n", encoding="utf-8")
+    return src
+
+
+def run_targets(env: Env, *argv: str) -> tuple[int, str]:
+    return run(env, "--repo", str(env.repo), "--config", str(env.config),
+               "--ledger", str(env.ledger), "--target-root", str(env.tmp / "targets"),
+               *argv, roots=False)
+
+
+@pytest.fixture
+def targets_root(env):
+    (env.tmp / "targets").mkdir()
+    return env.tmp / "targets"
+
+
+def test_target_whose_owner_checkout_is_gone_is_removed(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "w5", gone)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+    [line] = env.ledger_lines()
+    assert line["kind"] == "target" and line["complete"] is True
+    assert "deleted-worktree" in line["note"] and "gone" in line["note"]
+
+
+def test_target_whose_owner_worktree_is_merged_is_removed(env, targets_root):
+    wt = env.add("merged-owner")
+    target = _target(env, "w6", _src(wt))
+    _backdate(wt)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+    assert env.registered(wt), "a target sweep never removes the owner itself"
+
+
+def test_target_whose_owner_has_unmerged_work_is_kept(env, targets_root):
+    wt = env.add("busy-owner", unmerged=True)
+    target = _target(env, "w7", _src(wt))
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "owner in use" in out and "not on origin/master" in out
+
+
+def test_target_built_from_the_main_checkout_is_kept(env, targets_root):
+    target = _target(env, "main-build", _src(env.repo))
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "the main checkout" in out
+
+
+def test_every_owner_must_be_finished(env, targets_root):
+    busy = env.add("second-owner", unmerged=True)
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "shared", gone, _src(busy))
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "owner in use" in out
+
+
+def test_a_venv_with_the_same_tag_is_not_a_target(env, targets_root):
+    """uv writes cargo's exact CACHEDIR.TAG signature into a virtual
+    environment (measured 16 November 2026), so the tag alone proves
+    nothing: a target also needs cargo's own .rustc_info.json."""
+    venv = targets_root / "ci-venv"
+    (venv / "lib").mkdir(parents=True)
+    (venv / "CACHEDIR.TAG").write_text(SIGNATURE, encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    _backdate(venv)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert venv.exists()
+    assert "not a cargo target: 1" in out
+
+
+def test_a_build_holding_cargos_lock_keeps_the_target(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "building", gone)
+    fd = os.open(target / "debug" / ".cargo-lock", os.O_RDWR)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        rc, out = run_targets(env, "--apply")
+    finally:
+        os.close(fd)
+    assert rc == 0, out
+    assert target.exists()
+    assert "a build holds cargo's lock" in out
+
+
+def test_entries_cargo_does_not_explain_are_kept(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "with-extras", gone, age=None)
+    (target / "mutant-src").mkdir()
+    (target / "mutant-src" / "lib.rs").write_text("copy\n", encoding="utf-8")
+    (target / "cand-final.exe").write_bytes(b"binary")
+    (target / "tmp").mkdir()
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert sorted(p.name for p in target.iterdir()) == ["cand-final.exe", "mutant-src"]
+    assert "kept, not cargo's: cand-final.exe, mutant-src" in out
+
+
+def test_a_target_with_no_owner_waits_for_the_unowned_period(env, targets_root):
+    idle_5_days = _target(env, "unowned-recent", age=time.time() - 5 * 86400)
+    idle_30_days = _target(env, "unowned-old")
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert idle_5_days.exists() and not idle_30_days.exists()
+    assert "no owner found; idle 5.0 days, removed after 14" in out
+
+
+def test_target_grace_holds_a_recent_build(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "fresh", gone, age=None)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists()
+    assert "in grace period" in out
+    rc, out = run_targets(env, "--apply", "--target-grace-hours", "0")
+    assert rc == 0, out
+    assert not target.exists()
+
+
+def test_a_link_inside_a_target_keeps_it(env, targets_root, tmp_path):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "linked", gone)
+    if not _junction(target / "debug" / "shared", tmp_path / "elsewhere"):
+        pytest.skip("this platform could not create a junction or symlink")
+    keep = tmp_path / "elsewhere" / "precious.txt"
+    keep.write_text("data\n", encoding="utf-8")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert target.exists() and keep.exists()
+    assert "reparse point" in out
+
+
+def test_dry_run_reports_a_target_and_changes_nothing(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "w9", gone)
+    rc, out = run_targets(env)
+    assert rc == 0, out
+    assert target.exists() and env.ledger_lines() == []
+    assert "would remove" in out and "targets: 1 candidates, 1 would remove" in out
+
+
+def test_cargo_and_rustup_homes_name_no_owner(env, monkeypatch):
+    """A registry source cargo's own cleanup removed is not a gone owner."""
+    home = env.tmp / "cargo-home"
+    home.mkdir()
+    monkeypatch.setenv("CARGO_HOME", str(home))
+    missing = home / "registry" / "src" / "crate-1.0" / "src" / "lib.rs"
+    target = env.tmp / "t"
+    assert prune.source_owner(str(missing), str(target), prune._tool_homes()) is None
+
+
+def test_dep_info_paths_keep_escaped_spaces():
+    text = "out.rlib: /a\\ b/src/lib.rs /c/d.rs\n\n/a\\ b/src/lib.rs:\n"
+    assert prune._dep_tokens(text) == ["out.rlib", "/a b/src/lib.rs", "/c/d.rs",
+                                       "/a b/src/lib.rs"]
+
+
+def test_the_home_dir_may_be_a_target_root(env, monkeypatch):
+    """WSL workers leave targets directly in the home dir; only children
+    with cargo's markers are ever candidates, so the home may be a root."""
+    home = env.tmp / "home"
+    home.mkdir()
+    monkeypatch.setattr(prune.Path, "home", classmethod(lambda cls: home))
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "w18-target", gone, root=home)
+    (home / "notes").mkdir()
+    rc, out = run(env, "--repo", str(env.repo), "--config", str(env.config),
+                  "--ledger", str(env.ledger), "--target-root", str(home), "--apply",
+                  roots=False)
+    assert rc == 0, out
+    assert not target.exists() and (home / "notes").exists()
+
+
+# --- sweep mode: standalone clones -----------------------------------------
+
+def _clone(env: Env, name: str) -> Path:
+    root = env.tmp / "clones"
+    root.mkdir(exist_ok=True)
+    path = root / name
+    _git(env.tmp, "clone", "-q", str(env.origin), str(path))
+    _configure(path)
+    return path
+
+
+def run_clones(env: Env, *argv: str) -> tuple[int, str]:
+    return run(env, "--repo", str(env.repo), "--config", str(env.config),
+               "--ledger", str(env.ledger), "--clone-root", str(env.tmp / "clones"),
+               *argv, roots=False)
+
+
+def test_a_merged_clean_idle_clone_is_removed(env):
+    clone = _clone(env, "pr-check")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert not clone.exists(), out
+    [line] = env.ledger_lines()
+    assert line["kind"] == "clone" and line["complete"] is True
+
+
+def test_a_clone_whose_commit_exists_only_there_is_kept(env):
+    """A WSL clone's remote is a bundle or a Windows path, so "pushed"
+    means nothing; the test is whether the main repository has the commit."""
+    clone = _clone(env, "local-work")
+    (clone / "work.txt").write_text("only here\n", encoding="utf-8")
+    _git(clone, "add", "work.txt")
+    _git(clone, "commit", "-qm", "local only")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "exists only in that checkout" in out
+
+
+def test_a_clone_with_an_unmerged_branch_is_kept(env):
+    clone = _clone(env, "side-branch")
+    _git(clone, "checkout", "-qb", "side")
+    (clone / "side.txt").write_text("side\n", encoding="utf-8")
+    _git(clone, "add", "side.txt")
+    _git(clone, "commit", "-qm", "side work")
+    _git(clone, "checkout", "-q", "master")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "a local branch" in out
+
+
+def test_a_clone_with_a_stash_is_kept(env):
+    clone = _clone(env, "stashed")
+    (clone / "README.md").write_text("edited\n", encoding="utf-8")
+    _git(clone, "stash", "-q")
+    _backdate(clone)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert clone.exists()
+    assert "has a stash" in out
+
+
+def test_a_dirty_or_fresh_clone_is_kept(env):
+    dirty = _clone(env, "dirty")
+    (dirty / "untracked.log").write_text("evidence\n", encoding="utf-8")
+    _backdate(dirty)
+    fresh = _clone(env, "fresh")
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert dirty.exists() and fresh.exists()
+    assert "uncommitted changes" in out and "in grace period" in out
+
+
+def test_a_registered_worktree_is_not_a_clone(env):
+    root = env.tmp / "clones"
+    root.mkdir()
+    wt = env.add("registered", root=root)
+    rc, out = run_clones(env, "--apply")
+    assert rc == 0, out
+    assert env.registered(wt)
+
+
+# --- sweep mode: scratch dirs ----------------------------------------------
+
+def run_scratch(env: Env, *argv: str) -> tuple[int, str]:
+    return run(env, "--repo", str(env.repo), "--config", str(env.config),
+               "--ledger", str(env.ledger), "--scratch-root", str(env.tmp / "scratch"),
+               *argv, roots=False)
+
+
+def _scratch(env: Env, name: str, *files: str, age: float | None = OLD) -> Path:
+    path = env.tmp / "scratch" / name
+    path.mkdir(parents=True)
+    for rel in files or ("data.bin",):
+        (path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (path / rel).write_bytes(b"x")
+    if age is not None:
+        _backdate(path, age)
+    return path
+
+
+def test_an_idle_scratch_dir_is_removed(env):
+    old = _scratch(env, "w3runnertemp", "a/b.bin")
+    fresh = _scratch(env, "today", age=None)
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert not old.exists() and fresh.exists()
+    assert [l["kind"] for l in env.ledger_lines()] == ["scratch"]
+
+
+def test_scratch_holding_logs_evidence_checkouts_or_venvs_is_kept(env):
+    """Maintainer ruling of 16 November 2026: logs and evidence are kept
+    for ever; a checkout or virtual environment is never scratch."""
+    kept = [_scratch(env, "runlogs", "out/run.log"),
+            _scratch(env, "r4-evidence"),
+            _scratch(env, "has-checkout", ".git/HEAD"),
+            _scratch(env, "has-venv", "venv/pyvenv.cfg"),
+            _scratch(env, "claude")]
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert all(p.exists() for p in kept), out
+    for reason in ("holds a log", "holds evidence or logs", "holds a git checkout",
+                   "holds a virtual environment", "a harness's scratch root"):
+        assert reason in out, out
+
+
+def test_scratch_is_kept_when_the_process_list_cannot_be_read(env, monkeypatch):
+    monkeypatch.setattr(prune, "list_processes", lambda: None)
+    old = _scratch(env, "old")
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert old.exists()
+    assert "process check unavailable" in out
+
+
+def test_scratch_named_by_a_running_process_is_kept(env, monkeypatch):
+    old = _scratch(env, "busy")
+    monkeypatch.setattr(prune, "list_processes",
+                        lambda: [(999999, 1, f"cargo test --target-dir {old}")])
+    rc, out = run_scratch(env, "--apply")
+    assert rc == 0, out
+    assert old.exists()
+    assert "in use by process 999999" in out
+
+
+def test_new_root_keys_are_read_from_the_config(env, targets_root):
+    gone = env.tmp / "deleted-worktree" / "rust" / "src" / "lib.rs"
+    target = _target(env, "from-config", gone)
+    env.config.write_text(
+        f"repo = {json.dumps(str(env.repo))}\n"
+        f"target_roots = [{json.dumps(str(targets_root))}]\n"
+        "target_grace_hours = 6\nunowned_target_days = 14\nscratch_grace_days = 14\n",
+        encoding="utf-8")
+    rc, out = run(env, "--config", str(env.config), "--ledger", str(env.ledger),
+                  "--apply", roots=False)
+    assert rc == 0, out
+    assert not target.exists(), out
