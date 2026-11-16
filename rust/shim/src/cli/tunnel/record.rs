@@ -46,6 +46,8 @@ pub(super) enum Why {
     NoTable,
     /// A named process exists but this account cannot inspect its image.
     Uninspectable,
+    /// A named process id no process table can hold (0, or above u32).
+    OutOfRange,
 }
 
 #[derive(Debug)]
@@ -269,6 +271,46 @@ mod tests {
         let record = json!({"pid": 4242, "exe": exe, "supervisor": {"pid": pid, "exe": exe}});
         assert_eq!(liveness(&record, &mixed), Liveness::Running);
     }
+
+    /// "Gone" only on an observation: a process id no table can hold proves
+    /// nothing about a tunnel, so it is unknown with that cause.
+    #[test]
+    fn a_process_id_out_of_range_is_unknown_never_gone() {
+        let rows = vec![own()];
+        for record in [
+            json!({"pid": 0}),
+            json!({"pid": 4_294_967_296_u64}),
+            json!({"pid": 0, "supervisor": {"pid": 4_294_967_296_u64}}),
+        ] {
+            assert_eq!(
+                assess(&record, &rows),
+                (Liveness::Unknown, Some(Why::OutOfRange)),
+                "{record}"
+            );
+        }
+        // A real pid beside an out-of-range one: still not observed.
+        let record = json!({"pid": DEAD, "supervisor": {"pid": 4_294_967_296_u64}});
+        assert_eq!(assess(&record, &rows).0, Liveness::Unknown);
+        // A real pid alone that no table holds is observed gone.
+        assert_eq!(assess(&json!({"pid": DEAD}), &rows).0, Liveness::Gone);
+    }
+
+    /// Linux: the process table skips a live pid whose image it cannot read
+    /// (another account's or a non-dumpable process). Such a pid still has
+    /// `/proc/<pid>`, so it is unknown, never gone.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_live_pid_the_linux_table_skipped_is_unknown_never_gone() {
+        let pid = std::process::id();
+        let record = json!({"pid": pid, "exe": "/nonexistent/tunnel-client"});
+        assert_eq!(
+            assess(&record, &[]),
+            (Liveness::Unknown, Some(Why::Uninspectable))
+        );
+    }
+
+    /// A pid no process table holds on any platform.
+    const DEAD: u64 = 4_294_967_001;
 
     #[test]
     fn a_running_record_always_keeps_its_runtime_from_pruning() {

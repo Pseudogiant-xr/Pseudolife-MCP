@@ -335,6 +335,9 @@ fn unknown_cause(why: Option<record::Why>) -> &'static str {
         Some(Why::Uninspectable) => {
             "names a process that exists but this account cannot inspect; check which account runs it"
         }
+        Some(Why::OutOfRange) => {
+            "names a process id out of range (0, or larger than any process id); look at that file, and keep it while a tunnel may still run"
+        }
     }
 }
 
