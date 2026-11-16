@@ -658,12 +658,16 @@ def cases() -> list[core.Case]:
                mkdir("tunnels/dot-verification"),
                symlink("tunnels/dot-verification/challenge.json", "deep.json"),
                platforms=("linux",)),
-        # A junction only this user can change is followed (#1639); one
-        # another account could replace is not, and the challenge behind it
+        # A junction only this user can change is followed (#1639): the
+        # challenge behind it is read as status-challenge-present reads one
+        # from a plain folder. One another account could replace is not: the
+        # challenge behind it (past the native bound, so a read would show)
         # is never read.
         status("status-challenge-junction", ready(),
-               private("deep-dir/challenge.json", DEEP),
-               junction("tunnels/dot-verification", "deep-dir"),
+               private("real-dir/challenge.json",
+                       json.dumps({"nonce": REFRESH_ID, "identity": "a" * 64,
+                                   "created": 1.0}).encode()),
+               junction("tunnels/dot-verification", "real-dir"),
                platforms=("windows",), skip_if=no_junctions),
         status("status-challenge-junction-replaceable", ready(),
                private("deep-dir/challenge.json", DEEP),
