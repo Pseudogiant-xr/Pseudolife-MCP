@@ -433,6 +433,67 @@ def test_the_register_path_stops_only_the_recorded_shim_and_verifies_the_bind(sc
     assert "[int]$StartupTimeoutSec = 90" in text
 
 
+def test_a_rerun_over_its_own_serving_task_changes_nothing(tmp_path: Path) -> None:
+    """Reruns change nothing on a set-up host and say so: only when every
+    condition holds does a rerun skip the re-registration and the restart
+    (which would kill an extraction in flight and spend a CLI call); each
+    near miss goes the normal way."""
+    env = tmp_path / ".env"
+    env.write_bytes(b"PSEUDOLIFE_CODEX_SHIM_MODEL=gpt-5.6-terra\n")
+    env_ps = str(env).replace("'", "''")
+    base = {
+        "enabled": "$true", "execute": "powershell.exe", "arguments": "-EncodedCommand AAA", "actions": 1,
+        "logon": "Interactive", "runlevel": "Limited", "trigger_user": "HOST\\this-user", "trigger_enabled": "$true",
+        "trigger_class": "MSFT_TaskLogonTrigger", "legacy": "$false", "listeners": "4242", "recorded": "4242",
+        "before": "same", "task": "$true",
+    }
+    near_misses = {
+        "settings changed": {"before": "other"}, "settings file new": {"before": "none"},
+        "no task": {"task": "$false"}, "disabled": {"enabled": "$false"},
+        "another action": {"arguments": "-EncodedCommand BBB"}, "another program": {"execute": "pwsh.exe"},
+        "two actions": {"actions": 2}, "password logon": {"logon": "Password"}, "highest": {"runlevel": "Highest"},
+        "any-user trigger": {"trigger_user": ""}, "another user's trigger": {"trigger_user": "HOST\\other-user"},
+        "trigger disabled": {"trigger_enabled": "$false"}, "no logon trigger": {"trigger_class": "MSFT_TaskTimeTrigger"},
+        "legacy left": {"legacy": "$true"}, "not serving": {"listeners": ""},
+        "unproven listener": {"listeners": "4242, 4343"}, "nothing recorded": {"recorded": ""},
+    }
+
+    def run(case: dict) -> str:
+        before = {"same": f"[IO.File]::ReadAllBytes('{env_ps}')", "other": "[byte[]](65, 10)", "none": "$null"}[case["before"]]
+        actions = ", ".join(["[pscustomobject]@{ Execute = '%s'; Arguments = '%s' }" % (case["execute"], case["arguments"])] * case["actions"])
+        script = (_read(LOCK) +
+                  f"function Get-TaskShellUserSid {{ '{ME}' }}\n"
+                  f"function Get-AccountSid([string]$Account) {{ if ($Account -match '^(HOST\\\\)?this-user$') {{ '{ME}' }} elseif ($Account) {{ '{OTHER}' }} else {{ '' }} }}\n"
+                  "function Get-ScheduledTask { param($TaskPath, $TaskName, $ErrorAction)\n"
+                  f"  if ($TaskName -eq 'Legacy') {{ if ({case['legacy']}) {{ [pscustomobject]@{{ TaskName = 'Legacy' }} }}; return }}\n"
+                  f"  if (-not {case['task']}) {{ return }}\n"
+                  f"  [pscustomobject]@{{ Settings = [pscustomobject]@{{ Enabled = {case['enabled']} }}; Actions = @({actions});\n"
+                  f"    Principal = [pscustomobject]@{{ LogonType = '{case['logon']}'; RunLevel = '{case['runlevel']}' }};\n"
+                  f"    Triggers = @([pscustomobject]@{{ CimClass = [pscustomobject]@{{ CimClassName = '{case['trigger_class']}' }}; UserId = '{case['trigger_user']}'; Enabled = {case['trigger_enabled']} }}) }} }}\n"
+                  "function Get-NetTCPConnection { param($LocalPort, $State, $ErrorAction) "
+                  f"@({case['listeners']}) | ForEach-Object {{ [pscustomobject]@{{ OwningProcess = $_ }} }} }}\n"
+                  f"$recorded = @(@({case['recorded']}) | ForEach-Object {{ [pscustomobject]@{{ ProcessId = $_ }} }})\n"
+                  "$action = [pscustomobject]@{ Execute = 'powershell.exe'; Arguments = '-EncodedCommand AAA' }\n"
+                  f"'PID ' + (Get-UnchangedServingPid 'Task' $action 8086 $recorded {before} '{env_ps}' -AlsoAbsent @('Legacy'))\n")
+        proc = _run(script)
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout.strip()
+
+    assert run(base) == "PID 4242"
+    for name, change in near_misses.items():
+        assert run({**base, **change}) == "PID 0", name
+    # Both scripts snapshot ops\.env before their config write and decide
+    # after building the action, before the re-check and the unregister.
+    for script, absent in (("install-shim-autostart.ps1", " -AlsoAbsent @($legacyTaskName)"), ("install-codex-shim-autostart.ps1", "")):
+        text = _read(ROOT / "ops" / script)
+        snap = text.index("$envBefore = ")
+        config = text.index('ops\\shim_autostart.py") config claude' if "codex" not in script else 'ops\\shim_autostart.py") @configArgs')
+        decide = text.index(f"$servingPid = Get-UnchangedServingPid $taskName $action $Port $recorded $envBefore $envPath{absent}\n")
+        assert snap < config < text.index("$action = New-ScheduledTaskAction") < decide
+        assert decide < text.index("Assert-TaskUnlocked $taskName", decide) < text.index("Unregister-ScheduledTask")
+        assert "nothing changed.\"\n    return\n}" in text[decide:]
+
+
 def _recorded(tmp_path: Path, processes: list[dict], *, written_after: bool = True, port: int = 8082,
               recorded_pid: int = 4242) -> str:
     """Get-RecordedShim over a PID file this test writes and a mocked

@@ -206,6 +206,30 @@ function Assert-TaskUnlocked([string]$TaskName, [switch]$Removal) {
     }
     if ($lock) { throw (New-TaskLockError (Format-TaskLock $lock -Removal:$Removal)) }
 }
+function Get-UnchangedServingPid([string]$TaskName, $Action, [int]$Port, $Recorded, $EnvBefore, [string]$EnvPath,
+                                 [string[]]$AlsoAbsent = @()) {
+    # The pid serving the port when a rerun has nothing to do, else 0. All of:
+    # ops\.env byte for byte what it was before this run's config write; this
+    # user's task registered with exactly this action, enabled, Interactive
+    # and limited, with an enabled logon trigger naming this user; no legacy
+    # twin left; and every listener on the port the shim the runner recorded.
+    if ($null -eq $EnvBefore -or -not (Test-Path -LiteralPath $EnvPath)) { return 0 }
+    if ([Convert]::ToBase64String([byte[]]$EnvBefore) -ne [Convert]::ToBase64String([IO.File]::ReadAllBytes($EnvPath))) { return 0 }
+    $task = Get-ScheduledTask -TaskPath '\' -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task -or $task.Settings.Enabled -eq $false) { return 0 }
+    $actions = @($task.Actions)
+    if ($actions.Count -ne 1 -or $actions[0].Execute -ne $Action.Execute -or $actions[0].Arguments -ne $Action.Arguments) { return 0 }
+    if ("$($task.Principal.LogonType)" -ne 'Interactive' -or "$($task.Principal.RunLevel)" -ne 'Limited') { return 0 }
+    $me = Get-TaskShellUserSid
+    $mine = @($task.Triggers | Where-Object {
+        $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and $_.Enabled -ne $false -and "$($_.UserId)" -and (Get-AccountSid "$($_.UserId)") -eq $me })
+    if (-not $mine.Count) { return 0 }
+    foreach ($name in $AlsoAbsent) { if (Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction SilentlyContinue) { return 0 } }
+    $proven = @($Recorded | ForEach-Object ProcessId)
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if (-not $listeners.Count -or @($listeners | Where-Object { $_.OwningProcess -notin $proven }).Count) { return 0 }
+    [int]$listeners[0].OwningProcess
+}
 function Get-UnprovenPortHolder([int]$Port, $Recorded, [string]$Kind) {
     # '' when nothing but the recorded shim listens on $Port, else the one
     # refusal line: what holds it, then the command that frees it, last.

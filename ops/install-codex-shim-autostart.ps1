@@ -175,6 +175,9 @@ function Read-LogSince {
 $configArgs = @("config", "codex", "--model", $Model, "--port", "$Port", "--health-ttl", "$HealthTtl",
                 "--python", $PythonExe, "--log", $LogFile)
 if ($CodexCli) { $configArgs += @("--cli", $CodexCli) }
+# The settings file as it was, so a rerun that changes nothing can say so.
+$envPath = Join-Path $repo "ops\.env"
+$envBefore = if (Test-Path -LiteralPath $envPath) { [IO.File]::ReadAllBytes($envPath) } else { $null }
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") @configArgs 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
 $inner = @"
@@ -199,6 +202,13 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
+# A rerun over this user's own task that already runs these settings, with
+# the shim it recorded serving the port, changes nothing and says so.
+$servingPid = Get-UnchangedServingPid $taskName $action $Port $recorded $envBefore $envPath
+if ($servingPid) {
+    Write-Host "'$taskName' is already registered and serving these settings on port $Port (pid $servingPid); nothing changed."
+    return
+}
 # Again just before the unregister: the interpreter pick above can take
 # minutes, and a task another account registered meanwhile is not ours.
 Assert-TaskUnlocked $taskName
