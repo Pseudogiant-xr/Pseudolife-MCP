@@ -20,8 +20,13 @@
 //! path; a receipt's name and fields come from the saved challenge. The
 //! bridge prints no token, key or nonce, and its child never inherits a
 //! token or daemon address from the bridge's own environment.
+//!
+//! A receipt's `identity` is the challenge's, copied: this bridge checks the
+//! profile it serves is unchanged since it started, but there is no native
+//! launch identity yet to compare with the challenge's, so a reader must not
+//! take the field as proof of which launch answered until one exists.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
     io::Write,
     path::{Path, PathBuf},
@@ -66,8 +71,10 @@ fn dropped(name: &OsStr) -> bool {
 /// A JSON-RPC message the observer and the gate parse; larger lines are
 /// relayed but never parsed.
 const PARSE_LIMIT: usize = 4 * 1024 * 1024;
-/// Calls awaiting their answer, and `tools/list` requests held by the gate.
+/// Calls awaiting their answer, client requests in flight, and `tools/list`
+/// requests held by the gate.
 const PENDING_LIMIT: usize = 256;
+const IN_FLIGHT_LIMIT: usize = 1024;
 const HELD_LIMIT: usize = 64;
 /// How long a held `tools/list` waits for the catalog before it is refused.
 const GATE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -250,18 +257,30 @@ async fn serve(start: Start) -> ExitCode {
     }
 }
 
+/// What the client's writer is handed: a line to write, or a verification
+/// proof to settle once every line queued before it has been written.
+enum Out {
+    Line(Vec<u8>),
+    Settle(Proof),
+}
+
 /// Relay the client's lines to the shim and the shim's lines to the client,
 /// byte for byte, until the shim's output ends. The observer only reads; the
 /// gate holds or answers `tools/list` when it is enabled, and otherwise
-/// passes every line through. Receipts are written off the relay path, and
-/// all of them have settled when this returns.
+/// passes every line through.
+///
+/// Reading never waits for writing: each direction has its own writer and
+/// queue, so a shim that is not reading its input (while it attaches, say)
+/// cannot stop the bridge draining its output. Once the shim's input closes
+/// it has `CHILD_EXIT` to end its output; receipts settle after their answer
+/// is written, and have settled when this returns.
 pub(super) async fn relay<CI, CO, SI, SO>(
     client_in: CI,
-    mut client_out: CO,
+    client_out: CO,
     shim_in: SI,
     shim_out: SO,
-    mut observer: Option<Observer>,
-    mut gate: Gate,
+    observer: Option<Observer>,
+    gate: Gate,
 ) -> std::io::Result<()>
 where
     CI: AsyncRead + Unpin,
@@ -269,28 +288,68 @@ where
     SI: AsyncWrite + Unpin,
     SO: AsyncRead + Unpin,
 {
+    let (to_client, client_queue) = tokio::sync::mpsc::unbounded_channel();
+    let (to_shim, shim_queue) = tokio::sync::mpsc::unbounded_channel();
+    let control = control(client_in, shim_out, observer, gate, to_client, to_shim);
+    let writers = async {
+        tokio::join!(
+            write_client(client_out, client_queue),
+            write_shim(shim_in, shim_queue)
+        )
+    };
+    tokio::pin!(control, writers);
+    // The writers end only after the control loop has dropped their queues.
+    let (result, written) = tokio::select! {
+        result = &mut control => (result, false),
+        _ = &mut writers => (Ok(()), true),
+    };
+    if !written {
+        // What is queued is written, unless a side stopped reading for good.
+        let _ = tokio::time::timeout(CHILD_EXIT, &mut writers).await;
+    }
+    result
+}
+
+/// Reads both sides and decides where each line goes.
+async fn control<CI, SO>(
+    client_in: CI,
+    shim_out: SO,
+    mut observer: Option<Observer>,
+    mut gate: Gate,
+    to_client: tokio::sync::mpsc::UnboundedSender<Out>,
+    to_shim: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+) -> std::io::Result<()>
+where
+    CI: AsyncRead + Unpin,
+    SO: AsyncRead + Unpin,
+{
     let mut client_in = BufReader::new(client_in);
     let mut shim_out = BufReader::new(shim_out);
-    let mut shim_in = Some(shim_in);
-    // Kept across select! rounds: a partly read line is never lost.
+    let mut to_shim = Some(to_shim);
+    // Kept across select! rounds: a partly read line stays in its buffer.
     let (mut inbound, mut outbound) = (Vec::new(), Vec::new());
     let mut client_open = true;
-    let mut receipts = tokio::task::JoinSet::new();
-    let result = loop {
-        if !client_open && !gate.waiting() {
+    let mut closing: Option<tokio::time::Instant> = None;
+    loop {
+        if !client_open && !gate.waiting() && to_shim.is_some() {
             // The client is gone and nothing is held: the shim's input
-            // closes, and the shim ends its output in turn.
-            shim_in = None;
+            // closes, and the shim must end its output in turn.
+            to_shim = None;
+            closing = Some(tokio::time::Instant::now() + CHILD_EXIT);
         }
         let deadline = gate.deadline;
+        let mut shim_done = None;
         let (actions, proof) = tokio::select! {
-            read = client_in.read_until(b'\n', &mut inbound), if client_open => match read {
-                Ok(0) | Err(_) => {
+            read = client_in.read_until(b'\n', &mut inbound), if client_open => {
+                // A read that adds nothing is the end of the stream, even
+                // when an earlier, cancelled read left an unended last line.
+                if !matches!(read, Ok(n) if n > 0) {
                     client_open = false;
-                    (Vec::new(), None)
                 }
-                Ok(_) => {
-                    let line = std::mem::take(&mut inbound);
+                let line = std::mem::take(&mut inbound);
+                if line.is_empty() {
+                    (Vec::new(), None)
+                } else {
                     let message = message(&line);
                     if let (Some(observer), Some(message)) = (observer.as_mut(), message.as_ref()) {
                         observer.request(message);
@@ -298,11 +357,16 @@ where
                     (gate.inbound(line, message.as_ref()), None)
                 }
             },
-            read = shim_out.read_until(b'\n', &mut outbound) => match read {
-                Ok(0) => break Ok(()),
-                Err(error) => break Err(error),
-                Ok(_) => {
-                    let line = std::mem::take(&mut outbound);
+            read = shim_out.read_until(b'\n', &mut outbound) => {
+                match read {
+                    Ok(n) if n > 0 => {}
+                    Ok(_) => shim_done = Some(Ok(())),
+                    Err(error) => shim_done = Some(Err(error)),
+                }
+                let line = std::mem::take(&mut outbound);
+                if line.is_empty() {
+                    (Vec::new(), None)
+                } else {
                     let message = message(&line);
                     let actions = gate.outbound(line, message.as_ref());
                     let proof = observer
@@ -313,43 +377,72 @@ where
                 }
             },
             () = sleep_until(deadline), if deadline.is_some() => (gate.expire(), None),
+            // The shim kept its output open past its input's end.
+            () = sleep_until(closing), if closing.is_some() => return Ok(()),
         };
-        let mut client_gone = false;
         for action in actions {
             match action {
                 Action::ToShim(bytes) => {
-                    if let Some(writer) = shim_in.as_mut()
-                        && (writer.write_all(&bytes).await.is_err()
-                            || writer.flush().await.is_err())
-                    {
-                        // The shim stopped reading: its output ends next.
-                        shim_in = None;
+                    if let Some(queue) = &to_shim {
+                        let _ = queue.send(bytes);
                     }
                 }
                 Action::ToClient(bytes) => {
-                    if client_out.write_all(&bytes).await.is_err()
-                        || client_out.flush().await.is_err()
-                    {
-                        client_gone = true;
-                        break;
-                    }
+                    let _ = to_client.send(Out::Line(bytes));
                 }
             }
         }
-        if client_gone {
-            break Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
-        }
         if let Some(proof) = proof {
-            // Settled once its answer has been relayed, on the blocking
-            // pool, so the stream never waits for the disk.
-            receipts.spawn_blocking(move || proof.settle());
+            let _ = to_client.send(Out::Settle(proof));
+        }
+        if let Some(done) = shim_done {
+            return done;
+        }
+    }
+}
+
+/// Writes the client's lines in order; settles each proof, on the blocking
+/// pool, once the answer queued before it has been written.
+async fn write_client<CO: AsyncWrite + Unpin>(
+    mut writer: CO,
+    mut queue: tokio::sync::mpsc::UnboundedReceiver<Out>,
+) {
+    let mut open = true;
+    let mut receipts = tokio::task::JoinSet::new();
+    while let Some(item) = queue.recv().await {
+        match item {
+            Out::Line(bytes) => {
+                if open
+                    && (writer.write_all(&bytes).await.is_err() || writer.flush().await.is_err())
+                {
+                    // The client is gone; its input ends next.
+                    open = false;
+                }
+            }
+            // An answer the client never received proves nothing.
+            Out::Settle(proof) if open => {
+                receipts.spawn_blocking(move || proof.settle());
+            }
+            Out::Settle(_) => {}
         }
         while receipts.try_join_next().is_some() {}
-    };
-    drop(shim_in);
+    }
     while receipts.join_next().await.is_some() {}
-    let _ = client_out.flush().await;
-    result
+}
+
+/// Writes the shim's lines in order; its input closes when the queue does.
+async fn write_shim<SI: AsyncWrite + Unpin>(
+    mut writer: SI,
+    mut queue: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+) {
+    let mut open = true;
+    while let Some(bytes) = queue.recv().await {
+        if open && (writer.write_all(&bytes).await.is_err() || writer.flush().await.is_err()) {
+            // The shim stopped reading: its output ends next.
+            open = false;
+        }
+    }
+    let _ = writer.shutdown().await;
 }
 
 async fn sleep_until(deadline: Option<tokio::time::Instant>) {
@@ -572,6 +665,9 @@ pub(super) struct Observer {
     root: PathBuf,
     binding: Binding,
     pending: HashMap<Id, Call>,
+    /// Every client request id not yet answered: a verification call
+    /// sent under an id already in flight is never credited.
+    in_flight: HashSet<Id>,
     reporter: Reporter,
     sink: Sink,
 }
@@ -582,6 +678,7 @@ impl Observer {
             root,
             binding: Binding::of(profile),
             pending: HashMap::new(),
+            in_flight: HashSet::new(),
             reporter,
             sink,
         }
@@ -596,10 +693,16 @@ impl Observer {
         let Some(id) = identifier(message) else {
             return;
         };
-        // A reused id drops the earlier call rather than crediting it with
-        // an answer meant for the new one.
+        if self.in_flight.len() >= IN_FLIGHT_LIMIT {
+            // Requests a client cancelled are never answered; forget them.
+            self.in_flight.clear();
+        }
+        // A reused id makes either answer ambiguous: neither call is
+        // credited.
+        let reused = !self.in_flight.insert(id.clone());
         self.pending.remove(&id);
-        if self.pending.len() >= PENDING_LIMIT
+        if reused
+            || self.pending.len() >= PENDING_LIMIT
             || message.get("method").and_then(Value::as_str) != Some("tools/call")
         {
             return;
@@ -638,7 +741,9 @@ impl Observer {
         if message.contains_key("method") {
             return None;
         }
-        let call = self.pending.remove(&identifier(message)?)?;
+        let id = identifier(message)?;
+        self.in_flight.remove(&id);
+        let call = self.pending.remove(&id)?;
         succeeded(message).then(|| Proof {
             root: self.root.clone(),
             binding: self.binding.clone(),

@@ -319,6 +319,24 @@ async fn calls_that_prove_nothing_write_nothing() {
                 }
             }),
         ),
+        (
+            // The earlier call's success must not vouch for the nonce call.
+            "nonce call under an id already in flight",
+            format!("{}{}", search(1, "plain"), search(1, NONCE)),
+            Box::new(|m: &Map<String, Value>| {
+                if m["params"]["arguments"]["query"] == NONCE {
+                    vec![
+                        success(&m["id"]),
+                        format!(
+                            "{}\n",
+                            json!({"jsonrpc": "2.0", "id": m["id"], "error": {"code": -32603, "message": "x"}})
+                        ),
+                    ]
+                } else {
+                    Vec::new()
+                }
+            }),
+        ),
     ];
     for (case, request, script) in cases {
         let store = Store::new();
@@ -485,6 +503,112 @@ async fn traffic_is_byte_identical_with_and_without_the_observer() {
     assert_eq!(observed, plain);
     assert_eq!(observed.1, request.as_bytes(), "the shim saw other bytes");
     assert_eq!(recorder.written().len(), 1, "the observer wrote no receipt");
+}
+
+/// A last line without its newline still crosses when an earlier read of
+/// it was cut short by the shim's side of the relay.
+#[tokio::test]
+async fn an_unended_last_line_crosses_after_an_interrupted_read() {
+    let (mut client_writer, client_in) = duplex(1 << 16);
+    let (client_out, mut client_reader) = duplex(1 << 16);
+    let (shim_in, mut fake_reader) = duplex(1 << 16);
+    let (mut fake_writer, shim_out) = duplex(1 << 16);
+    let relayed = tokio::spawn(relay(
+        client_in,
+        client_out,
+        shim_in,
+        shim_out,
+        None,
+        Gate::new(false),
+    ));
+    let tail = b"{\"jsonrpc\":\"2.0\",\"id\":\"tail\",\"method\":\"ping\"}";
+    client_writer.write_all(tail).await.unwrap();
+    // The relay reads the tail and waits for its newline...
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    // ...until a shim line wins the round, cutting that read short.
+    let note = b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n";
+    fake_writer.write_all(note).await.unwrap();
+    let mut relayed_note = vec![0; note.len()];
+    client_reader.read_exact(&mut relayed_note).await.unwrap();
+    assert_eq!(relayed_note, note);
+    drop(client_writer);
+    let mut received = Vec::new();
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        fake_reader.read_to_end(&mut received),
+    )
+    .await
+    .expect("the shim's input closed")
+    .unwrap();
+    assert_eq!(received, tail);
+    drop(fake_writer);
+    relayed.await.unwrap().unwrap();
+}
+
+/// A shim that writes before it reads, through pipes far smaller than the
+/// traffic, still gets every line both ways: reading never waits for a
+/// write in the other direction.
+#[tokio::test]
+async fn a_shim_that_is_not_reading_never_stalls_the_relay() {
+    const LINES: usize = 200;
+    let (mut client_writer, client_in) = duplex(256);
+    let (client_out, mut client_reader) = duplex(256);
+    let (shim_in, fake_reader) = duplex(256);
+    let (mut fake_writer, shim_out) = duplex(256);
+    let request = |n: usize| {
+        format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":{n},\"method\":\"ping\",\"params\":{{\"pad\":\"{}\"}}}}\n",
+            "x".repeat(80)
+        )
+    };
+    let note = |n: usize| {
+        format!(
+            "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{{\"n\":{n},\"pad\":\"{}\"}}}}\n",
+            "y".repeat(80)
+        )
+    };
+    let sent: String = (0..LINES).map(request).collect();
+    let noted: String = (0..LINES).map(note).collect();
+    let relayed = tokio::spawn(relay(
+        client_in,
+        client_out,
+        shim_in,
+        shim_out,
+        None,
+        Gate::new(false),
+    ));
+    let client = {
+        let sent = sent.clone();
+        tokio::spawn(async move {
+            client_writer.write_all(sent.as_bytes()).await.unwrap();
+        })
+    };
+    let fake = {
+        let noted = noted.clone();
+        tokio::spawn(async move {
+            // Everything it has to say, before it reads a byte.
+            fake_writer.write_all(noted.as_bytes()).await.unwrap();
+            let mut received = Vec::new();
+            let mut reader = fake_reader;
+            reader.read_to_end(&mut received).await.unwrap();
+            received
+        })
+    };
+    let reading = tokio::spawn(async move {
+        let mut out = Vec::new();
+        client_reader.read_to_end(&mut out).await.unwrap();
+        out
+    });
+    let outcome = tokio::time::timeout(Duration::from_secs(30), async {
+        client.await.unwrap();
+        let received = fake.await.unwrap();
+        relayed.await.unwrap().unwrap();
+        (reading.await.unwrap(), received)
+    })
+    .await
+    .expect("the relay stalled");
+    assert_eq!(outcome.0, noted.as_bytes());
+    assert_eq!(outcome.1, sent.as_bytes());
 }
 
 /// A fake daemon's toolset: answers `memory_toolset` status and expand from
