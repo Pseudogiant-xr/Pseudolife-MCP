@@ -1,8 +1,8 @@
 //! Bounded waits for a test's own child processes. A child that never exits,
 //! or a descendant that keeps its output pipe open, fails the test with a
 //! message naming what it waited for and for how long, instead of running
-//! into nextest's timeout with no message; the child is killed and reaped on
-//! every path, so a failure leaves no process behind.
+//! into nextest's timeout with no message. The direct child is killed and
+//! reaped on every path; a descendant that outlives it is only named.
 use std::{
     io::Read,
     process::{Child, Command, ExitStatus, Output, Stdio},
@@ -10,25 +10,29 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Waits until `child` exits. Past `budget` it kills and reaps the child, then
-/// panics naming `what`.
+/// Waits until `child` exits, closing its stdin first as `Child::wait` does.
+/// Past `budget` it kills and reaps the child, then panics naming `what`.
+#[allow(dead_code)] // Not every importer waits on a child it holds itself.
 pub fn wait_within(child: &mut Child, budget: Duration, what: &str) -> ExitStatus {
+    wait_until(child, budget, what).unwrap_or_else(|error| panic!("{error}"))
+}
+
+fn wait_until(child: &mut Child, budget: Duration, what: &str) -> Result<ExitStatus, String> {
+    drop(child.stdin.take());
     let deadline = Instant::now() + budget;
     loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("{what} did not exit within {budget:?}; it was killed");
+        let error = match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
             }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("could not wait for {what}: {error}");
-            }
-        }
+            Ok(None) => format!("{what} did not exit within {budget:?}; it was killed"),
+            Err(error) => format!("could not wait for {what}: {error}"),
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
     }
 }
 
@@ -45,7 +49,18 @@ pub fn output_within(command: &mut Command, budget: Duration, what: &str) -> Out
         .unwrap_or_else(|error| panic!("could not start {what}: {error}"));
     let stdout = drain(child.stdout.take().expect("piped stdout"));
     let stderr = drain(child.stderr.take().expect("piped stderr"));
-    let status = wait_within(&mut child, budget, what);
+    let status = match wait_until(&mut child, budget, what) {
+        Ok(status) => status,
+        Err(error) => {
+            // The killed child's stderr says where it was, unless a
+            // descendant still holds the pipe.
+            let printed = stderr
+                .recv_timeout(Duration::from_secs(1))
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .unwrap_or_else(|_| "(stderr still held open by a descendant)".into());
+            panic!("{error}; its stderr:\n{printed}");
+        }
+    };
     let collect = |pipe: mpsc::Receiver<Vec<u8>>, name: &str| {
         let remaining = budget.saturating_sub(started.elapsed());
         pipe.recv_timeout(remaining.max(Duration::from_millis(100)))

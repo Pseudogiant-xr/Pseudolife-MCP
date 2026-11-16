@@ -28,7 +28,7 @@ const ORDINARY: &str = "native_ordinary_child_fixture";
 // one quiet run 36 s of CPU. Pinned to one core beside three busy loops, every
 // run failed "fixture readiness timed out" at 43-45 s (hosted #1605: 37 s);
 // on two cores beside six busy loops a run took 133 s, past nextest's 120 s
-// cap (hosted #1605: killed at 120 s), while every wait took under 15 ms.
+// cap (hosted #1605: killed at 120 s), while every wait took under 25 ms.
 // The runtime is therefore a stripped copy (6 MB), and the budgets below were
 // measured with it: a whole run took 1.3 s quiet and 4.4-5.1 s on one core
 // beside three busy loops.
@@ -39,9 +39,10 @@ const ORDINARY: &str = "native_ordinary_child_fixture";
 /// 0.2 s quiet, 0.7 s on one core beside three busy loops.
 const READINESS: Duration = Duration::from_secs(20);
 /// One round trip to a running fixture, the launcher's exit after "exit",
-/// and the release of the old runtime's pin: no hashing, milliseconds when
-/// measured.
-const REPLY: Duration = Duration::from_secs(10);
+/// and the release of the old runtime's pin: no hashing, under 25 ms when
+/// measured under load in WSL. Kept at the 20 s these waits always had,
+/// since on Windows the pin's release waits for the launcher's job to end.
+const REPLY: Duration = Duration::from_secs(20);
 /// Draining every fixture connection when a session ends, in all.
 const DRAIN: Duration = Duration::from_secs(10);
 /// A one-shot runtime child: it pins and hashes the runtime, then exits.
@@ -236,25 +237,29 @@ impl Session {
                     // Windows inherits the listener's nonblocking mode; the
                     // framed fixture protocol uses bounded blocking reads.
                     stream.set_nonblocking(false).unwrap();
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    stream
-                        .set_read_timeout(Some(remaining.max(Duration::from_millis(10))))
-                        .unwrap();
+                    // A fixture that connected in time gets a full reply
+                    // budget for its role line, even near the deadline.
+                    stream.set_read_timeout(Some(REPLY)).unwrap();
                     stream.set_write_timeout(Some(REPLY)).unwrap();
                     let mut connection = BufReader::new(stream);
                     let mut role = String::new();
-                    if let Err(error) = connection.read_line(&mut role) {
-                        session.not_ready(
+                    match connection.read_line(&mut role) {
+                        Ok(0) => session.not_ready(
                             expected,
-                            &format!("a connected fixture sent no role line ({error})"),
-                        );
+                            "a fixture connected and closed without a role line",
+                        ),
+                        Ok(_) => {}
+                        Err(error) => session.not_ready(
+                            expected,
+                            &format!(
+                                "a connected fixture sent no role line within {REPLY:?} ({error})"
+                            ),
+                        ),
                     }
                     let role = role.trim().to_owned();
-                    assert!(
-                        expected.contains(&role.as_str()),
-                        "unexpected fixture role {role:?}"
-                    );
-                    connection.get_mut().set_read_timeout(Some(REPLY)).unwrap();
+                    if !expected.contains(&role.as_str()) {
+                        session.not_ready(expected, &format!("unexpected fixture role {role:?}"));
+                    }
                     assert!(
                         session
                             .connections
