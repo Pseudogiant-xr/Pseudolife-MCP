@@ -298,12 +298,18 @@ def proof(binary, root, fixture, launcher_exe, provider, scenario="all"):
             assert Path(run.journal_rows(journal)[-1]["cwd"]).resolve() == repo.resolve()
             initial_calls = len(run.journal_rows(journal))
             repeated = checked(args, env=env, step=f"{kind} unchanged reinstall")
-            assert not repeated.stdout.strip(), repeated.stdout
+            # A rerun on a set-up host changes nothing; the Windows script
+            # says so in one line, the systemd one stays silent.
+            expected = [f"Native {kind} shim autostart '{token}' is already registered and serving these settings on port {port}; nothing changed."] if windows else []
+            assert repeated.stdout.decode().strip().splitlines() == expected, repeated.stdout
             assert len(run.journal_rows(journal)) == initial_calls, "unchanged install restarted its provider"
             if windows:
                 checked(["pwsh", "-NoProfile", "-Command",
                          f"Disable-ScheduledTask -TaskName '{token}' -ErrorAction Stop | Out-Null"], step=f"{kind} disable healthy task")
-                assert not checked(args, env=env, step=f"{kind} re-enable healthy task").stdout.strip()
+                reenabled = checked(args, env=env, step=f"{kind} re-enable healthy task")
+                assert reenabled.stdout.decode().strip().splitlines() == [
+                    f"Native {kind} shim autostart '{token}' was disabled and is enabled again; it already serves these settings on port {port}."
+                ], reenabled.stdout
                 checked(["pwsh", "-NoProfile", "-Command", WINDOWS_TASK_ABSENCE +
                          f"\nif (-not (Get-FixtureTask '{token}').Settings.Enabled) {{ throw 'task remains disabled' }}"],
                         step=f"{kind} enabled registration")

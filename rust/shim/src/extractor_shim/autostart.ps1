@@ -694,6 +694,7 @@ $originalOwnership = $rollbackOwnership
 $replacementRegistered = $false
 $mutated = $false
 $unchanged = $false
+$reenabled = $false
 $sameTask = $registered -and @($registered.Actions).Count -eq 1 -and
     $registered.Actions[0].Execute -eq $action.Execute -and $registered.Actions[0].Arguments -eq $action.Arguments -and
     [string]$registered.Principal.LogonType -eq [string]$c.LogonType
@@ -742,6 +743,7 @@ try {
     $followsFile = $selectedLock -and -not $unchanged
     if ($unchanged -and -not $registered.Settings.Enabled) {
         Enable-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction Stop | Out-Null
+        $reenabled = $true
     }
     if (-not $unchanged) {
         $mutated = $true
@@ -884,6 +886,8 @@ if (-not $unchanged -and -not $followsFile) {
     Write-Host "Native $kind shim autostart '$name' keeps its registration and was restarted with the new settings in $($c.EnvFile) (port $port, pid $script:verifiedPid). Note: $(Format-TaskLock $selectedLock -Follows $c.EnvFile)"
 } elseif ($selectedLock) {
     Write-Host "Native $kind shim autostart '$name' already runs these settings on port $port; nothing changed. Note: $(Format-TaskLock $selectedLock -Follows $c.EnvFile)"
+} elseif ($reenabled) {
+    Write-Host "Native $kind shim autostart '$name' was disabled and is enabled again; it already serves these settings on port $port."
 } else {
     Write-Host "Native $kind shim autostart '$name' is already registered and serving these settings on port $port; nothing changed."
 }
