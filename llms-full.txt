@@ -13851,19 +13851,20 @@ a sleeping or powered-off host available.
 service starts the tunnel through the installed `pseudolife-mcp` launcher,
 and the native client cannot run a tunnel yet. So a run that would move this
 machine to the native client refuses while a tunnel service it installed is
-registered and runs that launcher, even a disabled one. That covers an
-update with `PSEUDOLIFE_SHIM_ENGINE=native` (exit 2) and the installer with
-it (`runtime install` exits 3, and the installer keeps the Python client).
-The refusal names the service and changes nothing. Rerun without
+registered and runs that launcher, even a disabled one. An update with
+`PSEUDOLIFE_SHIM_ENGINE=native` exits 2, and the installer with it stops in
+its preflight; `runtime install --check` is the check both use. The refusal
+names the service and changes nothing. Rerun without
 `PSEUDOLIFE_SHIM_ENGINE=native` to stay on the Python client. To move anyway,
 first run the `pseudolife-mcp tunnel service remove` command the refusal
 prints (it carries the service's `--profile`, `--profile-dir` and, for a root
 service, `--system-service`), then rerun. A saved profile without a service,
 or a service that runs another program, does not block the move. On a
 machine already on the native client, an update warns about such a service
-and prints the service manager's own command that stops it
-(`systemctl --user disable --now`, `launchctl bootout` and `launchctl
-disable`, or `schtasks /Change /Disable`).
+and prints the service manager's own commands that remove it, since that
+client has no `tunnel service` command (`systemctl --user disable --now`
+and deleting the unit, `launchctl bootout` and deleting the plist, or
+`schtasks /Delete`).
 
 Windows stores the runtime key using user-scoped DPAPI plus owner-only ACLs;
 POSIX stores it in an owner-only file, with disk encryption left to the host.

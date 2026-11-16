@@ -281,7 +281,7 @@ fn a_registered_user_unit_refuses_the_move_and_changes_nothing() {
     assert!(
         line.contains(&format!(
             "(pseudolife-mcp tunnel service remove --profile dot --profile-dir {}), then rerun it.",
-            quote(&f.store())
+            quote(&f.store(), false)
         )),
         "{line}"
     );
@@ -337,7 +337,7 @@ fn a_root_system_unit_refuses_and_names_the_system_service_removal() {
     assert!(
         line.contains(&format!(
             "pseudolife-mcp tunnel service remove --profile dot --profile-dir {} --system-service",
-            quote(&f.store())
+            quote(&f.store(), false)
         )),
         "{line}"
     );
@@ -422,6 +422,7 @@ fn a_unit_without_the_owner_marker_is_not_this_products() {
 fn an_already_native_machine_moves_on_and_says_how_to_stop_the_failing_service() {
     let f = Fixture::new();
     f.native_launcher();
+    f.write(".pseudolife-mcp/tunnel/dot.json", "{}");
     f.write(
         ".config/systemd/user/pseudolife-tunnel-dot.service",
         &f.unit(&f.launcher()),
@@ -446,13 +447,21 @@ fn an_already_native_machine_moves_on_and_says_how_to_stop_the_failing_service()
         panic!("an already-native machine is not refused: {decision:?}");
     };
     assert_eq!(lines.len(), 1, "{lines:?}");
+    let unit = f
+        .home()
+        .join(".config")
+        .join("systemd")
+        .join("user")
+        .join("pseudolife-tunnel-dot.service");
     assert!(
-        lines[0].contains("cannot start under the native client"),
+        lines[0].contains("now the native client, which cannot run a tunnel yet"),
         "{lines:?}"
     );
-    assert!(lines[0].contains("keeps restarting it"), "{lines:?}");
     assert!(
-        lines[0].contains("systemctl --user disable --now pseudolife-tunnel-dot.service"),
+        lines[0].contains(&format!(
+            "remove it with: systemctl --user disable --now pseudolife-tunnel-dot.service; rm {}; systemctl --user daemon-reload",
+            quote(&unit.to_string_lossy(), false)
+        )),
         "{lines:?}"
     );
     // No service: nothing to say.
@@ -471,6 +480,7 @@ fn an_already_native_machine_moves_on_and_says_how_to_stop_the_failing_service()
 fn an_already_native_machine_names_each_service_managers_stop_command() {
     let f = Fixture::new();
     f.native_launcher();
+    f.write(".pseudolife-mcp/tunnel/dot.json", "{}");
     f.write(
         "Library/LaunchAgents/pseudolife-tunnel-dot.plist",
         &plist(&f.launcher()),
@@ -479,7 +489,8 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         panic!()
     };
     assert!(
-        lines[0].contains("launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot and launchctl disable gui/$(id -u)/pseudolife-tunnel-dot"),
+        lines[0]
+            .contains("remove it with: launchctl bootout gui/$(id -u)/pseudolife-tunnel-dot; rm "),
         "{lines:?}"
     );
     let registry = Registry::new(
@@ -491,7 +502,9 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         panic!()
     };
     assert!(
-        lines[0].contains("schtasks /Change /TN \"\\pseudolife-tunnel-dot\" /Disable"),
+        lines[0].contains("it fails at each logon")
+            && lines[0]
+                .contains("remove it with: schtasks /Delete /TN \"\\pseudolife-tunnel-dot\" /F"),
         "{lines:?}"
     );
     let system = f.path.join("etc-systemd-system");
@@ -511,7 +524,9 @@ fn an_already_native_machine_names_each_service_managers_stop_command() {
         panic!()
     };
     assert!(
-        lines[0].contains("systemctl disable --now pseudolife-tunnel-dot.service (as root)"),
+        lines[0].contains(
+            "remove it with: (as root) systemctl disable --now pseudolife-tunnel-dot.service; rm "
+        ),
         "{lines:?}"
     );
 }
@@ -630,7 +645,7 @@ fn a_registered_scheduled_task_refuses_after_read_only_queries() {
     assert!(
         line.contains(&format!(
             "tunnel service remove --profile dot --profile-dir {})",
-            quote(&f.store())
+            quote(&f.store(), true)
         )),
         "{line}"
     );
@@ -745,7 +760,8 @@ fn service_commands_are_read_as_render_service_writes_them() {
 fn a_native_launcher_whose_runtime_is_gone_is_still_native() {
     let f = Fixture::new();
     fs::create_dir_all(f.layout.launcher.parent().unwrap()).unwrap();
-    fs::write(&f.layout.launcher, b"ELF fixture").unwrap();
+    fs::write(&f.layout.launcher, b"\x7fELF fixture").unwrap();
+    f.write(".pseudolife-mcp/tunnel/dot.json", "{}");
     f.write(
         ".config/systemd/user/pseudolife-tunnel-dot.service",
         &f.unit(&f.launcher()),
@@ -753,6 +769,7 @@ fn a_native_launcher_whose_runtime_is_gone_is_still_native() {
     let Decision::Proceed(lines) = update(&f, &linux(), &Untouched) else {
         panic!("an ELF launcher is the native client: nothing to refuse");
     };
+    assert!(lines[0].contains("now the native client"), "{lines:?}");
     assert!(
         lines[0].contains("cannot start under the native client"),
         "{lines:?}"
@@ -765,6 +782,7 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
         kind: Kind::UserUnit,
         name: "pseudolife-tunnel-dot.service".into(),
         place: "systemd user unit /u".into(),
+        file: None,
         command: None,
     };
     let checkout = refusal(std::slice::from_ref(&service), false, Mover::Checkout);
@@ -774,7 +792,7 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
     );
     let unattended = refusal(std::slice::from_ref(&service), false, Mover::Unattended);
     assert!(
-        unattended.contains("this unattended run leaves it as it is"),
+        unattended.contains("this unattended run leaves the machine as it is, its daemon included"),
         "{unattended}"
     );
     assert!(
@@ -795,6 +813,83 @@ fn each_mover_names_its_own_way_to_stay_and_to_move() {
             "a disabled unit does not start: {line}"
         );
     }
+}
+
+#[test]
+fn a_native_machine_without_a_tunnel_store_asks_no_service_manager() {
+    let f = Fixture::new();
+    f.native_launcher();
+    // Untouched panics if schtasks were asked.
+    assert_eq!(
+        update(&f, &windows(), &Untouched),
+        Decision::Proceed(vec![])
+    );
+}
+
+#[test]
+fn a_task_command_that_did_not_decode_still_counts_as_the_launcher() {
+    // Piped schtasks output is single-byte in the console code page: a home
+    // folder with an accented letter is not valid UTF-8 and decodes lossily.
+    let f = Fixture::new();
+    f.python_launcher();
+    let mut xml = format!(
+        "<Task><RegistrationInfo><Source>{OWNER}{HEX}</Source></RegistrationInfo><Actions><Exec><Command>C:\\Users\\Zo"
+    )
+    .into_bytes();
+    xml.push(0xeb);
+    xml.extend_from_slice(b"\\AppData\\Local\\pseudolife-mcp\\bin\\pseudolife-mcp.exe</Command></Exec></Actions></Task>");
+    let registry = Registry::new(0, TASKS, xml);
+    refused(update(&f, &windows(), &registry));
+    // A numeric character reference is not the path either.
+    let registry = Registry::new(
+        0,
+        TASKS,
+        format!("<Task><RegistrationInfo><Source>{OWNER}{HEX}</Source></RegistrationInfo><Actions><Exec><Command>C:\\Users\\Zo&#235;\\x.exe</Command></Exec></Actions></Task>").into_bytes(),
+    );
+    refused(update(&f, &windows(), &registry));
+}
+
+#[cfg(windows)]
+#[test]
+fn a_windows_launcher_is_python_only_with_a_distlib_selector() {
+    use std::io::Write;
+    let f = Fixture::new();
+    fs::create_dir_all(f.layout.launcher.parent().unwrap()).unwrap();
+    let mut distlib = b"MZ stub".to_vec();
+    let mut zipped = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut zipped);
+        writer
+            .start_file("__main__.py", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"import selector\n").unwrap();
+        writer.finish().unwrap();
+    }
+    distlib.extend_from_slice(zipped.get_ref());
+    fs::write(&f.layout.launcher, &distlib).unwrap();
+    assert!(
+        !native_magic(&f.layout.launcher),
+        "a distlib launcher is the Python client"
+    );
+    fs::write(&f.layout.launcher, b"MZ native fixture").unwrap();
+    assert!(
+        native_magic(&f.layout.launcher),
+        "a PE file without a selector is native"
+    );
+}
+
+#[test]
+fn printed_paths_survive_a_paste() {
+    assert_eq!(
+        quote("/home/u/.pseudolife-mcp/tunnel", false),
+        "/home/u/.pseudolife-mcp/tunnel"
+    );
+    assert_eq!(quote("/home/u/my store", false), "'/home/u/my store'");
+    assert_eq!(quote("/a/it's;$x", false), "'/a/it'\\''s;$x'");
+    assert_eq!(
+        quote(r"C:\Users\u\it's (x)", true),
+        r"'C:\Users\u\it''s (x)'"
+    );
 }
 
 mod update {

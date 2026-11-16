@@ -2,7 +2,7 @@
 use super::*;
 use std::ffi::OsString;
 
-const HELP: &str = "usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]\n";
+const HELP: &str = "usage: pseudolife-mcp runtime install --archive <archive> --sha256sums <SUMS-file> --version <version> [--json]\n       pseudolife-mcp runtime install --check   (exit 3 when this machine must stay on the Python client)\n";
 #[derive(Debug, PartialEq, Eq)]
 struct Options {
     archive: PathBuf,
@@ -112,6 +112,22 @@ fn run_with(
     args: Vec<OsString>,
     probe: fn(Option<&Path>) -> crate::cli::tunnel_guard::Decision,
 ) -> u8 {
+    // The installers' preflight asks first, before the host changes at all;
+    // a release without this check answers a usage error they ignore.
+    if args.len() == 2 && args[0] == "install" && args[1] == "--check" {
+        return match probe(None) {
+            crate::cli::tunnel_guard::Decision::Refuse(line) => {
+                crate::stderrln!("runtime install refused: {line}");
+                REFUSED
+            }
+            crate::cli::tunnel_guard::Decision::Proceed(notes) => {
+                for note in notes {
+                    crate::stderrln!("warning: {note}");
+                }
+                0
+            }
+        };
+    }
     let options = match parse(args) {
         Ok(Some(options)) => options,
         Ok(None) => {
@@ -174,6 +190,23 @@ mod tests {
     fn args(parts: &[&str]) -> Vec<OsString> {
         parts.iter().map(OsString::from).collect()
     }
+    #[test]
+    fn the_check_alone_answers_the_installers_preflight() {
+        fn refuse(_: Option<&Path>) -> crate::cli::tunnel_guard::Decision {
+            crate::cli::tunnel_guard::Decision::Refuse("fixture refusal".into())
+        }
+        fn proceed(_: Option<&Path>) -> crate::cli::tunnel_guard::Decision {
+            crate::cli::tunnel_guard::Decision::Proceed(vec![])
+        }
+        assert_eq!(run_with(args(&["install", "--check"]), refuse), REFUSED);
+        assert_eq!(run_with(args(&["install", "--check"]), proceed), 0);
+        // Not a flag of the archive install.
+        assert_eq!(
+            run_with(args(&["install", "--check", "--version", "1.2.3"]), proceed),
+            2
+        );
+    }
+
     #[test]
     fn a_refused_move_exits_3_before_reading_the_archive() {
         fn refuse(_: Option<&Path>) -> crate::cli::tunnel_guard::Decision {

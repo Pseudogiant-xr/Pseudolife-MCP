@@ -118,6 +118,8 @@ struct Registered {
     name: String,
     /// Where it is, as shown to the user.
     place: String,
+    /// The definition file (systemd and launchd).
+    file: Option<PathBuf>,
     /// The service's program and arguments, when they could be read.
     command: Option<Vec<String>>,
 }
@@ -153,23 +155,32 @@ impl Registered {
         );
         if let Some(dir) = self.argument("--profile-dir") {
             line.push_str(" --profile-dir ");
-            line.push_str(&quote(dir));
+            line.push_str(&quote(dir, matches!(self.kind, Kind::Task)));
         }
         if matches!(self.kind, Kind::SystemUnit) {
             line.push_str(" --system-service");
         }
         line
     }
-    /// The service manager's own command that stops it starting.
-    fn stop(&self) -> String {
+    /// The service manager's own commands that stop it and remove its
+    /// definition, so this warning does not come back.
+    fn remove_native(&self) -> String {
+        let file = self
+            .file
+            .as_ref()
+            .map(|f| quote(&f.to_string_lossy(), false))
+            .unwrap_or_default();
         match self.kind {
-            Kind::UserUnit => format!("systemctl --user disable --now {}", self.name),
-            Kind::SystemUnit => format!("systemctl disable --now {} (as root)", self.name),
-            Kind::LaunchAgent => format!(
-                "launchctl bootout gui/$(id -u)/{0} and launchctl disable gui/$(id -u)/{0}",
+            Kind::UserUnit => format!(
+                "systemctl --user disable --now {0}; rm {file}; systemctl --user daemon-reload",
                 self.name
             ),
-            Kind::Task => format!("schtasks /Change /TN \"{}\" /Disable", self.name),
+            Kind::SystemUnit => format!(
+                "(as root) systemctl disable --now {0}; rm {file}; systemctl daemon-reload",
+                self.name
+            ),
+            Kind::LaunchAgent => format!("launchctl bootout gui/$(id -u)/{}; rm {file}", self.name),
+            Kind::Task => format!("schtasks /Delete /TN \"{}\" /F", self.name),
         }
     }
 }
@@ -213,6 +224,11 @@ pub(crate) fn decide(
     if !native && !moves() {
         return Decision::Proceed(vec![]);
     }
+    if native && !home.join(".pseudolife-mcp").join("tunnel").exists() {
+        // Only warns, so no Task Scheduler query on a machine that never
+        // saved a tunnel profile in the default store.
+        return Decision::Proceed(vec![]);
+    }
     let (found, notes) = registered(host, home, runner);
     let affected: Vec<_> = found
         .into_iter()
@@ -253,7 +269,7 @@ fn launcher(layout: &Layout) -> Launcher {
     if runtime::list_runtimes(layout)
         .iter()
         .any(|runtime| runtime.marker.binary_sha256 == digest)
-        || (!cfg!(windows) && native_magic(&layout.launcher))
+        || native_magic(&layout.launcher)
     {
         Launcher::Native
     } else {
@@ -261,23 +277,33 @@ fn launcher(layout: &Layout) -> Launcher {
     }
 }
 
-/// Off Windows the Python client's launcher is a `/bin/sh` script, so an
-/// ELF or Mach-O launcher is a native client even when its runtime is gone.
+/// A native binary even when its runtime is gone. Off Windows the Python
+/// client's launcher is a `/bin/sh` script, so ELF or Mach-O magic says so;
+/// on Windows it is a distlib launcher, a PE file with a zip carrying
+/// `__main__.py` appended, so a PE file without one is native.
 fn native_magic(path: &Path) -> bool {
     use std::io::Read;
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
     let mut magic = [0; 4];
-    fs::File::open(path)
-        .and_then(|mut file| file.read_exact(&mut magic))
-        .is_ok()
-        && (magic == [0x7f, b'E', b'L', b'F']
-            || [
-                [0xfe, 0xed, 0xfa, 0xce],
-                [0xce, 0xfa, 0xed, 0xfe],
-                [0xfe, 0xed, 0xfa, 0xcf],
-                [0xcf, 0xfa, 0xed, 0xfe],
-                [0xca, 0xfe, 0xba, 0xbe],
-            ]
-            .contains(&magic))
+    if file.read_exact(&mut magic).is_err() {
+        return false;
+    }
+    if cfg!(windows) {
+        return magic.starts_with(b"MZ")
+            && zip::ZipArchive::new(file)
+                .map_or(true, |mut archive| archive.by_name("__main__.py").is_err());
+    }
+    magic == [0x7f, b'E', b'L', b'F']
+        || [
+            [0xfe, 0xed, 0xfa, 0xce],
+            [0xce, 0xfa, 0xed, 0xfe],
+            [0xfe, 0xed, 0xfa, 0xcf],
+            [0xcf, 0xfa, 0xed, 0xfe],
+            [0xca, 0xfe, 0xba, 0xbe],
+        ]
+        .contains(&magic)
 }
 
 fn managed_registrations(layout: &Layout, repo: Option<&Path>) -> bool {
@@ -296,6 +322,9 @@ fn runs_launcher(service: &Registered, layout: &Layout) -> bool {
         .command
         .as_ref()
         .and_then(|c| c.first())
+        // Single-byte schtasks output in a non-UTF-8 code page, or a numeric
+        // character reference, is not the path it names: count it.
+        .filter(|program| !program.contains('\u{fffd}') && !program.contains("&#"))
         .is_none_or(|program| runtime::same_path(Path::new(program), &layout.launcher))
 }
 
@@ -382,6 +411,7 @@ fn definitions(
                 kind,
                 name,
                 place: format!("{label} {}", path.display()),
+                file: Some(path.clone()),
                 command,
             });
         }
@@ -428,6 +458,7 @@ fn tasks(
             found.push(Registered {
                 kind: Kind::Task,
                 place: format!("scheduled task {name}"),
+                file: None,
                 command: task_command(&text),
                 name,
             });
@@ -649,14 +680,20 @@ fn plain_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
 }
 
-fn quote(path: &str) -> String {
-    if path
-        .chars()
-        .any(|c| c.is_whitespace() || c == '"' || c == '\'')
-    {
-        format!("\"{}\"", path.replace('"', "\\\""))
-    } else {
+/// A path as a shell reads it back: bare when it holds only safe
+/// characters, else in single quotes (PowerShell doubles a quote inside;
+/// POSIX shells close, escape and reopen).
+fn quote(path: &str, powershell: bool) -> String {
+    let safe = !path.is_empty()
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/\\._-:+@,".contains(c));
+    if safe {
         path.to_owned()
+    } else if powershell {
+        format!("'{}'", path.replace('\'', "''"))
+    } else {
+        format!("'{}'", path.replace('\'', "'\\''"))
     }
 }
 
@@ -667,10 +704,16 @@ fn unchecked(what: &str) -> String {
 }
 
 fn failing(service: &Registered) -> String {
+    let how = match service.kind {
+        Kind::Task => "it fails at each logon",
+        _ => {
+            "it fails at each start, and while it is enabled its service manager starts it again every few seconds"
+        }
+    };
     format!(
-        "the tunnel service {} cannot start under the native client, which cannot run a tunnel yet, and its service manager keeps restarting it; stop it with {}",
+        "the tunnel service {} runs this machine's launcher, now the native client, which cannot run a tunnel yet, so {how}; this client has no tunnel service command, so remove it with: {}",
         service.place,
-        service.stop()
+        service.remove_native()
     )
 }
 
@@ -697,11 +740,11 @@ fn refusal(found: &[Registered], windows: bool, mover: Mover) -> String {
             "rerun it",
         ),
         Mover::Checkout => (
-            "to stay on it, rerun ops/update.sh or ops/update.ps1 without --native, PSEUDOLIFE_NATIVE_UPDATE and PSEUDOLIFE_NATIVE_CLI".to_owned(),
+            "to stay on it, rerun ops/update.sh or ops/update.ps1 without --native, PSEUDOLIFE_NATIVE_UPDATE and PSEUDOLIFE_NATIVE_CLI (or pseudolife-mcp update --checkout without --all, which leaves the clients alone)".to_owned(),
             "rerun it",
         ),
         Mover::Unattended => (
-            "this unattended run leaves it as it is and tries again at its next run".to_owned(),
+            "this unattended run leaves the machine as it is, its daemon included, and tries again at its next run (an attended pseudolife-mcp update --daemon-only updates the daemon alone)".to_owned(),
             "the next run moves it",
         ),
         Mover::Installer => (

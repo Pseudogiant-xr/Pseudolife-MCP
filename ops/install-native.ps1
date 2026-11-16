@@ -543,6 +543,22 @@ function Initialize-NativeClient {
     if ($level -lt $NativeInstallerProtocol) {
         Stop-NativeInstall "the native client $($script:nativeVersion) predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NativeInstallerProtocol or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first), then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only (PowerShell: `$env:PSEUDOLIFE_SHIM_ENGINE = 'native'; pseudolife-mcp update --clients-only); this native installer itself works from a checkout of a release that carries it."
     }
+    # A tunnel registered to start by itself through this machine's Python
+    # client keeps it on that client (issue #1632): refused here, before the
+    # host changes. A release without the check answers a usage error, and
+    # one that does not answer in time is not waited for; runtime install
+    # itself refuses the same move later.
+    $check = $null
+    try { $check = Invoke-NativeBounded $script:nativeStaged @("runtime", "install", "--check") } catch { $check = $null }
+    if ($check -and -not $check.TimedOut) {
+        $says = "$($check.Err)$($check.Out)".Trim()
+        if ($check.Code -eq 3) {
+            if ($says) { [Console]::Error.WriteLine($says) }
+            Stop-NativeInstall "a tunnel is registered to start by itself through this machine's Python client, and the native client cannot run a tunnel yet (the line above names it)" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native (in PowerShell, Remove-Item Env:PSEUDOLIFE_SHIM_ENGINE first) to keep the Python client, or first remove the autostart with the command the line above prints, then rerun."
+        } elseif (($check.Code -eq 0) -and $says) {
+            [Console]::Error.WriteLine($says)
+        }
+    }
     $script:nativeProbed = $true
 }
 function Get-NativeLauncherPath {

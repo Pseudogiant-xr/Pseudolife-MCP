@@ -664,6 +664,19 @@ native_stage() {  # fetch, verify, extract and run the release binary; refuses o
     if [ "$native_level" -lt "$NATIVE_INSTALLER_PROTOCOL" ]; then
         native_refuse "the native client $NATIVE_VERSION predates this installer: it does not answer installer --capability with pseudolife-mcp installer-protocol $NATIVE_INSTALLER_PROTOCOL or newer, so it lacks installer steps this checkout runs" "Install the default client by running the installer without PSEUDOLIFE_SHIM_ENGINE, then move this machine with PSEUDOLIFE_SHIM_ENGINE=native pseudolife-mcp update --clients-only; this native installer itself works from a checkout of a release that carries it."
     fi
+    # A tunnel registered to start by itself through this machine's Python
+    # client keeps it on that client (issue #1632): refused here, before the
+    # host changes. A release without the check answers a usage error, and
+    # one that does not answer in time is not waited for; runtime install
+    # itself refuses the same move later.
+    native_check_status=0
+    native_check_says="$(native_bounded both "$NATIVE_STAGED" runtime install --check)" || native_check_status=$?
+    if [ "$native_check_status" = 3 ]; then
+        printf '%s\n' "$native_check_says" >&2
+        native_refuse "a tunnel is registered to start by itself through this machine's Python client, and the native client cannot run a tunnel yet (the line above names it)" "Rerun the installer without PSEUDOLIFE_SHIM_ENGINE=native to keep the Python client, or first remove the autostart with the command the line above prints, then rerun."
+    elif [ "$native_check_status" = 0 ] && [ -n "$native_check_says" ]; then
+        printf '%s\n' "$native_check_says" >&2
+    fi
 }
 # ensure_shim's install: the verified archive into a new side-by-side runtime
 # behind the stable launcher. Status 0 with SHIM_PATH set, else 1.

@@ -143,6 +143,8 @@ RELEASE_PRELUDE = r'''#!/bin/sh
 case "$1" in
     version) echo "pseudolife-mcp fake"; exit 0 ;;
     runtime)
+        # The preflight's read-only tunnel-service check: nothing to refuse.
+        if [ "$2" = install ] && [ "$3" = --check ]; then exit 0; fi
         mkdir -p "$(dirname "$PSEUDOLIFE_SHIM_LAUNCHER")"
         cp "$0" "$PSEUDOLIFE_SHIM_LAUNCHER"; chmod 755 "$PSEUDOLIFE_SHIM_LAUNCHER"
         echo "$PSEUDOLIFE_SHIM_LAUNCHER"; exit 0 ;;
