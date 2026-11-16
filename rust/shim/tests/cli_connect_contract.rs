@@ -212,7 +212,14 @@ fn check_layout_setting(key: &str) {
         let mut command = home.command(DEAD);
         command
             .env("PSEUDOLIFE_SHIM_RUNTIMES", home.0.join("runtimes"))
-            .env("PSEUDOLIFE_SHIM_LAUNCHER", home.0.join("pseudolife-mcp"));
+            .env(
+                "PSEUDOLIFE_SHIM_LAUNCHER",
+                home.0.join(if cfg!(windows) {
+                    "pseudolife-mcp.exe"
+                } else {
+                    "pseudolife-mcp"
+                }),
+            );
         if relative {
             command.env(key, "relative-directory");
         }
