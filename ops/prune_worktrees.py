@@ -631,7 +631,7 @@ DEFAULT_SCRATCH_GRACE_DAYS = 7.0
 # its .rustup toolchain and its bin dir as scratch.
 SCRATCH_KEEP_NAMES = {"claude", "bin", "scripts", "tools"}
 SCRATCH_LOG_SUFFIXES = (".log", ".jsonl")
-DEP_INFO_PER_DIR = 40               # newest dep-info files read per dir
+DEP_INFO_PER_DIR = 400              # newest dep-info files read per dir: more owners can only keep more
 DEP_INFO_MAX_BYTES = 4 * 1024 * 1024
 
 
@@ -691,10 +691,25 @@ def target_layout(path: str) -> tuple[list[str], list[str], list[str]]:
     return cargo, profiles, foreign
 
 
+_ENV_DEP_MANIFEST = "# env-dep:CARGO_MANIFEST_DIR="
+
+
 def _dep_tokens(text: str) -> list[str]:
-    """Paths in a Makefile-style dep-info file (``\\ `` escapes a space)."""
+    """Paths in a Makefile-style dep-info file (``\\ `` escapes a space).
+
+    rustc names workspace sources relative to the workspace root, so those
+    say nothing; a crate that reads CARGO_MANIFEST_DIR also gets a
+    ``# env-dep:CARGO_MANIFEST_DIR=<dir>`` line (backslashes doubled), the
+    crate's absolute dir, which names its checkout exactly."""
     out = []
     for line in text.splitlines():
+        if line.startswith(_ENV_DEP_MANIFEST):
+            value = line[len(_ENV_DEP_MANIFEST):].strip().replace("\\\\", "\\")
+            if value:
+                out.append(os.path.join(value, "Cargo.toml"))
+            continue
+        if line.startswith("#"):
+            continue
         for token in re.findall(r"(?:\\ |\S)+", line):
             token = token.replace("\\ ", " ")
             if token.endswith(":"):

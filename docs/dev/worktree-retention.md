@@ -140,7 +140,11 @@ deleted when all of these hold:
 
   The main checkout is never finished. Paths under the cargo or rustup
   home, inside the target itself, or on a drive this machine does not have
-  name no owner.
+  name no owner, and neither do relative paths. rustc writes workspace
+  sources relative to the workspace root; the absolute ones come from a
+  top-level profile `.d` file and from `# env-dep:CARGO_MANIFEST_DIR=` lines,
+  which name a crate's dir exactly. The newest 400 dep-info files of each
+  dir are read: more owners can only keep more.
 - **Grace:** nothing in it, file or dir, was written within
   `--target-grace-hours` (default 24).
 - **No owner found:** a target whose dep-info names no owner is deleted

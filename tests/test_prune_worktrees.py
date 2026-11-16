@@ -1445,3 +1445,20 @@ def test_tool_dirs_under_a_scratch_root_are_kept(env):
     for reason in ("a hidden settings or tool dir", "a harness's scratchpad or a tool dir",
                    "a rustup or cargo home"):
         assert reason in out, out
+
+
+def test_a_manifest_dir_env_dep_line_names_the_owner(env, targets_root):
+    """rustc names workspace sources relative to the workspace root; the
+    absolute owner is in ``# env-dep:CARGO_MANIFEST_DIR=`` lines, with
+    backslashes doubled (read from a real target, 16 November 2026)."""
+    gone_crate = env.tmp / "deleted-worktree" / "rust" / "shim"
+    target = _target(env, "env-dep", age=None)
+    escaped = str(gone_crate).replace("\\", "\\\\")
+    (target / "debug" / "deps" / "x-1.d").write_text(
+        "out.rlib: shim/src/lib.rs\n\nshim/src/lib.rs:\n\n"
+        f"# env-dep:CARGO_MANIFEST_DIR={escaped}\n", encoding="utf-8")
+    _backdate(target)
+    rc, out = run_targets(env, "--apply")
+    assert rc == 0, out
+    assert not target.exists(), out
+    assert "deleted-worktree" in env.ledger_lines()[0]["note"]
