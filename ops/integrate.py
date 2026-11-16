@@ -2459,9 +2459,26 @@ def _after_drop_workflow_text(rev: str) -> str:
     return "\n".join(texts)
 
 
+def _after_drop_rust_module(path: str, rev: str) -> bool:
+    """A top-level Rust test file another test binary of its crate compiles
+    in with `mod name;` (tests/auth_fixture.rs): shared, though it sits
+    where a test binary of its own would."""
+    folder, _, name = path.rpartition("/")
+    if not (path.startswith("rust/") and folder.endswith("/tests") and name.endswith(".rs")):
+        return False
+    declares = re.compile(rf"^\s*(pub(\([^)]*\))?\s+)?mod\s+{re.escape(name[:-3])}\s*;", re.M)
+    for other in _out("ls-tree", "--name-only", rev, "--", f"{folder}/").splitlines():
+        if other != path and other.endswith(".rs") and declares.search(
+                git("show", f"{rev}:{other}", check=False).stdout):
+            return True
+    return False
+
+
 def _after_drop_imported(path: str, rev: str) -> bool:
     """A test module another Python file imports (a shared fixture such as
     `from .test_seed import throwaway_pg`): shared, though test-named."""
+    if path.endswith(".rs"):
+        return _after_drop_rust_module(path, rev)
     name = path.rsplit("/", 1)[-1]
     if not (name.startswith("test_") and name.endswith(".py")):
         return False
@@ -2629,12 +2646,12 @@ AFTER_DROP_SCOPE = AFTER_DROP_SCOPE_KEY[-1]
 
 
 def _after_drop_standing(rollup: list[dict] | None) -> list[dict]:
-    """Runs on the new head that finished red or cancelled with no later run
-    of the same check finished passing since: a rerun still going does not
-    replace them, since the fast path would carry it."""
+    """Runs on the new head that finished with anything but a pass (red,
+    cancelled, stale, timed out) and no later run of the same check
+    succeeded since: a rerun still going does not replace them, since the
+    fast path would carry it."""
     runs = rollup or []
-    bad = [c for c in runs if not _unfinished(c)
-           and (_check_state(c) in FAILED or _check_state(c) == CANCELLED)]
+    bad = [c for c in runs if not _unfinished(c) and _check_state(c) not in PASSING]
 
     def replaced(failure: dict) -> bool:
         # Only a later success clears it: a skipped rerun passed nothing.

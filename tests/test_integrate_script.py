@@ -6090,3 +6090,46 @@ def test_after_drop_merge_does_not_take_a_skipped_rerun_for_a_success(world, cap
 
     assert "no finished rerun has replaced the failure" in capsys.readouterr().err
     assert _merge_calls(world) == []
+
+
+@pytest.mark.parametrize("declaration", ["mod auth_fixture;\n", "#[path = \"x\"]\npub mod auth_fixture;\n"])
+def test_after_drop_refuses_a_rust_test_file_other_binaries_compile_in(world, capsys,
+                                                                      declaration):
+    # Codex review of 28d22ac2 (P1): tests/auth_fixture.rs, pulled into other
+    # test binaries with `mod auth_fixture;`.
+    world.advance_master({"rust/shim/tests/uses_it.rs": declaration + "fn t() {}\n"})
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"},
+                                11: {"rust/shim/tests/auth_fixture.rs": "pub fn f() {}\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 2
+
+    err = capsys.readouterr().err
+    assert "changes code every test or job shares" in err
+    assert "rust/shim/tests/auth_fixture.rs" in err
+
+
+def test_after_drop_takes_a_rust_test_file_no_binary_compiles_in(world, capsys):
+    # The near miss: a module name that merely starts the same.
+    world.advance_master({"rust/shim/tests/uses_it.rs": "mod auth_fixture_two;\nfn t() {}\n"})
+    _closed_red(world, capsys, {10: {"b.txt": "b\n"},
+                                11: {"rust/shim/tests/auth_fixture.rs": "pub fn f() {}\n"},
+                                12: {"d.txt": "d\n"}})
+
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+
+
+@pytest.mark.parametrize("first", ["STALE", "ACTION_REQUIRED"])
+def test_after_drop_merge_holds_any_non_pass_until_a_success(world, capsys, first):
+    # Codex review of 28d22ac2 (P2): a stale run whose rerun is pending.
+    _after_drop_opened(world, capsys, [
+        _run("scope"), _run("test"), _run("Parity / ubuntu-latest"),
+        _run("Parity / windows-latest"),
+        _run("Rust / windows-latest", first, started="2026-10-21T10:00:00Z"),
+        _run("Rust / windows-latest", None, status="IN_PROGRESS",
+             started="2026-10-21T11:00:00Z")])
+
+    assert integrate.main(["merge"]) == 2
+
+    assert "no finished rerun has replaced the failure" in capsys.readouterr().err
+    assert _merge_calls(world) == []
