@@ -131,9 +131,9 @@ pub(super) fn port_value(value: &str) -> Result<Option<u16>, ()> {
         return Ok(None);
     }
     if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
-        // int()'s digit limit (4300 unless PYTHONINTMAXSTRDIGITS moves it,
-        // which defers the whole command) counts leading zeros: past it
-        // int() raises, and `_port` reports that as no port.
+        // int()'s digit limit (4300; the native client ignores
+        // PYTHONINTMAXSTRDIGITS) counts leading zeros: past it int()
+        // raises, and `_port` reports that as no port.
         if value.len() > INT_MAX_STR_DIGITS {
             return Ok(None);
         }

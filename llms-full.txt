@@ -8989,8 +8989,7 @@ picks the release as an update would.
 
 **Not in the native client yet:** a shape it does not handle stops with
 `pseudolife-stdio: mode '<mode>' is deferred in this candidate` and exit 1,
-having changed nothing. Among them: the change step of `expose tailscale`
-and `expose off` ([Remote bank](remote-bank.md#expose-the-daemon-with-one-command)),
+having changed nothing. Among them:
 most of `tunnel` ([tunnels](tunnels.md)), `doctor` when a tunnel
 directory (`~/.pseudolife-mcp/tunnel`) exists or `http_proxy` /
 `https_proxy` is set, and `console` opening a browser on macOS and for some
@@ -12617,37 +12616,43 @@ the checks around it:
   it never replaces another serve. If that forward is already there it
   reports "already exposed" and changes nothing.
 - It shows the command and the client URL (`http://<tailnet-ip>:8765`) and
-  asks before running it; `--yes` skips the question, and a run with no
-  terminal and no `--yes` exits 2 without changing anything.
+  asks once before running it (`[y/N]`, so the default is no): only `y` or
+  `yes` goes ahead, and any other answer or the end of input exits 2, and
+  Ctrl-C at the question exits 130, each saying nothing changed. `--yes`
+  skips the question, and a run with no terminal and no `--yes` exits 2
+  without changing anything.
 - A user Tailscale does not let change the serve config is refused with
   the fix for the OS: on Linux, `sudo tailscale set --operator=$USER` (or
   run as root); on Windows, run it as the user logged in to Tailscale or
   from an elevated shell; on macOS, as the user logged in to the Tailscale
   app.
-- Afterwards it checks that the serve status shows the forward (if not, it
-  removes it again and exits 5; if the status cannot be read back, it exits
-  5 and says to check `tailscale serve status`), then fetches `<url>/health` through the
+- Afterwards it reads the serve status back and reports what is there. If
+  `tailscale serve` failed but the forward appeared anyway, it removes the
+  forward again, checks, and exits 5. If no forward appeared, nothing
+  changed: exit 4 when `tailscale serve` failed or did not finish, exit 5
+  when it reported success. Anything else that appeared on the port is
+  named and left alone (exit 5). If the status cannot be read back, it
+  exits 5 and says to check `tailscale serve status`. A `tailscale` call is
+  stopped after 30 seconds; a serve that waits for Serve to be enabled on
+  the tailnet prints a link, and the report names it. Once the forward is
+  there, it fetches `<url>/health` through the
   tailnet and compares its `bank` fingerprint with the local one. That probe
   is advisory: a host cannot always reach its own tailnet address, so a
   failed probe says to check from another machine with
   `curl <url>/health` and leaves the forward in place.
 
-**With the native client**, `expose status` and every check above work,
-but `expose tailscale` and `expose off` do not make the change yet: once
-the checks pass, the change step (with or without `--yes`, and the question
-at a terminal) stops with `pseudolife-stdio: mode 'expose' is deferred in
-this candidate` and exit 1, having changed nothing. Run the `tailscale
-serve` command from [Tailscale Serve, TCP mode](#1-tailscale-serve-tcp-mode)
-yourself instead.
-
 `pseudolife-mcp expose status` prints the client URL, or why there is none;
 `pseudolife-mcp expose off` removes the forward, and only a forward to
-`127.0.0.1:8765`. A port open to Funnel is never reported as exposed and
-never removed. All three take `--port` for a daemon on another port and
+`127.0.0.1:8765`, asking first as `expose tailscale` does, then reads the
+serve status back: exit 0 once the forward is gone, exit 4 if it is still
+there. Forwards on other ports are untouched. A port open to Funnel is
+never reported as exposed and never removed. All three take `--port` for a daemon on another port and
 `--json` for a machine-readable report. Exit codes: 0 done or already in
-that state; 2 usage, declined, or no terminal without `--yes`; 4 refused
-before any change; 5 the serve did not take and was undone, or its result
-could not be verified. Output from `tailscale` it cannot read is answered
+that state; 2 usage, declined, or no terminal without `--yes`; 4 refused,
+nothing changed; 5 the result was not the one asked for (undone where the
+forward was this run's, otherwise left alone and named), or could not be
+verified; 130 interrupted (at the question, or a serve that stopped
+with nothing changed). Output from `tailscale` it cannot read is answered
 with `could not read what tailscale ... printed`: exit 4 when nothing was
 changed, exit 5 after a change (`expose off` included), with how to check
 `tailscale serve status` and undo it. Only an ASCII dotted quad counts as

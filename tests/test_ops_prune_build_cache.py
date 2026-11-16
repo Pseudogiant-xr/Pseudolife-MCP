@@ -127,6 +127,8 @@ SCENARIOS: dict[str, tuple[dict, tuple[str, ...]]] = {
     "absent_distro": (_fixture(distro=False), ()),
     "fstrim_sh_c_form": (_fixture(), ()),
     "unparseable_size": (_fixture(size="garbage-not-a-size"), ()),
+    "dangling_images": (_fixture(), ("-PruneDanglingImages",)),
+    "dangling_dry_run": (_fixture(), ("-DryRun", "-PruneDanglingImages")),
 }
 
 # PowerShell flag -> bash flag. One test body, two CLIs.
@@ -135,6 +137,7 @@ _SH_FLAGS = {
     "-MaxUsedSpaceGB": "--max-used-space-gb",
     "-DryRun": "--dry-run",
     "-NoTrim": "--no-trim",
+    "-PruneDanglingImages": "--prune-dangling-images",
 }
 
 
@@ -172,6 +175,7 @@ function global:docker {{
         return @($global:fx.du | ForEach-Object {{ "$($_.created)|$($_.size)" }})
     }}
     if ($a[0] -eq "builder" -and $a[1] -eq "prune") {{ return "Total: 0B" }}
+    if ($a[0] -eq "image" -and $a[1] -eq "prune") {{ return "Total reclaimed space: 0B" }}
     # Forbidden verbs are deliberately PERMISSIVE here: the stub must not die
     # on them (that would fail the run via the scenario exit code before the
     # FORBIDDEN loop in the test ever inspects calls.log). Logged above via
@@ -243,6 +247,8 @@ docker() {{
         cat "$FX/du.txt"
     elif [ "$1" = "builder" ] && [ "$2" = "prune" ]; then
         echo "Total: 0B"
+    elif [ "$1" = "image" ] && [ "$2" = "prune" ]; then
+        echo "Total reclaimed space: 0B"
     elif [ "$1" = "rmi" ]; then
         # Forbidden verbs are deliberately PERMISSIVE here: the stub must
         # not die on them (that would fail the run via the scenario exit
@@ -318,6 +324,41 @@ def test_never_issues_a_forbidden_docker_verb(prune):
         for verb in FORBIDDEN:
             assert not call.startswith(verb), (
                 f"forbidden docker verb in: {call}" + res.detail())
+
+
+def _image_calls(result):
+    return [c for c in result.lines("calls.log") if c.startswith("image")]
+
+
+def test_dangling_image_prune_is_exactly_the_dangling_form(prune):
+    """Decision of 16 November 2026: the weekly task also removes dangling
+    images. The only image call allowed is ``image prune --force``: no
+    ``-a``/``--all`` (which would remove every image no container uses,
+    rollback tags included) and no filter. Docker removes only untagged
+    images no container, running or stopped, uses."""
+    res = prune("dangling_images")
+    assert res.returncode == 0, res.detail()
+    assert _image_calls(res) == ["image prune --force"], res.detail()
+    for call in res.lines("calls.log"):
+        for verb in FORBIDDEN:
+            assert not call.startswith(verb), (
+                f"forbidden docker verb in: {call}" + res.detail())
+    assert "dangling images" in res.stdout, res.detail()
+
+
+def test_no_image_call_without_the_switch(prune):
+    """The deploy path calls this script without the switch; it must keep
+    touching no image at all."""
+    res = prune("age_default")
+    assert res.returncode == 0, res.detail()
+    assert _image_calls(res) == [], res.detail()
+
+
+def test_dry_run_reports_but_does_not_prune_images(prune):
+    res = prune("dangling_dry_run")
+    assert res.returncode == 0, res.detail()
+    assert _image_calls(res) == [], "dry run must prune no image" + res.detail()
+    assert "docker image prune --force" in res.stdout, res.detail()
 
 
 def test_age_pass_always_runs_with_the_default_window(prune):
