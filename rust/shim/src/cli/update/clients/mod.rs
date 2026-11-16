@@ -60,14 +60,18 @@ pub fn run_steps(
     {
         report["tunnel"] = tunnel;
     }
-    report["ok"] = json!(
-        report
-            .as_object()
-            .unwrap()
-            .values()
-            .all(|r| r["state"] != "failed")
-    );
+    report["ok"] = json!(ladder_ok(&report));
     report
+}
+
+/// The ladder passes unless a step failed; `stale`, `skipped` and the
+/// other states are reported, not failures.
+fn ladder_ok(report: &Value) -> bool {
+    report
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|r| r["state"] != "failed")
 }
 
 fn check_autostart(_repo: Option<&Path>) -> Value {
@@ -184,19 +188,57 @@ fn base64_bytes(text: &str) -> Option<Vec<u8>> {
 
 fn update_tunnels(shim: Option<&Value>, runner: &impl Runner) -> Option<Value> {
     let root = runtime::home().join(".pseudolife-mcp/tunnel");
+    tunnel_step(
+        &root,
+        shim,
+        || {
+            let layout = runtime::default_layout()?;
+            Ok(
+                (layout.launcher.is_file() && runtime::current_runtime(&layout).is_some())
+                    .then_some(layout.launcher),
+            )
+        },
+        runner,
+    )
+}
+
+/// The tunnel step over the store at `root`: `None` when it holds no process
+/// record. `launcher` finds the installed native launcher, if any. The
+/// launcher's `tunnel update` reports each saved tunnel without stopping or
+/// starting one; a running tunnel it cannot refresh comes back `stale`, which
+/// this step accepts. The step fails only when that command refuses (an
+/// invalid store or profile, whose cause it carries), cannot run, or answers
+/// in a form this step does not know, or when the store cannot be read here.
+fn tunnel_step(
+    root: &Path,
+    shim: Option<&Value>,
+    launcher: impl FnOnce() -> Result<Option<PathBuf>, String>,
+    runner: &impl Runner,
+) -> Option<Value> {
     let result = (|| -> Result<Option<Value>, String> {
-        crate::credentials::reject_ancestor_redirects(&root)
-            .map_err(|_| "private tunnel profiles could not be checked; run tunnel doctor")?;
-        let entries = fs::read_dir(&root)
-            .map_err(|_| "private tunnel profiles could not be checked; run tunnel doctor")?;
+        let unreadable = || {
+            format!(
+                "private tunnel profiles in {} could not be checked; make it a directory only your account can access, then run pseudolife-mcp tunnel update",
+                root.display()
+            )
+        };
+        crate::credentials::reject_ancestor_redirects(root).map_err(|_| {
+            format!(
+                "{} is reached through a link or junction, or a folder above it cannot be inspected, so its private tunnel profiles are not read; make the path plain directories your account can read, then run pseudolife-mcp tunnel update",
+                root.display()
+            )
+        })?;
+        let entries = fs::read_dir(root).map_err(|_| unreadable())?;
         let mut count = 0;
         for entry in entries {
-            let entry = entry
-                .map_err(|_| "private tunnel profiles could not be checked; run tunnel doctor")?;
+            let entry = entry.map_err(|_| unreadable())?;
             let name = entry.file_name();
-            let name = name
-                .to_str()
-                .ok_or("private tunnel profile filename is invalid")?;
+            let name = name.to_str().ok_or_else(|| {
+                format!(
+                    "{} holds a file name that is not Unicode; move it out, then run pseudolife-mcp tunnel update",
+                    root.display()
+                )
+            })?;
             if name.ends_with(".process.json") {
                 count += 1;
             }
@@ -209,22 +251,34 @@ fn update_tunnels(shim: Option<&Value>, runner: &impl Runner) -> Option<Value> {
                 json!({"state":"skipped","detail":"running tunnels stay on their current runtime because the shim step failed; after it passes run pseudolife-mcp tunnel update"}),
             ));
         }
-        let layout = runtime::default_layout()?;
-        if !layout.launcher.is_file() || runtime::current_runtime(&layout).is_none() {
+        let Some(launcher) = launcher()? else {
             return Ok(Some(
                 json!({"state":"skipped","detail":"running tunnels were not refreshed: no installed native launcher; rerun native setup, then pseudolife-mcp tunnel update"}),
             ));
-        }
+        };
+        // The command reads the very directory this step scanned: its own
+        // default home can differ (USERPROFILE against HOME under WSL).
+        let directory = root.to_str().ok_or_else(|| {
+            format!(
+                "{} is not a Unicode path, so its tunnels cannot be checked; run pseudolife-mcp tunnel update --profile-dir <that directory> yourself",
+                root.display()
+            )
+        })?;
+        let timeout = Duration::from_secs(60 + 90 * count);
         let output = runner.run(
-            &layout.launcher,
-            &["tunnel", "update"],
+            &launcher,
+            &["tunnel", "update", "--profile-dir", directory],
             None,
-            Duration::from_secs(60 + 90 * count),
+            timeout,
             &[],
         );
+        // `stale`: a tunnel keeps running on its current runtime because
+        // this client cannot refresh it yet; nothing failed.
+        let answered = |state: &str| matches!(state, "current" | "stale");
         if let Some(mut report) = output.json().filter(|r| {
-            matches!(r["state"].as_str(), Some("current" | "failed")) && r["detail"].is_string()
-        }) && (output.code == 0) == (report["state"] == "current")
+            matches!(r["state"].as_str(), Some("current" | "stale" | "failed"))
+                && r["detail"].is_string()
+        }) && (output.code == 0) == answered(report["state"].as_str().unwrap_or(""))
         {
             report["detail"] = json!(format!(
                 "{}; run by the installed native launcher",
@@ -232,9 +286,63 @@ fn update_tunnels(shim: Option<&Value>, runner: &impl Runner) -> Option<Value> {
             ));
             return Ok(Some(report));
         }
-        Ok(Some(
-            json!({"state":"failed","detail":format!("installed tunnel update ended with exit {}; run pseudolife-mcp tunnel status, then tunnel update and tunnel doctor",output.code)}),
-        ))
+        // A refusal is one fixed sentence on stderr (no key, token or file
+        // contents), so it is the cause the user acts on.
+        let text = output.text();
+        let last = text.lines().map(str::trim).rfind(|line| !line.is_empty());
+        let said = last.filter(|line| line.len() <= 1024);
+        let left = format!("tunnels in {} were left as they are", root.display());
+        let launcher = launcher.display();
+        let answer = output.json();
+        let detail = match said {
+            // A JSON answer whose exit code disagrees with its state.
+            _ if answer.is_some() => format!(
+                "installed tunnel update answered {} with exit {}, a pairing this step does not accept; {left}; run pseudolife-mcp tunnel update to see it",
+                answer
+                    .as_ref()
+                    .and_then(|a| a["state"].as_str())
+                    .unwrap_or("an unknown state"),
+                output.code
+            ),
+            // An older native runtime that does not run tunnel update yet.
+            Some(said) if said.contains("is deferred in this candidate") => format!(
+                "the installed launcher {launcher} is a client runtime that does not run tunnel update; {left}; install the current client with pseudolife-mcp update --clients-only, then run pseudolife-mcp tunnel update"
+            ),
+            // The refusal names its own next step ("..., then retry").
+            Some(said) if said.ends_with("then retry") => format!(
+                "installed tunnel update refused (exit {}): {said} with pseudolife-mcp tunnel update; {left}",
+                output.code
+            ),
+            Some(said) => format!(
+                "installed tunnel update ended with exit {}: {said}; {left}; after fixing that, run pseudolife-mcp tunnel update",
+                output.code
+            ),
+            None if last.is_some() => format!(
+                "installed tunnel update ended with exit {} and printed a line too long to show here; {left}; run pseudolife-mcp tunnel update to read it",
+                output.code
+            ),
+            // The runner's own codes: no output at all.
+            None if output.code == 124 => format!(
+                "the installed launcher {launcher} did not answer tunnel update within {} s; {left}; run pseudolife-mcp tunnel update to see where it stops",
+                timeout.as_secs()
+            ),
+            // The runner reports 128+n when this update itself took signal
+            // n while the tunnel step ran (a child's own signal reads as 1).
+            None if cfg!(unix) && output.code > 128 => format!(
+                "this update was interrupted by signal {} while the tunnel step ran; {left}; run pseudolife-mcp tunnel update again",
+                output.code - 128
+            ),
+            // The runner gives 1 for a spawn failure and for a child a
+            // signal ended (no exit code); any other code is the child's.
+            None if output.code == 1 => format!(
+                "the installed launcher {launcher} could not be started, was stopped by a signal, or ended with exit 1 and printed nothing; {left}; run pseudolife-mcp tunnel update to see why"
+            ),
+            None => format!(
+                "the installed launcher {launcher} ended with exit {} and printed nothing; {left}; run pseudolife-mcp tunnel update to see why",
+                output.code
+            ),
+        };
+        Ok(Some(json!({"state":"failed","detail":detail})))
     })();
     result.unwrap_or_else(|detail| Some(json!({"state":"failed","detail":detail})))
 }

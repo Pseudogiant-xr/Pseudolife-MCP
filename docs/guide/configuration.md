@@ -3778,7 +3778,7 @@ directory (`~/.pseudolife-mcp/tunnel`) exists or `http_proxy` /
 Linux desktop defaults (`--no-open` works;
 [Signing in to the Console](#signing-in-to-the-console)). `move` checks
 and plans a move with `--dry-run` but refuses to perform one
-([Moving a bank](remote-bank.md#moving-a-bank)). On a machine with a running tunnel (a process record and a ready profile with its key), every native `update` that runs the client steps ends with exit 5, the run that opts in included (the move completes first), because its tunnel step runs `tunnel update`, which defers.
+([Moving a bank](remote-bank.md#moving-a-bank)). On a machine with a tunnel process record, a native `update` that runs the client steps leaves every tunnel as it is. Its tunnel step reports a tunnel that runs or may run as `stale`, because this client cannot refresh it yet, and names a record whose process is gone as a file you can delete; the update exits 0. The step fails, and the update exits 5, when the tunnel store or a saved profile cannot be trusted (not owner-only, invalid, reached through a link, or holding entries the client does not read), or when the installed tunnel command does not run or answer in time; the step then names the cause and the file or directory it stopped on.
 
 **Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
 checkout. Run inside one, a 0.16.x updater can record the wrong version in the

@@ -243,3 +243,23 @@ fn macos_readable_ambiguous_comm_still_blocks_pruning() {
         PathBuf::from("/Applications/runtime with spaces/pseudolife-mcp")
     );
 }
+
+#[cfg(windows)]
+#[test]
+fn a_record_whose_name_differs_only_in_case_still_pins_its_runtime() {
+    // Windows opens `fixture.PROCESS.JSON` for `fixture.process.json`, and
+    // `tunnel status` reads it as the profile's record: pruning reads it too.
+    let f = Fixture::new();
+    let old = f.install("1.0.0");
+    f.install("1.0.1");
+    let root = f.path.join("tunnel");
+    crate::board::state::private_dir(&root).unwrap();
+    crate::board::state::atomic_create(
+        &root.join("fixture.PROCESS.JSON"),
+        &serde_json::to_vec(&json!({"pid":88,"runtime_path":old.path})).unwrap(),
+    )
+    .unwrap();
+    let evidence = f.windows_evidence();
+    let pinned = tunnel_runtimes(&f.layout, &root, &evidence.processes).unwrap();
+    assert!(pinned.contains(&old.path), "{pinned:?}");
+}
