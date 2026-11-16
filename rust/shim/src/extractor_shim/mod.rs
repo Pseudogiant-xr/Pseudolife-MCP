@@ -459,7 +459,8 @@ pub fn run(mut args: Vec<OsString>) -> u8 {
     {
         return match autostart::install(&args[1..], args[0] == "uninstall-autostart") {
             Ok(()) => 0,
-            Err(e) => {
+            Err(autostart::Failure::Locked) => autostart::TASK_LOCKED_EXIT,
+            Err(autostart::Failure::Other(e)) => {
                 eprintln!("extractor-shim: {e}");
                 1
             }
