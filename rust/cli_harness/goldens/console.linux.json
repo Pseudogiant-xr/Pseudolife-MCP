@@ -461,8 +461,8 @@
    "stdout": "Tm8gYnJvd3NlcnMgYXJlIHNpZ25lZCBpbi4gYHBzZXVkb2xpZmUtbWNwIGNvbnNvbGVgIHNpZ25zIG9uZSBpbi4K",
    "stderr": "",
    "window": [
-    1794849374.183874,
-    1794849374.1885352
+    1794855504.7356737,
+    1794855504.7400715
    ],
    "requests": [
     {
@@ -5387,10 +5387,10 @@
    "candidate_sha256": "02c6bd275f63795b539376415011be3209d18812a26530ebfb1f6e6d91ff783f"
   },
   "defer-int-digits": {
-   "commit": "9425601aadde65d67171be5a80bab31fd158b332",
-   "rust_tree": "modified",
+   "commit": "19aba3a713112d3c8a0b8cffbe47b54ff9fa4fbc",
+   "rust_tree": "clean",
    "platform": "linux",
-   "candidate_sha256": "d8669926f8c1eb970396e05950e3fc7ea3e0e2ecbc4797dcf62ec284d4bbae23"
+   "candidate_sha256": "88ba1a3e128774983fae6bc4f637585db80a3af65b7f0d075f93ae597a528201"
   },
   "open-generic": {
    "commit": "ec81404c683e60f903242e3570c2b8e684d18472",
