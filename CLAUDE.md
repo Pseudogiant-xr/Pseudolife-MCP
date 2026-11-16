@@ -238,10 +238,11 @@ touched, with no retrofit sweep.
   (`full-suite.windows`: `refuse`).
 - `PSEUDOLIFE_SUITE_LOCK=off` is never a way around that refusal, because
   it only skips the queue, not the stall.
-- Both launchers test the committed HEAD (commit first; a commit not on
-  master reaches the box as a bundle, with nothing pushed), and a PR cites
-  machine and commit from `~/.pseudolife-mcp/suite-results`; read
-  `docs/dev/dev-machines.md` before a first run on a machine.
+- Both launchers (`ops/remote-suite.ps1`, `ops/wsl-suite.ps1`) test the
+  committed HEAD (commit first; a commit not on master reaches the box as a
+  bundle, with nothing pushed), and a PR cites machine and commit from
+  `~/.pseudolife-mcp/suite-results`; read `docs/dev/dev-machines.md` before
+  a first run on a machine.
 - **One full suite per machine at a time**, because two exhaust memory and
   kill test daemons: `tests/conftest.py` queues full runs (all of `tests/`,
   half its files, or an exclude-only `-k` / `-m`) on
