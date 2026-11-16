@@ -301,6 +301,16 @@ def key(name="dot", *, rel="tunnels", raw: bytes | None = None, plain_file=False
     return seed
 
 
+def saved_key():
+    """The key file as this platform's saved setup holds one, for cases
+    whose candidate decides from its form alone (``update`` reads no key;
+    ``status`` reports a ``DPAPI`` key unverified). On Windows the bytes are
+    a ``DPAPI``-prefixed stand-in: ``set_key``'s CryptProtectData needs the
+    account's logon credentials, which a key-authenticated SSH session (the
+    Windows dev VM, where these cases are recorded) does not hold."""
+    return key(raw=b"DPAPI\0fixture-sealed-key") if core.WINDOWS else key()
+
+
 def private(rel: str, data: bytes):
     def seed(arm):
         _profiles().private_write(arm.home / Path(rel), data)
@@ -672,11 +682,11 @@ def cases() -> list[core.Case]:
         status("status-process-record-text", ready(),
                private("tunnels/dot.process.json", DEAD_RECORD), json_out=False),
         # A Windows DPAPI key is present on disk, not verified (no unprotect).
-        case("status-dpapi-key", ["status", "--profile-dir", DIR], ready(), key(),
-             platforms=("windows",), rules=("tunnel-dpapi-key",)),
-        case("update-ready-key", ["update", "--profile-dir", DIR], ready(), key(),
+        case("status-dpapi-key", ["status", "--profile-dir", DIR], ready(), saved_key(),
+             platforms=("windows",)),
+        case("update-ready-key", ["update", "--profile-dir", DIR], ready(), saved_key(),
              rules=("tunnel-dpapi-key",)),
-        case("update-dead-record", ["update", "--profile-dir", DIR], ready(), key(),
+        case("update-dead-record", ["update", "--profile-dir", DIR], ready(), saved_key(),
              private("tunnels/dot.process.json", DEAD_RECORD), rules=("tunnel-dpapi-key",)),
         case("update-orphan-record", ["update", "--profile-dir", DIR], prepared(),
              private("tunnels/old.process.json", DEAD_RECORD)),
