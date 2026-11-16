@@ -392,7 +392,10 @@ pub(super) fn backup<D: Docker, H: Host>(
             "warning: the backup above is complete, but {message}"
         ));
     }
-    // The state's repair waits for the verified pair that holds it as it was.
+    // The state's repair waits for the verified pair that holds it as it
+    // was. A failed one is reported, but rotation still runs: a scheduled
+    // backup on such a host must not pile up pairs.
+    let mut repair_failed = 0;
     if let Some(checked) = ownership.as_ref().filter(|c| !c.state_usable()) {
         match ownership_steps::repair_state(&mut bank, checked, data_dir, &stamp) {
             Ok(repaired) => host.info(&repaired.line()),
@@ -401,7 +404,7 @@ pub(super) fn backup<D: Docker, H: Host>(
                     host,
                     &format!("the backup above is complete, but {message}"),
                 );
-                return code;
+                repair_failed = code.max(1);
             }
         }
     }
@@ -419,7 +422,7 @@ pub(super) fn backup<D: Docker, H: Host>(
             host.error(&format!(
                 "warning: rotation was skipped: {reason}, so the files a restore journal names are unknown and nothing was rotated (the new backup is complete)"
             ));
-            return 0;
+            return repair_failed;
         }
     };
     let rotation = rotate(
@@ -451,7 +454,7 @@ pub(super) fn backup<D: Docker, H: Host>(
             path.display()
         ));
     }
-    0
+    repair_failed
 }
 
 /// A killed backup's partial files stop changing; one changed this recently
@@ -804,10 +807,18 @@ mod tests {
             "{labels:?}"
         );
         assert_eq!(labels[at("repair /data") + 1], "probe", "{labels:?}");
-        let log = dir
-            .0
-            .join("ownership-repair")
-            .join(format!("ownership-repair-{STAMP}-state.log"));
+        // Named by the run's stamp, a unique token and the part.
+        let logs: Vec<PathBuf> = fs::read_dir(dir.0.join("ownership-repair"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        let log = logs[0].clone();
+        let name = log.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with(&format!("ownership-repair-{STAMP}-")) && name.ends_with("-state.log"),
+            "{name}"
+        );
         assert!(
             fs::read_to_string(&log)
                 .unwrap()
@@ -855,9 +866,19 @@ mod tests {
         let out = dir.0.join("backups");
         let mut docker = volume_fake();
         docker.unusable = vec![("999", "/data/theirs")];
+        // A scheduled backup on such a host must still rotate.
+        fs::create_dir_all(&out).unwrap();
+        for day in 1..=4 {
+            pair(&out, day, 0, 30);
+        }
         let mut host = ready_host();
         let code = backup(&mut docker, &mut host, &request(&out), &dir.0);
         assert_ne!(code, 0);
+        assert!(
+            host.info.iter().any(|l| l.starts_with("rotated out:")),
+            "{:?}",
+            host.info
+        );
         let errors = host.errors.join("\n");
         assert!(
             errors.contains("the backup above is complete, but"),
@@ -867,7 +888,10 @@ mod tests {
             errors.contains("/data/theirs") && errors.contains("Give it to 10001:10001"),
             "{errors}"
         );
-        assert_eq!(names(&out).len(), 2, "the pair stays");
+        assert!(
+            names(&out).contains(&format!("pseudolife_state-{STAMP}.tgz")),
+            "the pair stays"
+        );
     }
 
     #[test]

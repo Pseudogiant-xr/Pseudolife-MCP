@@ -18,7 +18,9 @@
 //! [`SEARCH_CAP`] (both are needed, measured on Docker 29.9 on 16 November
 //! 2026: with CHOWN alone a chowned 0700 directory can no longer be
 //! traversed), no network and a read-only root filesystem gives those
-//! entries to 10001:10001, following no link and entering no other mount.
+//! entries to 10001:10001, following no link and entering no other mount:
+//! it walks only the top-level state or model mount. Mounts the user added
+//! below them are probed but never repaired.
 //! A helper that fails or is interrupted is removed by name. The probe then
 //! runs again, and a second failure refuses naming the path and the one fix.
 //!
@@ -65,6 +67,9 @@ pub(crate) struct Mount {
 
 impl Mount {
     fn spec(&self) -> String {
+        self.spec_as(self.writable)
+    }
+    fn spec_as(&self, writable: bool) -> String {
         let mut fields = vec![("type", self.kind.as_str())];
         match self.kind.as_str() {
             "volume" => fields.push(("src", self.source.as_str())),
@@ -75,7 +80,7 @@ impl Mount {
         if let Some(subpath) = &self.subpath {
             fields.push(("volume-subpath", subpath.as_str()));
         }
-        if !self.writable && self.kind != "tmpfs" {
+        if !writable && self.kind != "tmpfs" {
             fields.push(("readonly", "true"));
         }
         // Docker parses --mount as one CSV record.
@@ -126,8 +131,12 @@ pub(crate) struct Layout {
     /// The state and model mounts, in the container's order, plus its tmpfs
     /// mounts there (kept as boundaries the walks skip).
     pub mounts: Vec<Mount>,
-    /// Writable persistent roots the probe and the repair walk.
+    /// The top-level state and model mounts: the only roots the repair
+    /// walks.
     pub roots: Vec<(String, Part)>,
+    /// Writable mounts below them: the user's additions, probed and never
+    /// repaired (an unusable one is refused with its source and the fix).
+    pub nested: Vec<(String, Part)>,
 }
 
 fn below(path: &str, root: &str) -> bool {
@@ -176,6 +185,7 @@ pub(crate) fn layout(container: &Value) -> Result<Option<Layout>, String> {
     };
     let mut mounts = Vec::new();
     let mut roots = Vec::new();
+    let mut nested = Vec::new();
     for mount in container["Mounts"].as_array().into_iter().flatten() {
         let destination = mount["Destination"].as_str().unwrap_or_default();
         let Some(part) = part_of(destination) else {
@@ -217,7 +227,11 @@ pub(crate) fn layout(container: &Value) -> Result<Option<Layout>, String> {
         // A read-only mount is never written by the daemon: the helpers keep
         // it (so the walks skip it as a mount) but do not walk it.
         if writable {
-            roots.push((destination.to_owned(), part));
+            if destination == STATE_DIR || destination == models {
+                roots.push((destination.to_owned(), part));
+            } else {
+                nested.push((destination.to_owned(), part));
+            }
         }
     }
     // `--tmpfs` mounts are listed only in the host configuration.
@@ -249,7 +263,19 @@ pub(crate) fn layout(container: &Value) -> Result<Option<Layout>, String> {
         image,
         mounts,
         roots,
+        nested,
     }))
+}
+
+impl Layout {
+    /// The mount at `destination`.
+    fn mount(&self, destination: &str) -> Option<&Mount> {
+        self.mounts.iter().find(|m| m.destination == destination)
+    }
+    /// Whether `destination` is a top-level root.
+    fn top(&self, destination: &str) -> bool {
+        self.roots.iter().any(|(root, _)| root == destination)
+    }
 }
 
 /// Which helper runs.
@@ -304,16 +330,27 @@ fn helper_argv(layout: &Layout, helper: Helper, name: &str) -> Vec<String> {
             "--read-only",
             "--log-driver",
             "none",
+            "--no-healthcheck",
+            "--pull",
+            "never",
+            "--pids-limit",
+            "256",
         ]
         .map(String::from),
     );
-    // A uid-0 helper gets only its own part's mounts.
+    // A uid-0 helper gets only its own part's mounts, and the user's nested
+    // mounts there only read-only: it walks none of them.
     for mount in layout
         .mounts
         .iter()
         .filter(|m| part.is_none_or(|p| m.part == p))
     {
-        argv.extend(["--mount".into(), mount.spec()]);
+        let spec = if part.is_some() && !layout.top(&mount.destination) {
+            mount.spec_as(false)
+        } else {
+            mount.spec()
+        };
+        argv.extend(["--mount".into(), spec]);
     }
     argv.extend([
         "--entrypoint".into(),
@@ -324,13 +361,23 @@ fn helper_argv(layout: &Layout, helper: Helper, name: &str) -> Vec<String> {
         ARGV0.into(),
         mode.into(),
     ]);
-    argv.extend(
-        layout
-            .roots
-            .iter()
-            .filter(|(_, p)| part.is_none_or(|wanted| *p == wanted))
-            .map(|(root, _)| root.clone()),
-    );
+    match part {
+        // The probe walks every writable mount, nested ones included.
+        None => argv.extend(
+            layout
+                .roots
+                .iter()
+                .chain(&layout.nested)
+                .map(|(root, _)| root.clone()),
+        ),
+        Some(part) => argv.extend(
+            layout
+                .roots
+                .iter()
+                .filter(|(_, p)| *p == part)
+                .map(|(root, _)| root.clone()),
+        ),
+    }
     argv
 }
 
@@ -421,27 +468,45 @@ pub(crate) struct Probe {
     pub unusable: Vec<Unusable>,
     /// Entries 10001 owns but cannot use: never refused or repaired.
     pub owner_fixable: Vec<Vec<u8>>,
+    /// Roots 10001 owns but cannot read and enter: the probe cannot see in.
+    pub unreadable_roots: Vec<Vec<u8>>,
 }
 
 impl Probe {
-    /// The unusable entries below one part's roots.
+    /// The unusable entries below one part's top-level root (the ones the
+    /// repair can reach).
     pub fn of(&self, layout: &Layout, part: Part) -> Vec<&Unusable> {
         self.unusable
             .iter()
-            .filter(|entry| part_of(layout, &entry.path) == Some(part))
+            .filter(|entry| {
+                root_of(layout, &entry.path).is_some_and(|(root, p)| p == part && layout.top(root))
+            })
+            .collect()
+    }
+
+    /// The unusable entries inside a nested mount, with that mount.
+    pub fn nested<'a>(&'a self, layout: &'a Layout) -> Vec<(&'a Unusable, &'a Mount)> {
+        self.unusable
+            .iter()
+            .filter_map(|entry| {
+                let (root, _) = root_of(layout, &entry.path)?;
+                (!layout.top(root)).then_some(())?;
+                Some((entry, layout.mount(root)?))
+            })
             .collect()
     }
 }
 
-/// The part of the deepest root holding `path`.
-fn part_of(layout: &Layout, path: &[u8]) -> Option<Part> {
+/// The deepest walked root holding `path`, with its part.
+fn root_of<'a>(layout: &'a Layout, path: &[u8]) -> Option<(&'a str, Part)> {
     let path = String::from_utf8_lossy(path);
     layout
         .roots
         .iter()
+        .chain(&layout.nested)
         .filter(|(root, _)| below(&path, root))
         .max_by_key(|(root, _)| root.len())
-        .map(|(_, part)| *part)
+        .map(|(root, part)| (root.as_str(), *part))
 }
 
 fn utf8(field: &[u8]) -> String {
@@ -464,6 +529,10 @@ pub(crate) fn parse_probe(stdout: &str) -> Option<Probe> {
             }
             (b"O", [path, tail @ ..]) => {
                 probe.owner_fixable.push(path.to_vec());
+                rest = tail;
+            }
+            (b"R", [path, tail @ ..]) => {
+                probe.unreadable_roots.push(path.to_vec());
                 rest = tail;
             }
             _ => return None,
@@ -520,13 +589,21 @@ pub(crate) trait Docker {
     fn docker(&mut self, args: &[String]) -> (i32, String);
     /// Removes a helper by name, also after an interrupt.
     fn remove(&mut self, name: &str) {
-        let _ = self.docker(&["rm".into(), "-f".into(), name.into()]);
+        let _ = self.docker(&["rm".into(), "-f".into(), "-v".into(), name.into()]);
     }
 }
 
 /// The text of one refusal or failure; the caller adds its own tail
 /// ("nothing was deployed", "Nothing was restored").
 pub(crate) type Refusal = String;
+
+/// The root an exit-71 walk names in its last `E` record.
+fn failed_root(output: &str) -> Option<String> {
+    let answer = decode(output)?;
+    let fields: Vec<&[u8]> = answer.split(|b| *b == 0).collect();
+    let at = fields.iter().rposition(|f| *f == b"E")?;
+    fields.get(at + 1).map(|root| shown(root))
+}
 
 /// Docker's own first line, when the helper printed no answer.
 fn said(output: &str) -> String {
@@ -547,7 +624,12 @@ fn walk_failure(code: i32, output: &str, image: &str) -> String {
             said(output)
         ),
         70 => "the ownership helper could not read its mount table (/proc/self/mountinfo); check that Docker mounts /proc in containers and retry".into(),
-        71 => "the ownership helper's walk of the daemon's volumes failed partway (find reported an error on a volume that changed or could not be read); check `docker logs` for the daemon and the volume's filesystem, then retry".into(),
+        71 => match failed_root(output) {
+            Some(root) => format!(
+                "the ownership helper could not read everything below {root} (find was refused there: its permissions, or a label such as SELinux's that the helper does not carry); make it readable and searchable inside the daemon's container, then retry"
+            ),
+            None => "the ownership helper's walk of the daemon's volumes failed partway; check the volumes' filesystem, then retry".into(),
+        },
         72 => "a volume the daemon mounts is missing from the ownership helper's view; recreate the daemon container from its Compose project and retry".into(),
         // It exited 0 but its answer was not the records it writes.
         -1 => format!(
@@ -629,7 +711,13 @@ fn write_log(
     entries: &[Visited],
 ) -> std::io::Result<(PathBuf, fs::File)> {
     fs::create_dir_all(directory)?;
-    let path = directory.join(format!("ownership-repair-{stamp}-{}.log", part.word()));
+    // Unique even for two repairs in one second (a per-second stamp).
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let path = directory.join(format!(
+        "ownership-repair-{stamp}-{}-{}.log",
+        &token[..8],
+        part.word()
+    ));
     let mut text = format!(
         "# Pseudolife ownership repair of the daemon's {}, image {}.\n# Written before the repair: every line is one root-owned entry it gives to\n# 10001:10001, as owner:group before, a tab, and its path inside the daemon\n# container (\\\\ \\t \\n and \\xHH escape special bytes). Setting each entry\n# back to its old owner and group undoes the repair.\n",
         part.noun(),
@@ -667,7 +755,7 @@ fn unfixable(entries: &[&Unusable], part: Part, log: Option<&Path>) -> Refusal {
     let owner = match first.owner.as_str() {
         "0" => "root still owns it".to_owned(),
         "?" => "it is missing or below a directory that account cannot search".to_owned(),
-        uid => format!("uid {uid} owns it"),
+        other => format!("uid {other} owns it"),
     };
     let done = match log {
         Some(log) => format!(
@@ -683,6 +771,57 @@ fn unfixable(entries: &[&Unusable], part: Part, log: Option<&Path>) -> Refusal {
     )
 }
 
+/// The refusal for a root the probe cannot see into.
+fn unreadable_root(path: &[u8]) -> Refusal {
+    format!(
+        "the daemon account (uid 10001) owns {} but cannot read or enter it, so nothing below it can be checked: its permissions, or a label such as SELinux's (relabel a bind mount with :z) the check does not carry. Give that account read and search permission on it, then retry; nothing was changed",
+        shown(path)
+    )
+}
+
+/// The refusal for an unusable entry in a mount the user added.
+fn nested_unusable(entry: &Unusable, mount: &Mount) -> Refusal {
+    let (what, fix) = if mount.kind == "bind" {
+        (
+            format!("the host directory {}", shown(mount.source.as_bytes())),
+            format!(
+                "change the owner of {} on the host to 10001:10001",
+                shown(mount.source.as_bytes())
+            ),
+        )
+    } else {
+        (
+            format!("the volume {}", shown(mount.source.as_bytes())),
+            "give its entries to 10001:10001 inside that volume".to_owned(),
+        )
+    };
+    format!(
+        "the daemon account (uid 10001) cannot use {} in {}, mounted at {} below the daemon's {}: the ownership repair leaves mounts added below it alone. To fix it, {fix}, then retry; nothing was changed",
+        entry.shown(),
+        what,
+        shown(mount.destination.as_bytes()),
+        mount.part.noun()
+    )
+}
+
+/// Whether the engine runs rootless or remaps user namespaces (uid 0 in a
+/// container is then not root on the host). None when Docker cannot say.
+fn remapped(docker: &mut impl Docker) -> Option<bool> {
+    let (code, output) = docker.docker(&[
+        "info".into(),
+        "--format".into(),
+        "{{json .SecurityOptions}}".into(),
+    ]);
+    let options: Vec<String> = serde_json::from_str(output.trim())
+        .ok()
+        .filter(|_| code == 0)?;
+    Some(
+        options
+            .iter()
+            .any(|o| o.contains("name=rootless") || o.contains("name=userns")),
+    )
+}
+
 /// Repairs one part after a probe found it unusable, then probes again.
 /// `log_dir` receives the undo list, before the change. Ok only when the
 /// second probe finds that part usable.
@@ -693,6 +832,20 @@ pub(crate) fn repair(
     log_dir: &Path,
     stamp: &str,
 ) -> Result<Repaired, Refusal> {
+    // A host directory as the root on a rootless or user-remapped engine:
+    // uid 0 there is not root on the host, so the repair would hand host
+    // files to an unrelated uid. Detected, never guessed.
+    if let Some((root, _)) = layout.roots.iter().find(|(_, p)| *p == part)
+        && let Some(mount) = layout.mount(root).filter(|m| m.kind == "bind")
+        && remapped(docker) != Some(false)
+    {
+        return Err(format!(
+            "the daemon's {} is the host directory {}, and this Docker engine runs rootless or remaps user namespaces (or could not say which), where uid 0 in a container is not root on the host, so the ownership repair does not run there. Change the owner of {} on the host so the daemon account (uid 10001 in the container) can use it, then retry; nothing was changed",
+            shown(root.as_bytes()),
+            shown(mount.source.as_bytes()),
+            shown(mount.source.as_bytes())
+        ));
+    }
     // 1. What root owns, listed by a uid-0 helper that cannot chown.
     let (code, output, finished) = run(docker, |name| list_argv(layout, part, name));
     let (listed, complete) = parse_records(&output, "list-root-owned");
@@ -750,6 +903,9 @@ pub(crate) fn repair(
     };
     // 4. Probe again.
     let after = probe(docker, layout)?;
+    if let Some(root) = after.unreadable_roots.first() {
+        return Err(unreadable_root(root));
+    }
     let left = after.of(layout, part);
     if !left.is_empty() {
         return Err(unfixable(&left, part, repaired.log.as_deref()));
@@ -790,6 +946,12 @@ pub(crate) fn preflight(
         return Ok(None);
     };
     let first = probe(docker, &layout)?;
+    if let Some(root) = first.unreadable_roots.first() {
+        return Err(unreadable_root(root));
+    }
+    if let Some((entry, mount)) = first.nested(&layout).first() {
+        return Err(nested_unusable(entry, mount));
+    }
     admit(&first.of(&layout, Part::State))?;
     let models = if first.of(&layout, Part::Models).is_empty() {
         None

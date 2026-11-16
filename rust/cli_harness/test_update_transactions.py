@@ -2612,6 +2612,9 @@ def ownership_args(mode, repo):
     common = ["--json", "--no-cache-prune", "--health-retries", "1", "--health-delay-ms", "0"]
     if mode == "release":
         return [*common, "--tag", "0.21.1", "--daemon-only"]
+    if mode == "engine":
+        # A checkout's engine selection: update::engine::deploy.
+        return [*common, "--checkout", str(repo), "--no-test-login", "--engine", "rust"]
     return [*common, "--checkout", str(repo), "--no-test-login"]
 
 
@@ -2619,7 +2622,7 @@ def root_helpers(state):
     return [call for call in state["calls"] if "--cap-add" in call or "0:0" in call]
 
 
-@pytest.mark.parametrize("mode", ["release", "checkout"])
+@pytest.mark.parametrize("mode", ["release", "checkout", "engine"])
 def test_a_healthy_host_probes_before_any_change_and_runs_no_root_container_for_ownership(tmp_path, mode):
     binary = _native_binary()
     if not binary:
@@ -2667,7 +2670,7 @@ def test_a_model_cache_is_listed_repaired_and_reprobed_and_the_state_is_untouche
         context.__exit__(None, None, None)
 
 
-@pytest.mark.parametrize("mode", ["release", "checkout"])
+@pytest.mark.parametrize("mode", ["release", "checkout", "engine"])
 def test_an_unusable_state_volume_is_backed_up_through_the_old_container_before_its_repair(tmp_path, mode):
     binary = _native_binary()
     if not binary:
@@ -2782,6 +2785,6 @@ def test_a_probe_that_cannot_run_refuses_before_anything_changes(tmp_path, code)
         assert ownership_stages(state) == ["pull", "probe"]
         # The failed helper is removed by its name.
         probe = next(call for call in state["calls"] if "--probe-access" in call)
-        assert ["rm", "-f", probe[probe.index("--name") + 1]] in state["calls"]
+        assert ["rm", "-f", "-v", probe[probe.index("--name") + 1]] in state["calls"]
     finally:
         context.__exit__(None, None, None)

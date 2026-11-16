@@ -21,7 +21,7 @@ use super::lease::lock as os_lock;
 
 mod args;
 mod bank;
-mod child_window;
+pub(in crate::cli) mod child_window;
 mod conn;
 mod docker;
 pub(super) mod docker_backup;

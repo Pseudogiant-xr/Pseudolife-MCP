@@ -1124,6 +1124,10 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
         u.disk_container(&pg, "/tmp")?;
         u.disk_container(&daemon, "/tmp")?;
     }
+    // Before the first change (the rollback tag): can the daemon account use
+    // its volumes? A model cache it cannot use is repaired here; the state
+    // waits for its backup below.
+    let ownership = u.ownership_preflight(&running)?;
     // Tag first: rebuilding the same engine moves its :checkout tag, and
     // Docker's containerd image store then no longer resolves the running
     // image's ID, so it could not be tagged afterwards.
@@ -1179,11 +1183,15 @@ pub(super) fn deploy(u: &mut Update, repo: &Path) -> Result<()> {
                 let replacement = compose_config(u, &compose, &env, UNRESOLVED)?;
                 u.provision_models(&image, &replacement)?;
             }
-            let backups = if stopped_handover {
-                u.builtin_backup(&pg, &daemon, &repo.join("data/backups"))?
-            } else {
-                u.project_backup(&repo, &pg, &daemon, user, db)?
-            };
+            // A state volume the daemon account cannot use is archived first
+            // and repaired after (update/ownership.rs).
+            let backups = u.backup_around_ownership(ownership.as_ref(), &running, |u| {
+                if stopped_handover {
+                    u.builtin_backup(&pg, &daemon, &repo.join("data/backups"))
+                } else {
+                    u.project_backup(&repo, &pg, &daemon, user, db)
+                }
+            })?;
             disk::host(&repo)?;
             // By tag: after a same-engine rebuild the running image's ID may not resolve.
             u.disk_storage(&daemon, Some(&pg), Some(&rollback))?;

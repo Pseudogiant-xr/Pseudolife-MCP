@@ -24,13 +24,18 @@ impl ownership::Docker for Update {
     fn remove(&mut self, name: &str) {
         // `command` starts nothing once an interrupt arrived, and this
         // helper must still go: a bounded direct call.
-        let Ok(mut child) = Command::new(&self.docker)
-            .args(["rm", "-f", name])
+        let mut command = Command::new(&self.docker);
+        command
+            .args(["rm", "-f", "-v", name])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        else {
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(crate::cli::restore_cli::child_window::child_window_flag());
+        }
+        let Ok(mut child) = command.spawn() else {
             return;
         };
         let started = Instant::now();

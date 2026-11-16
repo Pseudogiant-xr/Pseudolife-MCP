@@ -466,7 +466,8 @@ fn activation() -> String {
 fn prepare(repo: &Path, engine: &str, default: bool) -> Result<Vec<PathBuf>> {
     let written = |r: io::Result<PathBuf>| r.map(|p| vec![p]).map_err(|_| refusal(BAD_OVERLAY));
     // Checkout mode manages a checkout's Rust daemon, and its update
-    // probes; every other rerun applies the ownership order rule first.
+    // (`update::engine::deploy`) applies the ownership order rule itself;
+    // every other rerun applies it here first.
     if engine != "rust-checkout" {
         ownership()?;
     }
@@ -533,6 +534,10 @@ impl crate::cli::ownership::Docker for Installer {
     fn docker(&mut self, args: &[String]) -> (i32, String) {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         match docker(&args, true, 3600) {
+            // Docker's own text when the helper printed nothing, so "fix what
+            // Docker reports" has a report (answers are hex, untouched by the
+            // newline handling).
+            Ok(ran) if ran.stdout.trim().is_empty() => (ran.code, ran.stderr),
             Ok(ran) => (ran.code, ran.stdout),
             Err(_) => (1, String::new()),
         }

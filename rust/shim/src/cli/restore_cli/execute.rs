@@ -340,6 +340,9 @@ struct Run<'a, 'd, D: Docker, H: Host> {
     staging: bool,
     /// The swap found this mount below `/data` and replaced nothing.
     nested: Option<String>,
+    /// The post-restore ownership check failed: the data is restored and
+    /// only the daemon's start is left.
+    ownership_after_restore: bool,
 }
 
 /// The run ends here: what failed (the [`Stop`]'s text) at the phase
@@ -776,18 +779,10 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
             &plan.running,
             &cx.data_dir,
             &format!("{stamp}-restored"),
-        )
-        // The restore itself is complete: the next step is the daemon's
-        // start, never the restore again.
-        .map_err(|Stop(message, code)| {
-            Stop(
-                message.replace(
-                    ", then retry",
-                    &format!(", then start the daemon (docker start {})", plan.daemon),
-                ),
-                code,
-            )
-        });
+        );
+        // The data is in place: what is left on a failure is the daemon's
+        // start, never the restore again (`report`).
+        self.ownership_after_restore = restored.as_ref().is_err_and(|Stop(_, code)| *code != 130);
         if let Some(repaired) = step(restored)? {
             self.host.info(&repaired.line());
         }
@@ -1089,6 +1084,19 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     )),
                 }
             }
+            Phase::DataRestored if self.ownership_after_restore => {
+                // In order: what was done, what was left, why, the one step.
+                lines.clear();
+                lines.push("restore: the database and state were restored completely.".to_owned());
+                lines.push(format!(
+                    "The daemon {daemon} was left stopped, because the check that its account (uid 10001) can use the restored state failed: {}.",
+                    cause.trim_end_matches('.').replace(", then retry", "")
+                ));
+                lines.push(format!(
+                    "Once that is fixed, finish the restore with:\n  docker start {}",
+                    shell_word(&daemon)
+                ));
+            }
             Phase::DataRestored => {
                 lines.push(format!(
                     "The database and state were restored completely. Check docker logs {daemon}; start it with docker start {daemon} if it is stopped."
@@ -1169,6 +1177,7 @@ pub(super) fn execute<D: Docker, H: Host>(docker: &mut D, host: &mut H, cx: &Con
         stage_name: format!("{STAGE_PREFIX}{run_tag}"),
         staging: false,
         nested: None,
+        ownership_after_restore: false,
     };
     if let Some(earlier) = &run.earlier {
         let note = format!(

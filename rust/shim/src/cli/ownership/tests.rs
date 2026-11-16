@@ -47,6 +47,8 @@ fn usable() -> String {
 struct Fake {
     answers: Vec<(i32, String)>,
     calls: Vec<Vec<String>>,
+    /// `docker info --format {{json .SecurityOptions}}`.
+    info: (i32, String),
 }
 
 impl Docker for Fake {
@@ -54,6 +56,9 @@ impl Docker for Fake {
         self.calls.push(args.to_vec());
         if args[0] == "rm" {
             return (0, String::new());
+        }
+        if args[0] == "info" {
+            return self.info.clone();
         }
         self.answers.remove(0)
     }
@@ -63,12 +68,16 @@ fn fake(answers: Vec<(i32, String)>) -> Fake {
     Fake {
         answers,
         calls: Vec::new(),
+        info: (
+            0,
+            r#"["name=seccomp,profile=builtin","name=cgroupns"]"#.into(),
+        ),
     }
 }
 
 fn mode(call: &[String]) -> &str {
-    if call[0] == "rm" {
-        return "rm";
+    if call[0] == "rm" || call[0] == "info" {
+        return call[0].as_str();
     }
     call.iter()
         .find(|a| {
@@ -109,6 +118,32 @@ fn layout_of(container: &Value) -> Option<Layout> {
     layout(container).unwrap()
 }
 
+/// The fixture with a user's writable bind mount below /data.
+fn with_nested() -> Value {
+    let mut daemon = container();
+    daemon["Mounts"].as_array_mut().unwrap().push(
+        json!({"Type": "bind", "Source": "/srv/exports", "Destination": "/data/extra", "RW": true}),
+    );
+    daemon
+}
+
+/// The one undo list a test's repair wrote.
+fn only_log(dir: &Path) -> PathBuf {
+    let logs: Vec<PathBuf> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(logs.len(), 1, "{logs:?}");
+    assert!(
+        logs[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("ownership-repair-s-")
+    );
+    logs[0].clone()
+}
+
 #[test]
 fn the_embedded_script_is_the_image_entrypoint_byte_for_byte() {
     let ops = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ops/provision-daemon-models.sh");
@@ -147,14 +182,16 @@ fn the_layout_keeps_only_the_state_and_model_mounts_and_walks_only_writable_ones
     assert_eq!(layout_of(&stateless), None);
     // An inspect object without typed mounts (or no object at all) too.
     assert_eq!(layout_of(&Value::Null), None);
-    // A nested writable mount is its own root, in its own part.
-    let mut nested = container();
-    nested["Mounts"]
-        .as_array_mut()
-        .unwrap()
-        .push(json!({"Type": "volume", "Name": "extra", "Destination": "/data/extra", "RW": true}));
-    let nested = layout(&nested).unwrap().unwrap();
-    assert!(nested.roots.contains(&("/data/extra".into(), Part::State)));
+    // A nested writable mount is probed, never a repair root.
+    let nested = layout(&with_nested()).unwrap().unwrap();
+    assert_eq!(
+        nested.roots,
+        [
+            ("/data".into(), Part::State),
+            ("/models".into(), Part::Models)
+        ]
+    );
+    assert_eq!(nested.nested, [("/data/extra".into(), Part::State)]);
     // The models directory follows the container's own setting, slash or not.
     let mut moved = container();
     moved["Config"]["Env"] = json!(["PSEUDOLIFE_DAEMON_MODELS_DIR=/cache/"]);
@@ -204,6 +241,11 @@ fn tail(mode: &str, mounts: &[&str], roots: &[&str]) -> Vec<String> {
         "--read-only",
         "--log-driver",
         "none",
+        "--no-healthcheck",
+        "--pull",
+        "never",
+        "--pids-limit",
+        "256",
     ]
     .map(String::from)
     .to_vec();
@@ -278,6 +320,102 @@ fn the_uid_0_helpers_get_only_their_capabilities_and_their_own_parts_mounts() {
     let mut list = head(&[SEARCH_CAP]);
     list.extend(tail("--list-root-owned", &STATE_MOUNTS, &["/data"]));
     assert_eq!(list_argv(&found, Part::State, "n"), list);
+}
+
+#[test]
+fn the_probe_walks_nested_mounts_and_the_uid_0_helpers_get_them_read_only_and_unwalked() {
+    // test_container.py's real-engine case mirrors exactly these roots.
+    let found = layout_of(&with_nested()).unwrap();
+    let probe = probe_argv(&found, "n");
+    assert_eq!(
+        probe[probe.len() - 3..],
+        ["/data", "/models", "/data/extra"]
+    );
+    assert!(probe.contains(&"type=bind,source=/srv/exports,dst=/data/extra".to_owned()));
+    for argv in [
+        list_argv(&found, Part::State, "n"),
+        repair_argv(&found, Part::State, "n"),
+    ] {
+        assert_eq!(argv.last().unwrap(), "/data", "{argv:?}");
+        assert!(
+            argv.contains(
+                &"type=bind,source=/srv/exports,dst=/data/extra,readonly=true".to_owned()
+            ),
+            "{argv:?}"
+        );
+        assert!(
+            argv.contains(&"type=volume,src=p_state,dst=/data".to_owned()),
+            "{argv:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unusable_nested_mount_is_refused_with_its_source_before_anything_changes() {
+    let unusable = answer(
+        "probe-access",
+        &[&[b"U", b"0", b"/data/extra/x"], &[b"U", b"0", b"/data/old"]],
+        true,
+    );
+    let mut docker = fake(vec![(0, unusable)]);
+    let dir = scratch();
+    let error = preflight(&mut docker, &with_nested(), dir.path(), "s", |_| Ok(())).unwrap_err();
+    assert_eq!(modes(&docker), ["--probe-access"]);
+    assert!(
+        error.contains("/data/extra/x") && error.contains("/srv/exports"),
+        "{error}"
+    );
+    assert!(
+        error.contains("change the owner of /srv/exports on the host"),
+        "{error}"
+    );
+    assert!(error.contains("nothing was changed"), "{error}");
+}
+
+#[test]
+fn a_root_the_account_owns_but_cannot_read_is_refused_never_passed() {
+    let blind = answer("probe-access", &[&[b"R", b"/data"]], true);
+    let mut docker = fake(vec![(0, blind)]);
+    let dir = scratch();
+    let error = preflight(&mut docker, &container(), dir.path(), "s", |_| Ok(())).unwrap_err();
+    assert!(
+        error.contains("owns /data but cannot read or enter it"),
+        "{error}"
+    );
+    assert!(error.contains("SELinux"), "{error}");
+    assert_eq!(modes(&docker), ["--probe-access"]);
+}
+
+#[test]
+fn a_bind_root_on_a_remapped_or_unknown_engine_is_never_repaired() {
+    let mut daemon = container();
+    daemon["Mounts"][0] =
+        json!({"Type": "bind", "Source": "/srv/state", "Destination": "/data", "RW": true});
+    let found = layout_of(&daemon).unwrap();
+    for info in [
+        (0, r#"["name=seccomp,profile=builtin","name=rootless"]"#),
+        (0, r#"["name=userns"]"#),
+        (1, "Cannot connect to the Docker daemon"),
+    ] {
+        let mut docker = fake(vec![]);
+        docker.info = (info.0, info.1.into());
+        let dir = scratch();
+        let error = repair(&mut docker, &found, Part::State, dir.path(), "s").unwrap_err();
+        assert_eq!(modes(&docker), ["info"], "{info:?}");
+        assert!(
+            error.contains("/srv/state") && error.contains("nothing was changed"),
+            "{error}"
+        );
+    }
+    // An ordinary engine repairs a bind root as before.
+    let listed = answer("list-root-owned", &[], true);
+    let mut docker = fake(vec![(0, listed), (0, usable())]);
+    let dir = scratch();
+    repair(&mut docker, &found, Part::State, dir.path(), "s").unwrap();
+    assert_eq!(
+        modes(&docker),
+        ["info", "--list-root-owned", "--probe-access"]
+    );
 }
 
 #[test]
@@ -475,8 +613,8 @@ fn a_repair_that_did_not_finish_keeps_the_full_list_and_removes_its_helper() {
         ["--list-root-owned", "--repair-ownership", "rm"]
     );
     let name = &docker.calls[1][docker.calls[1].iter().position(|a| a == "--name").unwrap() + 1];
-    assert_eq!(docker.calls[2], ["rm", "-f", name.as_str()]);
-    let log = dir.path().join("ownership-repair-s-state.log");
+    assert_eq!(docker.calls[2], ["rm", "-f", "-v", name.as_str()]);
+    let log = only_log(dir.path());
     assert!(
         error.contains("did not finish") && error.contains(&log.display().to_string()),
         "{error}"
@@ -525,6 +663,7 @@ fn a_refusing_caller_stops_before_any_repair() {
 #[test]
 fn a_probe_that_cannot_run_is_never_usable_and_says_why() {
     let found = layout_of(&container()).unwrap();
+    let e71 = answer("probe-access", &[&[b"E", b"/data"]], false);
     for (code, out, cause) in [
         (
             125,
@@ -534,6 +673,7 @@ fn a_probe_that_cannot_run_is_never_usable_and_says_why() {
         (127, "", "could not run /bin/sh"),
         (70, "", "mount table"),
         (71, "", "failed partway"),
+        (71, e71.as_str(), "could not read everything below /data"),
         (0, "SCHEMA_META_VERSION = 58\n", "incomplete or unreadable"),
         (1, "", "exited 1"),
     ] {

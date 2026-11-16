@@ -1634,7 +1634,21 @@ fn a_restored_state_the_repair_cannot_fix_is_reported_with_the_data_restored() {
         errors.contains("/data/theirs") && errors.contains("Give it to 10001:10001"),
         "{errors}"
     );
-    assert!(errors.contains("restored completely"), "{errors}");
+    // In order: done, left, why, the one step.
+    assert_eq!(
+        host.errors[0],
+        "restore: the database and state were restored completely."
+    );
+    assert!(
+        host.errors[1].starts_with("The daemon d was left stopped, because the check"),
+        "{errors}"
+    );
+    assert!(!host.errors[1].contains("then retry"), "{errors}");
+    assert_eq!(
+        host.errors[2],
+        "Once that is fixed, finish the restore with:\n  docker start d"
+    );
+    assert_eq!(host.errors.len(), 3, "{errors}");
     let labels: Vec<String> = docker.calls.iter().map(|c| label(c)).collect();
     assert!(!labels.iter().any(|l| l == "start d"), "{labels:?}");
 }

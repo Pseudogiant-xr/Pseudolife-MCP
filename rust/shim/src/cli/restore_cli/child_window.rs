@@ -27,7 +27,7 @@ pub(super) fn window_flag(console_processes: u32) -> u32 {
 /// only when this process has no console.
 #[cfg(windows)]
 #[allow(unsafe_code)]
-pub(super) fn child_window_flag() -> u32 {
+pub(in crate::cli) fn child_window_flag() -> u32 {
     use windows_sys::Win32::System::Console::GetConsoleProcessList;
     let mut members = [0_u32; 1];
     // SAFETY: `members` is a writable buffer of the length passed; the call

@@ -9,7 +9,8 @@
 # `/bin/sh -c` in short-lived helper containers from the daemon's image:
 #   --probe-access DIR...     as uid 10001 with no capabilities: what that
 #                             account cannot use and cannot fix (U owner
-#                             path), and what it owns but cannot use (O path);
+#                             path), what it owns but cannot use (O path),
+#                             and a root it owns but cannot read (R path);
 #   --list-root-owned DIR...  as uid 0 without CHOWN: every uid-0 entry with
 #                             its group (L group path), the undo list the
 #                             client writes before anything changes;
@@ -18,7 +19,7 @@
 # Each answer is NUL-separated fields (the mode, 1, the records, end),
 # hex-encoded by od so that no capture can alter a name. Exit 0 means every
 # walk finished; 64 is a usage error, 70 an unreadable mount table, 71 a
-# walk that failed and 72 a missing DIR. A DIR may also be a file (a file
+# walk that failed (after an E record naming its root) and 72 a missing DIR. A DIR may also be a file (a file
 # bind mount): it is checked by itself.
 set -eu
 marker="${TMPDIR:-/tmp}/pseudolife-model-provisioning"
@@ -104,30 +105,56 @@ ownership_mode() {
         status=0
         case $mode in
             --probe-access)
+                # A mount point the account owns but cannot read and enter:
+                # the probe cannot see inside it (its modes, or a label such
+                # as SELinux's), so it cannot vouch for it (R).
+                if [ -d "$root" ] && { [ ! -r "$root" ] || [ ! -x "$root" ]; } \
+                    && [ "$(stat -c %u "$root")" = 10001 ]; then
+                    printf 'R\000%s\000' "$root"
+                    continue
+                fi
                 # What 10001 cannot use and cannot fix itself: another
                 # owner's entry it cannot read, or directory it cannot enter
                 # or write (U, with its owner). What it owns but cannot use
                 # is detail only (O): the owner can change its own mode.
                 # access(2) decides, so emulated ownership (Desktop bind
-                # mounts, network filesystems) holds.
-                ownership_walk "$root" ! -type l "(" \
-                    -type d ! -user 10001 "(" ! -readable -o ! -executable -o ! -writable ")" -printf 'U\0%U\0%p\0' -prune \
-                    -o -type d "(" ! -readable -o ! -executable ")" -printf 'O\0%p\0' -prune \
-                    -o -type d ! -writable -printf 'O\0%p\0' \
-                    -o ! -type d ! -user 10001 ! -readable -printf 'U\0%U\0%p\0' \
-                    -o ! -type d ! -readable -printf 'O\0%p\0' ")" || status=$? ;;
+                # mounts, network filesystems) holds. Under /data the daemon
+                # rewrites some files in place, so a uid-0 file there must be
+                # writable too; a model only has to be readable.
+                case $root in
+                    /data|/data/*)
+                        ownership_walk "$root" ! -type l "(" \
+                            -type d ! -user 10001 "(" ! -readable -o ! -executable -o ! -writable ")" -printf 'U\0%U\0%p\0' -prune \
+                            -o -type d "(" ! -readable -o ! -executable ")" -printf 'O\0%p\0' -prune \
+                            -o -type d ! -writable -printf 'O\0%p\0' \
+                            -o ! -type d -uid 0 ! -writable -printf 'U\0%U\0%p\0' \
+                            -o ! -type d ! -user 10001 ! -readable -printf 'U\0%U\0%p\0' \
+                            -o ! -type d ! -readable -printf 'O\0%p\0' ")" || status=$? ;;
+                    *)
+                        ownership_walk "$root" ! -type l "(" \
+                            -type d ! -user 10001 "(" ! -readable -o ! -executable -o ! -writable ")" -printf 'U\0%U\0%p\0' -prune \
+                            -o -type d "(" ! -readable -o ! -executable ")" -printf 'O\0%p\0' -prune \
+                            -o -type d ! -writable -printf 'O\0%p\0' \
+                            -o ! -type d ! -user 10001 ! -readable -printf 'U\0%U\0%p\0' \
+                            -o ! -type d ! -readable -printf 'O\0%p\0' ")" || status=$? ;;
+                esac ;;
             --list-root-owned)
                 ownership_walk "$root" -uid 0 -printf 'L\0%G\0%p\0' || status=$? ;;
             *)
-                # One chown per entry, never through a link, each reported
-                # with the group it had (its owner was 0).
-                ownership_walk "$root" -uid 0 "(" -exec chown -h 10001:10001 {} ";" -printf 'C\0%G\0%p\0' \
+                # One chown per entry, run in the entry's own directory and
+                # never through a link, each reported with the group it had
+                # (its owner was 0).
+                ownership_walk "$root" -uid 0 "(" -execdir chown -h 10001:10001 {} ";" -printf 'C\0%G\0%p\0' \
                     -o -printf 'F\0%G\0%p\0' ")" || status=$? ;;
         esac
         case $status in
             0) ;;
             70) return 70 ;;
-            *) echo "the walk of $root failed (find exited $status)" >&2; return 71 ;;
+            *)
+                # The root whose walk failed, for the client's message.
+                printf 'E\000%s\000' "$root"
+                echo "the walk of $root failed (find exited $status)" >&2
+                return 71 ;;
         esac
     done
     printf '%s\000' end
