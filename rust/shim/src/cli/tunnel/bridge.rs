@@ -793,16 +793,17 @@ fn identifier(message: &Map<String, Value>) -> Option<Id> {
         Value::Number(number) => {
             let digits = number.to_string();
             let unsigned = digits.strip_prefix('-').unwrap_or(&digits);
-            (digits.len() <= ID_LIMIT
+            let integer = digits.len() <= ID_LIMIT
                 && !unsigned.is_empty()
-                && unsigned.bytes().all(|byte| byte.is_ascii_digit()))
-            .then(|| {
-                Id::Integer(if unsigned.bytes().all(|byte| byte == b'0') {
-                    "0".to_owned()
-                } else {
-                    digits
-                })
-            })
+                && unsigned.bytes().all(|byte| byte.is_ascii_digit());
+            let zero = unsigned.bytes().all(|byte| byte == b'0');
+            if !integer {
+                None
+            } else if zero {
+                Some(Id::Integer("0".to_owned()))
+            } else {
+                Some(Id::Integer(digits))
+            }
         }
         _ => None,
     }
