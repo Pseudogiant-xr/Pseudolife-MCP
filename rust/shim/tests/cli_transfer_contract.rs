@@ -267,8 +267,6 @@ fn argument_and_path_shapes_have_native_answers() {
                 .unwrap();
             let cause = if mode == "import" {
                 "archive"
-            } else if *value == "nul.zip" {
-                "--out"
             } else {
                 connection
             };
