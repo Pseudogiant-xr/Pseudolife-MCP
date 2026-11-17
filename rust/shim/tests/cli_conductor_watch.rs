@@ -30,6 +30,135 @@ const AGENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
 #[test]
+fn native_option_like_values_require_an_equals_sign() {
+    let sandbox = Sandbox::new();
+    let mut failures = Vec::new();
+    for value in [
+        "--detach",
+        "--det",
+        "--sto",
+        "--stop=yes",
+        "--owner=fixture",
+    ] {
+        let out = sandbox.run(&["--state", value]);
+        let expected = "pseudolife-mcp conductor-watch: error: argument --state: expected one argument; use --state=VALUE for an option-like value";
+        if out.status.code() != Some(2) || !text(&out.stderr).trim_end().ends_with(expected) {
+            failures.push(text(&out.stderr));
+        }
+        // The same spelling can still be used as a literal file name.
+        let out = sandbox.run(&["--stop", &format!("--state={value}")]);
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+        assert!(text(&out.stdout).contains("nothing changed"));
+    }
+    let out = sandbox.run(&["--owner", "--stop"]);
+    assert!(text(&out.stderr).trim_end().ends_with(
+        "argument --owner: expected one argument; use --owner=VALUE for an option-like value"
+    ));
+    let out = sandbox.run(&["--state", "-x", "--stop"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(text(&out.stdout).contains("no watcher running for -x; nothing changed"));
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(!sandbox.root.join("work").join("--det.lock").exists());
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_explicit_state_stop_ignores_owner_lookup_errors() {
+    use sha2::{Digest, Sha256};
+    let sandbox = Sandbox::new();
+    let mut failures = Vec::new();
+    let session = "fixture-unreadable-agent";
+    let digests = sandbox.root.join("digests");
+    fs::create_dir(&digests).unwrap();
+    let agent = digests.join(format!("{:x}.agent", Sha256::digest(session.as_bytes())));
+    fs::write(&agent, OWNER).unwrap();
+    #[cfg(windows)]
+    let _held_agent = {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&agent)
+            .unwrap()
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&agent, fs::Permissions::from_mode(0)).unwrap();
+    }
+    #[cfg(unix)]
+    let opaque = {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(vec![0xff])
+    };
+    #[cfg(windows)]
+    let opaque = {
+        use std::os::windows::ffi::OsStringExt;
+        OsString::from_wide(&[0xd800])
+    };
+    for (name, variables, refusal) in [
+        (
+            "unreadable",
+            vec![
+                ("CLAUDE_CODE_SESSION_ID", session.into()),
+                ("PSEUDOLIFE_DIGEST_DIR", digests.into_os_string()),
+            ],
+            "cannot read the session .agent file (",
+        ),
+        (
+            "opaque",
+            vec![("CLAUDE_CODE_SESSION_ID", opaque)],
+            "CLAUDE_CODE_SESSION_ID is not Unicode;",
+        ),
+        (
+            "unresolved",
+            vec![
+                ("CLAUDE_CODE_SESSION_ID", session.into()),
+                (
+                    "PSEUDOLIFE_DIGEST_DIR",
+                    "~pseudolife-fixture-missing-account-0123456789/digests".into(),
+                ),
+                ("USERNAME", OsString::new()),
+            ],
+            "cannot resolve the session digest path;",
+        ),
+    ] {
+        let state = sandbox.state(name);
+        let mut child = sandbox.spawn(&state);
+        wait_for("the watcher's pid record", Duration::from_secs(20), || {
+            record(&state).is_some()
+        });
+        let state = state.to_str().unwrap();
+        // A start still needs a trustworthy owner; assert the actual error branch.
+        let start = sandbox
+            .command(&["--state", state])
+            .envs(variables.clone())
+            .output()
+            .unwrap();
+        if start.status.code() != Some(2)
+            || !text(&start.stderr).starts_with(&format!("conductor-watch: {refusal}"))
+        {
+            failures.push(format!("{name} start: {}", text(&start.stderr)));
+        }
+        let stop = sandbox
+            .command(&["--stop", "--state", state])
+            .envs(variables)
+            .output()
+            .unwrap();
+        if stop.status.code() != Some(0) || !text(&stop.stdout).contains("asked to stop") {
+            failures.push(format!("{name} stop: {}", text(&stop.stderr)));
+            // Baseline refusal must not leave the test's own watcher running.
+            fs::write(Path::new(state).with_extension("stop"), b"").unwrap();
+        }
+        assert_eq!(
+            exit_within(&mut child, Duration::from_secs(10)).code(),
+            Some(0)
+        );
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn native_new_refusals_do_not_echo_option_values() {
     let sandbox = Sandbox::new();
     let long = format!("{}fixture-secret", "x".repeat(641));
@@ -100,7 +229,11 @@ fn native_preflight_answers_every_former_argument_deferral() {
     let mut failures = Vec::new();
     let long = "1".repeat(4301);
     for (argv, code, message) in [
-        (vec!["--sto"], 2, "--stop"),
+        (
+            vec!["--sto"],
+            2,
+            "error: abbreviated option; use the full option --stop",
+        ),
         (vec!["--s"], 2, "full option"),
         (vec!["--"], 2, "--help"),
         (vec!["-x"], 2, "--help"),
@@ -201,7 +334,10 @@ fn native_path_and_record_refusals_preserve_files_and_do_not_start() {
     ] {
         fs::write(state.with_extension("pid"), &body).unwrap();
         let out = sandbox.run(&["--stop", "--state", state.to_str().unwrap()]);
-        if out.status.code() != Some(2) || !text(&out.stderr).contains("pid record") {
+        if out.status.code() != Some(2)
+            || !text(&out.stderr).contains("pid record")
+            || !text(&out.stderr).contains(&state.with_extension("pid").display().to_string())
+        {
             failures.push(text(&out.stderr));
         }
         assert_eq!(
@@ -224,7 +360,10 @@ fn native_path_and_record_refusals_preserve_files_and_do_not_start() {
         .output()
         .unwrap();
     if out.status.code() != Some(2)
-        || !text(&out.stderr).contains("--owner")
+        || !(text(&out.stderr)
+            .starts_with("conductor-watch: cannot read the session .agent file (")
+            || cfg!(windows)
+                && text(&out.stderr).starts_with("conductor-watch: no board address file at "))
         || text(&out.stderr).contains("deferred")
     {
         failures.push(text(&out.stderr));

@@ -194,8 +194,8 @@ def _agent_file(body: bytes | None = None, kind: str = "file"):
 
 
 def _steps(*steps, keep: bool = False):
-    """Run ``steps``; ``keep`` (deferral cases) snapshots the home they leave,
-    which the deferral rule expects the candidate to leave untouched."""
+    """Run ``steps``; ``keep`` snapshots the initial home for a case whose
+    output failure must leave its files untouched."""
     def setup(arm):
         for step in steps:
             step(arm)

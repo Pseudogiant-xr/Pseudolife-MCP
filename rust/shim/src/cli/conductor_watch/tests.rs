@@ -11,6 +11,24 @@ const OWNER: &str = "0123456789abcdef0123456789abcdef";
 const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
 #[test]
+fn decision_helpers_always_supply_a_scratch_home() {
+    let scratch = Scratch::new();
+    let state = scratch.state();
+    let start = decided(&["--owner", OWNER, "--state", &state])
+        .start
+        .unwrap();
+    assert!(start.home.starts_with(std::env::temp_dir()));
+    assert!(
+        start
+            .home
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("pl-conductor-watch-")
+    );
+}
+
+#[test]
 fn native_output_failures_exit_without_a_dispatcher_fallback() {
     struct Broken(usize);
     impl io::Write for Broken {
@@ -56,6 +74,8 @@ fn native_output_failures_exit_without_a_dispatcher_fallback() {
 
 #[test]
 fn native_arguments_never_need_the_python_parser() {
+    let scratch = Scratch::new();
+    let state = scratch.state();
     for argv in [
         &["--sto"][..],
         &["--s"],
@@ -69,11 +89,16 @@ fn native_arguments_never_need_the_python_parser() {
         assert_eq!(out.code, 2, "{argv:?}");
         assert!(!out.stderr.contains("private"));
     }
-    assert!(decided(&["--sto"]).stderr.contains("--stop"));
-    let out = decided(&["--stop", "--state", "-watch.json"]);
+    assert!(
+        decided(&["--sto"])
+            .stderr
+            .trim_end()
+            .ends_with("error: abbreviated option; use the full option --stop")
+    );
+    let out = decided(&["--stop", "--state", &state]);
     assert_eq!(out.code, 0);
     assert!(
-        decided(&["--owner", OWNER, "--interval", "0.1"])
+        decided(&["--owner", OWNER, "--interval", "0.1", "--state", &state])
             .start
             .is_some()
     );
@@ -87,7 +112,7 @@ fn native_arguments_never_need_the_python_parser() {
             "--owner",
             OWNER,
             "--state",
-            "watch.json",
+            &state,
             "--max-age",
             &format!("{}1", "0".repeat(641))
         ])
@@ -170,10 +195,15 @@ impl Drop for Scratch {
 }
 
 fn decide_with(argv: &[&str], vars: &[(&str, &str)]) -> Res<Out> {
-    let vars: HashMap<String, OsString> = vars
+    let scratch = Scratch::new();
+    let mut vars: HashMap<String, OsString> = vars
         .iter()
         .map(|(key, value)| ((*key).to_owned(), OsString::from(value)))
         .collect();
+    for key in ["HOME", "USERPROFILE"] {
+        vars.entry(key.into())
+            .or_insert_with(|| scratch.0.clone().into_os_string());
+    }
     let var = move |name: &str| vars.get(name).cloned();
     let context = Context { var: &var };
     let argv: Vec<String> = argv.iter().map(|item| (*item).to_owned()).collect();

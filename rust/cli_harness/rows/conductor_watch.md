@@ -85,7 +85,8 @@ names remain stable; their goldens now pin the native answers:
 - Abbreviations name the full options; unknown short options, `--` and
   unknown `--word=value` forms give a usage error with `--help` as the remedy.
   Unknown values are not echoed. A value beginning with a dash is accepted;
-  if it is itself a known option, use `--option=VALUE` to disambiguate it.
+  if it is a known option, a prefix of one, or a known option with `=`, use
+  `--option=VALUE` to disambiguate the literal file name.
 - Nonstandard numeric spellings are refused with a plain ASCII decimal
   remedy. `--max-age` has no Python digit limit; a finite positive duration
   is accepted, including long zero-padded numbers, and overflow is refused.
@@ -98,7 +99,10 @@ names remain stable; their goldens now pin the native answers:
   writing a stop request. Repair the record before retrying. Ordinary ASCII
   pid records retain their existing start-time and lock checks.
 - Unreadable session `.agent` files name the read failure and explicit
-  `--owner` remedy. Stop-write failures always name the writable-directory
+  `--owner` remedy for a start. An explicit-state stop treats owner-lookup
+  failures as an unknown owner and stops the named watcher; missing or
+  non-Unicode session ids and unresolved digest paths cannot prevent it.
+  Stop-write failures always name the writable-directory
   remedy, with native OS text when no historical errno mapping exists.
 - Failed output exits 1; a failed stdout write reports its cause and remedy
   on stderr when possible. A failed alias notice prevents any stop request.
@@ -107,6 +111,15 @@ Process start times are native on Windows, Linux and macOS. An unqueryable
 process falls back to the existing state-lock proof; it does not defer.
 The missing-source case in `watch.rs` and optional owner-record lookups
 return absence internally, not a dispatcher deferral.
+
+Previously supported inputs also change deliberately: invalid values in
+`--interval=-x`, `--max-age=-5` and `--owner=-abc` are no longer echoed.
+A `--max-age` of 309 to 640 nonzero digits is refused as non-finite rather
+than clamped to the watcher's maximum lifetime. A stdout failure adds a
+cause/remedy line on stderr when possible, and a failed first write exits 1
+without a dispatcher deferral. Invalid pid-record errors name the `.pid`
+path and ask the operator to restore a valid watcher record before retrying;
+they preserve both that record and the process it might identify.
 
 ## Declared divergences
 

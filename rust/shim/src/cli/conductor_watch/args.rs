@@ -290,6 +290,11 @@ fn unknown(token: &str) -> Parsed {
     Parsed::Error(message)
 }
 
+fn option_like_value(value: &str) -> bool {
+    let name = value.split('=').next().unwrap_or(value);
+    name == "-h" || name.starts_with("--") && known().any(|option| option.starts_with(name))
+}
+
 /// argparse's consumption order: options act as they are met; words
 /// collect as extras, reported once every option has been consumed.
 pub(super) fn parse(argv: &[String]) -> Parsed {
@@ -315,13 +320,7 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
         }
         if let Some(value_kind) = kind(token) {
             let value = match tokens.peek() {
-                Some(value)
-                    if kind(value).is_none()
-                        && !FLAGS.contains(&value.as_str())
-                        && !matches!(value.as_str(), "-h" | "--help") =>
-                {
-                    value.as_str()
-                }
+                Some(value) if !option_like_value(value) => value.as_str(),
                 None => return Parsed::Error(format!("argument {token}: expected one argument")),
                 Some(_) => {
                     return Parsed::Error(format!(
@@ -406,13 +405,19 @@ mod tests {
         for argv in [
             &["--help", "--s"][..],
             &["-h", "--sto"],
-            &["--interval", "x", "--s"],
             &["--help", "--zz=1"],
             &["zz", "--help", "-x"],
-            &["--stop=1", "--"],
         ] {
-            assert!(!matches!(run(argv), Parsed::Args(_)), "{argv:?}");
+            assert_eq!(run(argv), Parsed::Help, "{argv:?}");
         }
+        assert_eq!(
+            run(&["--interval", "x", "--s"]),
+            error("argument --interval: invalid _positive value: 'x'")
+        );
+        assert_eq!(
+            run(&["--stop=1", "--"]),
+            error("argument --stop: ignored explicit argument '1'")
+        );
         // Options spelled in full and unknown words still let help act.
         assert_eq!(run(&["--help", "--stop", "--zz", "word"]), Parsed::Help);
     }
@@ -697,24 +702,80 @@ mod tests {
 
     #[test]
     fn unsupported_argument_shapes_are_answered_natively() {
-        for argv in [
-            &["--sto"][..],
-            &["--own", "x"],
-            &["--s"],
-            &["--lease-c=x"],
-            &["--"],
-            &["-x"],
-            &["-"],
-            &["--help=x"],
-            &["--zz=1"],
-            &["--a b"],
-            &["--settle", "-nan"],
-            &["--settle", "1_0"],
-            &["--settle", " 1"],
-            &["--interval", "\u{661}"],
-        ] {
-            assert!(!matches!(run(argv), Parsed::Args(_)), "{argv:?}");
+        for argv in [&["--"][..], &["-x"], &["-"], &["--zz=1"], &["--a b"]] {
+            assert_eq!(
+                run(argv),
+                error("unsupported option; use --help and spell options in full"),
+                "{argv:?}"
+            );
         }
+        for (argv, expected) in [
+            (
+                &["--sto"][..],
+                "abbreviated option; use the full option --stop",
+            ),
+            (
+                &["--own", "x"],
+                "abbreviated option; use the full option --owner",
+            ),
+            (
+                &["--s"],
+                "abbreviated option; use the full option --stop or --settle or --state or --suite-results",
+            ),
+            (
+                &["--lease-c=x"],
+                "abbreviated option; use the full option --lease-cli",
+            ),
+            (
+                &["--help=x"],
+                "argument --help: does not take a value; use --help",
+            ),
+            (
+                &["--settle", "-nan"],
+                "argument --settle: must be 0 or more",
+            ),
+            (
+                &["--settle", "1_0"],
+                "argument --settle: unsupported value; use a plain ASCII decimal number",
+            ),
+            (
+                &["--settle", " 1"],
+                "argument --settle: unsupported value; use a plain ASCII decimal number",
+            ),
+            (
+                &["--interval", "١"],
+                "argument --interval: unsupported value; use a plain ASCII decimal number",
+            ),
+            (
+                &["--owner", "--stop"],
+                "argument --owner: expected one argument; use --owner=VALUE for an option-like value",
+            ),
+        ] {
+            assert_eq!(run(argv), error(expected), "{argv:?}");
+        }
+        for value in [
+            "--detach",
+            "--det",
+            "--sto",
+            "--stop=yes",
+            "--owner=fixture",
+        ] {
+            assert_eq!(
+                run(&["--state", value]),
+                error(
+                    "argument --state: expected one argument; use --state=VALUE for an option-like value"
+                )
+            );
+            let Parsed::Args(args) = run(&[&format!("--state={value}")]) else {
+                panic!("literal file name");
+            };
+            assert_eq!(args.state.as_deref(), Some(value));
+            assert!(!args.stop && !args.detach);
+        }
+        let Parsed::Args(args) = run(&["--state", "-x"]) else {
+            panic!("dash-leading file name");
+        };
+        assert_eq!(args.state.as_deref(), Some("-x"));
     }
 
     #[test]

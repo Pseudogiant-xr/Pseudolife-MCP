@@ -232,7 +232,7 @@ fn record_pid(value: Option<&J>) -> Res<Option<i64>> {
         Some(J::Wtf(_)) => None,
         Some(J::Str(text)) => {
             if !text.is_ascii() || text.contains('_') {
-                return Err("pid record has non-ASCII digits or underscores; use an ASCII decimal pid in the record before retrying".into());
+                return Err("has non-ASCII digits or underscores; restore a valid watcher pid record before retrying".into());
             }
             // An ASCII str reaches `PyLong_FromString` unchanged, which
             // strips C `isspace` only; U+001C..U+001F stay and raise.
@@ -251,7 +251,8 @@ fn record_pid(value: Option<&J>) -> Res<Option<i64>> {
 /// `_running(state)`: the pid file's record when it names a live process
 /// that started when the record says.
 fn running(state: &Path) -> Res<Option<pyjson::Dict>> {
-    let Ok(raw) = fs::read(with_suffix(state, ".pid")?) else {
+    let pid_file = with_suffix(state, ".pid")?;
+    let Ok(raw) = fs::read(&pid_file) else {
         return Ok(None);
     };
     let Ok(text) = String::from_utf8(raw) else {
@@ -260,10 +261,19 @@ fn running(state: &Path) -> Res<Option<pyjson::Dict>> {
     let record = match pyjson::loads(&text, DEPTH) {
         Ok(J::Dict(record)) => record,
         Ok(_) | Err(pyjson::Refused::NotJson) => return Ok(None),
-        Err(pyjson::Refused::TooDeep) => return Err("pid record exceeds 500 nesting levels; restore a valid watcher pid record before retrying".into()),
+        Err(pyjson::Refused::TooDeep) => {
+            return Err(format!(
+                "pid record at {} exceeds 500 nesting levels; restore a valid watcher pid record before retrying",
+                shown(&pid_file)?
+            ));
+        }
     };
     // `int(record["pid"])`: a missing key and a JSON null both fail there.
-    let Some(pid) = record_pid(pyjson::get(&record, "pid"))? else {
+    let pid = match record_pid(pyjson::get(&record, "pid")) {
+        Ok(pid) => pid,
+        Err(reason) => return Err(format!("pid record at {} {reason}", shown(&pid_file)?)),
+    };
+    let Some(pid) = pid else {
         return Ok(None);
     };
     if !alive(pid) {
@@ -520,7 +530,12 @@ fn decide(argv: &[String], context: &Context<'_>) -> Res<Out> {
         }
         args::Parsed::Args(args) => args,
     };
-    let owner = resolve_owner(args.owner.as_deref(), context)?;
+    let owner = match resolve_owner(args.owner.as_deref(), context) {
+        Ok(owner) => owner,
+        // An explicit state identifies the watcher to stop without an owner.
+        Err(reason) if args.stop && args.state.is_some() => Err(reason),
+        Err(reason) => return Err(reason),
+    };
     let state = match &args.state {
         Some(state) => Some(super::wait_mail::pathlib(Path::new(state))),
         None => default_state(owner.as_ref().ok().map(String::as_str), context)?,

@@ -1,2 +1,3 @@
 ### Fixed (2026-11-18 — Native watcher answers every invocation)
 - `conductor-watch` and its deprecated `delegate-watch` alias no longer report a Python deferral. Help has a fixed layout; supported dash-leading values and long finite durations work natively. Unsupported arguments, paths and pid records, unreadable owner files and failed output receive native errors with a remedy before a watcher is started.
+- An explicit-state stop works even when the session owner cannot be read. Option-like values, including abbreviated options, require `--option=VALUE`, so a mistyped stop cannot become a start. Invalid pid-record errors name the record that needs repair.
