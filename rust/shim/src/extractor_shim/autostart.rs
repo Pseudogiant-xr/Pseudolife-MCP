@@ -299,13 +299,26 @@ mod tests {
         registration_fixture("neither");
     }
 
+    #[test]
+    fn registration_accepts_paths_with_typographic_quotes() {
+        registration_fixture("typographic");
+    }
+
     fn registration_fixture(changed: &str) {
         let scratch = Scratch(
             std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())),
         );
         fs::create_dir(&scratch.0).unwrap();
-        let script = scratch.0.join("register ' é.ps1");
-        let data = scratch.0.join("registration ' é.json");
+        let script = scratch.0.join(if changed == "typographic" {
+            "register ' é ‘ ’ “ ”.ps1"
+        } else {
+            "register ' é.ps1"
+        });
+        let data = scratch.0.join(if changed == "typographic" {
+            "registration ' é ‘ ’ “ ”.json"
+        } else {
+            "registration ' é.json"
+        });
         let script_bytes = br#"param([string]$ConfigPath, [string]$ConfigJson)
 if (!$ConfigJson) { $ConfigJson = [IO.File]::ReadAllText($ConfigPath) }
 $c = $ConfigJson | ConvertFrom-Json
@@ -330,7 +343,7 @@ exit 0"#;
             let output = command.output().unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if changed == "neither" {
+            if matches!(changed, "neither" | "typographic") {
                 assert_eq!(output.status.code(), Some(0), "{stdout} {stderr}");
                 assert_eq!(stdout.trim(), "registered fixture");
             } else {
