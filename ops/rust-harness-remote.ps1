@@ -17,8 +17,8 @@
 #      otherwise), and stops them afterwards (Stop-HarnessServices);
 #   5. pytest runs the paths given with --require-databases, so a database
 #      case that cannot run fails instead of skipping;
-#   6. the private ref and the bundle go, and the next run sweeps any a
-#      killed run left.
+#   6. the private ref and bundle are removed on exit; stale private refs
+#      from an interrupted run are cleared before the next fetch.
 # Its last line is the verdict integrate.py reads, tagged with the run's
 # nonce: `rust-harness <nonce>: pytest exit N`, or `rust-harness <nonce>: not
 # run: <cause>` with exit 3. Needs PowerShell 7, git and uv on PATH.

@@ -825,6 +825,7 @@ jobs:
           tests/test_integrate_script.py::test_a_machine_without_a_services_hook_is_not_run
           tests/test_integrate_script.py::test_the_harness_far_half_refuses_a_bundle_that_is_not_the_batch_head
           tests/test_integrate_script.py::test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce
+          tests/test_integrate_script.py::test_harness_controller_ships_its_lock_helper_over_stdin
           tests/test_integrate_script.py::test_database_lock_excludes_another_worker_and_names_holder
           tests/test_integrate_script.py::test_database_lock_wrapper_preserves_exit_and_releases
           tests/test_integrate_script.py::test_database_lock_reclaims_only_proven_stale_identity

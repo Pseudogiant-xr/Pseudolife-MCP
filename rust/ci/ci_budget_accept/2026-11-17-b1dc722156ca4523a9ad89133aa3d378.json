@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "ci.yml",
-  "job": "test-lite-windows",
-  "before": "954d6243529019c3",
-  "fingerprint": "f9b9e37721088559",
-  "reason": "Adds six real PowerShell harness transport cases and database-lock lifecycle cases, plus controller result validation, to the existing Windows lite job. They use tiny local Git bundles, fake uv/cargo and no database or Rust build; the setup, matrix, job count and limits are unchanged."
-}

@@ -2928,8 +2928,8 @@ sys.exit(code)
 
 # Stands in for ssh by running the remote command here, stdin passed on.
 _LOCAL_SSH = r'''
-import subprocess, sys
-sys.exit(subprocess.run(sys.argv[-1].split(), stdin=sys.stdin).returncode)
+import shlex, subprocess, sys
+sys.exit(subprocess.run(shlex.split(sys.argv[-1]), stdin=sys.stdin).returncode)
 '''
 
 
@@ -3541,6 +3541,50 @@ def test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce(harness_far):
     proc = harness_far.run_harness(head, ref, data, extra=("-Nonce", nonce))
 
     assert _verdict(proc) == f"rust-harness {nonce}: pytest exit 0", proc.stderr[-2000:]
+
+
+@needs_pwsh
+def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkeypatch, tmp_path, capsys):
+    head, ref, _ = harness_far.batch()
+    monkeypatch.chdir(harness_far.seed)
+    ssh = tmp_path / "local_ssh.py"
+    ssh.write_text(_LOCAL_SSH, encoding="utf-8")
+    monkeypatch.setattr(integrate, "RUST_CHECK_SSH", (sys.executable, str(ssh)))
+    plan = integrate.Plan(branch=ref.removeprefix("refs/heads/"), base_sha=harness_far.base,
+                          label=LABEL, head=head, rust_check="passed")
+    monkeypatch.setattr(integrate, "_built_batch", lambda: (plan.branch, plan, head))
+    cfg = {"ssh": "dev-vm", "repo": str(harness_far.repo), "role": "Windows dev VM"}
+    monkeypatch.setattr(integrate, "_remote_config", lambda *args: (cfg, ""))
+    script = integrate.RUST_HARNESS_REMOTE_SCRIPT.replace("$ServicesHook = ''", "$ServicesHook = " + integrate._ps_literal(str(harness_far.hook)))
+    script = script.replace("$DatabaseLockPath = ''", "$DatabaseLockPath = " + integrate._ps_literal(str(tmp_path / "own-database.lock")))
+    monkeypatch.setattr(integrate, "RUST_HARNESS_REMOTE_SCRIPT", script)
+    monkeypatch.setattr(integrate, "RUST_HARNESS", ("gate_tests",))
+    monkeypatch.setattr(integrate, "RUST_HARNESS_COMMAND", "python -m pytest -q -p no:cacheprovider --require-databases gate_tests")
+    monkeypatch.setattr(integrate, "SUITE_RESULTS", tmp_path / "results")
+    assert integrate.main(["harness", "--lock-wait-seconds", "0"]) == 0, capsys.readouterr()
+    result, = integrate.SUITE_RESULTS.glob("*.json")
+    assert "passed" in integrate._gate_result_line(str(result), head, "rust-harness")
+    assert harness_far.hook_calls() == ["start", "stop"]
+    assert harness_far.harness_leftovers() == []
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+def test_shim_controller_sends_its_script_and_bundle_over_stdin(far, monkeypatch, tmp_path, capsys):
+    head, ref, _ = far.batch()
+    monkeypatch.chdir(far.seed)
+    ssh = tmp_path / "local_ssh.py"
+    ssh.write_text(_LOCAL_SSH, encoding="utf-8")
+    monkeypatch.setattr(integrate, "RUST_CHECK_SSH", (sys.executable, str(ssh)))
+    plan = integrate.Plan(branch=ref.removeprefix("refs/heads/"), base_sha=far.base,
+                          label=LABEL, head=head, rust_check="passed")
+    monkeypatch.setattr(integrate, "_built_batch", lambda: (plan.branch, plan, head))
+    cfg = {"ssh": "dev-box-two", "repo": str(far.repo), "role": "second Linux dev box"}
+    monkeypatch.setattr(integrate, "_remote_config", lambda *args: (cfg, ""))
+    monkeypatch.setattr(integrate, "SUITE_RESULTS", tmp_path / "results")
+    assert integrate.main(["shim-tests", "--lock-wait-seconds", "0"]) == 0, capsys.readouterr()
+    result, = integrate.SUITE_RESULTS.glob("*.json")
+    assert "passed" in integrate._gate_result_line(str(result), head, "shim-tests")
+    assert not any(c["suite_lock_free"] for c in far.cargo_calls() if c["argv"][:2] == ["nextest", "run"])
 
 
 def _lock_command(lock, *command, wait=0):

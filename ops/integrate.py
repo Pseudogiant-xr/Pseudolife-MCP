@@ -2256,7 +2256,7 @@ def _ps_literal(value: str) -> str:
 def _remote_far(plan: Plan, cfg: dict[str, str], script_text: str, name: str,
                 params: str, timeout: int, *, shell: str = "pwsh",
                 log_path: Path | None = None) -> tuple[int | None, str, list[str]]:
-    """Run a far half (ops/rust-check-remote.ps1, ops/rust-harness-remote.ps1)
+    """Run a far half (ops/rust-harness-remote.ps1, ops/shim-tests-remote.sh)
     on the dev machine `cfg` names, with the batch as a git bundle on ssh's
     stdin (`<branch> ^<base>`: everything master lacks), so nothing is pushed.
     Returns the far half's exit code from its own verdict line (None when it
