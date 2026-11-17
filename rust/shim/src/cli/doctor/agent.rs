@@ -1,52 +1,132 @@
 //! `--agent-state`: `probe_registration`'s read-only nonce proof for an
 //! explicit saved instance file. The file is read before any request; the
 //! context request runs where Python runs it, after the handshake.
-use super::pyenv::{Defer, Res, json_loads};
+use super::pyenv::{Finding, Res, json_loads};
 use hmac::{Hmac, Mac};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path, time::Duration};
 
+#[cfg(all(test, windows))]
+mod native_path_tests {
+    use super::*;
+    use crate::credentials::windows_security::{
+        current_user_sid, make_junction_for_test, set_link_dacl_sddl,
+    };
+    use std::{io::Write, path::PathBuf, process::Command};
+
+    struct Scratch(PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn relative_state_child() {
+        let Some(path) = std::env::var_os("DOCTOR_STATE_CASE_PATH") else {
+            return;
+        };
+        let result = read(Path::new(&path), "http://127.0.0.1:1");
+        if std::env::var_os("DOCTOR_STATE_EXPECT_REFUSAL").is_some() {
+            assert!(
+                result.is_err(),
+                "untrusted current-directory junction was accepted"
+            );
+        } else {
+            assert!(
+                matches!(result, Ok(Saved::State(_))),
+                "trusted relative state was refused"
+            );
+        }
+    }
+
+    #[test]
+    fn native_relative_state_checks_current_directory_junction() {
+        let scratch = Scratch(
+            std::env::temp_dir().join(format!("pl-doctor-relative-{}", uuid::Uuid::new_v4())),
+        );
+        crate::board::state::private_dir(&scratch.0).unwrap();
+        let real = scratch.0.join("real");
+        let holder = scratch.0.join("holder");
+        crate::board::state::private_dir(&real).unwrap();
+        crate::board::state::private_dir(&holder).unwrap();
+        let mut state = crate::board::state::create(&real.join("state.json")).unwrap();
+        state.file.write_all(br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"fixture-secret"}"#).unwrap();
+        drop(state);
+        let link = holder.join("redirect");
+        make_junction_for_test(&link, &real).unwrap();
+        let me = current_user_sid().unwrap();
+        let drive = match scratch.0.components().next().unwrap() {
+            std::path::Component::Prefix(prefix) => match prefix.kind() {
+                std::path::Prefix::Disk(drive) | std::path::Prefix::VerbatimDisk(drive) => {
+                    drive as char
+                }
+                _ => panic!("fixture requires a drive path"),
+            },
+            _ => panic!("fixture requires an absolute path"),
+        };
+        let mut failures = Vec::new();
+        for untrusted in [true, false] {
+            let extra = if untrusted { "(A;;0x40;;;AU)" } else { "" };
+            set_link_dacl_sddl(
+                &holder,
+                &format!("D:(A;OICI;FA;;;{me})(A;OICI;FA;;;SY){extra}"),
+                true,
+            )
+            .unwrap();
+            for path in ["state.json".to_owned(), format!("{drive}:state.json")] {
+                let mut child = Command::new(std::env::current_exe().unwrap());
+                child
+                    .env_clear()
+                    .current_dir(&link)
+                    .args([
+                        "--exact",
+                        "cli::doctor::agent::native_path_tests::relative_state_child",
+                        "--nocapture",
+                    ])
+                    .env("DOCTOR_STATE_CASE_PATH", &path);
+                if untrusted {
+                    child.env("DOCTOR_STATE_EXPECT_REFUSAL", "1");
+                }
+                let output = child.output().unwrap();
+                if !output.status.success() {
+                    failures.push((untrusted, path));
+                }
+            }
+        }
+        std::fs::remove_dir(&link).unwrap();
+        assert!(failures.is_empty(), "relative state cells: {failures:?}");
+    }
+}
+
 /// The saved instance file as `read_legacy` would find it.
 pub(super) enum Saved {
     /// `state_path.exists()` is false.
     Missing,
-    /// `read_legacy` raises.
-    Invalid,
     State(Map<String, Value>),
 }
 
-/// A name-surrogate reparse point (symlink or junction) on Windows, a
-/// symlink elsewhere: pathlib's `is_symlink` sees only symlinks, so either
-/// defers.
-fn redirect(path: &Path) -> Res<bool> {
-    let meta = std::fs::symlink_metadata(path).map_err(|_| Defer)?;
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        Ok(meta.file_type().is_symlink() || meta.file_attributes() & 0x400 != 0)
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(meta.file_type().is_symlink())
-    }
-}
-
-/// `Path(value).exists()` then `coordination_identity.read_legacy`.
-pub(super) fn read(value: &str, url: &str) -> Res<Saved> {
-    // argparse's type=Path: pathlib's spelling (trailing separators and `.`
-    // parts dropped) is the path every later call sees.
-    let normalized = super::pyenv::path_str(value)?;
-    let path = Path::new(&normalized);
-    // `exists()` comes before read_legacy's ancestor walk, so a missing file
-    // is missing_registration whatever its ancestors are.
-    if path
-        .components()
-        .any(|part| matches!(part, std::path::Component::ParentDir))
-    {
-        return Err(Defer);
+/// Read the selected private file. Parent components and native Windows
+/// prefixes are interpreted by the filesystem; private-file checks remain in force.
+pub(super) fn read(value: &Path, url: &str) -> Res<Saved> {
+    let normalized = value.to_str().map(super::pyenv::path_str).transpose()?;
+    let path = normalized.as_deref().map(Path::new).unwrap_or(value);
+    // Keep redirects visible to the trust walk, including those in the
+    // current directory for relative and Windows drive-relative paths.
+    let absolute = std::path::absolute(path).map_err(|error| Finding::io(&error))?;
+    let path = absolute.as_path();
+    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(Finding::new(
+            "selected file is a symbolic link; select the original private registration file",
+        ));
     }
     match std::fs::metadata(path) {
+        Ok(meta) if !meta.is_file() => {
+            return Err(Finding::new(
+                "selected path is not a regular file; select the private registration file",
+            ));
+        }
         Ok(_) => {}
         Err(error)
             if matches!(
@@ -56,36 +136,55 @@ pub(super) fn read(value: &str, url: &str) -> Res<Saved> {
         {
             return Ok(Saved::Missing);
         }
-        Err(_) => return Err(Defer),
+        Err(error) => return Err(Finding::io(&error)),
     }
-    let absolute = std::path::absolute(path).map_err(|_| Defer)?;
-    for ancestor in absolute.ancestors() {
-        if redirect(ancestor)? {
-            return Err(Defer);
-        }
-    }
-    // open_private: owner-only regular file, one link (board::state::open).
-    let Ok(opened) = crate::board::state::open(path) else {
-        return Ok(Saved::Invalid);
-    };
+    // Collect ancestor refusals before the shared opener's stderr reporting;
+    // a diagnostic must not print a private path containing credentials.
+    crate::private_path::check_ancestors(path).map_err(|refusal| {
+        use crate::private_path::Cause;
+        Finding::new(match *refusal.cause {
+            Cause::LinkOwner { .. } | Cause::HolderOwner { .. } =>
+                "an ancestor link or its holder belongs to another account; replace the link with a folder you own",
+            Cause::LinkWriter { .. } | Cause::HolderWritable { .. } =>
+                "another account can replace an ancestor link; replace the link with a private folder you own",
+            Cause::TooManyLinks =>
+                "ancestor link resolution exceeded its limit; select the original registration path without the link chain",
+            Cause::NotALink { .. } | Cause::UncheckableTarget { .. } =>
+                "an ancestor redirect cannot be checked; select the registration through a plain folder",
+            Cause::Uninspectable { .. } =>
+                "an ancestor could not be inspected; let this account read the folder attributes and permissions",
+        })
+    })?;
+    let opened = crate::board::state::open_detailed(path).map_err(|error| match error {
+        crate::board::state::OpenError::Io(error) => Finding::io(&error),
+        crate::board::state::OpenError::InvalidState => Finding::new(
+            "file is not a private regular file (ownership, permissions, links or redirected ancestors); select the original owner-only registration file"),
+    })?;
     // A text read of 16385 characters: more than 65540 bytes is more than
     // 16384 characters or undecodable, both a ValueError.
     let mut bytes = Vec::new();
-    if opened.file.take(65541).read_to_end(&mut bytes).is_err() {
-        return Ok(Saved::Invalid);
-    }
+    opened
+        .file
+        .take(65541)
+        .read_to_end(&mut bytes)
+        .map_err(|error| Finding::io(&error))?;
     if bytes.len() > 65540 {
-        return Ok(Saved::Invalid);
+        return Err(Finding::new(
+            "file exceeds 16384 characters; select a registration file within that limit",
+        ));
     }
-    let Ok(text) = String::from_utf8(bytes) else {
-        return Ok(Saved::Invalid);
-    };
+    let text = String::from_utf8(bytes)
+        .map_err(|_| Finding::new("file is not UTF-8; save the registration as UTF-8"))?;
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     if text.chars().count() > 16384 {
-        return Ok(Saved::Invalid);
+        return Err(Finding::new(
+            "file exceeds 16384 characters; select a registration file within that limit",
+        ));
     }
     let Some(Value::Object(state)) = json_loads(&text)? else {
-        return Ok(Saved::Invalid);
+        return Err(Finding::new(
+            "registration JSON is not an object; select the saved registration object",
+        ));
     };
     let named = |key: &str| {
         state
@@ -93,11 +192,18 @@ pub(super) fn read(value: &str, url: &str) -> Res<Saved> {
             .and_then(Value::as_str)
             .is_some_and(|v| !v.is_empty())
     };
-    if state.get("bank_url").and_then(Value::as_str) != Some(url)
-        || !named("agent_id")
-        || !named("credential")
-    {
-        return Ok(Saved::Invalid);
+    if state.get("bank_url").and_then(Value::as_str) != Some(url) {
+        return Err(Finding::new(
+            "registration bank_url is missing or does not match the daemon; select this daemon's saved registration file",
+        ));
+    }
+    for key in ["agent_id", "credential"] {
+        if !named(key) {
+            return Err(Finding::new(
+                "field is missing, empty or not text; select a complete saved registration file",
+            )
+            .at(key));
+        }
     }
     Ok(Saved::State(state))
 }

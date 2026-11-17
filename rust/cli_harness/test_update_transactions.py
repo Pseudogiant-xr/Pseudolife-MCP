@@ -4,7 +4,7 @@ The native arm accepts the standard PSEUDOLIFE_RUST_BINARY lane candidate
 or the explicit PSEUDOLIFE_UPDATE_TEST_BINARY override.
 Python is an oracle/test fixture only; no real Docker command can resolve.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import gzip
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +30,18 @@ FILES = ("docker-compose.yml", "docker-compose.ghcr.yml", "docker-compose.rust-d
 def _native_binary():
     candidate = os.environ.get("PSEUDOLIFE_UPDATE_TEST_BINARY") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
     return str(Path(candidate).resolve()) if candidate else None
+
+
+@contextmanager
+def _relocated_binary(source, destination):
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copyfile(source, destination)
+    try:
+        yield destination
+    finally:
+        destination.unlink(missing_ok=True)
 
 
 def _fallback_fixture(tmp_path, source):
@@ -791,19 +803,22 @@ def test_optional_test_login_uses_selected_project_postgres(tmp_path):
     if not binary:
         pytest.skip("set PSEUDOLIFE_RUST_BINARY to the built native CLI")
     with host(tmp_path, mode="checkout") as (repo, env, state_path):
-        if os.name == "nt":
-            # test-login uses bare `docker`, unlike update's explicit override.
-            # Rust searches its executable directory and System32 before the
-            # inherited PATH; hosted Windows has Docker in System32. Keep this
-            # copied candidate beside our stub so no host Docker can resolve.
-            binary = shutil.copyfile(binary, Path(env["PSEUDOLIFE_DOCKER"]).with_name(Path(binary).name))
-        env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:5433"
-        result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-cache-prune"])
+        with ExitStack() as binaries:
+            if os.name == "nt":
+                # Keep the candidate beside our Docker stub: Rust checks its
+                # executable directory and System32 before inherited PATH.
+                destination = Path(env["PSEUDOLIFE_DOCKER"]).with_name(Path(binary).name)
+                binary = binaries.enter_context(_relocated_binary(binary, destination))
+            env["PSEUDOLIFE_TEST_PG_HOST_PORT"] = "127.0.0.1:5433"
+            result = run_arm(repo, env, binary, ["--checkout", str(repo), "--json", "--no-cache-prune"])
         assert result.returncode == 0, result.stdout + result.stderr
         calls = json.loads(state_path.read_text())["calls"]
         assert ["port", "fixture-pg", "5432/tcp"] in calls
         assert not any("pseudolife-mcp-postgres" in call for call in calls)
         assert any(call[:3] == ["exec", "-i", "fixture-pg"] and any("psql" in arg for arg in call) for call in calls)
+        if os.name == "nt":
+            retained = Path(binary).stat().st_size if Path(binary).exists() else 0
+            assert retained == 0, f"test-login call retained {retained} bytes of executable scratch"
 
 
 def test_builtin_backup_has_independent_container_deadlines(tmp_path):

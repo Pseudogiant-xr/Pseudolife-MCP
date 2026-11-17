@@ -12,8 +12,12 @@ Producers: README "pseudolife-mcp doctor", docs/guide/configuration.md
 ops/install.* ("run doctor from that command's environment").
 
 Answered: `doctor`, with `--host codex|claude-code|claude-desktop|generic`,
-`--timeout N` (plain positive decimal) and `--agent-state FILE` (not
-starting with `-`), each at most once, any order (:548-554).
+`--timeout N` (finite positive seconds up to 4294967295, including exponent
+notation) and `--agent-state FILE`, in any order. Options accept `--name=value`;
+repeated options take the last value, and `-h`/`--help` prints local help.
+An empty agent-state path, unknown or abbreviated option, missing value,
+invalid host or unrepresentable duration is a usage error with its fix (exit 2).
+Option diagnostics never repeat user-supplied values.
 `--disposable-proof` without a nonempty `PSEUDOLIFE_TEST_DATABASE_URL`
 keeps the existing refusal (:562-566, exit 2).
 
@@ -83,9 +87,57 @@ authentication tests also compile into `cli_doctor_proof_contract` for hosted
 stress. The test helper accepts `PSEUDOLIFE_RUST_BINARY`, as supplied by the
 stress runner. Hosted stress remains pending.
 
-Deferred before any effect: other argv shapes (abbreviations, `=` forms,
-repeats, help, bad values). A saved `--agent-state` with the proof is a usage
-error and does not read that file.
+No input defers the command. A saved `--agent-state` with the proof is a usage
+error and does not read that file. Non-Unicode proof DSNs receive a named
+refusal. Runtime construction failures receive a report with the OS error kind.
+
+Local reads report the setting or check, cause and fix without parser excerpts
+or secret values. JSON uses native finite-number/Unicode syntax, arbitrary-size
+integers and a 256-level nesting bound. Invalid TOML, unsupported setting types,
+non-Unicode environment values, invalid PATHEXT and filesystem failures are
+findings; the other checks still run. Windows path prefixes and drive-relative
+paths use native path handling. Non-Unicode saved-state paths use the OS path.
+Codex home and executable settings expand `~/` using the configured home;
+named-user forms such as `~other/` receive an absolute-path repair instruction.
+Plugin hook verification uses a shared verifier that does not expand
+`CODEX_HOME`; when a plugin is found through a tilde path, doctor reports
+that limitation and asks for the expanded absolute directory. It does not
+misreport the plugin as absent. A malformed Claude registration is reported
+while credential discovery continues with the independent Codex registration.
+Missing registration files are distinct from unreadable or non-UTF-8 files.
+Each unreadable file is named with a repair; a bad Claude settings file keeps
+known registration evidence and Git Bash's environment/default/PATH checks.
+All native client JSON/TOML readers accept one UTF-8 byte-order mark, including
+both credential discovery and wake checks. Console uses the same independent
+credential search but keeps its existing interface without per-file findings;
+doctor is the diagnostic that reports those findings.
+
+Saved-state parent components and trusted directory links are supported.
+A leaf link or an unsafe private file is reported with a remedy; the file is
+never changed. Missing, malformed, oversized or unreadable saved state is named
+even when the board is offline. A malformed Codex saved connection suppresses
+network checks and is reported while local checks run; an explicit daemon URL
+remains a legitimate way to select the intended connection.
+
+Duplicate/non-ASCII board headers, unsupported response encodings, wrong
+maintainer field types, incomplete refusals and unsupported health redirects
+are named findings. Error strings omit response contents; URLs with userinfo,
+queries or fragments are redacted. Tunnel and autostart check semantics are unchanged.
+HTTP error pages name the endpoint/status and daemon-side repair; a proxy's
+non-JSON health error is availability evidence. A valid degraded health object
+remains readable on HTTP 503. Native identity and credential-source paths,
+including credential recovery text, use the same safe path display as launcher
+paths. Disposable-proof cleanup receipts also redact credential-bearing paths.
+
+The removed `doctor-agent-path-unnormalized` source mutant is replaced by
+`native_agent_json_cells_and_private_path_near_misses`; the removed Windows
+`doctor-pathlib-keeps-dot-parts` mutant is replaced by
+`review_round2_leading_dot_is_normalized` and `pathlib_strings`; the leading-dot
+test is also run against removal of the CurDir filter. The obsolete
+`doctor-toml-bom-accepted` mutant is replaced by
+`review_round2_utf8_bom_credentials_and_wake_agree`. The maintainer-skip mutant
+uses the diagnostic error type. The obsolete platform exclusion and now-empty
+`doctor-4` weekly shard are removed.
 
 ## Disposable-proof differences from Python
 
@@ -237,8 +289,8 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   races startup and response speed differently in each runtime, and the
   native doctor bounds connect and each read the way sockets do, not
   urllib's exact sequence of socket operations. Cases use budgets far from
-  either arm's latency; `--timeout` over 1,000,000 seconds defers (Python
-  accepts any positive float).
+  either arm's latency. Native `--timeout` accepts finite positive durations
+  through 4,294,967,295 seconds; an unrepresentable duration is a usage error.
 - Proxies: urllib honours `http_proxy`/`https_proxy` and, without them, the
   Windows registry (WinINet) and macOS `_scproxy` settings. The native probes
   connect directly and the platform settings are not consulted. A set proxy
@@ -303,18 +355,16 @@ Doctor shares the update client's Codex hook checks. The parity scope map
 therefore includes this row for update changes and the mapped dependencies
 that update imports, so changes to those helpers also run doctor parity.
 
-## Deferral domain
+## Native findings and refusals
 
-Only argument shapes defer the whole command: noncanonical argv (`--help`
-included) and `--timeout` past 1,000,000 seconds, plus an `--agent-state`
-path with a `..` component, a symlinked or junction ancestor of an existing
-file, or a stat error pathlib would raise (a missing file is
-`missing_registration` whatever its ancestors: `exists()` comes first,
-doctor_cli.py:458). With an invalid daemon URL the saved instance is not
-read and nothing defers.
+Doctor never hands a command to Python. Help and supported argument spellings
+are native; malformed arguments return a usage error naming the repair.
+Saved registration paths support parent components, trusted directory links
+and native Windows path prefixes. A missing, unsafe or unreadable saved file
+adds an `agent_state` finding, including while the daemon is offline.
 
-Every other input the native reader does not decide is named in the report
-while the other checks run (these deferred the whole run before #1607):
+An environmental input the native reader cannot interpret is named in the
+report with its cause and repair while independent checks continue:
 
 - `PYTHONINTMAXSTRDIGITS` is ignored (a Python-only setting); an absent PATH
   on POSIX searches the platform's CS_PATH.
@@ -331,16 +381,17 @@ while the other checks run (these deferred the whole run before #1607):
 - Saved tunnel profiles: the read-only `tunnels` section; an absent or empty
   `~/.pseudolife-mcp/tunnel` adds nothing, and a profile or store this
   client cannot read is one `unavailable` entry.
-- Client files and settings the native reader does not parse (JSON only
-  Python may read, TOML parse failures, non-UTF-8 environment values,
-  settings values whose `str()` needs Python's repr, `~` in
-  `CODEX_HOME`/`PSEUDOLIFE_CODEX_BIN`, UNC, device and drive-relative paths,
-  stat errors pathlib would raise): that field reads `unknown (not read by
-  the native client: ...)`, and a registration search that stopped adds
-  `registrations`.
+- Client JSON/TOML syntax errors, unsupported setting types, undecodable
+  text environment values and filesystem failures: the affected field reads
+  `could not read <input>: <cause; repair>`, and a registration search that
+  stopped adds `registrations`. Standard JSON supports nesting through 256
+  levels and arbitrary-size integers. Current-user tilde expansion and
+  Windows UNC, device and drive-relative paths are native; named-user tilde
+  expansion asks for an absolute path instead.
 - After the read-only GETs:
-  - A non-object health body, a non-string `status` or a health redirect
-    urllib would follow off HTTP: `DaemonUnrecognized`.
+  - A non-object health body or a non-string `status`: `DaemonUnrecognized`.
+    Invalid health JSON or an unsupported redirect also carries a finding
+    naming `GET /health` and the repair.
   - A non-string `version`: `unknown`.
   - A health `stall` object: `dreams` names its kind.
   - A Codex-plugin `hooks_digest` in any file state: `<state>: <detail>`.

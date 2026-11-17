@@ -19,6 +19,10 @@ use unicode_casefold::UnicodeCaseFold;
 mod diagnostics;
 #[path = "proof_process.rs"]
 mod process;
+// This leaf is also compiled without the enclosing doctor module.
+#[allow(clippy::duplicate_mod)]
+#[path = "display.rs"]
+mod display;
 // The isolated proof contract includes this leaf without the CLI module tree.
 #[allow(clippy::duplicate_mod)]
 #[path = "../maintainer/sqlstate.rs"]
@@ -890,7 +894,11 @@ fn cleanup_failure(
         ));
     }
     if files_removed.is_err() {
-        report["fixture_directory"] = json!(root.to_string_lossy());
+        let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();
+        report["fixture_directory"] = json!(display::display_path(
+            &root.to_string_lossy(),
+            token.as_deref()
+        ));
         recovery.push(
             "Remove the remaining local fixture directory after releasing any open handles.".into(),
         );
@@ -903,6 +911,66 @@ fn cleanup_failure(
 #[cfg(test)]
 #[path = "proof_loader_tests.rs"]
 mod loader_tests;
+
+#[cfg(test)]
+mod path_privacy_tests {
+    use super::*;
+
+    #[test]
+    fn review_round2_cleanup_path_redaction() {
+        const CHILD: &str = "PSEUDOLIFE_DOCTOR_PROOF_PATH_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.env_clear();
+            for key in ["SYSTEMROOT", "WINDIR"] {
+                if let Some(value) = std::env::var_os(key) {
+                    command.env(key, value);
+                }
+            }
+            let test = format!(
+                "{}::review_round2_cleanup_path_redaction",
+                module_path!().split_once("::").unwrap().1
+            );
+            let output = command
+                .env(CHILD, "1")
+                .env("PSEUDOLIFE_MCP_TOKEN", "w44-proof-path-bearer")
+                .args(["--exact", &test, "--nocapture"])
+                .output()
+                .unwrap();
+            assert!(String::from_utf8_lossy(&output.stdout).contains("running 1 test"));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            return;
+        }
+        let mut failed = Vec::new();
+        for path in [
+            "w44-proof-path-bearer/fixture",
+            "https://user:w44-url-secret@example.invalid/fixture",
+        ] {
+            let value =
+                cleanup_failure("fixture", Path::new(path), true, Err("fixture error")).unwrap();
+            let safe = value["fixture_directory"] == "[redacted]"
+                && !value.to_string().contains("w44-proof-path-bearer")
+                && !value.to_string().contains("w44-url-secret");
+            eprintln!("cleanup path redaction cell: {safe}");
+            if !safe {
+                failed.push(path);
+            }
+        }
+        let value = cleanup_failure(
+            "fixture",
+            Path::new("ordinary-fixture"),
+            true,
+            Err("fixture error"),
+        )
+        .unwrap();
+        assert_eq!(value["fixture_directory"], "ordinary-fixture");
+        assert!(failed.is_empty(), "{failed:?}");
+    }
+}
 
 #[cfg(test)]
 mod tests {

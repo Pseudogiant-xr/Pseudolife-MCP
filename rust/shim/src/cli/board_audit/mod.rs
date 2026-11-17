@@ -8,6 +8,7 @@ mod chain;
 pub(super) mod codec;
 mod help;
 mod metrics;
+mod output;
 mod redact;
 mod stats;
 mod time;
@@ -22,17 +23,27 @@ use std::{
 pub fn run(arguments: Vec<OsString>) -> u8 {
     // Deep historical payloads also recurse when dropped; use the same
     // stack allowance as the other commands using the Python JSON reader.
-    std::thread::Builder::new()
+    let worker = match std::thread::Builder::new()
         .stack_size(64 << 20)
         .spawn(move || run_inner(arguments))
-        .ok()
-        .and_then(|worker| worker.join().ok())
-        .unwrap_or_else(deferred)
+    {
+        Ok(worker) => worker,
+        Err(_) => {
+            return stats::error(
+                "audit worker could not start; free system resources and retry the command",
+            );
+        }
+    };
+    worker.join().unwrap_or_else(|_| {
+        stats::error("audit worker panicked and completion is unknown; inspect the audit head before retrying the command")
+    })
 }
 
 fn run_inner(arguments: Vec<OsString>) -> u8 {
     let Some(action) = args::parse(&arguments) else {
-        return deferred();
+        return stats::error(
+            "arguments contain non-Unicode text; supply Unicode arguments and paths",
+        );
     };
     match action {
         args::Action::Error(message) => {
@@ -63,7 +74,9 @@ fn run_inner(arguments: Vec<OsString>) -> u8 {
                 // Checked before any bank is resolved, as `_export` does.
                 match std::fs::metadata(out) {
                     Ok(_) => {
-                        crate::stderrln!("board-audit: {out} exists; export never replaces a file");
+                        crate::stderrln!(
+                            "board-audit: {out} exists; export never replaces a file; choose an unused --out path"
+                        );
                         return 2;
                     }
                     Err(error)
@@ -75,7 +88,7 @@ fn run_inner(arguments: Vec<OsString>) -> u8 {
                             || cfg!(target_os = "macos") && error.raw_os_error() == Some(62)
                             || cfg!(windows)
                                 && matches!(error.raw_os_error(), Some(21 | 123 | 206 | 1921)) => {}
-                    Err(_) => return failed(),
+                    Err(error) => return output::failure("destination inspection", &error),
                 }
             }
             if bank::dsn().is_none() {
@@ -99,17 +112,19 @@ where
     Fut: std::future::Future<Output = bank::Ending>,
 {
     let Some(dsn) = bank::dsn() else {
-        return deferred();
+        return bank::dsn_refusal();
     };
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
     else {
-        return deferred();
+        return stats::error(
+            "audit runtime could not start; free system resources and retry the command",
+        );
     };
     match runtime.block_on(work(dsn)) {
         bank::Ending::Exit(code) => code,
-        bank::Ending::Deferred => deferred(),
+        bank::Ending::Refused(message) => stats::error(message),
     }
 }
 
@@ -211,7 +226,7 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
         }
         let (value, seq, created_at, pending_payload) = match archive::row(&line) {
             Ok(row) => row,
-            Err(archive::Error::Deferred) => return deferred(),
+            Err(archive::Error::Unsupported(message)) => return stats::error(message),
             Err(archive::Error::Encoding) => return failed(),
             Err(error) => {
                 let diagnostic = match error {
@@ -233,46 +248,51 @@ fn verify_input(input: &str, expect: Option<args::Head>) -> u8 {
         }) {
             Ok(None) => {}
             Ok(Some(broken)) => return report(broken, 1),
-            Err(chain::Deferred) => return deferred(),
+            Err(chain::Failure::Unsupported(message)) => return stats::error(message),
             Err(chain::Failure::Python) => return failed(),
         }
     }
     match walker.finish() {
         Ok((report_value, intact)) => report(report_value, if intact { 0 } else { 1 }),
-        Err(chain::Deferred) => deferred(),
+        Err(chain::Failure::Unsupported(message)) => stats::error(message),
         Err(chain::Failure::Python) => failed(),
     }
 }
 
 /// `print(json.dumps(value))` before any effect: one line on stdout and the
-/// given exit code. A stdout that refuses the line defers: CPython's answer
-/// there (a buffered print, then a failed flush at interpreter shutdown,
-/// exit 120 and an ignored-exception trailer) is not reproduced.
+/// given exit code. A closed stdout is an output failure, not an integrity result.
 fn report(value: Json, code: u8) -> u8 {
     match print_line(&value) {
         Ok(()) => code,
-        Err(()) => deferred(),
+        Err(ReportError::Encoding) => stats::error(
+            "audit result cannot be encoded safely; report this internal encoding failure",
+        ),
+        Err(ReportError::Output) => output_failed(),
     }
+}
+
+enum ReportError {
+    Encoding,
+    Output,
 }
 
 /// One `print(json.dumps(value))` line; `Err` when stdout refused it (or the
 /// value holds something the encoder refuses, which nothing here builds).
-fn print_line(value: &Json) -> Result<(), ()> {
-    let bytes = sent_json::encode(value).map_err(|_| ())?;
+fn print_line(value: &Json) -> Result<(), ReportError> {
+    let bytes = sent_json::encode(value).map_err(|_| ReportError::Encoding)?;
     let mut text = String::from_utf8(bytes).expect("report is UTF-8");
     text.push('\n');
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(&super::text_bytes(&text))
         .and_then(|()| stdout.flush())
-        .map_err(|_| ())
+        .map_err(|_| ReportError::Output)
 }
 
-fn deferred() -> u8 {
-    crate::stderrln!(
-        "board-audit: this path is deferred; native board-audit covers canonical verify, export and redact"
-    );
-    1
+fn output_failed() -> u8 {
+    stats::error(
+        "stdout could not receive the audit result; rerun with stdout connected to a writable destination",
+    )
 }
 
 fn failed() -> u8 {
@@ -285,6 +305,16 @@ fn failed() -> u8 {
 #[cfg(test)]
 mod tests {
     use super::PythonLines;
+
+    #[test]
+    fn constructed_invalid_report_is_refused_before_stdout() {
+        let value = super::Json::Integer("synthetic-secret".into());
+        assert!(matches!(
+            super::print_line(&value),
+            Err(super::ReportError::Encoding)
+        ));
+        assert!(super::sent_json::encode(&super::Json::Integer("1".into())).is_ok());
+    }
 
     #[test]
     fn cr_and_utf8_at_decode_boundaries_keep_line_semantics() {
