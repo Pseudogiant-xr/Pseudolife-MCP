@@ -13178,16 +13178,16 @@
    "utc_offset": 0,
    "exit": 120,
    "stdout": "",
-   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA1MTUsIGluIG1haW4KICAgIHJldHVybiBfY3JlYXRlKGFyZ3MsIGV4ZWN1dG9yLCBwYXRoLCBiYW5rcywgcmVwb3J0LCBkYWVtb24pCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA2MzcsIGluIF9jcmVhdGUKICAgIHJlcG9ydC5zYXkoZiJ0ZXN0LWxvZ2luOiBvbiB7ZXhlY3V0b3IuZGVzY3JpcHRpb259LCBhcyB7d2hvLmdldCgnd2hvJyl9IChzdXBlcnVzZXIpIikKICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS90ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNDQ0LCBpbiBzYXkKICAgIHByaW50KGxpbmUsIGZpbGU9c2VsZi5vdXQsIGZsdXNoPVRydWUpCkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQoKRHVyaW5nIGhhbmRsaW5nIG9mIHRoZSBhYm92ZSBleGNlcHRpb24sIGFub3RoZXIgZXhjZXB0aW9uIG9jY3VycmVkOgoKVHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjMzLCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAxODQsIGluIG1haW4KICAgIHN5cy5leGl0KHRlc3RfbG9naW5fbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS90ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNTE3LCBpbiBtYWluCiAgICByZXR1cm4gcmVwb3J0LmZpbmlzaChFWElUX0ZBSUxFRCwgZiJjb3VsZCBub3Qgd3JpdGUge19zaG93bihwYXRoKX06IHtleGN9IikKICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA0NDksIGluIGZpbmlzaAogICAgcHJpbnQoZiJ0ZXN0LWxvZ2luOiB7ZXJyb3J9IiwgZmlsZT1zZWxmLm91dCwgZmx1c2g9VHJ1ZSkKQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCkV4Y2VwdGlvbiBpZ25vcmVkIGluOiA8X2lvLlRleHRJT1dyYXBwZXIgbmFtZT0nPHN0ZG91dD4nIG1vZGU9J3cnIGVuY29kaW5nPSd1dGYtOCc+CkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQo=",
+   "stderr": "dGVzdC1sb2dpbjogc3Rkb3V0IGNvdWxkIG5vdCBiZSB3cml0dGVuOyByZXN0b3JlIHN0ZG91dCBhbmQgcmV0cnkK",
    "window": [
-    1793600003.6520655,
-    1793600004.1225214
+    1794937994.7187939,
+    1794937994.8674233
    ],
    "run_tokens": {
-    "port": 42841,
-    "token": "2813ed65"
+    "port": 35615,
+    "token": "80fdd31e"
    },
-   "arm": "python",
+   "arm": "rust",
    "db": {
     "roles": [
      [
@@ -13530,16 +13530,16 @@
    "utc_offset": 0,
    "exit": 120,
    "stdout": "",
-   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA1MTUsIGluIG1haW4KICAgIHJldHVybiBfY3JlYXRlKGFyZ3MsIGV4ZWN1dG9yLCBwYXRoLCBiYW5rcywgcmVwb3J0LCBkYWVtb24pCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA2MzcsIGluIF9jcmVhdGUKICAgIHJlcG9ydC5zYXkoZiJ0ZXN0LWxvZ2luOiBvbiB7ZXhlY3V0b3IuZGVzY3JpcHRpb259LCBhcyB7d2hvLmdldCgnd2hvJyl9IChzdXBlcnVzZXIpIikKICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS90ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNDQ0LCBpbiBzYXkKICAgIHByaW50KGxpbmUsIGZpbGU9c2VsZi5vdXQsIGZsdXNoPVRydWUpCkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQoKRHVyaW5nIGhhbmRsaW5nIG9mIHRoZSBhYm92ZSBleGNlcHRpb24sIGFub3RoZXIgZXhjZXB0aW9uIG9jY3VycmVkOgoKVHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIjxmcm96ZW4gcnVucHk+IiwgbGluZSAxOTgsIGluIF9ydW5fbW9kdWxlX2FzX21haW4KICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgODgsIGluIF9ydW5fY29kZQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMjMzLCBpbiA8bW9kdWxlPgogICAgbWFpbigpCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvY2xpLnB5IiwgbGluZSAxODQsIGluIG1haW4KICAgIHN5cy5leGl0KHRlc3RfbG9naW5fbWFpbihzeXMuYXJndlsyOl0pKQogICAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS90ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNTE3LCBpbiBtYWluCiAgICByZXR1cm4gcmVwb3J0LmZpbmlzaChFWElUX0ZBSUxFRCwgZiJjb3VsZCBub3Qgd3JpdGUge19zaG93bihwYXRoKX06IHtleGN9IikKICAgICAgICAgICBeXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA0NDksIGluIGZpbmlzaAogICAgcHJpbnQoZiJ0ZXN0LWxvZ2luOiB7ZXJyb3J9IiwgZmlsZT1zZWxmLm91dCwgZmx1c2g9VHJ1ZSkKQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCkV4Y2VwdGlvbiBpZ25vcmVkIGluOiA8X2lvLlRleHRJT1dyYXBwZXIgbmFtZT0nPHN0ZG91dD4nIG1vZGU9J3cnIGVuY29kaW5nPSd1dGYtOCc+CkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQo=",
+   "stderr": "dGVzdC1sb2dpbjogc3Rkb3V0IGNvdWxkIG5vdCBiZSB3cml0dGVuOyByZXN0b3JlIHN0ZG91dCBhbmQgcmV0cnkK",
    "window": [
-    1793600004.5282192,
-    1793600004.9419959
+    1794937995.3366303,
+    1794937995.4540071
    ],
    "run_tokens": {
-    "port": 42841,
-    "token": "2813ed65"
+    "port": 35615,
+    "token": "80fdd31e"
    },
-   "arm": "python",
+   "arm": "rust",
    "db": {
     "roles": [
      [
@@ -13895,16 +13895,16 @@
    "utc_offset": 0,
    "exit": 120,
    "stdout": "",
-   "stderr": "VHJhY2ViYWNrIChtb3N0IHJlY2VudCBjYWxsIGxhc3QpOgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA1MTUsIGluIG1haW4KICAgIHJldHVybiBfY3JlYXRlKGFyZ3MsIGV4ZWN1dG9yLCBwYXRoLCBiYW5rcywgcmVwb3J0LCBkYWVtb24pCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA3MDYsIGluIF9jcmVhdGUKICAgIHJldHVybiByZXBvcnQuZmluaXNoKEVYSVRfT0spCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXgogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L3Rlc3RfbG9naW5fY2xpLnB5IiwgbGluZSA0NTEsIGluIGZpbmlzaAogICAgcHJpbnQoanNvbi5kdW1wcyh7ImV4aXQiOiBjb2RlLCAiZXJyb3IiOiBlcnJvciwgImNoYW5nZXMiOiBzZWxmLmxpbmVzLCAqKnNlbGYuZGF0YX0pLApCcm9rZW5QaXBlRXJyb3I6IFtFcnJubyAzMl0gQnJva2VuIHBpcGUKCkR1cmluZyBoYW5kbGluZyBvZiB0aGUgYWJvdmUgZXhjZXB0aW9uLCBhbm90aGVyIGV4Y2VwdGlvbiBvY2N1cnJlZDoKClRyYWNlYmFjayAobW9zdCByZWNlbnQgY2FsbCBsYXN0KToKICBGaWxlICI8ZnJvemVuIHJ1bnB5PiIsIGxpbmUgMTk4LCBpbiBfcnVuX21vZHVsZV9hc19tYWluCiAgRmlsZSAiPGZyb3plbiBydW5weT4iLCBsaW5lIDg4LCBpbiBfcnVuX2NvZGUKICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS9jbGkucHkiLCBsaW5lIDIzMywgaW4gPG1vZHVsZT4KICAgIG1haW4oKQogIEZpbGUgIntPUkFDTEV9L3BzZXVkb2xpZmVfbWVtb3J5L2NsaS5weSIsIGxpbmUgMTg0LCBpbiBtYWluCiAgICBzeXMuZXhpdCh0ZXN0X2xvZ2luX21haW4oc3lzLmFyZ3ZbMjpdKSkKICAgICAgICAgICAgIF5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eCiAgRmlsZSAie09SQUNMRX0vcHNldWRvbGlmZV9tZW1vcnkvdGVzdF9sb2dpbl9jbGkucHkiLCBsaW5lIDUxNywgaW4gbWFpbgogICAgcmV0dXJuIHJlcG9ydC5maW5pc2goRVhJVF9GQUlMRUQsIGYiY291bGQgbm90IHdyaXRlIHtfc2hvd24ocGF0aCl9OiB7ZXhjfSIpCiAgICAgICAgICAgXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl4KICBGaWxlICJ7T1JBQ0xFfS9wc2V1ZG9saWZlX21lbW9yeS90ZXN0X2xvZ2luX2NsaS5weSIsIGxpbmUgNDUxLCBpbiBmaW5pc2gKICAgIHByaW50KGpzb24uZHVtcHMoeyJleGl0IjogY29kZSwgImVycm9yIjogZXJyb3IsICJjaGFuZ2VzIjogc2VsZi5saW5lcywgKipzZWxmLmRhdGF9KSwKQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCkV4Y2VwdGlvbiBpZ25vcmVkIGluOiA8X2lvLlRleHRJT1dyYXBwZXIgbmFtZT0nPHN0ZG91dD4nIG1vZGU9J3cnIGVuY29kaW5nPSd1dGYtOCc+CkJyb2tlblBpcGVFcnJvcjogW0Vycm5vIDMyXSBCcm9rZW4gcGlwZQo=",
+   "stderr": "dGVzdC1sb2dpbjogc3Rkb3V0IGNvdWxkIG5vdCBiZSB3cml0dGVuOyByZXN0b3JlIHN0ZG91dCBhbmQgcmV0cnkK",
    "window": [
-    1793600005.407052,
-    1793600005.905094
+    1794937995.977008,
+    1794937996.3484986
    ],
    "run_tokens": {
-    "port": 42841,
-    "token": "2813ed65"
+    "port": 35615,
+    "token": "80fdd31e"
    },
-   "arm": "python",
+   "arm": "rust",
    "db": {
     "roles": [
      [
@@ -16667,6 +16667,26 @@
     ".pseudolife-mcp": "0o755",
     "cwd": "0o755"
    }
+  }
+ },
+ "recorded_from_candidate": {
+  "admin-fresh-json-stdout-closed": {
+   "commit": "e77e53cfa2ac3ccc262a6158b6a63947b57f4fc4",
+   "rust_tree": "modified",
+   "platform": "linux",
+   "candidate_sha256": "f4197a705e3e80e6be8ac145f259f6227655d5a3d9744db5cafebfa866115380"
+  },
+  "admin-fresh-stdout-closed": {
+   "commit": "e77e53cfa2ac3ccc262a6158b6a63947b57f4fc4",
+   "rust_tree": "modified",
+   "platform": "linux",
+   "candidate_sha256": "f4197a705e3e80e6be8ac145f259f6227655d5a3d9744db5cafebfa866115380"
+  },
+  "admin-reapply-stdout-closed": {
+   "commit": "e77e53cfa2ac3ccc262a6158b6a63947b57f4fc4",
+   "rust_tree": "modified",
+   "platform": "linux",
+   "candidate_sha256": "f4197a705e3e80e6be8ac145f259f6227655d5a3d9744db5cafebfa866115380"
   }
  }
 }

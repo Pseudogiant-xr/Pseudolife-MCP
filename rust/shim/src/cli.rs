@@ -48,7 +48,6 @@ const DEFERRED_MODES: &[&str] = &[
     "doctor",
     "connect",
     "invite",
-    "test-login",
     "pair",
     "tunnel",
     "move",

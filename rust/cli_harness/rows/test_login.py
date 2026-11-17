@@ -1,10 +1,8 @@
 """CLI-TEST-LOGIN: ``pseudolife-mcp test-login create``.
 
-Canonical argv: ``test-login create`` then ``--rotate``, ``--json``,
-``--role R``, ``--file P``, ``--admin-url URL``, ``--container NAME`` (each
-at most once, value a separate argument) and ``--bank DB`` (repeatable).
-Deferred shapes are covered by the Rust contract tests; this row compares
-answered cases only.
+Value options accept separate and equals-form arguments. Unsupported
+arguments and settings are covered by native Rust contract tests; this row
+retains the disposable database and credential-file regression cases.
 
 Every database case runs against its own throwaway server per arm
 (``_cluster``): a fresh copy of one initdb'd cluster for the ``--admin-url``
@@ -42,6 +40,12 @@ from pathlib import Path
 from .. import normalize
 from ..core import WINDOWS, Case
 from . import _cluster
+
+class _Secret(str):
+    """Keep credential values intact for children, out of pytest case reprs."""
+    def __repr__(self):
+        return "<test-login credential>"
+
 
 ROLE = "pseudolife_test"
 SEEDED_PASSWORD = "seeded-" + "s" * 36
@@ -376,7 +380,7 @@ _TRACEBACK = re.compile(
     rb"(?:BrokenPipeError|OSError): [^\r\n]*\r?\n"
     rb"Exception ignored in: <_io\.TextIOWrapper name='<stdout>'[^\r\n]*\r?\n"
     rb"(?:BrokenPipeError|OSError): [^\r\n]*\r?\n\Z")
-_DEFERRAL = "pseudolife-stdio: mode 'test-login' is deferred in this candidate\n"
+_STDOUT_FAILURE = "test-login: stdout could not be written; restore stdout and retry\n"
 
 
 def _oracle_stdout_traceback(obs: dict) -> bool:
@@ -386,28 +390,13 @@ def _oracle_stdout_traceback(obs: dict) -> bool:
             and b"test_login_cli.py" in stderr and bool(_TRACEBACK.match(stderr)))
 
 
-@normalize.rule("test-login-stdout-deferral")
-def stdout_deferral_rule(obs: dict) -> None:
-    """A stdout that refuses the first report line, before any change: the
-    oracle's print raises and its handler's print raises again (a traceback,
-    exit 120), and nothing was written. The candidate defers there: the
-    oracle arm's exit and stderr become the deferral line and exit 1, only
-    after validating that traceback. Files and the server compare as
-    observed, so a candidate that went on to write fails the case."""
+@normalize.rule("test-login-stdout-failure")
+def stdout_failure_rule(obs: dict) -> None:
+    """Validate the frozen oracle's broken-pipe traceback before replacing
+    it with the native stdout failure. Database and file state still compare."""
     if _oracle_stdout_traceback(obs):
-        obs["exit"] = 1
-        stderr = _DEFERRAL.replace("\n", "\r\n") if WINDOWS else _DEFERRAL
-        obs["stderr"] = base64.b64encode(stderr.encode()).decode()
-
-
-@normalize.rule("test-login-stdout-traceback")
-def stdout_traceback_rule(obs: dict) -> None:
-    """A stdout that refuses the report after the change (``--json`` prints
-    only at the end): the oracle's traceback, validated, is dropped; the
-    candidate keeps exit 120 and prints nothing. Everything the run changed
-    compares exactly."""
-    if _oracle_stdout_traceback(obs):
-        obs["stderr"] = ""
+        # Native eprintln! writes LF to stderr pipes on Windows too.
+        obs["stderr"] = base64.b64encode(_STDOUT_FAILURE.encode()).decode()
 
 
 @normalize.rule("test-login-run-tokens")
@@ -507,7 +496,7 @@ def _admin_case(id: str, argv: list[str], prepare=None, *, env=None, rules=(),
 
     base_env = {"PGPASSWORD": _cluster.SUPERUSER_PASSWORD}
     base_env.update(env or {})
-    return Case(id, ["test-login", "create", *argv], env=base_env, setup=setup, after=after,
+    return Case(id, ["test-login", "create", *argv], env={key: _Secret(value) for key, value in base_env.items()}, setup=setup, after=after,
                 rules=("test-login-password", *rules), timeout=120, note=note,
                 stdout_closed=stdout_closed)
 
@@ -721,11 +710,11 @@ def cases() -> list[Case]:
         # mode: the first line refused, before the file or the role change.
         # JSON: the one report line, after every change.
         _admin_case("admin-fresh-stdout-closed", admin, _shapes, stdout_closed=True,
-                    rules=("test-login-stdout-deferral",)),
+                    rules=("test-login-stdout-failure",)),
         _admin_case("admin-reapply-stdout-closed", admin, lambda arm, s: _seed_login(arm, s),
-                    stdout_closed=True, rules=("test-login-stdout-deferral",)),
+                    stdout_closed=True, rules=("test-login-stdout-failure",)),
         _admin_case("admin-fresh-json-stdout-closed", [*admin, "--json"], _shapes,
-                    stdout_closed=True, rules=("test-login-stdout-traceback",)),
+                    stdout_closed=True, rules=("test-login-stdout-failure",)),
         _admin_case("admin-bad-password", admin, env={"PGPASSWORD": "wrong"},
                     rules=("test-login-driver-error",)),
         _admin_case("admin-bad-password-json", [*admin, "--json"], env={"PGPASSWORD": "wrong"},
