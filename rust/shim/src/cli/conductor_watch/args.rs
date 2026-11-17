@@ -425,11 +425,14 @@ mod tests {
     #[test]
     fn long_durations_are_checked_by_value_without_a_python_digit_limit() {
         let long = "1".repeat(641);
-        assert!(matches!(run(&["--max-age", &long]), Parsed::Error(_)));
-        assert!(matches!(
+        assert_eq!(
+            run(&["--max-age", &long]),
+            error("argument --max-age: duration must be finite; use a smaller --max-age")
+        );
+        assert_eq!(
             run(&["--max-age", &"1".repeat(640)]),
-            Parsed::Error(_)
-        ));
+            error("argument --max-age: duration must be finite; use a smaller --max-age")
+        );
         assert!(matches!(
             run(&["--max-age", &format!("{}1", "0".repeat(641))]),
             Parsed::Args(_)
@@ -551,8 +554,11 @@ mod tests {
             }
             // UNC and extended forms: pathlib's drive rules, not reproduced.
             for text in ["\\\\srv\\share", "//srv/share/x", "\\\\?\\C:"] {
-                assert!(
-                    matches!(run(&["--state", text]), Parsed::Error(_)),
+                assert_eq!(
+                    run(&["--state", text]),
+                    error(
+                        "argument --state: UNC and device paths are not supported; use a local --state file path"
+                    ),
                     "{text:?}"
                 );
             }
@@ -599,7 +605,10 @@ mod tests {
             run(&["--settle", "nanx"]),
             error("argument --settle: invalid _non_negative value: 'nanx'")
         );
-        assert!(matches!(run(&["--settle", "nan(1)"]), Parsed::Error(_)));
+        assert_eq!(
+            run(&["--settle", "nan(1)"]),
+            error("argument --settle: unsupported value; use a plain ASCII decimal number")
+        );
     }
 
     #[test]

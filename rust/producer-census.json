@@ -388,7 +388,7 @@
     "rust/shim/src/cli/board_audit/transport.rs": "c1a3db3bced9cf6d56f6cb39fdf6d9e7aac7c04844ade45f012d06e231cc3d2c",
     "rust/shim/src/cli/briefing_help.txt": "443e8b51f02b3a1ac9c381d3653ceb9a6a6e5142398fe992c29edd3b523ee638",
     "rust/shim/src/cli/briefing_hook.rs": "8bf7c0f73f5377078155f42c08e44c13faaf880f7fe52170b164966e61d2faa5",
-    "rust/shim/src/cli/conductor_watch/args.rs": "9c7fee7aec85c8d838d396e96cf3f4a09442156f11e6fd2fc2314ee14db5fb40",
+    "rust/shim/src/cli/conductor_watch/args.rs": "32fa1865f19894bfd0a984460f4366b8378d2d582507bf206df873da68e9e6b9",
     "rust/shim/src/cli/conductor_watch/events.rs": "5d4e09484f8374212b34796382a44638e12c778ef195c66492b9483ca2eb617a",
     "rust/shim/src/cli/conductor_watch/help.txt": "f8c467dcb07393f82f34532a1ae88afa93ca445e4cb0df89756f00db8a4ce76f",
     "rust/shim/src/cli/conductor_watch/mod.rs": "eb35a78b5f2c130ec8f11f4bb3070679d5229e439ee06ba5e792b32adb82551a",

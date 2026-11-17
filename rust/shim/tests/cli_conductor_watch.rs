@@ -84,7 +84,7 @@ fn native_explicit_state_stop_ignores_owner_lookup_errors() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&agent, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&agent, fs::Permissions::from_mode(0o000)).unwrap();
     }
     #[cfg(unix)]
     let opaque = {
