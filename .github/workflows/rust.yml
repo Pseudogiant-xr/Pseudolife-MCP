@@ -1572,7 +1572,6 @@ jobs:
           - doctor-1
           - doctor-2
           - doctor-3
-          - doctor-4
           - episode-0
           - expose-0
           - hook-0

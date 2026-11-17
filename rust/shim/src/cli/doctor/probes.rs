@@ -1,7 +1,7 @@
 //! The read-only daemon probes: `GET /api/hook/coordination-start` (board),
 //! `GET /api/maintainer` and `GET /health`, answered as `board_status`,
 //! `doctor_cli.maintainer_probe` and `shim.probe_health` answer them.
-use super::pyenv::{Defer, Res, json_loads, strip};
+use super::pyenv::{Finding, Res, json_loads, strip};
 use serde_json::{Map, Value, json};
 use std::time::Duration;
 
@@ -71,6 +71,40 @@ fn success(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    #[test]
+    fn native_probe_encoding_and_type_findings() {
+        let mut failed = Vec::new();
+        for body in [
+            b"{\0}\0".as_slice(),
+            b"\xff\xfe{\0}\0",
+            b"\xfe\xff\0{\0}",
+            b"\xed\xa0\x80",
+        ] {
+            let text = format!("{:?}", loads_bytes(body));
+            let ok = text.contains("UTF-8");
+            eprintln!("probe encoding cell {body:?}: {ok}");
+            if !ok {
+                failed.push(text);
+            }
+        }
+        let text = format!("{:?}", python_str(Some(&json!(["w44-secret-value"]))));
+        if !text.contains("text") || text.contains("w44-secret-value") {
+            failed.push(text);
+        }
+        assert!(failed.is_empty(), "{failed:?}");
+        assert!(loads_bytes(b"{\"status\":\"ok\"}").unwrap().is_some());
+        assert!(
+            loads_bytes(b"\xef\xbb\xbf{\"status\":\"ok\"}")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(python_str(Some(&json!("localhost"))).unwrap(), "localhost");
+    }
+}
+
 /// `board_status.board_probe`: `{"state", "line"}`.
 pub(super) async fn board(
     url: &str,
@@ -117,9 +151,13 @@ pub(super) async fn board(
     let header = match answer.board.as_slice() {
         [] => String::new(),
         [value] if value.is_ascii() => {
-            strip(std::str::from_utf8(value).map_err(|_| Defer)?).to_owned()
+            strip(std::str::from_utf8(value).expect("ASCII header")).to_owned()
         }
-        _ => return Err(Defer),
+        _ => {
+            return Err(Finding::new(
+                "X-PL-Board is repeated or not ASCII; correct the daemon or proxy to return one ASCII header",
+            ));
+        }
     };
     let head = &answer.body;
     let served = head
@@ -180,13 +218,15 @@ fn loads_bytes(body: &[u8]) -> Res<Option<Value>> {
         || body.starts_with(&[0xff, 0xfe])
         || body.starts_with(&[0xfe, 0xff])
     {
-        return Err(Defer);
+        return Err(Finding::new(
+            "response is not UTF-8 JSON; configure the endpoint to return UTF-8 JSON",
+        ));
     }
     match std::str::from_utf8(body) {
         Ok(text) => json_loads(text),
-        // surrogatepass would admit encoded surrogates (ED A0..BF xx).
-        Err(_) if body.contains(&0xed) => Err(Defer),
-        Err(_) => Ok(None),
+        Err(_) => Err(Finding::new(
+            "response is not UTF-8 JSON; configure the endpoint to return UTF-8 JSON",
+        )),
     }
 }
 
@@ -194,7 +234,9 @@ fn python_str(value: Option<&Value>) -> Res<String> {
     match value {
         None | Some(Value::Null) => Ok("None".into()),
         Some(Value::String(text)) => Ok(text.clone()),
-        Some(_) => Err(Defer),
+        Some(_) => Err(Finding::new(
+            "response field must be text or null; correct the daemon response schema",
+        )),
     }
 }
 
@@ -208,9 +250,11 @@ pub(super) async fn maintainer(
     let limits = (Some(1 << 20), Some(65536));
     let answer = get(url, "/api/maintainer", Some(token), timeout, false, limits).await;
     let answer = match answer {
-        // exc.read(65536) runs inside `except HTTPError`: its failure escapes
-        // maintainer_probe and doctor ends in a traceback. Defer instead.
-        Some(answer) if answer.body_failed && !success(answer.status) => return Err(Defer),
+        Some(answer) if answer.body_failed && !success(answer.status) => {
+            return Err(Finding::new(
+                "GET /api/maintainer refusal body was incomplete; restore the daemon connection and retry",
+            ));
+        }
         Some(answer) if !answer.body_failed => answer,
         // A failed read(1 << 20), or no answer: the `except Exception`.
         _ => {
@@ -219,11 +263,16 @@ pub(super) async fn maintainer(
             return Ok(out);
         }
     };
-    let parsed = loads_bytes(&answer.body)?;
-    let body = match parsed {
+    let parsed = loads_bytes(&answer.body).map_err(|cause| cause.at("GET /api/maintainer"))?;
+    let mut body = match parsed {
         Some(Value::Object(map)) => map,
         _ => Map::new(),
     };
+    for key in ["rp_id", "origin"] {
+        if let Some(field) = body.get_mut(key) {
+            super::redact_report(field, Some(token));
+        }
+    }
     let status = answer.status;
     if status == 200 {
         let active = match body.get("passkeys") {
@@ -239,8 +288,8 @@ pub(super) async fn maintainer(
         let origin = body.get("origin").cloned().unwrap_or(Value::Null);
         let line = format!(
             "on - rp_id {}, origin {}, {active} active key(s)",
-            python_str(Some(&rp_id))?,
-            python_str(Some(&origin))?
+            python_str(Some(&rp_id)).map_err(|cause| cause.at("GET /api/maintainer rp_id"))?,
+            python_str(Some(&origin)).map_err(|cause| cause.at("GET /api/maintainer origin"))?
         );
         out.insert("state".into(), json!("on"));
         out.insert("rp_id".into(), rp_id);
@@ -263,7 +312,9 @@ pub(super) async fn maintainer(
             ),
             Some(Value::String(problem)) if !problem.is_empty() => {
                 out.insert("state".into(), json!("invalid"));
-                out.insert("line".into(), json!(format!("invalid - {problem}")));
+                let mut detail = json!(problem);
+                super::redact_report(&mut detail, Some(token));
+                out.insert("line".into(), json!(format!("invalid - {}", detail.as_str().unwrap())));
                 out.insert("recovery".into(), json!(MAINTAINER_FIX));
                 return Ok(out);
             }
@@ -271,7 +322,11 @@ pub(super) async fn maintainer(
         }
     } else {
         let code = match body.get("error") {
-            Some(Value::String(code)) if !code.is_empty() => format!(" {code}"),
+            Some(Value::String(code)) if !code.is_empty() => {
+                let mut detail = json!(code);
+                super::redact_report(&mut detail, Some(token));
+                format!(" {}", detail.as_str().unwrap())
+            }
             _ => String::new(),
         };
         ("not_checked", format!("not checked - HTTP {status}{code}"))
@@ -291,9 +346,14 @@ pub(super) async fn health(url: &str, timeout: Duration) -> Res<Option<Value>> {
     };
     if answer.unsupported {
         // An ftp: or non-text redirect target urllib would still follow.
-        return Err(Defer);
+        return Err(Finding::new(
+            "GET /health redirected to an unsupported URL; set PSEUDOLIFE_MCP_DAEMON_URL to the direct HTTP(S) daemon origin",
+        ));
     }
     if answer.body_failed {
+        return Ok(None);
+    }
+    if answer.body.is_empty() {
         return Ok(None);
     }
     match std::str::from_utf8(&answer.body) {

@@ -2,8 +2,8 @@
 //! disposable proof through the native daemon. A check whose input the
 //! native reader does not parse (a client file, a daemon answer, a saved
 //! tunnel, a proxy or an unusable credential) is named in the report while
-//! every unrelated check still runs; only argument shapes and an
-//! unresolvable --agent-state path still defer the whole command.
+//! every unrelated check still runs. Malformed command lines receive a
+//! usage error; environmental failures are diagnostic findings.
 mod agent;
 mod clients;
 mod handshake;
@@ -12,7 +12,7 @@ mod proof;
 mod pyenv;
 mod pyjson;
 
-use pyenv::{Defer, Env, Res};
+use pyenv::{Env, Finding};
 use serde_json::{Map, Value, json};
 use std::{
     ffi::OsString,
@@ -29,27 +29,14 @@ struct Args {
     proof: bool,
     timeout: f64,
     host: &'static str,
-    agent_state: Option<String>,
+    agent_state: Option<std::path::PathBuf>,
 }
 
-/// The longest `--timeout` answered, in seconds. Python takes any positive
-/// float; a budget past this (about 11.6 days) defers, so no deadline or
-/// Duration can overflow.
-const MAX_TIMEOUT: f64 = 1_000_000.0;
+/// Bound deadlines to a duration representable on every supported platform.
+const MAX_TIMEOUT: f64 = u32::MAX as f64;
+const HELP: &str = "Usage: pseudolife-mcp doctor [--timeout SECONDS] [--host HOST] [--agent-state FILE] [--disposable-proof]\n\nRead-only diagnostics; --disposable-proof instead uses an explicitly disposable database.\n  --timeout SECONDS  Positive finite seconds, at most 4294967295 (default 20).\n  --host HOST        codex, claude-code, claude-desktop, or generic (default).\n  --agent-state FILE Read a private saved registration; never rewrites it.\n  -h, --help         Show this help.\nOptions accept --name=value; repeated options use the last value.\n";
 
-fn positive_decimal(raw: &str) -> Option<f64> {
-    (raw.bytes().any(|byte| byte.is_ascii_digit())
-        && raw
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte == b'.')
-        && raw.bytes().filter(|byte| *byte == b'.').count() <= 1)
-        .then(|| raw.parse::<f64>().ok())
-        .flatten()
-        .filter(|value| value.is_finite() && *value > 0.0)
-}
-
-fn parse(values: &[OsString]) -> Option<Args> {
-    let mut seen = [false; 4];
+fn parse(values: &[OsString]) -> Result<Args, String> {
     let mut args = Args {
         proof: false,
         timeout: 20.0,
@@ -58,29 +45,55 @@ fn parse(values: &[OsString]) -> Option<Args> {
     };
     let mut values = values.iter();
     while let Some(raw) = values.next() {
-        let selected = match raw.to_str()? {
-            "--disposable-proof" => 0,
-            "--timeout" => 1,
-            "--host" => 2,
-            "--agent-state" => 3,
-            _ => return None,
-        };
-        if seen[selected] {
-            return None;
+        let raw = raw
+            .to_str()
+            .ok_or("option name is not valid Unicode; use --help for supported options")?;
+        if raw == "--" && values.len() == 0 {
+            break;
         }
-        seen[selected] = true;
-        if selected != 0 {
-            let value = values.next()?.to_str()?;
-            match selected {
-                1 => args.timeout = positive_decimal(value).filter(|t| *t <= MAX_TIMEOUT)?,
-                2 => args.host = HOSTS.iter().find(|host| **host == value)?,
-                _ if value.is_empty() || value.starts_with('-') => return None,
-                _ => args.agent_state = Some(value.to_owned()),
+        let (name, inline) = raw
+            .split_once('=')
+            .map_or((raw, None), |(name, value)| (name, Some(value)));
+        if name == "--disposable-proof" {
+            if inline.is_some() {
+                return Err("--disposable-proof takes no value; pass the flag alone".into());
             }
+            args.proof = true;
+            continue;
+        }
+        if !["--timeout", "--host", "--agent-state"].contains(&name) {
+            return Err("unknown option or positional argument; use --help for supported options (abbreviations are not accepted)".into());
+        }
+        let value = match inline {
+            Some(value) => OsString::from(value),
+            None => values
+                .next()
+                .cloned()
+                .ok_or_else(|| format!("{name} requires a value; supply it after the option"))?,
+        };
+        if name == "--agent-state" {
+            if value.is_empty() {
+                return Err(
+                    "--agent-state is empty; supply the saved registration file path".into(),
+                );
+            }
+            args.agent_state = Some(value.into());
+        } else if name == "--host" {
+            args.host = HOSTS
+                .iter()
+                .find(|host| Some(**host) == value.to_str())
+                .ok_or(
+                    "--host is invalid; choose codex, claude-code, claude-desktop, or generic",
+                )?;
+        } else {
+            let timeout = value.to_str().and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| value.is_finite() && *value > 0.0 && *value <= MAX_TIMEOUT)
+                .and_then(|value| Duration::try_from_secs_f64(value).ok().filter(|d| !d.is_zero()).map(|_| value))
+                .ok_or("--timeout is outside the supported duration range; supply finite positive seconds from 0.000000001 through 4294967295")?;
+            args.timeout = timeout;
         }
     }
-    args.proof = seen[0];
-    Some(args)
+    Ok(args)
 }
 
 fn emit(text: &str, code: u8) -> ExitCode {
@@ -95,19 +108,87 @@ fn emit(text: &str, code: u8) -> ExitCode {
     }
 }
 
+/// Response fields and local path labels are untrusted text too. Redact before
+/// serialization so quoting cannot disguise a credential in an error field.
+fn redact_report(value: &mut Value, token: Option<&str>) {
+    match value {
+        Value::String(text) => {
+            if let Some(token) = token.filter(|token| !token.is_empty()) {
+                *text = text.replace(token, "[redacted]");
+            }
+            static URLS: std::sync::LazyLock<regex_lite::Regex> = std::sync::LazyLock::new(|| {
+                regex_lite::Regex::new(r#"(?i)\b(?:https?|socks5h?)://[^\s\"<>]+"#)
+                    .expect("URL pattern")
+            });
+            *text = URLS
+                .replace_all(text, |matched: &regex_lite::Captures<'_>| {
+                    let url = matched.get(0).unwrap().as_str();
+                    let authority = url
+                        .split_once("://")
+                        .unwrap()
+                        .1
+                        .split(['/', '?', '#'])
+                        .next()
+                        .unwrap();
+                    if authority.contains('@') || url.contains(['?', '#']) {
+                        "[redacted URL]".to_owned()
+                    } else {
+                        url.to_owned()
+                    }
+                })
+                .into_owned();
+        }
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|value| redact_report(value, token)),
+        Value::Object(items) => items
+            .values_mut()
+            .for_each(|value| redact_report(value, token)),
+        _ => {}
+    }
+}
+
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
-    let arguments = values
+    if values
         .iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let environment = match super::host_connection::Environment::discover("doctor", &arguments) {
-        Ok(environment) => environment,
-        Err(error) => {
-            crate::stderrln!("pseudolife-mcp: {error}");
+        .any(|value| value == "--help" || value == "-h")
+    {
+        return Some(emit(HELP, 0));
+    }
+    let args = match parse(&values) {
+        Ok(args) => args,
+        Err(cause) => {
+            crate::stderrln!("pseudolife-mcp doctor: {cause}");
             return Some(ExitCode::from(2));
         }
     };
-    let args = parse(&values)?;
+    let arguments = if args.proof {
+        vec!["--disposable-proof".into()]
+    } else {
+        Vec::new()
+    };
+    let (environment, connection_problem) =
+        match super::host_connection::Environment::discover("doctor", &arguments) {
+            Ok(environment) => (environment, None),
+            Err(error) => (
+                super::host_connection::Environment::default(),
+                Some(error.to_string()),
+            ),
+        };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return Some(emit(
+                &(pyjson::dumps(&json!({"ok":false,
+            "error":"RuntimeUnavailable", "recovery":format!("could not start doctor's I/O runtime ({:?}); free operating-system resources and retry", error.kind())}))
+                    + "\n"),
+                1,
+            ));
+        }
+    };
     if args.proof {
         if args.agent_state.is_some() {
             let message = "usage: cli.py [-h] [--timeout TIMEOUT]\n              [--host {codex,claude-code,claude-desktop,generic}]\n              [--agent-state AGENT_STATE] [--disposable-proof]\ncli.py: error: --disposable-proof cannot use a saved --agent-state\n";
@@ -118,7 +199,10 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
             std::env::var("PSEUDOLIFE_TEST_DATABASE_URL"),
             Err(std::env::VarError::NotUnicode(_))
         ) {
-            return None;
+            return Some(emit(
+                "{\"ok\":false,\"error\":\"DisposableDatabaseInvalid\",\"recovery\":\"PSEUDOLIFE_TEST_DATABASE_URL is not valid Unicode; set a Unicode disposable database DSN and retry.\"}\n",
+                2,
+            ));
         }
         let Some(dsn) = std::env::var("PSEUDOLIFE_TEST_DATABASE_URL")
             .ok()
@@ -132,10 +216,6 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         let Some(models) = proof::models() else {
             return Some(emit(&(pyjson::dumps(&proof::missing_models()) + "\n"), 2));
         };
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .ok()?;
         let report = runtime.block_on(proof::run(&dsn, &daemon, &models, args.timeout));
         let code = if report["ok"] == true { 0 } else { 1 };
         let text = if code == 0 {
@@ -158,11 +238,7 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
         };
         return Some(emit(&(text + "\n"), code));
     }
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .ok()?;
-    let (report, ok) = runtime.block_on(diagnose(&args, &environment)).ok()?;
+    let (report, ok) = runtime.block_on(diagnose(&args, &environment, connection_problem));
     Some(emit(
         &(pyjson::dumps(&report) + "\n"),
         if ok { 0 } else { 1 },
@@ -174,7 +250,7 @@ pub(super) type Registration = (Vec<(String, String)>, Option<String>);
 
 /// `doctor_cli.registration_credentials(os.environ)` for another command
 /// (`console`): the overrides to apply and the source label, or `None`
-/// where doctor's reproduced domain ends (that command then defers).
+/// when a registration cannot be read. The caller decides how to report it.
 pub(super) fn registration_credentials() -> Option<Registration> {
     clients::registration_credentials(&Env::default()).ok()
 }
@@ -243,11 +319,9 @@ const PROXY_RECOVERY: &str = " The shim connects to this daemon through the conf
 
 /// A section whose input the native reader does not parse; the rest of
 /// the report is unaffected.
-fn unread(input: &str) -> String {
-    format!("unknown (not read by the native client: {input})")
+fn unread(input: &str, cause: &Finding) -> String {
+    format!("could not read {input}: {cause}")
 }
-
-const REGISTRATIONS_UNREAD: &str = "not read by the native client: the search of the Claude Code (~/.claude.json) and Codex (config.toml) registrations stopped on an input it does not decide, such as Python-only JSON (NaN), invalid TOML, a home directory that cannot be resolved, or a CLAUDE_CONFIG_DIR, CODEX_HOME or PSEUDOLIFE_MCP_DAEMON_URL that is not plain text or starts with `~`. Fix that input, or set PSEUDOLIFE_MCP_TOKEN_FILE in this shell to name the credential directly.";
 
 /// Where the credential came from, which decides what the user can fix.
 #[derive(Clone, Copy)]
@@ -648,7 +722,8 @@ fn finalize(
 async fn diagnose(
     args: &Args,
     environment: &super::host_connection::Environment,
-) -> Res<(Value, bool)> {
+    connection_problem: Option<String>,
+) -> (Value, bool) {
     // Everything before the first request: environment and client files.
     // A section whose input the native reader does not parse is named in
     // the report; it never ends the run.
@@ -659,15 +734,8 @@ async fn diagnose(
     }
     let (overrides, credential_source, registrations_unread) =
         match clients::registration_credentials(&env) {
-            Ok((overrides, source)) => (overrides, source, false),
-            // An unreadable token variable defers here too; that is
-            // named as CredentialUnavailable below, not as a client file.
-            Err(Defer) => (
-                Vec::new(),
-                None,
-                env.var("PSEUDOLIFE_MCP_TOKEN").is_ok()
-                    && env.var("PSEUDOLIFE_MCP_TOKEN_FILE").is_ok(),
-            ),
+            Ok((overrides, source)) => (overrides, source, None),
+            Err(error) => (Vec::new(), None, Some(error.to_string())),
         };
     for (key, value) in overrides {
         env.set(&key, value);
@@ -678,6 +746,11 @@ async fn diagnose(
         .ok()
         .map(|value| value.unwrap_or_else(|| crate::daemon_url::DEFAULT_URL.to_owned()))
         .and_then(|value| crate::daemon_url::validate(&value).ok());
+    let url = if connection_problem.is_some() {
+        None
+    } else {
+        url
+    };
     let mut problem = None;
     let provider = match (
         env.var("PSEUDOLIFE_MCP_TOKEN_FILE"),
@@ -729,39 +802,42 @@ async fn diagnose(
         problem = Some(BearerProblem::Unsendable);
     }
     let git_bash = if pyenv::WINDOWS {
-        Some(clients::git_bash_report(&env).unwrap_or_else(|_| {
+        Some(clients::git_bash_report(&env).unwrap_or_else(|cause| {
             vec![(
                 "git_bash",
                 json!(unread(
-                    "the Claude Code settings or PATH that locate Git Bash"
+                    "the Claude Code settings or PATH that locate Git Bash",
+                    &cause
                 )),
             )]
         }))
     } else {
         None
     };
-    let claude_wake = clients::claude_code_wake(&env).unwrap_or_else(|_| {
+    let claude_wake = clients::claude_code_wake(&env).unwrap_or_else(|cause| {
         clients::ClaudeWake::Fixed(
-            json!({"registered": unread("~/.claude.json or the Claude Code plugin list")}),
+            json!({"registered": unread("~/.claude.json or the Claude Code plugin list", &cause)}),
         )
     });
-    let codex_wake = clients::codex_wake(&env).unwrap_or_else(|_| {
-        clients::CodexWake::Fixed(json!({"registered": unread("the Codex config.toml")}))
+    let codex_wake = clients::codex_wake(&env).unwrap_or_else(|cause| {
+        clients::CodexWake::Fixed(json!({"registered": unread("the Codex config.toml", &cause)}))
     });
-    let hooks = clients::codex_hooks(&env)
-        .unwrap_or_else(|_| clients::CodexHooks::Line(unread("the Codex home or its config.toml")));
-    let resolution = clients::path_resolution(&env)
-        .unwrap_or_else(|_| json!({"on_path": unread("PATH or the launcher location")}));
+    let hooks = clients::codex_hooks(&env).unwrap_or_else(|cause| {
+        clients::CodexHooks::Line(unread("the Codex home or its config.toml", &cause))
+    });
+    let resolution = clients::path_resolution(&env).unwrap_or_else(
+        |cause| json!({"on_path": unread("PATH or the launcher location", &cause)}),
+    );
     let tunnel_root = clients::tunnel_root(&env).ok();
     let identity = identity();
     // A saved instance is read now; its context request runs after the
     // handshake, as in Python. Claude Desktop is never checked.
     let saved = match (&args.agent_state, &url) {
-        (Some(path), Some(url)) if args.host != "claude-desktop" => Some(agent::read(path, url)?),
+        (Some(path), Some(url)) if args.host != "claude-desktop" => Some(agent::read(path, url)),
         _ => None,
     };
 
-    let short = Duration::try_from_secs_f64(args.timeout.min(2.0)).map_err(|_| Defer)?;
+    let short = Duration::from_secs_f64(args.timeout.min(2.0));
     // _maintainer_probe and the --agent-state check build a new provider
     // and snapshot it again (the token file is read again).
     let fresh = || -> Result<Option<String>, ()> {
@@ -781,8 +857,34 @@ async fn diagnose(
         "credential_source",
         json!(credential_source.as_deref().unwrap_or("none")),
     );
-    if registrations_unread {
-        put(&mut report, "registrations", json!(REGISTRATIONS_UNREAD));
+    if let Some(cause) = &registrations_unread {
+        put(
+            &mut report,
+            "registrations",
+            json!(format!("could not read client registrations: {cause}")),
+        );
+    }
+    if let Some(cause) = &connection_problem {
+        put(
+            &mut report,
+            "host_connection",
+            json!(format!("could not read Codex saved connection: {cause}")),
+        );
+    }
+    if let Some(Err(cause)) = &saved {
+        put(
+            &mut report,
+            "agent_state",
+            json!(format!("could not read --agent-state: {cause}")),
+        );
+    } else if matches!(saved, Some(Ok(agent::Saved::Missing))) {
+        put(
+            &mut report,
+            "agent_state",
+            json!(
+                "could not read --agent-state: file not found; select the existing private registration file"
+            ),
+        );
     }
     // `_token_prefix` (v58): never the token, the 8 hex of its SHA-256 that
     // the daemon's `invite --list` shows when it refuses it.
@@ -820,10 +922,10 @@ async fn diagnose(
         (Some(_), Some(problem)) => not_checked(&problem.board_line()),
         (Some(url), None) => probes::board(url, token.as_deref(), short)
             .await
-            .unwrap_or_else(|_| {
-                not_checked(
-                    "not checked - the daemon's board answer is in a form this client does not read",
-                )
+            .unwrap_or_else(|cause| {
+                not_checked(&format!(
+                    "not checked - could not read board answer: {cause}"
+                ))
             }),
     };
     let board_state = board
@@ -841,10 +943,10 @@ async fn diagnose(
             Err(()) => not_checked("not checked - no usable credential or URL"),
             Ok(Some(token)) if !token.is_empty() => probes::maintainer(url, &token, short)
                 .await
-                .unwrap_or_else(|_| {
-                    not_checked(
-                        "not checked - the daemon's maintainer answer was incomplete or in a form this client does not read",
-                    )
+                .unwrap_or_else(|cause| {
+                    not_checked(&format!(
+                        "not checked - could not read maintainer answer: {cause}"
+                    ))
                 }),
             Ok(_) => {
                 not_checked("not checked - no bearer token (a tokenless daemon refuses passkeys)")
@@ -875,12 +977,24 @@ async fn diagnose(
             Ok(None) => Ok(None),
             Ok(Some(Value::Object(map))) => match map.get("status") {
                 None | Some(Value::Null | Value::String(_)) => Ok(Some(map)),
-                Some(_) => Err(()),
+                Some(_) => Err(Finding::new(
+                    "GET /health status is not text or null; correct the daemon response schema",
+                )),
             },
-            Ok(Some(_)) | Err(Defer) => Err(()),
+            Ok(Some(_)) => Err(Finding::new(
+                "GET /health JSON is not an object; set PSEUDOLIFE_MCP_DAEMON_URL to the daemon origin",
+            )),
+            Err(cause) => Err(cause),
         },
     };
     let unrecognized = answer.is_err();
+    if let Err(cause) = &answer {
+        put(
+            &mut report,
+            "health_response",
+            json!(format!("could not read /health: {cause}")),
+        );
+    }
     let health = answer.unwrap_or(None);
     let present = health.as_ref().filter(|map| !map.is_empty());
     let status = present.map(|map| map.get("status").cloned().unwrap_or(Value::Null));
@@ -898,7 +1012,10 @@ async fn diagnose(
     put(&mut report, "dreams", dreams(health.as_ref()));
     let mut tools_present = None;
     let healthy = present.filter(|_| status == Some(json!("ok")));
-    if url.is_none() {
+    if let Some(cause) = &connection_problem {
+        put(&mut report, "error", json!("HostConnectionUnavailable"));
+        put(&mut report, "recovery", json!(cause));
+    } else if url.is_none() {
         put(&mut report, "error", json!("DaemonUrlInvalid"));
         put(
             &mut report,
@@ -952,8 +1069,8 @@ async fn diagnose(
         && credential_source.is_none()
     {
         put(&mut report, "error", json!("BearerMissing"));
-        let recovery = if registrations_unread {
-            format!("{BEARER_MISSING} A client registration was {REGISTRATIONS_UNREAD}")
+        let recovery = if let Some(cause) = &registrations_unread {
+            format!("{BEARER_MISSING} Could not read client registrations: {cause}")
         } else {
             BEARER_MISSING.to_owned()
         };
@@ -969,8 +1086,8 @@ async fn diagnose(
                 text.to_owned()
             }
         };
-        // Nothing defers past this point: the handshake starts a shim.
-        let budget = Duration::try_from_secs_f64(args.timeout).map_err(|_| Defer)?;
+        // All local findings have been collected before starting the shim.
+        let budget = Duration::from_secs_f64(args.timeout);
         match handshake::run(env.overlay(), budget).await {
             Ok(result) => {
                 let ok = result.instructions_present
@@ -982,11 +1099,9 @@ async fn diagnose(
                     json!(result.instructions_present),
                 );
                 put(&mut report, "tool_count", json!(result.tool_count));
-                put(
-                    &mut report,
-                    "tools_missing_annotations",
-                    json!(result.missing_annotations),
-                );
+                let mut annotations = json!(result.missing_annotations);
+                redact_report(&mut annotations, token.as_deref());
+                put(&mut report, "tools_missing_annotations", annotations);
                 put(
                     &mut report,
                     "coordination_tools_present",
@@ -1055,9 +1170,9 @@ async fn diagnose(
         None => None,
         Some(saved) => Some(match (fresh(), saved) {
             (Err(()), _) => "unavailable",
-            (_, agent::Saved::Missing) => "missing_registration",
-            (_, agent::Saved::Invalid) => "invalid_state",
-            (token, agent::Saved::State(state)) => match &url {
+            (_, Ok(agent::Saved::Missing)) => "missing_registration",
+            (_, Err(_)) => "invalid_state",
+            (token, Ok(agent::Saved::State(state))) => match &url {
                 Some(url) => agent::probe(url, token, state, short).await,
                 None => "unavailable",
             },
@@ -1101,7 +1216,29 @@ async fn diagnose(
         put(&mut report, "tunnels", json!(tunnels));
     }
     let ok = report.get("ok") == Some(&json!(true));
-    Ok((Value::Object(report), ok))
+    // Redact display fields after decisions, so a bearer that happens to equal
+    // a version or a protocol word cannot change the diagnostic's outcome.
+    for key in [
+        "daemon_version",
+        "dreams",
+        "recovery",
+        "credential_source",
+        "path_resolution",
+        "git_bash",
+        "codex_hooks",
+    ] {
+        if let Some(field) = report.get_mut(key) {
+            redact_report(field, token.as_deref());
+        }
+    }
+    if let Some(field) = report.get_mut("daemon_status")
+        && field != "ok"
+    {
+        redact_report(field, token.as_deref());
+    }
+    let mut report = Value::Object(report);
+    redact_report(&mut report, None);
+    (report, ok)
 }
 
 #[cfg(test)]
@@ -1227,12 +1364,14 @@ mod tests {
     }
 
     #[test]
-    fn timeouts_past_the_cap_defer_in_parse() {
+    fn timeouts_are_bounded_by_representable_deadlines() {
         let args = |value: &str| {
-            parse(&[OsString::from("--timeout"), OsString::from(value)]).map(|args| args.timeout)
+            parse(&[OsString::from("--timeout"), OsString::from(value)])
+                .ok()
+                .map(|args| args.timeout)
         };
         assert_eq!(args("1000000"), Some(1_000_000.0));
-        assert_eq!(args("1000000.5"), None);
+        assert_eq!(args("1000000.5"), Some(1_000_000.5));
         assert_eq!(args("100000000000000000000"), None);
     }
 }

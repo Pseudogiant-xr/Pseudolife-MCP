@@ -1261,7 +1261,7 @@ MUTANTS = [
            ("board-on",)),
     Mutant("doctor-skip-maintainer", "doctor", "shim/src/cli/doctor/mod.rs",
            "probes::maintainer(url, &token, short)",
-           "std::future::ready(Ok::<_, Defer>({ let _ = (url, &token); Map::new() }))",
+           "std::future::ready(Ok::<_, Finding>({ let _ = (url, &token); Map::new() }))",
            ("maintainer-on",)),
     Mutant("doctor-registration-label", "doctor", "shim/src/cli/doctor/clients.rs",
            '"Claude Code registration ({claude})"', '"Claude registration ({claude})"',
@@ -1291,9 +1291,6 @@ MUTANTS = [
     Mutant("doctor-toml-bom-accepted", "doctor", "shim/src/cli/doctor/pyenv.rs",
            "if text.starts_with('\\u{feff}') {", "if text.starts_with('\\u{0}') {",
            ("codex-wake-bom", "codex-registration-double-bom")),
-    Mutant("doctor-agent-path-unnormalized", "doctor", "shim/src/cli/doctor/agent.rs",
-           "let normalized = super::pyenv::path_str(value)?;", "let normalized = value.to_owned();",
-           ("agent-state-trailing-separator",)),
     Mutant("doctor-escape-upper-hex", "doctor", "shim/src/cli/doctor/pyjson.rs",
            'format!("\\\\u{unit:04x}")', 'format!("\\\\u{unit:04X}")',
            ("claude-config-dir-non-ascii",)),
@@ -1328,10 +1325,6 @@ if core.WINDOWS:
     # '.' parts of a backslashed path, on Windows only.
     MUTANTS.append(Mutant("doctor-which-skips-cwd", "doctor", "shim/src/cli/doctor/pyenv.rs",
            'directories.insert(0, ".");', "", ("which-cwd-first",)))
-    MUTANTS.append(Mutant("doctor-pathlib-keeps-dot-parts", "doctor", "shim/src/cli/doctor/pyenv.rs",
-           ".split('\\\\')\n            .filter(|p| !p.is_empty() && *p != \".\")",
-           ".split('\\\\')\n            .filter(|p| !p.is_empty())",
-           ("claude-config-dir-dot-parts",)))
     # Its cases run only where the depth threshold was measured.
     MUTANTS.append(Mutant("doctor-json-depth-off-by-one", "doctor", "shim/src/cli/doctor/agent.rs",
                           "> PYTHON_JSON_DEPTH {", "> PYTHON_JSON_DEPTH + 1 {",

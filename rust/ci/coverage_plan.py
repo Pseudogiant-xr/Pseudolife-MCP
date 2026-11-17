@@ -164,7 +164,6 @@ PLATFORM_EXCLUSIONS = {
         'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
         'backup-owner-name-windows': 'Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.',
         'doctor-json-depth-off-by-one': 'Registered only by the Windows doctor source branch.',
-        'doctor-pathlib-keeps-dot-parts': 'Registered only by the Windows doctor source branch.',
         'doctor-which-skips-cwd': 'Registered only by the Windows doctor source branch.',
         'episode-home-drive-insensitive': 'Declared Windows-only drive spelling witness.',
         'hook-first-address-only': 'Declared Windows-only resolver witness.',

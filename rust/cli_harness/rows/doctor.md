@@ -12,8 +12,12 @@ Producers: README "pseudolife-mcp doctor", docs/guide/configuration.md
 ops/install.* ("run doctor from that command's environment").
 
 Answered: `doctor`, with `--host codex|claude-code|claude-desktop|generic`,
-`--timeout N` (plain positive decimal) and `--agent-state FILE` (not
-starting with `-`), each at most once, any order (:548-554).
+`--timeout N` (finite positive seconds up to 4294967295, including exponent
+notation) and `--agent-state FILE`, in any order. Options accept `--name=value`;
+repeated options take the last value, and `-h`/`--help` prints local help.
+An empty agent-state path, unknown or abbreviated option, missing value,
+invalid host or unrepresentable duration is a usage error with its fix (exit 2).
+Option diagnostics never repeat user-supplied values.
 `--disposable-proof` without a nonempty `PSEUDOLIFE_TEST_DATABASE_URL`
 keeps the existing refusal (:562-566, exit 2).
 
@@ -83,9 +87,35 @@ authentication tests also compile into `cli_doctor_proof_contract` for hosted
 stress. The test helper accepts `PSEUDOLIFE_RUST_BINARY`, as supplied by the
 stress runner. Hosted stress remains pending.
 
-Deferred before any effect: other argv shapes (abbreviations, `=` forms,
-repeats, help, bad values). A saved `--agent-state` with the proof is a usage
-error and does not read that file.
+No input defers the command. A saved `--agent-state` with the proof is a usage
+error and does not read that file. Non-Unicode proof DSNs receive a named
+refusal. Runtime construction failures receive a report with the OS error kind.
+
+Local reads report the setting or check, cause and fix without parser excerpts
+or secret values. JSON uses native finite-number/Unicode syntax, arbitrary-size
+integers and a 256-level nesting bound. Invalid TOML, unsupported setting types,
+non-Unicode environment values, invalid PATHEXT and filesystem failures are
+findings; the other checks still run. Windows path prefixes and drive-relative
+paths use native path handling. Non-Unicode saved-state paths use the OS path.
+
+Saved-state parent components and trusted directory links are supported.
+A leaf link or an unsafe private file is reported with a remedy; the file is
+never changed. Missing, malformed, oversized or unreadable saved state is named
+even when the board is offline. A malformed Codex saved connection suppresses
+network checks and is reported while local checks run; an explicit daemon URL
+remains a legitimate way to select the intended connection.
+
+Duplicate/non-ASCII board headers, unsupported response encodings, wrong
+maintainer field types, incomplete refusals and unsupported health redirects
+are named findings. Error strings omit response contents; URLs with userinfo,
+queries or fragments are redacted. Tunnel and autostart check semantics are unchanged.
+
+The removed `doctor-agent-path-unnormalized` source mutant is replaced by
+`native_agent_json_cells_and_private_path_near_misses`; the removed Windows
+`doctor-pathlib-keeps-dot-parts` mutant is replaced by
+`native_windows_path_shapes` and `pathlib_strings`. The maintainer-skip mutant
+uses the diagnostic error type. The obsolete platform exclusion and now-empty
+`doctor-4` weekly shard are removed.
 
 ## Disposable-proof differences from Python
 

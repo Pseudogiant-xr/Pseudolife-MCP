@@ -103,7 +103,6 @@
     "recovery-stop-gate-dropped"
   ],
   "doctor": [
-    "doctor-agent-path-unnormalized",
     "doctor-agent-proof-inverted",
     "doctor-board-token",
     "doctor-board-unbounded-read",
@@ -122,7 +121,6 @@
     "doctor-int-digits-at-limit",
     "doctor-json-depth-off-by-one",
     "doctor-maintainer-frozen-bearer",
-    "doctor-pathlib-keeps-dot-parts",
     "doctor-redirect-raise-unreachable",
     "doctor-redirect-uri-ignored",
     "doctor-registration-label",
