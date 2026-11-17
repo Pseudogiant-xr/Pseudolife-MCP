@@ -2561,8 +2561,9 @@ def test_replay_passes_on_oracle_goldens_and_ignores_candidate_provenance(
 
 
 def test_maintainer_case_repr_hides_dsn_but_child_receives_it(tmp_path, monkeypatch):
-    import hashlib
+    import inspect
     import subprocess
+    from _pytest.python import IdMaker
     from cli_harness.rows import maintainer
 
     fake_password = "SYNTHETIC_MAINTAINER_PASSWORD_7281"
@@ -2570,13 +2571,17 @@ def test_maintainer_case_repr_hides_dsn_but_child_receives_it(tmp_path, monkeypa
     monkeypatch.setattr(maintainer._bank, "url", lambda _: url)
     case = maintainer.case("repr-safety", "rich", ["list"])
     assert fake_password not in repr(case)
-    parameter = pytest.param(case, id=repr(case))
-    assert fake_password not in parameter.id
+    # Exercise pytest's actual default parameter-ID generation.
+    options = {"func_name": "test_case"} if "func_name" in inspect.signature(IdMaker).parameters else {}
+    identifiers = IdMaker(argnames=("case",), parametersets=[pytest.param(case)],
+                          idfn=None, ids=None, config=None, nodeid="test_case", **options)
+    assert all(fake_password not in value for value in identifiers.make_unique_parameterset_ids())
     arm = core.Arm("rust", tmp_path, tmp_path)
     target = core.Target("rust", [sys.executable])
     environment = core._environment(case, arm, target)
-    script = ("import hashlib,os; print(hashlib.sha256("
-              "os.environ['PSEUDOLIFE_MCP_DATABASE_URL'].encode()).hexdigest())")
+    environment["EXPECTED_DATABASE_URL"] = url
+    script = ("import os; print(os.environ['PSEUDOLIFE_MCP_DATABASE_URL'] == "
+              "os.environ['EXPECTED_DATABASE_URL'])")
     child = subprocess.run([sys.executable, "-I", "-c", script], env=environment,
                            capture_output=True, text=True, check=True, timeout=20)
-    assert child.stdout.strip() == hashlib.sha256(url.encode()).hexdigest()
+    assert child.stdout.strip() == "True"

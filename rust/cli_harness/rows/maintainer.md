@@ -4,12 +4,12 @@ The native `maintainer enrol-code`, `confirm`, `revoke`, `reset` and `list` comm
 
 ## Commands and refusal order
 
-- `enrol-code [--no-wait] [--poll SECONDS]` accepts a numeric polling value, including a value starting with a minus sign. Existing polling behavior and the order of bank checks remain intact.
+- `enrol-code [--no-wait] [--poll SECONDS]` requires finite polling seconds greater than 0 and below 18446744073709551616 when waiting. Invalid values get a usage error before any bank access or code storage; `--no-wait` leaves its unused numeric polling value alone.
 - `confirm [--] PREFIX` and `revoke [--] PREFIX` accept a literal value after `--`, including one that resembles a help flag. Prefix length and base64url validation still happen inside the existing transaction before its first statement.
 - `reset [--yes]` retains its consent check after the table probe. Repeated or abbreviated flags get usage errors; no broader reset is admitted.
 - `list` has no additional arguments. Bare, malformed or undecodable arguments receive exit 2 and a repair before any bank access. Known abbreviations name their full spelling. Argument values are not reproduced in errors.
 
-Help and setup dispatch retain their existing priority. A supplied, nonempty `PSEUDOLIFE_MCP_DATABASE_URL` must pass the shared native DSN parser. Invalid Unicode, syntax, hosts, ports and unsupported options are refused with the setting name and a fixing instruction; the URL, its password and untrusted option keys are never printed. An absent or empty setting preserves container resolution, the retired lite-bank refusal and the existing missing-bank error.
+Help and setup dispatch retain their existing priority. A supplied, nonempty `PSEUDOLIFE_MCP_DATABASE_URL` must pass the shared native DSN parser, including its ordinary `application_name` and `connect_timeout` connection options. Invalid Unicode, syntax, hosts, ports and unsupported options are refused with the setting name and a fixing instruction; the URL, its password and untrusted option keys are never printed. An absent or empty setting preserves container resolution, the retired lite-bank refusal and the existing missing-bank error.
 
 ## Bank behavior
 
@@ -38,6 +38,6 @@ Every displayed time is floored to a whole second and printed in UTC as `YYYY-MM
 
 The existing seeded banks are created with the test login and the disposable-bank guards on the dev machine's test PostgreSQL only. Each arm receives its own copy of a seed. The row wraps connection URL values in a local str subclass with a fixed repr placeholder; the real string payload still reaches the child environment. A synthetic regression checks case repr, pytest parameter ID and actual child delivery. Bank-backed runs are redirected to private machine logs and checked for test-password disclosure before logs are copied or summarized.
 
-Historical `defer-*` IDs remain regression cases for native outcomes. Deferral and local-time normalizers are removed; UTC output is compared directly. New `list-read-error` and `list-column-type-error` cases alter only their guarded disposable copies to exercise failed reads and row decoding, and require the database state to remain unchanged by the command.
+Historical `defer-*` IDs remain regression cases for native outcomes. Deferral and local-time normalizers are removed; UTC output is compared directly. New `list-read-error` and `list-column-type-error` cases alter only their guarded disposable copies to exercise failed reads and row decoding, and require the database state to remain unchanged by the command. These read-fault goldens are the collected replay coverage; the former standalone qualification function in the row was not collected by ordinary pytest and has been removed.
 
 Goldens are recorded from the native candidate with `--record-candidate --write` only for cases whose observable output changes, then replayed. Mutating command observations retain the existing code/secret, clock and audit-chain normalization; no real bank, enrolment or credential is used.

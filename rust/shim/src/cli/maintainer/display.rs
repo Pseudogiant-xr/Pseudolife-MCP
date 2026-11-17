@@ -98,8 +98,10 @@ mod tests {
         flagged.enrolled_by = "phoneKey_quarantineAAA".into();
         flagged.flagged_at = Some(1.0);
         let text = line(&flagged, &utc_clock()).unwrap();
-        assert!(text.contains("enrolled_by=phoneKey_qua"));
-        assert!(text.contains("FLAGGED (sign count went backwards)"));
+        assert_eq!(
+            text,
+            r#"-dashKeyAAAA  pending  'it\'s "twin"'  enrolled_by=phoneKey_qua  active_from=2026-10-03T04:00:00Z  last_used=-  FLAGGED (sign count went backwards)"#
+        );
         flagged.flagged_at = Some(0.0);
         assert!(!line(&flagged, &utc_clock()).unwrap().contains("FLAGGED"));
         flagged.flagged_at = Some(f64::NAN);

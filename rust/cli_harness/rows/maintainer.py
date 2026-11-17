@@ -717,30 +717,3 @@ def cases() -> list[core.Case]:
         defer("defer-dsn-option", "rich", ["list"], env={
             "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(ARM_DB) + "?application_name=x"}),
     ]
-
-
-def test_native_listing_failures_preserve_the_bank(tmp_path):
-    """Native qualification of the same read faults held by the golden row."""
-    from pathlib import Path
-    import pytest
-
-    candidate = os.environ.get("PSEUDOLIFE_RUST_BINARY")
-    if not candidate:
-        pytest.skip("PSEUDOLIFE_RUST_BINARY is required for native bank qualification")
-    selected = {item.id: item for item in cases()}
-    target = core.rust_target(Path(candidate))
-    for case_id in ("list-read-error", "list-column-type-error", "list-rich"):
-        try:
-            observation = core.run_arm(selected[case_id], target, tmp_path / case_id)
-        except Exception as failure:
-            # Shared fixture failures may retain connection arguments.
-            raise AssertionError("native maintainer fixture/process failure: " + type(failure).__name__) from None
-        assert observation["db"] == "unchanged"
-        if case_id == "list-rich":
-            assert observation["exit"] == 0
-            assert b"active_from=" in base64.b64decode(observation["stdout"])
-        else:
-            assert observation["exit"] == 2
-            assert base64.b64decode(observation["stdout"]) == b""
-            error = base64.b64decode(observation["stderr"])
-            assert b"maintainer_passkeys" in error and b"repair" in error

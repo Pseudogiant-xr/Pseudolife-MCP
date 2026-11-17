@@ -28,7 +28,7 @@ fn parse(arguments: &[OsString]) -> Result<Action, String> {
         .ok_or("argument is not valid Unicode; retype it as Unicode text")?;
     if arguments.first() == Some(&"enrol-code") {
         let mut wait = true;
-        let mut poll = 2.0;
+        let mut poll: f64 = 2.0;
         let mut items = arguments[1..].iter();
         while let Some(item) = items.next() {
             match *item {
@@ -47,6 +47,9 @@ fn parse(arguments: &[OsString]) -> Result<Action, String> {
                     return Err("abbreviated option; use --poll SECONDS in full".into()),
                 _ => return Err("unexpected enrol-code argument; run pseudolife-mcp maintainer enrol-code --help".into()),
             }
+        }
+        if wait && (poll <= 0.0 || std::time::Duration::try_from_secs_f64(poll).is_err()) {
+            return Err("--poll needs finite seconds greater than 0 and below 18446744073709551616; use --poll 2".into());
         }
         return Ok(Action::EnrolCode { wait, poll });
     }
@@ -175,15 +178,17 @@ fn dsn() -> Result<Option<crate::pg::Dsn>, &'static str> {
     let value = value.into_string().map_err(
         |_| "PSEUDOLIFE_MCP_DATABASE_URL is not Unicode; set it to a Unicode PostgreSQL URL",
     )?;
-    crate::pg::Dsn::parse(&value).map(Some).map_err(|error| match error {
+    crate::pg::Dsn::parse_with_connection_options(&value).map(Some).map_err(|error| match error {
         crate::pg::Error::UnsupportedOption(ref option) if option == "sslmode" =>
             "PSEUDOLIFE_MCP_DATABASE_URL has an unsupported sslmode; use disable, prefer, require, verify-ca or verify-full",
         crate::pg::Error::UnsupportedOption(_) =>
-            "PSEUDOLIFE_MCP_DATABASE_URL has an unsupported option; use only host, port, user, password, dbname, sslmode and sslrootcert",
+            "PSEUDOLIFE_MCP_DATABASE_URL has an unsupported option; use only host, port, user, password, dbname, sslmode, sslrootcert, application_name and connect_timeout",
         crate::pg::Error::InvalidOption("host") =>
             "PSEUDOLIFE_MCP_DATABASE_URL needs one TCP host; set it to a single-host PostgreSQL URL",
         crate::pg::Error::InvalidOption("port") =>
             "PSEUDOLIFE_MCP_DATABASE_URL has an invalid port; set its port to 1 through 65535",
+        crate::pg::Error::InvalidOption("connect_timeout") =>
+            "PSEUDOLIFE_MCP_DATABASE_URL has an invalid connect_timeout; use nonnegative whole seconds",
         _ => "PSEUDOLIFE_MCP_DATABASE_URL is not an admitted PostgreSQL connection setting; set it to a valid single-host PostgreSQL URL",
     })
 }
@@ -409,6 +414,29 @@ mod tests {
                 Some(Action::Revoke(prefix.into()))
             );
         }
+    }
+
+    #[test]
+    fn waiting_poll_requires_positive_finite_seconds_before_bank_access() {
+        let mut missed = Vec::new();
+        for value in ["-1", "0", "-0", "nan", "NaN", "inf", "-inf", "1e300"] {
+            let result = parse(&argv(&["enrol-code", "--poll", value]));
+            if !matches!(result, Err(ref message) if message.contains("--poll") && message.contains("finite") && message.contains("greater than 0"))
+            {
+                missed.push(value);
+            }
+        }
+        assert!(
+            missed.is_empty(),
+            "invalid poll values accepted: {missed:?}"
+        );
+        assert_eq!(
+            parse(&argv(&["enrol-code", "--poll", "0.01"])).ok(),
+            Some(Action::EnrolCode {
+                wait: true,
+                poll: 0.01
+            })
+        );
     }
 
     /// A sink that takes `room` bytes (three at a time), then refuses.
