@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity-checks",
+  "before": "106263c781ce47c4",
+  "fingerprint": "6e9165d4848e3386",
+  "reason": "Adds the native pairing pytest file to the existing PostgreSQL harness step; no job, service, dependency or build is added. Measured on this PR: Rust run 43984889969 at 32b5d0bbec72e9cb172fcd7de235386a406ddb90, all 20 completed Windows selection jobs passed on their first attempt, 75 tests per iteration: median 45 seconds (0.750 minutes), maximum 67 seconds (1.117 minutes). Whole stress iterations had median 175 seconds (2.917 minutes), including setup that the existing parity job already has. Own-head Ubuntu Rust run 43961221940 at 15327cede measured the earlier 65-case selection at 11 seconds (0.183 minutes), with an 82-second whole iteration (1.367 minutes). These are selection costs, not a measurement of the full parity shard. Ordinary PRs skip the heavy parity job; this accepts the small added selection cost, with full-shard remeasurement by the integration batch under docs/dev/ci-budget.md. Run URLs: https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/43984889969 and https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/43961221940."
+}
