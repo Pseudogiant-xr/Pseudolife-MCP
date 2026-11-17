@@ -3484,7 +3484,8 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
     if not script or (harness and not DATABASE_LOCK_SCRIPT):
         raise Refusal(f"the {name} far half or its lock helper is missing from this checkout")
     if harness:
-        # Ship the controller's helper, never a member's executable code.
+        # Ship the helper already read by this controller, not one loaded
+        # from the remote checkout after it changes to the batch head.
         helper = base64.b64encode(DATABASE_LOCK_SCRIPT.encode("utf-8")).decode("ascii")
         script = script.replace('# LOAD_DATABASE_LOCK',
             f". ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{helper}'))))")

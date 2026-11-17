@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Far half of integrate.py shim-tests. Arguments and bundle arrive over SSH;
-# this controller is read before building a batch, never imported from it.
+# the controller ships this script before the remote checkout is changed.
 set -u
 repo=$1 base=$2 head=$3 ref=$4 nonce=$5 wait_seconds=$6
 export PATH="$PATH:$HOME/.cargo/bin" GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=Never

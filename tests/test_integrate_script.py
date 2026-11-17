@@ -3672,6 +3672,68 @@ def test_database_lock_wrapper_preserves_exit_and_releases(tmp_path, code):
 
 
 @needs_pwsh
+@pytest.mark.skipif(os.name != "nt", reason="Windows process lifetime after TerminateProcess")
+@pytest.mark.parametrize("entrypoint", ["worker", "harness"])
+def test_database_lock_owner_death_stops_its_child_before_reuse(harness_far, tmp_path, entrypoint):
+    import time
+    import psutil
+    lock = tmp_path / "own-database.lock"
+    marker = tmp_path / "child.json"
+    child_code = ("import json, os, psutil, time\n"
+                  f"with open({str(marker)!r}, 'w') as f:\n"
+                  "    json.dump({'pid': os.getpid(), 'started': psutil.Process().create_time()}, f)\n"
+                  "time.sleep(90)\n")
+    if entrypoint == "worker":
+        script = tmp_path / "child.py"
+        script.write_text(child_code, encoding="utf-8")
+        command = _lock_command(lock, sys.executable, str(script))
+        data = None
+    else:
+        head, ref, data = harness_far.batch("def test_child():\n" + "\n".join("    " + line for line in child_code.splitlines()) + "\n")
+        command = [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(ROOT / "ops/rust-harness-remote.ps1"),
+                   "-Repo", str(harness_far.repo), "-Base", harness_far.base, "-Head", head, "-Ref", ref,
+                   "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock), "-PytestArgs", "gate_tests"]
+    child = None
+    identity = None
+    with (tmp_path / "owner.log").open("w", encoding="utf-8") as log:
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, text=True) as owner:
+            try:
+                if data:
+                    owner.stdin.write(data)
+                owner.stdin.close()
+                deadline = time.monotonic() + 60
+                while not marker.exists() and owner.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.05)
+                assert marker.exists(), (tmp_path / "owner.log").read_text(encoding="utf-8")
+                # The child closes the marker before sleeping. Retry a partial write.
+                for _ in range(100):
+                    try:
+                        identity = json.loads(marker.read_text())
+                        break
+                    except ValueError:
+                        time.sleep(.01)
+                assert identity
+                child = psutil.Process(identity["pid"])
+                assert child.create_time() == identity["started"]
+                owner.kill()  # this exact Popen handle, never a process-name search
+                owner.wait(timeout=10)
+                child.wait(timeout=10)
+                resumed = subprocess.run(_lock_command(lock, sys.executable, "-c", "pass"), capture_output=True, text=True, timeout=30)
+                assert resumed.returncode == 0, resumed.stderr
+            finally:
+                if owner.poll() is None:
+                    owner.kill()
+                    owner.wait(timeout=10)
+                if child is not None:
+                    try:
+                        if child.is_running() and child.create_time() == identity["started"]:
+                            child.kill()
+                            child.wait(timeout=10)
+                    except psutil.NoSuchProcess:
+                        pass
+
+
+@needs_pwsh
 @pytest.mark.parametrize("state", ["alive", "reused", "unreadable"])
 def test_database_lock_reclaims_only_proven_stale_identity(tmp_path, state):
     lock = tmp_path / "own-database.lock"
