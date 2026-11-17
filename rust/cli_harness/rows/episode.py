@@ -21,7 +21,6 @@ from pathlib import Path
 from .. import normalize
 from ..core import HOOK_PROBE_ENV, Case
 from ..fixture_daemon import TLS_CA, Trickle, factory, json_body, redirect, text
-from ..mutants import Mutant
 from . import _daemon
 
 HEALTH = {"status": "ok", "version": "0.17.0", "schema": 55, "storage": "postgres",
@@ -266,21 +265,3 @@ def _bank_cases() -> list[Case]:
 
 def cases() -> list[Case]:
     return _wire_cases() + _bank_cases()
-
-
-MUTANTS = [
-    Mutant("episode-start-path", "episode", "shim/src/cli/episode.rs",
-           '"start",\n            format!', '"begin",\n            format!',
-           ("start-plain-dir", "bank-start-git")),
-    Mutant("episode-body-spacing", "episode", "shim/src/cli/episode.rs",
-           'format!("{{\\"session_key\\": {key}}}")', 'format!("{{\\"session_key\\":{key}}}")',
-           ("end-plain",)),
-    Mutant("episode-system-dir-titled", "episode", "shim/src/cli/episode.rs",
-           '"system32" | "syswow64"', '"system33" | "syswow64"', ("start-cwd-system-dir",)),
-    Mutant("episode-home-drive-insensitive", "episode", "shim/src/cli/episode.rs",
-           ".is_some_and(|(home, cwd)| home.as_os_str() == cwd.as_os_str());",
-           ".is_some_and(|(home, cwd)| home == cwd);", ("start-cwd-home-lowercase-drive",),
-           platforms=("windows",)),
-    Mutant("episode-default-name", "episode", "shim/src/cli/episode.rs",
-           '"session".chars()', '"sessions".chars()', ("start-cwd-home", "bank-start-second")),
-]

@@ -65,13 +65,11 @@ def register(harness):
         def prepare_template(self, dsn: str) -> None:
             import psycopg
             sys.path.insert(0, str(harness.REPO))
-            from pseudolife_memory import principal_store
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            PostgresStorage(dsn).close()   # the bank, its v59 tables included
+            from principal_fixtures import prepare_bank, seed_principal
+            prepare_bank(dsn)
             now = time.time()
             with psycopg.connect(dsn, autocommit=True) as conn:
-                invite = principal_store.create_invite(conn, "laptop", ttl_seconds=3600, replace=False)
-                principal_store.redeem(dsn, sha(invite["code"]), sha(LAPTOP))
+                seed_principal(conn, "laptop", token=LAPTOP)
                 for sid, (tok, principal, source, issuer, created, used, expires, revoked) in SESSIONS.items():
                     created_at = now + created
                     conn.execute(

@@ -3,14 +3,12 @@
 Since the Python freeze (14 November 2026) the contract is: every accepted CLI row
 and daemon scenario replays its committed goldens in a parity shard or is named
 as unreplayed here or in parity_scope.UNREPLAYED_ROWS; no job a pull request,
-batch, master push or schedule starts compares against a live Python oracle,
-except the weekly CLI source mutants.
+batch, master push, schedule or manual CI starts compares against a live Python
+oracle. Only the explicitly selected manual stress dispatch is exempt.
 """
 
 import ast
 import itertools
-from collections import Counter
-import json
 import re
 import sys
 from pathlib import Path
@@ -19,12 +17,9 @@ from test_workflow import commands
 
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ["ubuntu-latest", "windows-latest"]
-# Weekly since the Python freeze (14 November 2026): the Sunday schedule
-# and manual CI. The weekday nightly is the other schedule.
+# Both schedules retain the ordinary Rust checks after source-mutant retirement.
 NIGHTLY_CRON = '23 3 * * 1-6'
 WEEKLY_CRON = '23 3 * * 0'
-SOURCE_EVENTS = (f"(github.event_name == 'schedule' && github.event.schedule == '{WEEKLY_CRON}') "
-                 "|| (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
 PARITY_CANCELLED_STEP = {"name": "A needed job was cancelled",
                          "if": "${{ contains(needs.*.result, 'cancelled') }}", "run": "exit 1"}
 PARITY_VERDICT_IF = "${{ !contains(needs.*.result, 'cancelled') }}"
@@ -41,13 +36,7 @@ foreach ($job in @('rust', 'candidate', 'parity-checks')) {
     exit 1
   }
 }
-$sourceResult = $results['source-mutants'].result
-$weekday = $env:GATE_EVENT -ceq 'schedule' -and $env:GATE_SCHEDULE -cne 'WEEKLY_CRON'
-if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push' -or $weekday) -and $sourceResult -ceq 'skipped')) {
-  Write-Error "source-mutants did not succeed outside the PR, merge-group, push and weekday-nightly skip exception"
-  exit 1
-}
-""".replace("WEEKLY_CRON", WEEKLY_CRON)
+"""
 # The parity suites that held only live comparisons against the Python
 # oracle and left CI with the freeze. None may come back into the matrix.
 RETIRED_SUITES = frozenset({"cli-live", "judges", "h5-audit", "h5-backup", "h5-w1a", "h5-background",
@@ -75,9 +64,8 @@ UNREPLAYED_SCENARIOS = frozenset({
 })
 # Run text that starts a Python oracle to compare the candidate against, or
 # replays a recording the same run made from one. No job a pull request, a
-# batch, a master push or a schedule starts may hold one, except the weekly
-# CLI source mutants (each control compares against the checkout's frozen
-# Python, rust/cli_harness/mutants.py). Stress loops are manual dispatches.
+# batch, a master push, a schedule or manual CI starts may hold one.
+# Only the named manual stress dispatch is exempt.
 LIVE_INVOCATIONS = (
     re.compile(r"\bevals[./]rust_port\b"),
     re.compile(r"\bevals[./]rust_baseline\b"),
@@ -87,7 +75,7 @@ LIVE_INVOCATIONS = (
     re.compile(r"(?:rust/)?daemon/harness/(?:mcp_ci|mcp_binding_sweep|mcp_run)\.py\b"),
     re.compile(r"rust/ci/body_evidence\.py\s+run\b"),
     re.compile(r"rust/ci/body_oracle\.py\b"),
-    re.compile(r"rust/ci/run_coverage\.py\s+--suite\b"),
+    re.compile(r"rust/ci/run_coverage\.py\s+--(?:suite|source-shard)\b"),
     # The CLI harness without an exact --golden (--golden-dir is not one),
     # by path or as a module; a recording from the oracle; the in-process
     # Codex planning comparison.
@@ -95,7 +83,7 @@ LIVE_INVOCATIONS = (
     re.compile(r"\s--record(?:-goldens)?(?=\s|$)"),
     re.compile(r"setup_codex_parity\.py\b"),
 )
-LIVE_EXEMPT_JOBS = ("source-mutants", "stress-plan", "stress-build", "stress", "stress-report")
+LIVE_EXEMPT_JOBS = ("stress-plan", "stress-build", "stress", "stress-report")
 
 
 # A trailing shell or PowerShell comment, which must not supply a --golden.
@@ -143,17 +131,6 @@ def all_workflow_live_invocations(root=ROOT):
     return found
 
 
-def cli_controls():
-    result = {}
-    for path in (ROOT / "rust/cli_harness/rows").glob("*.py"):
-        ids = {node.args[0].value for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-               and node.func.id == "Mutant"}
-        if ids:
-            result[path.stem] = ids
-    return result
-
-
 def assigned_list(path, name):
     tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
     return next(ast.literal_eval(node.value) for node in tree.body
@@ -173,14 +150,6 @@ def exception_reasons(value):
             exception_reasons(reason)
     else:
         assert isinstance(value, str) and value.strip(), 'empty or invalid exception reason'
-
-
-def exit_propagation(step, invocation):
-    lines = [line.strip() for line in step['run'].splitlines()
-             if line.strip() and not line.lstrip().startswith('#')]
-    assert step.get('shell') == 'pwsh' and len(lines) == 2 \
-        and lines[1] == 'exit $LASTEXITCODE', 'source-control exit propagation changed'
-    assert lines[0] == invocation, 'source-control driver command or failure propagation changed'
 
 
 def backup_zero_retention_scope(exceptions):
@@ -213,40 +182,17 @@ def backup_zero_retention_scope(exceptions):
 
 
 def check(workflow):
-    from coverage_plan import EXCEPTIONS, SOURCE_SHARDS, PLATFORM_EXCLUSIONS, UNOBSERVED_CONTROLS
-    from control_selection import runtime_controls
-    from rust.cli_harness import core
+    from coverage_plan import EXCEPTIONS
 
     from parity_scope import resolve
     # The full matrix, as the nightly runs it (a master push leaves out the
     # pairs its merged batch passed; parity_scope.pruned).
     workflow = resolve(workflow)
-    declared = cli_controls()
-    selected = json.loads((ROOT / "rust/ci/source_mutants.json").read_text(encoding="utf-8"))
-    assert {row: set(ids) for row, ids in selected.items()} == declared, "source mutant inventory drift"
     exception_reasons(EXCEPTIONS)
     backup_zero_retention_scope(EXCEPTIONS)
-    exception_reasons(PLATFORM_EXCLUSIONS)
-    exception_reasons(UNOBSERVED_CONTROLS)
-    all_controls = set().union(*declared.values())
-    for platform in ('linux', 'windows'):
-        assert set(PLATFORM_EXCLUSIONS[platform]) <= all_controls, 'unknown platform exclusion'
-    observed = set().union(*(all_controls - set(PLATFORM_EXCLUSIONS[p])
-                             - set(EXCEPTIONS['cli_mutants'][p]) for p in ('linux', 'windows')))
-    assert all_controls - observed == set(UNOBSERVED_CONTROLS), 'source control without any OS execution or named global exception'
-    for row in declared:
-        runtime_controls(row, core.PLATFORM)
     rows = assigned_list("rust/cli_harness/rows/__init__.py", "ROWS")
-    assert set(rows) == set(selected), "accepted row without a source-control CI selection"
-    # Payloads must retain every declaration before the dispatcher's platform
-    # eligibility and named-exception filters, not merely retain shard names.
-    assert set(row for row, ids in SOURCE_SHARDS.values()) == set(rows), 'executable source controls changed rows'
-    executable = {row: Counter(mutant for owner, ids in SOURCE_SHARDS.values()
-                               if owner == row for mutant in ids) for row in rows}
-    assert executable == {row: Counter(ids) for row, ids in selected.items()}, 'executable source controls dropped or duplicated'
-    assert all(set(exceptions) <= set().union(*declared.values())
-               for exceptions in EXCEPTIONS['cli_mutants'].values()), 'unknown source-control exception'
     jobs = workflow["jobs"]
+    assert "source-mutants" not in jobs, "the source-mutant job is retired"
     parity = jobs["parity-checks"]
     ordinary_ci = "github.event_name != 'workflow_dispatch' || inputs.mode == 'ci'"
     assert parity['if'] == (f"${{{{ !cancelled() && needs.scope.outputs.push_passed != 'true' "
@@ -296,19 +242,12 @@ def check(workflow):
     missing = daemon_scenarios() - golden_scenarios - UNREPLAYED_SCENARIOS
     assert not missing, f'accepted daemon scenario neither replayed nor named unreplayed: {sorted(missing)}'
 
-    source = jobs["source-mutants"]
-    assert source["strategy"]["matrix"]["os"] == SYSTEMS
-    assert set(source["strategy"]["matrix"]["shard"]) == set(SOURCE_SHARDS), "source mutant shard dropped"
-    assert "exclude" not in source["strategy"]["matrix"]
-    assert not source.get("continue-on-error")
     events = workflow.get('on', workflow.get(True))
     assert events.get('push') == {'branches': ['master']} \
-        and events.get('schedule') == [{'cron': NIGHTLY_CRON}, {'cron': WEEKLY_CRON}], 'source events dropped or changed'
-    assert {'pull_request', 'merge_group', 'workflow_dispatch'} <= set(events), 'source events dropped or changed'
-    assert source['if'] == (f"${{{{ !cancelled() && ({SOURCE_EVENTS}) "
-                            "&& needs.candidate.result == 'success' }}"), 'source event selection changed'
+        and events.get('schedule') == [{'cron': NIGHTLY_CRON}, {'cron': WEEKLY_CRON}], 'CI events dropped or changed'
+    assert {'pull_request', 'merge_group', 'workflow_dispatch'} <= set(events), 'CI events dropped or changed'
     gate = jobs['parity']
-    assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks', 'source-mutants'], 'Parity event gate lost dependency'
+    assert gate['needs'] == ['scope', 'rust', 'candidate', 'parity-checks'], 'Parity event gate lost dependency'
     assert gate['if'] == f'always() && ({ordinary_ci})' and not gate.get('continue-on-error'), 'Parity event gate can skip failures'
     assert len(gate['steps']) == 2, 'Parity event gate steps changed'
     cancelled, required = gate['steps']
@@ -318,23 +257,15 @@ def check(workflow):
     assert required.get('shell') == 'pwsh' and required.get('if') == PARITY_VERDICT_IF \
         and not required.get('continue-on-error'), 'Parity event gate can skip failures'
     assert required['env'] == {'GATE_RESULTS': '${{ toJSON(needs) }}',
-                              'GATE_EVENT': '${{ github.event_name }}',
-                              'GATE_SCHEDULE': '${{ github.event.schedule }}'}, 'Parity event gate inputs changed'
+                              'GATE_EVENT': '${{ github.event_name }}'}, 'Parity event gate inputs changed'
     actual = [line.strip() for line in required['run'].splitlines() if line.strip()]
     expected = [line.strip() for line in PARITY_EVENT_GATE.splitlines() if line.strip()]
     assert actual == expected, 'Parity event gate accepts an unsupported result'
-    invocation = next(s for s in source["steps"] if s.get("name") == "CLI source mutants")
-    assert not invocation.get("if") and not invocation.get("continue-on-error")
-    assert commands(invocation["run"])[0][:6] == ["python", "rust/ci/run_coverage.py", "--source-shard", "${{", "matrix.shard", "}}"]
-    exit_propagation(invocation, "python rust/ci/run_coverage.py --source-shard ${{ matrix.shard }} "
-                     "--out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')")
-    assert not any('oracle_selection' in step.get('run', '') for step in source['steps']), \
-        'source mutants select an event oracle again'
-    assert any(s.get("name") == "ported-row-and-mutant-ci-inventory" for s in jobs["rust"]["steps"])
+    assert any(s.get("name") == "ported-row-ci-inventory" for s in jobs["rust"]["steps"])
 
 if __name__ == "__main__":
     import yaml
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
     everywhere = all_workflow_live_invocations()
     assert not everywhere, f"a workflow starts a live comparison against the Python oracle: {everywhere[0]}"
-    print("ported-row-and-mutant-ci-inventory: all named selections accounted for")
+    print("ported-row-ci-inventory: all named selections accounted for")

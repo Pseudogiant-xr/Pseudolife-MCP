@@ -37,7 +37,6 @@ from pathlib import Path
 
 from .. import normalize
 from ..core import WINDOWS, Case
-from ..mutants import Mutant
 from . import _bank
 
 DB = _bank.name("pl_cf_w1c_backup_src")
@@ -565,92 +564,4 @@ def _cases() -> list[Case]:
              programs=("pg_dump",)),
         Case("posix-symlink-member", ["backup", *data], setup=with_symlink,
              platforms=("linux",), rules=RULES),
-    ]
-
-
-B = "shim/src/cli/backup/"
-MUTANTS = [
-    Mutant("backup-archives-backups-dir", "backup", B + "archive.rs",
-           '    "backups",\n    "native",',
-           '    "embedded_pg",\n    "native",',
-           ("file-mode", "file-mode-out-absolute-keep-half-day")),
-    Mutant("backup-archives-password-file", "backup", B + "archive.rs",
-           '    "embedded_pg",\n    "embedded_pg.secret",\n',
-           '    "embedded_pg",\n    "embedded_pg",\n',
-           ("file-mode",)),
-    Mutant("backup-rotates-dumps-in-file-mode", "backup", B + "mod.rs",
-           "    if include_dumps {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));",
-           "    if true {\n        patterns.insert(0, (DUMP_PREFIX, \".sql.gz\"));", ("file-mode",)),
-    Mutant("backup-rotation-order", "backup", B + "mod.rs",
-           "names.sort_by_key(|name| path_sort_key(name));",
-           "names.sort_by_key(|name| std::cmp::Reverse(path_sort_key(name)));", ("file-mode",)),
-    Mutant("backup-nested-member-order", "backup", B + "archive.rs",
-           "name_sort_key(name, top && cfg!(windows))",
-           "name_sort_key(name, cfg!(windows) || !top)", ("file-mode",)),
-    Mutant("backup-hardlink-identity", "backup", B + "archive.rs",
-           "kind = EntryType::Link;", "kind = EntryType::Regular;", ("member-kinds-roundtrip",)),
-    Mutant("backup-raw-member-name", "backup", B + "archive.rs",
-           "let mut name = arcname.to_vec();",
-           "let mut name = String::from_utf8_lossy(arcname).as_bytes().to_vec();",
-           ("member-kinds-roundtrip",), platforms=("linux",)),
-    Mutant("backup-omits-fifo", "backup", B + "archive.rs",
-           "kind = if file_type.is_fifo() {\n                EntryType::Fifo",
-           "kind = if file_type.is_fifo() {\n                return Ok(())",
-           ("member-kinds-roundtrip",), platforms=("linux",)),
-    Mutant("backup-dump-keeps-owner", "backup", B + "dump.rs",
-           '.args(["--no-owner", "--no-acl", "--dbname", dsn])',
-           '.args(["--no-acl", "--dbname", dsn])', ("dsn-path",)),
-    Mutant("backup-skipped-wording", "backup", B + "mod.rs",
-           "file-mode state archived only", "file mode state archived only", ("file-mode",)),
-    Mutant("backup-pg-dump-failure-strip", "backup", B + "dump.rs",
-           'format!("pg_dump failed: {}", python_strip(&text))',
-           'format!("pg_dump failed: {}", text)', ("dsn-pg-dump-fails",)),
-    Mutant("backup-stdout-failure-exit", "backup", B + "mod.rs",
-           "    } else {\n        120\n    }\n}",
-           "    } else {\n        0\n    }\n}",
-           ("file-mode-stdout-closed",)),
-    Mutant("backup-argparse-repeat-first-wins", "backup", B + "args.rs",
-           '"--data-dir" => args.data_dir = Some(pathlib(Path::new(value))),',
-           '"--data-dir" => { if args.data_dir.is_none() { args.data_dir = Some(pathlib(Path::new(value))); } },',
-           ("file-mode-argparse-equals-repeat-abbrev",)),
-    Mutant("backup-help-ignores-columns", "backup", B + "args.rs",
-           'pub(in crate::cli) fn width() -> usize {\n    std::env::var("COLUMNS")',
-           'pub(in crate::cli) fn width() -> usize {\n    std::env::var("IGNORED_COLUMNS")',
-           ("help-columns-40",)),
-    Mutant("backup-help-closed-exit-1", "backup", B + "mod.rs",
-           'return if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                120',
-           'return if write_stream(true, &args::help(args::width())).is_ok() {\n                0\n            } else {\n                1',
-           ("help-stdout-closed-help", "help-stdout-closed-h")),
-    Mutant("backup-dot-join-keeps-prefix", "backup", B + "args.rs",
-           '    pathlib(&base.join(name))', '    base.join(name)',
-           ("file-mode-data-dir-dot", "file-mode-out-dot")),
-    Mutant("backup-discovery-generic-errno-class", "backup", B + "dump.rs",
-           '        if number == code {\n            return class;',
-           '        if number == code {\n            let _ = class;\n            return "OSError";',
-           ("discovery-permission-metadata", "discovery-permission-read-dir"),
-           platforms=("linux",)),
-    Mutant("backup-owner-name-windows", "backup", B + "archive.rs",
-           '        let _ = (uid, gid);\n        Ok((Vec::new(), Vec::new()))',
-           '        let _ = (uid, gid);\n        Ok((b"unexpected-owner".to_vec(), Vec::new()))',
-           ("file-mode",), platforms=("windows",)),
-]
-if WINDOWS:
-    MUTANTS += [
-        Mutant("backup-member-mode-windows", "backup", B + "archive.rs",
-               "let mut mode = if readonly { 0o444 } else { 0o666 };",
-               "let mut mode = if readonly { 0o444 } else { 0o644 };", ("file-mode",)),
-        Mutant("backup-dotfile-suffix-windows", "backup", B + "archive.rs",
-               "let text = path.to_string_lossy();",
-               "let text = path.extension().map(|ext| format!(\".{}\", ext.to_string_lossy()))"
-               ".unwrap_or_default();",
-               ("file-mode",)),
-        Mutant("backup-top-order-windows", "backup", B + "archive.rs",
-               "name_sort_key(name, top && cfg!(windows))",
-               "name_sort_key(name, false)", ("file-mode",)),
-    ]
-else:
-    MUTANTS += [
-        Mutant("backup-member-mode-posix", "backup", B + "archive.rs",
-               "meta.permissions().mode() & 0o7777", "meta.permissions().mode() & 0o7700",
-               ("file-mode",)),
     ]

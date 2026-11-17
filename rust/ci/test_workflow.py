@@ -373,7 +373,6 @@ def workflow():
     return resolve(yaml.safe_load(WORKFLOW.read_text(encoding="utf-8")))
 
 
-
 def test_shards_cover_both_systems_and_build_once():
     jobs = workflow()["jobs"]
     for name in ("rust", "candidate", "parity-checks", "parity"):
@@ -530,15 +529,14 @@ def test_daemon_artifact_is_built_once_and_shared_with_graph():
     assert permission["run"] == "chmod +x rust/target/release/graph-contract"
 
 
-GATE_NEEDS = ["scope", "rust", "candidate", "parity-checks", "source-mutants"]
+GATE_NEEDS = ["scope", "rust", "candidate", "parity-checks"]
 # The gate's first step fails when a job it needs was cancelled, and its
 # verdict step then skips, so the failed step itself says a cancel caused it
 # (ops/integrate.py reads that to tell a cancel from a failure).
 CANCELLED_IF = "${{ contains(needs.*.result, 'cancelled') }}"
 CANCELLED_STEP = {"name": "A needed job was cancelled", "if": CANCELLED_IF, "run": "exit 1"}
 VERDICT_IF = "${{ !contains(needs.*.result, 'cancelled') }}"
-# The schedules: weekday nightlies, and the Sunday weekly run that also runs
-# the CLI source mutants (and so must not skip them).
+# The weekday and Sunday schedules run the same required Rust checks.
 NIGHTLY = "23 3 * * 1-6"
 WEEKLY = "23 3 * * 0"
 
@@ -551,11 +549,10 @@ def gate_steps(jobs=None):
     return steps[0], steps[1]
 
 
-def run_verdict(needs, event, schedule=WEEKLY):
+def run_verdict(needs, event):
     import os
     return subprocess.run(["pwsh", "-NoProfile", "-Command", gate_steps()[1]["run"]],
-                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event,
-                                   GATE_SCHEDULE=schedule if event == "schedule" else ""),
+                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
                           capture_output=True, text=True)
 
 
@@ -610,38 +607,20 @@ def test_a_cancelled_need_fails_the_gate_as_the_verdict_alone_did(dependency, ev
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
-@pytest.mark.parametrize("dependency", ["parity-checks", "source-mutants"])
+@pytest.mark.parametrize("dependency", ["parity-checks"])
 @pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "schedule", "workflow_dispatch"])
 def test_required_parity_gate_fails_closed(result, dependency, event):
     gate = workflow()["jobs"]["parity"]
     assert gate["needs"] == GATE_NEEDS
     assert gate["if"].startswith("always() &&")
     step = gate_steps()[1]
-    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}",
-                           "GATE_SCHEDULE": "${{ github.event.schedule }}"}
+    assert step["env"] == {"GATE_RESULTS": "${{ toJSON(needs) }}", "GATE_EVENT": "${{ github.event_name }}"}
     needs = {name: {"result": "success"} for name in gate["needs"]}
     needs[dependency]["result"] = result
     # On the Sunday weekly run (the schedule run_verdict passes by default).
     executed = run_verdict(needs, event)
-    accepted = result == "success" or (event in ("pull_request", "merge_group", "push")
-                                       and dependency == "source-mutants" and result == "skipped")
+    accepted = result == "success"
     assert executed.returncode == (0 if accepted else 1), executed.stderr
-
-
-@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", ""])
-def test_a_weekday_nightly_may_skip_only_the_source_mutants(result):
-    # Source mutants are weekly since the Python freeze: a weekday nightly
-    # skips them, but never fails or cancels them, and skips nothing else.
-    needs = {name: {"result": "success"} for name in GATE_NEEDS}
-    needs["source-mutants"]["result"] = result
-    accepted = result in ("success", "skipped")
-    assert run_verdict(needs, "schedule", NIGHTLY).returncode == (0 if accepted else 1)
-    assert run_verdict(needs, "schedule", WEEKLY).returncode == (0 if result == "success" else 1)
-    needs["source-mutants"]["result"] = "skipped"
-    for other in ("rust", "candidate", "parity-checks"):
-        skipped = copy.deepcopy(needs)
-        skipped[other]["result"] = "skipped"
-        assert run_verdict(skipped, "schedule", NIGHTLY).returncode == 1, other
 
 
 @pytest.mark.parametrize("event", ["push", "pull_request", "merge_group", "schedule", "workflow_dispatch"])
@@ -652,8 +631,6 @@ def test_only_a_push_with_no_parity_pairs_left_skips_the_parity_checks(event, pa
     needs = {name: {"result": "success"} for name in GATE_NEEDS}
     needs["scope"]["outputs"] = {"parity_any": parity_any}
     needs["parity-checks"]["result"] = "skipped"
-    if event != "push":
-        needs["source-mutants"]["result"] = "success"
     accepted = event == "push" and parity_any == "false"
     assert run_verdict(needs, event).returncode == (0 if accepted else 1)
     # It never excuses a failed or cancelled parity job, nor a skipped Rust job.
@@ -666,7 +643,7 @@ def test_only_a_push_with_no_parity_pairs_left_skips_the_parity_checks(event, pa
 
 DOCS_ONLY_SKIP = {"scope": {"result": "success", "outputs": {"rust": "false"}},
                   "rust": {"result": "skipped"}, "candidate": {"result": "skipped"},
-                  "parity-checks": {"result": "skipped"}, "source-mutants": {"result": "skipped"}}
+                  "parity-checks": {"result": "skipped"}}
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
@@ -706,7 +683,7 @@ def test_parity_gate_still_fails_a_broken_job_on_a_docs_pull_request(job, result
 # Rust job runs and must pass, and the candidate build and parity matrix skip.
 ORDINARY_PR_SKIP = {"scope": {"result": "success", "outputs": {"rust": "true", "full": "false"}},
                     "rust": {"result": "success"}, "candidate": {"result": "skipped"},
-                    "parity-checks": {"result": "skipped"}, "source-mutants": {"result": "skipped"}}
+                    "parity-checks": {"result": "skipped"}}
 
 
 def test_parity_gate_accepts_an_ordinary_pull_request_without_parity():
@@ -998,32 +975,6 @@ def test_image_job_proves_cached_models_without_network_and_retains_result():
     assert upload["with"]["if-no-files-found"] == "error"
 
 
-@pytest.mark.parametrize("event, schedule, runs", [
-    ("pull_request", "", False), ("merge_group", "", False), ("push", "", False),
-    ("schedule", NIGHTLY, False), ("schedule", WEEKLY, True), ("workflow_dispatch", "", True)])
-def test_source_mutants_run_weekly_and_on_manual_ci_only(event, schedule, runs):
-    from ci_budget import Evaluator, condition_text
-
-    class Event(Evaluator):
-        def lookup(self, path):
-            if path == ["github", "event", "schedule"]:
-                return schedule
-            if path == ["inputs", "mode"]:
-                return "ci"
-            if path == ["needs", "candidate", "result"]:
-                return "success"
-            return super().lookup(path)
-
-    raw = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    assert raw[True]["schedule"] == [{"cron": NIGHTLY}, {"cron": WEEKLY}]
-    condition = workflow()["jobs"]["source-mutants"]["if"]
-    assert condition == ("${{ !cancelled() && ((github.event_name == 'schedule' && github.event.schedule == "
-                         f"'{WEEKLY}') || "
-                         "(github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) "
-                         "&& needs.candidate.result == 'success' }}")
-    assert Event(event, [], set()).run(condition_text(condition)) is runs
-
-
 def test_scope_gates_every_heavy_job_and_fails_safe():
     jobs = workflow()["jobs"]
     scope = jobs["scope"]
@@ -1059,7 +1010,7 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
             expected = expected.replace("&& (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')",
                                         "&& needs.scope.outputs.push_passed != 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')")
         assert jobs[name]["if"] == expected, name
-    # Parity checks and source mutants inherit the skip through their needs.
+    # Parity checks inherit the skip through their needs.
     # Their success checks name rust and candidate: the implicit success()
     # would also cover scope. Parity checks need scope for their matrix, so a
     # failed scope fails them (and the gate) instead of skipping them.
@@ -1074,9 +1025,6 @@ def test_scope_gates_every_heavy_job_and_fails_safe():
     assert jobs["candidate-harness"]["if"] == jobs["candidate"]["if"]
     assert jobs["fixtures"]["if"] == gated % ("inputs.mode == 'ci'", " && needs.scope.outputs.full != 'false'")
     assert "rust" in jobs["parity"]["needs"]
-    assert jobs["source-mutants"]["needs"] == ["candidate"]
-    assert jobs["source-mutants"]["if"].startswith("${{ !cancelled() && ")
-    assert jobs["source-mutants"]["if"].endswith("&& needs.candidate.result == 'success' }}")
     assert jobs["parity"]["needs"][0] == "scope"
 
 
@@ -1546,7 +1494,7 @@ def test_binaryless_harness_units_run_on_both_platforms():
                      "rust/daemon/harness/test_w2d_trace_compare.py",
                      "rust/cli_harness/test_update_row.py",
                      "rust/cli_harness/test_console_browser.py",
-                     # The harness's offline self-test, source-mutant anchors
+                     # The harness's offline self-test and recording checks
                      # included: on a pull request's own checks, not only in
                      # the batch's cli shard.
                      "rust/cli_harness/test_cli_harness.py",), PYTEST_FILTERS)
@@ -1809,7 +1757,7 @@ def cached_jobs():
 
 def test_every_rust_cache_is_saved_on_failure_and_keeps_the_lockfile_hash():
     jobs = cached_jobs()
-    assert set(jobs) >= {"rust", "fixtures", "candidate", "candidate-harness", "parity-checks", "source-mutants"}
+    assert set(jobs) >= {"rust", "fixtures", "candidate", "candidate-harness", "parity-checks"}
     for name, job in jobs.items():
         cache = next(step for step in job["steps"] if step.get("uses") == "Swatinem/rust-cache@v2")
         # The fixtures and frozen-probes jobs only read the Rust job's cache

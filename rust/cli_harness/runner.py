@@ -1,6 +1,5 @@
-"""Command line: run rows live, record goldens, compare against goldens, or
-run the mutant control. Exit 0 only when every selected case matches (or,
-for ``--mutants``, when every mutant is caught)."""
+"""Command line: run rows live, record goldens, or compare against goldens.
+Exit 0 only when every selected case matches."""
 
 from __future__ import annotations
 
@@ -646,7 +645,6 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--record", action="store_true", help="write goldens from the oracle")
     mode.add_argument("--golden", action="store_true", help="compare against goldens")
-    mode.add_argument("--mutants", action="store_true", help="run the mutant control")
     mode.add_argument("--record-candidate", action="store_true",
                       help="re-record this platform's goldens from the candidate (a dry run "
                            "that shows each case's difference unless --write is given)")
@@ -655,7 +653,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-deferral", action="store_true",
                         help="with --record-candidate: record a case whose candidate output "
                              "is a deferral")
-    parser.add_argument("--mutant", action="append", default=[], help="only these mutants")
     parser.add_argument("--skip-bank", action="store_true",
                         help="skip cases that need real daemons on disposable banks")
     parser.add_argument("--out", type=Path, help="write a JSON summary")
@@ -703,10 +700,6 @@ def main(argv: list[str] | None = None) -> int:
     oracle = core.python_target(args.oracle_python, source)
     candidate_path = args.candidate or _default_candidate()
 
-    if args.mutants:
-        from . import mutants  # noqa: PLC0415
-        mutants.SKIP_BANK = args.skip_bank
-        return mutants.main(args.row, args.mutant, oracle, args.verbose, out=args.out)
     # Keyed by row name: two rows may share a PARITY ID (invite and pair).
     # Written after every row, so a later row's crash keeps the earlier ones;
     # ``complete`` turns true only once every selected row has finished.

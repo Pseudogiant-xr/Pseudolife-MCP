@@ -26,7 +26,6 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .. import core, normalize
-from ..mutants import Mutant
 from . import _bank
 
 DAY = 86400
@@ -1289,71 +1288,3 @@ def cases() -> list[core.Case]:
                     prepare=VACUUM_WARNING),
     ]
     return out
-
-
-MUTANTS = [
-    Mutant("audit-iso-conversion-admitted", "audit", "shim/src/cli/board_audit/args.rs",
-           "None => iso(value),", "None => iso(value).or(Some(0.0)),",
-           ("export-invalid-nonnumeric",)),
-    Mutant("audit-repeat-first-wins", "audit", "shim/src/cli/board_audit/args.rs",
-           "slot.1 = value;", "let _ = value;", ("input-repeated", "export-repeated-abbreviated")),
-    Mutant("audit-read-message", "audit", "shim/src/cli/board_audit/mod.rs",
-           "board-audit: cannot read {input}", "board-audit: unreadable {input}", ("input-directory",)),
-    Mutant("audit-payload-depth-capped", "audit", "shim/src/cli/board_audit/codec.rs",
-           "EXPORT_DEPTH: usize = 988;", "EXPORT_DEPTH: usize = 128;", ("export-payload-domain",)),
-    Mutant("audit-decode-one-byte", "audit", "shim/src/cli/board_audit/mod.rs",
-           "self.at + 8192", "self.at + 1", ("input-decode-before-broken",)),
-    Mutant("audit-body-reason-swap", "audit", "shim/src/cli/board_audit/chain.rs",
-           '"body_missing"\n            } else {\n                "body_not_exported"',
-           '"body_not_exported"\n            } else {\n                "body_missing"',
-           ("input-stripped", "input-blanked")),
-    Mutant("audit-broken-exit-3", "audit", "shim/src/cli/board_audit/mod.rs",
-           "Ok(Some(broken)) => return report(broken, 1),",
-           "Ok(Some(broken)) => return report(broken, 3),",
-           ("input-gap", "input-link")),
-    Mutant("audit-export-agent-filter-dropped", "audit", "shim/src/cli/board_audit/bank.rs",
-           "    if let Some(agent) = &filters.agent {",
-           "    if let Some(agent) = &None::<String> {",
-           ("export-agent-full", "export-agent-prefix")),
-    Mutant("audit-export-order-flipped", "audit", "shim/src/cli/board_audit/bank.rs",
-           "FROM coordination_events{filter} ORDER BY seq\"",
-           "FROM coordination_events{filter} ORDER BY seq DESC\"",
-           ("export-all", "bank-verify-rich")),
-    Mutant("audit-redact-body-kept", "audit", "shim/src/cli/board_audit/redact.rs",
-           "UPDATE coordination_events SET body=NULL,body_salt=NULL WHERE",
-           "UPDATE coordination_events SET body=body,body_salt=NULL WHERE",
-           ("redact-removed",)),
-    Mutant("audit-exists-token", "audit", "shim/src/cli/board_audit/mod.rs",
-           "exists; export never replaces a file", "exists; export never overwrites a file",
-           ("export-out-exists",)),
-    Mutant("audit-start-cut-dropped", "audit", "shim/src/cli/board_audit/chain.rs",
-           '("through_seq".into(), integer(cut.through_seq)),', "",
-           ("input-pruned-start-cut", "bank-verify-pruned")),
-    Mutant("audit-siblings-dropped", "audit", "shim/src/cli/board_audit/redact.rs",
-           "            siblings.push(row.try_get::<_, String>(0)?);",
-           "            let _ = row;", ("redact-fanout-siblings",)),
-    # review round 1
-    Mutant("audit-duplicate-eager", "audit", "shim/src/cli/pyjson.rs",
-           "                dict.push((key, value));\n            }",
-           "                dict.push((key, value));\n            }\n"
-           "            if self.unique && repeated { self.duplicate = true; return Err(Refused::NotJson); }",
-           ("input-duplicate-truncated", "input-duplicate-then-long-int")),
-    Mutant("audit-redact-stdout-closed-exit-1", "audit", "shim/src/cli/board_audit/redact.rs",
-           "    } else {\n        120\n    };", "    } else {\n        1\n    };",
-           ("redact-stdout-closed",)),
-    Mutant("audit-printed-hash-token", "audit", "shim/src/cli/board_audit/redact.rs",
-           'let expect_head = format!("{}:{}", redacted.redact_seq, redacted.redact_hash);',
-           'let expect_head = format!("{}:<redact-hash>", redacted.redact_seq);',
-           ("redact-removed",)),
-    Mutant("audit-least-dropped", "audit", "shim/src/cli/board_audit/redact.rs",
-           "        cleared = text.is_some();\n        tx.execute(\n            \"UPDATE "
-           "coordination_messages SET text=NULL,fingerprint='redacted',expires_at=LEAST("
-           "expires_at,$1) WHERE message_id=$2\",",
-           "        cleared = text.is_some();\n        tx.execute(\n            \"UPDATE "
-           "coordination_messages SET text=NULL,fingerprint='redacted',expires_at=expires_at"
-           "+0*$1 WHERE message_id=$2\",",
-           ("redact-future-expiry",)),
-    Mutant("audit-vacuum-warnings-dropped", "audit", "shim/src/cli/board_audit/redact.rs",
-           "Some(tokio_postgres::error::Severity::Warning)",
-           "Some(tokio_postgres::error::Severity::Notice)", ("redact-vacuum-warning",)),
-]

@@ -31,7 +31,6 @@ from .. import core, normalize
 # The oracle's schema version: the candidate's refusal names the one it
 # was built for, pinned to this constant by tests/test_schema_version.py.
 from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
-from ..mutants import Mutant
 from . import _bank
 
 ROW = "transfer"
@@ -851,52 +850,3 @@ def _cases() -> list[core.Case]:
         _import("import-huge-int-float", "huge-int-float",
                 note="an int past int8 into float8 is typed numeric, as psycopg types it"),
     ]
-
-
-MUTANTS = [
-    Mutant("transfer-float-window", ROW, "shim/src/cli/transfer/json.rs",
-           "if !(-4..16).contains(&power) {", "if !(-4..15).contains(&power) {",
-           ("export-tricky",)),
-    # Review of #678 (2026-10-10): Rust's shortest digits instead of repr's
-    # half-to-even choice on an exact tie.
-    Mutant("transfer-float-ties", ROW, "shim/src/cli/transfer/json.rs",
-           "    let (significant, power) = shortest_digits(value.abs());\n"
-           "    let significant = significant.as_str();\n",
-           "    let text = format!(\"{:e}\", value.abs());\n"
-           "    let (mantissa, power) = scientific(&text);\n"
-           "    let significant = mantissa.trim_end_matches('0');\n",
-           ("export-float-ties", "import-float-ties")),
-    # Review of #678 at 6447829f: a refused stdout must change the status.
-    Mutant("transfer-stdout-refusal-ignored", ROW, "shim/src/cli/transfer.rs",
-           "            } else {\n                EXIT_STDOUT_REFUSED\n",
-           "            } else {\n                0\n",
-           ("export-help-stdout-closed", "export-stdout-closed", "import-stdout-closed")),
-    # Review of #678 (2026-10-10): only a server ERROR at COMMIT is certain.
-    Mutant("transfer-commit-fatal-certain", ROW, "shim/src/cli/transfer/sql.rs",
-           "Some(db) if db.parsed_severity() == Some(Severity::Error) =>",
-           "Some(_) =>", ("import-commit-lost-unknown",)),
-    Mutant("transfer-commit-error-uncertain", ROW, "shim/src/cli/transfer/sql.rs",
-           "Some(db) if db.parsed_severity() == Some(Severity::Error) =>",
-           "Some(db) if db.parsed_severity() == Some(Severity::Panic) =>",
-           ("import-commit-refused-fails",)),
-    Mutant("transfer-meta-skip", ROW, "shim/src/cli/transfer.rs",
-           '"active_session_pointer",', '"active_session_pointer_x",', ("export-seeded",)),
-    Mutant("transfer-nonempty-wording", ROW, "shim/src/cli/transfer/import.rs",
-           "import only fills a fresh bank", "import only fills an empty bank",
-           ("import-nonempty-refused",)),
-    Mutant("transfer-entry-sequence", ROW, "shim/src/cli/transfer/import.rs",
-           'if highwater == "0" {', 'if highwater != "-1" {', ("import-seeded",)),
-    Mutant("transfer-refusal-exit", ROW, "shim/src/cli/transfer.rs",
-           "            1,\n        ),\n        Outcome::SchemaRefused",
-           "            2,\n        ),\n        Outcome::SchemaRefused", ("import-format-9",)),
-    Mutant("transfer-drop-inverses", ROW, "shim/src/cli/transfer/import.rs",
-           "    send(pass, &inverses).await?;", "    let _ = &inverses;",
-           ("import-reversed-relations",)),
-    Mutant("transfer-order-flip", ROW, "shim/src/cli/transfer/export.rs",
-           '"DECLARE {cursor} CURSOR FOR SELECT * FROM {} ORDER BY 1"',
-           '"DECLARE {cursor} CURSOR FOR SELECT * FROM {} ORDER BY 1 DESC"',
-           ("export-seeded",)),
-    # Review round 1 (2026-10-09): each guard below is load-bearing.
-    Mutant("transfer-int-type", ROW, "shim/src/cli/transfer/import.rs",
-           '_ => "numeric",', '_ => "int8",', ("import-huge-int-float",)),
-]

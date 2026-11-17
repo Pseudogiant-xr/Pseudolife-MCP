@@ -215,8 +215,9 @@ the existing rollback and verification handling.
 | `mod.rs`: I/O runtime creation fails | Name the OS failure; resolve that system error and re-run | `native_runtime_failure_names_the_system_cause` (Unix unit subprocess with exhausted descriptors), with an unrestricted control |
 | `mod.rs`, `discover.rs`: signal setup or current-directory lookup fails | Name the system failure and the retry/remedy | Signal setup is not fault-injected; current-directory Unicode failure is covered above |
 
-No source-mutant entry points at a removed connect branch. The existing connect
-mutants continue to protect writes, backups, credentials, ordering and transport.
+The automatic connect source-mutant checks were retired on 17 November 2026.
+The native tests named above and committed connect goldens remain the checks
+for writes, backups, credentials, ordering and transport.
 No new harness file or hosted job is added.
 
 ## Declared divergences
@@ -281,7 +282,8 @@ No new harness file or hosted job is added.
   method, target, every header field and the body, as received (review of
   #670: the earlier capture kept only a credential label, so a different
   rejected credential or a changed field was invisible). Same-outcome
-  controls: mutants `connect-latin-1-credential-as-utf8` (a Latin-1
+  controls before their retirement on 17 November 2026:
+  `connect-latin-1-credential-as-utf8` (a Latin-1
   credential sent as UTF-8, still refused alike) and
   `connect-user-agent-changed`.
 - Fixture credentials are generated per harness process and appear in no

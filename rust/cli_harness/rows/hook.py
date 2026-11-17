@@ -25,7 +25,6 @@ from pathlib import Path
 from .. import producers as p
 from ..core import HOOK_PROBE_ENV, Case
 from ..fixture_daemon import TLS_CA, Trickle, factory, json_body, redirect, text
-from ..mutants import Mutant
 
 HEALTH = {"status": "ok", "version": "0.17.0", "schema": 55, "storage": "postgres",
           "auth": True, "bank": "a1b2c3d4", "persist_errors": 0,
@@ -343,42 +342,3 @@ def _finish(cases: list[Case]) -> list[Case]:
 
 def cases() -> list[Case]:
     return _finish(_briefing_cases() + _prompt_cases() + _doorbell_cases())
-
-
-MUTANTS = [
-    Mutant("hook-briefing-cap-order", "hook", "shim/src/cli/briefing_hook.rs",
-           '"/api/briefing?max_unsure={}&max_lessons={}&max_world={}",\n'
-           '            args.caps[0], args.caps[1], args.caps[2]',
-           '"/api/briefing?max_unsure={}&max_lessons={}&max_world={}",\n'
-           '            args.caps[1], args.caps[0], args.caps[2]', ("briefing-caps",)),
-    Mutant("hook-event-name", "hook", "shim/src/cli/briefing_hook.rs",
-           'payload("SessionStart", context)', 'payload("Sessionstart", context)',
-           ("briefing-hook-json",)),
-    Mutant("hook-token-dropped", "hook", "shim/src/cli/briefing_hook.rs",
-           'let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();',
-           'let token: Option<String> = None;', ("briefing-hook-json",)),
-    Mutant("hook-first-address-only", "hook", "shim/src/cli/hook_http.rs",
-           "    for address in tokio::net::lookup_host((host.as_str(), port))\n        .await\n        .map_err(other)?\n    {",
-           "    for address in tokio::net::lookup_host((host.as_str(), port))\n        .await\n        .map_err(other)?\n        .take(1)\n    {",
-           ("briefing-hook-json-localhost",),
-           # Linux resolves localhost to 127.0.0.1 first; only Windows
-           # (::1 first) exercises the fallback to the next address.
-           platforms=("windows",)),
-    Mutant("hook-whole-reply-budget", "hook", "shim/src/cli/hook_http.rs",
-           "            Poll::Ready(result) => {\n                this.read = None;\n",
-           "            Poll::Ready(result) => {\n",
-           ("briefing-health-trickle", "prompt-trickle")),
-    Mutant("hook-redirect-repeat-limit", "hook", "shim/src/cli/hook_http.rs",
-           "visited.get(&next).copied().unwrap_or(0) >= 4",
-           "visited.get(&next).copied().unwrap_or(0) >= 5",
-           ("briefing-health-redirect-loop",)),
-    Mutant("hook-cursor-not-saved", "hook", "shim/src/cli/briefing_hook.rs",
-           'file.write_all(format!("{next}\\n").as_bytes()).ok()?;',
-           'file.write_all(b"").ok()?;', ("prompt-first-note",)),
-    Mutant("hook-since-dropped", "hook", "shim/src/cli/briefing_hook.rs",
-           'target.push_str(&format!("&since={since}"));', 'let _ = &since;',
-           ("prompt-existing-cursor",)),
-    Mutant("hook-doorbell-receipt-inverted", "hook", "shim/src/cli/doorbell_seen.rs",
-           'if payload["prompt"] == record["text"] {', 'if payload["prompt"] != record["text"] {',
-           ("doorbell-positive", "doorbell-ordinary-prompt")),
-]
