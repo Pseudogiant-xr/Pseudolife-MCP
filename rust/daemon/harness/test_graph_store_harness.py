@@ -1,10 +1,12 @@
 """Rejecting controls for the store harness's semantic clock comparison."""
 import copy
 from contextlib import ExitStack
+import importlib.abc
 import os
 import json
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -91,8 +93,8 @@ class ClockControls(unittest.TestCase):
                 ("graph_store.pg.create", {"side_effect": lambda name, **_: name}),
                 ("graph_store.pg.drop", {}), ("graph_store.seed", {}),
                 ("psycopg.connect", {"return_value": connection}),
-                ("pseudolife_memory.storage.postgres.PostgresStorage", {}),
-                ("graph_store.oracle_call", {"return_value": {"value": None}}),
+                ("graph_store.ReadFixture", {"return_value": MagicMock(
+                    apply=MagicMock(return_value={"value": None}))}),
                 ("graph_store.subprocess.Popen", {"return_value": process}),
                 ("psutil.Process", {}), ("graph_store.dbstate.dump", {"side_effect": observed}),
             ]:
@@ -192,6 +194,112 @@ class ClockControls(unittest.TestCase):
     def test_nonfinite_json_refuses(self):
         with self.assertRaisesRegex(ValueError, "non-finite"):
             strict_json('{"value":NaN}')
+
+
+class IndependentFixtures(unittest.TestCase):
+    def test_seed_and_replay_import_without_product(self):
+        class Block(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, *args):
+                if fullname == "pseudolife_memory" or fullname.startswith("pseudolife_memory."):
+                    raise AssertionError("product imported: " + fullname)
+
+        saved = {n: m for n, m in sys.modules.items() if n == "pseudolife_memory"
+                 or n.startswith("pseudolife_memory.")}
+        guard = Block()
+        sys.meta_path.insert(0, guard)
+        for name in saved:
+            del sys.modules[name]
+        try:
+            import graph_fixtures
+            with patch("graph_fixtures.connect") as connection, patch("graph_fixtures.ensure_schema"):
+                graph_fixtures.seed("disposable fixture")
+                self.assertGreater(connection.return_value.__enter__.return_value.execute.call_count, 20)
+            with patch("graph_store.pg.create", side_effect=RuntimeError("reached disposable setup")), \
+                    patch("graph_store.pg.drop"):
+                with self.assertRaisesRegex(RuntimeError, "reached disposable setup"):
+                    graph_store.run(Path("unused"), "golden")
+        finally:
+            sys.meta_path.remove(guard)
+            sys.modules.update(saved)
+
+    def test_seed_guards_target_before_open_and_connection_before_writes(self):
+        import graph_fixtures as fixture
+        with patch.object(fixture, "refuse_production_database", side_effect=ValueError("refused")), \
+                patch.object(fixture.psycopg, "connect") as connect:
+            with self.assertRaisesRegex(ValueError, "refused"):
+                fixture.seed("postgresql://localhost/pseudolife_memory")
+            connect.assert_not_called()
+        with patch.object(fixture, "refuse_production_database"), \
+                patch.object(fixture, "assert_disposable_database", side_effect=ValueError("server refused")), \
+                patch.object(fixture.psycopg, "connect") as connect:
+            with self.assertRaisesRegex(ValueError, "server refused"):
+                fixture.seed("postgresql://localhost/pl_cf_w3h_fixture")
+            connect.return_value.execute.assert_not_called()
+            connect.return_value.close.assert_called_once()
+
+    def test_collation_changes_only_the_recorded_inverse_relation(self):
+        from graph_fixtures import ReadFixture
+        golden = json.loads(graph_store.GOLDEN.with_name("graph-read.json").read_text(encoding="utf-8"))
+        fixture = object.__new__(ReadFixture)
+        fixture.conn = MagicMock()
+        for relation in ("aa", "a-z"):
+            fixture.conn.execute.return_value.fetchone.return_value = (relation,)
+            for index in range(158, 164):
+                want = golden["cases"][index]["response"]
+                expected = copy.deepcopy(want)
+                for edge in expected["value"]["edges"]:
+                    if edge.get("via") == ["inverse:z"]:
+                        edge["relation"] = relation
+                got = fixture.subgraph(golden["operations"][index], want)
+                self.assertEqual(got, expected)
+                self.assertEqual(want, golden["cases"][index]["response"])
+
+
+class CandidateRecording(unittest.TestCase):
+    def drive(self, path, write=False, cases=None):
+        case = {"index": 0, "op": "fixture", "response": {"value": 2}, "state_sha256": "candidate", "diffs": []}
+        results = {}
+        with patch("graph_store.GOLDEN", path), patch("graph_store.operations", return_value=[{"op": "fixture"}]), \
+                patch("graph_store.run", return_value=[case] if cases is None else cases) as run, \
+                patch("candidate_record.provenance", return_value={"candidate_sha256": "fixture", "commit": "head", "rust_tree": "clean"}):
+            code = graph_store.record_candidate(Path("unused"), "store", write, results)
+        return code, results, run
+
+    def test_dry_run_then_write_then_unchanged_round_trip(self):
+        with tempfile.TemporaryDirectory() as home:
+            path = Path(home) / "graph-store.json"
+            before = '{"operations": [], "cases": [], "normalizers": "retained"}'
+            path.write_text(before)
+            code, result, run = self.drive(path)
+            self.assertEqual(code, 1)
+            self.assertEqual(result["recording"]["changed"], ["store"])
+            self.assertEqual(path.read_text(), before)
+            run.assert_called_once_with(Path("unused"), "record", row="store", metadata=result)
+            code, result, _ = self.drive(path, write=True)
+            self.assertEqual(code, 0)
+            recorded = json.loads(path.read_text())
+            self.assertEqual(recorded["normalizers"], "retained")
+            self.assertEqual(recorded["recorded_from_candidate"]["store"]["candidate_sha256"], "fixture")
+            self.assertEqual(recorded["cases"][0]["response"], {"value": 2})
+            self.assertEqual(self.drive(path)[0], 0)
+
+    def test_mutant_refuses_before_launch(self):
+        with patch.dict(os.environ, {"PSEUDOLIFE_DAEMON_MUTANT": "graph-alias"}):
+            code, result, run = self.drive(Path("unused"), write=True)
+        self.assertEqual(code, 1)
+        self.assertIn("PSEUDOLIFE_DAEMON_MUTANT", result["failure"])
+        run.assert_not_called()
+
+    def test_recording_failures_never_write(self):
+        with tempfile.TemporaryDirectory() as home:
+            path = Path(home) / "graph-store.json"
+            for cases in ([], [{"response": {"value": "is deferred in this candidate"}, "diffs": []}],
+                          [{"response": {}, "diffs": ["bad state"]}],
+                          [{"response": {"value": home}, "diffs": []}]):
+                path.write_text('{"operations": [], "cases": []}')
+                before = path.read_bytes()
+                self.assertEqual(self.drive(path, write=True, cases=cases)[0], 1)
+                self.assertEqual(path.read_bytes(), before)
 
 
 if __name__ == "__main__":

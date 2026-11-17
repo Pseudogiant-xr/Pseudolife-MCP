@@ -156,8 +156,8 @@ The graph-store boundary uses the same disposable-bank and state helpers:
 
 ```bash
 cargo build --manifest-path rust/Cargo.toml --bin graph-contract --features graph-harness,mutants -j 3
-python rust/daemon/harness/graph_store.py live --candidate <graph-contract> --out graph-live.json
 python rust/daemon/harness/graph_store.py golden --candidate <graph-contract>
+python rust/daemon/harness/graph_store.py golden --candidate <graph-contract> --record-candidate
 python rust/daemon/harness/graph_store.py mutants --candidate <graph-contract> --out graph-mutants.json
 ```
 
@@ -165,14 +165,24 @@ It compares every response and all bank state after each operation. Clocks
 are checked in each arm's operation window and keep their change identity;
 stored REAL responses use PostgreSQL's text-format spelling like Psycopg.
 Goldens retain all-row and sequence digests; catalogs must remain unchanged
-within each arm, and live mode also compares them across arms. The fixture
+within each arm. Guarded SQL fixtures and the committed schema plan seed the bank
+without the Python package. The fixture
 binary is available only with `graph-harness`; it has no model or HTTP server.
 These are store APIs for subsequent services, not installed graph routes.
 
-`graph_store.py` also accepts `--row read` in live, golden and mutants modes.
-It exercises the actual GraphStore oracle source and pure graph functions;
+`graph_store.py` also accepts `--row read` in golden and mutants modes.
+It exercises the native graph storage and pure graph functions;
 `test_graph_read_compare.py` checks the narrow ordering/path/provenance rules.
 Subgraph path choice remains exact because it selects returned nodes and edges.
+
+`graph_store.py golden --record-candidate` records the Rust candidate through
+the replay's clock, catalog and structural checks, using `candidate_record.py`.
+It reports changes without writing unless `--write` is given, records candidate
+provenance, and refuses a selected mutant or failed observation. Use scratch
+copies for recording checks; one golden serves both platforms. On a different
+database locale, the last nine read cells compare full state with an independent
+SQL fixture and select the inverse relation using PostgreSQL's local ordering;
+all other response fields and the structural comparator remain unchanged.
 
 `run.py embedding --rust-bin <binary> --model <existing model> --out <file>`
 runs Python torch, Python ONNX and Rust sequentially on a canonical text corpus.

@@ -1,17 +1,15 @@
-"""Graph-store differential: all bank state after every operation, plus goldens.
+"""Graph regression replay: all bank state after every operation, plus goldens.
 
 Uses the daemon harness's disposable-bank guard, environment isolation and
 state comparator. The candidate is a feature-gated native fixture executable;
-the oracle is the checkout's actual PostgresStorage methods, without models.
+fixed SQL fixtures initialize its bank without importing the retired package.
 """
 from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from functools import lru_cache
 import hashlib
-import importlib.util
 import json
 import math
 import os
@@ -20,13 +18,13 @@ import subprocess
 import sys
 import tempfile
 import time
-from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 import dbstate
 import pgdisposable
 from daemons import base_env
+from graph_fixtures import ReadFixture, seed
 
 pg = pgdisposable.Slice("w3h")
 
@@ -48,7 +46,7 @@ def golden_collation_skips(golden, locale):
     if same_locale(golden["database_locale"], locale):
         return [], None
     reason = (f"graph-read golden requires recorded locale {golden['database_locale']}; "
-              f"disposable database has {locale}; live differential remains required")
+              f"disposable database has {locale}; independent SQL fixture comparison required")
     if os.environ.get("PL_GRAPH_REQUIRE_RECORDED_LOCALE") == "1":
         raise AssertionError(reason)
     indices = golden["collation_cases"]
@@ -96,47 +94,6 @@ def response_diff(expected, actual):
     if not differences and json.dumps(expected, sort_keys=True) != json.dumps(actual, sort_keys=True):
         differences.append("JSON scalar types differ")
     return differences
-
-
-def seed(url):
-    from pseudolife_memory.storage.postgres import PostgresStorage
-    # Seed via the oracle's own persistence APIs; no hand-written rows.
-    with patch("pseudolife_memory.storage.postgres.time.time", return_value=1.0):
-        st = PostgresStorage(url)
-        try:
-            a = st.ensure_entity("node-a", "Node A")
-            b = st.ensure_entity("node-b", "Node B", "runtime")
-            c = st.ensure_entity("node-c", "Node C")
-            st.add_alias("first", a)
-            st.upsert_entity_source(a, "fixture-source", "manual", 1.0)
-            st.upsert_entity_source(b, "fixture-source", "derived", 1.0)
-            st.upsert_entity_source(a, "carried-source", "derived", 1.0)
-            for index, (name, value, subject, obj) in enumerate([
-                ("Node A", "Node B", a, b), ("node_a", "Node C", None, c),
-                ("G:", "capacity", None, None), ("alpha beta", "x", None, None),
-                ("ΟΣ", "Greek", None, None), ("100%_done", "percent", None, None),
-                ("AA_İ", "tied-segment", None, None),
-                ("prefix_\uA7CB", "unicode-14-a", None, None),
-                ("prefix_\u1C89", "unicode-14-b", None, None),
-                ("prefix_\uA7CC", "unicode-14-c", None, None),
-            ]):
-                st.upsert_fact(dict(entity=name, attribute=f"attr-{index}",
-                    entity_norm=name.lower(), attribute_norm=f"attr-{index}",
-                    value=value, status="current", polarity="+", confidence=0.7,
-                    asserted_at=1.0, last_confirmed=1.0, entity_id=subject,
-                    object_entity_id=obj))
-            st.replace_lessons([dict(entity="Node A", attribute="approach",
-                entity_norm="node a", attribute_norm="approach", value="keep",
-                about="Node B", outcome="success", polarity="+", status="current",
-                confidence=0.7, asserted_at=1.0, last_confirmed=1.0,
-                entity_id=a, object_entity_id=b)])
-            # A small deterministic vector is sufficient for edge-evidence FKs.
-            for index in range(2):
-                st.insert_entry(dict(band="flat", text=f"fixture support {index}",
-                    embedding=[0.0] * 1024, surprise=0.0, ts=1.0,
-                    access_count=0, source="fixture", superseded_at=1.0 if index else None))
-        finally:
-            st.close()
 
 
 def operations(row="store"):
@@ -284,60 +241,20 @@ def catalog_shape(state):
     return catalog
 
 
-def oracle_call(st, request):
-    kwargs = {k: v for k, v in request.items() if k != "op"}
-    try:
-        if request["op"] == "subgraph":
-            value = oracle_graph_store()(st).subgraph(request["root"],
-                depth=request.get("depth", 1), to_id=request.get("to"))
-            value["nodes"] = sorted(value["nodes"])
-            return {"value": value}
-        if request["op"] in {"degree_counts", "degrees_by_name", "shortest_path", "resolve_relation",
-                             "derive_edges", "build_subgraph"}:
-            from pseudolife_memory import graph
-            value = getattr(graph, request["op"])(**kwargs)
-            if request["op"] == "build_subgraph":
-                value["nodes"] = sorted(value["nodes"])
-            return {"value": value}
-        if request["op"] == "alias_canonical_map":
-            from pseudolife_memory.graph import alias_canonical_map
-            return {"value": alias_canonical_map(request["entities"],
-                {int(k): v for k, v in request["aliases"].items()})}
-        if request["op"] == "norm_name":
-            from pseudolife_memory.graph import norm_name
-            return {"value": norm_name(request["raw"])}
-        return {"value": getattr(st, request["op"])(**kwargs)}
-    except Exception as error:
-        if not getattr(error, "sqlstate", None):
-            raise
-        return {"sqlstate": error.sqlstate}
-
-
-@lru_cache(maxsize=1)
-def oracle_graph_store():
-    # Execute the actual checkout source without importing memory/__init__,
-    # whose unrelated eager imports require torch. This wrapper uses graph.py
-    # and the real PostgresStorage methods; no model or substitute oracle.
-    source = REPO / "pseudolife_memory/memory/graph_store.py"
-    spec = importlib.util.spec_from_file_location("graph_store_oracle", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.PostgresNetworkxGraphStore
-
-
 def run(candidate, mode, mutant=None, row="store", metadata=None):
-    from pseudolife_memory.storage.postgres import PostgresStorage
+    if mode not in {"golden", "record"}:
+        raise ValueError("live Python comparison is retired; use golden or --record-candidate")
     import psutil
     names = [pg.name(pg.PREFIX + str(os.getpid() * 10 + n)) for n in range(3)]
-    proc = oracle = None
+    proc = reference = None
     cases = []
     skip_reason = None
     skipped_indices = []
     try:
         template = pg.create(names[0])
         golden_path = GOLDEN if row == "store" else GOLDEN.with_name("graph-read.json")
-        golden = json.loads(golden_path.read_text(encoding="utf-8")) if mode == "golden" else None
-        if golden and golden["operations"] != operations(row):
+        golden = json.loads(golden_path.read_text(encoding="utf-8"))
+        if mode == "golden" and golden["operations"] != operations(row):
             raise AssertionError("golden input inventory is stale")
         if row == "read":
             import psycopg
@@ -350,16 +267,16 @@ def run(candidate, mode, mutant=None, row="store", metadata=None):
                 metadata["database_locale"] = locale
             # template1 carries vector for the restricted test login. Pinning
             # template0's locale loses that untrusted extension; retain isolation
-            # and declare the recorded replay skip, while live runs still compare
-            # both implementations under the runner's actual collation.
-            if golden:
+            # and compare locale-dependent cells with an independent SQL
+            # fixture under the runner's actual collation.
+            if mode == "golden":
                 skipped_indices, skip_reason = golden_collation_skips(golden, locale)
                 if skipped_indices:
-                    print(f"SKIP golden comparisons for cases {skipped_indices}: {skip_reason}", flush=True)
+                    print(f"SQL fixture comparisons for cases {skipped_indices}: {skip_reason}", flush=True)
         seed(template)
         urls = [pg.create(name, template=names[0]) for name in names[1:]]
         initial = dbstate.dump(urls[0])
-        clocks = [ClockState("python"), ClockState("rust")]
+        clocks = [ClockState("sql fixture"), ClockState("rust")]
         for clock in clocks:
             clock.initialize(initial)
         with tempfile.TemporaryDirectory(prefix="pl-w3h-") as home, ThreadPoolExecutor(max_workers=1) as reader:
@@ -379,26 +296,26 @@ def run(candidate, mode, mutant=None, row="store", metadata=None):
                         proc.terminate()
                         proc.wait(timeout=10)
                 lifetime.callback(stop_fixture)
-                if mode != "golden" or skipped_indices:
-                    # Warm the oracle through every operation so fallback cases
-                    # retain exact response, row, sequence and catalog checks.
-                    oracle = PostgresStorage(urls[0])
+                if skipped_indices:
+                    reference = ReadFixture(urls[0])
                 for index, request in enumerate(operations(row)):
                     context = request
                     if request["op"] == "subgraph":
-                        if oracle:
-                            loaded = oracle.load_graph()
-                            context = {**request, "op": "build_subgraph", "edges": [
-                                dict(src=e["src_id"], relation=e["relation"], dst=e["dst_id"],
-                                     confidence=e["confidence"], origin=e["origin"])
-                                for e in loaded["edges"]], "relations": {r["name"]: dict(
-                                    transitive=r["transitive"], inverse_of=r["inverse_of"])
-                                    for r in oracle.load_relations()}}
+                        if mode == "record":
+                            from graph_fixtures import read_context
+                            context = read_context(urls[1], request)
                         else:
                             context = golden["cases"][index]["comparison_context"]
-                    pstart = time.time()
-                    expected = oracle_call(oracle, request) if oracle else golden["cases"][index]["response"]
-                    pend = time.time()
+                    expected = golden["cases"][index]["response"] if mode == "golden" else None
+                    pstart = wall_time()
+                    fixture_response = reference.apply(request, pstart) if reference else None
+                    pend = wall_time()
+                    if reference and (fixture_response is not None or index in skipped_indices):
+                        pstate = clocks[0].state(dbstate.dump(urls[0]), index, (pstart, pend))
+                        if catalog_shape(pstate) != catalog_shape(initial):
+                            raise AssertionError("SQL fixture unexpectedly changed the bank catalog")
+                        if index in skipped_indices:
+                            expected = fixture_response if fixture_response is not None else reference.subgraph(request, expected)
                     sstart = wall_time()
                     proc.stdin.write(json.dumps(request, ensure_ascii=True) + "\n")
                     proc.stdin.flush()
@@ -412,20 +329,18 @@ def run(candidate, mode, mutant=None, row="store", metadata=None):
                         raise AssertionError("candidate unexpectedly changed the bank catalog: " +
                                              str(dbstate.diff(catalog_shape(initial), catalog_shape(sstate))[:3]))
                     actual = clocks[1].response(actual)
-                    if oracle:
-                        pstate = clocks[0].state(dbstate.dump(urls[0]), index, (pstart, pend))
-                        if catalog_shape(pstate) != catalog_shape(initial):
-                            raise AssertionError("oracle unexpectedly changed the bank catalog")
-                        expected = clocks[0].response(expected)
+                    if index in skipped_indices:
                         state_diffs = dbstate.diff(pstate, sstate)
                         expected_hash = digest(pstate)
                     else:
                         state_diffs = []
-                    if golden and index not in skipped_indices:
+                    if mode == "golden" and index not in skipped_indices:
                         expected = golden["cases"][index]["response"]
                         expected_hash = golden["cases"][index]["state_sha256"]
                         if digest(sstate) != expected_hash:
                             state_diffs.append("golden bank-state digest differs")
+                    if mode == "record":
+                        expected, expected_hash = actual, digest(sstate)
                     if context["op"] in {"derive_edges", "build_subgraph", "shortest_path"}:
                         from graph_read_compare import compare
                         diffs = compare(context, expected, actual, response_diff) + state_diffs
@@ -444,8 +359,8 @@ def run(candidate, mode, mutant=None, row="store", metadata=None):
                     raise RuntimeError("candidate exit failure")
         return cases
     finally:
-        if oracle:
-            oracle.close()
+        if reference:
+            reference.close()
         if proc and proc.poll() is None:
             # This Popen child has not been reaped; verify its recorded start
             # time as well, then stop only this fixture (it has no children).
@@ -457,14 +372,43 @@ def run(candidate, mode, mutant=None, row="store", metadata=None):
             pg.drop(name)
 
 
+def record_candidate(candidate, row, write, results):
+    import candidate_record
+    why = candidate_record.refuse_mutant_environment()
+    if why:
+        results["failure"] = why
+        print(why, flush=True)
+        return 1
+    golden_path = GOLDEN if row == "store" else GOLDEN.with_name("graph-read.json")
+    cases = run(candidate, "record", row=row, metadata=results)
+    observed = {"operations": operations(row), "cases": cases}
+    if row == "read":
+        observed.update(database_locale=results["database_locale"], collation_cases=list(range(155, 164)))
+    failures = [d for case in cases for d in case["diffs"]]
+    failures += [mark for case in cases if (mark := candidate_record.deferral(case["response"]))]
+    if not cases or len(cases) != len(observed["operations"]):
+        failures.append("candidate did not answer every operation")
+    recording = candidate_record.Recording(golden_path, tuple(observed), candidate,
+                                           whole=False, defined=[row], single=True)
+    recording.write = write
+    recording.observe(row, observed, failures, candidate_record.round_trip)
+    results["recording"] = recording.report
+    return recording.finish(write, f"graph_store.py golden --row {row} --candidate <binary>")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["live", "golden", "mutants"])
+    parser.add_argument("mode", choices=["golden", "mutants"])
     parser.add_argument("--candidate", type=Path, required=True)
-    parser.add_argument("--record", action="store_true")
+    parser.add_argument("--record-candidate", action="store_true")
+    parser.add_argument("--write", action="store_true")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--row", choices=["store", "read"], default="store")
     args = parser.parse_args()
+    if args.write and not args.record_candidate:
+        parser.error("--write needs --record-candidate")
+    if args.record_candidate and args.mode != "golden":
+        parser.error("--record-candidate belongs to golden mode")
     results = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO,
                                                text=True).strip(),
                "platform": sys.platform,
@@ -472,30 +416,20 @@ def main():
                "row": args.row,
                "candidate_sha256": hashlib.sha256(args.candidate.read_bytes()).hexdigest()}
     try:
-        control = run(args.candidate, "golden" if args.mode == "golden" else "live",
+        if args.record_candidate:
+            return record_candidate(args.candidate, args.row, args.write, results)
+        control = run(args.candidate, "golden",
                       row=args.row, metadata=results)
         failed = sum(bool(c["diffs"]) for c in control)
         skipped = [c["index"] for c in control if "skip_reason" in c]
         results["summary"] = {"cases": len(control) - len(skipped), "diff_cases": failed}
         if skipped:
             results["summary"].update(executed_cases=len(control), skipped_indices=skipped,
-                                      live_fallback_cases=len(skipped),
+                                      sql_fixture_cases=len(skipped),
                                       skip_reason=next(c["skip_reason"] for c in control if "skip_reason" in c))
         print(json.dumps(results["summary"]), flush=True)
         if failed:
             return 1
-        if args.record:
-            if args.mode != "live":
-                parser.error("--record requires live mode")
-            golden_path = GOLDEN if args.row == "store" else GOLDEN.with_name("graph-read.json")
-            locale_metadata = {"database_locale": results["database_locale"],
-                               "collation_cases": list(range(155, 164))} if args.row == "read" else {}
-            golden_path.write_text(json.dumps(dict(operations=operations(args.row), cases=control,
-                **locale_metadata,
-                normalizers="ClockState in graph_store.py; operation-specific windows; JSON object order free" +
-                    ("; graph_read_compare.py: derived multisets, inverse collision provenance, node sets, "
-                     "standalone minimum paths; subgraph selection exact" if args.row == "read" else "")),
-                indent=1, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n")
         if args.mode == "mutants":
             outcomes = {}
             failures = {}
@@ -504,7 +438,7 @@ def main():
                 from graph_read_profile import MUTANTS as mutants
             for mutant in mutants:
                 try:
-                    cases = run(args.candidate, "live", mutant, row=args.row)
+                    cases = run(args.candidate, "golden", mutant, row=args.row)
                     outcomes[mutant] = sum(bool(c["diffs"]) for c in cases)
                 except Exception as error:
                     # Only a completed comparison can catch a source mutant.
