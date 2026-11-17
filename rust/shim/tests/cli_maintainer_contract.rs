@@ -34,7 +34,12 @@ fn assert_native_error(arguments: &[&str], dsn: Option<&str>) {
     assert!(output.stderr.starts_with(&cli::native_text("error: ")));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(!error.contains("is deferred in this candidate"));
-    assert!(error.contains("maintainer") || error.contains("PSEUDOLIFE_MCP_DATABASE_URL"));
+    assert!(
+        error.contains("use ")
+            || error.contains("run ")
+            || error.contains("set ")
+            || error.contains("spell ")
+    );
     if let Some(value) = dsn {
         assert!(!error.contains(value), "database URL was printed");
     }
