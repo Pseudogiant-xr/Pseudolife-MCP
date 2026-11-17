@@ -489,6 +489,46 @@ mod tests {
         drop(directory);
     }
 
+    #[test]
+    fn registration_hardening_controls() {
+        // One bounded stress selection runs every registration control.
+        // Each function remains a separately named ordinary unit test too.
+        for (name, check) in [
+            (
+                "interpreter",
+                registration_uses_system_windows_powershell as fn(),
+            ),
+            ("changed script", registration_refuses_a_changed_script),
+            ("changed data", registration_refuses_changed_data),
+            ("unchanged", registration_accepts_unchanged_files),
+            (
+                "literal paths",
+                registration_accepts_paths_with_typographic_quotes,
+            ),
+            ("plain error", registration_script_errors_are_one_plain_line),
+            (
+                "lock refusal",
+                registration_script_preserves_the_lock_refusal_exit_code,
+            ),
+            (
+                "exclusive files",
+                registration_files_are_created_exclusively,
+            ),
+            (
+                "replaced folder",
+                registration_refuses_a_replaced_scratch_junction,
+            ),
+            ("cleanup", registration_scratch_removes_its_own_folder),
+            (
+                "protected folder",
+                elevated_registration_scratch_has_a_protected_admin_dacl,
+            ),
+        ] {
+            eprintln!("registration control: {name}");
+            check();
+        }
+    }
+
     fn registration_fixture(changed: &str) {
         let scratch = Scratch::create(
             std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())),
