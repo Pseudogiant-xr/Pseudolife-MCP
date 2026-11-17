@@ -106,15 +106,21 @@ def test_fixture_guards_precede_connections_and_writes(blocked, monkeypatch):
 
 def test_environment_vectors_and_wrong_parser_control(blocked):
     from principal_fixtures import env_auth, environment_principal
-    for row in AUTH:
-        mapped, singular = env_auth(row["env"])
-        assert (mapped, singular) == (row["mapped"], row["singular"])
-        assert [environment_principal(h, mapped, singular) for h in HEADERS] == [
-            value[0] for value in row["resolved"]]
-    # A parser that makes every bearer an environment identity loses the
-    # stored-principal readiness witness and must fail the generated table.
+
+    def check(parser, classify):
+        for row in AUTH:
+            mapped, singular = parser(row["env"])
+            assert (mapped, singular) == (row["mapped"], row["singular"])
+            assert [classify(h, mapped, singular) for h in HEADERS] == [
+                value[0] for value in row["resolved"]]
+
+    check(env_auth, environment_principal)
+    # Lost configuration or an always-open classifier must fail the same
+    # table that protects the stored-principal readiness witness.
     with pytest.raises(AssertionError):
-        assert all(value[0] == "default" for row in AUTH for value in row["resolved"])
+        check(lambda env: ({}, None), environment_principal)
+    with pytest.raises(AssertionError):
+        check(env_auth, lambda *args: "default")
 
 
 def test_signer_vectors_and_bad_signature_control(blocked):
