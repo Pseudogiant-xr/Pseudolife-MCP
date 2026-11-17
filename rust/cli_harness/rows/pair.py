@@ -19,8 +19,7 @@ it, and each case's ``after`` hook fails the run if a token file appeared
 in, or vanished from, this user's real ``~/.pseudolife-mcp``.
 
 Named rules: ``pair-token`` (the minted token and its SHA-256, the random
-``pairing-<8 hex>.token`` name) and ``pair-deferral`` (a declared deferral
-case's expectation). Owner-only is the oracle's own check
+``pairing-<8 hex>.token`` name). Owner-only is the oracle's own check
 (``client_config.check_token_file``) on every token file, recorded in the
 compared ``db`` field, plus the POSIX modes the harness records.
 """
@@ -44,7 +43,6 @@ from ..mutants import Mutant
 CODE = "abcd-efgh-jkmn"
 CANONICAL = "ABCDEFGHJKMN"
 SEP = os.sep
-DEFERRAL = "pseudolife-stdio: mode 'pair' is deferred in this candidate\n"
 ERRORS = {400: "pairing_refused", 429: "rate_limited", 503: "pairing_unavailable",
           401: "unauthorized", 403: "forbidden_origin", 404: "not_found",
           405: "method_not_allowed", 413: "request_too_large",
@@ -324,52 +322,32 @@ def pair_token(obs: dict) -> None:
         _swap_all(obs, next(iter(names)), b"pairing-<hex>.token")
 
 
-_TRACEBACK = re.compile(rb"\ATraceback \(most recent call last\):\r?\n.*\n(?P<last>[A-Za-z]+"
-                        rb"Error: [^\r\n]*)\r?\n\Z", re.DOTALL)
-DECLARED_CRASHES = {
-    # /health nested past CPython's recursion limit (`_json` outside a try).
-    "pair-recursion-traceback": rb"RecursionError: maximum recursion depth exceeded",
-    # A refusal whose `target.unlink(missing_ok=True)` raises (the file is
-    # held open without delete sharing): the oracle dies after the POST.
-    "pair-cleanup-traceback": rb"PermissionError: [WinError 32] ",
-}
+@normalize.rule("pair-cleanup-fixture-token")
+def cleanup_fixture_token(obs: dict) -> None:
+    """Record a retained fixture file without its token; never redact output.
 
-
-def _declared_crash(name: str, marker: bytes):
-    def rule(obs: dict) -> None:
-        """Declared: the oracle dies with this uncaught exception (exit 1, a
-        traceback naming its own source files); the candidate prints its
-        deferral line, exit 1. Only that traceback with exit 1 maps; the
-        requests, the files and the owner-only record stay compared."""
-        if obs.get("arm") != "python" or obs["exit"] != 1:
-            return
-        match = _TRACEBACK.match(normalize._get(obs, "stderr"))
-        if match and match.group("last").startswith(marker) and not normalize._get(obs, "stdout"):
-            native = DEFERRAL.replace("\n", "\r\n") if core.WINDOWS else DEFERRAL
-            normalize._put(obs, "stderr", native.encode())
-    normalize.rule(name)(rule)
-
-
-for _name, _marker in DECLARED_CRASHES.items():
-    _declared_crash(_name, _marker)
-
-
-@normalize.rule("pair-deferral")
-def pair_deferral(obs: dict) -> None:
-    """A declared deferral case: the candidate must print the dispatcher's
-    deferral line, exit 1, send no request and create no file. The oracle
-    arm's observation is replaced by that expectation."""
-    if obs.get("arm") != "python":
+    The POST digest and the daemon's in-flight file check must both agree.
+    Replay still checks token contents against that digest on the candidate.
+    """
+    posts = [r for r in obs.get("requests", []) if r.get("method") == "POST"]
+    if not posts or any(p["headers"].get("x-fixture-digest-of-a-token-file") != "matches"
+                        for p in posts):
         return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    native = DEFERRAL.replace("\n", "\r\n") if core.WINDOWS else DEFERRAL
-    obs["stderr"] = base64.b64encode(native.encode()).decode()
-    obs["files"] = dict(obs.get("before", {}))
-    obs["modes"] = dict(obs.get("before_modes", {}))
-    if "requests" in obs:
-        obs["requests"] = []
-    obs["db"] = {"owner_only": dict(obs.get("before_owner_only", {}))}
+    try:
+        hashes = {json.loads(p["body"])["token_sha256"] for p in posts}
+    except (ValueError, KeyError, TypeError):
+        return
+    if len(hashes) != 1:
+        return
+    digest = next(iter(hashes))
+    for rel, value in obs.get("files", {}).items():
+        if rel.endswith(".token") and value.startswith("file:"):
+            token = base64.b64decode(value[5:]).decode("utf-8", "replace")
+            if _TOKEN.fullmatch(token) and hashlib.sha256(token.encode()).hexdigest() == digest:
+                obs["files"][rel] = "file:" + base64.b64encode(b"<token>").decode()
+
+
+normalize.RECORD_RULES.add("pair-cleanup-fixture-token")
 
 
 # ── cases ───────────────────────────────────────────────────────────────────
@@ -565,7 +543,7 @@ def cases() -> list[core.Case]:
          health=b'{"status": "ok", "auth": ' + nest(986) + b"}")
     live("health-nested-past-limit", [CODE],
          health=b'{"status": "ok", "auth": ' + nest(987) + b"}",
-         rules=("pair-token", "pair-recursion-traceback"))
+         rules=("pair-token",))
     live("health-int-past-limit", [CODE],
          health=b'{"status": "ok", "auth": true, "x": 1' + b"0" * 4300 + b"}")
     live("health-int-at-limit-json", [CODE, "--json"],
@@ -581,23 +559,22 @@ def cases() -> list[core.Case]:
     live("answer-int-past-limit-then-paired-json", [CODE, "--json"],
          answers=[(200, b'{"principal": "laptop", "x": 1' + b"0" * 4300 + b"}")])
 
-    # A refusal whose file the oracle cannot remove (held open without
-    # delete sharing, which only Windows enforces): declared crash.
+    # A refused redemption whose token file is held without delete sharing:
+    # preserve it and report the recovery path.
     live("refusal-cleanup-fails", [CODE], default=400, hold_on_post=True,
-         rules=("pair-token", "pair-cleanup-traceback"), platforms=("windows",))
+         rules=("pair-cleanup-fixture-token", "pair-token"), platforms=("windows",))
 
-    # Declared deferrals: before any effect.
-    deferred = ("pair-deferral",)
+    # Former fallback inputs now have native outcomes; retain their case IDs.
     add(case("defer-https", [core.DEAD_DAEMON_URL.replace("http:", "https:"), CODE]))
     live("defer-proxy-environment", [CODE],
          env={"HTTP_PROXY": "http://127.0.0.1:9"})
     live("defer-non-ascii-code", ["abcd-efgh-jkmñ"])
     live("defer-non-ascii-stdin", ["--read-code"], stdin="abcd-efgh-jkmñ\n".encode())
     live("defer-help", ["--help"])
-    live("defer-code-after-option", ["--json", CODE], rules=deferred)
-    live("defer-repeated-option", [CODE, "--json", "--json"], rules=deferred)
-    live("defer-equals-spelling", [CODE, "--token-file=x.token"], rules=deferred)
-    add(case("defer-no-arguments", [], rules=deferred))
+    live("defer-code-after-option", ["--json", CODE])
+    live("defer-repeated-option", [CODE, "--json", "--json"])
+    live("defer-equals-spelling", [CODE, "--token-file=x.token"])
+    add(case("defer-no-arguments", []))
     return out
 
 
@@ -633,12 +610,7 @@ if core.WINDOWS:
     # The protected DACL is the whole protection (the CRT ignores the mode).
     MUTANTS.append(Mutant("pair-not-owner-only", "pair", "shim/src/cli/pairing/token_file.rs",
                           "        protect(&file)?;\n", "", cases=("success",)))
-    # Only Windows refuses to delete a file another process holds open.
-    MUTANTS.append(Mutant(
-        "pair-cleanup-error-swallowed", "pair", "shim/src/cli/pairing/pair.rs",
-        "Err(problem) if problem.kind() != std::io::ErrorKind::NotFound => Err(Defer),",
-        "Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => Err(Defer),",
-        cases=("refusal-cleanup-fails",)))
+
 else:
     # `.mode(0o600)` at creation would hide a removed protect(): widen the
     # fchmod instead, which the owner-only validation then refuses.

@@ -1,7 +1,7 @@
 //! `principal_store`'s invite operations (create_invite, list_principals,
 //! list_rejected, revoke) and `invite_cli._bank_of`, as the same SQL on this crate's
 //! PostgreSQL client.
-use super::Defer;
+use super::Refusal;
 use tokio_postgres::Client;
 
 const NOW: &str = "EXTRACT(EPOCH FROM clock_timestamp())::double precision";
@@ -17,31 +17,41 @@ pub(super) enum DbError {
     Refused(String),
     /// Another `psycopg.Error`, by its class name.
     Failed(&'static str),
+    /// COMMIT was sent but its outcome could not be established.
+    CommitUnknown,
     /// A client-side failure no server error explains (a value this client
     /// cannot decode); `prepare` rules it out before an invite's request.
-    Defer,
+    Invalid(Refusal),
 }
 
-impl From<Defer> for DbError {
-    fn from(_: Defer) -> Self {
-        DbError::Defer
+impl From<Refusal> for DbError {
+    fn from(error: Refusal) -> Self {
+        DbError::Invalid(error)
     }
 }
+
+const ROW_ERROR: DbError = DbError::Invalid(Refusal::new(
+    "the database returned an incompatible invite row; repair the principals, meta or activity column types and null values to match the daemon schema before retrying",
+));
 
 /// The psycopg class a server error raises (`psycopg.errors.lookup`, else
 /// its SQLSTATE class's base); an error with no SQLSTATE is a lost
 /// connection (`OperationalError`).
 fn classify(error: &tokio_postgres::Error) -> DbError {
     let Some(db) = error.as_db_error() else {
-        return if error.is_closed() || std::error::Error::source(error).is_some() {
-            DbError::Failed("OperationalError")
-        } else {
-            DbError::Defer
-        };
+        return DbError::Failed("OperationalError");
     };
     match db.code().code() {
         "42P01" => DbError::UndefinedTable,
         code => DbError::Failed(super::sqlstate::class_name(code)),
+    }
+}
+
+fn classify_commit(error: &tokio_postgres::Error) -> DbError {
+    if error.as_db_error().is_none() {
+        DbError::CommitUnknown
+    } else {
+        classify(error)
     }
 }
 
@@ -64,7 +74,7 @@ pub(super) async fn prepare(client: &Client) -> Result<(), DbError> {
             &[],
         )
         .await
-        .map_err(|_| DbError::Defer)?;
+        .map_err(|error| classify(&error))?;
     const EXPECTED: [(&str, &str, &str); 13] = [
         ("meta", "key", "text"),
         ("meta", "value", "jsonb"),
@@ -82,25 +92,30 @@ pub(super) async fn prepare(client: &Client) -> Result<(), DbError> {
     ];
     for row in &rows {
         let (table, column, kind): (String, String, String) = (
-            row.try_get(0).map_err(|_| DbError::Defer)?,
-            row.try_get(1).map_err(|_| DbError::Defer)?,
-            row.try_get(2).map_err(|_| DbError::Defer)?,
+            row.try_get(0).map_err(|_| ROW_ERROR)?,
+            row.try_get(1).map_err(|_| ROW_ERROR)?,
+            row.try_get(2).map_err(|_| ROW_ERROR)?,
         );
         if let Some((_, _, wanted)) = EXPECTED
             .iter()
             .find(|(t, c, _)| *t == table && *c == column)
             && *wanted != kind
         {
-            return Err(DbError::Defer);
+            return Err(DbError::Invalid(Refusal::new(
+                "the principals or meta schema has an incompatible column type; restore the daemon schema before inviting",
+            )));
         }
     }
     let now: f64 = client
         .query_one(&format!("SELECT {NOW}"), &[])
         .await
-        .and_then(|row| row.try_get(0))
-        .map_err(|_| DbError::Defer)?;
+        .map_err(|error| classify(&error))?
+        .try_get(0)
+        .map_err(|_| ROW_ERROR)?;
     if !(0.0..LAST_CLOCK).contains(&now) {
-        return Err(DbError::Defer);
+        return Err(DbError::Invalid(Refusal::new(
+            "the database clock is outside the supported invite expiry range (1970 through 9999); correct the database host clock before inviting",
+        )));
     }
     Ok(())
 }
@@ -134,8 +149,8 @@ pub(super) async fn bank_of(client: &Client) -> Result<Option<String>, DbError> 
     let Some(row) = row else {
         return Ok(None);
     };
-    let string: Option<bool> = row.try_get(0).map_err(|_| DbError::Defer)?;
-    let value: Option<String> = row.try_get(1).map_err(|_| DbError::Defer)?;
+    let string: Option<bool> = row.try_get(0).map_err(|_| ROW_ERROR)?;
+    let value: Option<String> = row.try_get(1).map_err(|_| ROW_ERROR)?;
     Ok(match (string, value) {
         (Some(true), Some(value)) if !value.is_empty() => {
             Some(super::sha256_hex(&value)[..16].to_owned())
@@ -237,21 +252,21 @@ pub(super) async fn list(
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let get = |index: usize| -> Result<Option<f64>, DbError> {
-            row.try_get(index).map_err(|_| DbError::Defer)
+            row.try_get(index).map_err(|_| ROW_ERROR)
         };
-        let principal: String = row.try_get(0).map_err(|_| DbError::Defer)?;
+        let principal: String = row.try_get(0).map_err(|_| ROW_ERROR)?;
         let last_seen = get(10)?;
-        let stored: bool = row.try_get(11).map_err(|_| DbError::Defer)?;
+        let stored: bool = row.try_get(11).map_err(|_| ROW_ERROR)?;
         if !stored {
             let owner = !not_owner.contains(&principal);
             out.push(Listed::environment(principal, last_seen, Some(owner)));
             continue;
         }
-        let paired: bool = row.try_get(3).map_err(|_| DbError::Defer)?;
-        let pending: bool = row.try_get(4).map_err(|_| DbError::Defer)?;
+        let paired: bool = row.try_get(3).map_err(|_| ROW_ERROR)?;
+        let pending: bool = row.try_get(4).map_err(|_| ROW_ERROR)?;
         let expires = get(5)?;
         let revoked = get(8)?;
-        let now = get(9)?.ok_or(DbError::Defer)?;
+        let now = get(9)?.ok_or(ROW_ERROR)?;
         let state = if revoked.is_some() {
             "revoked"
         } else if pending && expires.is_some_and(|expires| expires > now) {
@@ -268,16 +283,16 @@ pub(super) async fn list(
             state,
             paired,
             pending,
-            tier: row.try_get(1).map_err(|_| DbError::Defer)?,
-            board: Some(row.try_get(2).map_err(|_| DbError::Defer)?),
+            tier: row.try_get(1).map_err(|_| ROW_ERROR)?,
+            board: Some(row.try_get(2).map_err(|_| ROW_ERROR)?),
             code_expires_at: expires,
-            created_at: Some(get(6)?.ok_or(DbError::Defer)?),
+            created_at: Some(get(6)?.ok_or(ROW_ERROR)?),
             paired_at: get(7)?,
             revoked_at: revoked,
             last_seen_at: last_seen,
             owner: Some(
                 row.try_get::<_, Option<bool>>(12)
-                    .map_err(|_| DbError::Defer)?
+                    .map_err(|_| ROW_ERROR)?
                     .unwrap_or(true),
             ),
         });
@@ -328,10 +343,10 @@ pub(super) async fn list_rejected(client: &Client) -> Result<Vec<Rejected>, DbEr
     rows.iter()
         .map(|row| {
             Ok(Rejected {
-                hash_prefix: row.try_get(0).map_err(|_| DbError::Defer)?,
-                rejections: row.try_get(1).map_err(|_| DbError::Defer)?,
-                first_seen_at: row.try_get(2).map_err(|_| DbError::Defer)?,
-                last_seen_at: row.try_get(3).map_err(|_| DbError::Defer)?,
+                hash_prefix: row.try_get(0).map_err(|_| ROW_ERROR)?,
+                rejections: row.try_get(1).map_err(|_| ROW_ERROR)?,
+                first_seen_at: row.try_get(2).map_err(|_| ROW_ERROR)?,
+                last_seen_at: row.try_get(3).map_err(|_| ROW_ERROR)?,
             })
         })
         .collect()
@@ -352,7 +367,7 @@ async fn revoke_sessions(
         .await
         .map_err(|error| classify(&error))?
         .try_get(0)
-        .map_err(|_| DbError::Defer)?;
+        .map_err(|_| ROW_ERROR)?;
     if present {
         transaction
             .execute(
@@ -391,7 +406,7 @@ pub(super) async fn revoke(client: &mut Client, name: &str) -> Result<bool, DbEr
     transaction
         .commit()
         .await
-        .map_err(|error| classify(&error))?;
+        .map_err(|error| classify_commit(&error))?;
     Ok(row.is_some())
 }
 
@@ -417,11 +432,11 @@ pub(super) async fn has_owned_column(client: &Client) -> Result<bool, DbError> {
         )
         .await
         .map_err(|error| classify(&error))?;
-    row.try_get(0).map_err(|_| DbError::Defer)
+    row.try_get(0).map_err(|_| ROW_ERROR)
 }
 
 /// `new_pairing_code`: twelve characters drawn uniformly from the 32.
-fn new_code() -> Result<String, Defer> {
+fn new_code() -> Result<String, Refusal> {
     Ok(super::random_bytes(12)?
         .iter()
         .map(|byte| char::from(ALPHABET[usize::from(byte & 31)]))
@@ -524,8 +539,8 @@ async fn attempt(
             },
         ),
         Some(row) => {
-            let paired: bool = row.try_get(0).map_err(|_| DbError::Defer)?;
-            let revoked: bool = row.try_get(1).map_err(|_| DbError::Defer)?;
+            let paired: bool = row.try_get(0).map_err(|_| ROW_ERROR)?;
+            let revoked: bool = row.try_get(1).map_err(|_| ROW_ERROR)?;
             let state = if revoked {
                 "revoked"
             } else if paired {
@@ -551,14 +566,14 @@ async fn attempt(
                         code: None,
                         expires_at: None,
                         state,
-                        tier: row.try_get(0).map_err(|_| DbError::Defer)?,
-                        board: row.try_get(1).map_err(|_| DbError::Defer)?,
-                        owned: row.try_get(2).map_err(|_| DbError::Defer)?,
+                        tier: row.try_get(0).map_err(|_| ROW_ERROR)?,
+                        board: row.try_get(1).map_err(|_| ROW_ERROR)?,
+                        owned: row.try_get(2).map_err(|_| ROW_ERROR)?,
                     };
                     transaction
                         .commit()
                         .await
-                        .map_err(|error| classify(&error))?;
+                        .map_err(|error| classify_commit(&error))?;
                     return Ok(Attempt::Done(created));
                 }
                 // Leaving the transaction rolls it back, as the raise does.
@@ -614,16 +629,16 @@ async fn attempt(
     }
     let created = Created {
         code: Some(code),
-        expires_at: Some(row.try_get(0).map_err(|_| DbError::Defer)?),
+        expires_at: Some(row.try_get(0).map_err(|_| ROW_ERROR)?),
         state,
-        tier: row.try_get(1).map_err(|_| DbError::Defer)?,
-        board: row.try_get(2).map_err(|_| DbError::Defer)?,
-        owned: row.try_get(3).map_err(|_| DbError::Defer)?,
+        tier: row.try_get(1).map_err(|_| ROW_ERROR)?,
+        board: row.try_get(2).map_err(|_| ROW_ERROR)?,
+        owned: row.try_get(3).map_err(|_| ROW_ERROR)?,
     };
     match transaction.commit().await {
         Ok(()) => Ok(Attempt::Done(created)),
         Err(error) if unique_violation(&error) => Ok(Attempt::Collision),
-        Err(error) => Err(classify(&error)),
+        Err(error) => Err(classify_commit(&error)),
     }
 }
 

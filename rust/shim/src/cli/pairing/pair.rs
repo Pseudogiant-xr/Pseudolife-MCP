@@ -2,7 +2,7 @@
 //! retain it on uncertain outcomes, and verify authenticated access.
 use super::pyjson::{self, J};
 use super::token_file::{self, Failure, Moved};
-use super::{Defer, net, url};
+use super::{Refusal, net, url};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -24,40 +24,87 @@ struct Args {
     json: bool,
 }
 
-fn parse(arguments: &[String]) -> Result<Args, Defer> {
+fn parse(arguments: &[String]) -> Result<Args, Refusal> {
     let mut items = arguments.iter();
-    let url = items.next().filter(|value| !value.starts_with('-'));
-    let url = url.ok_or(Defer)?.clone();
-    let mut rest: Vec<&String> = items.collect();
-    let code = match rest.first() {
-        Some(value) if !value.starts_with('-') => Some(rest.remove(0).clone()),
-        _ => None,
-    };
     let mut args = Args {
-        url,
-        code,
+        url: String::new(),
+        code: None,
         read_code: false,
         token_file: None,
         json: false,
     };
-    let mut rest = rest.into_iter();
-    while let Some(option) = rest.next() {
-        match option.as_str() {
-            "--read-code" if !args.read_code => args.read_code = true,
-            "--json" if !args.json => args.json = true,
-            "--token-file" if args.token_file.is_none() => {
-                let value = rest.next().filter(|value| !value.starts_with('-'));
-                args.token_file = Some(value.ok_or(Defer)?.clone());
+    let mut positionals = 0;
+    let mut positional_only = false;
+    while let Some(item) = items.next() {
+        if item == "--" && !positional_only {
+            positional_only = true;
+            continue;
+        }
+        if positional_only || !item.starts_with('-') {
+            match positionals {
+                0 => args.url = item.clone(),
+                1 => args.code = Some(item.clone()),
+                _ => {
+                    return Err(Refusal::usage(
+                        "pair takes a URL and one code; remove the extra argument (see pair --help)",
+                    ));
+                }
             }
-            _ => return Err(Defer),
+            positionals += 1;
+            continue;
+        }
+        let (option, inline) = item
+            .split_once('=')
+            .map_or((item.as_str(), None), |(k, v)| (k, Some(v)));
+        match option {
+            "--read-code" if inline.is_none() => args.read_code = true,
+            "--json" if inline.is_none() => args.json = true,
+            "--token-file" => {
+                if args.token_file.is_some() {
+                    return Err(Refusal::usage(
+                        "--token-file was repeated; supply one destination",
+                    ));
+                }
+                let value = inline
+                    .map(str::to_owned)
+                    .or_else(|| items.next().filter(|v| !v.starts_with('-')).cloned());
+                args.token_file = Some(value.ok_or(Refusal::usage(
+                    "--token-file requires a path; supply the new token file's destination",
+                ))?);
+            }
+            _ => {
+                return Err(Refusal::usage(
+                    "unrecognized pair option or a value on a flag; use pair --help for the supported options",
+                ));
+            }
         }
     }
+    if positionals == 0 {
+        return Err(Refusal::usage(
+            "the daemon URL is missing; give an http(s) origin as shown by pair --help",
+        ));
+    }
     Ok(args)
+}
+
+pub(super) fn refusal(error: Refusal, json: bool) -> u8 {
+    Report::new(None)
+        .done(
+            if error.exit == EXIT_USAGE {
+                "usage"
+            } else {
+                "refused"
+            },
+            error.exit,
+            Some(error.message.to_owned()),
+        )
+        .emit(json)
 }
 
 struct Report {
     url: Option<String>,
     state: &'static str,
+    refusal_state: Option<&'static str>,
     principal: Option<String>,
     tier: Option<String>,
     bank: Option<String>,
@@ -72,6 +119,7 @@ impl Report {
         Self {
             url: url.map(str::to_owned),
             state: "",
+            refusal_state: None,
             principal: None,
             tier: None,
             bank: None,
@@ -91,7 +139,7 @@ impl Report {
 
     fn json(&self) -> J {
         let text = |value: &Option<String>| value.clone().map_or(J::Null, J::Str);
-        J::Dict(vec![
+        let mut fields = vec![
             ("url".into(), text(&self.url)),
             ("state".into(), J::Str(self.state.into())),
             ("principal".into(), text(&self.principal)),
@@ -104,7 +152,11 @@ impl Report {
             ),
             ("error".into(), text(&self.error)),
             ("exit".into(), J::Int(self.exit.to_string())),
-        ])
+        ];
+        if let Some(state) = self.refusal_state {
+            fields.push(("refusal_state".into(), J::Str(state.into())));
+        }
+        J::Dict(fields)
     }
 
     /// `_emit`.
@@ -141,7 +193,7 @@ impl Report {
 }
 
 /// `principals.normalize_pairing_code`, including Unicode uppercase expansion.
-fn normalize_code(text: &str) -> Result<Option<String>, Defer> {
+fn normalize_code(text: &str) -> Result<Option<String>, Refusal> {
     let code: String = pyjson::py_strip(text)
         .to_uppercase()
         .chars()
@@ -158,7 +210,7 @@ fn normalize_code(text: &str) -> Result<Option<String>, Defer> {
 /// `sys.stdin.readline()` on a piped stdin: up to and including the first
 /// line end (universal newlines), decoding the UTF-8 CLI stream.
 #[allow(unsafe_code)]
-async fn read_line() -> Result<String, Defer> {
+async fn read_line() -> Result<String, Refusal> {
     #[cfg(not(unix))]
     use std::io::Read;
     let mut line = Vec::new();
@@ -186,7 +238,9 @@ async fn read_line() -> Result<String, Defer> {
                     tokio::task::yield_now().await;
                     continue;
                 }
-                return Err(Defer);
+                return Err(Refusal::new(
+                    "--read-code could not read stdin; supply the code through a readable input stream",
+                ));
             }
             // Read exactly one byte directly: StdinLock can buffer ahead, and
             // buffered bytes would no longer appear in the readiness check.
@@ -214,36 +268,39 @@ async fn read_line() -> Result<String, Defer> {
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            Err(_) => return Err(Defer),
+            Err(_) => {
+                return Err(Refusal::new(
+                    "--read-code could not read stdin; supply the code through a readable input stream",
+                ));
+            }
         }
         if !line.is_empty() && line.len().is_multiple_of(1024) {
             tokio::task::yield_now().await;
         }
     }
-    String::from_utf8(line).map_err(|_| Defer)
+    String::from_utf8(line).map_err(|_| {
+        Refusal::usage("--read-code input is not UTF-8; supply the pairing code as UTF-8 text")
+    })
 }
 
-/// `runtimes.home()`: `USERPROFILE`, else `HOME`, as pathlib prints it.
-/// A value pathlib would respell (separators, `.` parts) defers.
-fn home() -> Result<PathBuf, Defer> {
+/// Resolve USERPROFILE, then HOME; formatting differences do not change access checks.
+fn home() -> Result<PathBuf, Refusal> {
     let value = ["USERPROFILE", "HOME"]
         .iter()
         .filter_map(|name| std::env::var(name).ok())
         .find(|value| !value.is_empty())
-        .ok_or(Defer)?;
+        .ok_or(Refusal::new("USERPROFILE and HOME contain no readable home directory; set HOME to an absolute directory or supply --token-file"))?;
     let path = PathBuf::from(&value);
-    let rebuilt: PathBuf = path.components().collect();
-    if !path.is_absolute()
-        || rebuilt.as_os_str() != path.as_os_str()
-        || (cfg!(windows) && value.contains('/'))
-    {
-        return Err(Defer);
+    if !path.is_absolute() {
+        return Err(Refusal::new(
+            "USERPROFILE or HOME is relative; set it to an absolute home directory or supply --token-file",
+        ));
     }
     Ok(path)
 }
 
-fn display(path: &Path) -> Result<String, Defer> {
-    path.to_str().map(str::to_owned).ok_or(Defer)
+fn display(path: &Path) -> Result<String, Refusal> {
+    path.to_str().map(str::to_owned).ok_or(Refusal::new("the --token-file destination is not valid Unicode; choose a Unicode path for the token file"))
 }
 
 const KEPT: &str = "{path} is kept: the code may already be spent, and this file is the only copy of a token the daemon may now accept. Re-run `pseudolife-mcp connect <url> --token-file {path}` once the daemon answers; delete the file only if the operator re-invites this machine";
@@ -259,10 +316,10 @@ fn text(value: Option<&J>) -> Option<String> {
     ((1..=128).contains(&count) && value.chars().all(super::printable)).then(|| value.to_owned())
 }
 
-fn resolve_target(token_file: Option<&str>) -> Result<(PathBuf, Option<PathBuf>), Defer> {
+fn resolve_target(token_file: Option<&str>) -> Result<(PathBuf, Option<PathBuf>), Refusal> {
     match token_file {
         Some(value) => Ok((
-            crate::credentials::absolute_expanded(Path::new(value)).map_err(|_| Defer)?,
+            crate::credentials::absolute_expanded(Path::new(value)).map_err(|_| Refusal::new("the --token-file path could not be expanded to an absolute destination; supply an absolute path"))?,
             None,
         )),
         None => {
@@ -296,7 +353,7 @@ pub(super) fn normalize_for_connect(text: &str) -> Option<String> {
     normalize_code(text).ok().flatten()
 }
 
-pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
+pub(super) async fn run(arguments: &[String]) -> Result<u8, Refusal> {
     #[cfg(unix)]
     {
         // Tokio retains its process signal handler after a listener is dropped.
@@ -304,7 +361,7 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         // cancellation drops the prompt guard and retains any minted token.
         let mut interrupt =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-                .map_err(|_| Defer)?;
+                .map_err(|_| Refusal::new("pair could not install its interrupt handler; restore operating-system signal resources and retry"))?;
         tokio::select! {
             biased;
             _ = interrupt.recv() => Ok(130),
@@ -315,7 +372,7 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
     run_inner(arguments).await
 }
 
-async fn run_inner(arguments: &[String]) -> Result<u8, Defer> {
+async fn run_inner(arguments: &[String]) -> Result<u8, Refusal> {
     let args = parse(arguments)?;
     let usage = |line: &str, url: Option<&str>| {
         Report::new(url)
@@ -346,7 +403,7 @@ async fn run_inner(arguments: &[String]) -> Result<u8, Defer> {
             Some(&url),
         ));
     }
-    // Resolved before stdin is read; every deferral here is pre-effect.
+    // Resolve the origin and destination before reading a secret.
     let remote = !url::is_loopback(&url)?;
     let (target, bank_directory) = resolve_target(args.token_file.as_deref())?;
     let text = if args.read_code {
@@ -354,7 +411,11 @@ async fn run_inner(arguments: &[String]) -> Result<u8, Defer> {
             match super::prompt::password("pairing code: ").await {
                 Ok(line) => line,
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => return Ok(130),
-                Err(_) => return Err(Defer),
+                Err(_) => {
+                    return Err(Refusal::new(
+                        "--read-code could not read hidden terminal input; pipe the code through stdin with --read-code",
+                    ));
+                }
             }
         } else {
             read_line().await?
@@ -385,10 +446,10 @@ async fn redeem(
     code: &str,
     mut target: PathBuf,
     bank_directory: Option<&Path>,
-) -> Result<Report, Defer> {
+) -> Result<Report, Refusal> {
     let report = Report::new(Some(url));
     let shown = display(&target)?;
-    if token_file::present(&target).map_err(|()| Defer)? {
+    if token_file::present(&target).map_err(|()| Refusal::new("the --token-file destination could not be inspected; correct access to its parent directory before retrying"))? {
         return Ok(report.done(
             "refused",
             EXIT_REFUSED,
@@ -397,11 +458,10 @@ async fn redeem(
             )),
         ));
     }
-    // Drawn before the first request, so nothing after it can defer on it.
+    // Draw the token before any request or file write.
     let token = base64_urlsafe(&super::random_bytes(32)?);
-    // Declared: past the measured nesting limit the oracle dies with an
-    // uncaught RecursionError traceback (exit 1); this defers (exit 1).
-    let health = net::pair_health(url).await.map_err(|_| Defer)?;
+    // Refuse an excessive health response before creating a token file.
+    let health = net::pair_health(url).await.map_err(|_| Refusal::new("the daemon /health response exceeds the JSON nesting limit; update the daemon before pairing"))?;
     let Some(health) =
         health.filter(|health| pyjson::get(health, "status").and_then(J::as_str) == Some("ok"))
     else {
@@ -415,7 +475,11 @@ async fn redeem(
     };
     let auth = pyjson::get(&health, "auth");
     if auth != Some(&J::Bool(true)) {
-        let shown_auth = pyjson::dumps_line(auth.unwrap_or(&J::Null));
+        let shown_auth = match auth {
+            Some(value @ (J::Bool(_) | J::Null)) => pyjson::dumps_line(value),
+            None => "null".to_owned(),
+            _ => "<invalid auth value>".to_owned(),
+        };
         return Ok(report.done(
             "refused",
             EXIT_REFUSED,
@@ -444,12 +508,18 @@ async fn redeem(
         "{{\"code\": \"{code}\", \"token_sha256\": \"{}\"}}",
         super::sha256_hex(&token)
     );
-    // `target.unlink(missing_ok=True)`: any error but a missing file escapes
-    // the oracle as an uncaught traceback (exit 1, the file left in place).
-    // Declared: this leaves the file too and exits 1 with the deferral line.
+    // A confirmed refusal permits removing only our unused token. If removal
+    // fails, retain its path in the report and explain the required cleanup.
     let refused = |mut report: Report, state: &'static str, error: String| {
         match std::fs::remove_file(&target) {
-            Err(problem) if problem.kind() != std::io::ErrorKind::NotFound => Err(Defer),
+            Err(problem) if problem.kind() != std::io::ErrorKind::NotFound => {
+                report.refusal_state = Some(state);
+                let message = format!(
+                    "pairing was {state}: {error}. The unused token file {shown} could not be removed ({}); remove that file before retrying pairing",
+                    token_file::os_class(&problem)
+                );
+                Ok(report.done("cleanup_failed", EXIT_UNKNOWN, Some(message)))
+            }
             _ => {
                 report.token_file = None;
                 Ok(report.done(state, EXIT_REFUSED, Some(error)))
@@ -590,29 +660,29 @@ mod tests {
     }
 
     #[test]
-    fn canonical_argv_only() {
+    fn native_argument_shapes() {
         for good in [
             &["http://h:1", "ABCD-EFGH-JKMN"][..],
+            &["--json", "http://h:1", "c"],
+            &["http://h:1", "--json", "c"],
+            &["http://h:1", "--json", "--json"],
+            &["http://h:1", "--token-file=f"],
+            &["http://h:1", "--"],
             &["http://h:1", "--read-code", "--token-file", "f", "--json"],
             &["http://h:1", "c", "--json"],
             &["http://h:1"],
         ] {
             assert!(parse(&strings(good)).is_ok(), "{good:?}");
         }
-        for deferred in [
+        for invalid in [
             &[][..],
-            &["--json", "http://h:1", "c"],
-            &["http://h:1", "--json", "c"],
             &["http://h:1", "c", "d"],
-            &["http://h:1", "--json", "--json"],
             &["http://h:1", "--token-file"],
             &["http://h:1", "--token-file", "-1"],
-            &["http://h:1", "--token-file=f"],
             &["http://h:1", "--read"],
             &["http://h:1", "--help"],
-            &["http://h:1", "--"],
         ] {
-            assert!(parse(&strings(deferred)).is_err(), "{deferred:?}");
+            assert!(parse(&strings(invalid)).is_err(), "{invalid:?}");
         }
     }
 
