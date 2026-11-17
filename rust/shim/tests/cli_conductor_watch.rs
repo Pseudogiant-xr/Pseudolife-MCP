@@ -29,6 +29,391 @@ const OWNER: &str = "0123456789abcdef0123456789abcdef";
 const AGENT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "fedcba9876543210fedcba9876543210";
 
+#[test]
+fn native_option_like_values_require_an_equals_sign() {
+    let sandbox = Sandbox::new();
+    let mut failures = Vec::new();
+    for value in [
+        "--detach",
+        "--det",
+        "--sto",
+        "--stop=yes",
+        "--owner=fixture",
+    ] {
+        let out = sandbox.run(&["--state", value]);
+        let expected = "pseudolife-mcp conductor-watch: error: argument --state: expected one argument; use --state=VALUE for an option-like value";
+        if out.status.code() != Some(2) || !text(&out.stderr).trim_end().ends_with(expected) {
+            failures.push(text(&out.stderr));
+        }
+        // The same spelling can still be used as a literal file name.
+        let out = sandbox.run(&["--stop", &format!("--state={value}")]);
+        assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+        assert!(text(&out.stdout).contains("nothing changed"));
+    }
+    let out = sandbox.run(&["--owner", "--stop"]);
+    assert!(text(&out.stderr).trim_end().ends_with(
+        "argument --owner: expected one argument; use --owner=VALUE for an option-like value"
+    ));
+    let out = sandbox.run(&["--state", "-x", "--stop"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(text(&out.stdout).contains("no watcher running for -x; nothing changed"));
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(!sandbox.root.join("work").join("--det.lock").exists());
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_explicit_state_stop_ignores_owner_lookup_errors() {
+    use sha2::{Digest, Sha256};
+    let sandbox = Sandbox::new();
+    let mut failures = Vec::new();
+    let session = "fixture-unreadable-agent";
+    let digests = sandbox.root.join("digests");
+    fs::create_dir(&digests).unwrap();
+    let agent = digests.join(format!("{:x}.agent", Sha256::digest(session.as_bytes())));
+    fs::write(&agent, OWNER).unwrap();
+    #[cfg(windows)]
+    let _held_agent = {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&agent)
+            .unwrap()
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&agent, fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    #[cfg(unix)]
+    let opaque = {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(vec![0xff])
+    };
+    #[cfg(windows)]
+    let opaque = {
+        use std::os::windows::ffi::OsStringExt;
+        OsString::from_wide(&[0xd800])
+    };
+    for (name, variables, refusal) in [
+        (
+            "unreadable",
+            vec![
+                ("CLAUDE_CODE_SESSION_ID", session.into()),
+                ("PSEUDOLIFE_DIGEST_DIR", digests.into_os_string()),
+            ],
+            "cannot read the session .agent file (",
+        ),
+        (
+            "opaque",
+            vec![("CLAUDE_CODE_SESSION_ID", opaque)],
+            "CLAUDE_CODE_SESSION_ID is not Unicode;",
+        ),
+        (
+            "unresolved",
+            vec![
+                ("CLAUDE_CODE_SESSION_ID", session.into()),
+                (
+                    "PSEUDOLIFE_DIGEST_DIR",
+                    "~pseudolife-fixture-missing-account-0123456789/digests".into(),
+                ),
+                ("USERNAME", OsString::new()),
+            ],
+            "cannot resolve the session digest path;",
+        ),
+    ] {
+        let state = sandbox.state(name);
+        let mut child = sandbox.spawn(&state);
+        wait_for("the watcher's pid record", Duration::from_secs(20), || {
+            record(&state).is_some()
+        });
+        let state = state.to_str().unwrap();
+        // A start still needs a trustworthy owner; assert the actual error branch.
+        let start = sandbox
+            .command(&["--state", state])
+            .envs(variables.clone())
+            .output()
+            .unwrap();
+        if start.status.code() != Some(2)
+            || !text(&start.stderr).starts_with(&format!("conductor-watch: {refusal}"))
+        {
+            failures.push(format!("{name} start: {}", text(&start.stderr)));
+        }
+        let stop = sandbox
+            .command(&["--stop", "--state", state])
+            .envs(variables)
+            .output()
+            .unwrap();
+        if stop.status.code() != Some(0) || !text(&stop.stdout).contains("asked to stop") {
+            failures.push(format!("{name} stop: {}", text(&stop.stderr)));
+            // Baseline refusal must not leave the test's own watcher running.
+            fs::write(Path::new(state).with_extension("stop"), b"").unwrap();
+        }
+        assert_eq!(
+            exit_within(&mut child, Duration::from_secs(10)).code(),
+            Some(0)
+        );
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_new_refusals_do_not_echo_option_values() {
+    let sandbox = Sandbox::new();
+    let long = format!("{}fixture-secret", "x".repeat(641));
+    let mut failures = Vec::new();
+    for argv in [
+        vec!["--max-age", &long],
+        vec!["--owner", "-fixture-secret"],
+        vec!["--interval", "-fixture-secret"],
+    ] {
+        let out = sandbox.run(&argv);
+        let message = text(&out.stderr);
+        if out.status.code() != Some(2)
+            || message.contains("fixture-secret")
+            || !message.contains("use") && !message.contains("pass --owner")
+        {
+            failures.push(message);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "newly admitted option values were echoed or lacked a remedy"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_explicit_state_stop_does_not_require_a_unicode_home() {
+    use std::os::unix::ffi::OsStringExt;
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("absent");
+    let out = sandbox
+        .command(&["--stop", "--state", state.to_str().unwrap()])
+        .env("HOME", OsString::from_vec(vec![0xff]))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("nothing changed"));
+}
+
+#[test]
+fn native_closed_stdout_names_the_writable_stream_remedy() {
+    let sandbox = Sandbox::new();
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    // The reader is closed before spawn, so every write fails regardless
+    // of how quickly the parent or child gets scheduled.
+    let out = sandbox
+        .command(&["--help"])
+        .env("COLUMNS", "80")
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stderr).contains("make stdout writable and retry"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(sandbox.board.count("register"), 0);
+}
+
+#[test]
+fn native_preflight_answers_every_former_argument_deferral() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("absent");
+    let state = state.to_str().unwrap();
+    let mut failures = Vec::new();
+    let long = "1".repeat(4301);
+    for (argv, code, message) in [
+        (
+            vec!["--sto"],
+            2,
+            "error: abbreviated option; use the full option --stop",
+        ),
+        (vec!["--s"], 2, "full option"),
+        (vec!["--"], 2, "--help"),
+        (vec!["-x"], 2, "--help"),
+        (vec!["--unknown=fixture-secret"], 2, "--help"),
+        (vec!["--interval", "1_0"], 2, "ASCII decimal"),
+        (vec!["--settle", "nan(1)"], 2, "ASCII decimal"),
+        (vec!["--interval", "١"], 2, "ASCII decimal"),
+        (vec!["--max-age", &long], 2, "finite"),
+        (
+            vec!["--stop", "--state", "-watch.json"],
+            0,
+            "nothing changed",
+        ),
+        (vec!["--stop", "--state", state], 0, "nothing changed"),
+        (vec!["--help", "--s"], 0, "usage:"),
+    ] {
+        let out = sandbox.run(&argv);
+        let output = format!("{}{}", text(&out.stdout), text(&out.stderr));
+        if out.status.code() != Some(code)
+            || !output.contains(message)
+            || output.contains("deferred")
+            || output.contains("fixture-secret")
+        {
+            failures.push(format!("expected {code}/{message}: {output}"));
+        }
+    }
+    #[cfg(windows)]
+    for path in [
+        r"\\server\share\watch.json",
+        r"\\?\C:\watch.json",
+        r"\\.\watch",
+    ] {
+        let out = sandbox.run(&["--stop", "--state", path]);
+        if out.status.code() != Some(2) || !text(&out.stderr).contains("local --state") {
+            failures.push(text(&out.stderr));
+        }
+    }
+    assert!(!state.is_empty());
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_help_and_unicode_ignore_python_locale_and_layout_settings() {
+    let sandbox = Sandbox::new();
+    let mut failures = Vec::new();
+    for mode in ["conductor-watch", "delegate-watch"] {
+        let path = std::env::join_paths([sandbox.root.join("bin")]).unwrap();
+        let env = sandbox.env(&path);
+        for columns in ["30", "100"] {
+            let out =
+                common::cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
+                    .envs(env.clone())
+                    .current_dir(sandbox.root.join("work"))
+                    .env("COLUMNS", columns)
+                    .env("FORCE_COLOR", "1")
+                    .env("NO_COLOR", "1")
+                    .env("PYTHON_COLORS", "1")
+                    .env("PYTHONINTMAXSTRDIGITS", "invalid")
+                    .env("PYTHONUTF8", "0")
+                    .env("LC_ALL", "C")
+                    .args([mode, "--help"])
+                    .output()
+                    .unwrap();
+            if out.status.code() != Some(0) || !text(&out.stdout).starts_with("usage:") {
+                failures.push(text(&out.stderr));
+            }
+        }
+    }
+    let state = sandbox.state("é");
+    let out = sandbox
+        .command(&["--stop", "--state", state.to_str().unwrap()])
+        .env("PYTHONUTF8", "0")
+        .env("LC_ALL", "C")
+        .output()
+        .unwrap();
+    if out.status.code() != Some(0) {
+        failures.push(text(&out.stderr));
+    }
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_path_and_record_refusals_preserve_files_and_do_not_start() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.state("record");
+    fs::create_dir_all(state.parent().unwrap()).unwrap();
+    let mut failures = Vec::new();
+    for body in [
+        r#"{"pid":"1_0"}"#.to_owned(),
+        r#"{"pid":"١"}"#.to_owned(),
+        format!(
+            r#"{{"extra":{}0{},"pid":0}}"#,
+            "[".repeat(501),
+            "]".repeat(501)
+        ),
+    ] {
+        fs::write(state.with_extension("pid"), &body).unwrap();
+        let out = sandbox.run(&["--stop", "--state", state.to_str().unwrap()]);
+        if out.status.code() != Some(2)
+            || !text(&out.stderr).contains("pid record")
+            || !text(&out.stderr).contains(&state.with_extension("pid").display().to_string())
+        {
+            failures.push(text(&out.stderr));
+        }
+        assert_eq!(
+            fs::read_to_string(state.with_extension("pid")).unwrap(),
+            body
+        );
+        assert!(!state.with_extension("stop").exists());
+    }
+    let out = sandbox.run(&["--stop", "--state", &format!("{}.", state.display())]);
+    if out.status.code() != Some(2) || !text(&out.stderr).contains("trailing dot") {
+        failures.push(text(&out.stderr));
+    }
+    // A non-directory ancestor makes stat/open fail without special privileges.
+    let blocked = sandbox.root.join("blocked");
+    fs::write(&blocked, b"fixture").unwrap();
+    let out = sandbox
+        .command(&[])
+        .env("CLAUDE_CODE_SESSION_ID", "fixture-session")
+        .env("PSEUDOLIFE_DIGEST_DIR", &blocked)
+        .output()
+        .unwrap();
+    if out.status.code() != Some(2)
+        || !(text(&out.stderr)
+            .starts_with("conductor-watch: cannot read the session .agent file (")
+            || cfg!(windows)
+                && text(&out.stderr).starts_with("conductor-watch: no board address file at "))
+        || text(&out.stderr).contains("deferred")
+    {
+        failures.push(text(&out.stderr));
+    }
+    assert_eq!(fs::read(&blocked).unwrap(), b"fixture");
+    assert_eq!(sandbox.board.count("register"), 0);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn native_non_unicode_arguments_and_session_ids_have_a_remedy() {
+    let sandbox = Sandbox::new();
+    #[cfg(unix)]
+    let opaque = {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(vec![0xff])
+    };
+    #[cfg(windows)]
+    let opaque = {
+        use std::os::windows::ffi::OsStringExt;
+        OsString::from_wide(&[0xd800])
+    };
+    let arg = sandbox.command(&["--state"]).arg(&opaque).output().unwrap();
+    let session = sandbox
+        .command(&[])
+        .env("CLAUDE_CODE_SESSION_ID", &opaque)
+        .output()
+        .unwrap();
+    let mut failures = Vec::new();
+    for out in [arg, session] {
+        if out.status.code() != Some(2) || !text(&out.stderr).contains("Unicode") {
+            failures.push(text(&out.stderr));
+        }
+    }
+    let state = sandbox.state("absent");
+    let out = sandbox
+        .command(&[
+            "--stop",
+            "--owner",
+            OWNER,
+            "--state",
+            state.to_str().unwrap(),
+        ])
+        .env("HOME", "")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// A board on a loopback port this test owns, answering the calls a
 /// watcher makes; the owner is always listed.
 struct Board {
