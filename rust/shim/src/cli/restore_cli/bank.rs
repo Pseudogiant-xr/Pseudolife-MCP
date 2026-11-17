@@ -60,6 +60,8 @@ pub(super) struct Plan {
     pub pg_paths: Vec<String>,
     /// Helper containers an earlier, killed restore left behind.
     pub stale_helpers: Vec<String>,
+    /// The daemon's `docker inspect` object (the ownership probe's mounts).
+    pub running: Value,
 }
 
 pub(super) struct Bank<'a, D: Docker> {
@@ -956,6 +958,7 @@ pub(super) fn probe<D: Docker>(
         state_mounts,
         pg_paths,
         stale_helpers,
+        running: running.clone(),
     })
 }
 

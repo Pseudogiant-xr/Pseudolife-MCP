@@ -894,7 +894,44 @@ impl Update {
                 "the bank is at schema v{bank}, newer than {image}'s v{image_schema}, which would refuse it; update to a release at schema v{bank} or later; nothing was changed"
             )));
         }
+        // Once the pull and the schema check passed (they change nothing):
+        // can the daemon account use its volumes? A model cache it cannot use
+        // is repaired here; the state waits for its backup.
+        let ownership = self.ownership_preflight(&context.running)?;
         let daemon = context.running["Id"].as_str().unwrap_or(DAEMON_CONTAINER);
+        let checkout = context.checkout.clone();
+        let release_backup = |u: &mut Self| -> Result<Value> {
+            if u.o.no_backup {
+                u.warn("skipping backup (--no-backup)");
+                return Ok(json!({}));
+            }
+            let pg = pg.as_deref().expect("backup discovery returns PostgreSQL");
+            if let Some(repo) = checkout
+                .as_deref()
+                .filter(|repo| u.checkout_script(repo, "backup").is_some())
+            {
+                let pg_env = &config["services"]["pseudolife-pg"]["environment"];
+                let user = pg_env["POSTGRES_USER"]
+                    .as_str()
+                    .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
+                let db = pg_env["POSTGRES_DB"]
+                    .as_str()
+                    .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
+                u.project_backup(repo, pg, daemon, user, db)
+            } else {
+                u.builtin_backup(pg, daemon, &data_dir().join("backups"))
+            }
+        };
+        // A state volume the daemon account cannot use is backed up and
+        // repaired before anything reads it as that account.
+        let early = match ownership.as_ref().filter(|c| !c.state_usable()) {
+            Some(checked) => Some(self.backup_around_ownership(
+                Some(checked),
+                &context.running,
+                release_backup,
+            )?),
+            None => None,
+        };
         if choice == "rust" {
             // A first start would otherwise download the models inside the
             // health gate. The running daemon keeps serving meanwhile.
@@ -902,34 +939,9 @@ impl Update {
             self.check_config(&image, &config)?;
             self.provision_models(&image, &config)?;
         }
-        let backups = if self.o.no_backup {
-            self.warn("skipping backup (--no-backup)");
-            json!({})
-        } else if let Some(repo) = context
-            .checkout
-            .as_deref()
-            .filter(|repo| self.checkout_script(repo, "backup").is_some())
-        {
-            let pg_env = &config["services"]["pseudolife-pg"]["environment"];
-            let user = pg_env["POSTGRES_USER"]
-                .as_str()
-                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL user"))?;
-            let db = pg_env["POSTGRES_DB"]
-                .as_str()
-                .ok_or_else(|| UpdateError::usage("cannot resolve PostgreSQL database"))?;
-            self.project_backup(
-                repo,
-                pg.as_deref().expect("backup discovery returns PostgreSQL"),
-                daemon,
-                user,
-                db,
-            )?
-        } else {
-            self.builtin_backup(
-                pg.as_deref().expect("backup discovery returns PostgreSQL"),
-                daemon,
-                &data_dir().join("backups"),
-            )?
+        let backups = match early {
+            Some(backups) => backups,
+            None => release_backup(self)?,
         };
         // A backup changes nothing on the host: a refused one still lets a
         // defaulted move fall back to the ordinary update.
@@ -1192,11 +1204,13 @@ impl Update {
         self.disk_storage(&daemon, pg.as_deref(), running["Image"].as_str())?;
         self.set_rollback_scope(&config, &running)?;
         self.maintainer_context = Some((compose.clone(), env.clone()));
-        if self.o.no_backup {
-            self.backup(None)?;
-        } else {
+        let ownership = self.ownership_preflight(&running)?;
+        self.backup_around_ownership(ownership.as_ref(), &running, |u| {
+            if u.o.no_backup {
+                return u.backup(None);
+            }
             let pg = pg.as_deref().expect("backup discovery returns PostgreSQL");
-            if self.checkout_script(&repo, "backup").is_some() {
+            if u.checkout_script(&repo, "backup").is_some() {
                 let pg_env = &config["services"]["pseudolife-pg"]["environment"];
                 let user = pg_env["POSTGRES_USER"].as_str().ok_or_else(|| {
                     UpdateError::usage("cannot resolve the project's PostgreSQL user; set POSTGRES_USER in its Compose environment and retry; nothing was deployed")
@@ -1204,11 +1218,11 @@ impl Update {
                 let db = pg_env["POSTGRES_DB"].as_str().ok_or_else(|| {
                     UpdateError::usage("cannot resolve the project's PostgreSQL database; set POSTGRES_DB in its Compose environment and retry; nothing was deployed")
                 })?;
-                self.project_backup(&repo, pg, &daemon, user, db)?;
+                u.project_backup(&repo, pg, &daemon, user, db)
             } else {
-                self.builtin_backup(pg, &daemon, &data_dir().join("backups"))?;
+                u.builtin_backup(pg, &daemon, &data_dir().join("backups"))
             }
-        }
+        })?;
         let text = fs::read_to_string(&file)?;
         disk::host(&repo)?;
         self.disk_storage(&daemon, pg.as_deref(), running["Image"].as_str())?;

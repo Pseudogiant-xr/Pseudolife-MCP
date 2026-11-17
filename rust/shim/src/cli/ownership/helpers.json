@@ -1,0 +1,26 @@
+{
+  "about": "One daemon layout and the mounts and roots cli::ownership gives each helper for it. ownership::tests checks the product's argv against this file; rust/daemon/test_container.py runs the helpers on a real engine with exactly these mounts and roots, its own volumes standing in for state, nested and models.",
+  "container": {
+    "Image": "sha256:daemon",
+    "Config": {"User": "", "Env": ["PSEUDOLIFE_DAEMON_MODELS_DIR=/models"]},
+    "Mounts": [
+      {"Type": "volume", "Name": "state", "Destination": "/data", "RW": true},
+      {"Type": "volume", "Name": "nested", "Destination": "/data/nested", "RW": true},
+      {"Type": "volume", "Name": "models", "Destination": "/models", "RW": true}
+    ]
+  },
+  "helpers": {
+    "probe": {
+      "mounts": ["type=volume,src=state,dst=/data", "type=volume,src=nested,dst=/data/nested", "type=volume,src=models,dst=/models"],
+      "roots": ["/data", "/models", "/data/nested"]
+    },
+    "state": {
+      "mounts": ["type=volume,src=state,dst=/data", "type=volume,src=nested,dst=/data/nested,readonly=true"],
+      "roots": ["/data"]
+    },
+    "models": {
+      "mounts": ["type=volume,src=models,dst=/models"],
+      "roots": ["/models"]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+### Security (2026-11-16 — the native client checks that the daemon account can use its volumes, and repairs old root-owned files once, after a backup)
+- `pseudolife-mcp update` (release mode, checkout mode and a checkout's engine selection), `backup`, `restore`, `move` (through the target's restore) and the native installers' reruns now first run a short check in a helper container as the daemon account (uid 10001), with no capabilities, no network and a read-only root filesystem. It reads metadata only and writes nothing, and confirms that this account can read every file and enter every directory of the daemon's state and model mounts, and write every directory and every root-owned state file it does not own. A directory the account owns but cannot use is reported, never refused. A healthy host runs only this check: no root container is started for it.
+- Where an older release left files that root owns, the client repairs them once:
+  - a uid-0 helper that cannot change owners first lists them, and that list is written to a private log under `~/.pseudolife-mcp/ownership-repair/` (the undo list) before anything changes;
+  - then a helper running as uid 0 with only the CHOWN and DAC_OVERRIDE capabilities (a subset of what the running daemon already holds; DAC_READ_SEARCH is avoided because it unlocks `open_by_handle_at`), no network and a read-only root filesystem gives each uid-0 entry to 10001:10001;
+  - it walks only the top-level state or model mount, follows no link and enters no mount below it, and changes owners only (chown also clears setuid and setgid bits and file capabilities);
+  - the check then runs again, and an entry it still cannot use (another owner's, or on a filesystem that cannot change owners) is refused with its path and the one fix, with nothing else changed;
+  - the user sees one line naming the log.
+- **Mounts the user added below `/data` or the model directory** are checked but never repaired: an unusable one is refused, naming the mount, its host directory or volume, and the fix. So is a bind-mounted state directory on a rootless or user-remapped Docker engine, where uid 0 in a container is not root on the host.
+- **The order protects the backed-up state:**
+  - the model cache, which backups do not include, is repaired first;
+  - the state volume is repaired after a verified archive of it, which `update` takes through the old container (or, for a stopped one, a read-only uid-0 helper), `backup` with its own pair and `restore` with its safety pair;
+  - the one exception: when the only running container already is the daemon account and cannot read root's files, it is repaired first and then archived, and the update goes on only with that archive.
+  - `update --no-backup` on such a host refuses and asks for a run with the backup.
+- **The image entrypoint's own start-time transfer** of root-owned state no longer walks into another volume mounted below `/data` or `/models`: two named volumes on one host filesystem share a device number, so `find -xdev` alone entered them.

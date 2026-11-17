@@ -29,6 +29,7 @@ use super::{
     args::Args,
     bank::{self, BULK, Bank, CLEANUP, MINUTE, NESTED_MOUNTS, Plan, Step, Stop, sh_quote},
     docker::{Docker, Input, Output},
+    ownership_steps,
     safety::{self, Pair},
     state,
 };
@@ -339,6 +340,9 @@ struct Run<'a, 'd, D: Docker, H: Host> {
     staging: bool,
     /// The swap found this mount below `/data` and replaced nothing.
     nested: Option<String>,
+    /// The post-restore ownership check failed: the data is restored and
+    /// only the daemon's start is left.
+    ownership_after_restore: bool,
 }
 
 /// The run ends here: what failed (the [`Stop`]'s text) at the phase
@@ -526,6 +530,21 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     1,
                 )));
             }
+        }
+
+        // Before anything changes: can the daemon account use its volumes?
+        // A model cache it cannot use is repaired now; the state is checked
+        // again once it is restored, with the safety pair already taken.
+        self.check()?;
+        let stamp = self.host.stamp();
+        let checked = step(ownership_steps::preflight(
+            &mut self.bank,
+            &plan.running,
+            &cx.data_dir,
+            &stamp,
+        ))?;
+        if let Some(models) = checked.as_ref().and_then(|c| c.models.as_ref()) {
+            self.host.info(&models.line());
         }
 
         self.check()?;
@@ -752,6 +771,21 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         if let Some(warning) = clear_journal(&journal_path(cx)) {
             self.host.error(&warning);
         }
+        // What was restored may hold entries the daemon account cannot use
+        // (an archive written as another owner); the safety pair exists.
+        self.check()?;
+        let restored = ownership_steps::after_restore(
+            &mut self.bank,
+            &plan.running,
+            &cx.data_dir,
+            &format!("{stamp}-restored"),
+        );
+        // The data is in place: what is left on a failure is the daemon's
+        // start, never the restore again (`report`).
+        self.ownership_after_restore = restored.is_err();
+        if let Some(repaired) = step(restored)? {
+            self.host.info(&repaired.line());
+        }
         if cx.args.leave_stopped {
             self.host
                 .info("Restore complete; daemon left stopped (--leave-stopped).");
@@ -896,10 +930,11 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
         self.bank.docker.set_interruptible(false);
         let plan = self.plan();
         let daemon = plan.daemon.clone();
-        let cause = if interrupted {
-            "restore was interrupted".to_owned()
-        } else {
-            stop.0.clone()
+        let cause = match stop.0.strip_prefix(ownership_steps::INTERRUPTED) {
+            // An interrupted ownership step names its undo list.
+            Some(rest) => format!("restore was interrupted ({rest})"),
+            None if interrupted => "restore was interrupted".to_owned(),
+            None => stop.0.clone(),
         };
         let retry = self.retry_command();
         let recovery = self.recovery_text();
@@ -1050,6 +1085,24 @@ impl<'a, 'd, D: Docker, H: Host> Run<'a, 'd, D, H> {
                     )),
                 }
             }
+            Phase::DataRestored if self.ownership_after_restore => {
+                // In order: what was done, what was left, why, the one step.
+                lines.clear();
+                lines.push("restore: the database and state were restored completely.".to_owned());
+                lines.push(format!(
+                    "The daemon {daemon} was left stopped, because the check that its account (uid 10001) can use the restored state failed: {}.",
+                    // The data is restored: no "retry" and no "nothing was
+                    // changed" from the cause reaches this sentence.
+                    cause
+                        .trim_end_matches('.')
+                        .replace(", then retry", "")
+                        .replace("; nothing was changed", "")
+                ));
+                lines.push(format!(
+                    "Once that is fixed, finish the restore with:\n  docker start {}",
+                    shell_word(&daemon)
+                ));
+            }
             Phase::DataRestored => {
                 lines.push(format!(
                     "The database and state were restored completely. Check docker logs {daemon}; start it with docker start {daemon} if it is stopped."
@@ -1130,6 +1183,7 @@ pub(super) fn execute<D: Docker, H: Host>(docker: &mut D, host: &mut H, cx: &Con
         stage_name: format!("{STAGE_PREFIX}{run_tag}"),
         staging: false,
         nested: None,
+        ownership_after_restore: false,
     };
     if let Some(earlier) = &run.earlier {
         let note = format!(
