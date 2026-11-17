@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "rust",
+  "before": "9045b09e5ae957d5",
+  "fingerprint": "7cb9ba381e8ad527",
+  "reason": "Adds the Console browser harness file to the existing binary-free inventory pytest invocation, with no new job, dependency or binary build. Own PR #1673 Rust run 43927375917 measured that step at 85 seconds (1.42 minutes) on ubuntu-latest, job 133511256515, and 87 seconds (1.45 minutes) on windows-latest, job 133511256520. The seven pure Console checks plus their workflow pin take 0.16 seconds on the Linux dev box; the candidate replay skips in this binary-free step and keeps its existing parity/stress coverage. The measured job allowance therefore holds."
+}

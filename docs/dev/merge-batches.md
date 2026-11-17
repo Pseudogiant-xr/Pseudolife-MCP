@@ -369,7 +369,8 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   the body and the comments `open` would post, then switches back; it
   creates, pushes and comments on nothing, and only says whether `build`
   would run the Rust compile check.
-- **`open`** publishes a built batch once its full suite passed on it.
+- **`open`** publishes a built batch once its full suite passed on it
+  (a batch built `--after-drop` needs no suite result: "After a drop").
   `--suite` takes the result JSON `ops/remote-suite.ps1` writes (the one
   `suite` names) and refuses unless it tested exactly the batch head,
   exited 0 and ran the real native client built from that head
@@ -680,7 +681,8 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    second or deterministic Windows-only failure goes to the Windows dev VM
    (CLAUDE.md "Dev machines"); otherwise drop the attributed member with a
    comment, close the batch and build again. If no member can be attributed, bisect by building
-   smaller batches.
+   smaller batches. When the dropped member shares nothing with the rest,
+   the batch built again can take the fast path ("After a drop", below).
 4. CI on the batch pull request is the combined check of its members and
    their only full CI; no member is ever merged directly. If master moves
    before the merge, merge it forward only under the `merge-forward`
@@ -692,6 +694,107 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
    their own, so the batch review checks that its members and merged heads
    match the body, that no conflict was resolved in it, and any
    conflict-marker warning the body carries.
+
+## After a drop
+
+A batch that opened, went red in hosted CI and was closed already paid for
+a full local gate and most of a hosted run. When its culprit is dropped
+and that pull request touched nothing the rest share, the batch built again
+does not pay for them twice (the maintainer's ruling, 17 November 2026):
+
+```bash
+python ops/integrate.py build --after-drop <closed batch PR>
+python ops/integrate.py open
+python ops/integrate.py merge   # once `test` passed on the new head
+```
+
+**What it skips.** The local full suite and the Rust harness run: `open`
+needs neither result, and the body says they were not run. The Rust
+compile check still runs, and `open` still refuses a head that did not
+pass it.
+
+**What it carries.** `merge` still waits for `test` to pass on the new head
+itself (or, on a Rust-only head, to be skipped by a successful `scope`,
+below). A job still running on the new head is not waited for when it
+concluded `SUCCESS` on the closed batch's head. A job that was skipped,
+neutral, failed, cancelled or missing there must pass on the new head. For
+a job that failed there, a skip on the new head counts as a pass only when
+its workflow's scope job (CI's `scope`, the Rust workflow's `Scope`)
+succeeded on the new head and nothing in that workflow's run there failed,
+was cancelled or timed out, since scope skips a lane once the dropped
+change that triggered it is gone (the conductor's ruling, 17 November
+2026; the tool's `AFTER_DROP_SKIP_PASSES` demands a success instead). A
+neutral result is never a pass for such a job. A
+required lane the new head never reported counts as carried only once
+every workflow run on the new head has finished. A job that did not pass on
+the closed head and has not appeared on the new one is waited for; once
+every run on the new head has finished without it, the fast path refuses.
+Any check that has finished red or cancelled on the new head refuses the
+merge, carried or not, and so does a failure whose rerun is still running,
+so a carried job that fails before the click is a failure. Before it
+merges, `merge` reads every check again and posts a comment on the batch
+pull request (and prints it): each carried job with its run on the closed
+head, each job that passed on the new head, and the state of every check
+at that moment. It reads every check once more after the comment and
+merges with the head pinned.
+
+**When it applies.** `build --after-drop` checks each of these itself and
+refuses, naming the one that failed and building nothing, unless all hold:
+
+- the named pull request is a batch from an `integrate/*` branch into
+  `master`, closed and not merged, and this checkout holds the plan of the
+  run that built and opened it, at the head GitHub shows;
+- `master` is exactly the commit the closed batch was built on;
+- the new batch's members are the closed batch's members minus the dropped
+  ones, at the same heads: nobody joined, nobody pushed, at least one was
+  dropped, and the build left nobody else out;
+- no file a dropped pull request changes is changed by a remaining member;
+- a dropped pull request changes no code every test or job shares: anything
+  under `tests/` but `tests/test_*.py`, any `conftest.py`, Python under
+  `rust/` other than `test_*.py`, anything in a folder under a Rust crate's
+  `tests/` (`tests/common/mod.rs`, which many test binaries compile in), `.github/`, `ops/integrate.py`,
+  dependency manifests and lock files (`pyproject.toml`, `uv.lock`,
+  requirements files, any `Cargo.toml` or `Cargo.lock`, the Rust toolchain
+  file, `package.json` and the npm lock files), JSON under `rust/ci/`, the
+  settings a runner, linter or build tool reads by itself (anything under a
+  `.config/` or `.cargo/` folder, `pytest.ini`, `clippy.toml`,
+  `rustfmt.toml`, `tsconfig*.json`, `vite.config.*` and the like), any path
+  a workflow's steps, inputs or filters name (a CI script, a Dockerfile; a
+  comment does not count), and a test module another Python file imports
+  (a shared fixture);
+- the new head differs from the closed one only in the dropped members'
+  files and the batch's generated metadata.
+
+The generated metadata the batch's own census commit rewrites
+(`rust/producer-census.json`, `rust/ci/ci_budget_fingerprints.json` and
+the imported accept records) is left out of these comparisons; a member's
+own edit to `rust/ci/ci_budget.json` or another accept record is not. The
+plan keeps what it relied on (the closed batch's number and head, the
+dropped members and their files, the remaining members and their heads),
+and `build`, `open` and the batch body print it.
+
+**It merges early.** The rebuilt batch merges before every hosted job on
+its new head has finished, which no other batch does: once `test` passed
+there, the jobs that passed on the closed batch are not waited for again.
+
+**When it saves time.** A summary job, such as `Parity / <os>` over the
+parity shards, is a job like any other: if it did not pass on the closed
+head (one shard went red), it must pass on the new one, so it waits for the
+carried shards it needs, and the fast path saves no time while they run;
+`merge` says so, naming them. So the fast path pays off when the closed
+batch went red outside the Rust workflow, `test` alone for example.
+
+**A Rust-only rebuilt batch** (the maintainer's ruling, 17 November 2026):
+`scope` skips `test` on a head with no Python change, and `merge` accepts
+that `test` as skipped only when `scope` itself succeeded on the new head.
+So on a Rust-only rebuilt batch only the compile check and the quick lanes
+run fresh on the new head. A `test` skipped while `scope` is still running
+waits for `scope`; one skipped while `scope` failed, was skipped or never
+reported, and a neutral `test`, refuse the fast path: rerun the job, or
+close the batch and build it again without `--after-drop`.
+
+A batch that went red in the local gate and never opened has no hosted
+results to carry, so it is built again the ordinary way.
 
 ## Merging it
 
@@ -724,6 +827,10 @@ hold:
   `TIMED_OUT` included, refuses naming the check. A rerun that superseded
   a failure counts;
 - master has not moved since `build`, or the head contains current master.
+
+A batch built `--after-drop` merges on the carried checks described under
+"After a drop" instead of waiting for every check; everything else here
+holds for it too.
 
 It then runs `gh pr merge <N> --merge --admin --match-head-commit <head>`,
 so GitHub merges nothing but that head, and checks each member by its

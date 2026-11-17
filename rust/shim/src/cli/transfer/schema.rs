@@ -16,12 +16,11 @@ const RESTORE: &str = "(`pseudolife-mcp restore --backup-file <dump> --state-arc
 
 pub(super) enum Error {
     Refused(String),
-    Db,
-    CommitUnknown,
+    Db(tokio_postgres::Error),
 }
 impl From<tokio_postgres::Error> for Error {
-    fn from(_: tokio_postgres::Error) -> Self {
-        Self::Db
+    fn from(error: tokio_postgres::Error) -> Self {
+        Self::Db(error)
     }
 }
 
@@ -136,19 +135,27 @@ async fn execute(client: &Client) -> Result<(), Error> {
     Ok(())
 }
 
-/// Python commits ensure_schema separately, even if a later import refuses.
+/// The caller owns the transaction: schema and imported rows commit together.
 pub(super) async fn ensure(client: &Client) -> Result<(), Error> {
-    client.batch_execute("BEGIN").await?;
-    if let Err(error) = execute(client).await {
-        let _ = client.batch_execute("ROLLBACK").await;
-        return Err(error);
-    }
-    super::sql::commit(client)
-        .await
-        .map_err(|error| match error {
-            super::sql::CommitFailure::RolledBack => Error::Db,
-            super::sql::CommitFailure::Unknown => Error::CommitUnknown,
-        })
+    let settings = client
+        .query_one(
+            "SELECT current_setting('statement_timeout'), current_setting('lock_timeout')",
+            &[],
+        )
+        .await?;
+    let statement: String = settings.get(0);
+    let lock: String = settings.get(1);
+    execute(client).await?;
+    // The plan's SET LOCAL limits cover schema work only, even though import
+    // now owns the transaction that also commits the data.
+    client
+        .batch_execute(&format!(
+            "SET LOCAL statement_timeout = {}; SET LOCAL lock_timeout = {}",
+            super::sql::text(&statement),
+            super::sql::text(&lock)
+        ))
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]
