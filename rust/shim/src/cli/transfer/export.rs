@@ -1,7 +1,7 @@
 //! `perform_export`: one REPEATABLE READ READ ONLY snapshot streamed into
 //! `<out>.part` as one JSONL member per exported table plus `manifest.json`.
 use super::json::{self, Value};
-use super::{EXCLUDED_TABLES, EXPORTED_TABLES, Outcome, canonical_path, skip_meta_key, sql};
+use super::{EXCLUDED_TABLES, EXPORTED_TABLES, Outcome, skip_meta_key, sql};
 use crate::pg::{Client, Dsn, Session, types::Type};
 use std::{
     fmt::Write as _,
@@ -13,91 +13,74 @@ use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 /// Streamed in batches like the oracle's named cursor.
 const FETCH_ROWS: usize = 1000;
-/// Session zones whose offset is zero in every tz database, and the zone
-/// psycopg falls back to when it cannot load one: the only sessions in which
-/// PostgreSQL's rendered wall time is exactly what psycopg's loader returns.
-const UTC_ZONES: [&str; 18] = [
-    "UTC",
-    "Etc/UTC",
-    "UCT",
-    "Etc/UCT",
-    "Universal",
-    "Etc/Universal",
-    "Zulu",
-    "Etc/Zulu",
-    "GMT",
-    "Etc/GMT",
-    "GMT0",
-    "Etc/GMT0",
-    "GMT+0",
-    "Etc/GMT+0",
-    "GMT-0",
-    "Etc/GMT-0",
-    "Greenwich",
-    "Etc/Greenwich",
-];
-
 pub(super) struct Destination {
     path: PathBuf,
     display: String,
 }
 
-/// The oracle's `args.out or Path.cwd() / "pseudolife-export-<ts>.zip"`, with
-/// every precondition whose failure would be a Python traceback deferred.
-pub(super) fn destination(out: Option<String>) -> Option<Destination> {
-    let display = match out {
-        Some(value) => value,
-        None => {
-            // MSVCRT's strftime honours TZ; the native local clock does not.
-            if cfg!(windows) && std::env::var_os("TZ").is_some() {
-                return None;
-            }
-            let cwd = std::env::current_dir()
-                .ok()?
-                .into_os_string()
-                .into_string()
-                .ok()?;
-            let name = format!(
-                "pseudolife-export-{}.zip",
-                chrono::Local::now().format("%Y%m%d-%H%M%S")
-            );
-            let separator = if cfg!(windows) { '\\' } else { '/' };
-            if cwd.ends_with(separator) {
-                format!("{cwd}{name}")
-            } else {
-                format!("{cwd}{separator}{name}")
-            }
-        }
+/// Validate the destination without creating directories or touching files.
+pub(super) fn destination(out: Option<String>) -> Result<Destination, String> {
+    let path = match out {
+        Some(value) => PathBuf::from(value),
+        None => std::env::current_dir().map_err(|e|
+            format!("cannot resolve the current directory: {e} — pass --out with an absolute archive path."))?
+            .join(format!("pseudolife-export-{}.zip", chrono::Local::now().format("%Y%m%d-%H%M%S"))),
     };
-    if !canonical_path(&display) {
-        return None;
-    }
-    let path = PathBuf::from(&display);
+    let display = path
+        .to_str()
+        .ok_or_else(|| {
+            "--out path is not valid Unicode — choose a Unicode archive path.".to_owned()
+        })?
+        .to_owned();
     match fs::symlink_metadata(&path) {
-        Ok(meta) if meta.is_dir() => return None,
+        Ok(meta) if meta.is_dir() => {
+            return Err(format!(
+                "--out {display:?} is a directory — choose an archive filename."
+            ));
+        }
         Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(format!(
+                "cannot inspect --out {display:?}: {e} — choose an accessible archive path."
+            ));
+        }
     }
-    // A `.part` this run did not create is never overwritten or removed: the
-    // oracle would truncate and then unlink or rename it.
     match fs::symlink_metadata(format!("{display}.part")) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        _ => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(_) => {
+            return Err(format!(
+                "--out temporary file {display}.part already exists — choose a different --out filename."
+            ));
+        }
+        Err(e) => {
+            return Err(format!(
+                "cannot inspect --out temporary file {display}.part: {e} — choose an accessible --out path."
+            ));
+        }
     }
-    // mkdir(parents=True, exist_ok=True) fails on a non-directory ancestor.
     for ancestor in path.ancestors().skip(1) {
         if ancestor.as_os_str().is_empty() {
             break;
         }
         match fs::metadata(ancestor) {
             Ok(meta) if meta.is_dir() => break,
-            Ok(_) => return None,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return None,
+            Ok(_) => {
+                return Err(format!(
+                    "--out parent {} is not a directory — choose an archive path beneath a directory.",
+                    ancestor.display()
+                ));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(format!(
+                    "cannot inspect --out parent {}: {e} — choose an accessible archive path.",
+                    ancestor.display()
+                ));
+            }
         }
     }
-    Some(Destination { path, display })
+    Ok(Destination { path, display })
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -129,12 +112,10 @@ struct Table {
     columns: Vec<(String, Kind)>,
 }
 
-/// Every deferral is decided before the first filesystem effect. After it,
-/// failures keep the oracle's traceback effects: `.part` unlinked, created
-/// directories kept.
+/// Admission refusals precede filesystem changes.
 enum Stop {
-    Defer,
-    /// PostgreSQL, or a value the pre-checks should have deferred.
+    Refuse(String),
+    /// PostgreSQL failed during the snapshot.
     Fail,
     /// The filesystem.
     FailIo,
@@ -215,7 +196,11 @@ fn cell(out: &mut String, kind: Kind, text: Option<&str>, rendering: &Rendering)
             _ => return None,
         }),
         Kind::Jsonb => out.push_str(&json::dumps(&json::loads(text)?, false, None)),
-        Kind::Timestamptz => json::write_str(out, &timestamptz(text, rendering)?, false),
+        Kind::Timestamptz => json::write_str(
+            out,
+            &timestamptz(text, rendering).unwrap_or_else(|| text.to_owned()),
+            false,
+        ),
     }
     Some(())
 }
@@ -223,20 +208,23 @@ fn cell(out: &mut String, kind: Kind, text: Option<&str>, rendering: &Rendering)
 /// `meta.schema_version` as this build's `ensure_schema` writes it.
 const BUILD_SCHEMA: &str = "59";
 
-async fn tables(client: &Client) -> Result<Option<Vec<Table>>, ()> {
+async fn tables(client: &Client) -> Result<Vec<Table>, Stop> {
     // Every public table must be classified, as transfer_cli's roster test
     // demands of BENCH_RESET_TABLES; an unknown one would be dropped silently.
     let present = sql::rows(
         client,
         "SELECT tablename FROM pg_tables WHERE schemaname = 'public'",
     )
-    .await?;
+    .await
+    .map_err(|error| Stop::Refuse(sql::refusal(error, "read the public table roster")))?;
     for row in &present {
         let Some(Some(name)) = row.first() else {
-            return Ok(None);
+            return Err(query_refusal("read the public table roster"));
         };
         if !EXPORTED_TABLES.contains(&name.as_str()) && !EXCLUDED_TABLES.contains(&name.as_str()) {
-            return Ok(None);
+            return Err(Stop::Refuse(format!(
+                "public table {name:?} has no export policy in this build — use a build that supports this table before exporting."
+            )));
         }
     }
     let mut found = Vec::new();
@@ -245,24 +233,35 @@ async fn tables(client: &Client) -> Result<Option<Vec<Table>>, ()> {
             client,
             &format!("SELECT to_regclass('public.{name}') IS NOT NULL"),
         )
-        .await?;
+        .await
+        .map_err(|error| Stop::Refuse(sql::refusal(error, "inspect export tables")))?;
         if exists.as_deref() != Some("t") {
-            return Ok(None);
+            return Err(Stop::Refuse(format!(
+                "required export table {name} is missing — start the matching daemon to initialize the bank before exporting."
+            )));
         }
         let statement = client
-            .prepare(&format!("SELECT * FROM {name} ORDER BY 1"))
+            .prepare(&format!("SELECT * FROM {name} LIMIT 0"))
             .await
-            .map_err(|_| ())?;
+            .map_err(|error| Stop::Refuse(sql::refusal(error, "inspect export columns")))?;
+        client.query(&statement, &[]).await.map_err(|error| {
+            Stop::Refuse(sql::refusal(error, &format!("read export table {name}")))
+        })?;
         let mut columns = Vec::new();
         for column in statement.columns() {
             let Some(kind) = kind(column.type_()) else {
-                return Ok(None);
+                return Err(Stop::Refuse(format!(
+                    "{}.{} has unsupported export type {} — use a build that supports this column type.",
+                    name,
+                    column.name(),
+                    column.type_().name()
+                )));
             };
             columns.push((column.name().to_owned(), kind));
         }
         found.push(Table { name, columns });
     }
-    Ok(Some(found))
+    Ok(found)
 }
 
 type Archive = ZipWriter<BufWriter<File>>;
@@ -346,40 +345,25 @@ fn quoted(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
-/// Value-level deferrals, decided inside the snapshot before any effect:
-/// timestamptz values psycopg's loader would not return as `cell` renders
-/// them, and jsonb documents `json::loads` does not carry.
+fn query_refusal(operation: &str) -> Stop {
+    Stop::Refuse(format!(
+        "PostgreSQL could not {operation} for PSEUDOLIFE_MCP_DATABASE_URL — restore database access and retry."
+    ))
+}
+
+/// Check JSON limits in the same snapshot before creating the archive.
 async fn admit_values(
     client: &Client,
     tables: &[Table],
-    rendering: &Rendering,
+    _rendering: &Rendering,
 ) -> Result<(), Stop> {
     for table in tables {
-        let mut documents = Vec::new();
-        for (name, kind) in &table.columns {
-            let column = quoted(name);
-            let probe = match kind {
-                Kind::Timestamptz if rendering.utc && rendering.iso => format!(
-                    "SELECT EXISTS (SELECT 1 FROM {} WHERE {column} IS NOT NULL AND NOT \
-                     ({column} >= '0001-01-01 00:00:00+00' \
-                     AND {column} < '10000-01-01 00:00:00+00'))",
-                    table.name
-                ),
-                Kind::Timestamptz => format!(
-                    "SELECT EXISTS (SELECT 1 FROM {} WHERE {column} IS NOT NULL)",
-                    table.name
-                ),
-                Kind::Jsonb => {
-                    documents.push(column);
-                    continue;
-                }
-                _ => continue,
-            };
-            let found = sql::scalar(client, &probe).await.map_err(|_| Stop::Defer)?;
-            if found.as_deref() != Some("f") {
-                return Err(Stop::Defer);
-            }
-        }
+        let documents: Vec<_> = table
+            .columns
+            .iter()
+            .filter(|(_, kind)| *kind == Kind::Jsonb)
+            .map(|(name, _)| name)
+            .collect();
         if documents.is_empty() {
             continue;
         }
@@ -388,31 +372,41 @@ async fn admit_values(
             client,
             &format!(
                 "DECLARE {cursor} CURSOR FOR SELECT {} FROM {}",
-                documents.join(", "),
+                documents
+                    .iter()
+                    .map(|name| quoted(name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 table.name
             ),
         )
         .await
-        .map_err(|_| Stop::Defer)?;
+        .map_err(|error| Stop::Refuse(sql::refusal(error, "open the JSON validation cursor")))?;
         loop {
             let rows = sql::rows(client, &format!("FETCH FORWARD {FETCH_ROWS} FROM {cursor}"))
                 .await
-                .map_err(|_| Stop::Defer)?;
+                .map_err(|error| Stop::Refuse(sql::refusal(error, "read JSON values")))?;
             if rows.is_empty() {
                 break;
             }
-            if rows
-                .iter()
-                .flatten()
-                .flatten()
-                .any(|text| json::loads(text).is_none())
-            {
-                return Err(Stop::Defer);
+            for row in rows {
+                for (name, text) in documents.iter().zip(row) {
+                    if let Some(text) = text {
+                        json::read(&text).map_err(|reason| {
+                            Stop::Refuse(format!(
+                                "{}.{}: {reason} — simplify this JSON value before exporting.",
+                                table.name, name
+                            ))
+                        })?;
+                    }
+                }
             }
         }
         sql::execute(client, &format!("CLOSE {cursor}"))
             .await
-            .map_err(|_| Stop::Defer)?;
+            .map_err(|error| {
+                Stop::Refuse(sql::refusal(error, "close the JSON validation cursor"))
+            })?;
     }
     Ok(())
 }
@@ -433,49 +427,54 @@ async fn snapshot(
     destination: &Destination,
     partial: &Path,
 ) -> Result<Vec<(&'static str, u64)>, Stop> {
-    // The oracle's session has no lock_timeout; the shared session sets one.
-    sql::execute(client, "RESET lock_timeout")
+    let setup = "BEGIN; SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY; \
+        SET LOCAL extra_float_digits = 3; SET LOCAL TimeZone = 'UTC'; SET LOCAL DateStyle = 'ISO, YMD'";
+    sql::execute(client, setup)
         .await
-        .map_err(|_| Stop::Defer)?;
-    let setup = "BEGIN; \
-        SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY; \
-        SET LOCAL extra_float_digits = 3";
-    sql::execute(client, setup).await.map_err(|_| Stop::Defer)?;
-    let zone = sql::scalar(client, "SHOW TimeZone").await;
-    let style = sql::scalar(client, "SHOW DateStyle").await;
-    let encoding = sql::scalar(client, "SHOW server_encoding").await;
-    let (Ok(Some(zone)), Ok(Some(style)), Ok(Some(encoding))) = (zone, style, encoding) else {
-        return Err(Stop::Defer);
-    };
-    // psycopg decodes in the server's encoding; the native client is UTF-8.
-    if encoding != "UTF8" {
-        return Err(Stop::Defer);
+        .map_err(|error| Stop::Refuse(sql::refusal(error, "start a read-only snapshot")))?;
+    let encoding = sql::scalar(client, "SHOW server_encoding")
+        .await
+        .map_err(|error| Stop::Refuse(sql::refusal(error, "read server_encoding")))?;
+    if encoding.as_deref() != Some("UTF8") {
+        return Err(Stop::Refuse(
+            "server_encoding is not UTF8 — migrate this database to UTF8 before exporting.".into(),
+        ));
     }
     let rendering = Rendering {
-        utc: UTC_ZONES.contains(&zone.as_str()),
-        iso: style.starts_with("ISO"),
+        utc: true,
+        iso: true,
     };
-    let tables = tables(client)
-        .await
-        .map_err(|_| Stop::Defer)?
-        .ok_or(Stop::Defer)?;
-    let version = sql::rows(
+    let tables = tables(client).await?;
+    let version = sql::scalar(
         client,
         "SELECT value FROM meta WHERE key = 'schema_version'",
     )
     .await
-    .map_err(|_| Stop::Defer)?;
-    // The roster is this build's: a bank at another schema version may hold
-    // tables this build would leave out without a word, so it defers.
-    if !matches!(version.first().and_then(|row| row.first()), Some(Some(text)) if text == BUILD_SCHEMA)
-    {
-        return Err(Stop::Defer);
+    .map_err(|error| Stop::Refuse(sql::refusal(error, "read meta.schema_version")))?;
+    if version.as_deref() != Some(BUILD_SCHEMA) {
+        let stamp = version
+            .as_deref()
+            .and_then(|value| value.parse::<i64>().ok());
+        let supported: i64 = BUILD_SCHEMA.parse().expect("build schema version");
+        let (cause, fix) = match stamp {
+            Some(stamp) if stamp > supported => (
+                "newer than this client",
+                "run pseudolife-mcp update and export with a release that supports the bank",
+            ),
+            Some(stamp) if stamp > 0 && stamp < supported => (
+                "older than this client",
+                "use the matching daemon release to upgrade the bank before exporting",
+            ),
+            _ => (
+                "missing or not understood",
+                "restore the bank from a backup with a valid schema stamp",
+            ),
+        };
+        return Err(Stop::Refuse(format!(
+            "meta.schema_version is {cause} (this client supports {BUILD_SCHEMA}) — {fix}."
+        )));
     }
-    let version = match version.first().and_then(|row| row.first()) {
-        None => Value::Null,
-        Some(None) => Value::Null,
-        Some(Some(text)) => json::loads(text).ok_or(Stop::Defer)?,
-    };
+    let version = Value::Int(BUILD_SCHEMA.into());
     admit_values(client, &tables, &rendering).await?;
 
     // First filesystem effect: the oracle's out.parent.mkdir(parents=True).
@@ -554,8 +553,9 @@ async fn snapshot(
 }
 
 pub(super) async fn run(dsn: &Dsn, destination: &Destination) -> Outcome {
-    let Ok(session) = Session::open(dsn).await else {
-        return Outcome::Deferred;
+    let session = match Session::open(dsn).await {
+        Ok(session) => session,
+        Err(error) => return Outcome::Refused(super::database_refusal(error)),
     };
     let partial = PathBuf::from(format!("{}.part", destination.display));
     let result = snapshot(session.client(), destination, &partial).await;
@@ -563,7 +563,7 @@ pub(super) async fn run(dsn: &Dsn, destination: &Destination) -> Outcome {
     let counts = match result {
         Ok(counts) => counts,
         // Decided before any effect: nothing to undo.
-        Err(Stop::Defer) => return Outcome::Deferred,
+        Err(Stop::Refuse(message)) => return Outcome::Refused(message),
         Err(stop) => {
             // destination() refused a pre-existing `.part`: this one is ours.
             let _ = fs::remove_file(&partial);

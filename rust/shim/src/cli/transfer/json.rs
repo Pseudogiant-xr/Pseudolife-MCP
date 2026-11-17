@@ -3,13 +3,13 @@
 //! Objects keep Python dict semantics: first position, last value. Anything the
 //! oracle would reject, or would decode into a value this leaf does not carry
 //! (a lone surrogate, an integer past the 4,300-digit limit, a document deeper
-//! than [`MAX_DEPTH`]), is `None`, which callers turn into a deferral.
+//! than [`MAX_DEPTH`]), is refused with a diagnostic before any transfer mutation.
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// CPython's default `sys.int_info.default_max_str_digits`.
 const MAX_INT_DIGITS: usize = 4300;
-/// Deeper documents defer instead of approximating CPython's recursion limit.
+/// Bound recursive parsing and serialization stack use.
 const MAX_DEPTH: usize = 200;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -34,21 +34,33 @@ impl Value {
 }
 
 pub(super) fn loads(text: &str) -> Option<Value> {
+    read(text).ok()
+}
+
+pub(super) fn read(text: &str) -> Result<Value, String> {
     let mut parser = Parser {
         bytes: text.as_bytes(),
         text,
         at: 0,
+        reason: None,
     };
     parser.whitespace();
-    let value = parser.value(0)?;
+    let value = parser.value(0);
     parser.whitespace();
-    (parser.at == parser.bytes.len()).then_some(value)
+    match value {
+        Some(value) if parser.at == parser.bytes.len() => Ok(value),
+        _ => Err(match parser.reason {
+            Some(reason) => reason.to_owned(),
+            None => format!("invalid JSON at byte {}", parser.at),
+        }),
+    }
 }
 
 struct Parser<'a> {
     text: &'a str,
     bytes: &'a [u8],
     at: usize,
+    reason: Option<&'static str>,
 }
 
 impl Parser<'_> {
@@ -135,6 +147,7 @@ impl Parser<'_> {
         }
         let digits = &self.text[start..integral_end];
         if digits.trim_start_matches('-').len() > MAX_INT_DIGITS {
+            self.reason = Some("JSON integer exceeds the 4300-digit limit");
             return None;
         }
         Some(Value::Int(if digits == "-0" {
@@ -201,7 +214,12 @@ impl Parser<'_> {
                             } else {
                                 first
                             };
-                            out.push(char::from_u32(point)?);
+                            let Some(character) = char::from_u32(point) else {
+                                self.reason =
+                                    Some("JSON string contains an unpaired Unicode surrogate");
+                                return None;
+                            };
+                            out.push(character);
                         }
                         _ => return None,
                     }
@@ -213,6 +231,7 @@ impl Parser<'_> {
 
     fn array(&mut self, depth: usize) -> Option<Value> {
         if depth > MAX_DEPTH {
+            self.reason = Some("JSON nesting exceeds the 200-level limit");
             return None;
         }
         self.at += 1;
@@ -241,6 +260,7 @@ impl Parser<'_> {
 
     fn object(&mut self, depth: usize) -> Option<Value> {
         if depth > MAX_DEPTH {
+            self.reason = Some("JSON nesting exceeds the 200-level limit");
             return None;
         }
         self.at += 1;
