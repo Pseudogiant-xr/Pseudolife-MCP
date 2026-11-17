@@ -90,8 +90,7 @@ each exists because it was violated at least once.
     exception.
 11. **Committed goldens are Rust regression snapshots:** parity shards
     replay them and no PR, batch, push or nightly job compares against a
-    live Python oracle outside the weekly source mutants, so a change that
-    moves a golden on purpose updates
+    live Python oracle, so a change that moves a golden on purpose updates
     it in the same PR and says so (read `rust/cli_harness/README.md`
     "Goldens after the freeze" first, because `--record` still records the
     frozen Python).
