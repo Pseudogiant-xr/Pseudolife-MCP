@@ -1,9 +1,24 @@
 //! Private same-directory staging; publication never replaces another file.
 use std::{
+    fmt,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
 };
+
+#[derive(Debug)]
+enum StagingFailure {
+    IdentityLost,
+}
+
+impl fmt::Display for StagingFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::IdentityLost => "staged archive identity could not be confirmed before publication; retry in a private destination directory",
+        })
+    }
+}
+impl std::error::Error for StagingFailure {}
 
 pub(super) struct Staged {
     path: PathBuf,
@@ -58,14 +73,24 @@ impl Staged {
     }
 
     pub(super) fn publish(mut self) -> io::Result<()> {
+        self.require_identity()?;
         self.file().sync_all()?;
-        if !self.owns_path() {
-            return Err(io::ErrorKind::PermissionDenied.into());
-        }
+        self.require_identity()?;
         // Windows refuses a pathname rename while our non-delete-sharing
         // private handle is open. Nothing is written after this close.
         drop(self.file.take());
         rename_exclusive(&self.path, &self.destination)
+    }
+
+    fn require_identity(&self) -> io::Result<()> {
+        if self.owns_path() {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                StagingFailure::IdentityLost,
+            ))
+        }
     }
 
     fn owns_path(&self) -> bool {
@@ -205,6 +230,14 @@ fn rename_exclusive(_: &Path, _: &Path) -> io::Result<()> {
 }
 
 pub(super) fn failure(operation: &str, error: &io::Error) -> u8 {
+    if let Some(cause) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<StagingFailure>())
+    {
+        return super::stats::error(format!(
+            "--out {operation} failed: {cause}; no archive was published"
+        ));
+    }
     let (cause, fix) = match error.kind() {
         io::ErrorKind::NotFound if operation == "staging" => (
             "parent directory does not exist",
@@ -214,14 +247,6 @@ pub(super) fn failure(operation: &str, error: &io::Error) -> u8 {
             "the staged archive or destination directory is missing",
             "keep the destination directory available and retry the export",
         ),
-        io::ErrorKind::PermissionDenied
-            if cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)) =>
-        {
-            (
-                "an archive path is locked by another process",
-                "close the program using that path before retrying",
-            )
-        }
         io::ErrorKind::PermissionDenied => (
             "permission denied",
             "choose a destination writable by your user",

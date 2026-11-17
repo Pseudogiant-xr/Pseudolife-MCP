@@ -406,6 +406,8 @@ def test_staging_error_names_out_and_leaves_no_file(candidate, bank, tmp_path):
     assert invoke(candidate, tmp_path, "export", "--out", out, dsn=bank[1]).returncode == 0
 
 
+@pytest.mark.skipif(os.name == "posix" and os.geteuid() == 0,
+                    reason="root bypasses directory write permissions")
 def test_unwritable_export_parent_has_permission_fix(candidate, bank, tmp_path):
     parent = tmp_path / "private"
     parent.mkdir()
