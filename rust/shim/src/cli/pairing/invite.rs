@@ -4,7 +4,7 @@
 //! `--list` (`coordination.not_owner_principals` read natively).
 use super::invite_db::{self, DbError};
 use super::pyjson::{self, J};
-use super::{Defer, net};
+use super::{Refusal, net};
 use std::path::PathBuf;
 #[path = "invite_transport.rs"]
 mod transport;
@@ -17,6 +17,14 @@ const DEFAULT_PORT: u32 = 8765;
 const MIN_SCHEMA: i64 = 53;
 const TIERS: [&str; 3] = ["minimal", "core", "full"];
 const URL_PLACEHOLDER: &str = "<daemon-url>";
+const EXPIRY_ERROR: Refusal = Refusal::usage(
+    "--expires must be ASCII digits with an optional s, m, h or d suffix, from 60 seconds to 24 hours; use --expires 15m",
+);
+const PORT_ERROR: Refusal =
+    Refusal::usage("--port must be ASCII digits from 1 to 65535; use --port 8765");
+const TIME_ERROR: Refusal = Refusal::new(
+    "an invite list timestamp is non-finite or outside 1970 through 9999; repair that timestamp in the bank before listing again",
+);
 /// `VERSION_LINES`: what `invite --version-check` prints, the highest
 /// version listed being this image's; 2 (v59) takes `--someone-else` and
 /// `--mine`. Line 1 stays first because every host CLI before v59, Python
@@ -36,7 +44,7 @@ struct Args {
     tier: Option<String>,
     board: Option<bool>,
     /// v59: `--someone-else` (false) or `--mine` (true); both is
-    /// argparse's mutually-exclusive error, deferred.
+    /// a mutually exclusive argument error.
     owned: Option<bool>,
     expires: Option<u32>,
     replace: bool,
@@ -51,8 +59,8 @@ struct Args {
 }
 
 /// `_expires` for its ASCII spellings `<digits>[smhd]` (any case), within
-/// one minute and 24 hours; anything else is argparse's error, deferred.
-fn expires(value: &str) -> Result<u32, Defer> {
+/// one minute and 24 hours; other values receive a usage error.
+fn expires(value: &str) -> Result<u32, Refusal> {
     let lower = value.to_ascii_lowercase();
     let (digits, unit) = match lower.as_bytes().last() {
         Some(b's') => (&lower[..lower.len() - 1], 1),
@@ -62,89 +70,131 @@ fn expires(value: &str) -> Result<u32, Defer> {
         _ => (lower.as_str(), 60),
     };
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(Defer);
+        return Err(EXPIRY_ERROR);
     }
     let digits = digits.trim_start_matches('0');
     if digits.len() > 9 {
-        return Err(Defer);
+        return Err(EXPIRY_ERROR);
     }
     let seconds = digits.parse::<u64>().unwrap_or(0) * unit;
     if !(60..=86400).contains(&seconds) {
-        return Err(Defer);
+        return Err(EXPIRY_ERROR);
     }
-    u32::try_from(seconds).map_err(|_| Defer)
+    u32::try_from(seconds).map_err(|_| EXPIRY_ERROR)
 }
 
 /// A port spelled as ASCII digits in 1..=65535 (`expose_cli._port`, and the
-/// `PSEUDOLIFE_MCP_PORT` default); any other spelling defers.
-fn port(value: &str) -> Result<u32, Defer> {
+/// `PSEUDOLIFE_MCP_PORT` default).
+fn port(value: &str) -> Result<u32, Refusal> {
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(Defer);
+        return Err(PORT_ERROR);
     }
     let digits = value.trim_start_matches('0');
     if digits.len() > 5 {
-        return Err(Defer);
+        return Err(PORT_ERROR);
     }
     let port = digits.parse::<u32>().unwrap_or(0);
     if (1..=65535).contains(&port) {
         Ok(port)
     } else {
-        Err(Defer)
+        Err(PORT_ERROR)
     }
 }
 
-fn parse(arguments: &[String]) -> Result<Args, Defer> {
+fn parse(arguments: &[String]) -> Result<Args, Refusal> {
     let mut args = Args::default();
     let mut items = arguments.iter();
-    fn once<T>(slot: &mut Option<T>, value: T) -> Result<(), Defer> {
-        if slot.is_some() {
-            return Err(Defer);
-        }
-        *slot = Some(value);
-        Ok(())
-    }
-    fn flag(slot: &mut bool) -> Result<(), Defer> {
-        if *slot {
-            return Err(Defer);
-        }
-        *slot = true;
-        Ok(())
-    }
+    let mut positional_only = false;
     while let Some(item) = items.next() {
-        let mut value = || {
-            items
-                .next()
-                .filter(|value| !value.starts_with('-'))
-                .cloned()
-                .ok_or(Defer)
-        };
-        match item.as_str() {
-            "--tier" => {
-                let tier = value()?;
-                if !TIERS.contains(&tier.as_str()) {
-                    return Err(Defer);
-                }
-                once(&mut args.tier, tier)?;
+        if item == "--" && !positional_only {
+            positional_only = true;
+            continue;
+        }
+        if positional_only || !item.starts_with('-') {
+            if args.name.replace(item.clone()).is_some() {
+                return Err(Refusal::usage(
+                    "invite takes one principal name; remove the extra positional argument",
+                ));
             }
-            "--board" => once(&mut args.board, true)?,
-            "--no-board" => once(&mut args.board, false)?,
-            "--someone-else" => once(&mut args.owned, false)?,
-            "--mine" => once(&mut args.owned, true)?,
-            "--expires" => once(&mut args.expires, expires(&value()?)?)?,
-            "--replace" => flag(&mut args.replace)?,
-            "--url" => once(&mut args.url, value()?)?,
-            "--port" => once(&mut args.port, port(&value()?)?)?,
-            "--bank" => once(&mut args.bank, value()?)?,
-            "--list" => flag(&mut args.list)?,
-            "--revoke" => once(&mut args.revoke, value()?)?,
-            "--yes" => flag(&mut args.yes)?,
-            "--json" => flag(&mut args.json)?,
-            "--version-check" => flag(&mut args.version_check)?,
-            positional if !positional.starts_with('-') => once(&mut args.name, item.clone())?,
-            _ => return Err(Defer),
+            continue;
+        }
+        let (option, inline) = item
+            .split_once('=')
+            .map_or((item.as_str(), None), |(k, v)| (k, Some(v)));
+        let mut value = |missing| {
+            inline
+                .map(str::to_owned)
+                .or_else(|| items.next().filter(|v| !v.starts_with('-')).cloned())
+                .ok_or(Refusal::usage(missing))
+        };
+        match option {
+            "--tier" => {
+                let tier = value("--tier requires a value; use minimal, core or full")?;
+                if !TIERS.contains(&tier.as_str()) {
+                    return Err(Refusal::usage(
+                        "--tier is not minimal, core or full; choose one of those tiers",
+                    ));
+                }
+                args.tier = Some(tier);
+            }
+            "--board" | "--no-board" if inline.is_none() => {
+                let board = option == "--board";
+                if args.board.is_some_and(|old| old != board) {
+                    return Err(Refusal::usage(
+                        "--board and --no-board conflict; choose just one",
+                    ));
+                }
+                args.board = Some(board);
+            }
+            "--mine" | "--someone-else" if inline.is_none() => {
+                let owned = option == "--mine";
+                if args.owned.is_some_and(|old| old != owned) {
+                    return Err(Refusal::usage(
+                        "--mine and --someone-else conflict; choose just one",
+                    ));
+                }
+                args.owned = Some(owned);
+            }
+            "--expires" => {
+                args.expires = Some(expires(&value(
+                    "--expires requires a duration; use --expires 15m",
+                )?)?)
+            }
+            "--port" => {
+                args.port = Some(port(&value("--port requires a number; use --port 8765")?)?)
+            }
+            "--url" => {
+                args.url = Some(value(
+                    "--url requires the daemon address; supply an http(s) origin",
+                )?)
+            }
+            "--bank" => {
+                args.bank = Some(value(
+                    "--bank requires a bank fingerprint; supply the daemon's bank fingerprint",
+                )?)
+            }
+            "--revoke" => {
+                args.revoke = Some(value(
+                    "--revoke requires a principal name; supply the machine to revoke",
+                )?)
+            }
+            "--replace" if inline.is_none() => args.replace = true,
+            "--list" if inline.is_none() => args.list = true,
+            "--yes" if inline.is_none() => args.yes = true,
+            "--json" if inline.is_none() => args.json = true,
+            "--version-check" if inline.is_none() => args.version_check = true,
+            _ => {
+                return Err(Refusal::usage(
+                    "unrecognized invite option or a value on a flag; use invite --help for the supported options",
+                ));
+            }
         }
     }
     Ok(args)
+}
+
+pub(super) fn refusal(error: Refusal, json: bool) -> u8 {
+    Report::new(json).fail(error.exit, error.message)
 }
 
 /// `_Report`: the JSON report's members in their insertion order.
@@ -212,12 +262,27 @@ impl Report {
 }
 
 /// `time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(epoch)) if epoch else "-"`.
-fn when(epoch: Option<f64>) -> Result<String, Defer> {
+fn when(epoch: Option<f64>) -> Result<String, Refusal> {
     when_or(epoch, "-")
 }
 
+#[cfg(test)]
+mod native_refusal_tests {
+    use super::*;
+
+    #[test]
+    fn native_refusal_timestamp_has_a_repair_step() {
+        for epoch in [-1.0, f64::NAN, f64::INFINITY, 253_402_300_800.0] {
+            let error = when(Some(epoch)).unwrap_err();
+            assert!(format!("{error:?}").contains("timestamp"));
+        }
+        assert!(when(Some(1.0)).is_ok());
+        assert!(when(Some(253_402_300_799.0)).is_ok());
+    }
+}
+
 /// `_when(epoch, missing)`.
-fn when_or(epoch: Option<f64>, missing: &str) -> Result<String, Defer> {
+fn when_or(epoch: Option<f64>, missing: &str) -> Result<String, Refusal> {
     let Some(epoch) = epoch.filter(|epoch| *epoch != 0.0) else {
         return Ok(missing.to_owned());
     };
@@ -225,30 +290,35 @@ fn when_or(epoch: Option<f64>, missing: &str) -> Result<String, Defer> {
     // where this formatting pads it, and Windows' gmtime refuses negative
     // times; outside the range the oracle's own answer depends on the host.
     if !(0.0..253_402_300_800.0).contains(&epoch) {
-        return Err(Defer);
+        return Err(TIME_ERROR);
     }
-    let moment = chrono::DateTime::from_timestamp(epoch.floor() as i64, 0).ok_or(Defer)?;
+    let moment = chrono::DateTime::from_timestamp(epoch.floor() as i64, 0).ok_or(TIME_ERROR)?;
     Ok(moment.format("%Y-%m-%d %H:%M UTC").to_string())
 }
 
-/// `parse_token_map` principals and `parse_tier_map` writers, or a deferral
-/// when either would log a warning (or holds non-ASCII text).
-fn environment_names() -> Result<(Vec<String>, Vec<String>), Defer> {
-    let read = |name: &str| -> Result<String, Defer> {
+/// Validate both authority maps without echoing their credential-bearing entries.
+fn environment_names() -> Result<(Vec<String>, Vec<String>), Refusal> {
+    const TOKENS: Refusal = Refusal::new(
+        "PSEUDOLIFE_MCP_TOKENS cannot be validated: entries must be ASCII token:principal pairs with nonempty values, unique tokens and no default or maintainer principal; correct that setting before inviting",
+    );
+    const TIERS_ERROR: Refusal = Refusal::new(
+        "PSEUDOLIFE_MCP_TIER_MAP cannot be validated: entries must be ASCII writer:tier pairs with a nonempty writer and a minimal, core or full tier; correct that setting before inviting",
+    );
+    let read = |name: &str, error| -> Result<String, Refusal> {
         match std::env::var(name) {
             Ok(value) if value.is_ascii() => Ok(value),
-            Ok(_) => Err(Defer),
+            Ok(_) => Err(error),
             Err(std::env::VarError::NotPresent) => Ok(String::new()),
-            Err(_) => Err(Defer),
+            Err(_) => Err(error),
         }
     };
     let mut tokens: Vec<(String, String)> = Vec::new();
-    for part in read("PSEUDOLIFE_MCP_TOKENS")?.split(',') {
+    for part in read("PSEUDOLIFE_MCP_TOKENS", TOKENS)?.split(',') {
         let part = pyjson::py_strip(part);
         if part.is_empty() {
             continue;
         }
-        let (token, principal) = part.rsplit_once(':').ok_or(Defer)?;
+        let (token, principal) = part.rsplit_once(':').ok_or(TOKENS)?;
         let token = pyjson::py_strip(token);
         let principal = pyjson::py_strip(principal).to_ascii_lowercase();
         if token.is_empty()
@@ -257,21 +327,21 @@ fn environment_names() -> Result<(Vec<String>, Vec<String>), Defer> {
             || principal == "maintainer"
             || tokens.iter().any(|(seen, _)| seen == token)
         {
-            return Err(Defer);
+            return Err(TOKENS);
         }
         tokens.push((token.to_owned(), principal));
     }
     let mut writers = Vec::new();
-    for part in read("PSEUDOLIFE_MCP_TIER_MAP")?.split(',') {
+    for part in read("PSEUDOLIFE_MCP_TIER_MAP", TIERS_ERROR)?.split(',') {
         let part = pyjson::py_strip(part);
         if part.is_empty() {
             continue;
         }
-        let (writer, tier) = part.split_once(':').ok_or(Defer)?;
+        let (writer, tier) = part.split_once(':').ok_or(TIERS_ERROR)?;
         let writer = pyjson::py_strip(writer).to_ascii_lowercase();
         let tier = pyjson::py_strip(tier).to_ascii_lowercase();
         if writer.is_empty() || !TIERS.contains(&tier.as_str()) {
-            return Err(Defer);
+            return Err(TIERS_ERROR);
         }
         writers.push(writer);
     }
@@ -280,7 +350,7 @@ fn environment_names() -> Result<(Vec<String>, Vec<String>), Defer> {
 
 /// `_environment_names`: the token map's principals, and `default` when
 /// `PSEUDOLIFE_MCP_TOKEN` is set (v58's `invite --list`).
-fn list_environment() -> Result<Vec<String>, Defer> {
+fn list_environment() -> Result<Vec<String>, Refusal> {
     let (mut names, _writers) = environment_names()?;
     if std::env::var_os("PSEUDOLIFE_MCP_TOKEN").is_some_and(|value| !value.is_empty()) {
         names.push("default".to_owned());
@@ -291,7 +361,7 @@ fn list_environment() -> Result<Vec<String>, Defer> {
 }
 
 /// `_name_refusal`.
-fn name_refusal(name: &str) -> Result<Option<String>, Defer> {
+fn name_refusal(name: &str) -> Result<Option<String>, Refusal> {
     if super::RESERVED.contains(&name) {
         return Ok(Some(format!("'{name}' is reserved; choose another name")));
     }
@@ -315,18 +385,23 @@ fn env_nonempty(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// `Path.home()` as CPython 3.11 resolves it from the environment; a home
-/// it would take from elsewhere (the password database) defers.
-fn python_home() -> Result<PathBuf, Defer> {
+/// Resolve the optional configuration home from explicit environment settings.
+fn python_home() -> Result<PathBuf, Refusal> {
     if cfg!(windows) {
         if let Some(home) = env_nonempty("USERPROFILE") {
             return Ok(home);
         }
-        let path = std::env::var_os("HOMEPATH").ok_or(Defer)?;
+        let path = std::env::var_os("HOMEPATH").ok_or(Refusal::new(
+            "the home directory is unset; set USERPROFILE to your absolute home directory",
+        ))?;
         let drive = std::env::var_os("HOMEDRIVE").unwrap_or_default();
         Ok(PathBuf::from(drive).join(path))
     } else {
-        std::env::var_os("HOME").map(PathBuf::from).ok_or(Defer)
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or(Refusal::new(
+                "HOME is unset; set HOME to your absolute home directory",
+            ))
     }
 }
 
@@ -418,20 +493,32 @@ fn python_bool(value: bool) -> J {
     J::Bool(value)
 }
 
-pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
+pub(super) async fn run(arguments: &[String]) -> Result<u8, Refusal> {
     let mut args = parse(arguments)?;
-    // `int(os.environ.get("PSEUDOLIFE_MCP_PORT") or 8765)` runs while the
-    // parser is built; a value int() would refuse is a traceback.
-    let default_port = match std::env::var("PSEUDOLIFE_MCP_PORT") {
-        Ok(value) if !value.is_empty() => port(&value)?,
-        Ok(_) | Err(std::env::VarError::NotPresent) => DEFAULT_PORT,
-        Err(_) => return Err(Defer),
-    };
     if args.version_check {
         for line in VERSION_LINES {
             super::print(line);
         }
         return Ok(EXIT_OK);
+    }
+    let default_port = if let Some(port) = args.port {
+        port
+    } else {
+        match std::env::var("PSEUDOLIFE_MCP_PORT") {
+        Ok(value) if !value.is_empty() => port(&value).map_err(|_| Refusal::usage("PSEUDOLIFE_MCP_PORT must be ASCII digits from 1 to 65535; set PSEUDOLIFE_MCP_PORT=8765"))?,
+        Ok(_) | Err(std::env::VarError::NotPresent) => DEFAULT_PORT,
+        Err(_) => return Err(Refusal::usage("PSEUDOLIFE_MCP_PORT is not valid Unicode; set PSEUDOLIFE_MCP_PORT=8765")),
+    }
+    };
+    if let Some(url) = args
+        .url
+        .as_deref()
+        .filter(|url| !url.is_empty() && *url != URL_PLACEHOLDER)
+        && !matches!(super::url::validated(url), Ok(Ok(_)))
+    {
+        return Err(Refusal::usage(
+            "--url is not a supported daemon origin; supply an ASCII http(s) URL with no credentials, path, query or fragment",
+        ));
     }
     let mut report = Report::new(args.json);
     // Python truthiness: an empty value counts as no mode.
@@ -455,10 +542,7 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         if !super::valid_principal_name(target) {
             return Ok(report.fail(
                 EXIT_USAGE,
-                &format!(
-                    "{} is not a principal name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters",
-                    super::super::mode_repr(target)
-                ),
+                "the principal name is invalid: use lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters",
             ));
         }
         if let Some(name) = &name
@@ -503,16 +587,16 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         }
         return Ok(report.fail(EXIT_REFUSED, "no database found: set PSEUDOLIFE_MCP_DATABASE_URL, or run this on the daemon's host (a Docker install runs it in the daemon container)"));
     };
-    let dsn = crate::pg::Dsn::parse(&dsn).map_err(|_| Defer)?;
+    let dsn = crate::pg::Dsn::parse(&dsn).map_err(database_error)?;
     let mut url = args.url.clone().filter(|url| !url.is_empty());
     if name.is_some() && url.is_none() {
         url = transport::exposed_url(port).await?;
     }
-    // Everything that could still defer happens here, before an invite's
-    // only request: the connection (Python opens it after `/health`; a
-    // refusal of it is deferred instead), the session settings, and the
-    // checks that leave nothing to defer once the request went out.
-    let mut session = crate::pg::Session::open(&dsn).await.map_err(|_| Defer)?;
+    // Check the connection, session settings, schema and clock before an
+    // invite can write a code. All decoding inside a transaction precedes COMMIT.
+    let mut session = crate::pg::Session::open(&dsn)
+        .await
+        .map_err(database_error)?;
     let ready = async {
         invite_db::setup(session.client()).await?;
         if name.is_some() {
@@ -521,9 +605,9 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
         Ok::<(), DbError>(())
     }
     .await;
-    if ready.is_err() {
+    if let Err(error) = ready {
         let _ = session.close().await;
-        return Err(Defer);
+        return Ok(database_failure(&mut report, error));
     }
     let mut health = None;
     if name.is_some() {
@@ -534,9 +618,9 @@ pub(super) async fn run(arguments: &[String]) -> Result<u8, Defer> {
                 let _ = session.close().await;
                 return Ok(report.fail_units(EXIT_REFUSED, refusal));
             }
-            Err(Defer) => {
+            Err(error) => {
                 let _ = session.close().await;
-                return Err(Defer);
+                return Err(error);
             }
         }
     }
@@ -569,16 +653,30 @@ fn quoting(prefix: &str, value: &J, suffix: &str) -> Vec<u16> {
     out
 }
 
-/// `_daemon_check(port, report, need_auth=True)`: the health, or the
-/// refusal; the report's `daemon` member is set as Python sets it. `Defer`
-/// only for a `/health` nested past CPython's recursion limit, where the
-/// oracle dies with a `RecursionError` traceback (declared).
+/// Preserve health validation while keeping arbitrary response values out of diagnostics.
+fn diagnostic_member(key: &str, value: J) -> J {
+    let safe = match (key, &value) {
+        (_, J::Null) => true,
+        ("auth", J::Bool(_)) => true,
+        ("schema", J::Bool(_)) => true,
+        ("schema", J::Int(digits)) => digits.parse::<u32>().is_ok(),
+        ("bank", J::Str(bank)) => bank.len() == 16 && bank.bytes().all(|b| b.is_ascii_hexdigit()),
+        _ => false,
+    };
+    if safe {
+        value
+    } else {
+        J::Str(format!("<invalid {key} value>"))
+    }
+}
+
+/// Check the daemon before inviting. Diagnostics contain only known field shapes.
 async fn daemon_check(
     port: u32,
     report: &mut Report,
-) -> Result<Result<pyjson::Dict, Vec<u16>>, Defer> {
+) -> Result<Result<pyjson::Dict, Vec<u16>>, Refusal> {
     let local = format!("http://127.0.0.1:{port}");
-    let health = net::invite_health(&local).await.map_err(|_| Defer)?;
+    let health = net::invite_health(&local).await.map_err(|_| Refusal::new("the daemon /health response exceeds the JSON nesting limit; update the daemon before inviting"))?;
     let Some(health) =
         health.filter(|h| pyjson::get(h, "status").and_then(J::as_str) == Some("ok"))
     else {
@@ -590,9 +688,18 @@ async fn daemon_check(
     report.set(
         "daemon",
         J::Dict(vec![
-            (J::Str("auth".into()), member("auth")),
-            (J::Str("schema".into()), member("schema")),
-            (J::Str("bank".into()), member("bank")),
+            (
+                J::Str("auth".into()),
+                diagnostic_member("auth", member("auth")),
+            ),
+            (
+                J::Str("schema".into()),
+                diagnostic_member("schema", member("schema")),
+            ),
+            (
+                J::Str("bank".into()),
+                diagnostic_member("bank", member("bank")),
+            ),
         ]),
     );
     if pyjson::get(&health, "auth") != Some(&J::Bool(true)) {
@@ -609,9 +716,15 @@ async fn daemon_check(
         _ => true,
     };
     if old {
+        let shown = diagnostic_member("schema", schema.clone());
+        if shown != schema {
+            return Ok(Err(units(
+                "the daemon /health schema is not a supported version number; update the daemon before inviting",
+            )));
+        }
         return Ok(Err(quoting(
             "the daemon runs schema ",
-            &schema,
+            &shown,
             &format!(", older than invite (v{MIN_SCHEMA}): update the daemon first"),
         )));
     }
@@ -630,20 +743,199 @@ fn bank_refusal(bank: Option<&str>, expected: &J, what: &str) -> Option<Vec<u16>
     {
         return None;
     }
+    let shown = diagnostic_member("bank", expected.clone());
+    if shown != *expected {
+        return Some(units(if what == "--bank" {
+            "--bank is not a valid bank fingerprint; supply the daemon's 16 hexadecimal digit fingerprint. Nothing was changed"
+        } else {
+            "the daemon /health bank field is not a valid bank fingerprint; update the daemon before inviting. Nothing was changed"
+        }));
+    }
     Some(quoting(
         &format!(
             "this database holds bank {}, but {what} is bank ",
             bank.unwrap_or("(none)")
         ),
-        expected,
+        &shown,
         ": it is another database. Nothing was changed",
     ))
 }
 
 const NO_TABLE: &str = "this bank has no principals table yet (schema v53): update the daemon and let it start, then re-run";
 
+fn database_error(error: crate::pg::Error) -> Refusal {
+    use crate::pg::Error;
+    let exit = if matches!(
+        &error,
+        Error::Connection | Error::SessionSetup | Error::Shutdown
+    ) {
+        EXIT_FAILED
+    } else {
+        EXIT_REFUSED
+    };
+    let message = match error {
+        Error::InvalidDsn => {
+            "PSEUDOLIFE_MCP_DATABASE_URL is not a valid PostgreSQL connection string; supply a PostgreSQL URL or libpq keyword connection string"
+        }
+        Error::UnsupportedOption(option) if option == "sslmode" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has an unsupported sslmode; choose disable, prefer, require, verify-ca or verify-full without weakening the required verification"
+        }
+        Error::UnsupportedOption(option) if option == "sslcert" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL requires unsupported sslcert client-certificate authentication; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        Error::UnsupportedOption(option) if option == "sslkey" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL requires unsupported sslkey client-certificate authentication; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        Error::UnsupportedOption(option) if option == "sslcrl" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL requires an unsupported sslcrl revocation policy; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        Error::UnsupportedOption(option) if option == "application_name" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has unsupported application_name; remove application_name from that connection string and retry"
+        }
+        Error::UnsupportedOption(option) if option == "connect_timeout" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has unsupported connect_timeout; remove connect_timeout from that connection string and retry"
+        }
+        Error::UnsupportedOption(option) if option == "client_encoding" => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has unsupported client_encoding; remove client_encoding from that connection string and retry"
+        }
+        Error::UnsupportedOption(_) => {
+            "PSEUDOLIFE_MCP_DATABASE_URL contains an unsupported connection option; keep the required setting and ask the maintainer to add support before retrying"
+        }
+        Error::InvalidOption("host") => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has an invalid host; supply one TCP hostname or IP address"
+        }
+        Error::InvalidOption("port") => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has an invalid port; supply an integer from 1 through 65535"
+        }
+        Error::InvalidOption("sslmode") => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has an invalid sslmode; choose disable, prefer, require, verify-ca or verify-full without weakening the required verification"
+        }
+        Error::InvalidOption(_) => {
+            "PSEUDOLIFE_MCP_DATABASE_URL has an invalid connection option; correct the connection settings before retrying"
+        }
+        Error::AmbientControl(control) => ambient_error(&control),
+        Error::RootCertificate => {
+            "the PostgreSQL sslrootcert setting cannot be read as a trusted certificate; provide the correct readable CA certificate"
+        }
+        Error::HostnameRules => {
+            "the PostgreSQL certificate does not validate for the host in PSEUDOLIFE_MCP_DATABASE_URL; use a certificate whose SAN matches that host"
+        }
+        Error::Connection => {
+            "the PostgreSQL connection selected by PSEUDOLIFE_MCP_DATABASE_URL failed; verify that connection and its credentials before retrying"
+        }
+        Error::SessionSetup => {
+            "the PostgreSQL session settings for PSEUDOLIFE_MCP_DATABASE_URL could not be applied; allow the login to set the required session parameters before retrying"
+        }
+        Error::Shutdown => {
+            "the PostgreSQL connection could not close cleanly; run invite --list to verify the outcome before retrying"
+        }
+    };
+    Refusal { message, exit }
+}
+
+// Only known setting names enter diagnostics: a driver-supplied name can
+// itself contain a secret. Unknown PGSSL/PGTLS keys get the safe prefix.
+fn ambient_error(control: &str) -> &'static str {
+    macro_rules! settings {
+        ($($name:literal),* $(,)?) => {
+            match control.to_ascii_uppercase().as_str() {
+                $($name => concat!($name, " is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"),)*
+                _ => "a PGSSL or PGTLS environment setting is unsupported by this invite client; keep the required TLS policy and ask the maintainer to add support before retrying",
+            }
+        };
+    }
+    macro_rules! removable {
+        ($($name:literal),* $(,)?) => {
+            match control.to_ascii_uppercase().as_str() {
+                $($name => return concat!($name, " is unsupported by this invite client; unset ", $name, " for this command and retry"),)*
+                _ => {},
+            }
+        };
+    }
+    removable!(
+        "PGAPPNAME",
+        "PGCONNECT_TIMEOUT",
+        "PGCLIENTENCODING",
+        "PGDATESTYLE",
+        "PGTZ",
+        "PGGEQO"
+    );
+    match control.to_ascii_uppercase().as_str() {
+        "PGHOST" => {
+            "PGHOST is unsupported as an ambient setting for invite; move its required value to host in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGPORT" => {
+            "PGPORT is unsupported as an ambient setting for invite; move its required value to port in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGDATABASE" => {
+            "PGDATABASE is unsupported as an ambient setting for invite; move its required value to dbname in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGUSER" => {
+            "PGUSER is unsupported as an ambient setting for invite; move its required value to user in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGSSLMODE" => {
+            "PGSSLMODE is unsupported as an ambient setting for invite; move its required value to sslmode in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "PGSSLROOTCERT" => {
+            "PGSSLROOTCERT is unsupported as an ambient setting for invite; move its required value to sslrootcert in PSEUDOLIFE_MCP_DATABASE_URL before unsetting it"
+        }
+        "POSTGRESQL.CRT" => {
+            "the implicit PostgreSQL postgresql.crt client-certificate policy is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        "POSTGRESQL.KEY" => {
+            "the implicit PostgreSQL postgresql.key client-certificate policy is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        "ROOT.CRL" => {
+            "the implicit PostgreSQL root.crl revocation policy is unsupported by this invite client; keep the required policy and ask the maintainer to add support before retrying"
+        }
+        _ => settings!(
+            "PGHOSTADDR",
+            "PGPASSFILE",
+            "PGSERVICE",
+            "PGSERVICEFILE",
+            "PGSYSCONFDIR",
+            "PGOPTIONS",
+            "PGCHANNELBINDING",
+            "PGTARGETSESSIONATTRS",
+            "PGLOADBALANCEHOSTS",
+            "PGREQUIREAUTH",
+            "PGGSSENCMODE",
+            "PGKRBSRVNAME",
+            "PGGSSLIB",
+            "PGGSSDELEGATION",
+            "PGREQUIREPEER",
+            "PGMINPROTOCOLVERSION",
+            "PGMAXPROTOCOLVERSION",
+            "PGREQUIRESSL",
+            "PGREALM",
+            "PGSSLCERT",
+            "PGSSLKEY",
+            "PGSSLCRL",
+            "PGSSLCRLDIR",
+            "PGSSLCOMPRESSION",
+            "PGSSLSNI",
+            "PGSSLNEGOTIATION",
+            "PGSSLMINPROTOCOLVERSION",
+            "PGSSLMAXPROTOCOLVERSION",
+        ),
+    }
+}
+
+fn database_failure(report: &mut Report, error: DbError) -> u8 {
+    match error {
+        DbError::UndefinedTable => report.fail(EXIT_REFUSED, NO_TABLE),
+        DbError::Refused(message) => report.fail(EXIT_REFUSED, &format!("{message}. Nothing was changed")),
+        DbError::Failed(class) => report.fail(EXIT_FAILED, &format!("the database refused or lost the invite operation ({class}); check PSEUDOLIFE_MCP_DATABASE_URL and run invite --list before retrying")),
+        DbError::CommitUnknown => {
+            report.set("state", J::Str("unknown".into()));
+            report.fail(EXIT_FAILED, "the PostgreSQL COMMIT reply was lost: a pairing code may have been created, or the requested revocation or ownership change may have committed; run invite --list to check the principal, and use invite --revoke <principal> to invalidate its code and token before retrying")
+        }
+        DbError::Invalid(error) => report.fail(error.exit, error.message),
+    }
+}
+
 /// `_local` after the daemon check: the database errors as Python reports
-/// them (`classify`); `Defer` remains only for a value this client cannot
+/// them (`classify`); `Refusal` remains only for a value this client cannot
 /// decode, which `prepare` rules out before an invite's request.
 #[allow(clippy::too_many_arguments)]
 async fn local(
@@ -655,7 +947,7 @@ async fn local(
     url: Option<String>,
     port: u32,
     health: Option<pyjson::Dict>,
-) -> Result<u8, Defer> {
+) -> Result<u8, Refusal> {
     let result = async {
         let bank_given = args.bank.clone().filter(|bank| !bank.is_empty());
         if name.is_some() || bank_given.is_some() {
@@ -687,7 +979,9 @@ async fn local(
             let found = invite_db::revoke(session.client_mut(), revoke).await?;
             return Ok(Ok(Outcome::Revoked(found)));
         }
-        let name = name.clone().ok_or(DbError::Defer)?;
+        let name = name.clone().ok_or(DbError::Invalid(Refusal::usage(
+            "no invite name was supplied; give a principal name",
+        )))?;
         let ownership = invite_db::has_owned_column(session.client()).await?;
         let created = invite_db::create_invite(
             session.client_mut(),
@@ -731,15 +1025,7 @@ async fn local(
             ownership && args.owned.is_none(),
         )),
         Ok(Err(refusal)) => Ok(report.fail_units(EXIT_REFUSED, refusal)),
-        Err(DbError::UndefinedTable) => Ok(report.fail(EXIT_REFUSED, NO_TABLE)),
-        Err(DbError::Refused(message)) => {
-            Ok(report.fail(EXIT_REFUSED, &format!("{message}. Nothing was changed")))
-        }
-        Err(DbError::Failed(class)) => Ok(report.fail(
-            EXIT_FAILED,
-            &format!("the database refused the change ({class})"),
-        )),
-        Err(DbError::Defer) => Err(Defer),
+        Err(error) => Ok(database_failure(report, error)),
     }
 }
 
@@ -846,12 +1132,12 @@ fn float(value: Option<f64>) -> J {
     value.map_or(J::Null, J::Float)
 }
 
-/// `_list` (read only: an unrepresentable time defers before any output).
+/// Build the complete list before emitting output; invalid times refuse it.
 fn list_report(
     report: &mut Report,
     rows: &[invite_db::Listed],
     rejected: &[invite_db::Rejected],
-) -> Result<u8, Defer> {
+) -> Result<u8, Refusal> {
     let mut lines = Vec::new();
     let mut members = Vec::new();
     for row in rows {
@@ -866,7 +1152,7 @@ fn list_report(
         .flatten()
         {
             if !time.is_finite() {
-                return Err(Defer);
+                return Err(TIME_ERROR);
             }
         }
         let state = if row.state == "pending" {
@@ -925,7 +1211,7 @@ fn list_report(
     let mut refused = Vec::new();
     for row in rejected {
         if !row.first_seen_at.is_finite() || !row.last_seen_at.is_finite() {
-            return Err(Defer);
+            return Err(TIME_ERROR);
         }
         refused_lines.push(format!(
             "  {:<8} {:>8}  {:<21} {}",
@@ -1013,9 +1299,13 @@ mod tests {
     }
 
     #[test]
-    fn canonical_argv_only() {
+    fn native_argument_shapes() {
         for good in [
             &["laptop"][..],
+            &["--json", "--json"],
+            &["x", "--someone-else", "--someone-else"],
+            &["--url=u", "x"],
+            &["--"],
             &["--tier", "core", "laptop", "--no-board", "--expires", "2h"],
             &[
                 "laptop",
@@ -1035,12 +1325,10 @@ mod tests {
         ] {
             assert!(parse(&strings(good)).is_ok(), "{good:?}");
         }
-        for deferred in [
+        for invalid in [
             &["a", "b"][..],
             &["--board", "--no-board", "x"],
-            &["--json", "--json"],
             &["x", "--mine", "--someone-else"],
-            &["x", "--someone-else", "--someone-else"],
             &["--tier", "writer", "x"],
             &["--tier"],
             &["--expires", "30s", "x"],
@@ -1049,13 +1337,11 @@ mod tests {
             &["--port", "0", "x"],
             &["--port", "+1", "x"],
             &["--url", "-x", "x"],
-            &["--url=u", "x"],
             &["--rev", "x"],
             &["--help"],
             &["-h"],
-            &["--"],
         ] {
-            assert!(parse(&strings(deferred)).is_err(), "{deferred:?}");
+            assert!(parse(&strings(invalid)).is_err(), "{invalid:?}");
         }
     }
 
@@ -1089,7 +1375,7 @@ mod tests {
         assert_eq!(when(Some(1_700_000_059.9)).unwrap(), "2023-11-14 22:14 UTC");
         assert!(when(Some(f64::NAN)).is_err());
         // Outside 1970..=9999 the platforms disagree (glibc prints year 1
-        // unpadded, Windows' gmtime refuses negative times): deferred.
+        // unpadded, Windows' gmtime refuses negative times): refused.
         assert!(when(Some(-62_135_596_800.0)).is_err());
         assert!(when(Some(-1.0)).is_err());
         assert!(when(Some(253_402_300_800.0)).is_err());
@@ -1100,24 +1386,22 @@ mod tests {
     }
 
     #[test]
-    fn bank_refusals_name_both_banks() {
+    fn bank_refusals_name_only_valid_fingerprints() {
+        let bank = "0123456789abcdef";
         assert_eq!(
-            bank_refusal(Some("ab"), &J::Str("ab".into()), "--bank"),
+            bank_refusal(Some(bank), &J::Str(bank.into()), "--bank"),
             None
         );
         let text = |units: Vec<u16>| String::from_utf16(&units).unwrap();
-        assert_eq!(
-            text(bank_refusal(None, &J::Str("ab".into()), "--bank").unwrap()),
-            "this database holds bank (none), but --bank is bank ab: it is another database. Nothing was changed"
-        );
-        assert!(
-            text(bank_refusal(Some("ab"), &J::Int("5".into()), "x").unwrap()).contains("bank 5:")
-        );
-        // A lone surrogate in the daemon's value stays a code unit.
-        let message = bank_refusal(Some("ab"), &J::Wtf(vec![0xd800]), "x").unwrap();
-        assert_eq!(
-            pyjson::backslashreplace(&message),
-            "this database holds bank ab, but x is bank \\ud800: it is another database. Nothing was changed"
-        );
+        assert!(text(bank_refusal(None, &J::Str(bank.into()), "--bank").unwrap()).contains(bank));
+        for invalid in [
+            J::Int("5".into()),
+            J::Wtf(vec![0xd800]),
+            J::Str("fixture-private-secret".into()),
+        ] {
+            let message = text(bank_refusal(Some(bank), &invalid, "--bank").unwrap());
+            assert!(message.contains("valid bank fingerprint"));
+            assert!(!message.contains("fixture-private-secret"));
+        }
     }
 }
