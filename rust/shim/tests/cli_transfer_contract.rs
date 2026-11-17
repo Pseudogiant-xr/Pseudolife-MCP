@@ -1,8 +1,7 @@
 #![forbid(unsafe_code)]
 //! export/import behaviour that needs no PostgreSQL: help, bank resolution
-//! refusals and deferrals, argv deferrals, and the archive refusals that the
-//! oracle raises before it connects. Database behaviour is proven by the
-//! differential harness row `transfer` (rust/cli_harness/rows/transfer.py).
+//! refusals, argument handling and archive admission before connecting.
+//! Database behavior is covered by rust/cli_harness/test_transfer_native.py.
 #[path = "common/cli.rs"]
 mod cli;
 use std::{
@@ -14,7 +13,7 @@ use std::{
 
 const NO_DATABASE: &str = "no database configured — set PSEUDOLIFE_MCP_DATABASE_URL (Docker tier: postgresql://pseudolife:<POSTGRES_PASSWORD from ops/.env>@127.0.0.1:5433/pseudolife_memory).\n";
 /// Parses, and nothing listens there: no test reaches a connection attempt
-/// except the one that checks the deferral after a refused connection.
+/// except tests that check the connection refusal.
 const UNREACHABLE: &str = "postgresql://nobody@127.0.0.1:9/pl_cf_absent";
 
 struct Home(PathBuf);
@@ -61,10 +60,13 @@ impl Drop for Home {
     }
 }
 
-fn deferred(mode: &str) -> Vec<u8> {
-    cli::native_text(&format!(
-        "pseudolife-stdio: mode '{mode}' is deferred in this candidate\n"
-    ))
+fn assert_native_refusal(output: &Output, cause: &str) {
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(!text.contains("deferred"), "{text}");
+    assert!(text.contains(cause), "{text}");
+    assert!(text.contains(" — "), "{text}");
 }
 
 fn assert_stderr(output: &Output, code: i32, stderr: &[u8]) {
@@ -111,7 +113,9 @@ fn captured_help_for_both_modes() {
             .env("COLUMNS", "120")
             .output()
             .unwrap();
-        assert_stderr(&wide, 1, &deferred(mode));
+        assert_eq!(wide.status.code(), Some(0));
+        assert_eq!(wide.stdout, cli::native_text(help));
+        assert!(wide.stderr.is_empty());
     }
 }
 
@@ -196,36 +200,49 @@ fn a_lite_bank_is_refused_plainly_without_touching_it() {
 }
 
 #[test]
-fn non_canonical_argv_defers_before_any_effect() {
+fn argument_and_path_shapes_have_native_answers() {
     let home = Home::new("argv");
+    archive(
+        &home.cwd().join("a.zip"),
+        &[("manifest.json", "{\"format_version\":1}")],
+    );
     let before = home.entries();
-    let cases: &[(&str, &[&str])] = &[
-        ("export", &["--ou", "x.zip"]),
-        ("export", &["--out=x.zip"]),
-        ("export", &["--out", "a.zip", "--out", "b.zip"]),
-        ("export", &["--out"]),
-        ("export", &["--out", ""]),
-        ("export", &["--out", "-x.zip"]),
-        ("export", &["--force"]),
-        ("export", &["-h"]),
-        ("export", &["--help", "--out", "x.zip"]),
-        ("export", &["extra"]),
-        ("import", &[]),
-        ("import", &["a.zip", "b.zip"]),
-        ("import", &["--force", "--force", "a.zip"]),
-        ("import", &["-a.zip"]),
-        ("import", &["a.zip", "--out", "x"]),
-        ("import", &["a.zip", "--data-dir"]),
-        ("import", &["a.zip", "--data-dir", "d", "--data-dir", "e"]),
+    let connection = "PostgreSQL connection failed";
+    let cases: &[(&str, &[&str], &str)] = &[
+        ("export", &["--ou", "x.zip"], "unexpected argument"),
+        ("export", &["--out=x.zip"], connection),
+        ("export", &["--out", "a.zip", "--out", "b.zip"], connection),
+        ("export", &["--out"], "needs a value"),
+        ("export", &["--out", ""], "empty path"),
+        ("export", &["--out", "-x.zip"], "needs a value"),
+        ("export", &["--force"], "unexpected argument"),
+        ("export", &["-h"], ""),
+        ("export", &["--help", "--out", "x.zip"], ""),
+        ("export", &["extra"], "unexpected argument"),
+        ("import", &[], "archive path is missing"),
+        ("import", &["a.zip", "b.zip"], "unexpected argument"),
+        ("import", &["--force", "--force", "a.zip"], connection),
+        ("import", &["-a.zip"], "unexpected argument"),
+        ("import", &["a.zip", "--out", "x"], "unexpected argument"),
+        ("import", &["a.zip", "--data-dir"], "needs a value"),
+        (
+            "import",
+            &["a.zip", "--data-dir", "d", "--data-dir", "e"],
+            connection,
+        ),
     ];
-    for (mode, argv) in cases {
+    for (mode, argv, cause) in cases {
         let output = home
             .command(mode)
             .args(*argv)
             .env("PSEUDOLIFE_MCP_DATABASE_URL", UNREACHABLE)
             .output()
             .unwrap();
-        assert_stderr(&output, 1, &deferred(mode));
+        if argv.contains(&"-h") || argv.contains(&"--help") {
+            assert_eq!(output.status.code(), Some(0));
+        } else {
+            assert_native_refusal(&output, cause);
+        }
     }
     // Spellings whose printed form Python's Path would rewrite.
     let spelled: &[&str] = if cfg!(windows) {
@@ -248,7 +265,12 @@ fn non_canonical_argv_defers_before_any_effect() {
                 .env("PSEUDOLIFE_MCP_DATABASE_URL", UNREACHABLE)
                 .output()
                 .unwrap();
-            assert_stderr(&output, 1, &deferred(mode));
+            let cause = if mode == "import" {
+                "archive"
+            } else {
+                connection
+            };
+            assert_native_refusal(&output, cause);
         }
     }
     assert_eq!(home.entries(), before);
@@ -295,7 +317,7 @@ fn archive_refusals_precede_the_connection() {
         assert_stderr(&output, 1, &refusal(&message));
     }
     // Not a zip, a missing file and an unparsed manifest are oracle
-    // tracebacks: the candidate defers.
+    // failures: the native command gives a specific refusal.
     fs::write(home.cwd().join("plain.zip"), "not a zip").unwrap();
     archive(
         &home.cwd().join("badjson.zip"),
@@ -309,7 +331,16 @@ fn archive_refusals_precede_the_connection() {
             .env("PSEUDOLIFE_MCP_DATABASE_URL", UNREACHABLE)
             .output()
             .unwrap();
-        assert_stderr(&output, 1, &deferred("import"));
+        assert_native_refusal(
+            &output,
+            if name == "missing.zip" {
+                "archive"
+            } else if name == "plain.zip" {
+                "ZIP"
+            } else {
+                "manifest.json"
+            },
+        );
     }
     let after: Vec<_> = home
         .entries()
@@ -324,7 +355,7 @@ fn archive_refusals_precede_the_connection() {
 }
 
 #[test]
-fn an_unreachable_bank_defers_without_creating_the_destination() {
+fn an_unreachable_bank_refuses_without_creating_the_destination() {
     let home = Home::new("unreachable");
     let before = home.entries();
     let target = home.cwd().join("made").join("x.zip");
@@ -335,6 +366,6 @@ fn an_unreachable_bank_defers_without_creating_the_destination() {
         .env("PSEUDOLIFE_MCP_DATABASE_URL", UNREACHABLE)
         .output()
         .unwrap();
-    assert_stderr(&output, 1, &deferred("export"));
+    assert_native_refusal(&output, "PostgreSQL connection failed");
     assert_eq!(home.entries(), before);
 }

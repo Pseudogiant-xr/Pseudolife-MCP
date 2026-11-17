@@ -31,17 +31,17 @@ impl Host for Fake {
     }
 }
 
-fn background(program: &str, args: &[&str]) -> Result<Plan, Unsupported> {
-    Ok(Plan::Background {
+fn background(program: &str, args: &[&str]) -> Plan {
+    Plan::Background {
         program: program.to_owned(),
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
-    })
+    }
 }
 
 /// The cause a refused POSIX plan prints, which every one of them has.
-fn cause(plan: Result<Plan, Unsupported>) -> String {
+fn cause(plan: Plan) -> String {
     match plan {
-        Ok(Plan::Refused(Some(cause))) => {
+        Plan::Refused(Some(cause)) => {
             assert!(cause.contains(SET_BROWSER), "{cause}");
             cause
         }
@@ -50,6 +50,109 @@ fn cause(plan: Result<Plan, Unsupported>) -> String {
 }
 
 use Platform::{Mac, Posix, Windows};
+
+#[test]
+fn mac_ssh_prints_the_link_unless_browser_is_explicit() {
+    for key in ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] {
+        let remote = Fake::default().with(key, "remote");
+        let Plan::Refused(Some(reason)) = choose(&remote, Mac) else {
+            panic!("SSH should print the link")
+        };
+        assert!(reason.contains("SSH"));
+        assert!(reason.contains("machine in front of you"));
+        assert!(!reason.contains("firefox"));
+        assert_eq!(
+            choose(&remote.with("BROWSER", "stub %s"), Mac),
+            background("stub", &["%s"])
+        );
+        assert_eq!(
+            choose(&Fake::default().with(key, ""), Mac),
+            background(MAC_OPEN, &["%s"])
+        );
+    }
+}
+
+#[test]
+fn windows_refusals_explain_unquoted_spaces() {
+    for (value, cause, fix) in [
+        (
+            r"C:\Program Files\Mozilla Firefox\firefox.exe",
+            "unquoted",
+            "quote the executable path",
+        ),
+        (
+            r"C:\Program Files\browser.exe %s &",
+            "unquoted",
+            "quote the executable path",
+        ),
+    ] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(
+            matches!(plan, Plan::Refused(Some(ref why)) if why.contains(cause) && why.contains(fix)),
+            "{value}: {plan:?}"
+        );
+    }
+}
+
+#[test]
+fn windows_refusals_explain_network_and_device_paths() {
+    for (value, cause, fix) in [
+        (r"\\server\share\browser.exe", "UNC", "drive-letter path"),
+        (r"\\?\C:\browser.exe", "device path", "drive-letter path"),
+    ] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(
+            matches!(plan, Plan::Refused(Some(ref why)) if why.contains(cause) && why.contains(fix)),
+            "{value}: {plan:?}"
+        );
+    }
+}
+
+#[test]
+fn windows_refuses_command_shells() {
+    for (value, cause, fix) in [
+        (
+            r"C:\Windows\System32\cmd.exe /c start %s",
+            "command shell",
+            "browser executable directly",
+        ),
+        (
+            r"C:\Tools\PowerShell.exe %s",
+            "command shell",
+            "browser executable directly",
+        ),
+        (
+            r"C:\Tools\pwsh.exe %s",
+            "command shell",
+            "browser executable directly",
+        ),
+    ] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(
+            matches!(plan, Plan::Refused(Some(ref why)) if why.contains(cause) && why.contains(fix)),
+            "{value}: {plan:?}"
+        );
+    }
+}
+
+#[test]
+fn windows_accepts_ordinary_paths_and_names_every_refusal() {
+    for value in [
+        r"C:\Tools\browser.exe %s &",
+        r"C:\Tools\browser.exe",
+        "C:/Tools/browser.exe %s",
+    ] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(matches!(plan, Plan::Background { .. }), "{value}: {plan:?}");
+    }
+    for value in ["firefox", "b.cmd %s &", "b.exe %s &", " ", "'unclosed"] {
+        let plan = choose(&Fake::default().with("BROWSER", value), Windows);
+        assert!(
+            matches!(plan, Plan::Refused(Some(ref why)) if why.contains("BROWSER") && why.contains("printed link")),
+            "{value}: {plan:?}"
+        );
+    }
+}
 
 /// `[text, words or null]` from CPython 3.11.9's `shlex.split`, 2026-11-13.
 const SHLEX: &str = include_str!("shlex_cases.json");
@@ -118,7 +221,7 @@ fn a_posix_browser_variable_is_a_command_line_that_starts_in_the_background() {
 }
 
 #[test]
-fn windows_runs_only_an_absolute_exe_it_starts_the_same_way() {
+fn windows_runs_only_an_explicit_exe_and_preserves_quoted_paths() {
     let windows = |value: &str| choose(&Fake::default().with("BROWSER", value), Windows);
     assert_eq!(
         windows("'C:\\Program Files\\B\\b.exe' %s &"),
@@ -134,8 +237,6 @@ fn windows_runs_only_an_absolute_exe_it_starts_the_same_way() {
         background("C:/b/b.exe", &["%s"])
     );
     for value in [
-        // shlex eats the backslashes.
-        "C:\\b\\b.exe %s &",
         "b.exe %s &",
         "bin\\b.exe %s &",
         "'C:\\b\\b.cmd' %s &",
@@ -145,35 +246,34 @@ fn windows_runs_only_an_absolute_exe_it_starts_the_same_way() {
         "'C:\\b\\\"b.exe' %s &",
         "firefox",
     ] {
-        assert_eq!(windows(value), Err(Unsupported), "{value}");
+        assert!(matches!(windows(value), Plan::Refused(Some(_))), "{value}");
     }
-    // `ntpath.splitdrive` takes whatever precedes a colon in second place
-    // as the drive, a digit or a non-ASCII letter included.
-    assert_eq!(windows("1:firefox"), Err(Unsupported));
-    assert_eq!(windows("\u{e9}:Firefox --private"), Err(Unsupported));
-    // A clone needs the basename itself to be a registered name.
-    assert_eq!(windows("C:\\b\\my.exe"), Ok(Plan::Refused(None)));
-    assert_eq!(windows("C:\\b\\chrome.exe"), Ok(Plan::Refused(None)));
-    assert_eq!(windows("C:/b/b.exe %s"), Ok(Plan::Refused(None)));
-    // An entry that is only whitespace raises IndexError in _synthesize.
-    assert_eq!(windows("C:/b/b.exe %s &; "), Ok(Plan::Refused(None)));
+    for value in ["1:firefox", "é:Firefox --private"] {
+        assert!(matches!(windows(value), Plan::Refused(Some(_))));
+    }
+    assert_eq!(windows(r"C:\b\my.exe"), background(r"C:\b\my.exe", &["%s"]));
+    assert_eq!(windows("C:/b/b.exe %s"), background("C:/b/b.exe", &["%s"]));
+    assert_eq!(
+        windows("C:/b/b.exe %s &; "),
+        background("C:/b/b.exe", &["%s"])
+    );
 }
 
 #[test]
 fn without_a_browser_variable_the_platform_default_decides() {
-    assert_eq!(choose(&Fake::default(), Windows), Ok(Plan::StartFile));
+    assert_eq!(choose(&Fake::default(), Windows), Plan::StartFile);
     assert_eq!(
         choose(&Fake::default().with("BROWSER", ""), Windows),
-        Ok(Plan::StartFile)
+        Plan::StartFile
     );
     assert_eq!(
         choose(&Fake::default().with("BROWSER", ";;"), Windows),
-        Ok(Plan::StartFile)
+        Plan::StartFile
     );
     // Windows reads none of the POSIX launchers.
     assert_eq!(
         choose(&Fake::default().found(&["xdg-open"]), Windows),
-        Ok(Plan::StartFile)
+        Plan::StartFile
     );
     // macOS: an empty BROWSER is no BROWSER.
     for value in ["", "::"] {
@@ -261,12 +361,14 @@ fn a_browser_variable_that_is_not_utf8_prints_the_link_with_its_cause() {
 
 #[cfg(windows)]
 #[test]
-fn a_browser_variable_that_is_not_utf16_defers() {
+fn a_browser_variable_that_is_not_utf16_has_a_cause() {
     use std::os::windows::ffi::OsStringExt;
     let mut fake = Fake::default();
     fake.vars
         .insert("BROWSER", OsString::from_wide(&[0x43, 0xd800, 0x25, 0x73]));
-    assert_eq!(choose(&fake, Windows), Err(Unsupported));
+    assert!(
+        matches!(choose(&fake, Windows), Plan::Refused(Some(why)) if why.contains("not valid Unicode"))
+    );
 }
 
 #[cfg(unix)]
@@ -349,5 +451,5 @@ fn a_set_browser_decides_without_a_display_and_none_says_why() {
     }
     // macOS and Windows never read DISPLAY.
     assert_eq!(choose(&Fake::default(), Mac), background(MAC_OPEN, &["%s"]));
-    assert_eq!(choose(&Fake::default(), Windows), Ok(Plan::StartFile));
+    assert_eq!(choose(&Fake::default(), Windows), Plan::StartFile);
 }
