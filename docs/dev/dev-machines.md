@@ -224,7 +224,10 @@ knobs and procedures they point at.
   automatically. Its file records holder, PID, process creation time and
   acquisition time; a waiter names the holder and elapsed hold time. A held
   Windows file handle excludes writers but permits metadata reads. Finally
-  releases it; process death releases the OS handle. Stale metadata is
+  releases it; process death releases the OS handle. On Windows, the wrapper
+  and harness contain descendants in a kill-on-close job so killing the
+  owner also terminates its child tree; inability to establish that job
+  refuses the run before acquiring the database lock. Stale metadata is
   reclaimed only when PID plus creation time prove its owner is gone;
   unreadable identity refuses, never an age-based guess. After an interrupted
   SSH session, verify the owned children/services have stopped before retrying.

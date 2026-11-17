@@ -3,6 +3,78 @@
 # Parse wrapper options only up to --. PowerShell's parameter binder would
 # otherwise consume child options such as python -c as this script's flags.
 
+function Initialize-DevDatabaseProcessTree {
+    if (-not $IsWindows) { return }
+    if (-not ('DevDatabaseProcessTree' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class DevDatabaseProcessTree {
+    [StructLayout(LayoutKind.Sequential)]
+    struct BasicLimits {
+        public long ProcessTime, JobTime;
+        public uint Flags;
+        public UIntPtr MinimumWorkingSet, MaximumWorkingSet;
+        public uint ActiveProcesses;
+        public UIntPtr Affinity;
+        public uint PriorityClass, SchedulingClass;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct IoCounters {
+        public ulong ReadOperations, WriteOperations, OtherOperations;
+        public ulong ReadBytes, WriteBytes, OtherBytes;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct ExtendedLimits {
+        public BasicLimits Basic;
+        public IoCounters Io;
+        public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
+    }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
+    static extern IntPtr CreateJobObjectW(IntPtr security, string name);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedLimits limits, uint size);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool CloseHandle(IntPtr handle);
+
+    // Intentionally owned until process exit, not a finalizable SafeHandle:
+    // closing this job while its owner runs would terminate the owner too.
+    // The OS closes it on death and terminates the child tree.
+    // Children do not inherit this handle.
+    static IntPtr lifetimeJob;
+    public static void Attach() {
+        if (lifetimeJob != IntPtr.Zero) return;
+        IntPtr job = CreateJobObjectW(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateJobObject failed");
+        var limits = new ExtendedLimits();
+        limits.Basic.Flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; no breakaway.
+        if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf<ExtendedLimits>())) {
+            int error = Marshal.GetLastWin32Error();
+            CloseHandle(job);
+            throw new Win32Exception(error, "SetInformationJobObject failed");
+        }
+        if (!AssignProcessToJobObject(job, GetCurrentProcess())) {
+            int error = Marshal.GetLastWin32Error();
+            CloseHandle(job);
+            throw new Win32Exception(error, "AssignProcessToJobObject failed");
+        }
+        lifetimeJob = job;
+    }
+}
+'@
+    }
+    [DevDatabaseProcessTree]::Attach()
+}
+
 function Read-DevLockRecord([IO.Stream] $Stream) {
     $Stream.Position = 0
     $reader = [IO.StreamReader]::new($Stream, [Text.Encoding]::UTF8, $true, 1024, $true)
@@ -10,6 +82,10 @@ function Read-DevLockRecord([IO.Stream] $Stream) {
     if (-not $text.Trim()) { return $null }
     try {
         $record = ConvertFrom-Json -InputObject $text -ErrorAction Stop
+        # PowerShell converts ISO dates to DateTime. Format explicitly: implicit
+        # conversion uses a different culture from DateTimeOffset.Parse on some
+        # non-interactive Windows hosts (for example en-US versus en-AU).
+        if ($record.acquired -is [DateTime]) { $record.acquired = $record.acquired.ToString('o') }
         if (-not $record.holder -or [int]$record.pid -le 0 -or
             [string]$record.process_started -notmatch '^\d+$' -or
             [long]$record.process_started -le 0 -or -not $record.acquired) { throw 'missing identity' }
@@ -30,6 +106,7 @@ function Test-DevLockOwner($Record) {
 function Enter-DevDatabaseLock {
     param([string] $Path = '', [string] $Holder = 'database run',
           [ValidateRange(0, 86400)] [int] $WaitSeconds = 1200)
+    Initialize-DevDatabaseProcessTree
     if (-not $Path) { $Path = Join-Path $HOME '.pseudolife-mcp/locks/test-postgres.lock' }
     $Path = [IO.Path]::GetFullPath($Path)
     $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
