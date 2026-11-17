@@ -306,6 +306,9 @@ mod tests {
             #[cfg(windows)]
             {
                 use std::os::windows::fs::OpenOptionsExt;
+                use windows_sys::Win32::Storage::FileSystem::{
+                    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                };
                 // The command excludes delete sharing. This constructed
                 // Staged value lets the test remove its path before publish.
                 drop(staged.file.take());
@@ -313,7 +316,7 @@ mod tests {
                     fs::OpenOptions::new()
                         .read(true)
                         .write(true)
-                        .share_mode(7)
+                        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
                         .open(&staged.path)
                         .unwrap(),
                 );
@@ -386,6 +389,7 @@ mod tests {
         use windows_sys::Win32::Storage::FileSystem::{
             FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
         };
+        use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
         let directory = Directory::new();
         let ordinary = directory.0.join("ordinary");
         let redirect = directory.0.join("redirect");
@@ -400,7 +404,7 @@ mod tests {
             .args(["/d", "/c", "mklink", "/J"])
             .arg(&redirect)
             .arg(&target_directory)
-            .creation_flags(0x08000000)
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .unwrap();
         assert!(output.status.success(), "{:?}", output.stderr);
