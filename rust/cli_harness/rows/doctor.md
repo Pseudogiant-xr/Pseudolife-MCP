@@ -268,8 +268,8 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   races startup and response speed differently in each runtime, and the
   native doctor bounds connect and each read the way sockets do, not
   urllib's exact sequence of socket operations. Cases use budgets far from
-  either arm's latency; `--timeout` over 1,000,000 seconds defers (Python
-  accepts any positive float).
+  either arm's latency. Native `--timeout` accepts finite positive durations
+  through 4,294,967,295 seconds; an unrepresentable duration is a usage error.
 - Proxies: urllib honours `http_proxy`/`https_proxy` and, without them, the
   Windows registry (WinINet) and macOS `_scproxy` settings. The native probes
   connect directly and the platform settings are not consulted. A set proxy
@@ -334,18 +334,16 @@ Doctor shares the update client's Codex hook checks. The parity scope map
 therefore includes this row for update changes and the mapped dependencies
 that update imports, so changes to those helpers also run doctor parity.
 
-## Deferral domain
+## Native findings and refusals
 
-Only argument shapes defer the whole command: noncanonical argv (`--help`
-included) and `--timeout` past 1,000,000 seconds, plus an `--agent-state`
-path with a `..` component, a symlinked or junction ancestor of an existing
-file, or a stat error pathlib would raise (a missing file is
-`missing_registration` whatever its ancestors: `exists()` comes first,
-doctor_cli.py:458). With an invalid daemon URL the saved instance is not
-read and nothing defers.
+Doctor never hands a command to Python. Help and supported argument spellings
+are native; malformed arguments return a usage error naming the repair.
+Saved registration paths support parent components, trusted directory links
+and native Windows path prefixes. A missing, unsafe or unreadable saved file
+adds an `agent_state` finding, including while the daemon is offline.
 
-Every other input the native reader does not decide is named in the report
-while the other checks run (these deferred the whole run before #1607):
+An environmental input the native reader cannot interpret is named in the
+report with its cause and repair while independent checks continue:
 
 - `PYTHONINTMAXSTRDIGITS` is ignored (a Python-only setting); an absent PATH
   on POSIX searches the platform's CS_PATH.
@@ -362,16 +360,17 @@ while the other checks run (these deferred the whole run before #1607):
 - Saved tunnel profiles: the read-only `tunnels` section; an absent or empty
   `~/.pseudolife-mcp/tunnel` adds nothing, and a profile or store this
   client cannot read is one `unavailable` entry.
-- Client files and settings the native reader does not parse (JSON only
-  Python may read, TOML parse failures, non-UTF-8 environment values,
-  settings values whose `str()` needs Python's repr, `~` in
-  `CODEX_HOME`/`PSEUDOLIFE_CODEX_BIN`, UNC, device and drive-relative paths,
-  stat errors pathlib would raise): that field reads `unknown (not read by
-  the native client: ...)`, and a registration search that stopped adds
-  `registrations`.
+- Client JSON/TOML syntax errors, unsupported setting types, undecodable
+  text environment values and filesystem failures: the affected field reads
+  `could not read <input>: <cause; repair>`, and a registration search that
+  stopped adds `registrations`. Standard JSON supports nesting through 256
+  levels and arbitrary-size integers. Current-user tilde expansion and
+  Windows UNC, device and drive-relative paths are native; named-user tilde
+  expansion asks for an absolute path instead.
 - After the read-only GETs:
-  - A non-object health body, a non-string `status` or a health redirect
-    urllib would follow off HTTP: `DaemonUnrecognized`.
+  - A non-object health body or a non-string `status`: `DaemonUnrecognized`.
+    Invalid health JSON or an unsupported redirect also carries a finding
+    naming `GET /health` and the repair.
   - A non-string `version`: `unknown`.
   - A health `stall` object: `dreams` names its kind.
   - A Codex-plugin `hooks_digest` in any file state: `<state>: <detail>`.

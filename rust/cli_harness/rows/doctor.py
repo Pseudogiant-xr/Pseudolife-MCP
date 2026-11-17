@@ -1321,8 +1321,7 @@ MUTANTS = [
            '&(pyjson::dumps(&report) + "\\n"),', "&pyjson::dumps(&report),", ("unreachable",)),
 ]
 if core.WINDOWS:
-    # shutil.which searches the working directory first, and pathlib drops
-    # '.' parts of a backslashed path, on Windows only.
+    # shutil.which searches the working directory first on Windows.
     MUTANTS.append(Mutant("doctor-which-skips-cwd", "doctor", "shim/src/cli/doctor/pyenv.rs",
            'directories.insert(0, ".");', "", ("which-cwd-first",)))
     # Its cases run only where the depth threshold was measured.
