@@ -27,7 +27,10 @@ def test_a_rollback_step_skips_the_cross_side_state_dump():
 def board_db():
     import pgdisposable
     if not pgdisposable.LOGIN_FILE.exists():
-        pytest.skip("no disposable-bank login here")
+        import database_gate
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     import psycopg
     from pseudolife_memory.storage.schema import SCHEMA_SQL
     pg = pgdisposable.Slice("w2f")

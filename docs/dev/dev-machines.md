@@ -166,10 +166,70 @@ verdict is its last line, tagged with a nonce `build` sends on stdin, so
 no line cargo passes through can stand in for it. The target is a cache,
 so a cold check refills it.
 
+## Batch harness and shim tests
+
+After `build`, run `python ops/integrate.py harness` and
+`python ops/integrate.py shim-tests`; each prints a JSON result for `open`
+([merge-batches.md](merge-batches.md), "Validating it"). Both send a git
+bundle, so the head needs no push, and neither falls back to this PC.
+
+The harness uses `rust-check.remote` with `role=Windows dev VM`. Its clone
+must have git, PowerShell 7 and uv. The machine's private
+`~/.pseudolife-mcp/rust-harness-services.ps1` defines `Start-HarnessServices`
+(start and prove its test PostgreSQL and Linux Docker engine; set the test
+login/environment) and `Stop-HarnessServices` (clean up even after partial
+startup). The controller holds the suite and database locks through cleanup.
+It keeps its own `<repo>.rust-harness` worktree, `.rust-harness-venv`, and
+clone lock beside that configured clone, and refuses under 8 GB free there.
+
+The shim step reads a separate UTF-8 file on the controller:
+`~/.pseudolife-mcp/locks/shim-tests.remote`. Like `rust-check.remote` it has
+`ssh=<alias>`, `repo=<absolute path of an existing dedicated clone>` and
+`role=second Linux dev box` (comments/blank lines allowed, no other keys).
+Configure the second box, not the full-suite box. It needs bash, git, flock,
+Python 3, cargo through rustup and cargo-nextest; SSH must work without prompts.
+The tool reads configuration and never provisions or edits it.
+
+The far half holds that box's `full-suite.lock` and its own clone lock while
+checking out the bundled head and running nextest. Its worktree and target
+are `<repo>.shim-tests` and `<repo>.shim-tests-target`; that target belongs
+only to this fixed source path and is never a worker's shared target. Both
+the work and cache filesystems need at least 8 GB free. The result records
+the exact head, selection, role, exit, summary and timestamps; logs and JSON
+stay private under the controller's `~/.pseudolife-mcp/suite-results`.
+
+Both commands accept `--lock-wait-seconds` (default 1200). A timeout,
+unreachable machine, missing dependency or service, failed cleanup or low
+disk is not a passing gate. Resolve the named cause and rerun the command;
+never substitute a note or another head's result. An interrupted worktree
+without `.git` is refused for inspection, never silently overwritten.
+
 ## Sharing
 
 The rules are in `CLAUDE.md` ("Sharing the machine"); this section holds the
 knobs and procedures they point at.
+
+- **Windows VM database turns.** Every database-using worker command must
+  use the same VM account/lock folder as the gate. Prefix a foreground command
+  with this one line, including over non-interactive SSH:
+
+  ```powershell
+  pwsh -NoProfile -NonInteractive -File ops/dev-database-lock.ps1 -Holder worker -- python -m pytest <tests>
+  ```
+
+  `-WaitSeconds 1200` is the configurable bounded wait. The script preserves
+  the command's exit code and holds `~/.pseudolife-mcp/locks/test-postgres.lock`
+  until it returns or fails; keep service startup and shutdown inside the
+  wrapped command. Do not detach work from it. The harness takes this lock
+  automatically. Its file records holder, PID, process creation time and
+  acquisition time; a waiter names the holder and elapsed hold time. A held
+  Windows file handle excludes writers but permits metadata reads. Finally
+  releases it; process death releases the OS handle. Stale metadata is
+  reclaimed only when PID plus creation time prove its owner is gone;
+  unreadable identity refuses, never an age-based guess. After an interrupted
+  SSH session, verify the owned children/services have stopped before retrying.
+  The lock file is never deleted during normal operation. Experiments use
+  `-LockPath <your own scratch lock>` and never the shared lock name.
 
 - **This PC's availability for full suites.** It is the maintainer's
   statement only: the file `~/.pseudolife-mcp/locks/pc-available` on the

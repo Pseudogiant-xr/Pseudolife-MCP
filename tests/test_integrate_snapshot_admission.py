@@ -43,6 +43,25 @@ def test_admission_state(integrate, state, admitted):
     assert (integrate._not_ready(member(integrate, state)) is None) is admitted
 
 
+@pytest.mark.parametrize("state", ["pending", "failing", "unverified", "satisfied", "not required"])
+def test_status_explains_snapshot_admission_before_build(integrate, monkeypatch, capsys, state):
+    value = member(integrate, state)
+    value.rust_jobs = "Rust / ubuntu-latest: in_progress; Rust / windows-latest: success"
+    monkeypatch.setattr(integrate, "git", lambda *a, **kw: None)
+    monkeypatch.setattr(integrate, "_out", lambda *a: SHA)
+    monkeypatch.setattr(integrate, "ready", lambda *a: [value])
+    monkeypatch.setattr(integrate, "_fetch_head", lambda *a: SHA)
+    monkeypatch.setattr(integrate, "_merge_tree", lambda *a: (True, []))
+    assert integrate.status(SimpleNamespace(label="ready-to-batch")) == 0
+    out = capsys.readouterr().out
+    assert value.rust_jobs in out
+    assert f"snapshot {state}" in out
+    if state in ("pending", "failing", "unverified"):
+        assert "would leave out: " + value.snapshot_why in out
+    else:
+        assert "would leave out" not in out
+
+
 @pytest.fixture
 def actions(integrate, monkeypatch):
     rollup, jobs = [], {}

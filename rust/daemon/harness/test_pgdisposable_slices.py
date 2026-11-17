@@ -153,3 +153,51 @@ def test_the_option_test_leaves_no_strict_mode_behind():
     # case added there does not break this one.
     skipped = re.search(r"(\d+) skipped", run.stdout.splitlines()[-1])
     assert skipped and int(skipped.group(1)) >= 2, run.stdout[-2000:]
+
+
+# The login fixtures that skipped with a bare pytest.skip (16 November 2026):
+# under --require-databases a machine without the login file skipped them
+# silently, so moving the batch's harness run to another machine could pass
+# without them. Every one goes through database_gate now.
+_LOGIN_FIXTURE_FILES = (
+    "board/test_base_delta.py", "board/test_maintainer_rollback.py",
+    "test_w2e_judge_settle.py", "test_w2e_own_decisions.py",
+    "test_w2e_real_bank_expects.py", "test_w2d_seed_base.py",
+)
+
+
+def test_no_harness_test_skips_a_missing_login_past_the_gate():
+    here = Path(__file__).resolve().parent
+    bare = re.compile(r"pytest\.skip\(\s*[\"'][^\"']*disposable-bank login")
+    offenders = [str(p.relative_to(here)) for p in sorted(here.rglob("test_*.py"))
+                 if bare.search(p.read_text(encoding="utf-8"))]
+    assert offenders == []
+
+
+def test_a_missing_login_fails_the_login_fixtures_when_databases_are_required():
+    here = Path(__file__).resolve().parent
+    env = dict(os.environ)
+    env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] = str(here / "no-such-login.env")
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--require-databases",
+         *[str(here / name) for name in _LOGIN_FIXTURE_FILES]],
+        cwd=here.parents[2], env=env, capture_output=True, text=True, timeout=300)
+    last = run.stdout.strip().splitlines()[-1] if run.stdout.strip() else ""
+    # Every login case fails, naming the cause; none skips past the gate.
+    # A fixture failing reports as a setup error; no login case skips.
+    assert run.returncode != 0 and re.search(r"\d+ (failed|errors?)", last), run.stdout[-2000:]
+    assert "skipped" not in last, run.stdout[-2000:]
+    assert "This run requires databases" in run.stdout, run.stdout[-2000:]
+
+
+def test_without_the_option_a_missing_login_still_skips_the_login_fixtures():
+    # Hosted CI's case: no login and no --require-databases, so they skip.
+    here = Path(__file__).resolve().parent
+    env = {k: v for k, v in os.environ.items() if k != _gate().REQUIRE_DATABASES_ENV}
+    env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] = str(here / "no-such-login.env")
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         *[str(here / name) for name in _LOGIN_FIXTURE_FILES]],
+        cwd=here.parents[2], env=env, capture_output=True, text=True, timeout=300)
+    assert run.returncode == 0, run.stdout[-2000:]
+    assert re.search(r"\d+ skipped", run.stdout.strip().splitlines()[-1]), run.stdout[-2000:]

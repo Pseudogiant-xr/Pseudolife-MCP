@@ -338,15 +338,18 @@ python ops/integrate.py status
 python ops/integrate.py build --dry-run
 python ops/integrate.py build            # with the Rust compile check when rust/ changed
 python ops/integrate.py suite > <log> 2>&1   # the full suite on the box, with the native client
-python -m pytest -q -p no:cacheprovider --require-databases <the RUST_HARNESS paths build prints> > <log> 2>&1
-python ops/integrate.py open --suite ~/.pseudolife-mcp/suite-results/<run>.json \
-  --harness-note "<count> passed at <head short sha>"
+python ops/integrate.py harness > <harness.log> 2>&1
+python ops/integrate.py shim-tests > <shim.log> 2>&1
+python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shim-tests <shim.json>
 python ops/integrate.py merge   # once its CI is green and it has its review
 ```
 
 - **`status`** lists the labelled pull requests in batch order, each with
   whether its head merges cleanly into master (`git merge-tree`, no working
-  tree touched), its CI on that head and its review decision.
+  tree touched), its CI on that head and its review decision. It also names
+  both own-head Rust job states, the snapshot checkpoint, and `would leave
+  out: <reason>` for a member admission would omit, including a pending
+  own-head replay. A finished replay can admit a head whose other jobs run.
 - **`build`** needs a checkout with no uncommitted tracked changes whose
   HEAD is `origin/master` (`git switch --detach origin/master` in a fresh
   worktree). It creates the next free local `integrate/<date>-batch-N`
@@ -381,10 +384,12 @@ python ops/integrate.py merge   # once its CI is green and it has its review
   was not checked. A result for a selected run, or one from a launcher too
   old to record its pytest arguments or the real client, is refused, so a
   batch suite run before this rule needs a rerun.
-  `--harness-note` takes the Rust harness run's result in words (next
-  section); it must name the head's short sha and state pytest's
-  `<count> passed` with no failed or error count, and the body records it
-  beside the suite as not checked. Before the push `open` refuses a plan whose Rust compile
+  `--harness` and `--shim-tests` take the result JSON their commands write.
+  Each must bind the exact full head, gate kind, complete command and selection,
+  designated machine role, exit 0, a positive passing count without failures,
+  and valid start/end timestamps. An interrupted, partial, wrong-head or
+  not-run result refuses publication. There is no `--harness-note` bypass.
+  Before the push `open` refuses a plan whose Rust compile
   check failed or did not run, or that predates the check, and records a
   pass in the body. It also re-reads each
   member's own CI and refuses if one turned red since `build`, naming it:
@@ -471,8 +476,9 @@ member. A legacy branch changing the parity resolver must first merge
 master and use acceptance fragments, since its resolver is not executed
 inside the batch controller.
 
-Neither the full suite nor the Rust harness run compiles Rust, so two
-members that each compile alone can break the batch together: on
+The suite's client build and the shim unit tests do not compile every
+workspace target, so two members that each compile alone can break the
+batch together: on
 2026-10-28 #991 changed `record()`'s signature, #994 called it the old way,
 and batch #1017 failed hosted CI with E0061. So when the batch diff against
 master changes anything under `rust/` (which holds every workspace Cargo
@@ -632,38 +638,41 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
      A dev-profile Linux client is about 300 MB, over the client's 256 MiB
      archive limit; the installer tests pack a debug-stripped copy
      (#1556, #1560).
-2. The Rust harness Python tests run on the same head, because the full
-   suite collects only `tests/` and never runs the Python tests under
-   `rust/`: #877 broke `rust/daemon/harness/test_w2e_lifecycle.py`, passed
-   its batch's local suite, and was caught only by a reviewer's targeted
-   run. `build` prints the command (`RUST_HARNESS` in `ops/integrate.py`):
-   every pytest path of `rust.yml`'s `rust` job (a test pins that none is
-   missing) plus the eval shard's `pytest rust/ci`; census currency is not
-   among them, since `build` regenerates the census and `open` runs CI's
-   verdict.
-   - **Some database cases run only here.** Hosted runners have no
-     disposable-bank login, so the login cases skip there, and the hosted
-     Windows runner has no Linux Docker engine, so the mirror seed's Docker
-     cases run only on the hosted Linux runner. This run has the
-     test login (`~/.pseudolife-mcp/test-pg.env`, or
-     `PSEUDOLIFE_TEST_PG_LOGIN_FILE`) for the bench PostgreSQL at
-     127.0.0.1:5433, which must be up, and a running Docker engine for the
-     mirror seed tests' throwaway PostgreSQL (Linux containers).
-   - **`--require-databases`**, part of the printed command, makes a
-     database case that finds no login or no Docker engine fail, naming the
-     cause and the fix, instead of skipping, so it cannot pass unseen.
-     Start the bench PostgreSQL and Docker before running it.
+2. `python ops/integrate.py harness` runs the Rust harness Python tests on
+   the Windows dev VM at that same head. The full suite collects only
+   `tests/`, never these tests under `rust/`. `RUST_HARNESS` lists every
+   pytest path of rust.yml's Rust job plus `rust/ci`; a test keeps that list
+   complete. The command sends the head as a git bundle, runs the controller's
+   `ops/rust-harness-remote.ps1`, and records its result and live log beside
+   the suite results. No push or private gate kit is needed.
+   - The VM is configured through `rust-check.remote`, with role `Windows
+     dev VM`. Its private `rust-harness-services.ps1` provides
+     `Start-HarnessServices` and `Stop-HarnessServices`: start and prove the
+     VM's test PostgreSQL and Linux Docker engine, then stop them even after
+     a partially failed start. Failed cleanup cannot produce a passing result.
+   - The run takes the machine's full-suite lock, its shared database lock,
+     then its clone lock, keeping all through service shutdown. Worker
+     database commands take that same database lock (dev-machines.md,
+     "Sharing"). The bounded wait reports the holder and elapsed hold time;
+     `--lock-wait-seconds` changes its default 1200 seconds.
+   - `--require-databases` remains mandatory: missing login or Docker fails
+     database cases instead of silently skipping them. Hosted runs without
+     that option retain their existing platform/login skips.
+   - Offline, busy past the wait, missing tools/services, or less than 8 GB
+     free beside the worktree produces **not run**, never a local fallback.
 
-   These need no built Rust binary; the
-   parity shards' other harness files drive the release candidates and stay
-   CI's. Run it natively from the batch checkout (a targeted run, about
-   5 minutes on Windows with its database cases, measured 2026-11-08;
-   `rust/ci/test_workflow.py` needs `pwsh`) in any
-   Python with the project's dev dependencies, for example `uv run
-   --no-project --python 3.11 --with mcp==2.2.0 --with pytest --with
-   psycopg --with psutil --with httpx --with pyyaml python -m pytest ...`,
-   and pass its result to `open --harness-note`.
-3. A red suite, harness run or Rust compile check is bisected locally:
+   `python ops/integrate.py shim-tests` separately runs
+   `cargo nextest run --locked -p pseudolife-stdio --lib --bins -j 4 --no-fail-fast`
+   on the **second Linux dev box**, configured by `shim-tests.remote`. It
+   sends the unpushed head as a bundle to its own clone/worktree and target,
+   under that box's full-suite lock. A bounded lock wait, offline machine,
+   missing cargo/nextest or less than 8 GB free on the work/cache filesystem
+   gives **not run**, with no local fallback. Both commands print the result
+   JSON paths to give `open`; failed tests keep their actual exit codes.
+   They are separate commands so the conductor can take each machine by turn
+   without exceeding the hypervisor's two-heavy-run limit.
+
+3. A red suite, harness, shim test run or Rust compile check is bisected locally:
    test master plus half
    the members, then the half that fails, until one member is left. Drop
    that culprit with a comment on its pull request and remove its label,
@@ -708,8 +717,10 @@ python ops/integrate.py open
 python ops/integrate.py merge   # once `test` passed on the new head
 ```
 
-**What it skips.** The local full suite and the Rust harness run: `open`
-needs neither result, and the body says they were not run. The Rust
+**What it skips.** The whole off-PC gate except the compile check: the
+local full suite, the Rust harness and the shim unit tests. `open` requires
+none of those three results, and the body says they were not run. This is
+kept in the tool's one `_after_drop_rulings` function. The Rust
 compile check still runs, and `open` still refuses a head that did not
 pass it.
 

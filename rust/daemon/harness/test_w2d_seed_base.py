@@ -22,7 +22,10 @@ sys.path.insert(0, str(HERE.parents[2]))
 def bank(monkeypatch):
     import pgdisposable
     if not pgdisposable.LOGIN_FILE.exists():
-        pytest.skip("no disposable-bank login here")
+        import database_gate
+        database_gate.unavailable("no disposable-bank login here",
+                                  "create it once on the daemon host with `pseudolife-mcp test-login "
+                                  "create`, or point PSEUDOLIFE_TEST_PG_LOGIN_FILE at it")
     import psycopg
     from pseudolife_memory.storage.schema import ensure_schema
     # An empty bank of its own, never a copy of a mirror's base.
