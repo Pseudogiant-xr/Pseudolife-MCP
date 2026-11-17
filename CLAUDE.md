@@ -223,9 +223,14 @@ touched, with no retrofit sweep.
   `rust/`, `cargo check`, on its head before `open` pushes it, because that
   costs less than one CI run and the suite never collects `rust/`.
 - Nothing is fixed inside a batch except the one generated census commit
-  (a conflicting member or a red batch's culprit is dropped with a comment),
+  (a conflicting member or a red batch's culprit is dropped with a comment,
+  and a conflict in the generated census alone is regenerated, not a drop),
   and it merges with a merge commit, never squash, so GitHub marks its
   members merged.
+- **A batch built again after a drop** (`build --after-drop`) skips the
+  local gates only when the dropped pull request shares no code with the
+  rest, because the closed batch already paid for them
+  (`docs/dev/merge-batches.md` "After a drop", read before using it).
 - **A batch is built when none is open and two or more PRs are ready, or a
   lone PR has waited about one hosted-run cycle or is urgent or a release
   cut**, because a batch of one pays a full hour of hosted CI for one
@@ -269,6 +274,12 @@ touched, with no retrofit sweep.
   resource, with pid, worktree, fixed duration or ETA and a stop switch (a
   sentinel file), and ended with a SUITE-END, since peers may not read
   statuses until their next turn.
+- **Machine notices go in your board status, never in mail to a conductor
+  or the session that launched you** (taking or releasing a machine, a run
+  starting, ending or being stopped, an acknowledgement), because every mail
+  wakes a parked session to re-read its context; mail it only for a ruling
+  you need, an answer it asked for, a credential or data-safety event and a
+  finished pull request.
 - **CPU- or memory-saturating work never overlaps a full suite** (stress
   repros, benchmark sweeps, a model server, a large in-memory eval), since
   overlap causes timing flakes and os error 1455.
