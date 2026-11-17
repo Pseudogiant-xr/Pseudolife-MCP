@@ -8,6 +8,7 @@ mod chain;
 pub(super) mod codec;
 mod help;
 mod metrics;
+mod output;
 mod redact;
 mod stats;
 mod time;

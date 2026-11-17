@@ -1,7 +1,7 @@
 //! Container forwarding; all named files belong to the invoking host.
 use super::{
     args::{Export, Head, Stats},
-    bank, stats,
+    stats,
 };
 use crate::pg::resolution;
 use std::{ffi::OsString, fs::File, process::Stdio};
@@ -83,27 +83,20 @@ pub(super) fn export(export: &Export) -> u8 {
     let Some(out) = &export.out else {
         return forward(args, None);
     };
-    let file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(out)
-    {
+    let staged = match super::output::Staged::create(std::path::Path::new(out)) {
         Ok(f) => f,
-        Err(e) => {
-            return stats::error(format!(
-                "cannot create {out}: {}",
-                bank::write_strerror(&e).unwrap_or_else(|| "I/O error".into())
-            ));
-        }
+        Err(e) => return super::output::failure("staging", &e),
     };
-    let code = match file.try_clone() {
+    let code = match staged.file().try_clone() {
         Ok(f) => forward(args, Some(Stdio::from(f))),
         Err(_) => super::failed(),
     };
-    if code != 0 && bank::created_destination(&file, std::path::Path::new(out)) {
-        let _ = std::fs::remove_file(out);
+    if code != 0 {
+        return code;
     }
-    code
+    staged
+        .publish()
+        .map_or_else(|e| super::output::failure("publication", &e), |()| 0)
 }
 pub(super) fn stats(stats: &Stats) -> u8 {
     if let Some(code) = local_answer() {

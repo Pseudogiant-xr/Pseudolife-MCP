@@ -336,11 +336,6 @@ pub(super) async fn export(dsn: &pg::Dsn, args: &Export) -> Ending {
     ending
 }
 
-enum Outcome {
-    Lines(String),
-    AgentRefused(String),
-}
-
 async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
     let Ok(tx) = snapshot(session).await else {
         return Ending::Deferred;
@@ -350,7 +345,7 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
         Ok(false) => return no_log(),
         Err(()) => return Ending::Deferred,
     }
-    // Python creates the destination before agent resolution and payload decoding.
+    // Reserve a private staging file; the destination remains absent until success.
     let output = match Output::create(args) {
         Ok(output) => output,
         Err(ending) => return ending,
@@ -361,18 +356,14 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
             Err(()) => return Ending::Deferred,
             Ok(Resolved::Id(id)) => Some(id),
             Ok(Resolved::Missing) => {
-                return write_lines(
-                    output,
-                    Outcome::AgentRefused(format!("no agent id starts with {agent}")),
-                );
+                crate::stderrln!("board-audit: no agent id starts with {agent}");
+                return Ending::Exit(2);
             }
             Ok(Resolved::Ambiguous(listed)) => {
-                return write_lines(
-                    output,
-                    Outcome::AgentRefused(format!(
-                        "--agent {agent} matches several ids: {listed}; give a longer prefix"
-                    )),
+                crate::stderrln!(
+                    "board-audit: --agent {agent} matches several ids: {listed}; give a longer prefix"
                 );
+                return Ending::Exit(2);
             }
         },
     };
@@ -387,22 +378,17 @@ async fn export_in(session: &mut pg::Session, args: &Export) -> Ending {
         return Ending::Deferred;
     };
     let _ = tx.rollback().await;
-    let mut text = String::new();
     for (map, _) in rows {
         let Some(line) = export_line(map) else {
-            // Python has already emitted preceding stdout rows. A failed
-            // file export still removes the run's exclusive destination.
-            if output.file.is_none() {
-                let ending = write_lines(output, Outcome::Lines(text));
-                if !matches!(ending, Ending::Exit(0)) {
-                    return ending;
-                }
-            }
-            return Ending::Exit(super::failed());
+            return Ending::Exit(super::stats::error(
+                "audit payload cannot be encoded for export; restore a readable audit payload from a trusted backup; stdout output is incomplete and no file archive was published",
+            ));
         };
-        text.push_str(&line);
+        if let Err(code) = output.write(&line) {
+            return Ending::Exit(code);
+        }
     }
-    write_lines(output, Outcome::Lines(text))
+    Ending::Exit(output.finish())
 }
 
 /// `OSError.strerror` of a failed file write in CPython. POSIX: the C
@@ -427,149 +413,42 @@ pub(super) fn write_strerror(error: &std::io::Error) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Remove the destination on failure only while its identity still matches.
-/// The check and pathname unlink are separate on POSIX and Windows; an agent
-/// refusal preserves the empty file, as Python does.
-struct Output<'a> {
-    args: &'a Export,
-    file: Option<std::fs::File>,
-    keep: bool,
+/// A file archive is private until complete; stdout keeps streaming rows.
+struct Output {
+    file: Option<super::output::Staged>,
 }
-impl<'a> Output<'a> {
-    fn create(args: &'a Export) -> Result<Self, Ending> {
-        let file = if let Some(out) = &args.out {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(out)
-            {
-                Ok(file) => Some(file),
-                Err(error) => {
-                    return Err(match write_strerror(&error) {
-                        Some(text) => {
-                            crate::stderrln!("board-audit: cannot create {out}: {text}");
-                            Ending::Exit(2)
-                        }
-                        None => Ending::Deferred,
-                    });
-                }
-            }
+impl Output {
+    fn create(args: &Export) -> Result<Self, Ending> {
+        let file = args
+            .out
+            .as_ref()
+            .map(|out| {
+                super::output::Staged::create(std::path::Path::new(out))
+                    .map_err(|error| Ending::Exit(super::output::failure("staging", &error)))
+            })
+            .transpose()?;
+        Ok(Self { file })
+    }
+
+    fn write(&self, line: &str) -> Result<(), u8> {
+        use std::io::Write;
+        if let Some(file) = &self.file {
+            file.file()
+                .write_all(line.as_bytes())
+                .map_err(|e| super::output::failure("write", &e))
         } else {
-            None
-        };
-        Ok(Self {
-            args,
-            file,
-            keep: false,
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(&super::super::text_bytes(line)).and_then(|()| stdout.flush())
+                .map_err(|_| super::stats::error("stdout output is incomplete because the output was closed; rerun export with --out to a writable file"))
+        }
+    }
+
+    fn finish(self) -> u8 {
+        self.file.map_or(0, |file| {
+            file.publish()
+                .map_or_else(|e| super::output::failure("publication", &e), |()| 0)
         })
     }
-}
-impl Drop for Output<'_> {
-    fn drop(&mut self) {
-        if !self.keep
-            && let Some(file) = &self.file
-            && let Some(out) = &self.args.out
-            && created_destination(file, std::path::Path::new(out))
-        {
-            let _ = std::fs::remove_file(out);
-        }
-    }
-}
-
-#[cfg(unix)]
-pub(super) fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match (file.metadata(), std::fs::symlink_metadata(path)) {
-        (Ok(created), Ok(current)) => {
-            current.is_file() && created.dev() == current.dev() && created.ino() == current.ino()
-        }
-        _ => false,
-    }
-}
-
-#[cfg(windows)]
-#[allow(unsafe_code)]
-pub(super) fn created_destination(file: &std::fs::File, path: &std::path::Path) -> bool {
-    use std::{
-        mem,
-        os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
-    };
-    use windows_sys::Win32::{
-        Foundation::HANDLE,
-        Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_READ_ATTRIBUTES, GetFileInformationByHandle,
-        },
-    };
-    fn identity(file: &std::fs::File) -> Option<(u32, u32, u32)> {
-        // SAFETY: File owns the live handle and the initialized structure has
-        // the size and alignment required by GetFileInformationByHandle.
-        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { mem::zeroed() };
-        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut info) } == 0
-            || info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-            || (info.nFileIndexHigh == 0 && info.nFileIndexLow == 0)
-        {
-            return None;
-        }
-        Some((
-            info.dwVolumeSerialNumber,
-            info.nFileIndexHigh,
-            info.nFileIndexLow,
-        ))
-    }
-    let Ok(current) = std::fs::OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-    else {
-        return false;
-    };
-    identity(file).is_some_and(|created| Some(created) == identity(&current))
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn created_destination(_: &std::fs::File, _: &std::path::Path) -> bool {
-    false
-}
-
-fn write_lines(mut output: Output<'_>, outcome: Outcome) -> Ending {
-    use std::io::Write;
-    let (text, refusal) = match outcome {
-        Outcome::Lines(text) => (text, None),
-        Outcome::AgentRefused(message) => (String::new(), Some(message)),
-    };
-    if let Some(file) = &mut output.file {
-        let out = output.args.out.as_ref().expect("file destination");
-        if let Err(error) = file.write_all(text.as_bytes()).and_then(|()| file.flush()) {
-            // As `_export`: the file this run created is removed, then
-            // `cannot write PATH: <strerror>`, exit 2.
-            return match write_strerror(&error) {
-                Some(text) => {
-                    crate::stderrln!("board-audit: cannot write {out}: {text}");
-                    Ending::Exit(2)
-                }
-                // Declared: a Windows error the C runtime's mapping is not
-                // pinned for. The created file is already removed again.
-                None => Ending::Deferred,
-            };
-        }
-    } else if !text.is_empty() {
-        let mut stdout = std::io::stdout().lock();
-        if stdout
-            .write_all(&super::super::text_bytes(&text))
-            .and_then(|()| stdout.flush())
-            .is_err()
-        {
-            crate::stderrln!("board-audit: the output was closed before the export finished");
-            return Ending::Exit(2);
-        }
-    }
-    output.keep = true;
-    if let Some(message) = refusal {
-        crate::stderrln!("board-audit: {message}");
-        return Ending::Exit(2);
-    }
-    Ending::Exit(0)
 }
 
 #[cfg(test)]
