@@ -31,12 +31,6 @@ use std::{
 };
 use tailscale::{Binary, Proc, State};
 
-/// An argument spelling outside the canonical form: the dispatcher's
-/// deferral line.
-#[derive(Debug)]
-struct Defer;
-type Res<T> = Result<T, Defer>;
-
 const EXIT_OK: u8 = 0;
 const EXIT_FAILED: u8 = 1;
 const EXIT_USAGE: u8 = 2;
@@ -69,11 +63,6 @@ pub(super) fn py_repr(text: &str) -> String {
 
 fn units(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
-}
-
-/// What the argument handling depends on besides argv.
-struct Context {
-    utf8_argv: bool,
 }
 
 /// One answer: the stdout text (code units, written with a lone surrogate
@@ -1109,29 +1098,24 @@ async fn status(host: &impl Host, args: &Args, mut report: Report) -> Out {
     }
 }
 
-/// argparse, then the action. `Err` only for an argument spelling outside
-/// the canonical form.
-fn decide(argv: &[String], context: &Context, host: &impl Host) -> Res<Out> {
-    if !context.utf8_argv && !argv.iter().all(|argument| argument.is_ascii()) {
-        return Err(Defer);
-    }
+/// Parse before any host access, then run the selected action.
+fn decide(argv: &[String], host: &impl Host) -> Out {
     let args = match args::parse(argv) {
-        Parsed::Defer => return Err(Defer),
         // The help and usage text are argparse's at 80 columns, whatever
         // the terminal's width.
         Parsed::MainHelp => {
-            return Ok(Out {
+            return Out {
                 stdout: units(args::MAIN_HELP),
                 stderr: String::new(),
                 code: EXIT_OK,
-            });
+            };
         }
         Parsed::Help(action) => {
-            return Ok(Out {
+            return Out {
                 stdout: units(&action.help()),
                 stderr: String::new(),
                 code: EXIT_OK,
-            });
+            };
         }
         Parsed::Error(parser, message) => {
             let (usage, prog) = match parser {
@@ -1144,11 +1128,11 @@ fn decide(argv: &[String], context: &Context, host: &impl Host) -> Res<Out> {
                     "pseudolife-mcp expose".to_owned(),
                 ),
             };
-            return Ok(Out {
+            return Out {
                 stdout: Vec::new(),
                 stderr: format!("{usage}{prog}: error: {message}\n"),
                 code: EXIT_USAGE,
-            });
+            };
         }
         Parsed::Args(args) => args,
     };
@@ -1159,10 +1143,10 @@ fn decide(argv: &[String], context: &Context, host: &impl Host) -> Res<Out> {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            return Ok(report.fail_text(
+            return report.fail_text(
                 EXIT_FAILED,
                 &format!("could not start ({error}); nothing changed"),
-            ));
+            );
         }
     };
     let out = runtime.block_on(async {
@@ -1175,21 +1159,19 @@ fn decide(argv: &[String], context: &Context, host: &impl Host) -> Res<Out> {
     // A question's stdin read may still be pending after an interrupt; the
     // process ends now rather than waiting for its line.
     runtime.shutdown_background();
-    Ok(out)
+    out
 }
 
-/// `None` defers to the dispatcher (an argument spelling outside the
-/// canonical form), before anything is written or run.
+/// Every invocation is answered natively.
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
-    let argv = values
-        .into_iter()
-        .map(OsString::into_string)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    let context = Context {
-        utf8_argv: super::move_cli::utf8_argv(),
+    let out = match values.into_iter().map(OsString::into_string).collect::<Result<Vec<_>, _>>() {
+        Ok(argv) => decide(&argv, &Real::default()),
+        Err(_) => Out {
+            stdout: Vec::new(),
+            stderr: "pseudolife-mcp expose: error: argument is not valid Unicode; retype it as Unicode text; nothing changed\n".into(),
+            code: EXIT_USAGE,
+        },
     };
-    let out = decide(&argv, &context, &Real::default()).ok()?;
     let (stdout, stderr) = encode(&out.stdout, &out.stderr);
     let wrote_out =
         stdout.is_empty() || super::move_cli::emit(&mut io::stdout().lock(), &stdout).is_ok();

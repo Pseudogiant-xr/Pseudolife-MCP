@@ -50,7 +50,6 @@ const DEFERRED_MODES: &[&str] = &[
     "invite",
     "test-login",
     "pair",
-    "expose",
     "tunnel",
     "move",
     "backup",
