@@ -2499,10 +2499,10 @@
   "models": "a /models body's run of the provider's listed models, exactly in the native order after the launch model, as one token",
   "prompt": "the production prompt's text as <production prompt>"
  },
- "oracle_head": "25320ed0d29a18df567760533741875fd193d7d4",
+ "oracle_head": "42c9642daa82fa27e557d8c8a9a3da44b623e13e",
  "python_sources": {
   "evals/claude_shim.py": "66326ead3e956cc2063a8f6f6ebb2447901cae7e7d1154c796b9e68082362191",
   "evals/codex_shim.py": "6276e27963530046a54e600d35681d6288bafdcb4380b9f91ad377ae30a61a2b",
-  "ops/shim_autostart.py": "3f159a5be7c73c8070da787322abf79701404a1b273b990c691cb51872a25ec3"
+  "ops/shim_autostart.py": "c046460aea32c80311fd9575bc55e672c3e259d10ae8d216e0d94ac1dbcfa3d4"
  }
 }

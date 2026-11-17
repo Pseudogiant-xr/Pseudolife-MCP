@@ -7,11 +7,9 @@
 //! [`POSIX_LAUNCHERS`] that `PATH` holds. Nothing there defers: every
 //! outcome either starts one program or prints the link with its cause.
 //!
-//! Windows keeps the reproduction of CPython 3.11's `webbrowser.get()` as
-//! `console_cli.open_browser` sees it: `os.startfile` without `BROWSER`, a
-//! `BackgroundBrowser` from a `BROWSER` entry of the `<program> %s &` form
-//! whose program is a drive-absolute `.exe`, a refused `GenericBrowser`,
-//! and a deferral for the shapes it does not reproduce.
+//! Windows uses its default browser without `BROWSER`; an explicit value
+//! must name a drive-absolute `.exe`. Quotes group words and backslashes
+//! stay literal, so ordinary Windows paths work. No browser choice defers.
 use std::ffi::OsString;
 
 /// Which `sys.platform` branch of `webbrowser` runs.
@@ -31,18 +29,13 @@ impl Platform {
     } else {
         Platform::Posix
     };
-
-    /// `os.pathsep`.
-    fn pathsep(self) -> char {
-        if self == Platform::Windows { ';' } else { ':' }
-    }
 }
 
 /// What the sign-in does once it has a safe link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Plan {
     /// Start nothing and print the link. The text is the cause and its next
-    /// step, printed beside the link; Windows gives none, as before.
+    /// step, printed beside the link.
     Refused(Option<String>),
     /// Start `program` with `args`, each `%s` replaced by the URL (the URL
     /// is always one argument, never read by a shell).
@@ -58,11 +51,6 @@ pub(super) trait Host {
     /// Whether `PATH` holds an executable `name` (POSIX only).
     fn which(&self, name: &str) -> bool;
 }
-
-/// Outside the reproduced domain (Windows only): defer before the code is
-/// minted.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct Unsupported;
 
 /// A POSIX graphical session: a non-empty `DISPLAY` or `WAYLAND_DISPLAY`
 /// (macOS and Windows never read them).
@@ -110,11 +98,11 @@ pub(super) const NO_DISPLAY: &str =
     "no graphical display here (DISPLAY and WAYLAND_DISPLAY are unset) and no BROWSER set";
 
 /// The sign-in's choice when a browser may open (no `--no-open`).
-pub(super) fn choose(host: &dyn Host, platform: Platform) -> Result<Plan, Unsupported> {
+pub(super) fn choose(host: &dyn Host, platform: Platform) -> Plan {
     if platform == Platform::Windows {
         return choose_windows(host);
     }
-    Ok(choose_posix(host, platform))
+    choose_posix(host, platform)
 }
 
 fn refused(cause: String) -> Plan {
@@ -138,6 +126,12 @@ fn choose_posix(host: &dyn Host, platform: Platform) -> Plan {
         }
     }
     if platform == Platform::Mac {
+        if ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]
+            .iter()
+            .any(|key| host.var(key).is_some_and(|value| !value.is_empty()))
+        {
+            return refused("this is an SSH session; the Mac's browser is on its own screen; open the printed link on the machine in front of you. Set BROWSER only to explicitly choose an opener for this session".to_owned());
+        }
         return Plan::Background {
             program: MAC_OPEN.to_owned(),
             args: vec!["%s".to_owned()],
@@ -195,47 +189,6 @@ fn from_posix_entry(entry: &str) -> Plan {
     }
 }
 
-/// Every name a standard registration can carry an instance under, on any
-/// platform (CPython 3.11): a Windows `BROWSER` entry whose first word has one of these basenames
-/// may be cloned from that controller (`_synthesize`), so it defers.
-const STANDARD_NAMES: [&str; 35] = [
-    "macosx",
-    "chrome",
-    "firefox",
-    "safari",
-    "browser",
-    "windows-default",
-    "firebird",
-    "seamonkey",
-    "mozilla",
-    "netscape",
-    "opera",
-    "xdg-open",
-    "gio",
-    "gvfs-open",
-    "kfmclient",
-    "x-www-browser",
-    "iceweasel",
-    "iceape",
-    "mozilla-firefox",
-    "mozilla-firebird",
-    "kfm",
-    "konqueror",
-    "galeon",
-    "epiphany",
-    "skipstone",
-    "google-chrome",
-    "chromium",
-    "chromium-browser",
-    "mosaic",
-    "grail",
-    "www-browser",
-    "links",
-    "elinks",
-    "lynx",
-    "w3m",
-];
-
 /// `os.path.basename`.
 fn basename(path: &str, platform: Platform) -> &str {
     let split = |c: char| c == '/' || (platform == Platform::Windows && c == '\\');
@@ -253,11 +206,8 @@ fn basename(path: &str, platform: Platform) -> &str {
     path.rsplit(split).next().unwrap_or(path)
 }
 
-/// Whether a Windows `BackgroundBrowser` program starts the same way in
-/// both launchers: `CreateProcess(NULL, cmdline)` searches the interpreter's own
-/// directory and the current directory for a bare name, where Rust does
-/// not, and runs a batch file through `cmd.exe`; only a drive-absolute
-/// `.exe` path with no quote is reproduced.
+/// An explicit executable avoids implicit current-directory lookup and
+/// batch-file shell interpretation on Windows.
 fn launchable(program: &str) -> bool {
     let bytes = program.as_bytes();
     bytes.len() > 3
@@ -270,71 +220,82 @@ fn launchable(program: &str) -> bool {
             .is_some_and(|ext| ext.eq_ignore_ascii_case(".exe"))
 }
 
-/// Windows: `webbrowser.get()` as `open_browser` sees it.
-fn choose_windows(host: &dyn Host) -> Result<Plan, Unsupported> {
-    let platform = Platform::Windows;
-    let choices = match host.var("BROWSER") {
-        None => Vec::new(),
-        Some(value) => value
-            .into_string()
-            .map_err(|_| Unsupported)?
-            .split(platform.pathsep())
-            .filter(|entry| !entry.is_empty())
-            .map(str::to_owned)
-            .collect(),
-    };
-    // `_synthesize(cmdline)` runs for every entry, last first, and raises
-    // IndexError on one that is only whitespace.
-    if choices
-        .iter()
-        .any(|entry| entry.split(super::pyjson::py_space).all(str::is_empty))
-    {
-        return Ok(Plan::Refused(None));
-    }
-    match choices.first() {
-        // Every entry goes to the front of the try order, the first one first.
-        Some(first) => from_browser_variable(first, platform),
-        // `WindowsDefault` is the first standard controller; the detected
-        // browsers come after it and never decide.
-        None => Ok(Plan::StartFile),
-    }
-}
+/// One recovery for an explicit Windows launcher that cannot be used.
+pub(super) const SET_WINDOWS_BROWSER: &str =
+    "set BROWSER to a full .exe path (quote paths with spaces), or open the printed link yourself";
 
-/// Windows `get()` for the first `BROWSER` entry.
-fn from_browser_variable(entry: &str, platform: Platform) -> Result<Plan, Unsupported> {
-    if entry.contains("%s") {
-        let Ok(mut words) = shlex_split(entry) else {
-            return Ok(Plan::Refused(None));
-        };
-        if words.last().map(String::as_str) != Some("&") {
-            return Ok(Plan::Refused(None));
-        }
+fn choose_windows(host: &dyn Host) -> Plan {
+    let Some(value) = host.var("BROWSER") else {
+        return Plan::StartFile;
+    };
+    let Ok(value) = value.into_string() else {
+        return refused(format!(
+            "the BROWSER variable is not valid Unicode; {SET_WINDOWS_BROWSER}"
+        ));
+    };
+    let Some(entry) = value.split(';').find(|entry| !entry.is_empty()) else {
+        return Plan::StartFile;
+    };
+    let Ok(mut words) = split_words(entry, true) else {
+        return refused(format!(
+            "the BROWSER variable has an unclosed quote; {SET_WINDOWS_BROWSER}"
+        ));
+    };
+    if words.last().map(String::as_str) == Some("&") {
         words.pop();
-        // `%s` is in some word, so one is left.
-        let program = words.remove(0);
-        if !launchable(&program) {
-            return Err(Unsupported);
+    }
+    if words.first().is_none_or(String::is_empty) {
+        return refused(format!(
+            "the BROWSER variable names no program; {SET_WINDOWS_BROWSER}"
+        ));
+    }
+    let program = words.remove(0);
+    if !launchable(&program) {
+        let path = program.replace('\\', "/");
+        if path.starts_with("//?/") || path.starts_with("//./") {
+            return refused("BROWSER names a Windows device path; use a drive-letter path to the browser executable, or open the printed link yourself".to_owned());
         }
-        return Ok(Plan::Background {
-            program,
-            args: words,
-        });
+        if path.starts_with("//") {
+            return refused("BROWSER names a UNC path; use a drive-letter path to the browser executable, or open the printed link yourself".to_owned());
+        }
+        let bytes = path.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1..3] == *b":/"
+            && !entry.trim_start().starts_with(['\'', '"'])
+            && words
+                .iter()
+                .any(|word| word.to_ascii_lowercase().ends_with(".exe"))
+        {
+            return refused("BROWSER contains an unquoted executable path with spaces; quote the executable path, or open the printed link yourself".to_owned());
+        }
+        return refused(format!(
+            "BROWSER must name a drive-absolute .exe, not a bare name, relative path or script; {SET_WINDOWS_BROWSER}"
+        ));
     }
-    let first = entry
-        .split(super::pyjson::py_space)
-        .find(|word| !word.is_empty())
-        .unwrap_or_default();
-    let name = basename(first, platform).to_lowercase();
-    if STANDARD_NAMES.contains(&name.as_str()) {
-        return Err(Unsupported);
+    if ["cmd.exe", "powershell.exe", "pwsh.exe"].contains(
+        &basename(&program, Platform::Windows)
+            .to_ascii_lowercase()
+            .as_str(),
+    ) {
+        return refused("BROWSER names a command shell; set BROWSER to the browser executable directly, or open the printed link yourself".to_owned());
     }
-    // `register(cmdline, None, GenericBrowser(cmdline))`: refused.
-    Ok(Plan::Refused(None))
+    if !words.iter().any(|word| word.contains("%s")) {
+        words.push("%s".to_owned());
+    }
+    Plan::Background {
+        program,
+        args: words,
+    }
 }
 
 /// `shlex.split(text)` (POSIX mode, no comments): the words, or `Err` for
 /// the `ValueError` it raises on an open quote or a trailing backslash.
 pub(super) fn shlex_split(text: &str) -> Result<Vec<String>, ()> {
+    split_words(text, false)
+}
+
+fn split_words(text: &str, windows: bool) -> Result<Vec<String>, ()> {
     #[derive(Clone, Copy, PartialEq)]
     enum State {
         Space,
@@ -356,7 +317,7 @@ pub(super) fn shlex_split(text: &str) -> Result<Vec<String>, ()> {
                         quoted = false;
                     }
                     state = State::Space;
-                } else if c == '\\' {
+                } else if c == '\\' && !windows {
                     state = State::Escape('a');
                 } else if c == '\'' || c == '"' {
                     state = State::Quote(c);
@@ -369,7 +330,7 @@ pub(super) fn shlex_split(text: &str) -> Result<Vec<String>, ()> {
                 quoted = true;
                 if c == quote {
                     state = State::Word;
-                } else if c == '\\' && quote == '"' {
+                } else if c == '\\' && quote == '"' && !windows {
                     state = State::Escape(quote);
                 } else {
                     token.push(c);

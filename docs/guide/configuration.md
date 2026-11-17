@@ -1164,44 +1164,49 @@ to schema v59 says, once, which principals are now treated as yours.
 
 `console` picks the browser before it asks for a code, and the link always
 goes to it as one argument. With `BROWSER` unset (or empty), macOS runs
-`/usr/bin/open`; Linux with a display (`DISPLAY` or `WAYLAND_DISPLAY` set
-and not empty) runs the first of `xdg-open`, `gio open`, `x-www-browser`,
-`firefox`, `google-chrome`, `chromium` and `chromium-browser` it finds on
-`PATH`; Windows opens its default browser. On macOS and Linux a `BROWSER`
-you set decides on its own, with or without a display: its first entry
-(entries are separated by `:`) is a command line, split into words as a
-shell would split it but never run through one (so no `~` or `$VAR`
-expansion), and started in the background. Each `%s` in it becomes the
-link, and the link is added at the end when there is no `%s`, so
-`BROWSER=firefox` works as well as `BROWSER='firefox --new-window %s'`. A
-`BROWSER` naming a terminal browser (`lynx`, `w3m`, `elinks`, `links`,
-`links2`, `browsh`, `www-browser`) prints the link instead, since that
-browser would fight the command for the terminal.
+`/usr/bin/open`, except over SSH (`SSH_CONNECTION`, `SSH_CLIENT` or `SSH_TTY`
+set and not empty), where it prints the link for you to open locally.
+Linux with a display (`DISPLAY` or `WAYLAND_DISPLAY` set and not empty)
+runs the first of `xdg-open`, `gio open`, `x-www-browser`, `firefox`,
+`google-chrome`, `chromium` and `chromium-browser` it finds on `PATH`;
+Windows opens its default browser.
 
-When no browser opens, `console` prints the link and the code just as
-`--no-open` does. On macOS and Linux it also says why on stderr, as
-`pseudolife-mcp console: no browser opened: <cause>` (with `--json`, as the
-`browser_error` field instead): no display and no `BROWSER`, no launcher on
-`PATH`, a `BROWSER` it cannot read or that names a terminal browser, a
-program that cannot be started, or a launcher that exits with an error
-within two seconds (one still running then counts as the browser). On
-Windows a launch that fails prints the link alone.
+A `BROWSER` you set decides on its own, including over SSH or without a
+display. Its first non-empty entry is a command line (entries are separated
+by `:` on macOS and Linux, `;` on Windows). It is never run through a shell:
+there is no `~` or `$VAR` expansion. Each `%s` becomes the link; without
+`%s`, the link is added at the end. A trailing `&` is optional.
 
-On Windows the first `BROWSER` entry decides (entries are separated by `;`
-there, and an entry of only spaces anywhere prints the link), and two
-shapes of it still stop with `pseudolife-stdio: mode 'console' is deferred
-in this candidate` before a code is minted: an entry without `%s` whose
-first word is a standard browser name (`firefox`, `chrome`, `lynx`, say),
-and a `<program> %s &` entry whose program is not a drive-absolute `.exe`
-path (a `BROWSER` that is not valid Unicode stops the same way). The value
-is split as a POSIX shell splits it, so an unquoted backslash is dropped:
-write the path with forward slashes (`C:/Tools/browser.exe %s &`) or in
-single quotes (`'C:\Program Files\Mozilla Firefox\firefox.exe' %s &`);
-`C:\Tools\browser.exe %s &` defers. Any other Windows `BROWSER` opens a
-browser only in that `<program> %s &` form, and otherwise prints the link.
-Where it defers, use `--no-open` and open the printed link yourself, or
-unset `BROWSER`: `--no-open` never starts a browser and prints the link and
-the code on every system.
+On macOS and Linux, words and quotes follow shell quoting, so
+`BROWSER=firefox` and `BROWSER='firefox --new-window %s'` both work.
+Terminal browsers (`lynx`, `w3m`, `elinks`, `links`, `links2`, `browsh`,
+`www-browser`) print the link instead, since they would compete for the
+terminal. Under WSL (a non-empty `WSL_DISTRO_NAME`), `BROWSER=explorer.exe`
+treats Explorer's exit code 1 as a hand-off to Windows; other programs and
+other non-zero codes still report a failure. That exit code does not prove
+that Windows displayed the page.
+
+On Windows, `BROWSER` must name a drive-absolute `.exe` path. Backslashes
+stay literal, so `C:\Tools\browser.exe %s &` works, as does
+`C:/Tools/browser.exe`. Single or double quotes group a path with spaces,
+for example `'C:\Program Files\Mozilla Firefox\firefox.exe' %s`.
+Bare names, relative paths and scripts print the link with a message asking
+for a full `.exe` path. An unquoted path with spaces asks you to quote it;
+a UNC or device path asks for a drive-letter path. Known command shells
+(`cmd.exe`, `powershell.exe`, `pwsh.exe`) are refused: name the browser
+executable directly. No browser choice defers to the Python client.
+
+When no browser opens, `console` prints the link and code just as
+`--no-open` does, and says why on stderr as
+`pseudolife-mcp console: no browser opened: <cause>` (with `--json`, in
+`browser_error` instead). That includes a refused `BROWSER`, a program
+that cannot start and Windows default-browser errors. On macOS and Linux,
+a launcher has two seconds to report failure; one still running counts as
+the browser. On Windows, the command checks once just after starting it:
+a running process or a zero exit counts as opened. `--no-open` never
+starts a browser and prints the link and code on every system. On Windows,
+the chosen browser's input and output are disconnected from this command,
+so a caller capturing its output does not wait for the browser to close.
 
 `pseudolife-mcp console --list` shows the signed-in browsers (an operator
 sees all of them, a paired machine its own) and `--revoke <id>` signs one
@@ -4862,19 +4867,27 @@ An invalid bearer map is still refused.
 
 ```yaml
 updates:
-  check_releases: true          # ask PyPI for the newest release, on a background thread
+  check_releases: true          # check GitHub releases in the background
   check_interval_seconds: 21600 # every six hours; 60 is the floor
   unattended_clients: false     # the shim may take the client half of an update by itself
 ```
 
-With `check_releases` on (the default) the daemon reads the newest
-release from PyPI once per interval on its own thread, never on a request,
-keeps the last good answer, and serves it on `/health` as
+With `check_releases` on (the default) the daemon reads GitHub's latest
+stable release from `api.github.com` once per interval in the background,
+never on a request. Once its native assets are complete, it keeps that answer
+and serves it on `/health` as
 `updates.latest_release` (with `checked_at`). When that release is newer
 than the daemon, the session-start briefing opens with one line naming
 the command: `release X is available (daemon Y[, plugin Z]) — run
 pseudolife-mcp update`, and no second line about the plugin, since that
-command moves both. A daemon with no route to PyPI offers nothing;
+command moves both. The GitHub release must carry all five native archives,
+the compose bundle and `SHA256SUMS` before it is offered. The check sends no
+credentials or memory content. A daemon with no route to GitHub and no cached
+answer offers nothing; failures retain an earlier successful answer.
+The first check runs at startup, without delaying startup; subsequent checks
+use the configured interval. An incomplete release waits for that interval;
+other failures before the first success retry after at most 15 minutes.
+GitHub rate-limit responses can extend a short interval by up to an hour.
 `check_releases: false` makes no request at all. The plugin-behind,
 daemon-behind and hooks-differ notices, `pseudolife-mcp doctor` and the
 shim's own version line all name `pseudolife-mcp update` (or its
@@ -5034,8 +5047,12 @@ off" from counting as unit failures) and enables the timer. A `--user`
 timer runs only while that user has a session unless lingering is on:
 `loginctl enable-linger <user>` once, which is the headless case this
 is for. On Windows it registers the task `Pseudolife Unattended Update`
-through `schtasks`, which on an administrator account needs an elevated
-PowerShell opened from the Start menu (the refusal says so); the task
+through Task Scheduler's PowerShell cmdlets as a daily task for you only,
+with a limited token, which needs no elevation. A task of that name
+registered earlier from an elevated PowerShell is owned by Administrators
+and cannot be replaced or removed from a normal window: `--schedule` and
+`--unschedule` then change nothing and print the one command to run once
+in a PowerShell opened with Run as administrator. The task
 runs while the user is signed in, with the user's User-scope environment
 variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` and any
 `PSEUDOLIFE_MCP_DAEMON_URL` must be set at User scope (the command
