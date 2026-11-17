@@ -6,7 +6,7 @@ test login (``~/.pseudolife-mcp/test-pg.env``), a role that creates its own
 databases and cannot connect to the bank. Every name must start with
 ``pl_cf_``; the production guard is asked again on every connection.
 
-The schema comes from the oracle's own ``ensure_schema``; rows come from the
+The schema comes from the Rust daemon's committed schema plan; rows come from the
 oracle's writers or the oracle test suite's seeders, never from this module.
 ``dump`` reads back every public table, sequence and catalog shape so two
 arms' post-states can be compared exactly.
@@ -54,7 +54,8 @@ def url(name: str) -> str:
 
 def _connect(name: str, autocommit: bool = True):
     import psycopg  # noqa: PLC0415
-    from pseudolife_memory.storage.schema import refuse_production_database  # noqa: PLC0415
+    from rust.harness_support.database_guard import refuse_production_database  # noqa: PLC0415
+    refuse_production_database(name)
     conn = psycopg.connect(url(name), connect_timeout=5, autocommit=autocommit)
     refuse_production_database(conn.execute("SELECT current_database()").fetchone()[0])
     return conn
@@ -103,7 +104,7 @@ def teardown(name: str) -> None:
     there, or its absence cannot be confirmed, the bank leaked and the
     failure propagates. A guard refusal (a name this run does not own, or a
     production database) always propagates."""
-    from pseudolife_memory.storage.schema import ProductionDatabaseError  # noqa: PLC0415
+    from rust.harness_support.database_guard import ProductionDatabaseError  # noqa: PLC0415
     try:
         drop(name)
     except (ValueError, ProductionDatabaseError):
@@ -130,7 +131,7 @@ def teardown(name: str) -> None:
 
 def drop(name: str) -> None:
     import psycopg  # noqa: PLC0415
-    from pseudolife_memory.storage.schema import (  # noqa: PLC0415
+    from rust.harness_support.database_guard import (  # noqa: PLC0415
         assert_disposable_database, refuse_production_database)
     NAMES.require_owned(name)
     url(name)  # validates the name
@@ -168,12 +169,12 @@ def drop(name: str) -> None:
 
 
 def create(name: str, schema: bool = True) -> str:
-    """A fresh empty database; with ``schema`` the oracle's ensure_schema ran."""
+    """A fresh empty database; with ``schema`` the committed schema plan ran."""
     drop(name)
     with _admin() as conn:
         create_from_default_template(conn, f'CREATE DATABASE "{name}"')
     if schema:
-        from pseudolife_memory.storage.schema import ensure_schema  # noqa: PLC0415
+        from rust.harness_support.schema import ensure_schema  # noqa: PLC0415
         with _connect(name, autocommit=False) as conn:
             conn.execute("SET search_path TO public")
             ensure_schema(conn)

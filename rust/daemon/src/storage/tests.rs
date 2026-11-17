@@ -585,6 +585,36 @@ async fn db_open_once_for_state_compare() {
     s.close().await;
 }
 
+/// Schema-only fixture initialization, without relation seeds or writer epoch.
+#[tokio::test]
+async fn db_ensure_schema_once_for_state_compare() {
+    let Ok(dsn) = std::env::var("PL_W1A_OPEN_DSN") else {
+        eprintln!("PL_W1A_OPEN_DSN unset: skipping");
+        return;
+    };
+    let (client, task) = side_client(&dsn).await;
+    let name = simple_value(&client, "SELECT current_database()")
+        .await
+        .unwrap()
+        .flatten()
+        .unwrap();
+    assert!(
+        name.starts_with("pl_cf_"),
+        "requires a disposable harness bank"
+    );
+    assert_eq!(Some(name.as_str()), parse_dsn(&dsn).unwrap().get_dbname());
+    client
+        .batch_execute("SET search_path TO public")
+        .await
+        .unwrap();
+    ensure_schema(&client)
+        .await
+        .expect("schema-only initialization");
+    drop(client);
+    let _ = task.await;
+    println!("schema-only initialized");
+}
+
 // ---- writer-session probe and reconnect (postgres.py `conn`, verify) ----
 
 /// Ends `s`'s writer session from a side connection, as a PostgreSQL restart
