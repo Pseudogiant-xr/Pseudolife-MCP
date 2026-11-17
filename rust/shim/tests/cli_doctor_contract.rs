@@ -703,7 +703,7 @@ fn a_maintainer_refusal_whose_body_never_arrives_is_not_checked() {
     assert_eq!(
         map["maintainer_passkeys"],
         json!({"state": "not_checked",
-               "line": "not checked - could not read maintainer answer: GET /api/maintainer refusal body was incomplete; restore the daemon connection and retry"})
+               "line": "not checked - could not read maintainer answer: GET /api/maintainer returned HTTP 409 and its refusal body was incomplete; restore the daemon connection and retry"})
     );
     // The 404 /health is no health answer: the daemon is unavailable.
     assert_eq!(map["error"], json!("DaemonUnavailable"));

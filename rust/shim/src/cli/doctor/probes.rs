@@ -178,8 +178,7 @@ const MAINTAINER_NOTE: &str = "Maintainer authority on this host also rests on t
 /// `json.loads(body)` on bytes: BOM-aware UTF-8, `None` where Python
 /// raises too.
 fn loads_bytes(body: &[u8]) -> Res<Option<Value>> {
-    // utf-8-sig removes one BOM; a second one is json's ValueError.
-    let body = body.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(body);
+    // The common JSON reader accepts one UTF-8 BOM.
     if body.iter().take(4).any(|byte| *byte == 0)
         || body.starts_with(&[0xff, 0xfe])
         || body.starts_with(&[0xfe, 0xff])
@@ -194,6 +193,27 @@ fn loads_bytes(body: &[u8]) -> Res<Option<Value>> {
             "response is not UTF-8 JSON; configure the endpoint to return UTF-8 JSON",
         )),
     }
+}
+
+fn response_json(body: &[u8], endpoint: &str) -> Res<Option<Value>> {
+    loads_bytes(body).map_err(|cause| {
+        let cause = cause
+            .0
+            .split(';')
+            .next()
+            .unwrap_or("invalid JSON response")
+            .to_owned();
+        Finding::new(&format!(
+            "{cause}; check the daemon endpoint and its logs, repair the response, then retry"
+        ))
+        .at(endpoint)
+    })
+}
+
+fn http_problem(endpoint: &str, status: u16) -> Finding {
+    Finding::new(&format!(
+        "{endpoint} returned HTTP {status}; check the intended daemon service and its logs, repair the daemon or its gateway, then retry"
+    ))
 }
 
 fn python_str(value: Option<&Value>) -> Res<String> {
@@ -217,9 +237,10 @@ pub(super) async fn maintainer(
     let answer = get(url, "/api/maintainer", Some(token), timeout, false, limits).await;
     let answer = match answer {
         Some(answer) if answer.body_failed && !success(answer.status) => {
-            return Err(Finding::new(
-                "GET /api/maintainer refusal body was incomplete; restore the daemon connection and retry",
-            ));
+            return Err(Finding::new(&format!(
+                "GET /api/maintainer returned HTTP {} and its refusal body was incomplete; restore the daemon connection and retry",
+                answer.status
+            )));
         }
         Some(answer) if !answer.body_failed => answer,
         // A failed read(1 << 20), or no answer: the `except Exception`.
@@ -229,7 +250,13 @@ pub(super) async fn maintainer(
             return Ok(out);
         }
     };
-    let parsed = loads_bytes(&answer.body).map_err(|cause| cause.at("GET /api/maintainer"))?;
+    let status = answer.status;
+    // Error statuses remain useful even when a gateway supplied HTML or no JSON.
+    let parsed = if status == 200 {
+        response_json(&answer.body, "GET /api/maintainer")?
+    } else {
+        loads_bytes(&answer.body).ok().flatten()
+    };
     let mut body = match parsed {
         Some(Value::Object(map)) => map,
         _ => Map::new(),
@@ -239,7 +266,6 @@ pub(super) async fn maintainer(
             super::redact_report(field, Some(token));
         }
     }
-    let status = answer.status;
     if status == 200 {
         let active = match body.get("passkeys") {
             Some(Value::Array(keys)) => keys
@@ -295,7 +321,12 @@ pub(super) async fn maintainer(
             }
             _ => String::new(),
         };
-        ("not_checked", format!("not checked - HTTP {status}{code}"))
+        (
+            "not_checked",
+            format!(
+                "not checked - HTTP {status}{code}; check the intended daemon service and its logs, repair the daemon or its gateway, then retry"
+            ),
+        )
     };
     out.insert("state".into(), json!(state));
     out.insert("line".into(), json!(line));
@@ -306,7 +337,11 @@ pub(super) async fn maintainer(
 /// there is none, its body fails to read or it is not JSON. A 3xx reply here
 /// is where urllib's redirect handler raised HTTPError (no target, a refused
 /// scheme, the repeat limits): `e.read()` parses its body like any other.
-pub(super) async fn health(url: &str, timeout: Duration) -> Res<Option<Value>> {
+pub(super) async fn health(
+    url: &str,
+    timeout: Duration,
+    findings: &mut Vec<Finding>,
+) -> Res<Option<Value>> {
     let Some(answer) = get(url, "/health", None, timeout, true, (None, None)).await else {
         return Ok(None);
     };
@@ -316,16 +351,26 @@ pub(super) async fn health(url: &str, timeout: Duration) -> Res<Option<Value>> {
             "GET /health redirected to an unsupported URL; set PSEUDOLIFE_MCP_DAEMON_URL to the direct HTTP(S) daemon origin",
         ));
     }
+    if !success(answer.status) {
+        // A genuine degraded daemon may return 503 with its health object.
+        // An error page from a proxy is availability evidence, not bad client JSON.
+        let parsed = (!answer.body_failed)
+            .then(|| loads_bytes(&answer.body).ok().flatten())
+            .flatten();
+        if matches!(&parsed, Some(Value::Object(map)) if matches!(map.get("status"), Some(Value::String(_) | Value::Null)))
+        {
+            return Ok(parsed);
+        }
+        findings.push(http_problem("GET /health", answer.status));
+        return Ok(None);
+    }
     if answer.body_failed {
         return Ok(None);
     }
     if answer.body.is_empty() {
         return Ok(None);
     }
-    match std::str::from_utf8(&answer.body) {
-        Ok(text) => json_loads(text),
-        Err(_) => Ok(None),
-    }
+    response_json(&answer.body, "GET /health")
 }
 
 #[cfg(test)]

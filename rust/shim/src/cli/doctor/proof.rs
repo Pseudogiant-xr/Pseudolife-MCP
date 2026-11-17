@@ -890,7 +890,11 @@ fn cleanup_failure(
         ));
     }
     if files_removed.is_err() {
-        report["fixture_directory"] = json!(root.to_string_lossy());
+        let token = std::env::var("PSEUDOLIFE_MCP_TOKEN").ok();
+        report["fixture_directory"] = json!(super::display_path(
+            &root.to_string_lossy(),
+            token.as_deref()
+        ));
         recovery.push(
             "Remove the remaining local fixture directory after releasing any open handles.".into(),
         );

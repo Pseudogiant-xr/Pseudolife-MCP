@@ -2,8 +2,7 @@
 //! wake path, Codex's hook copy, Git Bash, `pseudolife-mcp` on PATH and
 //! saved tunnels. File reads only; nothing here touches the network.
 use super::pyenv::{
-    self, Env, Finding, Res, Text, is_dir, is_file, join, json_loads, path_str, read_text, strip,
-    toml_loads,
+    self, Env, Finding, Res, is_dir, is_file, join, json_loads, path_str, strip, toml_loads,
 };
 use serde_json::{Map, Value, json};
 
@@ -13,6 +12,25 @@ const TOKEN_KEYS: [&str; 2] = ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FIL
 const URL_KEY: &str = "PSEUDOLIFE_MCP_DAEMON_URL";
 const OFF: [&str; 4] = ["0", "false", "no", "off"];
 const YES: [&str; 4] = ["1", "true", "yes", "on"];
+
+/// An absent file is distinct from one the diagnostic could not inspect.
+fn read_optional(path: &str, label: &str) -> Res<Option<String>> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(Finding::io(&error).at(label)),
+    };
+    String::from_utf8(bytes)
+        .map(|text| Some(text.replace("\r\n", "\n").replace('\r', "\n")))
+        .map_err(|_| Finding::new("file is not UTF-8; save the file as UTF-8").at(label))
+}
 
 fn claude_registration_path(env: &Env) -> Res<String> {
     Ok(match env.truthy("CLAUDE_CONFIG_DIR")? {
@@ -76,7 +94,7 @@ pub(super) fn registration_credentials(
     // Claude Code first: ~/.claude.json's mcpServers.
     let claude_result = (|| -> Res<Option<(Overrides, String)>> {
         let claude = claude_registration_path(env)?;
-        if let Text::Ok(text) = read_text(&claude, true)
+        if let Some(text) = read_optional(&claude, "Claude Code registration (~/.claude.json)")?
             && let Some(data) = json_loads(&text)
                 .map_err(|cause| cause.at("Claude Code registration (~/.claude.json)"))?
             && let Some(block) = data
@@ -110,7 +128,7 @@ pub(super) fn registration_credentials(
     }
     // Then Codex: config.toml's mcp_servers.
     let codex = codex_config_path(env)?;
-    if let Text::Ok(text) = read_text(&codex, true)
+    if let Some(text) = read_optional(&codex, "Codex config.toml")?
         && let Some(data) = toml_loads(&text).map_err(|cause| cause.at("Codex config.toml"))?
         && let Some(block) = data
             .get("mcp_servers")
@@ -227,31 +245,25 @@ pub(super) fn claude_code_wake(env: &Env) -> Res<ClaudeWake> {
     let registration = claude_registration_path(env)?;
     let config = claude_config_dir(env)?;
     let installed = join(&join(&config, "plugins"), "installed_plugins.json");
-    let unreadable =
-        || ClaudeWake::Fixed(json!({"registered": "unknown (unreadable ~/.claude.json)"}));
-    let mut registered = false;
+    let mut findings = Vec::new();
+    let mut load =
+        |path: &str, label: &str| match read_optional(path, label).and_then(|text| match text {
+            Some(text) => json_loads(&text).map_err(|cause| cause.at(label)),
+            None => Ok(None),
+        }) {
+            Ok(data) => data,
+            Err(cause) => {
+                findings.push(cause.to_string());
+                None
+            }
+        };
+    let registration = load(&registration, "Claude Code registration (~/.claude.json)");
+    let installed = load(&installed, "Claude Code installed_plugins.json");
+    let registered = registration
+        .as_ref()
+        .is_some_and(|data| data.to_string().contains(SERVER));
     let mut plugin_installed = false;
-    if is_file(&registration)? {
-        let Text::Ok(text) = read_text(&registration, false) else {
-            return Ok(unreadable());
-        };
-        if json_loads(&text)
-            .map_err(|cause| cause.at("Claude Code registration (~/.claude.json)"))?
-            .is_none()
-        {
-            return Ok(unreadable());
-        }
-        registered = text.contains(SERVER);
-    }
-    if is_file(&installed)? {
-        let Text::Ok(text) = read_text(&installed, false) else {
-            return Ok(unreadable());
-        };
-        let Some(record) =
-            json_loads(&text).map_err(|cause| cause.at("Claude Code installed_plugins.json"))?
-        else {
-            return Ok(unreadable());
-        };
+    if let Some(record) = installed {
         let plugins = match &record {
             Value::Object(map) => map.get("plugins").unwrap_or(&record),
             _ => &Value::Null,
@@ -261,27 +273,35 @@ pub(super) fn claude_code_wake(env: &Env) -> Res<ClaudeWake> {
             _ => false,
         };
     }
+    let registration_unread = !findings.is_empty();
+    let settings = join(&config, "settings.json");
+    let parsed = match read_optional(&settings, "Claude Code settings.json").and_then(|text| {
+        text.map(|text| json_loads(&text).map_err(|cause| cause.at("Claude Code settings.json")))
+            .transpose()
+    }) {
+        Ok(value) => value.flatten(),
+        Err(cause) => {
+            findings.push(cause.to_string());
+            None
+        }
+    };
+    if !findings.is_empty() {
+        let registered = if registered || plugin_installed {
+            json!(true)
+        } else if registration_unread {
+            json!("unknown (registration could not be read)")
+        } else {
+            json!(false)
+        };
+        return Ok(ClaudeWake::Fixed(json!({"registered": registered,
+            "stop_hook": format!("could not read Claude Code wake configuration: {}", findings.join("; "))})));
+    }
     if !(registered || plugin_installed) {
         return Ok(ClaudeWake::Fixed(json!({"registered": false})));
     }
-    let settings = join(&config, "settings.json");
-    let mut data = Map::new();
-    if is_file(&settings)? {
-        let parsed = match read_text(&settings, false) {
-            Text::Ok(text) => {
-                json_loads(&text).map_err(|cause| cause.at("Claude Code settings.json"))?
-            }
-            _ => None,
-        };
-        let Some(loaded) = parsed else {
-            return Ok(ClaudeWake::Fixed(
-                json!({"registered": true, "stop_hook": "unknown (unreadable settings.json)"}),
-            ));
-        };
-        if let Value::Object(map) = loaded {
-            data = map;
-        }
-    }
+    let data = parsed
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
     let block = data
         .get("env")
         .and_then(Value::as_object)
@@ -305,10 +325,16 @@ pub(super) fn claude_code_wake(env: &Env) -> Res<ClaudeWake> {
             None => Ok(strip(&env.var(key)?.unwrap_or_default()).to_owned()),
         }
     };
-    Ok(ClaudeWake::Hook {
-        master: effective("PSEUDOLIFE_AGENT_COORDINATION")?,
-        flag: effective("PSEUDOLIFE_AGENT_WAKE_HOOK")?,
-    })
+    Ok(
+        match (
+            effective("PSEUDOLIFE_AGENT_COORDINATION"),
+            effective("PSEUDOLIFE_AGENT_WAKE_HOOK"),
+        ) {
+            (Ok(master), Ok(flag)) => ClaudeWake::Hook { master, flag },
+            (Err(cause), _) | (_, Err(cause)) => ClaudeWake::Fixed(json!({"registered": true,
+            "stop_hook": super::unread("Claude Code settings.json or its environment override", &cause)})),
+        },
+    )
 }
 
 /// The codex wake inputs, resolved before the daemon answers.
@@ -354,15 +380,11 @@ impl CodexWake {
 /// `_codex_wake`'s file reads and the Codex CLI lookup.
 pub(super) fn codex_wake(env: &Env) -> Res<CodexWake> {
     let config = codex_config_path(env)?;
-    if !is_file(&config)? {
+    let Some(text) = read_optional(&config, "Codex config.toml")? else {
         return Ok(CodexWake::Fixed(json!({"registered": false})));
-    }
-    let unreadable = || CodexWake::Fixed(json!({"registered": "unknown (unreadable config.toml)"}));
-    let Text::Ok(text) = read_text(&config, false) else {
-        return Ok(unreadable());
     };
     let Some(data) = toml_loads(&text).map_err(|cause| cause.at("Codex config.toml"))? else {
-        return Ok(unreadable());
+        return Ok(CodexWake::Fixed(json!({"registered": false})));
     };
     let server = match data.get("mcp_servers") {
         None => None,
@@ -525,11 +547,8 @@ pub(super) fn codex_hooks(env: &Env) -> Res<CodexHooks> {
     if is_dir(&hooks_root)? {
         return Ok(CodexHooks::Line("bundle-present".into()));
     }
-    let config_text = match read_text(&join(&codex_home, "config.toml"), false) {
-        Text::Ok(text) => text,
-        Text::Unreadable => String::new(),
-        Text::Undecodable => return Ok(CodexHooks::Line("unknown (UnicodeDecodeError)".into())),
-    };
+    let config_text =
+        read_optional(&join(&codex_home, "config.toml"), "Codex config.toml")?.unwrap_or_default();
     if !config_text.contains(&format!("\"{PLUGIN_ID}\"")) {
         return Ok(CodexHooks::Line("not-configured".into()));
     }
@@ -551,16 +570,27 @@ pub(super) fn git_bash_report(env: &Env, token: Option<&str>) -> Res<Vec<(&'stat
         Some(dir) => path_str(&dir)?,
         None => join(&pyenv::home(env)?, ".claude"),
     };
-    let mut configured = None;
-    if let Text::Ok(text) = read_text(&join(&base, "settings.json"), true)
-        && let Some(Value::Object(settings)) =
-            json_loads(&text).map_err(|cause| cause.at("Claude Code settings.json"))?
-        && let Some(Value::Object(block)) = settings.get("env")
-        && let Some(Value::String(value)) = block.get("CLAUDE_CODE_GIT_BASH_PATH")
-        && !value.is_empty()
-    {
-        configured = Some(value.clone());
-    }
+    let settings = read_optional(&join(&base, "settings.json"), "Claude Code settings.json")
+        .and_then(|text| {
+            text.map(|text| {
+                json_loads(&text).map_err(|cause| cause.at("Claude Code settings.json"))
+            })
+            .transpose()
+        });
+    let (settings, settings_problem) = match settings {
+        Ok(value) => (value.flatten(), None),
+        Err(cause) => (
+            None,
+            Some(super::unread("Claude Code settings.json", &cause)),
+        ),
+    };
+    let configured = settings
+        .as_ref()
+        .and_then(|settings| settings.get("env"))
+        .and_then(|block| block.get("CLAUDE_CODE_GIT_BASH_PATH"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
     let configured = match configured {
         Some(value) => Some(value),
         None => env.truthy("CLAUDE_CODE_GIT_BASH_PATH")?,
@@ -616,6 +646,9 @@ pub(super) fn git_bash_report(env: &Env, token: Option<&str>) -> Res<Vec<(&'stat
         ("bash_on_path", json!(bash_on_path)),
         ("bash_on_path_is_wsl_launcher", json!(launcher)),
     ];
+    if let Some(problem) = settings_problem {
+        report.push(("git_bash_settings", json!(problem)));
+    }
     match (&git_bash, launcher) {
         (None, _) => report.push((
             "git_bash_recovery",

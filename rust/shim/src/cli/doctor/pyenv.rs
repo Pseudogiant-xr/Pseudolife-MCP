@@ -215,34 +215,6 @@ fn stat(path: &str) -> Res<Option<std::fs::Metadata>> {
     }
 }
 
-/// The outcome of `Path.read_text(encoding=...)`.
-pub(super) enum Text {
-    /// `OSError` (absent, a directory, unreadable).
-    Unreadable,
-    /// `UnicodeDecodeError`.
-    Undecodable,
-    Ok(String),
-}
-
-/// `Path(path).read_text(encoding="utf-8" | "utf-8-sig")`, universal
-/// newlines included.
-pub(super) fn read_text(path: &str, sig: bool) -> Text {
-    let Ok(bytes) = std::fs::read(path) else {
-        return Text::Unreadable;
-    };
-    let Ok(text) = String::from_utf8(bytes) else {
-        return Text::Undecodable;
-    };
-    let text = if sig {
-        text.strip_prefix('\u{feff}')
-            .map(str::to_owned)
-            .unwrap_or(text)
-    } else {
-        text
-    };
-    Text::Ok(text.replace("\r\n", "\n").replace('\r', "\n"))
-}
-
 /// CPython 3.11's `int()` refuses decimal strings over 4300 digits
 /// (`sys.int_info.default_max_str_digits`): `json.loads` raises ValueError
 /// on such an integer literal.
@@ -301,6 +273,7 @@ pub(super) fn json_unbounded(text: &str) -> Option<Value> {
 
 /// Standard JSON, with a bounded depth independent of a Python interpreter.
 pub(super) fn json_loads(text: &str) -> Res<Option<Value>> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     if json_depth(text.as_bytes()) > 256 {
         return Err(Finding::new(
             "JSON nesting exceeds 256 levels; reduce the nesting",
@@ -312,9 +285,7 @@ pub(super) fn json_loads(text: &str) -> Res<Option<Value>> {
 
 /// Parse TOML without exposing a parser excerpt (which may contain a token).
 pub(super) fn toml_loads(text: &str) -> Res<Option<toml::Table>> {
-    if text.starts_with('\u{feff}') {
-        return Ok(None);
-    }
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     text.parse::<toml::Table>().map(Some).map_err(|_| {
         Finding::new(
             "invalid TOML or a value outside TOML's supported range; correct the TOML syntax",

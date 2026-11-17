@@ -233,7 +233,7 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     };
     if args.proof {
         if args.agent_state.is_some() {
-            let message = "usage: cli.py [-h] [--timeout TIMEOUT]\n              [--host {codex,claude-code,claude-desktop,generic}]\n              [--agent-state AGENT_STATE] [--disposable-proof]\ncli.py: error: --disposable-proof cannot use a saved --agent-state\n";
+            let message = "Usage: pseudolife-mcp doctor [--timeout SECONDS] [--host HOST] [--agent-state FILE] [--disposable-proof]\npseudolife-mcp doctor: --disposable-proof cannot use a saved --agent-state\n";
             let _ = io::stderr().lock().write_all(&super::text_bytes(message));
             return Some(ExitCode::from(2));
         }
@@ -291,8 +291,9 @@ pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
 pub(super) type Registration = (Vec<(String, String)>, Option<String>);
 
 /// `doctor_cli.registration_credentials(os.environ)` for another command
-/// (`console`): the overrides to apply and the source label, or `None`
-/// when a registration cannot be read. The caller decides how to report it.
+/// (`console`): the first usable overrides and source label. This compatibility
+/// caller does not display doctor's per-file findings; an unreadable Claude
+/// registration does not hide an independent usable Codex credential.
 pub(super) fn registration_credentials() -> Option<Registration> {
     clients::registration_credentials(&Env::default(), &mut Vec::new()).ok()
 }
@@ -386,6 +387,24 @@ enum BearerProblem {
     /// A folder above the token file is a link another account could
     /// change: the private-path rule's line, which names the link and the fix.
     Behind(String),
+}
+
+fn private_credential_reason(path: &std::path::Path) -> Option<String> {
+    use crate::private_path::Cause;
+    crate::private_path::check_ancestors(path).err().map(|refusal| {
+        match *refusal.cause {
+            Cause::LinkOwner { .. } | Cause::HolderOwner { .. } =>
+                "a credential path ancestor link or its holder belongs to another account; fix: replace the link with a private folder you own",
+            Cause::LinkWriter { .. } | Cause::HolderWritable { .. } =>
+                "another account can replace a credential path ancestor link; fix: replace the link with a private folder you own",
+            Cause::TooManyLinks =>
+                "credential path link resolution exceeded its limit; fix: select the original credential file without the link chain",
+            Cause::NotALink { .. } | Cause::UncheckableTarget { .. } =>
+                "a credential path redirect cannot be checked; fix: select the credential file through a plain folder",
+            Cause::Uninspectable { .. } =>
+                "a credential path ancestor cannot be inspected; fix: let this account read its attributes and permissions",
+        }.to_owned()
+    })
 }
 
 impl BearerProblem {
@@ -496,7 +515,7 @@ fn sendable(token: &str) -> bool {
 /// decision 2026-10-09).
 /// A path this runtime cannot name (not UTF-8, or unresolvable) is
 /// `unknown`; the version is always known.
-fn identity() -> Vec<(&'static str, String)> {
+fn identity(token: Option<&str>) -> Vec<(&'static str, String)> {
     let executable = std::env::current_exe().ok();
     let resolved = executable
         .as_deref()
@@ -512,8 +531,8 @@ fn identity() -> Vec<(&'static str, String)> {
         })
         .unwrap_or_else(|| "unknown".to_owned());
     vec![
-        ("interpreter", interpreter),
-        ("source", source),
+        ("interpreter", display_path(&interpreter, token)),
+        ("source", display_path(&source, token)),
         ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),
     ]
 }
@@ -842,7 +861,7 @@ async fn diagnose(
             let behind = provider
                 .as_ref()
                 .and_then(|provider| provider.path())
-                .and_then(crate::private_path::explain);
+                .and_then(private_credential_reason);
             problem = Some(match behind {
                 Some(line) => BearerProblem::Behind(line),
                 None => BearerProblem::Unavailable(Source::File, error.0),
@@ -884,7 +903,7 @@ async fn diagnose(
         |cause| json!({"on_path": unread("PATH or the launcher location", &cause)}),
     );
     let tunnel_root = clients::tunnel_root(&env).ok();
-    let identity = identity();
+    let identity = identity(token.as_deref());
     // A saved instance is read now; its context request runs after the
     // handshake, as in Python. Claude Desktop is never checked.
     let saved = match (&args.agent_state, &url) {
@@ -917,7 +936,7 @@ async fn diagnose(
                 .map(|path| format!("{prefix}{})", display_path(path, token.as_deref())))
         })
         .unwrap_or_else(|| source.to_owned());
-    put(&mut report, "credential_source", json!(source_display));
+    put(&mut report, "credential_source", json!(&source_display));
     if let Some(cause) = &registrations_unread {
         put(
             &mut report,
@@ -1032,9 +1051,10 @@ async fn diagnose(
     }
     // `None` for no answer; `Err` for an answer that is no daemon's health
     // report (not an object, a status that is not text, a redirect off HTTP).
+    let mut health_findings = Vec::new();
     let answer = match &url {
         None => Ok(None),
-        Some(url) => match probes::health(url, short).await {
+        Some(url) => match probes::health(url, short, &mut health_findings).await {
             Ok(None) => Ok(None),
             Ok(Some(Value::Object(map))) => match map.get("status") {
                 None | Some(Value::Null | Value::String(_)) => Ok(Some(map)),
@@ -1048,6 +1068,19 @@ async fn diagnose(
             Err(cause) => Err(cause),
         },
     };
+    if !health_findings.is_empty() {
+        put(
+            &mut report,
+            "health_response",
+            json!(
+                health_findings
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+        );
+    }
     let unrecognized = answer.is_err();
     if let Err(cause) = &answer {
         put(
@@ -1103,8 +1136,11 @@ async fn diagnose(
             )),
         );
     } else if let Some(problem) = &problem {
-        let (error, recovery) =
-            problem.error(credential_source.as_deref().unwrap_or("environment"));
+        let (error, recovery) = problem.error(if credential_source.is_some() {
+            &source_display
+        } else {
+            "environment"
+        });
         put(&mut report, "error", json!(error));
         put(&mut report, "recovery", json!(recovery));
         // The unauthenticated details still help; the handshake would only
