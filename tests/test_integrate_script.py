@@ -4062,6 +4062,17 @@ def _rust_job_pytest_paths() -> list[str]:
     return paths
 
 
+def test_harness_agreement_guards_run_on_every_pull_request():
+    import yaml
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    step, = [s for s in workflow["jobs"]["guards"]["steps"]
+             if s.get("name") == "Tree-wide guards"]
+    assert "if" not in step
+    for name in ("test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness",
+                 "test_the_rust_harness_run_mirrors_ci_and_what_the_suite_skips"):
+        assert f"tests/test_integrate_script.py::{name}" in step["run"].split()
+
+
 def test_every_pytest_path_of_the_rust_job_is_in_the_rust_harness():
     """The reverse of the check above: a test CI's `rust` job runs is also
     in the batch's local harness run, which has the bench login hosted
