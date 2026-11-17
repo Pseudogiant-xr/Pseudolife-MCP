@@ -5,8 +5,8 @@
 //! number spelling (`int(lexeme)`, `repr(float(lexeme))`) and dict insertion
 //! order; a duplicate key keeps its first position with its last value, as a
 //! Python dict does. A lone surrogate (no Rust `String` holds it), nesting
-//! past 100 and integers past 4300 digits defer.
-use super::Defer;
+//! past 100 and integers past 4300 digits are refused with a named cause.
+use super::Refusal;
 use std::fmt::Write as _;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,7 +80,7 @@ impl J {
     }
 
     /// `str(value)`: a str as itself, anything else its repr.
-    pub(in crate::cli) fn py_str(&self) -> Result<String, Defer> {
+    pub(in crate::cli) fn py_str(&self) -> Result<String, Refusal> {
         Ok(match self {
             J::Str(value) => value.clone(),
             other => py_value_repr(other),
@@ -124,7 +124,7 @@ const MAX_INT_DIGITS: usize = 4300;
 /// Python reading cannot be held here.
 enum Stop {
     Syntax,
-    Defer,
+    Limit(&'static str),
 }
 
 /// CPython's C scanner (`json.loads` with its defaults).
@@ -176,7 +176,7 @@ impl Reader<'_> {
     fn nested(&mut self, read: fn(&mut Self) -> Result<J, Stop>) -> Result<J, Stop> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
-            return Err(Stop::Defer);
+            return Err(Stop::Limit("JSON nesting exceeds 100 levels"));
         }
         let value = read(self);
         self.depth -= 1;
@@ -229,12 +229,14 @@ impl Reader<'_> {
         }
         let lexeme = &self.text[start..self.at];
         if float {
-            return lexeme.parse::<f64>().map(J::Float).map_err(|_| Stop::Defer);
+            return lexeme.parse::<f64>().map(J::Float).map_err(|_| {
+                Stop::Limit("JSON number cannot be represented as a floating-point value")
+            });
         }
         let digits = &self.text[start..integer_end];
         let magnitude = digits.strip_prefix('-').unwrap_or(digits);
         if magnitude.len() > MAX_INT_DIGITS {
-            return Err(Stop::Defer);
+            return Err(Stop::Limit("JSON integer exceeds 4300 digits"));
         }
         Ok(J::Int(if magnitude == "0" {
             "0".to_owned()
@@ -292,7 +294,9 @@ impl Reader<'_> {
                                 unit
                             };
                             // A lone surrogate is a Python str no Rust String holds.
-                            out.push(char::from_u32(point).ok_or(Stop::Defer)?);
+                            out.push(char::from_u32(point).ok_or(Stop::Limit(
+                                "JSON string contains an unpaired Unicode surrogate",
+                            ))?);
                         }
                         _ => return Err(Stop::Syntax),
                     }
@@ -373,7 +377,7 @@ impl Reader<'_> {
 }
 
 /// `json.loads(text)`: `Ok(None)` when Python raises a JSONDecodeError.
-pub(in crate::cli) fn loads(text: &str) -> Result<Option<J>, Defer> {
+pub(in crate::cli) fn loads(text: &str) -> Result<Option<J>, Refusal> {
     Ok(loads_noting_duplicates(text)?.map(|(value, _)| value))
 }
 
@@ -381,7 +385,7 @@ pub(in crate::cli) fn loads(text: &str) -> Result<Option<J>, Defer> {
 /// refuses duplicates would raise on (inner objects close first).
 pub(in crate::cli) fn loads_noting_duplicates(
     text: &str,
-) -> Result<Option<(J, Option<String>)>, Defer> {
+) -> Result<Option<(J, Option<String>)>, Refusal> {
     let mut reader = Reader {
         text,
         at: 0,
@@ -392,7 +396,7 @@ pub(in crate::cli) fn loads_noting_duplicates(
     let value = match reader.value() {
         Ok(value) => value,
         Err(Stop::Syntax) => return Ok(None),
-        Err(Stop::Defer) => return Err(Defer),
+        Err(Stop::Limit(cause)) => return Err(Refusal(cause.into())),
     };
     reader.space();
     Ok((reader.at == text.len()).then_some((value, reader.duplicate)))

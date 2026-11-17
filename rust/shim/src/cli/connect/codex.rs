@@ -5,7 +5,7 @@
 //! and the hooks' connection file beside it.
 use super::discover::{self, Ctx, Edits, Row};
 use super::pyjson::{Dict, J};
-use super::{Defer, FILE_KEY, SERVER, Step, TOKEN_KEY, WriteFailed, files, paths};
+use super::{FILE_KEY, Refusal, SERVER, Step, TOKEN_KEY, WriteFailed, files, paths};
 use crate::setup::codex::{self as setup, Rpc, SetupError};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -117,7 +117,7 @@ fn edits(before: &serde_json::Map<String, Value>, after: &serde_json::Map<String
 }
 
 /// `connect_cli._codex_rows`.
-pub(super) async fn rows(ctx: &Ctx, opener: &impl Opener) -> Result<Vec<Row>, Defer> {
+pub(super) async fn rows(ctx: &Ctx, opener: &impl Opener) -> Result<Vec<Row>, Refusal> {
     let path = paths::codex_config()?;
     // Only Codex's own file: another client's unreadable configuration must
     // not read as "no Codex registration" (Codex review).
@@ -151,14 +151,14 @@ pub(super) async fn rows_for(
     path: &Path,
     command: Option<String>,
     opener: &impl Opener,
-) -> Result<Vec<Row>, Defer> {
+) -> Result<Vec<Row>, Refusal> {
     let path = path.to_path_buf();
     let Some(command) = command else {
         return unregistered(ctx, &path);
     };
     let home = home_of(&path);
     let connection = setup::connection_path(&home);
-    let manual = |reason: &str| -> Result<Vec<Row>, Defer> {
+    let manual = |reason: &str| -> Result<Vec<Row>, Refusal> {
         Ok(vec![discover::manual(
             "codex",
             "registration",
@@ -260,7 +260,7 @@ pub(super) async fn rows_for(
 
 /// No Codex registration of the shim: a url server is manual, an
 /// unreadable file that names the server is manual, anything else absent.
-fn unregistered(ctx: &Ctx, path: &Path) -> Result<Vec<Row>, Defer> {
+fn unregistered(ctx: &Ctx, path: &Path) -> Result<Vec<Row>, Refusal> {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     if text.is_empty() {
         return Ok(vec![discover::absent("codex", ctx)?]);
