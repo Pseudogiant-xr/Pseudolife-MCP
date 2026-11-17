@@ -10,6 +10,9 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
     python ops/integrate.py status            # labelled PRs, CI, mergeability
     python ops/integrate.py build --dry-run   # what a build would do
     python ops/integrate.py build             # merge the batch locally
+    python ops/integrate.py build --after-drop <closed batch PR>
+                                              # again without its dropped culprit,
+                                              # no suite ("After a drop")
     python ops/integrate.py suite             # its full suite on the remote machine
     python ops/integrate.py open --suite <result.json> --harness-note "<result>"
                                               # push it, open its PR
@@ -286,6 +289,10 @@ class Plan:
     # Where it ran: empty for this host with no remote configured (as before),
     # `local` when forced here, else the remote machine's role.
     rust_check_where: str = ""
+    # Set by `build --after-drop` (docs/dev/merge-batches.md, "After a drop"):
+    # the closed batch this one repeats without its culprit, and the file
+    # lists that let it skip the suite and carry the closed batch's passes.
+    after_drop: dict = field(default_factory=dict)
 
     @property
     def title(self) -> str:
@@ -311,6 +318,8 @@ class Plan:
             del data["carried"]
         if not data["rust_check_where"]:
             del data["rust_check_where"]
+        if not data["after_drop"]:
+            del data["after_drop"]
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @staticmethod
@@ -2365,6 +2374,518 @@ def _rust_check_cell(plan: Plan) -> str:
     return "<run by `build`>"
 
 
+# ── After a drop (docs/dev/merge-batches.md, "After a drop") ──
+# The maintainer's ruling of 17 November 2026: when a batch opened and went
+# red in hosted CI, and its culprit is dropped, the batch built again without
+# it skips the local suite and harness (the compile check still runs) and
+# merges once `test` passes on its new head, carrying the closed batch's
+# passes for the jobs still running, but only when the dropped pull request
+# shares no file with any remaining member or with code every test shares.
+AFTER_DROP_DOC = 'docs/dev/merge-batches.md, "After a drop"'
+# What the batch's own generated commit rewrites (_regenerate_census and
+# _regenerate_budget): not a member's change, so not compared.
+AFTER_DROP_GENERATED = (CENSUS_JSON, CI_FINGERPRINTS)
+AFTER_DROP_GENERATED_PREFIXES = (f"{CI_ACCEPT}/imported-",)
+# Dependency manifests and lock files, by file name.
+AFTER_DROP_MANIFESTS = frozenset({"pyproject.toml", "uv.lock", "setup.py", "setup.cfg",
+                                  "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
+                                  "rust-toolchain", "package.json", "package-lock.json",
+                                  "pnpm-lock.yaml", "yarn.lock"})
+AFTER_DROP_REQUIREMENTS_RE = re.compile(r"requirements[^/]*\.txt")
+# Settings a test runner, linter or build tool reads by itself, with no
+# workflow naming them (`cargo nextest` reads .config/nextest.toml).
+AFTER_DROP_TOOL_CONFIG = frozenset({"pytest.ini", "tox.ini", ".coveragerc", "clippy.toml",
+                                    ".clippy.toml", "rustfmt.toml", ".rustfmt.toml",
+                                    "deny.toml", ".python-version", ".nvmrc", ".npmrc"})
+AFTER_DROP_TOOL_CONFIG_RE = re.compile(r"(tsconfig[^/]*\.json|(vite|vitest|eslint|prettier)"
+                                       r"\.config\.[^/]+|\.eslintrc[^/]*|\.prettierrc[^/]*)")
+# The job that must pass on the new head itself, never carried, and the job
+# whose success makes a skipped one stand (both in ci.yml, workflow "CI").
+AFTER_DROP_TEST = "test"
+AFTER_DROP_TEST_KEY = ("check", "CI", "test")
+AFTER_DROP_SCOPE_KEY = ("check", "CI", "scope")
+
+
+def _after_drop_generated(path: str) -> bool:
+    return path in AFTER_DROP_GENERATED or path.startswith(AFTER_DROP_GENERATED_PREFIXES)
+
+
+def _after_drop_shared(path: str) -> bool:
+    """Code or data every test, build or job shares, so a change to it can
+    break what a remaining member's passing runs never saw."""
+    name = path.rsplit("/", 1)[-1]
+    return (
+        (path.startswith("tests/") and not re.fullmatch(r"tests/test_[^/]*\.py", path))
+        or name == "conftest.py"
+        or (path.startswith("rust/") and path.endswith(".py") and not name.startswith("test_"))
+        # A Rust crate's tests/<folder>/ holds modules its test binaries
+        # share (tests/common/mod.rs); a top-level tests/*.rs is one binary.
+        or (path.startswith("rust/") and "/tests/" in path
+            and "/" in path.split("/tests/", 1)[1])
+        or path.startswith(".github/")
+        or "/.cargo/" in f"/{path}" or "/.config/" in f"/{path}"
+        or name in AFTER_DROP_TOOL_CONFIG or bool(AFTER_DROP_TOOL_CONFIG_RE.fullmatch(name))
+        or path == "ops/integrate.py"
+        or name in AFTER_DROP_MANIFESTS
+        or bool(AFTER_DROP_REQUIREMENTS_RE.fullmatch(name))
+        or (path.startswith("rust/ci/") and path.endswith(".json")))
+
+
+def _after_drop_workflow_text(rev: str) -> str:
+    """Every string value of every workflow file at `rev`, joined: a path a
+    workflow names in a step, an input or a filter (a CI script, a
+    Dockerfile) is an input of the jobs that run it. Comments are not
+    values, so a path a comment mentions does not count. A file that does
+    not parse counts whole."""
+    names = _out("ls-tree", "-r", "--name-only", rev, "--", ".github/workflows").splitlines()
+    texts = []
+
+    def strings(value) -> None:
+        if isinstance(value, str):
+            texts.append(value)
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                strings(k)
+                strings(v)
+        elif isinstance(value, list):
+            for v in value:
+                strings(v)
+
+    for name in names:
+        raw = git("show", f"{rev}:{name}", check=False).stdout
+        try:
+            strings(_yaml().safe_load(raw))
+        except Exception:        # unparseable, or no YAML module: the whole text
+            texts.append(raw)
+    return "\n".join(texts)
+
+
+def _after_drop_rust_module(path: str, rev: str) -> bool:
+    """A top-level Rust test file another test binary of its crate compiles
+    in with `mod name;` (tests/auth_fixture.rs): shared, though it sits
+    where a test binary of its own would."""
+    folder, _, name = path.rpartition("/")
+    if not (path.startswith("rust/") and folder.endswith("/tests") and name.endswith(".rs")):
+        return False
+    declares = re.compile(rf"^\s*(pub(\([^)]*\))?\s+)?mod\s+{re.escape(name[:-3])}\s*;", re.M)
+    for other in _out("ls-tree", "--name-only", rev, "--", f"{folder}/").splitlines():
+        if other != path and other.endswith(".rs") and declares.search(
+                git("show", f"{rev}:{other}", check=False).stdout):
+            return True
+    return False
+
+
+def _after_drop_imported(path: str, rev: str) -> bool:
+    """A test module another Python file imports (a shared fixture such as
+    `from .test_seed import throwaway_pg`): shared, though test-named."""
+    if path.endswith(".rs"):
+        return _after_drop_rust_module(path, rev)
+    name = path.rsplit("/", 1)[-1]
+    if not (name.startswith("test_") and name.endswith(".py")):
+        return False
+    stem = name[:-3]
+    name_re = re.escape(stem)
+    importing = re.compile(
+        rf"^\s*(from\s+[\w.]*\b{name_re}\s+import\b"          # from pkg.test_x import a
+        rf"|import\s+([\w.]*\.)?{name_re}\b"                     # import pkg.test_x
+        rf"|from\s+[\w.]+\s+import\s+(\([^)]*|[^\n]*)\b{name_re}\b)",  # from pkg import test_x
+        re.M)
+    # Candidates by plain text, then the import itself (git grep's regex
+    # dialect differs between builds).
+    hits = git("grep", "-l", "-F", stem, rev, "--", "*.py", check=False).stdout.splitlines()
+    for hit in hits:
+        other = hit.split(":", 1)[-1]
+        if other == path:
+            continue
+        text = git("show", f"{rev}:{other}", check=False).stdout
+        if importing.search(text):
+            return True
+    return False
+
+
+def _after_drop_rebuilds(number: int) -> list[int]:
+    """The pull requests of batches this checkout built `--after-drop number`
+    and opened: a later rebuild's checks supersede the closed batch's."""
+    root = Plan.path(f"{PREFIX}x").parent
+    found = []
+    for path in sorted(root.glob("*.json")) if root.is_dir() else []:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (raw.get("after_drop") or {}).get("batch") == number and raw.get("pr"):
+            found.append(raw["pr"])
+    return sorted(found, reverse=True)
+
+
+def _after_drop_closed(number: int, base_sha: str) -> Plan:
+    """The closed batch `build --after-drop <number>` repeats: its plan, here,
+    checked against GitHub. Refuses, naming the condition, otherwise."""
+    why = f"`build --after-drop {number}` refused ({AFTER_DROP_DOC})"
+    view = json.loads(gh("pr", "view", str(number), "--json",
+                         "state,headRefName,headRefOid,baseRefName,isCrossRepository"))
+    state, branch = view.get("state"), view.get("headRefName", "")
+    if state != "CLOSED":
+        fix = ("close it first, once its hosted CI went red" if state == "OPEN" else
+               "nothing to repeat: build the next batch as usual")
+        raise Refusal(f"{why}: #{number} is {str(state).lower()}, not closed unmerged; {fix}")
+    if (not BATCH_RE.match(branch) or view.get("baseRefName") != BASE
+            or view.get("isCrossRepository")):
+        raise Refusal(f"{why}: #{number} comes from {branch or 'an unknown branch'} into "
+                      f"{view.get('baseRefName')}, not an {PREFIX} batch into {BASE}; "
+                      "name the batch pull request that went red")
+    old = Plan.load(branch)
+    if old is None:
+        raise Refusal(f"{why}: this checkout holds no plan for {branch}; run it in the "
+                      f"checkout that built and opened #{number}, which kept its plan. A "
+                      "batch that went red before it opened has no hosted results to "
+                      "carry: build it again the ordinary way")
+    if old.pr != number or old.head != view.get("headRefOid"):
+        raise Refusal(f"{why}: the plan for {branch} records #{old.pr or '?'} at "
+                      f"{old.head[:12] or '?'}, but #{number} is at "
+                      f"{str(view.get('headRefOid'))[:12]}; its hosted results are not the "
+                      "plan's head's. Build it again the ordinary way")
+    later = _after_drop_rebuilds(number)
+    if later:
+        raise Refusal(f"{why}: #{number} was already built again after a drop and opened "
+                      f"as #{later[0]}, whose own hosted results are newer; name #{later[0]} "
+                      f"(`build --after-drop {later[0]}`) once it is closed, so its checks "
+                      "are the ones carried")
+    if old.base_sha != base_sha:
+        raise Refusal(f"{why}: {REMOTE}/{BASE} is {base_sha[:12]}, not the closed batch's "
+                      f"base {old.base_sha[:12]}, so its hosted results tested another "
+                      "master. Build it again the ordinary way")
+    return old
+
+
+def _after_drop_record(plan: Plan, old: Plan) -> dict:
+    """The conditions on the batch `build` just merged, checked against the
+    closed batch `old`; the record `open` and `merge` rely on and print."""
+    why = f"`build --after-drop {old.pr}` refused ({AFTER_DROP_DOC})"
+    again = f"{why}; nothing was kept, so build it again the ordinary way"
+    if plan.dropped:
+        raise Refusal(f"{again}: this build itself left out "
+                      + ", ".join(f"#{d.member.number} ({d.reason})" for d in plan.dropped))
+    before = {m.number: m for m in old.merged}
+    now = {m.number: m for m in plan.merged}
+    joined = sorted(set(now) - set(before))
+    if joined:
+        raise Refusal(f"{again}: " + ", ".join(f"#{n}" for n in joined)
+                      + f" joined since #{old.pr}, whose hosted results never saw "
+                      + ("it" if len(joined) == 1 else "them"))
+    gone = sorted(set(before) - set(now))
+    if not gone:
+        raise Refusal(f"{again}: every member of #{old.pr} is in it again, so nothing was "
+                      f"dropped; drop the culprit first (its `{plan.label}` label removed)")
+    moved = [n for n in sorted(now) if now[n].sha != before[n].sha]
+    if moved:
+        raise Refusal(f"{again}: " + ", ".join(
+            f"#{n} moved from {before[n].sha[:12]} to {now[n].sha[:12]}" for n in moved)
+            + f" since #{old.pr}, whose hosted results tested the old head")
+    files = {}
+    for n in [*gone, *sorted(now)]:
+        sha = before[n].sha
+        if git("cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode != 0:
+            raise Refusal(f"{again}: #{n}'s head {sha[:12]} from #{old.pr} is not in this "
+                          "checkout, so its files cannot be compared")
+        files[n] = sorted(p for p in _changed(sha, plan.base_sha) if not _after_drop_generated(p))
+    # The carried jobs ran on the closed head's tree: the new head may differ
+    # from it only by the dropped members' files and the generated metadata.
+    dropped_files = {p for n in gone for p in files[n]}
+    if git("cat-file", "-e", f"{old.head}^{{commit}}", check=False).returncode != 0:
+        raise Refusal(f"{again}: the closed batch's head {old.head[:12]} is not in this "
+                      "checkout, so the two heads cannot be compared")
+    other = sorted(p for p in _out("diff", "--name-only", "--no-renames", old.head,
+                                   plan.head).splitlines()
+                   if p not in dropped_files and not _after_drop_generated(p))
+    if other:
+        raise Refusal(f"{again}: the new head differs from #{old.pr}'s head "
+                      f"{old.head[:12]} in " + ", ".join(other[:8])
+                      + (", ..." if len(other) > 8 else "")
+                      + ", beyond the dropped members' files and the generated metadata")
+    workflows = _after_drop_workflow_text(old.head)
+    for n in gone:
+        shared = [p for p in files[n]
+                  if _after_drop_shared(p) or p in workflows or _after_drop_imported(p, old.head)]
+        if shared:
+            raise Refusal(f"{again}: dropped #{n} changes code every test or job shares ("
+                          + ", ".join(shared[:8]) + (", ..." if len(shared) > 8 else "")
+                          + "), so the closed batch's passes may rest on it")
+        for m in sorted(now):
+            common = sorted(set(files[n]) & set(files[m]))
+            if common:
+                raise Refusal(f"{again}: dropped #{n} and #{m} both change "
+                              + ", ".join(common[:8]) + (", ..." if len(common) > 8 else ""))
+    return {"batch": old.pr, "branch": old.branch, "head": old.head, "base": old.base_sha,
+            "dropped": [{"number": n, "sha": before[n].sha, "files": files[n]} for n in gone],
+            "remaining": [{"number": n, "sha": now[n].sha, "files": len(files[n])}
+                          for n in sorted(now)]}
+
+
+def _after_drop_lines(record: dict) -> list[str]:
+    """What the fast path relied on, in words: printed by `build` and `open`
+    and kept in the batch body."""
+    dropped = record["dropped"]
+    return [
+        f"- Closed batch: #{record['batch']} ({record['branch']}) at `{record['head']}`, "
+        f"built on `{record['base']}`, which is this batch's base too.",
+        *(f"- Dropped: #{d['number']} at `{d['sha']}`, changing {len(d['files'])} file(s): "
+          + ", ".join(f"`{p}`" for p in d["files"][:20])
+          + (", ..." if len(d["files"]) > 20 else "") for d in dropped),
+        "- Remaining, each at the head the closed batch merged: "
+        + ", ".join(f"#{r['number']} at `{r['sha'][:12]}` ({r['files']} file(s))"
+                    for r in record["remaining"]) + ".",
+        "- No file of the dropped pull request(s) is changed by a remaining member, and none "
+        "is code every test or job shares (tests/ outside tests/test_*.py, any conftest.py, "
+        "Python under rust/ outside test_*.py, .github/, ops/integrate.py, dependency "
+        "manifests and lock files, JSON under rust/ci/); the batch's generated metadata is "
+        "not compared, and the two heads differ only in the dropped files and that metadata.",
+    ]
+
+
+AFTER_DROP_SCOPE = AFTER_DROP_SCOPE_KEY[-1]
+# Whether a job that failed on the closed head passes on the new one by a
+# skip its workflow's scope job made (scope skips a lane once the dropped
+# change that triggered it is gone), and whether one skipped or neutral
+# there carries when absent here (condition 2 of the conductor's plan).
+# False demands a success on the new head for both. The conductor ruled
+# True on 17 November 2026, as for `test` on a Rust-only rebuild, after
+# Codex asked for False; it is the maintainer's to flip.
+AFTER_DROP_SKIP_PASSES = True
+# The scope job of each workflow whose skips can count (`_after_drop_skipped`).
+AFTER_DROP_WORKFLOW_SCOPES = {"CI": AFTER_DROP_SCOPE_KEY, "Rust shim": ("check", "Rust shim", "Scope")}
+
+
+def _after_drop_standing(rollup: list[dict] | None) -> list[dict]:
+    """Runs on the new head that finished with anything but a pass (red,
+    cancelled, stale, timed out) and no later run of the same check
+    succeeded since: a rerun still going does not replace them, since the
+    fast path would carry it."""
+    runs = rollup or []
+    bad = [c for c in runs if not _unfinished(c) and _check_state(c) not in PASSING]
+
+    def replaced(failure: dict) -> bool:
+        # Only a later success clears it: a skipped rerun passed nothing.
+        return any(other is not failure and _check_key(other) == _check_key(failure)
+                   and not _unfinished(other) and _check_state(other) == "SUCCESS"
+                   and _when(other)[0] > _when(failure)[0] for other in runs)
+
+    return [c for c in bad if not replaced(c)]
+
+
+def _after_drop_rulings(test: str, scope: str | None, summaries: list[tuple[str, list[str]]],
+                        plan: Plan) -> tuple[str | None, list[str], list[str]]:
+    """The maintainer's rulings the fast path rests on, in one place:
+    (refusal, waiting, notes).
+
+    `test` on the new head, finished as `test` ("" while it runs or is
+    missing, which the caller waits for), given the `scope` job's state
+    there (None missing, "" unfinished), must succeed there, or be skipped
+    because `scope` succeeded and judged the head Rust-only (17 November
+    2026): then only the compile check and the quick lanes ran fresh on it.
+
+    A summary job (`summaries`: its name and the carried jobs it needs) that
+    did not pass on the closed head is a job like any other: it must pass
+    on the new head, so it waits for the carried jobs it needs, and the fast
+    path saves no time while they run. Whether it may be judged by its
+    inputs instead is the maintainer's call (asked 17 November 2026)."""
+    notes = [f"{name} did not pass on #{plan.after_drop.get('batch')}'s head, so it must pass "
+             f"on this one; it needs {', '.join(inputs)}, which {'is' if len(inputs) == 1 else 'are'} "
+             "carried but still running, so it cannot finish before "
+             f"{'it' if len(inputs) == 1 else 'them'} and the fast path saves no time here"
+             for name, inputs in summaries]
+    if test in ("", "SUCCESS"):
+        return None, [], notes
+    if test == "SKIPPED" and scope == "SUCCESS":
+        return None, [], notes
+    if test == "SKIPPED" and scope == "":
+        return None, [AFTER_DROP_SCOPE], notes
+    why = (f"`{AFTER_DROP_TEST}` was skipped on #{plan.pr} at {plan.head[:12]}, but "
+           f"`{AFTER_DROP_SCOPE}` did not succeed there ({(scope or 'missing').lower()}), so "
+           "nothing says the head is Rust-only") if test == "SKIPPED" else (
+           f"`{AFTER_DROP_TEST}` was {test.lower()} on #{plan.pr} at {plan.head[:12]}")
+    return (f"{why}; a batch built after a drop merges only once `{AFTER_DROP_TEST}` passed "
+            f"on its new head, or was skipped by a successful `{AFTER_DROP_SCOPE}` "
+            f"({AFTER_DROP_DOC}). Rerun the job, or close #{plan.pr}, switch back with "
+            f"`git switch --detach {REMOTE}/{BASE}`, remove the local branch and build it "
+            "again without --after-drop"), [], notes
+
+
+def _after_drop_skipped(check: dict, new: dict, plan: Plan) -> str | None:
+    """The refusal, or None, for a job that failed (or never finished) on
+    the closed head and finished other than SUCCESS on the new one. Only a
+    skip can stand for a pass there (AFTER_DROP_SKIP_PASSES), and only one
+    its workflow's scope job made: that scope job succeeded on the new head,
+    and nothing in that workflow's run there failed, was cancelled or timed
+    out, so GitHub did not skip it because a job it needs failed. A neutral
+    conclusion is never a pass for such a job."""
+    name, state = _check_name(check), _check_state(check)
+    batch = plan.after_drop.get("batch")
+    why = (f"{name} did not pass on #{batch}'s head and was {state.lower()} on "
+           f"#{plan.pr}'s head {plan.head[:12]}")
+    fix = (f"; a batch built after a drop needs it to succeed on the new head, or to be "
+           f"skipped by its workflow's successful scope in a clean run ({AFTER_DROP_DOC}). "
+           f"Rerun it, or close #{plan.pr} and build again without --after-drop")
+    if state != "SKIPPED" or not AFTER_DROP_SKIP_PASSES:
+        return f"{why}, which is not a pass for a job that failed before{fix}"
+    workflow = check.get("workflowName") or ""
+    scope_key = AFTER_DROP_WORKFLOW_SCOPES.get(workflow)
+    scope = new.get(scope_key) if scope_key else None
+    if scope is None or _unfinished(scope) or _check_state(scope) != "SUCCESS":
+        seen = ("no scope job" if scope_key is None else "missing" if scope is None
+                else "unfinished" if _unfinished(scope) else _check_state(scope).lower())
+        return f"{why}, and its workflow {workflow or '?'}'s scope job did not succeed ({seen}){fix}"
+    red = sorted(_check_name(c) for c in new.values()
+                 if c.get("workflowName") == workflow and not _unfinished(c)
+                 and (_check_state(c) in FAILED or _check_state(c) == CANCELLED))
+    if red:
+        return (f"{why}, and {workflow}'s run there has " + ", ".join(red)
+                + " red or cancelled, so the skip may be GitHub's for a failed need" + fix)
+    return None
+
+
+def _after_drop_summaries(new: dict, eligible: set) -> list[tuple[str, list[str]]]:
+    """(name, carried inputs) of each unfinished check on the new head that
+    is not carried itself but needs, in its workflow, a job whose run is
+    (a summary job such as `Parity / <os>` over the parity shards)."""
+    try:
+        workflows = _local_workflows()
+    except Refusal:
+        return []
+    found = []
+    for key, check in sorted(new.items(), key=lambda kv: _check_name(kv[1])):
+        if key in eligible or not _unfinished(check) or key[0] != "check":
+            continue
+        jobs = (workflows.get(check.get("workflowName") or "") or {}).get("jobs", {})
+        job = next((j for jid, j in jobs.items()
+                    if _job_pattern(jid, j).fullmatch(_check_name(check))), None)
+        if job is None:
+            continue
+        patterns = [_job_pattern(n, jobs[n]) for n in _needs(job) if n in jobs]
+        inputs = sorted({_check_name(new[k]) for k in eligible
+                         if k[0] == "check" and k[1] == check.get("workflowName")
+                         and any(pat.fullmatch(_check_name(new[k])) for pat in patterns)})
+        if inputs:
+            found.append((_check_name(check), inputs))
+    return found
+
+
+def _after_drop_merge(plan: Plan, view: dict) -> tuple[list[str], list[str], list[str]]:
+    """For a batch built `--after-drop`: (waiting, report, notes) on the new
+    head. A job still running there is excused only when it concluded
+    SUCCESS on the closed batch's head; `test` must pass on the new head
+    itself. Finished failures are refused before this (_merge_checks)."""
+    record = plan.after_drop
+    old_view = json.loads(gh("pr", "view", str(record["batch"]), "--json",
+                             "state,headRefOid,statusCheckRollup"))
+    if old_view.get("state") != "CLOSED":
+        raise Refusal(f"closed batch #{record['batch']} now reads "
+                      f"{str(old_view.get('state')).lower()}, not closed; its results are "
+                      "not a closed batch's. Wait for every check on this head and merge the "
+                      "ordinary way")
+    if old_view.get("headRefOid") != record["head"]:
+        raise Refusal(f"closed batch #{record['batch']} now reads head "
+                      f"{str(old_view.get('headRefOid'))[:12]}, not {record['head'][:12]} "
+                      "the record names; its results are not the ones checked. Wait for "
+                      "every check on this head and merge the ordinary way")
+    old = {_check_key(c): c for c in _latest_checks(old_view.get("statusCheckRollup"))}
+    new = {_check_key(c): c for c in _latest_checks(view.get("statusCheckRollup"))}
+    runs = json.loads(gh("run", "list", "--commit", plan.head, "--limit", "200", "--json",
+                         "status,name,databaseId") or "[]")
+    settled = bool(runs) and all((r.get("status") or "").upper() == "COMPLETED" for r in runs)
+
+    def url(check: dict | None) -> str:
+        return (check or {}).get("detailsUrl") or (check or {}).get("targetUrl") or "no link"
+
+    def failed_old(key: tuple) -> bool:
+        """Did it fail, or never finish, on the closed head? (A job neutral
+        or skipped there, or not there at all, did not fail before.)"""
+        check = old.get(key)
+        return check is not None and (_unfinished(check) or _check_state(check) not in PASSING)
+
+    def passed_old(key: tuple) -> dict | None:
+        check = old.get(key)
+        if check is None or _unfinished(check):
+            return None
+        state = (check.get("conclusion") or check.get("state") or "").upper()
+        return check if state == "SUCCESS" else None
+
+    test = new.get(AFTER_DROP_TEST_KEY)
+    test_state = "" if test is None or _unfinished(test) else _check_state(test)
+    scope = new.get(AFTER_DROP_SCOPE_KEY)
+    scope_state = None if scope is None else "" if _unfinished(scope) else _check_state(scope)
+    eligible = {k for k, c in new.items()
+                if _unfinished(c) and k != AFTER_DROP_TEST_KEY and passed_old(k)}
+    refusal, waiting, notes = _after_drop_rulings(test_state, scope_state,
+                                                  _after_drop_summaries(new, eligible), plan)
+    if refusal:
+        raise Refusal(refusal)
+    carried, anew = [], []
+    for key, check in sorted(new.items(), key=lambda kv: _check_name(kv[1])):
+        name = _check_name(check)
+        if not _unfinished(check):
+            if (_check_state(check) != "SUCCESS" and key != AFTER_DROP_TEST_KEY
+                    and failed_old(key)):
+                refusal = _after_drop_skipped(check, new, plan)
+                if refusal:
+                    raise Refusal(refusal)
+            anew.append(f"{name}: {(check.get('conclusion') or check.get('state') or '').lower()} "
+                        f"on this head ({url(check)})")
+            continue
+        source = passed_old(key)
+        if name in waiting:
+            continue          # judged above (`scope` behind a skipped `test`)
+        if name == AFTER_DROP_TEST or source is None:
+            waiting.append(name)
+        else:
+            carried.append(f"{name}: carried, success on #{record['batch']}'s head "
+                           f"{record['head'][:12]} ({url(source)})")
+    reported = {_check_name(c) for c in new.values()}
+    for name in REQUIRED_CHECKS:
+        if name == AFTER_DROP_TEST:
+            if AFTER_DROP_TEST_KEY not in new:      # CI's own `test`, not a namesake
+                waiting.append(f"{name} (not reported yet)")
+            continue
+        if name in reported:
+            continue
+        key = next((k for k in old if k[-1] == name), None)
+        source = passed_old(key) if key else None
+        if name == AFTER_DROP_TEST or source is None or not settled:
+            waiting.append(f"{name} (not reported yet)")
+        else:
+            carried.append(f"{name}: carried (absent here once every run on this head "
+                           f"finished), success on #{record['batch']}'s head "
+                           f"{record['head'][:12]} ({url(source)})")
+    # A job that did not pass on the closed head must pass on this one, even
+    # one not reported here yet.
+    for key, check in sorted(old.items(), key=lambda kv: _check_name(kv[1])):
+        name = _check_name(check)
+        if key in new or name in REQUIRED_CHECKS:
+            continue
+        state = "" if _unfinished(check) else _check_state(check)
+        if state == "SUCCESS" or (AFTER_DROP_SKIP_PASSES and state in PASSING):
+            continue
+        if not settled:
+            waiting.append(f"{name} (not reported here yet; it did not pass on "
+                           f"#{record['batch']})")
+        else:
+            raise Refusal(f"{name} did not pass on #{record['batch']}'s head "
+                          f"({(state or 'unfinished').lower()}) and never ran on #{plan.pr}'s "
+                          f"head {plan.head[:12]}, whose runs have all finished, so nothing "
+                          "shows it passing; a batch built after a drop needs it to pass on "
+                          f"its new head ({AFTER_DROP_DOC}). Rerun it on #{plan.pr}, or close "
+                          "it and build again without --after-drop")
+    report = [f"Fast path after a drop ({AFTER_DROP_DOC}): #{record['batch']} closed red at "
+              f"{record['head'][:12]}; this batch, at {plan.head[:12]}, leaves out "
+              + ", ".join(f"#{d['number']}" for d in record["dropped"]) + "."]
+    report += ["Carried from the closed batch:", *(f"- {c}" for c in carried or ["none"])]
+    report += ["Passed or finished on this head:", *(f"- {a}" for a in anew or ["none"])]
+    report += ["Every check on this head now:",
+               *(f"- {_check_name(c)}: {_check_state(c).lower() or 'running'}"
+                 for c in sorted(new.values(), key=_check_name))]
+    return waiting, report, notes
+
+
 def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> str:
     lines = [
         f"Integration batch of {len(plan.merged)} reviewed pull requests, built by "
@@ -2395,6 +2916,13 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
                       "their source: " + ", ".join(f"`{p}`" for p in plan.census_drift)
                       + ". Review each construction and refresh its `MANUAL_SHA256` "
                       "fingerprint in a follow-up pull request (`rust/producer-census.md`)."]
+    if plan.after_drop:
+        lines += ["", "## After a drop", "",
+                  f"Built with `build --after-drop {plan.after_drop['batch']}` "
+                  f"({AFTER_DROP_DOC}): no local suite or harness run, and `merge` waits "
+                  "for `test` on this head, carrying the closed batch's other passes. "
+                  "What it relied on, checked by the tool:", "",
+                  *_after_drop_lines(plan.after_drop)]
     if plan.markers:
         lines += ["", "## Warning: conflict markers", "",
                   "These files carry conflict markers that master does not; "
@@ -2423,6 +2951,8 @@ def _switch_back(restore: str, base_sha: str) -> None:
 
 def build(args: argparse.Namespace) -> int:
     restore, base_sha = _preflight()
+    # First, so a closed batch that is in fact still open is named as such.
+    closed = _after_drop_closed(args.after_drop, base_sha) if args.after_drop else None
     open_prs = _open_batches()
     if open_prs:
         raise Refusal("a batch is already open: " + ", ".join(
@@ -2464,6 +2994,8 @@ def build(args: argparse.Namespace) -> int:
         judged = _merge_batch(plan, members)
         plan.markers = _new_markers(base_sha)
         plan.head = _out("rev-parse", "HEAD")
+        if closed is not None:
+            plan.after_drop = _after_drop_record(plan, closed)
         done = True
     finally:
         if git("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode == 0:
@@ -2516,6 +3048,13 @@ def build(args: argparse.Namespace) -> int:
                else "") if plan.rust_check == "passed" else
             f"not needed, nothing under {RUST_CHECK_DIR}/ but the census changed")
     print(f"\nRust compile check (`{RUST_CHECK_COMMAND}` in {RUST_CHECK_DIR}/): {rust}.")
+    if plan.after_drop:
+        print(f"built {plan.branch} at {plan.head[:12]} after a drop, relying on:\n"
+              + "\n".join(_after_drop_lines(plan.after_drop))
+              + f"\nNo local suite or harness run is needed ({AFTER_DROP_DOC}). Next, on "
+              "this checkout: python ops/integrate.py open; then `merge` once `test` "
+              "passes on the new head.")
+        return 0
     print(f"built {plan.branch} at {plan.head[:12]}; nothing is pushed, so no CI "
           "has started. Next, on this checkout:\n"
           f"  1. {SUITE_COMMAND}   (the full suite on the remote machine, the batch "
@@ -2763,7 +3302,15 @@ def open_(args: argparse.Namespace) -> int:
     # resumes, as one opened from a plan that predates the check must.
     if not own and plan.rust_check not in RUST_CHECK_OK:
         raise Refusal(_rust_check_refusal(plan))
-    text = body(plan, _suite_line(args, head), _harness_line(args, head))
+    skipped = (f"not run: a batch built after a drop skips it ({AFTER_DROP_DOC}); closed "
+               f"batch #{plan.after_drop.get('batch')} ran it") if plan.after_drop else ""
+    suite = (skipped if skipped and not (args.suite or args.suite_note)
+             else _suite_line(args, head))
+    harness = skipped if skipped and not args.harness_note else _harness_line(args, head)
+    if plan.after_drop:
+        print(f"integrate: opening {plan.branch} after a drop, relying on:\n"
+              + "\n".join(_after_drop_lines(plan.after_drop)))
+    text = body(plan, suite, harness)
     url = None
     if own:
         number, url, sha = own[0]
@@ -2967,9 +3514,11 @@ def _merge_checks(rollup: list[dict] | None) -> tuple[list[str], list[str]]:
     return red, waiting
 
 
-def _refuse_unmergeable(plan: Plan, view: dict) -> None:
+def _refuse_unmergeable(plan: Plan, view: dict) -> list[str] | None:
     """Refuse unless the pull request is this plan's batch at the built head,
-    with every check finished and none failed, and master not past it."""
+    with every check finished and none failed, and master not past it. A
+    batch built after a drop waits only for what it cannot carry, and its
+    report (what was carried, what passed here) is returned."""
     n = plan.pr
     head_ref = view.get("headRefName", "")
     if (head_ref != plan.branch or not head_ref.startswith(PREFIX)
@@ -3003,6 +3552,26 @@ def _refuse_unmergeable(plan: Plan, view: dict) -> None:
                       "dev VM (CLAUDE.md \"Dev machines\"); otherwise drop the member the "
                       "failing job covers, or bisect, then close the batch and build "
                       "again (docs/dev/merge-batches.md, \"Validating it\")")
+    report = None
+    if plan.after_drop:
+        # A failure whose rerun is still running stays a failure here: the
+        # latest run alone would read as pending, and pending can be carried.
+        standing = sorted({_check_name(c) for c in
+                           _after_drop_standing(view.get("statusCheckRollup"))})
+        if standing:
+            raise Refusal(f"CI failed on #{n} at {plan.head[:12]} ({', '.join(standing)}) "
+                          "and no finished rerun has replaced the failure; a batch built "
+                          "after a drop never carries past a failure on its own head. Wait "
+                          "for the rerun to finish, then rerun `python ops/integrate.py "
+                          "merge`")
+        waiting, report, notes = _after_drop_merge(plan, view)
+        if waiting:
+            raise Refusal(f"CI on #{n} has not finished what a batch after a drop cannot "
+                          f"carry ({', '.join(waiting)}): `{AFTER_DROP_TEST}` must pass on "
+                          "this head, and only a job that succeeded on the closed batch's "
+                          f"head (#{plan.after_drop['batch']}) is carried ({AFTER_DROP_DOC}); "
+                          "rerun `python ops/integrate.py merge` once they finish"
+                          + "".join(f". {note}" for note in notes))
     if waiting:
         raise Refusal(f"CI on #{n} has not finished ({', '.join(waiting)}); wait for "
                       "every check, the required lanes included, to complete, then rerun "
@@ -3018,6 +3587,7 @@ def _refuse_unmergeable(plan: Plan, view: dict) -> None:
                       "remove the local branch and build the next batch; only the "
                       "`merge-forward` skill's exceptions let it merge instead, and that "
                       "merge is the maintainer's")
+    return report
 
 
 def _on_master(sha: str, number: int, commit: str) -> bool:
@@ -3079,10 +3649,26 @@ def merge(args: argparse.Namespace) -> int:
         # A rerun after the merge went through: only the confirmation is left.
         print(f"#{n} is already merged; confirming its members")
     else:
-        _refuse_unmergeable(plan, view)
+        report = _refuse_unmergeable(plan, view)
         frozen = _batch_freeze_refusal(plan)
         if frozen:
             raise Refusal(frozen)
+        if report:
+            # Every check read again just before the comment and the click,
+            # which pins the head; the comment says what this read found.
+            view = json.loads(gh("pr", "view", str(n), "--json",
+                                 "headRefName,headRefOid,baseRefName,state,"
+                                 "isCrossRepository,statusCheckRollup"))
+            report = _refuse_unmergeable(plan, view)
+            text = "\n".join(report)
+            print(text)
+            gh("pr", "comment", str(n), "--body-file", "-", input=text + "\n")
+            # And once more after the comment, just before the click: a check
+            # that turned red while it was posted refuses the merge.
+            view = json.loads(gh("pr", "view", str(n), "--json",
+                                 "headRefName,headRefOid,baseRefName,state,"
+                                 "isCrossRepository,statusCheckRollup"))
+            _refuse_unmergeable(plan, view)
         try:
             gh("pr", "merge", str(n), "--merge", "--admin",
                "--match-head-commit", plan.head)
@@ -3152,6 +3738,10 @@ def main(argv: list[str] | None = None) -> int:
                         "creates, pushes and comments on nothing")
     b.add_argument("--date", default=dt.date.today().isoformat(),
                    help="batch date (default: today)")
+    b.add_argument("--after-drop", type=int, metavar="PR",
+                   help="build the closed red batch PR again without its dropped "
+                        "culprit, skipping the local suite and carrying its passes "
+                        f"({AFTER_DROP_DOC})")
     o = sub.add_parser("open", help="push the built batch and open its pull request")
     evidence = o.add_mutually_exclusive_group()
     evidence.add_argument("--suite", help="the passing suite result JSON for this head")
