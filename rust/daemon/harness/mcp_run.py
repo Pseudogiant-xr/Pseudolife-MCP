@@ -44,8 +44,7 @@ ENV = {
 }
 
 
-# Stored principals, seeded on both banks through Python's own write path
-# (principal_store.create_invite, then redeem): name -> (token, tier).
+# Stored principal SQL fixtures on both banks: name -> (token, tier).
 STORED = {"dave": ("tok-dave-0001", "minimal"), "erin": ("tok-erin-0001", None),
           "frank": ("tok-frank-0001", "full")}
 
@@ -55,18 +54,16 @@ def seed_stored(dsn):
     bank no daemon has started on yet, so each daemon's first stored-principal
     read already holds them."""
     import psycopg
-    from pseudolife_memory.principal_store import create_invite, redeem
-    from pseudolife_memory.principals import secret_sha256
-    from pseudolife_memory.storage.schema import ensure_schema
+    from principal_fixtures import check_target, seed_principal
+    from rust.harness_support.schema import ensure_schema
+    check_target(dsn)
     with psycopg.connect(dsn) as conn:
         conn.execute("SET search_path TO public")
         ensure_schema(conn)
         conn.commit()
     with psycopg.connect(dsn, autocommit=True) as conn:
         for name, (token, tier) in STORED.items():
-            invite = create_invite(conn, name, tier=tier, ttl_seconds=600, replace=False)
-            row = redeem(dsn, secret_sha256(invite["code"]), secret_sha256(token))
-            assert row is not None and row.principal == name, (name, row)
+            seed_principal(conn, name, token=token, tier=tier, ttl=600)
 
 
 def expected_summary(args):
