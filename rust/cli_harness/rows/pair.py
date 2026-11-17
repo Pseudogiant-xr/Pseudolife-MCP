@@ -575,6 +575,3 @@ def cases() -> list[core.Case]:
     live("defer-equals-spelling", [CODE, "--token-file=x.token"])
     add(case("defer-no-arguments", []))
     return out
-
-
-# Owner-only is made differently per platform, so each has its own break.

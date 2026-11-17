@@ -34,10 +34,6 @@ from ..core import Case
 from ..fixture_daemon import FixtureDaemon, json_body, redirect, text
 
 DEFERRAL = "pseudolife-stdio: mode 'expose' is deferred in this candidate\n"
-FILE = "shim/src/cli/expose/mod.rs"
-TS_FILE = "shim/src/cli/expose/tailscale.rs"
-ARGS_FILE = "shim/src/cli/expose/args.rs"
-LOOKUP_FILE = "shim/src/cli/program_lookup.rs"
 DEAD_PORT = "9"
 TS_PATH = "{HOME}/bin"
 # The lookup's inputs, pinned: PATH holds only the stand-in's directory, and

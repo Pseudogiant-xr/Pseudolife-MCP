@@ -39,7 +39,6 @@ from pathlib import Path
 from ..core import WINDOWS, Case
 
 MARKER = b"-- PostgreSQL database dump complete"
-DIR = "shim/src/cli/restore_cli"
 
 
 def _native(text: str) -> bytes:
@@ -679,15 +678,6 @@ def _docker_cases() -> list[Case]:
         # the lock: another update holds it, so the oracle refuses before Docker
         _scripted("docker-lock-busy", [], prepare=_hold_lock, rules=("restore-busy-holders",)),
     ]
-
-
-FILE = DIR + "/mod.rs"
-ARGS = DIR + "/args.rs"
-DUMPRS = DIR + "/dump.rs"
-GZIPRS = DIR + "/gzip.rs"
-STATERS = DIR + "/state.rs"
-BANK = DIR + "/bank.rs"
-CONN = DIR + "/conn.rs"
 
 
 def _values(argv: list[str], flag: str) -> list[str]:

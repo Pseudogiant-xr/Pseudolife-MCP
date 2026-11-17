@@ -148,7 +148,7 @@ def operator_clock(obs):
         _operator_clock(projected)
     except (AssertionError, KeyError, StopIteration, ValueError):
         # Preserve the entire raw observation on an unvalidated clock or
-        # audit path, so a mutant cannot become a matching projection.
+        # audit path, so a changed result cannot become a matching projection.
         return
     obs.clear()
     obs.update(projected)

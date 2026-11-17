@@ -549,11 +549,10 @@ def gate_steps(jobs=None):
     return steps[0], steps[1]
 
 
-def run_verdict(needs, event, schedule=WEEKLY):
+def run_verdict(needs, event):
     import os
     return subprocess.run(["pwsh", "-NoProfile", "-Command", gate_steps()[1]["run"]],
-                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event,
-                                   GATE_SCHEDULE=schedule if event == "schedule" else ""),
+                          env=dict(os.environ, GATE_RESULTS=json.dumps(needs), GATE_EVENT=event),
                           capture_output=True, text=True)
 
 

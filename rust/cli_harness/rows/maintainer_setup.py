@@ -61,7 +61,7 @@ def _config_after(changed):
         if not changed:
             # The raw file snapshot compares the original bytes and absence
             # of backups. Leave unexpected writes visible to that comparison
-            # so the consent-bypass mutant is reported as a mismatch.
+            # so a consent-bypass change is reported as a mismatch.
             pass
         else:
             assert len(backups) == 1

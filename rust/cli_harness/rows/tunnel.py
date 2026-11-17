@@ -20,7 +20,7 @@ field edited. Guards on every arm:
   home (``PATH`` is empty, ``COMSPEC`` and ``PATHEXT`` are removed);
 - every daemon URL, saved in a profile or passed as an argument, is the
   arm's own loopback listener, which records any connection (none may
-  happen; the ``tunnel-saved-url-connect`` mutant proves it would show);
+  happen; its automatic source-mutant check was retired on 17 November 2026);
 - the caller's real ``~/.pseudolife-mcp`` is compared by ``lstat`` metadata
   only (names, size, mtime_ns, mode, inode, link count, Windows attributes)
   before and after the arm. No file there is opened or read; links and

@@ -162,14 +162,9 @@ IO_NAMES = ("std::net", "TcpStream", "TcpListener", "UdpSocket", "ToSocketAddrs"
             "libc", "windows_sys", "winapi", "unsafe", "extern", "crate::")
 
 
-def _leaf_source(binary: Path) -> Path:
-    """The candidate's dispatcher source in this checkout."""
-    return RUST / FILE
-
-
-def _leaf_io(binary: Path) -> list[str]:
+def _leaf_io() -> list[str]:
     """Check the dispatcher's I/O boundary against this checkout."""
-    text = _leaf_source(binary).read_text(encoding="utf-8")
+    text = (RUST / FILE).read_text(encoding="utf-8")
     hits = [name for name in IO_NAMES if name in text]
     hits += [text[at:at + 24] for at in range(len(text)) if text.startswith("super::", at)
              and not text.startswith(("super::text_bytes(", "super::*;"), at)]
@@ -253,7 +248,7 @@ def _case(case_id: str, argv: list[str], *, rules: tuple[str, ...] = (), columns
 
     def during(arm, proc) -> None:
         # Compared field: the oracle arm's is empty by definition.
-        hits = _leaf_io(Path(proc.args[0])) if arm.name == "rust" else []
+        hits = _leaf_io() if arm.name == "rust" else []
         arm.state["listener"] = {"leaf_io": hits}
 
     def after(arm, observation: dict) -> None:
