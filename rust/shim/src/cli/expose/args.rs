@@ -158,7 +158,7 @@ fn int_accepts(value: &str) -> bool {
         && body.bytes().all(|b| b.is_ascii_digit() || b == b'_')
 }
 
-fn option_error(option: &str) -> String {
+fn option_error(option: &str, action: Option<Action>) -> String {
     let fix = ["--help", "--port", "--json", "--yes"]
         .into_iter()
         .find(|full| {
@@ -166,6 +166,7 @@ fn option_error(option: &str) -> String {
                 && option.len() > 2
                 && option.len() < full.len()
                 && full.starts_with(option)
+                && (*full != "--yes" || action != Some(Action::Status))
         });
     match fix {
         Some(full) => format!("unrecognized option {option}; use {full} in full"),
@@ -237,7 +238,7 @@ fn parse_action(action: Action, rest: &[String]) -> Parsed {
                     }
                 }
             }
-            _ => return error(option_error(option)),
+            _ => return error(option_error(option, Some(action))),
         }
     }
     if !extras.is_empty() {
@@ -263,7 +264,7 @@ pub(super) fn parse(argv: &[String]) -> Parsed {
                 None,
                 format!(
                     "{}; place action options after tailscale, off or status",
-                    option_error(word)
+                    option_error(word, None)
                 ),
             );
         }
@@ -425,6 +426,20 @@ mod tests {
             args(Action::Status, 80, false, false)
         );
         assert_eq!(run(&["off", "--yes"]), args(Action::Off, 8765, true, false));
+    }
+
+    #[test]
+    fn option_repairs_are_supported_by_the_selected_action() {
+        for option in ["--y", "--ye"] {
+            assert!(matches!(run(&["status", option]), Parsed::Error(_, m)
+                if m.contains("--help") && !m.contains("use --yes")));
+            assert!(matches!(run(&["off", option]), Parsed::Error(_, m)
+                if m.contains("use --yes in full")));
+            assert!(matches!(run(&["tailscale", option]), Parsed::Error(_, m)
+                if m.contains("use --yes in full")));
+        }
+        assert_eq!(run(&["off", "--yes"]), args(Action::Off, 8765, true, false));
+        assert_eq!(run(&["status", "--help"]), Parsed::Help(Action::Status));
     }
 
     #[test]
