@@ -1196,6 +1196,35 @@ Connection: close
     }
     #[cfg(windows)]
     #[test]
+    fn scheduler_child_uses_the_operating_system_environment() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::update::unattended::schedule::tests::scheduler_environment_probe",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SystemRoot", "C:/fixture-windows")
+            .env("WINDIR", "C:/fixture-windows")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess probe invoked by scheduler_child_uses_the_operating_system_environment"]
+    fn scheduler_environment_probe() {
+        let (code, output) = run_windows_script("$null='{}'|ConvertFrom-Json|ConvertTo-Json; [Console]::Out.WriteLine('fixture environment accepted')").unwrap();
+        assert_eq!(code, 0, "{output}");
+        assert_eq!(output.trim(), "fixture environment accepted");
+    }
+    #[cfg(windows)]
+    #[test]
     fn a_scheduler_script_longer_than_the_command_line_limit_runs() {
         let script = format!(
             "$x='{}';[Console]::Out.WriteLine('ran');exit 3",
