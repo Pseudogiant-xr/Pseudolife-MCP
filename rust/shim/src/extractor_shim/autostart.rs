@@ -601,7 +601,7 @@ mod tests {
                 .find("$user = [Security.Principal.WindowsIdentity]")
                 .unwrap()];
         let source = format!(
-            "{header}\n{functions}\n$native=[string]$c.Native;$ownerExe=[string]$c.OwnerExe\nfunction New-ScheduledTaskAction {{ param($Execute,$Argument) @{{Execute=$Execute;Arguments=$Argument}} }}\n$originalRoot=$env:SystemRoot;$env:SystemRoot='C:/fixture-windows'\n{action}\n$env:SystemRoot=$originalRoot\n[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)"
+            "{header}\n{functions}\n$native=[string]$c.Native;$ownerExe=[string]$c.OwnerExe\nfunction New-ScheduledTaskAction {{ param($Execute,$Argument) @{{Execute=$Execute;Arguments=$Argument}} }}\n{action}\n[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)"
         );
         let producer = registration_data(json!({
             "Native":"C:\\fixture\\launcher.exe", "OwnerExe":"C:\\fixture\\runtime.exe",
