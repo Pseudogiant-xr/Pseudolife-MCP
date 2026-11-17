@@ -45,16 +45,7 @@ const HELP: &str = include_str!("cli_help.txt");
 // generic line names them. `serve`, `embedded` and `board-audit` answer every
 // shape themselves (main.rs, the arm below, main.rs), so none is listed.
 const DEFERRED_MODES: &[&str] = &[
-    "doctor",
-    "connect",
-    "invite",
-    "pair",
-    "tunnel",
-    "move",
-    "backup",
-    "export",
-    "import",
-    "maintainer",
+    "doctor", "connect", "invite", "pair", "tunnel", "move", "backup", "export", "import",
     "console",
 ];
 

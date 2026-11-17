@@ -125,58 +125,54 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDAwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAwMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykKcGhvbmVLZXlfcXVhICBhY3RpdmUgICAiVG9tJ3MgcGhvbmUg4piOIiAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjAyICBsYXN0X3VzZWQ9LQp0d2luQUIxa2V5REEgIGFjdGl2ZSAgICdpdFwncyAidHdpbiInICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMDA6MDMgIGxhc3RfdXNlZD0tCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjA0ICBsYXN0X3VzZWQ9LQpjYW5jZWxYZFJldm8gIHJldm9rZWQgICdzcGFyZScgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAwMDowNSAgbGFzdF91c2VkPS0K",
+   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxVDAwOjAxOjAwWiAgbGFzdF91c2VkPTIwMjYtMDctMDFUMDA6MDY6MDBaICBGTEFHR0VEIChzaWduIGNvdW50IHdlbnQgYmFja3dhcmRzKQpwaG9uZUtleV9xdWEgIGFjdGl2ZSAgICJUb20ncyBwaG9uZSDimI4iICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDJUMDA6MDI6MDBaICBsYXN0X3VzZWQ9LQp0d2luQUIxa2V5REEgIGFjdGl2ZSAgICdpdFwncyAidHdpbiInICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDJUMDA6MDM6MDBaICBsYXN0X3VzZWQ9LQp0d2luQUIya2V5RUEgIGFjdGl2ZSAgICd0d2luIHR3bycgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMlQwMDowNDowMFogIGxhc3RfdXNlZD0tCmNhbmNlbFhkUmV2byAgcmV2b2tlZCAgJ3NwYXJlJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyVDAwOjA1OjAwWiAgbGFzdF91c2VkPS0K",
    "stderr": "",
    "window": [
-    1793646400.4956307,
-    1793646400.95555
+    1794942826.2478106,
+    1794942826.312042
    ],
-   "arm": "python",
+   "arm": "rust",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
-   "shown": {
-    "phoneKey_qua": [
-     1782950520,
-     null
-    ],
-    "twinAB1keyDA": [
-     1782950580,
-     null
-    ],
-    "-dashKeyAAAA": [
-     1782864060,
-     1782864360
-    ],
-    "cancelXdRevo": [
-     1782950700,
-     null
-    ],
-    "twinAB2keyEA": [
-     1782950640,
-     null
-    ]
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
    },
-   "local_times": {
-    "phoneKey_qua": [
-     "2026-07-02 00:02",
-     null
-    ],
-    "twinAB1keyDA": [
-     "2026-07-02 00:03",
-     null
-    ],
-    "-dashKeyAAAA": [
-     "2026-07-01 00:01",
-     "2026-07-01 00:06"
-    ],
-    "cancelXdRevo": [
-     "2026-07-02 00:05",
-     null
-    ],
-    "twinAB2keyEA": [
-     "2026-07-02 00:04",
-     null
-    ]
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "list-read-error": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IG1haW50YWluZXJfcGFzc2tleXMgc2NoZW1hIGRvZXMgbm90IHByb3ZpZGUgdGhlIGxpc3RpbmcgY29sdW1uczsgaGF2ZSB0aGUgYmFuayBtYWludGFpbmVyIHJlcGFpciBpdHMgc2NoZW1hIGJlZm9yZSByZXRyeWluZyBsaXN0Cg==",
+   "window": [
+    1794942826.469104,
+    1794942826.5305104
+   ],
+   "arm": "rust",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
+   "db": "unchanged",
+   "files": {
+    "cwd": "dir"
    },
+   "modes": {
+    "cwd": "0o755"
+   }
+  },
+  "list-column-type-error": {
+   "home": null,
+   "utc_offset": 0,
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IG1haW50YWluZXJfcGFzc2tleXMgY29sdW1uIHR5cGVzIGRvIG5vdCBtYXRjaCB0aGUgbGlzdGluZyBzY2hlbWE7IGhhdmUgdGhlIGJhbmsgbWFpbnRhaW5lciByZXBhaXIgdGhlbSBiZWZvcmUgcmV0cnlpbmcgbGlzdAo=",
+   "window": [
+    1794942826.6870694,
+    1794942826.7544181
+   ],
+   "arm": "rust",
+   "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -2021,57 +2017,13 @@
    "utc_offset": 0,
    "exit": 120,
    "stdout": "",
-   "stderr": "RXhjZXB0aW9uIGlnbm9yZWQgaW46IDxfaW8uVGV4dElPV3JhcHBlciBuYW1lPSc8c3Rkb3V0PicgbW9kZT0ndycgZW5jb2Rpbmc9J3V0Zi04Jz4KQnJva2VuUGlwZUVycm9yOiBbRXJybm8gMzJdIEJyb2tlbiBwaXBlCg==",
+   "stderr": "ZXJyb3I6IG1haW50YWluZXIgbGlzdCBjb3VsZCBub3Qgd3JpdGUgc3Rkb3V0OyBjb25uZWN0IHN0ZG91dCB0byBhIHdyaXRhYmxlIGRlc3RpbmF0aW9uIGFuZCByZXJ1biBsaXN0Cg==",
    "window": [
-    1793646437.4868226,
-    1793646437.942821
+    1794942848.2787473,
+    1794942848.339319
    ],
-   "arm": "python",
+   "arm": "rust",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
-   "shown": {
-    "phoneKey_qua": [
-     1782950520,
-     null
-    ],
-    "twinAB1keyDA": [
-     1782950580,
-     null
-    ],
-    "-dashKeyAAAA": [
-     1782864060,
-     1782864360
-    ],
-    "cancelXdRevo": [
-     1782950700,
-     null
-    ],
-    "twinAB2keyEA": [
-     1782950640,
-     null
-    ]
-   },
-   "local_times": {
-    "phoneKey_qua": [
-     "2026-07-02 00:02",
-     null
-    ],
-    "twinAB1keyDA": [
-     "2026-07-02 00:03",
-     null
-    ],
-    "-dashKeyAAAA": [
-     "2026-07-01 00:01",
-     "2026-07-01 00:06"
-    ],
-    "cancelXdRevo": [
-     "2026-07-02 00:05",
-     null
-    ],
-    "twinAB2keyEA": [
-     "2026-07-02 00:04",
-     null
-    ]
-   },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -2084,58 +2036,14 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDAwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAwMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykKcGhvbmVLZXlfcXVhICBhY3RpdmUgICAiVG9tJ3MgcGhvbmUg4piOIiAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjAyICBsYXN0X3VzZWQ9LQp0d2luQUIxa2V5REEgIGFjdGl2ZSAgICdpdFwncyAidHdpbiInICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMDA6MDMgIGxhc3RfdXNlZD0tCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjA0ICBsYXN0X3VzZWQ9LQpjYW5jZWxYZFJldm8gIHJldm9rZWQgICdzcGFyZScgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAwMDowNSAgbGFzdF91c2VkPS0K",
+   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxVDAwOjAxOjAwWiAgbGFzdF91c2VkPTIwMjYtMDctMDFUMDA6MDY6MDBaICBGTEFHR0VEIChzaWduIGNvdW50IHdlbnQgYmFja3dhcmRzKQpwaG9uZUtleV9xdWEgIGFjdGl2ZSAgICJUb20ncyBwaG9uZSDimI4iICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDJUMDA6MDI6MDBaICBsYXN0X3VzZWQ9LQp0d2luQUIxa2V5REEgIGFjdGl2ZSAgICdpdFwncyAidHdpbiInICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDJUMDA6MDM6MDBaICBsYXN0X3VzZWQ9LQp0d2luQUIya2V5RUEgIGFjdGl2ZSAgICd0d2luIHR3bycgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMlQwMDowNDowMFogIGxhc3RfdXNlZD0tCmNhbmNlbFhkUmV2byAgcmV2b2tlZCAgJ3NwYXJlJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyVDAwOjA1OjAwWiAgbGFzdF91c2VkPS0K",
    "stderr": "",
    "window": [
-    1793646438.0461833,
-    1793646438.5081995
+    1794942848.4597464,
+    1794942848.5213687
    ],
-   "arm": "python",
+   "arm": "rust",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
-   "shown": {
-    "phoneKey_qua": [
-     1782950520,
-     null
-    ],
-    "twinAB1keyDA": [
-     1782950580,
-     null
-    ],
-    "-dashKeyAAAA": [
-     1782864060,
-     1782864360
-    ],
-    "cancelXdRevo": [
-     1782950700,
-     null
-    ],
-    "twinAB2keyEA": [
-     1782950640,
-     null
-    ]
-   },
-   "local_times": {
-    "phoneKey_qua": [
-     "2026-07-02 00:02",
-     null
-    ],
-    "twinAB1keyDA": [
-     "2026-07-02 00:03",
-     null
-    ],
-    "-dashKeyAAAA": [
-     "2026-07-01 00:01",
-     "2026-07-01 00:06"
-    ],
-    "cancelXdRevo": [
-     "2026-07-02 00:05",
-     null
-    ],
-    "twinAB2keyEA": [
-     "2026-07-02 00:04",
-     null
-    ]
-   },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -2347,86 +2255,16 @@
   "defer-reset-repeated-yes": {
    "home": null,
    "utc_offset": 0,
-   "exit": 0,
-   "stdout": "UmV2b2tlZCA0IHBhc3NrZXkocyk7IHNlY3JldCByb3RhdGVkOyBydW4gYHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgZW5yb2wtY29kZWAgdG8gZW5yb2wgYWdhaW4uCg==",
-   "stderr": "",
+   "exit": 2,
+   "stdout": "",
+   "stderr": "ZXJyb3I6IHJlc2V0IGFjY2VwdHMgLS15ZXMgb25jZTsgdXNlIHBzZXVkb2xpZmUtbWNwIG1haW50YWluZXIgcmVzZXQgLS15ZXMK",
    "window": [
-    1793646440.3875883,
-    1793646440.8523223
+    1794942849.3288918,
+    1794942849.3326144
    ],
-   "arm": "python",
+   "arm": "rust",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
-   "shown": {
-    "phoneKey_qua": [
-     1782950520,
-     null
-    ],
-    "twinAB1keyDA": [
-     1782950580,
-     null
-    ],
-    "-dashKeyAAAA": [
-     1782864060,
-     1782864360
-    ],
-    "cancelXdRevo": [
-     1782950700,
-     null
-    ],
-    "twinAB2keyEA": [
-     1782950640,
-     null
-    ]
-   },
-   "local_times": {
-    "phoneKey_qua": [
-     "2026-07-02 00:02",
-     null
-    ],
-    "twinAB1keyDA": [
-     "2026-07-02 00:03",
-     null
-    ],
-    "-dashKeyAAAA": [
-     "2026-07-01 00:01",
-     "2026-07-01 00:06"
-    ],
-    "cancelXdRevo": [
-     "2026-07-02 00:05",
-     null
-    ],
-    "twinAB2keyEA": [
-     "2026-07-02 00:04",
-     null
-    ]
-   },
-   "db": {
-    "seed": "c691fd884f7ef1e4e7a7771bb08230f51398ab25f23715561dcb36e8aa942924",
-    "tables": {
-     "coordination_events": [
-      "{\"hlc\": \"\", \"seq\": 1, \"body\": null, \"hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"task\": \"\", \"actor\": \"daemon\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"bootstrap\\\",\\\"change\\\":\\\"enrol\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"principal\": \"\", \"created_at\": 1782864000, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 2, \"body\": null, \"hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"confirm\\\",\\\"credential_id\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"label\\\":\\\"laptop\\\",\\\"path\\\":\\\"host\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"b5e314abccfe995f19df91784268e50fcc3d144231b40f63ab112e462d9c89a5\", \"principal\": \"\", \"created_at\": 1782864060, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 3, \"body\": null, \"hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"phoneKey_quarantineAAA\\\",\\\"label\\\":\\\"Tom's phone \u260e\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"785b8811513e2ac8cb318af7fbac1a3e037e649cabbcdc2fa4d1f3df7289bf82\", \"principal\": \"\", \"created_at\": 1782864120, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 4, \"body\": null, \"hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB1keyDAAAAAAAAAAA\\\",\\\"label\\\":\\\"it's \\\\\\\"twin\\\\\\\"\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bc865bd81a7d0007c4e443f744175ca15ebe45fa7a18edfd4ce803ee97840e44\", \"principal\": \"\", \"created_at\": 1782864180, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 5, \"body\": null, \"hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"twinAB2keyEAAAAAAAAAAA\\\",\\\"label\\\":\\\"twin two\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"bcce920b8de8f976fc92adf45deecaf10ab42a39b48ada4a08f3d7371519f8cf\", \"principal\": \"\", \"created_at\": 1782864240, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 6, \"body\": null, \"hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"add\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"beaf49758d42aff7c1cdc6a1e4fc745083bff5ca7e8e5699221062f890e2ddc7\", \"principal\": \"\", \"created_at\": 1782864300, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 7, \"body\": null, \"hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"task\": \"\", \"actor\": \"maintainer\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"-dashKeyAAAAAAAAAAAAAA\\\",\\\"change\\\":\\\"cancel\\\",\\\"credential_id\\\":\\\"cancelXdRevokedAAAAAAA\\\",\\\"label\\\":\\\"spare\\\",\\\"path\\\":\\\"console\\\",\\\"revoked\\\":null}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"435ab82e11581629afa88aa8d28e629e48936feea508b392595f7d95086dd3ed\", \"principal\": \"\", \"created_at\": 1782864360, \"message_id\": null, \"recipient_agent_id\": null}",
-      "{\"hlc\": \"\", \"seq\": 8, \"body\": null, \"hash\": \"0eb12323a1937cfaafb62fffcbca2b7f3e0253ff2005d275ddd156166649a195\", \"task\": \"\", \"actor\": \"operator\", \"event\": \"maintainer_key\", \"payload\": \"{\\\"by\\\":\\\"host\\\",\\\"change\\\":\\\"reset\\\",\\\"credential_id\\\":null,\\\"label\\\":null,\\\"path\\\":\\\"host\\\",\\\"revoked\\\":4}\", \"project\": \"\", \"agent_id\": \"\", \"body_salt\": null, \"prev_hash\": \"f8e32a00668c891437e1f1546efe2737c137a5361748c05d7f8cdbe824026676\", \"principal\": \"\", \"created_at\": 1793646440.830545, \"message_id\": null, \"recipient_agent_id\": null}"
-     ],
-     "maintainer_bootstrap": [],
-     "maintainer_passkeys": [
-      "{\"alg\": -7, \"label\": \"Tom's phone \u260e\", \"state\": \"revoked\", \"created_at\": 1782864120, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054c464585f27bce122c70e43b797201bf79d037335dec25ca27360b2cb63dfad22582025a085c8cb5034a8d11583fda6e8aa8c4537f4d263b8b2729b16b5785dc2e5ef\", \"revoked_at\": 1793646440.828835, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950520, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"signs_in_as\": null, \"last_used_at\": null, \"credential_id\": \"phoneKey_quarantineAAA\"}",
-      "{\"alg\": -7, \"label\": \"it's \\\"twin\\\"\", \"state\": \"revoked\", \"created_at\": 1782864180, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582042bb1757da17c1503312e5f1fe7eb8b422e8258c06a84b641a962e008c439e7422582007fdb64d9ebe089bf51e4a9bd33bb8055267f575ddebe5a58444d9efec39bdf6\", \"revoked_at\": 1793646440.828835, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950580, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"signs_in_as\": null, \"last_used_at\": null, \"credential_id\": \"twinAB1keyDAAAAAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"laptop\", \"state\": \"revoked\", \"created_at\": 1782864000, \"flagged_at\": 1782864420, \"public_key\": \"\\\\xa5010203262001215820c8fd98d6b7e39e88f8d4915938b735e12017dd12de5bcdc29ab3de6791829080225820f853731dd26e04fd224ceda02ef88dc81fba44694fefbf7d816d4250075c70db\", \"revoked_at\": 1793646440.828835, \"revoked_by\": \"host\", \"sign_count\": 6, \"active_from\": 1782864060, \"enrolled_by\": \"bootstrap\", \"signs_in_as\": null, \"last_used_at\": 1782864360, \"credential_id\": \"-dashKeyAAAAAAAAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"spare\", \"state\": \"revoked\", \"created_at\": 1782864300, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582061eed90603ebfd8e7ed2b719f7ca1b650afd4a0c2f84a4576b925ec61c0e7f55225820ca930a404f50e9db1481b16e297ea7d91bdd068f6d48aee3f04b676380b8b8df\", \"revoked_at\": 1782864360, \"revoked_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"sign_count\": 1, \"active_from\": 1782950700, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"signs_in_as\": null, \"last_used_at\": null, \"credential_id\": \"cancelXdRevokedAAAAAAA\"}",
-      "{\"alg\": -7, \"label\": \"twin two\", \"state\": \"revoked\", \"created_at\": 1782864240, \"flagged_at\": null, \"public_key\": \"\\\\xa501020326200121582054dc93b26969ba8238a684e98185549713cf520f219da5dca7671c5c7570d33122582051edcc7517466b90dc646cdf94272ba00a7192d77746ea73d6647b713cf5ddc0\", \"revoked_at\": 1793646440.828835, \"revoked_by\": \"host\", \"sign_count\": 1, \"active_from\": 1782950640, \"enrolled_by\": \"-dashKeyAAAAAAAAAAAAAA\", \"signs_in_as\": null, \"last_used_at\": null, \"credential_id\": \"twinAB2keyEAAAAAAAAAAA\"}"
-     ],
-     "meta": [
-      "{\"key\": \"maintainer_secret_v1\", \"value\": \"f5ba351f187f25c177ba4b436ef58a56d36c0c3b43b5a9a1b7f91edd69ba48a1\"}",
-      "{\"key\": \"schema_version\", \"value\": 59}"
-     ]
-    }
-   },
+   "db": "unchanged",
    "files": {
     "cwd": "dir"
    },
@@ -2502,58 +2340,14 @@
    "home": null,
    "utc_offset": 0,
    "exit": 0,
-   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxIDAwOjAxICBsYXN0X3VzZWQ9MjAyNi0wNy0wMSAwMDowNiAgRkxBR0dFRCAoc2lnbiBjb3VudCB3ZW50IGJhY2t3YXJkcykKcGhvbmVLZXlfcXVhICBhY3RpdmUgICAiVG9tJ3MgcGhvbmUg4piOIiAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjAyICBsYXN0X3VzZWQ9LQp0d2luQUIxa2V5REEgIGFjdGl2ZSAgICdpdFwncyAidHdpbiInICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDIgMDA6MDMgIGxhc3RfdXNlZD0tCnR3aW5BQjJrZXlFQSAgYWN0aXZlICAgJ3R3aW4gdHdvJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyIDAwOjA0ICBsYXN0X3VzZWQ9LQpjYW5jZWxYZFJldm8gIHJldm9rZWQgICdzcGFyZScgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMiAwMDowNSAgbGFzdF91c2VkPS0K",
+   "stdout": "LWRhc2hLZXlBQUFBICBhY3RpdmUgICAnbGFwdG9wJyAgZW5yb2xsZWRfYnk9Ym9vdHN0cmFwICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAxVDAwOjAxOjAwWiAgbGFzdF91c2VkPTIwMjYtMDctMDFUMDA6MDY6MDBaICBGTEFHR0VEIChzaWduIGNvdW50IHdlbnQgYmFja3dhcmRzKQpwaG9uZUtleV9xdWEgIGFjdGl2ZSAgICJUb20ncyBwaG9uZSDimI4iICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDJUMDA6MDI6MDBaICBsYXN0X3VzZWQ9LQp0d2luQUIxa2V5REEgIGFjdGl2ZSAgICdpdFwncyAidHdpbiInICBlbnJvbGxlZF9ieT0tZGFzaEtleUFBQUEgIGFjdGl2ZV9mcm9tPTIwMjYtMDctMDJUMDA6MDM6MDBaICBsYXN0X3VzZWQ9LQp0d2luQUIya2V5RUEgIGFjdGl2ZSAgICd0d2luIHR3bycgIGVucm9sbGVkX2J5PS1kYXNoS2V5QUFBQSAgYWN0aXZlX2Zyb209MjAyNi0wNy0wMlQwMDowNDowMFogIGxhc3RfdXNlZD0tCmNhbmNlbFhkUmV2byAgcmV2b2tlZCAgJ3NwYXJlJyAgZW5yb2xsZWRfYnk9LWRhc2hLZXlBQUFBICBhY3RpdmVfZnJvbT0yMDI2LTA3LTAyVDAwOjA1OjAwWiAgbGFzdF91c2VkPS0K",
    "stderr": "",
    "window": [
-    1793646441.553565,
-    1793646442.0162566
+    1794950083.5272982,
+    1794950083.5881639
    ],
-   "arm": "python",
+   "arm": "rust",
    "seed_secret": "2036c53907c0e684275295ec28f183d2fc6ec2db0c903858a52fc56e9f87b0e7",
-   "shown": {
-    "phoneKey_qua": [
-     1782950520,
-     null
-    ],
-    "twinAB1keyDA": [
-     1782950580,
-     null
-    ],
-    "-dashKeyAAAA": [
-     1782864060,
-     1782864360
-    ],
-    "cancelXdRevo": [
-     1782950700,
-     null
-    ],
-    "twinAB2keyEA": [
-     1782950640,
-     null
-    ]
-   },
-   "local_times": {
-    "phoneKey_qua": [
-     "2026-07-02 00:02",
-     null
-    ],
-    "twinAB1keyDA": [
-     "2026-07-02 00:03",
-     null
-    ],
-    "-dashKeyAAAA": [
-     "2026-07-01 00:01",
-     "2026-07-01 00:06"
-    ],
-    "cancelXdRevo": [
-     "2026-07-02 00:05",
-     null
-    ],
-    "twinAB2keyEA": [
-     "2026-07-02 00:04",
-     null
-    ]
-   },
    "db": "unchanged",
    "files": {
     "cwd": "dir"
@@ -2564,11 +2358,53 @@
   }
  },
  "recorded_from_candidate": {
+  "defer-dsn-option": {
+   "commit": "f14847013601a57d828130bc75174b233faf4967",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "e5a181cf9837b7ae7e0870806518679c5ce1ffd5925e76b4faa4992b90ac8947"
+  },
+  "defer-list-stdout-closed": {
+   "commit": "0e2573f04d41c9de41a899a4ec521a8d50b485ff",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "aef3ad7f6162ed290c742209ab7071a9c532f7311cd11c7750baf070b5880751"
+  },
+  "defer-list-tz-set": {
+   "commit": "0e2573f04d41c9de41a899a4ec521a8d50b485ff",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "aef3ad7f6162ed290c742209ab7071a9c532f7311cd11c7750baf070b5880751"
+  },
   "defer-no-dsn": {
    "commit": "b56cd2c365c4251be3e12317a59865479bc9488b",
    "rust_tree": "clean",
    "platform": "linux",
    "candidate_sha256": "1633d4f30e805b2e56025e37db34b550f9aeeb4e2b6c7a9d869f2ef621a19ad1"
+  },
+  "defer-reset-repeated-yes": {
+   "commit": "0e2573f04d41c9de41a899a4ec521a8d50b485ff",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "aef3ad7f6162ed290c742209ab7071a9c532f7311cd11c7750baf070b5880751"
+  },
+  "list-column-type-error": {
+   "commit": "0e2573f04d41c9de41a899a4ec521a8d50b485ff",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "aef3ad7f6162ed290c742209ab7071a9c532f7311cd11c7750baf070b5880751"
+  },
+  "list-read-error": {
+   "commit": "0e2573f04d41c9de41a899a4ec521a8d50b485ff",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "aef3ad7f6162ed290c742209ab7071a9c532f7311cd11c7750baf070b5880751"
+  },
+  "list-rich": {
+   "commit": "0e2573f04d41c9de41a899a4ec521a8d50b485ff",
+   "rust_tree": "clean",
+   "platform": "linux",
+   "candidate_sha256": "aef3ad7f6162ed290c742209ab7071a9c532f7311cd11c7750baf070b5880751"
   }
  }
 }

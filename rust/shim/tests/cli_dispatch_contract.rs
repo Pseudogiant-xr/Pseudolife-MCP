@@ -67,7 +67,7 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
     // that stops deferring off the machine's real daemon and browser.
     let home = std::env::temp_dir().join(format!("pl-dispatch-home-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    let cases: [(&str, &[&str]); 2] = [("maintainer", &[]), ("console", &["--help"])];
+    let cases: [(&str, &[&str]); 1] = [("console", &["--help"])];
     for (mode, args) in cases {
         let output = common::cli::cleared_command(std::path::Path::new(env!(
             "CARGO_BIN_EXE_pseudolife-stdio"
@@ -112,7 +112,13 @@ fn update_dispatches_to_the_native_updater_help() {
 fn completed_modes_answer_help_and_argument_errors_without_deferring() {
     let home = std::env::temp_dir().join(format!("pl-dispatch-completed-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&home).unwrap();
-    for mode in ["conductor-watch", "delegate-watch", "expose", "test-login"] {
+    for mode in [
+        "conductor-watch",
+        "delegate-watch",
+        "expose",
+        "test-login",
+        "maintainer",
+    ] {
         for (argument, code) in [("--help", 0), ("--bad-dispatch-fixture-option", 2)] {
             let output = common::cli::cleared_command(std::path::Path::new(env!(
                 "CARGO_BIN_EXE_pseudolife-stdio"
