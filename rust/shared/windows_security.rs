@@ -161,17 +161,18 @@ pub(crate) fn create_registration_directory(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Pin a plain registration directory without delete sharing. Holding this
-/// handle prevents its removal or rename while registration files are opened.
+/// Hold a plain registration directory with list access and no delete
+/// sharing. List access participates in Windows sharing checks, so a
+/// conflicting rename/delete open is refused until this handle closes.
 pub(crate) fn open_registration_directory(path: &Path, elevated: bool) -> io::Result<File> {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL,
+        FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL,
     };
     let directory = OpenOptions::new()
         .read(true)
-        .access_mode(FILE_READ_ATTRIBUTES | READ_CONTROL)
+        .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)?;

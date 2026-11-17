@@ -784,6 +784,18 @@ mod tests {
                 "replaced folder",
                 registration_refuses_a_replaced_scratch_junction,
             ),
+            (
+                "held-folder rename",
+                held_registration_directory_refuses_rename,
+            ),
+            (
+                "held-folder write",
+                held_registration_directory_prevents_write_redirection,
+            ),
+            (
+                "action data",
+                rust_registration_data_drives_the_action_and_os_fallback,
+            ),
             ("cleanup", registration_scratch_removes_its_own_folder),
             (
                 "protected folder",
