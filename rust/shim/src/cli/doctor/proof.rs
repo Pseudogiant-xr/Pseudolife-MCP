@@ -936,15 +936,20 @@ mod path_privacy_tests {
             );
             return;
         }
+        let mut failed = Vec::new();
         for path in [
             "w44-proof-path-bearer/fixture",
             "https://user:w44-url-secret@example.invalid/fixture",
         ] {
             let value =
                 cleanup_failure("fixture", Path::new(path), true, Err("fixture error")).unwrap();
-            assert_eq!(value["fixture_directory"], "[redacted]");
-            assert!(!value.to_string().contains("w44-proof-path-bearer"));
-            assert!(!value.to_string().contains("w44-url-secret"));
+            let safe = value["fixture_directory"] == "[redacted]"
+                && !value.to_string().contains("w44-proof-path-bearer")
+                && !value.to_string().contains("w44-url-secret");
+            eprintln!("cleanup path redaction cell: {safe}");
+            if !safe {
+                failed.push(path);
+            }
         }
         let value = cleanup_failure(
             "fixture",
@@ -954,6 +959,7 @@ mod path_privacy_tests {
         )
         .unwrap();
         assert_eq!(value["fixture_directory"], "ordinary-fixture");
+        assert!(failed.is_empty(), "{failed:?}");
     }
 }
 

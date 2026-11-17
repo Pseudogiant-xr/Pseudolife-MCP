@@ -2243,6 +2243,11 @@ fn review_round2_http_errors_name_daemon_repair_before_json() {
         }
         assert!(!cause.contains("correct the JSON syntax"));
     }
+}
+
+#[test]
+fn review_round2_maintainer_http_status_precedes_json() {
+    let home = Home::new();
     for (status, body, expected) in [
         (500, "<html>fixture gateway error</html>", "not_checked"),
         (
@@ -2324,21 +2329,29 @@ fn review_round2_bad_settings_preserve_independent_client_checks() {
 #[test]
 fn review_round2_unreadable_registrations_are_not_absent() {
     let home = Home::new();
+    let mut failed = Vec::new();
     for name in ["claude/.claude.json", "codex/config.toml"] {
         let path = home.0.join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"\xff").unwrap();
         let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
         let map = report(&output);
-        let finding = map["registrations"].as_str().unwrap();
-        assert!(
-            finding.contains("UTF-8")
-                && finding.contains(path.file_name().unwrap().to_str().unwrap())
-        );
+        let found = map
+            .get("registrations")
+            .and_then(Value::as_str)
+            .is_some_and(|finding| {
+                finding.contains("UTF-8")
+                    && finding.contains(path.file_name().unwrap().to_str().unwrap())
+            });
+        eprintln!("unreadable registration {name}: {found}");
+        if !found {
+            failed.push(name);
+        }
         std::fs::remove_file(&path).unwrap();
         let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
         assert!(!report(&output).contains_key("registrations"));
     }
+    assert!(failed.is_empty(), "{failed:?}");
 }
 
 #[cfg(unix)]
@@ -2346,6 +2359,7 @@ fn review_round2_unreadable_registrations_are_not_absent() {
 fn review_round2_permission_denied_registration_is_reported() {
     use std::os::unix::fs::PermissionsExt;
     let home = Home::new();
+    let mut failed = Vec::new();
     for name in ["claude/.claude.json", "codex/config.toml"] {
         let path = home.0.join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2353,22 +2367,26 @@ fn review_round2_permission_denied_registration_is_reported() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
         let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(
-            report(&output)["registrations"]
-                .as_str()
-                .unwrap()
-                .contains("PermissionDenied")
-        );
+        let found = report(&output)
+            .get("registrations")
+            .and_then(Value::as_str)
+            .is_some_and(|finding| finding.contains("PermissionDenied"));
+        eprintln!("registration permissions {name}: {found}");
+        if !found {
+            failed.push(name);
+        }
         std::fs::remove_file(path).unwrap();
         assert!(
             !report(&diagnose(&home, "http://127.0.0.1:1").output().unwrap())
                 .contains_key("registrations")
         );
     }
+    assert!(failed.is_empty(), "{failed:?}");
 }
 
 #[test]
 fn review_round2_utf8_bom_credentials_and_wake_agree() {
+    let mut failed = Vec::new();
     for (name, text, client) in [
         (
             "claude/.claude.json",
@@ -2390,11 +2408,46 @@ fn review_round2_utf8_bom_credentials_and_wake_agree() {
             let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
             let map = report(&output);
             assert!(!map.contains_key("registrations"));
-            assert_eq!(map["wake"][client]["registered"], true);
+            let found = map["wake"][client]["registered"] == true;
+            eprintln!("BOM wake {client}, BOM={}: {found}", !prefix.is_empty());
+            if !found {
+                failed.push(client);
+            }
             wakes.push(map["wake"][client].clone());
             assert!(!Value::Object(map).to_string().contains("w44-round2-bearer"));
         }
-        assert_eq!(wakes[0], wakes[1]);
+        if wakes[0] != wakes[1] {
+            failed.push(client);
+        }
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn review_round2_git_bash_bad_settings_keeps_path_checks() {
+    let home = Home::new();
+    std::fs::create_dir(home.0.join("claude")).unwrap();
+    let bash = home.0.join("bash.exe");
+    std::fs::write(&bash, b"never executed").unwrap();
+    for settings in ["{", "{}"] {
+        std::fs::write(home.0.join("claude/settings.json"), settings).unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env("CLAUDE_CODE_GIT_BASH_PATH", &bash)
+            .output()
+            .unwrap();
+        let map = report(&output);
+        assert_eq!(map["git_bash"], bash.to_string_lossy().as_ref());
+        assert!(map.contains_key("bash_on_path"));
+        assert_eq!(map["bash_on_path_is_wsl_launcher"], false);
+        if settings == "{" {
+            assert!(
+                map["git_bash_settings"]
+                    .as_str()
+                    .unwrap()
+                    .contains("settings.json")
+            );
+        }
     }
 }
 
