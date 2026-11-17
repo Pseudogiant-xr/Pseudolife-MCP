@@ -17,8 +17,9 @@ any client registration (that is `connect --code`, CLI-CONNECT).
 - `pair <url> --read-code [--token-file P] [--json]` (the installers:
   `pair "$DAEMON_URL" --read-code --token-file "$TOKEN_FILE" --json`)
 
-The URL first, the code (when given) right after it, then options, each at
-most once, a value as the next argument.
+The URL and code keep their positional order, with options before, between
+or after them. Repeated boolean flags and `--token-file=value` are supported.
+`--` ends option parsing; repeated token destinations are refused.
 
 ## Exact contract items
 
@@ -50,31 +51,29 @@ most once, a value as the next argument.
   digest; the rule tokenizes the digest only then).
 - urllib's per-socket-operation timeouts versus the native per-request ones.
 
-## Deferred before any effect
+## Native refusals and recovery
 
-- Argparse errors, a code after an option, repeated options,
-  `--opt=value`, abbreviations, a `--token-file` value starting with `-`.
-- A home (`USERPROFILE`, else `HOME`) that pathlib would respell, or none;
-  a target whose existence check pathlib would raise on; a non-Unicode path.
+There is no Python fallback. Unsupported arguments, non-Unicode arguments or
+paths, unreadable stdin, missing or relative home directories, unsafe target
+inspection, and unsupported URL forms receive secret-free native diagnostics
+with the parameter and recovery step. Equivalent absolute home spellings are
+accepted without changing the owner-only checks. Code normalization, URL
+validation, authenticated health checks, redemption and grants remain unchanged.
 
-The token and the pairing name are drawn before the first request, so no
-random-source failure can defer after it.
+A `/health` response past the nesting limit refuses before creating a token.
+If a refused redemption cannot remove its token file, the file remains and the
+report has state `cleanup_failed`, exit 5, the original `refusal_state`, the exact path and the instruction
+to remove that unused file before retrying. The error never includes its token
+or the pairing code. `native_refusal_cleanup_keeps_token_and_names_recovery`
+checks the locked-file path on Windows and a non-writable directory on Unix.
 
-## Declared divergences
+The `pair-cleanup-fixture-token` recording rule redacts only the retained
+fixture file's contents, after its hash matches the recorded POST and the
+daemon's in-flight file check. It never redacts stdout or stderr, so a token
+printed by the command remains a failure. The existing `pair-token` rule
+still validates the candidate's file and normalizes its random name on replay.
 
-Two oracle crashes after a request (each an uncaught exception: exit 1, a
-traceback naming the oracle's own source files). The candidate leaves the
-same state (requests, files) and exits 1 with its deferral line; rules
-`pair-recursion-traceback` / `pair-cleanup-traceback` map only that
-traceback with exit 1:
-
-- a `/health` nested past the recursion limit (`_json` sits outside the
-  probe's `try`; limit measured on CPython 3.11.9);
-- a refusal whose `target.unlink(missing_ok=True)` raises anything but a
-  missing file (harness case `refusal-cleanup-fails`, Windows: the file held
-  open without delete sharing). The token file stays, as in Python.
-
-Others:
+## Other platform differences
 
 - Windows moves the default file by hard link then unlink (the POSIX
   oracle's own way) where the oracle renames without replace; on a volume
@@ -97,12 +96,10 @@ on Linux and the tested `localhost.` spelling on Windows, whose resolver rejects
 the numeric abbreviation. Both remain outside either arm's strict loopback
 classification; both cases must pair successfully and emit the warning.
 
-Both Parity lanes run the row live and against `goldens/pair.<os>.json`.
-`refused-unreachable` names core's closed loopback port (`127.0.0.1:9`)
-rather than a free port, so its URL is the same in every run. The oracle's
-tracebacks in deferral cases are recorded with the oracle checkout, its
-interpreter and the real home replaced by tokens (`runner.record`); the
-deferral rules replace those streams anyway.
+Required lanes replay `goldens/pair.<os>.json`. The case IDs beginning with
+`defer-` remain stable for traceability, but their outcomes are native.
+`refused-unreachable` names the harness's closed loopback port so its URL is
+stable across runs. No normalization turns a crash into an expected deferral.
 
 ## Operator transport extension (2026-11-02 candidate)
 

@@ -25,7 +25,7 @@ sys.path.insert(0, str(REPO))
 import dbstate
 import pgdisposable
 import psycopg
-from pseudolife_memory.storage.schema import assert_disposable_database
+from rust.harness_support.database_guard import assert_disposable_database
 
 pg = pgdisposable.Slice.from_env("pgs")
 GOLDEN_FILE = HERE / "goldens" / "schema-startup.json"
@@ -212,6 +212,8 @@ def main(argv=None):
             ap.error("--record-candidate records the golden's cases only; check the result with "
                      "--check-goldens --refusals --mutants")
         return record_candidate(args)
+    from test_schema_executor import check_equivalence
+    equivalence = check_equivalence(args.rust_test_bin.resolve(), pg)
     results = []
     recorded = {}
     goldens = json.loads(GOLDEN_FILE.read_text()) if args.check_goldens else None
@@ -229,6 +231,7 @@ def main(argv=None):
         results.append(result)
         print(f"schema {commit or 'fresh'}: {sum(len(stage_diffs(s)) for s in result['stages'])} diffs", flush=True)
         args.out.write_text(json.dumps({"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO).decode().strip(),
+                                       "schema_executor": equivalence,
                                        "cells": results}, indent=2), encoding="utf-8")
     refusals = []
     if args.refusals:
