@@ -3907,7 +3907,9 @@ def test_harness_environment_cleanup_refuses_an_active_process(tmp_path, alias):
         # The cleaner receives the short spelling, while the process names
         # the long spelling of this same directory.
         environment = Path(buffer.value) / environment.name
-    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(90)", argument],
+    # Use the base executable so this Popen owns the sleeper itself, rather
+    # than a Windows venv launcher whose child would outlive terminate().
+    process = subprocess.Popen([sys._base_executable, "-c", "import time; time.sleep(90)", argument],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     identity = psutil.Process(process.pid).create_time()
     try:
