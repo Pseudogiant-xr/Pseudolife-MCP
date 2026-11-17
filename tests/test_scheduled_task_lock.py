@@ -22,8 +22,8 @@ principal, this token's SID, whether this shell is elevated, the process
 table. No test registers, reads, stops or removes a real task or process.
 """
 
-import hashlib
 import base64
+import hashlib
 import json
 import os
 import re
@@ -137,7 +137,8 @@ def test_the_interactive_task_action_keeps_its_exact_bytes() -> None:
     text = _read(NATIVE)
     function = text[text.index("function Get-NativeTaskCode("):text.index("function Get-RegisteredInvocation(")]
     action = text[text.index("function Quote-Argument("):text.index("$user = [Security.Principal.WindowsIdentity]")]
-    script = (function + "\n" +
+    system_root = os.environ.get("SystemRoot", "/fixture/windows")
+    script = (function + "\n" + f"$env:SystemRoot = '{system_root}'\n" +
               "$native = 'C:\\fixture dir\\launcher.exe'\n"
               "$ownerExe = 'C:\\fixture dir\\runtime.exe'\n"
               "$c = @{ ServeArgs = @('extractor-shim', 'claude', '--env-file', 'C:\\fixture dir\\settings.env') }\n"
@@ -163,7 +164,7 @@ def test_the_interactive_task_action_keeps_its_exact_bytes() -> None:
         encoded = arguments.rsplit(" ", 1)[1]
         # The here-string uses the source file's line endings on each host.
         assert base64.b64decode(encoded).decode("utf-16-le").replace("\r\n", "\n") == expected
-        assert result["Execute"] == str(Path(os.environ.get("SystemRoot", "")) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        assert result["Execute"] == str(Path(system_root) / "System32/WindowsPowerShell/v1.0/powershell.exe")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows final path APIs")

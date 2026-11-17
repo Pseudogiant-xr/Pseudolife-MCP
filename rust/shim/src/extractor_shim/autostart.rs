@@ -259,7 +259,7 @@ mod tests {
         let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
             .join("System32/WindowsPowerShell/v1.0/powershell.exe");
         assert!(std::path::Path::new(command.get_program()).is_absolute());
-        assert_eq!(command.get_program(), expected);
+        assert_eq!(command.get_program(), expected.as_os_str());
         assert!(command.get_args().any(|arg| arg == "-EncodedCommand"));
     }
 
