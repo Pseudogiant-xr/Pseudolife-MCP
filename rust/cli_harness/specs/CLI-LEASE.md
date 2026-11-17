@@ -72,7 +72,8 @@ Named rules extend the shared core rules:
   spelling, either pwsh 7's literal non-ASCII or the escaped form, so a
   non-ASCII installation path associates.
 
-Eight real source mutants cover hold status, break holder removal,
+Until retirement on 17 November 2026, eight source mutants covered hold
+status, break holder removal,
 conductor duration, the old names' deprecation line, a swallowed audit-insert
 failure (break then reports success on a rolled-back bank), an ignored COMMIT
 result (conductor then reports a grant that never committed), a lost COMMIT

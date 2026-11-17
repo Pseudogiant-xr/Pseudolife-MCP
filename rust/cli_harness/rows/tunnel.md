@@ -147,7 +147,8 @@ only that value, and only in the saved profile's `runtime_key_expires_at`
 and the report's `"expires_at"` / `API key expiry:`; it does so only when
 the seed is a midnight UTC stamp one to three days after the arm's start
 and the profile still holds exactly that value. A reported or saved date
-moved by a day stays as written (mutant `tunnel-near-expiry-day-earlier`).
+moved by a day stays as written. The historical `tunnel-near-expiry-day-earlier`
+source-mutant check was retired on 17 November 2026.
 
 A refused stdout fails only CPython's shutdown flush, which turns any exit
 into 120; with nothing on stdout (a refusal on stderr) the exit stays.
@@ -166,8 +167,8 @@ Guards, every arm:
 - Every daemon URL, saved in a seeded profile or passed as `--daemon-url`,
   is the arm's own loopback listener, which records every connection,
   including any still in its backlog after the arm exits. None may occur;
-  the `tunnel-saved-url-connect` mutant (a connect to the saved URL) is
-  caught by it.
+  the `tunnel-saved-url-connect` source-mutant check demonstrated this before
+  its retirement on 17 November 2026.
 - The caller's real `~/.pseudolife-mcp` is compared before and after the arm
   by `lstat` metadata only: names, size, mtime_ns, mode, inode, link count
   and Windows attributes. Directories are listed; no file is opened or

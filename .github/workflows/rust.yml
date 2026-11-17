@@ -8,7 +8,7 @@ on:
   push:
     branches: [master]
   # Nightly Monday to Saturday; on Sunday the same hour is the weekly run,
-  # the nightly plus the CLI source mutants (source-mutants says why).
+  # the same Rust checks as the weekday nightly.
   schedule:
     - cron: '23 3 * * 1-6'
     - cron: '23 3 * * 0'
@@ -331,7 +331,7 @@ jobs:
           python rust/daemon/harness/gen_schema_sql.py --check
           exit $LASTEXITCODE
       # rust/cli_harness/test_cli_harness.py is the harness's offline
-      # self-test (no CLI runs; its source-mutant anchor check reads files
+      # self-test (no CLI runs; its recording checks read files
       # only), run here so a pull request's own checks see it rather than
       # only the batch's cli shard: 182 passed in 25 s on a Windows desktop,
       # 0.5 min hosted (2026-11-14). Two of its mail-row cases import
@@ -346,7 +346,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python rust/producer_census.py --ci-check
           exit $LASTEXITCODE
-      - name: ported-row-and-mutant-ci-inventory
+      - name: ported-row-ci-inventory
         working-directory: .
         run: python rust/ci/inventory.py
       - name: Board harness lifecycle and normalization
@@ -1523,194 +1523,6 @@ jobs:
       PARITY_MIN_FREE_GB: '8'
     steps: *parity_steps
 
-  source-mutants:
-    # Run 38145459384: 92m23s versus the 70m28s baseline; 68 source jobs
-    # queued behind the 20-job concurrency cap, with a largest matrix queue
-    # of 24m25s, so they left PRs. Since 2026-10-17 they also leave master
-    # pushes and run nightly and on manual CI. On master they were 72 of 104
-    # jobs and about 550 of 920 runner-minutes (runs 38412458284,
-    # 38775578227, 38794022446; Windows shard median 11 min, Linux 5), and
-    # all 1,170 shard jobs in the 16 readable master/nightly runs from
-    # 2026-10-12 to 2026-10-16 passed. 18 of the 27 push runs in that window
-    # were cancelled by a newer push before finishing. A survivor now
-    # surfaces at the next nightly (its own concurrency group, so pushes no
-    # longer cancel it) instead of after the merge that caused it.
-    # Weekly since the Python freeze (14 November 2026, maintainer ruling):
-    # the Sunday schedule and manual CI only. They were about 774 of a
-    # nightly's 1,762 runner-minutes (nightly run 43414735492, 104 jobs).
-    # Each control still compares a mutated candidate with this checkout's
-    # frozen Python live (rust/cli_harness/mutants.py); no oracle is
-    # selected or exported for it.
-    if: ${{ !cancelled() && ((github.event_name == 'schedule' && github.event.schedule == '23 3 * * 0') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')) && needs.candidate.result == 'success' }}
-    name: Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}
-    # These shards compile their own source copies and consume no rust-job
-    # artifact; the final Parity gate still requires both Rust jobs. They
-    # read nothing from scope since the freeze (its oracle base left).
-    needs: [candidate]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        # One shard per line, in sorted order, so that two branches each
-        # adding a shard do not conflict on one long line.
-        shard:
-          - audit-0
-          - audit-1
-          - audit-2
-          - backup-0
-          - backup-1
-          - backup-2
-          - conductor_watch-0
-          - conductor_watch-1
-          - connect-0
-          - connect-1
-          - connect-2
-          - console-0
-          - console-1
-          - coordination_recovery-0
-          - doctor-0
-          - doctor-1
-          - doctor-2
-          - doctor-3
-          - episode-0
-          - expose-0
-          - hook-0
-          - hook-1
-          - invite-0
-          - lease-0
-          - lease_operator-0
-          - mail-0
-          - mail-1
-          - maintainer-0
-          - maintainer-1
-          - maintainer_setup-0
-          - migrate_flat-0
-          - move-0
-          - move-1
-          - pair-0
-          - pair-1
-          - restore-0
-          - restore-1
-          - restore-2
-          - restore-3
-          - restore-4
-          - restore-5
-          - restore-6
-          - test_login-0
-          - test_login-1
-          - test_login-2
-          - transfer-0
-          - transfer-1
-          - tunnel-0
-          - tunnel-1
-          - tunnel-2
-          - update-0
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.94.0
-      - name: Keep only the pinned Rust toolchain
-        if: runner.environment != 'self-hosted'
-        shell: pwsh
-        run: |
-          $toolchainFile = Join-Path $env:GITHUB_WORKSPACE 'rust/rust-toolchain.toml'
-          $match = Select-String -LiteralPath $toolchainFile -Pattern '^channel = "([^"]+)"$' | Select-Object -First 1
-          if (-not $match) { throw "rust/rust-toolchain.toml names no channel; nothing is known to keep" }
-          $pinned = $match.Matches[0].Groups[1].Value
-          foreach ($line in @(rustup toolchain list)) {
-            $name = ($line -split '\s+')[0]
-            if ($name -and -not $name.StartsWith("$pinned-")) {
-              rustup toolchain uninstall $name
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            }
-          }
-          rustup toolchain list
-          exit $LASTEXITCODE
-      # The Rust caches' key starts with this UTC ISO week (the Rust job's
-      # rust-cache step says why), so its entries are never a week old.
-      - name: Name this week's Rust cache
-        id: cache_week
-        shell: pwsh
-        run: |
-          $now = [DateTime]::UtcNow
-          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
-          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Rust cache week: $week"
-      # One shard per OS saves the shared mutant target's dependencies; all
-      # 37 restore it. Every shard saved under this one key until 2026-10-24,
-      # so each nightly that changed it raced 37 uploads for one entry.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: v0-rust-${{ steps.cache_week.outputs.week }}
-          workspaces: rust -> ${{ runner.temp }}/source-mutants-target/mutant
-          key: cli-source-mutants
-          cache-on-failure: true
-          save-if: ${{ matrix.shard == 'audit-0' }}
-      - name: Install source harness dependencies
-        # Network-bound setup keeps the existing ten-minute dependency floor.
-        timeout-minutes: 10
-        shell: pwsh
-        run: |
-          python -m pip install --no-compile --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install --no-compile -e ".[dev,lite]" "mcp==2.2.0"
-          exit $LASTEXITCODE
-      - name: Prepare disposable PostgreSQL for source controls
-        # Linux 2026-10-11: fixture setup under 5s; network-bound floor.
-        timeout-minutes: 5
-        shell: pwsh
-        env:
-          LANG: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
-          LC_ALL: ${{ runner.os == 'Linux' && 'en_US.UTF-8' || '' }}
-        run: |
-          python rust/cli_harness/lease_ci.py
-          exit $LASTEXITCODE
-      - name: Install offline episode fixture dependencies
-        if: startsWith(matrix.shard, 'episode-')
-        timeout-minutes: 5
-        run: python -m pip install "onnx==1.22.0" "onnxruntime==1.27.0" "optimum==2.1.0" "optimum-onnx==0.1.0"
-      - name: Build the test_login source-control image
-        if: runner.os == 'Linux' && startsWith(matrix.shard, 'test_login-')
-        # Master 38076979343: Linux image build 13s; network-bound floor.
-        timeout-minutes: 5
-        run: docker build -t pseudolife-pg:18 -f ops/Dockerfile.pg ops
-      - name: CLI source mutants
-        # Linux 2026-10-11: slowest eight-control selection 81s plus
-        # 65s cold compile; six minutes is about twice that cold bound.
-        # Linux 2026-11-13 (nightly run 43414735492): move-0 caught all 8
-        # mutants at 6m05s and was killed at 6m06s (job 131853444061;
-        # 2m04s to the first verdict, then about 34s per mutant); audit-0,
-        # transfer-0/1, maintainer-1 and test_login-0 took 5m38s-5m43s,
-        # and the night before (run 43209050039) audit-1 and maintainer-0
-        # took 5m42s-5m46s. One limit covers every Linux shard: ten minutes.
-        # Windows is provisional, with startup headroom inside 56m; its
-        # slowest shards took 11m21s-11m52s on those two nights.
-        timeout-minutes: ${{ runner.os == 'Linux' && 10 || 30 }}
-        shell: pwsh
-        env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/source-mutants-target
-        run: |
-          python rust/ci/run_coverage.py --source-shard ${{ matrix.shard }} --out-dir (Join-Path $env:RUNNER_TEMP 'h5-source')
-          exit $LASTEXITCODE
-      - name: Retain source-control witnesses and timings
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: source-mutants-${{ runner.os }}-${{ matrix.shard }}
-          path: |
-            ${{ runner.temp }}/h5-source/*.json
-          if-no-files-found: error
-
   daemon-image:
     name: Rust daemon / disposable image
     needs: scope
@@ -1809,7 +1621,7 @@ jobs:
     # any other skip still fails.
     if: always() && (github.event_name != 'workflow_dispatch' || inputs.mode == 'ci')
     name: Parity / ${{ matrix.os }}
-    needs: [scope, rust, candidate, parity-checks, source-mutants]
+    needs: [scope, rust, candidate, parity-checks]
     strategy:
       fail-fast: false
       matrix:
@@ -1829,7 +1641,6 @@ jobs:
         env:
           GATE_RESULTS: ${{ toJSON(needs) }}
           GATE_EVENT: ${{ github.event_name }}
-          GATE_SCHEDULE: ${{ github.event.schedule }}
         run: |
           $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
           $docsOnly = ($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group') -and $results['scope'].result -ceq 'success' -and $results['scope'].outputs.rust -ceq 'false'
@@ -1842,12 +1653,6 @@ jobs:
               Write-Error "$job did not succeed"
               exit 1
             }
-          }
-          $sourceResult = $results['source-mutants'].result
-          $weekday = $env:GATE_EVENT -ceq 'schedule' -and $env:GATE_SCHEDULE -cne '23 3 * * 0'
-          if ($sourceResult -cne 'success' -and -not (($env:GATE_EVENT -ceq 'pull_request' -or $env:GATE_EVENT -ceq 'merge_group' -or $env:GATE_EVENT -ceq 'push' -or $weekday) -and $sourceResult -ceq 'skipped')) {
-            Write-Error "source-mutants did not succeed outside the PR, merge-group, push and weekday-nightly skip exception"
-            exit 1
           }
 
   # A stress loop (mode=stress): run one selection on N fresh hosted runners

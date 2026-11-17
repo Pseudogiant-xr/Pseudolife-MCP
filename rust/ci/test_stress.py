@@ -893,7 +893,7 @@ def test_a_stress_loop_runs_no_ordinary_ci_job():
     jobs = raw_workflow()["jobs"]
     for name in ("rust", "daemon-image", "parity-checks", "parity"):
         assert CI_ONLY in jobs[name]["if"] and "wait-mail" not in jobs[name]["if"], name
-    for name in ("parity-selfhosted", "source-mutants"):
+    for name in ("parity-selfhosted",):
         assert "inputs.mode == 'ci'" in jobs[name]["if"] and "pull_request" not in jobs[name]["if"], name
 
 

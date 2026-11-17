@@ -84,23 +84,14 @@ to show a golden catches it. Seeded and live-only scenarios are skipped, and
 the `console-dream-*` scenarios are refused, because their replay seeds the
 bank from the recording itself.
 
-Run the existing source mutants; every selected mutant must be caught:
-
-```powershell
-python rust/cli_harness --row mail --mutants -v
-```
-
-The mutant runner builds copies under `$CARGO_TARGET_DIR/mutant-src` into
-`$CARGO_TARGET_DIR/mutant`, retaining the ordinary build. `--mutant <id>` selects
-one control. Run it through the same check (`lease check full-suite --
-python rust/cli_harness ...`), which starts the build work only while the lease
-is free.
+CLI source mutants were retired on 17 November 2026. Run the Rust unit and
+contract tests and committed golden replay; CLI changes no longer maintain
+source-mutant declarations or witnesses.
 
 The [daemon harness](daemon/README.md#the-harness) has equivalent `live`,
 `golden`, `live --record` and `mutants` modes, with `--only <scenario>` for a
 single scenario. Its README names the model/runtime and disposable-bank setup.
 
 Command sources, verified at `049863c9`: [CLI runner](cli_harness/runner.py)
-(`_default_candidate`, `record`, `main`), [mutant builder](cli_harness/mutants.py)
-(`_target`, `_sync_source`, `_build`), and [bank guards](cli_harness/rows/_bank.py)
+(`_default_candidate`, `record`, `main`), and [bank guards](cli_harness/rows/_bank.py)
 (`_login`, `url`, `_connect`). The existing commands need no wrapper.

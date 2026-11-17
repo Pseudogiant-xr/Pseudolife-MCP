@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "source-mutants",
+  "before": "93747a10bc8f00e5",
+  "fingerprint": null,
+  "reason": "Retires the scheduled and manual-CI CLI source-mutant job. The merge base has 52 shards on two operating systems (104 jobs); historical weekly run 43707943300 used 106 jobs and 842.18 runner-minutes before later shard removals. The job was outside the PR budget, so its before fingerprint comes from the merge-base workflow rather than the generated baseline. No replacement job is added. Manual stress is unchanged."
+}

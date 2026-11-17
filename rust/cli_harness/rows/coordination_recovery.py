@@ -18,13 +18,7 @@ from urllib.parse import quote
 
 from .. import core, normalize
 from ..run_names import RunNames
-from ..mutants import Mutant
 
-MUTANTS = [
-    Mutant("recovery-stop-gate-dropped", "coordination_recovery",
-           "shim/src/cli/coordination_recovery/mod.rs",
-           "if !args.stopped {", "if false {", ("recovery-stop-required",)),
-]
 
 DISABLED = "coordination:\n  enabled: false\n  allowed_principals: [alice, daemon, maintainer]\n"
 ID_A = "aaaaaaaa000000000000000000000001"

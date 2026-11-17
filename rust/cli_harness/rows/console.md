@@ -287,7 +287,8 @@ Local evidence (2026-11-13, after issue #1497's fixes): Windows
 workstation, 166/166 live and golden and all 15 of its mutants caught
 (`console-display-ignored` is Linux-only); WSL Ubuntu, 166/166 live and
 golden and all 15 of its mutants caught (`console-winerror-full-stop` is
-Windows-only). The row holds 16 mutants, two CI shards of eight. Before the
+Windows-only). At that time the row held 16 mutants, two CI shards of eight.
+The source mutants were retired on 17 November 2026. Before the
 port, the row
 against master's deferring binary on Windows: 37 of the new and changed
 cases differed, and the five that matched are the four declared pre-mint
@@ -298,9 +299,9 @@ Evidence of 16 November 2026 (the native macOS and Linux browser rules):
 WSL Ubuntu, `--golden` 167/167 against the Linux golden re-recorded from
 the candidate (`--record-candidate --write`; three Windows-only cases keep
 orphaned Linux entries, which the recorder does not remove). The row's 16
-mutants now split by OS: Linux runs 13 (`console-exited-counts-as-opened`,
+mutants then split by OS: Linux ran 13 (`console-exited-counts-as-opened`,
 `console-generic-launched` and `console-winerror-full-stop` are
-Windows-only), Windows runs 15 (`console-running-counts-as-failed` is
+Windows-only), Windows ran 15 (`console-running-counts-as-failed` is
 Linux-only); `console-display-ignored` was removed, since its case now
 differs from the oracle on purpose and so could not catch it. The mutants
 were not run in that change.

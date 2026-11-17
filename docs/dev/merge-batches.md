@@ -58,8 +58,8 @@ Each change waits for hosted CI once, on its batch:
   any of those jobs. The last exception, cli-store's live security step,
   left on 16 November 2026: Rust tests the Rust job runs now hold the
   startup bind and token-map refusals and the 0.0.0.0-configured
-  Host/Origin and bearer cases. Only the weekly source mutants still
-  compare with the frozen Python.
+  Host/Origin and bearer cases. The source mutants were retired on
+  17 November 2026; manual stress remains the named live-oracle exception.
 - **The `Python freeze` check** (its own workflow, `python-freeze.yml`)
   refuses an ordinary pull request whose net change touches
   `pseudolife_memory/` outside `pseudolife_memory/web/static/`, the Console
@@ -146,9 +146,10 @@ Each change waits for hosted CI once, on its batch:
   runs everything, which is the backstop that skill relies on.
 - **The nightly and manual runs** run everything, as before. The nightly
   is the full backstop for everything a master push skipped. Since the
-  Python freeze the CLI source mutants run weekly, on the Sunday schedule
-  (`23 3 * * 0`, which replaces that day's nightly) and on manual CI; the
-  `Parity` gate accepts their skip on a weekday nightly only.
+  retirement of CLI source mutants on 17 November 2026, neither schedule
+  nor manual CI runs them, and the `Parity` gate no longer depends on them.
+  Both existing schedules retain the other checks. Manual `mode=stress`
+  selections remain separate and unchanged.
 - **Never cancelled:** batch runs, master pushes, the nightly, manual and
   stress runs and merge groups each get a concurrency group of their own
   (their run id), so neither a newer push nor a newer run cancels them,

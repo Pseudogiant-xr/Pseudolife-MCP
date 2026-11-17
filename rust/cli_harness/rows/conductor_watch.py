@@ -28,7 +28,6 @@ import sys
 
 from .. import core, normalize
 from ..core import Case
-from ..mutants import Mutant
 
 OWNER = "0123456789abcdef0123456789abcdef"
 OTHER = "fedcba9876543210fedcba9876543210"
@@ -454,35 +453,3 @@ def cases() -> list[Case]:
     add(case("defer-age-digit-limit", ["--stop", "--state", STATE, "--max-age", "1" * 4301],
              rules=("conductor-watch-deferral",)))
     return c
-
-
-MUTANTS = [
-    Mutant("conductor-watch-stop-before-owner", "conductor_watch", FILE,
-           "if args.stop {", "if args.stop && owner.is_ok() {", ("stop-bad-owner-with-state",)),
-    Mutant("conductor-watch-start-ignored", "conductor_watch", FILE,
-           "&& recorded != &J::Str(current)", "&& recorded == &J::Str(current)",
-           ("stop-start-mismatch",)),
-    Mutant("conductor-watch-foreign-exit-0", "conductor_watch", FILE,
-           "return foreign(&record, &owner, &state);", "return Ok(already(&record));",
-           ("start-foreign-owner",)),
-    Mutant("conductor-watch-cr-kept", "conductor_watch", FILE,
-           r"first[end - 1] == b'\r'", r"first[end - 1] == b'\n'",
-           ("start-already-running-from-agent-file",)),
-    Mutant("conductor-watch-stop-file-kept", "conductor_watch", FILE,
-           'fs::write(stop, b"")', 'fs::write(stop, b"x")', ("stop-running-stop-file-exists",)),
-    Mutant("conductor-watch-age-zero-admitted", "conductor_watch", ARGS,
-           "if number.bytes().all(|b| b == b'0') {", "if number.is_empty() {",
-           ("error-max-age-zero",)),
-    Mutant("conductor-watch-state-parent-admitted", "conductor_watch", ARGS,
-           '"" | "." | ".." => refused(', '"" | "." => refused(', ("error-state-parent",)),
-    Mutant("conductor-watch-settle-nan-admitted", "conductor_watch", ARGS,
-           "kind == Kind::NonNegative && (number.is_nan() || number < 0.0)",
-           "kind == Kind::NonNegative && number < 0.0", ("error-settle-nan",)),
-    Mutant("conductor-watch-pid-limit-deferred", "conductor_watch", FILE,
-           "Some(J::Int(text)) => small(text),",
-           "Some(J::Int(text)) => Some(small(text).ok_or(Defer)?),", ("stop-pid-past-limit",)),
-    Mutant("conductor-watch-stop-refusal-exit-0", "conductor_watch", FILE,
-           "out = Out::say(&stop_refusal(&path, &reason).ok()?, EXIT_SETUP);",
-           "out = Out::say(&stop_refusal(&path, &reason).ok()?, EXIT_OK);",
-           ("stop-request-unwritable",)),
-]

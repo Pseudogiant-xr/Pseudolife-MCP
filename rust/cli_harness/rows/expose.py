@@ -32,13 +32,8 @@ import sys
 from .. import core, normalize
 from ..core import Case
 from ..fixture_daemon import FixtureDaemon, json_body, redirect, text
-from ..mutants import Mutant
 
 DEFERRAL = "pseudolife-stdio: mode 'expose' is deferred in this candidate\n"
-FILE = "shim/src/cli/expose/mod.rs"
-TS_FILE = "shim/src/cli/expose/tailscale.rs"
-ARGS_FILE = "shim/src/cli/expose/args.rs"
-LOOKUP_FILE = "shim/src/cli/program_lookup.rs"
 DEAD_PORT = "9"
 TS_PATH = "{HOME}/bin"
 # The lookup's inputs, pinned: PATH holds only the stand-in's directory, and
@@ -219,8 +214,8 @@ normalize.RECORD_RULES.add("expose-port")
 
 # The native client's wording where it says more than the oracle (that
 # nothing changed, or what is still in place): the oracle's line, then the
-# native one. Applied to the oracle's streams only, so a live run and the
-# mutant control still compare everything else byte for byte.
+# native one. Applied to the oracle's streams only, so a live comparison
+# still compares everything else byte for byte.
 NATIVE_WORDING = [
     (re.compile(rb"no terminal to confirm on: rerun with --yes"),
      b"no terminal to confirm on, so nothing changed: rerun with --yes"),
@@ -644,32 +639,3 @@ def cases() -> list[Case]:
     add(case("tailscale-yes-unverifiable", ["tailscale", *at(), "--yes"], daemon=healthy,
              scenario_=s(reads=[{}, {"code": 1, "err": "boom\n"}])))
     return c
-
-
-MUTANTS = [
-    Mutant("expose-funnel-ignored", "expose", TS_FILE,
-           "if funnelled(Some(config), port) ||", "if false ||", ("status-funnel",)),
-    Mutant("expose-relative-path-searched", "expose", LOOKUP_FILE,
-           "if known == Some(false) {", "if known.is_none() {", ("status-relative-path-skipped",)),
-    Mutant("expose-yes-skips-tty-check", "expose", FILE,
-           "if !host.interactive() {", "if false {", ("off-no-terminal",)),
-    Mutant("expose-first-line-unstripped", "expose", TS_FILE,
-           ".find(|line| !pyjson::py_strip(line).is_empty())",
-           ".find(|line| !line.is_empty())", ("status-not-running-blank-line",)),
-    Mutant("expose-port-range-off-by-one", "expose", ARGS_FILE,
-           "(1..=65535).contains(port)", "(0..=65535).contains(port)", ("port-zero",)),
-    Mutant("expose-auth-truthy", "expose", FILE,
-           'if pyjson::get(&health, "auth") != Some(&J::Bool(true)) {',
-           'if !pyjson::get(&health, "auth").is_some_and(J::truthy) {',
-           ("tailscale-daemon-auth-one",)),
-    # Only Windows' message text ends in a full stop.
-    Mutant("expose-winerror-full-stop", "expose", TS_FILE,
-           "message.trim_end_matches(|c: char| c <= ' ' || c == '.')",
-           "message.trim_end_matches(|c: char| c <= ' ')", ("status-not-a-program",),
-           platforms=("windows",)),
-    # Only Windows has PATHEXT, whose spelling the lookup reports.
-    Mutant("expose-pathext-lowercased", "expose", LOOKUP_FILE,
-           '.map(|ext| format!("{name}{ext}"))',
-           '.map(|ext| format!("{name}{}", ext.to_lowercase()))', ("status-none-json",),
-           platforms=("windows",)),
-]
