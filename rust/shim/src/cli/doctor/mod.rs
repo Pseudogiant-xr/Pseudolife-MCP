@@ -144,7 +144,7 @@ fn redact_report(value: &mut Value, token: Option<&str>) {
                 *text = text.replace(token, "[redacted]");
             }
             static URLS: std::sync::LazyLock<regex_lite::Regex> = std::sync::LazyLock::new(|| {
-                regex_lite::Regex::new(r#"(?i)\b(?:https?|socks5h?)://[^\s\"<>]+"#)
+                regex_lite::Regex::new(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s\"<>]+"#)
                     .expect("URL pattern")
             });
             *text = URLS

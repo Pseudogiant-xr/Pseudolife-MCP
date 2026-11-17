@@ -1934,6 +1934,7 @@ fn native_reports_do_not_echo_bearers_or_credential_urls_from_answers() {
     for health in [
         json!({"status":"ok", "version":"w44-secret-value https://user:w44-url-password@example.com https://example.com/?token=w44-query-secret"}),
         json!({"status":"w44-secret-value"}),
+        json!({"status":"postgresql://fixture:w44-url-password@example.invalid/bank"}),
     ] {
         let fixture = Fixture::start_with(Setup {
             health: vec![Reply::Http(200, health.to_string())],
@@ -1966,5 +1967,17 @@ fn native_reports_do_not_echo_bearers_or_credential_urls_from_answers() {
     assert!(!report(&output).contains_key("error"));
     assert_eq!(report(&output)["ok"], true);
     assert_eq!(report(&output)["daemon_status"], "ok");
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(
+            200,
+            json!({"status":"https://example.invalid/status"}).to_string(),
+        )],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    assert_eq!(
+        report(&output)["daemon_status"],
+        "https://example.invalid/status"
+    );
     assert!(failures.is_empty(), "{failures:?}");
 }
