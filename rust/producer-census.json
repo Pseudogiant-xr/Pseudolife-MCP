@@ -422,15 +422,16 @@
     "rust/shim/src/cli/console/tests.rs": "10c9445fcebc4dc2e67224e4330c6dee4cb9aaf7dfd25f2ed20e7ce6b28e31e9",
     "rust/shim/src/cli/coordination_recovery/help.txt": "a7c5af87cafc5865595dac3bf7c384bb02b47ace5cc8789912635f1429d40c8c",
     "rust/shim/src/cli/coordination_recovery/mod.rs": "f599c1ac1e271c7dbecc396f32286bc2b2bcea7c560232aa082a73d41344c0f0",
-    "rust/shim/src/cli/doctor/agent.rs": "2224a43cdb6c5f0130865952dabd369f231f622ae49423c957c7c41f1a4b3b06",
-    "rust/shim/src/cli/doctor/clients.rs": "20d9053dc635f4d347b0d5a201dcfb2e387bce0120a12e14c6ac12655688d63e",
+    "rust/shim/src/cli/doctor/agent.rs": "9a572ca4b2fd938fb5d2edb5d790eaaf7a1e285cac9a6218ff4654861dbd2f7f",
+    "rust/shim/src/cli/doctor/clients.rs": "a2c02cd98d45f4bd6c7a29a1cf0bf2529ba2325796d35f42a3ddb2aa056bd08b",
+    "rust/shim/src/cli/doctor/display.rs": "22561290db522be32f9b75b781e6e7d4db42a48886ebb5e1dbef2af27cdc848a",
     "rust/shim/src/cli/doctor/handshake.rs": "54c580f0063e838fab86da2c716894648a425a213697d444509aa100d12a53a0",
-    "rust/shim/src/cli/doctor/mod.rs": "33727ed7fa8fff4e8268b46554401fb2aaa9ce7e4e3c905e83b879204ba56e98",
-    "rust/shim/src/cli/doctor/probes.rs": "4f2d543a3453281f5720fb63834269e49e1192750a4dbde37bf46ca66790b161",
-    "rust/shim/src/cli/doctor/proof.rs": "863892be59f52cd4140579a4869a214c86331a29bbfcf56263d19349f8dcfbb7",
+    "rust/shim/src/cli/doctor/mod.rs": "2f16a1ebcec9263cac32c72b9bfca0f173073ec89e285c8c39df5583d47830c5",
+    "rust/shim/src/cli/doctor/probes.rs": "bb3125030f5b6b696a5cda371ebd108a8ba38198e1dc901ad12c8b2228f5d464",
+    "rust/shim/src/cli/doctor/proof.rs": "80fd710f5e6a0d19f4de3c580ed790367c35c7d628fd0e944e72eca354dde0c9",
     "rust/shim/src/cli/doctor/proof_diagnostics.rs": "211bdb9072a840db3aade9033735b3de03e74ac1cae5c880a66e82232004d9f9",
     "rust/shim/src/cli/doctor/proof_process.rs": "9c485255fcae4fb13cec74bf377f4c3d321d779ff024678ae8f34d760373ec3a",
-    "rust/shim/src/cli/doctor/pyenv.rs": "5cab03cb8eb68592e6ddde009dde6a364dfccbd172aba242d32ef7632e6bd0ec",
+    "rust/shim/src/cli/doctor/pyenv.rs": "d9c270c19d54eb39d523dab17366ed0d81b3e89a8aab61266b2c227928215796",
     "rust/shim/src/cli/doctor/pyjson.rs": "4a60384b4a0d3329c5b95de68d860d846f44acb67b35a79d64d248719dd57d1e",
     "rust/shim/src/cli/doorbell_files.rs": "d14f64a6e978d508d5b281bf56704da83b5dc36ad1b6444a44bf4481c16c2c6b",
     "rust/shim/src/cli/doorbell_json.rs": "331e9444e3b4491af7664c456a54217262618eaec613626f09211d95c4b982c3",
@@ -3091,7 +3092,78 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:50",
+          "location": "rust/shim/src/cli/doctor/mod.rs:151",
+          "shape": {
+            "argv_source": "doctor : {cause}\");",
+            "channel": "argv",
+            "complete": false,
+            "expression": ": {cause}\");",
+            "omitted_optional": null,
+            "parameters": {}
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/mod.rs:184",
+          "shape": {
+            "argv_source": "doctor [--timeout SECONDS] [--host HOST] [--agent-state FILE] [--disposable-proof]\\npseudolife-mcp doctor: --disposable-proof cannot use a saved --agent-state\\n\";",
+            "channel": "argv",
+            "complete": false,
+            "expression": "[--timeout SECONDS] [--host HOST] [--agent-state FILE] [--disposable-proof]\\npseudolife-mcp doctor: --disposable-proof cannot use a saved --agent-state\\n\";",
+            "omitted_optional": null,
+            "parameters": {
+              "--agent-state": {
+                "expression": "FILE]"
+              },
+              "--disposable-proof": {
+                "expression": "cannot"
+              },
+              "--host": {
+                "expression": "HOST]"
+              },
+              "--timeout": {
+                "expression": "SECONDS]"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/mod.rs:37",
+          "shape": {
+            "argv_source": "doctor [--timeout SECONDS] [--host HOST] [--agent-state FILE] [--disposable-proof]\\n\\nRead-only diagnostics; --disposable-proof instead uses an explicitly disposable database.\\n  --timeout SECONDS  Positive finite seconds, at most 4294967295 (default 20).\\n  --host HOST        codex, claude-code, claude-desktop, or generic (default).\\n  --agent-state FILE Read a private saved registration; never rewrites it.\\n  -h, --help         Show this help.\\nOptions accept --name=value; repeated options use the last value.\\n\";",
+            "channel": "argv",
+            "complete": false,
+            "expression": "[--timeout SECONDS] [--host HOST] [--agent-state FILE] [--disposable-proof]\\n\\nRead-only diagnostics; --disposable-proof instead uses an explicitly disposable database.\\n  --timeout SECONDS  Positive finite seconds, at most 4294967295 (default 20).\\n  --host HOST        codex, claude-code, claude-desktop, or generic (default).\\n  --agent-state FILE Read a private saved registration; never rewrites it.\\n  -h, --help         Show this help.\\nOptions accept --name=value; repeated options use the last value.\\n\";",
+            "omitted_optional": null,
+            "parameters": {
+              "--agent-state": {
+                "expression": "FILE"
+              },
+              "--disposable-proof": {
+                "expression": "instead"
+              },
+              "--help": {
+                "expression": "Show"
+              },
+              "--host": {
+                "expression": "HOST"
+              },
+              "--name": {
+                "expression": "value;"
+              },
+              "--timeout": {
+                "expression": "SECONDS"
+              }
+            }
+          }
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/proof.rs:54",
           "shape": {
             "argv_source": "doctor --disposable-proof with an explicit disposable PSEUDOLIFE_TEST_DATABASE_URL), or install the native daemon; nothing was changed.\"})",
             "channel": "argv",
@@ -5343,7 +5415,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:323",
+          "location": "rust/shim/src/cli/doctor/mod.rs:406",
           "shape": {
             "argv_source": "invite on the daemon host, or the daemon's ops/.env), without extra characters, then retry\"",
             "channel": "argv",
@@ -5356,7 +5428,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:158",
+          "location": "rust/shim/src/cli/doctor/probes.rs:162",
           "shape": {
             "argv_source": "invite <name> --replace` on the daemon host, then `pseudolife-mcp connect <url> --read-code` here\"",
             "channel": "argv",
@@ -5369,7 +5441,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:161",
+          "location": "rust/shim/src/cli/doctor/probes.rs:165",
           "shape": {
             "argv_source": "invite <machine>` on the daemon host\"",
             "channel": "argv",
@@ -10450,7 +10522,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:1014",
+          "location": "rust/shim/src/cli/doctor/mod.rs:1199",
           "shape": {
             "argv_source": "update --clients-only --tag {daemon_version} (the daemon's release as a new shim runtime beside the running one; from a checkout: python ops/update_clients.py --only shim; no session has to close), or update the daemon with pseudolife-mcp update; then start a new session and retry.\"",
             "channel": "argv",
@@ -13467,7 +13539,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:153",
+          "location": "rust/shim/src/cli/doctor/probes.rs:157",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13483,7 +13555,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:161",
+          "location": "rust/shim/src/cli/doctor/probes.rs:165",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13499,7 +13571,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:262",
+          "location": "rust/shim/src/cli/doctor/probes.rs:303",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -13961,7 +14033,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:161",
+          "location": "rust/shim/src/cli/doctor/probes.rs:165",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -14311,7 +14383,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:153",
+          "location": "rust/shim/src/cli/doctor/probes.rs:157",
           "shape": {
             "channel": "config",
             "complete": false,
@@ -26474,7 +26546,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/agent.rs:361",
+          "location": "rust/shim/src/cli/doctor/agent.rs:467",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -26486,7 +26558,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:575",
+          "location": "rust/shim/src/cli/doctor/proof.rs:579",
           "shape": {
             "channel": "body",
             "complete": false,
@@ -28198,7 +28270,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:279",
+          "location": "rust/shim/src/cli/doctor/clients.rs:330",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28211,7 +28283,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:374",
+          "location": "rust/shim/src/cli/doctor/clients.rs:426",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -28532,7 +28604,7 @@
         },
         {
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:149",
+          "location": "rust/shim/src/cli/doctor/clients.rs:186",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -29417,7 +29489,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:156",
+          "location": "rust/shim/src/cli/doctor/clients.rs:193",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29430,7 +29502,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:180",
+          "location": "rust/shim/src/cli/doctor/clients.rs:217",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -29443,7 +29515,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:280",
+          "location": "rust/shim/src/cli/doctor/clients.rs:331",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -30950,7 +31022,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:395",
+          "location": "rust/shim/src/cli/doctor/clients.rs:455",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/clients.rs:459",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31077,7 +31162,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:307",
+          "location": "rust/shim/src/cli/doctor/clients.rs:363",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -31090,7 +31175,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:375",
+          "location": "rust/shim/src/cli/doctor/clients.rs:427",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -39044,7 +39129,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:518",
+          "location": "rust/shim/src/cli/doctor/proof.rs:522",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40518,7 +40603,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:13",
+          "location": "rust/shim/src/cli/doctor/clients.rs:12",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40531,7 +40616,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:1083",
+          "location": "rust/shim/src/cli/doctor/mod.rs:1014",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40544,7 +40629,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:250",
+          "location": "rust/shim/src/cli/doctor/mod.rs:1082",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40557,7 +40642,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:677",
+          "location": "rust/shim/src/cli/doctor/mod.rs:1111",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40570,7 +40655,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:819",
+          "location": "rust/shim/src/cli/doctor/mod.rs:1268",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40583,7 +40668,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:853",
+          "location": "rust/shim/src/cli/doctor/mod.rs:765",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40596,7 +40681,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:907",
+          "location": "rust/shim/src/cli/doctor/mod.rs:949",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -40609,7 +40694,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:929",
+          "location": "rust/shim/src/cli/doctor/mod.rs:983",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/probes.rs:351",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42722,7 +42820,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:277",
+          "location": "rust/shim/src/cli/doctor/proof.rs:281",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -42735,7 +42833,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:517",
+          "location": "rust/shim/src/cli/doctor/proof.rs:521",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44046,7 +44144,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:519",
+          "location": "rust/shim/src/cli/doctor/proof.rs:523",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44059,7 +44157,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:86",
+          "location": "rust/shim/src/cli/doctor/proof.rs:90",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -44471,7 +44569,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:528",
+          "location": "rust/shim/src/cli/doctor/proof.rs:532",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -46304,7 +46402,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:529",
+          "location": "rust/shim/src/cli/doctor/proof.rs:533",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49347,7 +49445,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:12",
+          "location": "rust/shim/src/cli/doctor/clients.rs:11",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49360,7 +49458,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:371",
+          "location": "rust/shim/src/cli/doctor/clients.rs:423",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49373,7 +49471,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:65",
+          "location": "rust/shim/src/cli/doctor/clients.rs:90",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49386,7 +49484,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:257",
+          "location": "rust/shim/src/cli/doctor/mod.rs:322",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49399,7 +49497,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:287",
+          "location": "rust/shim/src/cli/doctor/mod.rs:370",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49412,7 +49510,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:290",
+          "location": "rust/shim/src/cli/doctor/mod.rs:373",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49425,7 +49523,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:317",
+          "location": "rust/shim/src/cli/doctor/mod.rs:400",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49438,7 +49536,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:320",
+          "location": "rust/shim/src/cli/doctor/mod.rs:403",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49451,7 +49549,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:323",
+          "location": "rust/shim/src/cli/doctor/mod.rs:406",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49464,7 +49562,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:332",
+          "location": "rust/shim/src/cli/doctor/mod.rs:415",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49477,7 +49575,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:668",
+          "location": "rust/shim/src/cli/doctor/mod.rs:777",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49490,20 +49588,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:684",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:695",
+          "location": "rust/shim/src/cli/doctor/mod.rs:788",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49516,7 +49601,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/probes.rs:155",
+          "location": "rust/shim/src/cli/doctor/probes.rs:159",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -49529,7 +49614,33 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:530",
+          "location": "rust/shim/src/cli/doctor/proof.rs:534",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/proof.rs:897",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/pyenv.rs:54",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53531,7 +53642,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:12",
+          "location": "rust/shim/src/cli/doctor/clients.rs:11",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53544,7 +53655,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:372",
+          "location": "rust/shim/src/cli/doctor/clients.rs:424",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53557,7 +53668,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:65",
+          "location": "rust/shim/src/cli/doctor/clients.rs:90",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53570,7 +53681,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:250",
+          "location": "rust/shim/src/cli/doctor/mod.rs:320",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53583,7 +53694,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:255",
+          "location": "rust/shim/src/cli/doctor/mod.rs:373",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53596,7 +53707,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:290",
+          "location": "rust/shim/src/cli/doctor/mod.rs:400",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53609,7 +53720,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:317",
+          "location": "rust/shim/src/cli/doctor/mod.rs:406",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53622,7 +53733,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:323",
+          "location": "rust/shim/src/cli/doctor/mod.rs:415",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53635,7 +53746,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:332",
+          "location": "rust/shim/src/cli/doctor/mod.rs:776",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -53648,33 +53759,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:669",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:683",
-          "shape": {
-            "channel": "environment",
-            "complete": false,
-            "expression": "reference",
-            "omitted_optional": null,
-            "parameters": {}
-          },
-          "usage": "reference"
-        },
-        {
-          "dynamic": "unresolved",
-          "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:694",
+          "location": "rust/shim/src/cli/doctor/mod.rs:787",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56192,7 +56277,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:531",
+          "location": "rust/shim/src/cli/doctor/proof.rs:535",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -56995,7 +57080,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:616",
+          "location": "rust/shim/src/cli/doctor/clients.rs:684",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -57258,7 +57343,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:615",
+          "location": "rust/shim/src/cli/doctor/clients.rs:683",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59083,7 +59168,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:118",
+          "location": "rust/shim/src/cli/doctor/mod.rs:189",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59096,7 +59181,20 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/mod.rs:123",
+          "location": "rust/shim/src/cli/doctor/mod.rs:193",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/mod.rs:197",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59122,7 +59220,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:130",
+          "location": "rust/shim/src/cli/doctor/proof.rs:134",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -59135,7 +59233,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:50",
+          "location": "rust/shim/src/cli/doctor/proof.rs:54",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -60113,7 +60211,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:310",
+          "location": "rust/shim/src/cli/doctor/clients.rs:366",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -60126,7 +60224,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/clients.rs:376",
+          "location": "rust/shim/src/cli/doctor/clients.rs:428",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -61163,7 +61261,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "static",
-          "location": "rust/shim/src/cli/doctor/proof.rs:270",
+          "location": "rust/shim/src/cli/doctor/proof.rs:274",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -81074,7 +81172,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/doctor/mod.rs:1035",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1220",
       "name": "mcp",
       "shape": {
         "argv_source": "mcp ; reinstall there if stale, then retry.\"",
@@ -81088,7 +81186,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/doctor/probes.rs:171",
+      "location": "rust/shim/src/cli/doctor/probes.rs:175",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup` on the daemon host. By hand: in the daemon's config.yaml (file-only), set coordination.maintainer.rp_id to the lower-case host name the Console is served at and coordination.maintainer.origin to exactly https://<rp_id> or https://<rp_id>:<port> (for local use only, rp_id localhost with origin http://localhost:<port>). Restart the daemon, then open the Console at that origin.\";",
@@ -81102,7 +81200,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "cli",
-      "location": "rust/shim/src/cli/doctor/probes.rs:262",
+      "location": "rust/shim/src/cli/doctor/probes.rs:303",
       "name": "maintainer",
       "shape": {
         "argv_source": "maintainer setup)\".to_owned(),",
@@ -82192,7 +82290,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "rust/shim/src/cli/doctor/probes.rs:171",
+      "location": "rust/shim/src/cli/doctor/probes.rs:175",
       "name": "MaintainerConfig.origin",
       "shape": {
         "channel": "config",
@@ -82206,7 +82304,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "rust/shim/src/cli/doctor/probes.rs:171",
+      "location": "rust/shim/src/cli/doctor/probes.rs:175",
       "name": "MaintainerConfig.rp_id",
       "shape": {
         "channel": "config",
@@ -82220,7 +82318,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "config",
-      "location": "rust/shim/src/cli/doctor/probes.rs:262",
+      "location": "rust/shim/src/cli/doctor/probes.rs:303",
       "name": "CoordinationConfig.maintainer",
       "shape": {
         "channel": "config",
@@ -85006,7 +85104,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:118",
+      "location": "rust/shim/src/cli/doctor/proof.rs:122",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -85020,7 +85118,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:520",
+      "location": "rust/shim/src/cli/doctor/proof.rs:524",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -85034,7 +85132,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:522",
+      "location": "rust/shim/src/cli/doctor/proof.rs:526",
       "name": "PSEUDOLIFE_DAEMON_RERANK_DIR",
       "shape": {
         "channel": "environment",
@@ -85048,7 +85146,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:525",
+      "location": "rust/shim/src/cli/doctor/proof.rs:529",
       "name": "PSEUDOLIFE_DAEMON_ORT_THREADS",
       "shape": {
         "channel": "environment",
@@ -85062,7 +85160,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:527",
+      "location": "rust/shim/src/cli/doctor/proof.rs:531",
       "name": "PSEUDOLIFE_DAEMON_DEBUG_BOARD",
       "shape": {
         "channel": "environment",
@@ -85076,7 +85174,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:55",
+      "location": "rust/shim/src/cli/doctor/proof.rs:59",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -85090,7 +85188,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:80",
+      "location": "rust/shim/src/cli/doctor/proof.rs:84",
       "name": "PSEUDOLIFE_DAEMON_ONNX_DIR",
       "shape": {
         "channel": "environment",
@@ -85104,7 +85202,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "environment",
-      "location": "rust/shim/src/cli/doctor/proof.rs:85",
+      "location": "rust/shim/src/cli/doctor/proof.rs:89",
       "name": "PSEUDOLIFE_DAEMON_MODELS_DIR",
       "shape": {
         "channel": "environment",
@@ -86447,7 +86545,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/agent.rs:361",
+      "location": "rust/shim/src/cli/doctor/agent.rs:467",
       "method": "POST",
       "name": "/api/coordination/context",
       "shape": {
@@ -86461,7 +86559,35 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/probes.rs:209",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1010",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1014",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/probes.rs:237",
       "method": "GET",
       "name": "/api/maintainer",
       "shape": {
@@ -86475,7 +86601,63 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/probes.rs:289",
+      "location": "rust/shim/src/cli/doctor/probes.rs:241",
+      "method": "GET",
+      "name": "/api/maintainer",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/probes.rs:256",
+      "method": "GET",
+      "name": "/api/maintainer",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/probes.rs:283",
+      "method": "GET",
+      "name": "/api/maintainer",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/probes.rs:284",
+      "method": "GET",
+      "name": "/api/maintainer",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/probes.rs:345",
       "method": "GET",
       "name": "/health",
       "shape": {
@@ -86489,7 +86671,49 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/proof.rs:575",
+      "location": "rust/shim/src/cli/doctor/probes.rs:351",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/probes.rs:365",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/probes.rs:374",
+      "method": "GET",
+      "name": "/health",
+      "shape": {
+        "channel": "query",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "static",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/proof.rs:579",
       "method": "POST",
       "name": "/api/coordination/context",
       "shape": {
@@ -86503,7 +86727,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/proof.rs:580",
+      "location": "rust/shim/src/cli/doctor/proof.rs:584",
       "method": "GET",
       "name": "/health",
       "shape": {
@@ -86517,7 +86741,7 @@
       "dynamic": "unresolved",
       "evidence": "static",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/proof.rs:646",
+      "location": "rust/shim/src/cli/doctor/proof.rs:650",
       "method": "POST",
       "name": "/api/coordination/{action}",
       "shape": {
@@ -90561,7 +90785,21 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/mod.rs:231",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1037",
+      "method": null,
+      "name": "/health",
+      "shape": {
+        "channel": "body",
+        "complete": false,
+        "expression": "Request helper, URL suffix or body requires resolution at this location.",
+        "parameters": {}
+      }
+    },
+    {
+      "dynamic": "unresolved",
+      "evidence": "unverified",
+      "kind": "route",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1111",
       "method": null,
       "name": "/health",
       "shape": {
@@ -90589,7 +90827,7 @@
       "dynamic": "unresolved",
       "evidence": "unverified",
       "kind": "route",
-      "location": "rust/shim/src/cli/doctor/mod.rs:929",
+      "location": "rust/shim/src/cli/doctor/mod.rs:298",
       "method": null,
       "name": "/health",
       "shape": {
@@ -122358,132 +122596,138 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/agent.rs:361",
+      "location": "rust/shim/src/cli/doctor/agent.rs:467",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:context"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/agent.rs:361",
+      "location": "rust/shim/src/cli/doctor/agent.rs:467",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/context"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/agent.rs:361",
+      "location": "rust/shim/src/cli/doctor/agent.rs:467",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:12",
+      "location": "rust/shim/src/cli/doctor/clients.rs:11",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:12",
+      "location": "rust/shim/src/cli/doctor/clients.rs:11",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:13",
+      "location": "rust/shim/src/cli/doctor/clients.rs:12",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:156",
+      "location": "rust/shim/src/cli/doctor/clients.rs:193",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE_HOOK"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:180",
+      "location": "rust/shim/src/cli/doctor/clients.rs:217",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE_HOOK"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:279",
+      "location": "rust/shim/src/cli/doctor/clients.rs:330",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:280",
+      "location": "rust/shim/src/cli/doctor/clients.rs:331",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_WAKE_HOOK"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:307",
+      "location": "rust/shim/src/cli/doctor/clients.rs:363",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:310",
+      "location": "rust/shim/src/cli/doctor/clients.rs:366",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:371",
+      "location": "rust/shim/src/cli/doctor/clients.rs:423",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:372",
+      "location": "rust/shim/src/cli/doctor/clients.rs:424",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:374",
+      "location": "rust/shim/src/cli/doctor/clients.rs:426",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_AGENT_COORDINATION"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:375",
+      "location": "rust/shim/src/cli/doctor/clients.rs:427",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_DOORBELL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:376",
+      "location": "rust/shim/src/cli/doctor/clients.rs:428",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_WRITER_ID"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:395",
+      "location": "rust/shim/src/cli/doctor/clients.rs:455",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_CODEX_BIN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:615",
+      "location": "rust/shim/src/cli/doctor/clients.rs:459",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_CODEX_BIN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/clients.rs:683",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_RUNTIMES"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:616",
+      "location": "rust/shim/src/cli/doctor/clients.rs:684",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SHIM_LAUNCHER"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:65",
+      "location": "rust/shim/src/cli/doctor/clients.rs:90",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/clients.rs:65",
+      "location": "rust/shim/src/cli/doctor/clients.rs:90",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
@@ -122501,39 +122745,93 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:1014",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:update"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:1035",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1010",
       "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:cli:mcp"
+      "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:1083",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1014",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:118",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:123",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:231",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1014",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1037",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1082",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1111",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1111",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1199",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:update"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1220",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:cli:mcp"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:1268",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:151",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:doctor"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:184",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:doctor"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:189",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:193",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:197",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
@@ -122543,30 +122841,6 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:250",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:250",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:255",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:257",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
       "location": "rust/shim/src/cli/doctor/mod.rs:26",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
@@ -122585,229 +122859,271 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:287",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:290",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:290",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:317",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:317",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+      "location": "rust/shim/src/cli/doctor/mod.rs:298",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
       "location": "rust/shim/src/cli/doctor/mod.rs:320",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:322",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:323",
+      "location": "rust/shim/src/cli/doctor/mod.rs:37",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:doctor"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:370",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:373",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:373",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:400",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:400",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:403",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:406",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:323",
+      "location": "rust/shim/src/cli/doctor/mod.rs:406",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:323",
+      "location": "rust/shim/src/cli/doctor/mod.rs:406",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:332",
+      "location": "rust/shim/src/cli/doctor/mod.rs:415",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:332",
+      "location": "rust/shim/src/cli/doctor/mod.rs:415",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:668",
+      "location": "rust/shim/src/cli/doctor/mod.rs:765",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:776",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/mod.rs:777",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:669",
+      "location": "rust/shim/src/cli/doctor/mod.rs:787",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:677",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:683",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:684",
+      "location": "rust/shim/src/cli/doctor/mod.rs:788",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:694",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN_FILE"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:695",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:819",
+      "location": "rust/shim/src/cli/doctor/mod.rs:949",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:853",
+      "location": "rust/shim/src/cli/doctor/mod.rs:983",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:907",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:929",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/mod.rs:929",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/health"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:153",
+      "location": "rust/shim/src/cli/doctor/probes.rs:157",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:153",
+      "location": "rust/shim/src/cli/doctor/probes.rs:157",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.enabled"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:155",
+      "location": "rust/shim/src/cli/doctor/probes.rs:159",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:158",
+      "location": "rust/shim/src/cli/doctor/probes.rs:162",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:161",
+      "location": "rust/shim/src/cli/doctor/probes.rs:165",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "cli:invite"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:161",
+      "location": "rust/shim/src/cli/doctor/probes.rs:165",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:161",
+      "location": "rust/shim/src/cli/doctor/probes.rs:165",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig.allowed_principals"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:171",
+      "location": "rust/shim/src/cli/doctor/probes.rs:175",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:171",
+      "location": "rust/shim/src/cli/doctor/probes.rs:175",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:MaintainerConfig.origin"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:171",
+      "location": "rust/shim/src/cli/doctor/probes.rs:175",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:MaintainerConfig.rp_id"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:209",
+      "location": "rust/shim/src/cli/doctor/probes.rs:237",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:262",
+      "location": "rust/shim/src/cli/doctor/probes.rs:241",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:256",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:283",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:284",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/maintainer"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:303",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "config:CoordinationConfig"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:262",
+      "location": "rust/shim/src/cli/doctor/probes.rs:303",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:cli:maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:262",
+      "location": "rust/shim/src/cli/doctor/probes.rs:303",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:config:CoordinationConfig.maintainer"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/probes.rs:289",
+      "location": "rust/shim/src/cli/doctor/probes.rs:345",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:351",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_DAEMON_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:351",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:365",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/health"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/probes.rs:374",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
@@ -122819,163 +123135,175 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:118",
+      "location": "rust/shim/src/cli/doctor/proof.rs:122",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:130",
+      "location": "rust/shim/src/cli/doctor/proof.rs:134",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:270",
+      "location": "rust/shim/src/cli/doctor/proof.rs:274",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:_PSEUDOLIFE_PRODUCTION_DB"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:277",
+      "location": "rust/shim/src/cli/doctor/proof.rs:281",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:50",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "cli:doctor"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:50",
-      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
-      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:517",
+      "location": "rust/shim/src/cli/doctor/proof.rs:521",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATABASE_URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:518",
+      "location": "rust/shim/src/cli/doctor/proof.rs:522",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_CONFIG"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:519",
+      "location": "rust/shim/src/cli/doctor/proof.rs:523",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:520",
+      "location": "rust/shim/src/cli/doctor/proof.rs:524",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:522",
+      "location": "rust/shim/src/cli/doctor/proof.rs:526",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_RERANK_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:525",
+      "location": "rust/shim/src/cli/doctor/proof.rs:529",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ORT_THREADS"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:527",
+      "location": "rust/shim/src/cli/doctor/proof.rs:531",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_DEBUG_BOARD"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:528",
+      "location": "rust/shim/src/cli/doctor/proof.rs:532",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_HOST"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:529",
+      "location": "rust/shim/src/cli/doctor/proof.rs:533",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_PORT"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:530",
+      "location": "rust/shim/src/cli/doctor/proof.rs:534",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:531",
+      "location": "rust/shim/src/cli/doctor/proof.rs:535",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_RELEASE_CHECK"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:55",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
+      "location": "rust/shim/src/cli/doctor/proof.rs:54",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "cli:doctor"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:575",
+      "location": "rust/shim/src/cli/doctor/proof.rs:54",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_TEST_DATABASE_URL"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/proof.rs:579",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "coordination:context"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:575",
+      "location": "rust/shim/src/cli/doctor/proof.rs:579",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/api/coordination/context"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:575",
+      "location": "rust/shim/src/cli/doctor/proof.rs:579",
       "reason": "built URL"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:580",
+      "location": "rust/shim/src/cli/doctor/proof.rs:584",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:route:/health"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:646",
-      "reason": "Unknown or forwarded inventory target/shape.",
-      "surface": "inventory-gap:route:/api/coordination/{action}"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:646",
-      "reason": "built URL, forwarded request action/body"
-    },
-    {
-      "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:80",
+      "location": "rust/shim/src/cli/doctor/proof.rs:59",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:85",
+      "location": "rust/shim/src/cli/doctor/proof.rs:650",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:route:/api/coordination/{action}"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/proof.rs:650",
+      "reason": "built URL, forwarded request action/body"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/proof.rs:84",
+      "reason": "Unknown or forwarded inventory target/shape.",
+      "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_ONNX_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/proof.rs:89",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_DAEMON_MODELS_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "rust/shim/src/cli/doctor/proof.rs:86",
+      "location": "rust/shim/src/cli/doctor/proof.rs:897",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/proof.rs:90",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/pyenv.rs:54",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",

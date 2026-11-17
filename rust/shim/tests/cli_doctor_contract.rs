@@ -8,6 +8,121 @@ use std::{
 
 const REFUSAL: &str = "{\"ok\": false, \"error\": \"ExplicitDisposableDatabaseRequired\", \"recovery\": \"Set PSEUDOLIFE_TEST_DATABASE_URL to an explicitly disposable fixture server; no configured bank or bench default is used.\"}\n";
 
+// Each cell runs even on the baseline so its failure is observed separately.
+#[test]
+fn native_argument_cells_never_defer_or_echo_values() {
+    let home = Home::new();
+    let mut failures = Vec::new();
+    for (args, code, needle) in [
+        (vec!["--help"], 0, "Usage:"),
+        (vec!["-h"], 0, "Usage:"),
+        (
+            vec!["--timeout=20", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (
+            vec!["--host=codex", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (
+            vec!["--timeout", "1e2", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (
+            vec!["--timeout", "+20", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (
+            vec!["--timeout", "1000000.5", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (
+            vec!["--timeout", "20", "--timeout", "30", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (
+            vec!["--host", "generic", "--host", "codex", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (
+            vec!["--disposable-proof", "--disposable-proof"],
+            2,
+            "ExplicitDisposableDatabaseRequired",
+        ),
+        (vec!["--host", "w44-secret-value"], 2, "--host"),
+        (vec!["--timeout", "1e300"], 2, "--timeout"),
+        (vec!["--timeout", "NaN"], 2, "--timeout"),
+        (vec!["--timeout", "0"], 2, "--timeout"),
+        (vec!["--timeout", "-1"], 2, "--timeout"),
+        (vec!["--timeout"], 2, "--timeout"),
+        (vec!["--host"], 2, "--host"),
+        (vec!["--agent-state"], 2, "--agent-state"),
+        (vec!["--agent-state", ""], 2, "--agent-state"),
+        (vec!["--time", "20"], 2, "--help"),
+        (vec!["--dispos"], 2, "--help"),
+        (vec!["--disposable-proof=false"], 2, "--disposable-proof"),
+        (vec!["w44-secret-value"], 2, "--help"),
+    ] {
+        let output = command(&home).arg("doctor").args(&args).output().unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let ok = output.status.code() == Some(code)
+            && text.contains(needle)
+            && !text.contains("deferred")
+            && !text.contains("w44-secret-value");
+        eprintln!("native argument cell {args:?}: {ok}");
+        if !ok {
+            failures.push(args);
+        }
+    }
+    assert!(failures.is_empty(), "failed cells: {failures:?}");
+}
+
+#[test]
+fn native_agent_paths_report_findings_even_offline() {
+    let home = Home::new();
+    std::fs::create_dir(home.0.join("child")).unwrap();
+    let mut failures = Vec::new();
+    for name in [
+        "child/../missing.json",
+        "child/../bad.json",
+        "bad.json/",
+        "bad.json",
+    ] {
+        std::fs::write(
+            home.0.join("bad.json"),
+            br#"{"credential":"w44-secret-value","n":NaN}"#,
+        )
+        .unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .arg("--agent-state")
+            .arg(home.0.join(name))
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&output.stdout);
+        let ok = text.contains("agent_state")
+            && text.contains("--agent-state")
+            && text.contains("daemon_status")
+            && !text.contains("w44-secret-value")
+            && output.stderr.is_empty();
+        eprintln!("native agent path {name}: {ok}");
+        if !ok {
+            failures.push(name);
+        }
+    }
+    assert!(failures.is_empty(), "failed paths: {failures:?}");
+}
+
 fn command(home: &Home) -> Command {
     let mut command = home.command();
     command
@@ -24,13 +139,12 @@ fn refusal(output: Output) {
     assert!(output.stderr.is_empty());
 }
 
-fn deferred(output: Output) {
-    assert_eq!(output.status.code(), Some(1));
+fn usage_error(output: Output) {
+    assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
-    assert_eq!(
-        output.stderr,
-        native_text("pseudolife-stdio: mode 'doctor' is deferred in this candidate\n")
-    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("pseudolife-mcp doctor:"), "{stderr}");
+    assert!(!stderr.contains("deferred"));
 }
 
 #[test]
@@ -116,31 +230,21 @@ fn canonical_options_allow_any_order_and_the_four_hosts() {
 }
 
 #[test]
-fn noncanonical_arguments_defer_without_parser_diagnostics() {
+fn malformed_arguments_have_usage_diagnostics() {
     let home = Home::new();
     for arguments in [
         vec!["--time", "20"],
-        vec!["--timeout=20"],
-        vec!["--host=generic"],
-        vec!["--agent-state=owned-state.json"],
         vec!["--disposable-proof=false"],
         vec!["--dispos"],
         vec!["--h"],
-        vec!["--help"],
-        vec!["-h"],
-        vec!["--"],
         vec!["unexpected"],
         vec!["--host", "invalid"],
         vec!["--host"],
         vec!["--timeout"],
         vec!["--agent-state"],
         vec!["--agent-state", ""],
-        vec!["--agent-state", "-owned-state.json"],
-        vec!["--disposable-proof"],
-        vec!["--timeout", "20", "--timeout", "30"],
-        vec!["--host", "generic", "--host", "codex"],
     ] {
-        deferred(
+        usage_error(
             command(&home)
                 .args(["doctor", "--disposable-proof"])
                 .args(arguments)
@@ -150,10 +254,10 @@ fn noncanonical_arguments_defer_without_parser_diagnostics() {
     }
     let overflow = "9".repeat(400);
     for timeout in [
-        "", ".", "0", "-1", "-1\n", "-.5\n", "+20", "2_0", "nan", "inf", "1e2", " 20", "20\n",
-        "1.2.3", "２０", &overflow,
+        "", ".", "0", "-1", "-1\n", "-.5\n", "2_0", "nan", "inf", " 20", "20\n", "1.2.3", "２０",
+        &overflow,
     ] {
-        deferred(
+        usage_error(
             command(&home)
                 .args(["doctor", "--disposable-proof", "--timeout", timeout])
                 .output()
@@ -164,14 +268,15 @@ fn noncanonical_arguments_defer_without_parser_diagnostics() {
 }
 
 #[test]
-fn nonempty_proof_requires_native_prerequisites_and_help_stays_deferred() {
+fn nonempty_proof_requires_native_prerequisites_and_help_is_local() {
     let home = Home::new();
-    deferred(
-        command(&home)
-            .args(["doctor", "--disposable-proof", "--help"])
-            .output()
-            .unwrap(),
-    );
+    let output = command(&home)
+        .args(["doctor", "--disposable-proof", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+    assert!(output.stderr.is_empty());
     for dsn in [" ", "postgresql://fixture.invalid/disposable"] {
         let output = command(&home)
             .env("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
@@ -189,7 +294,7 @@ fn nonempty_proof_requires_native_prerequisites_and_help_stays_deferred() {
 }
 
 #[test]
-fn non_unicode_nonempty_dsn_stays_deferred() {
+fn non_unicode_nonempty_dsn_has_named_refusal() {
     #[cfg(unix)]
     let dsn = {
         use std::os::unix::ffi::OsStringExt;
@@ -201,12 +306,19 @@ fn non_unicode_nonempty_dsn_stays_deferred() {
         std::ffi::OsString::from_wide(&[0xd800])
     };
     let home = Home::new();
-    deferred(
-        command(&home)
-            .env("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
-            .args(["doctor", "--disposable-proof"])
-            .output()
-            .unwrap(),
+    let output = command(&home)
+        .env("PSEUDOLIFE_TEST_DATABASE_URL", dsn)
+        .args(["doctor", "--disposable-proof"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["error"], "DisposableDatabaseInvalid");
+    assert!(
+        parsed["recovery"]
+            .as_str()
+            .unwrap()
+            .contains("PSEUDOLIFE_TEST_DATABASE_URL")
     );
     assert_eq!(std::fs::read_dir(&home.0).unwrap().count(), 0);
 }
@@ -215,8 +327,6 @@ fn non_unicode_nonempty_dsn_stays_deferred() {
 
 use common::{Fixture, Reply, Setup};
 use serde_json::{Value, json};
-
-const DEFERRED: &str = "pseudolife-stdio: mode 'doctor' is deferred in this candidate\n";
 
 /// Every entry under `root`, with file bytes, so a run can be shown to
 /// leave the home as it found it.
@@ -499,7 +609,7 @@ struct RawDaemon {
 }
 
 impl RawDaemon {
-    fn start(answer: fn(&str) -> (Vec<u8>, u64)) -> Self {
+    fn start(answer: impl Fn(&str) -> (Vec<u8>, u64) + Send + Sync + 'static) -> Self {
         use std::io::{Read, Write};
         use std::sync::atomic::Ordering;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -507,6 +617,7 @@ impl RawDaemon {
         let url = format!("http://{}", listener.local_addr().unwrap());
         let paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let answer = std::sync::Arc::new(answer);
         let (seen, halt) = (paths.clone(), stop.clone());
         let thread = std::thread::spawn(move || {
             while !halt.load(Ordering::SeqCst) {
@@ -515,6 +626,7 @@ impl RawDaemon {
                     continue;
                 };
                 let (seen, halt) = (seen.clone(), halt.clone());
+                let answer = answer.clone();
                 std::thread::spawn(move || {
                     stream.set_nonblocking(false).unwrap();
                     let mut head = Vec::new();
@@ -591,7 +703,7 @@ fn a_maintainer_refusal_whose_body_never_arrives_is_not_checked() {
     assert_eq!(
         map["maintainer_passkeys"],
         json!({"state": "not_checked",
-               "line": "not checked - the daemon's maintainer answer was incomplete or in a form this client does not read"})
+               "line": "not checked - could not read maintainer answer: GET /api/maintainer returned HTTP 409 and its refusal body was incomplete; restore the daemon connection and retry"})
     );
     // The 404 /health is no health answer: the daemon is unavailable.
     assert_eq!(map["error"], json!("DaemonUnavailable"));
@@ -623,51 +735,32 @@ fn a_health_redirect_to_ftp_is_an_unrecognized_daemon() {
     assert_eq!(*daemon.paths.lock().unwrap(), ["/health"]);
 }
 
-fn assert_deferred(output: &Output) {
-    assert_eq!(output.status.code(), Some(1));
-    assert!(
-        output.stdout.is_empty(),
-        "{:?}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    assert_eq!(output.stderr, native_text(DEFERRED));
-}
-
 type Prepare = fn(&Home, &mut Command);
 
 #[test]
-fn shapes_beyond_the_port_defer_before_any_request() {
-    // Only argument shapes still defer: an explicit --agent-state path the
-    // native resolver does not decide, and timeouts past the cap.
-    let cases: [(&str, Prepare); 3] = [
-        ("saved instance path through ..", |home, command| {
-            std::fs::create_dir_all(home.0.join("x")).unwrap();
-            std::fs::write(home.0.join("state.json"), b"{}").unwrap();
-            command
-                .arg("--agent-state")
-                .arg(home.0.join("x").join("..").join("state.json"));
-        }),
-        ("timeout past the cap", |_, command| {
-            command.args(["--timeout", "100000000000000000000"]);
-        }),
-        ("timeout just past the cap", |_, command| {
-            command.args(["--timeout", "1000000.5"]);
-        }),
-    ];
-    for (name, prepare) in cases {
-        let home = Home::new();
-        let fixture = Fixture::start();
-        let mut command = diagnose(&home, &fixture.url);
-        prepare(&home, &mut command);
-        let before = tree(&home.0);
-        let output = command.output().unwrap();
-        assert_deferred(&output);
-        assert!(
-            fixture.records.lock().unwrap().is_empty(),
-            "{name}: requested"
-        );
-        assert_eq!(tree(&home.0), before, "{name}: home changed");
-    }
+fn formerly_deferred_paths_and_timeouts_have_native_results() {
+    let home = Home::new();
+    std::fs::create_dir_all(home.0.join("x")).unwrap();
+    std::fs::write(home.0.join("state.json"), b"{}").unwrap();
+    let before = tree(&home.0);
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(home.0.join("x/../state.json"))
+        .output()
+        .unwrap();
+    assert!(report(&output)["agent_state"].is_string());
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .args(["--timeout", "1000000.5"])
+        .output()
+        .unwrap();
+    assert_eq!(report(&output)["daemon_status"], "unreachable");
+    usage_error(
+        diagnose(&home, "http://127.0.0.1:1")
+            .args(["--timeout", "100000000000000000000"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(tree(&home.0), before);
 }
 
 #[test]
@@ -813,13 +906,10 @@ fn client_files_the_native_client_cannot_read_are_named_and_the_rest_runs() {
             // Searched in the platform's default directories instead: no
             // `unknown (not read ...)` fallback anywhere in the report
             // (whether those directories hold pseudolife-mcp is the host's).
-            assert!(!text.contains("not read by the native client"), "{text}");
+            assert!(!text.contains("could not read"), "{text}");
             assert!(map["path_resolution"].get("on_path").is_some(), "{text}");
         } else {
-            assert!(
-                text.contains("not read by the native client"),
-                "{name}: {text}"
-            );
+            assert!(text.contains("could not read"), "{name}: {text}");
         }
     }
 }
@@ -1510,13 +1600,941 @@ fn a_missing_bearer_beside_an_unread_registration_names_both() {
         map["registrations"]
             .as_str()
             .unwrap()
-            .starts_with("not read by the native client")
+            .starts_with("could not read")
     );
     let recovery = map["recovery"].as_str().unwrap();
     assert!(recovery.contains("PSEUDOLIFE_MCP_TOKEN_FILE"), "{recovery}");
-    assert!(
-        recovery.contains("not read by the native client"),
-        "{recovery}"
-    );
+    assert!(recovery.contains("Could not read"), "{recovery}");
     assert_eq!(output.status.code(), Some(1));
+}
+
+fn private_state(path: &std::path::Path, bytes: &[u8]) {
+    use std::io::Write;
+    let mut file = pseudolife_stdio::board::state::create(path).unwrap();
+    file.file.write_all(bytes).unwrap();
+}
+
+#[test]
+fn native_agent_json_cells_and_private_path_near_misses() {
+    let home = Home::new();
+    std::fs::create_dir(home.0.join("child")).unwrap();
+    let mut failures = Vec::new();
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(home.0.join("child"))
+        .output()
+        .unwrap();
+    if !report(&output)["agent_state"]
+        .as_str()
+        .is_some_and(|line| line.contains("not a regular file"))
+    {
+        failures.push(8);
+    }
+    for (index, bytes, cause) in [
+        (0, br#"{"n":NaN}"#.to_vec(), "JSON"),
+        (1, br#"{"n":Infinity}"#.to_vec(), "JSON"),
+        (2, br#"{"n":"\ud800"}"#.to_vec(), "JSON"),
+        (3, b"\xff".to_vec(), "UTF-8"),
+        (4, b"[]".to_vec(), "object"),
+        (5, b"{}".to_vec(), "bank_url"),
+        (6, vec![b' '; 16385], "16384"),
+        (
+            7,
+            format!("{}0{}", "[".repeat(257), "]".repeat(257)).into_bytes(),
+            "256",
+        ),
+    ] {
+        let path = home.0.join(format!("state-{index}.json"));
+        private_state(&path, &bytes);
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .arg("--agent-state")
+            .arg(&path)
+            .output()
+            .unwrap();
+        let parsed: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
+        let ok = parsed["agent_state"]
+            .as_str()
+            .is_some_and(|line| line.contains(cause) && line.contains(';'));
+        eprintln!("agent JSON cell {index}: {ok}");
+        if !ok {
+            failures.push(index);
+        }
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+    let good = home.0.join("valid.json");
+    private_state(&good, br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"w44-secret-value","extra":"NaN Infinity \ud83d\ude00"}"#);
+    for path in [
+        good.clone(),
+        home.0.join("child/../valid.json"),
+        home.0.join("valid.json/"),
+    ] {
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .arg("--agent-state")
+            .arg(path)
+            .output()
+            .unwrap();
+        let map = report(&output);
+        assert!(!map.contains_key("agent_state"), "{map:?}");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+    }
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+#[test]
+fn native_non_unicode_arguments_and_environment_have_named_results() {
+    #[cfg(unix)]
+    let value = {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(vec![0xff])
+    };
+    #[cfg(windows)]
+    let value = {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[0xd800])
+    };
+    let home = Home::new();
+    let mut failures = Vec::new();
+    for key in [
+        "HOME",
+        "USERPROFILE",
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "PATH",
+        "PSEUDOLIFE_SHIM_LAUNCHER",
+    ] {
+        if (key == "HOME" && cfg!(windows)) || (key == "USERPROFILE" && cfg!(unix)) {
+            continue;
+        }
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("CODEX_HOME")
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", "fixture")
+            .env(key, &value)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&output.stdout);
+        let ok = text.contains(key) && text.contains("Unicode") && text.contains("daemon_status");
+        eprintln!("non-Unicode environment {key}: {ok}");
+        if !ok {
+            failures.push(key);
+        }
+    }
+    let output = command(&home)
+        .args(["doctor", "--disposable-proof"])
+        .env("PSEUDOLIFE_TEST_DATABASE_URL", &value)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    if output.status.code() != Some(2)
+        || !text.contains("PSEUDOLIFE_TEST_DATABASE_URL")
+        || !text.contains("Unicode")
+    {
+        failures.push("proof DSN");
+    }
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(&value)
+        .output()
+        .unwrap();
+    if !String::from_utf8_lossy(&output.stdout).contains("agent_state") {
+        failures.push("agent path");
+    }
+    let good = home.0.join(&value);
+    private_state(&good, br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"w44-secret-value"}"#);
+    for inline in [false, true] {
+        let mut command = diagnose(&home, "http://127.0.0.1:1");
+        if inline {
+            let mut argument = std::ffi::OsString::from("--agent-state=");
+            argument.push(&good);
+            command.arg(argument);
+        } else {
+            command.arg("--agent-state").arg(&good);
+        }
+        let output = command.output().unwrap();
+        let parsed = serde_json::from_slice::<Value>(&output.stdout).ok();
+        let ok = parsed.as_ref().is_some_and(|value| {
+            value.get("daemon_status").is_some() && value.get("agent_state").is_none()
+        });
+        eprintln!("existing non-Unicode agent path (inline={inline}): {ok}");
+        if !ok {
+            failures.push(if inline {
+                "inline non-Unicode agent path"
+            } else {
+                "existing non-Unicode agent path"
+            });
+        }
+    }
+    let output = command(&home).arg("doctor").arg(&value).output().unwrap();
+    if output.status.code() != Some(2)
+        || !String::from_utf8_lossy(&output.stderr).contains("Unicode")
+    {
+        failures.push("option");
+    }
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+#[test]
+fn native_saved_connection_failure_does_not_prevent_other_checks() {
+    let home = Home::new();
+    std::fs::create_dir_all(home.0.join("codex/pseudolife")).unwrap();
+    private_state(
+        &home.0.join("codex/pseudolife/connection.json"),
+        b"{broken w44-secret-value",
+    );
+    let output = command(&home)
+        .arg("doctor")
+        .env_remove("PSEUDOLIFE_MCP_DAEMON_URL")
+        .env("CODEX_THREAD_ID", "fixture")
+        .env("PATH", home.0.join("absent"))
+        .output()
+        .unwrap();
+    let map = report(&output);
+    assert!(map["host_connection"].as_str().unwrap().contains("Codex"));
+    assert_eq!(map["daemon_status"], "not_checked");
+    assert!(map.contains_key("path_resolution"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+    // An explicit intended daemon bypasses the broken saved connection.
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .env("CODEX_THREAD_ID", "fixture")
+        .output()
+        .unwrap();
+    assert!(!report(&output).contains_key("host_connection"));
+}
+
+#[test]
+fn native_agent_link_and_plain_file_are_distinguished() {
+    let home = Home::new();
+    let path = home.0.join("state.json");
+    private_state(&path, br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"w44-secret-value"}"#);
+    let link = home.0.join("link.json");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&path, &link).unwrap();
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(&link)
+        .output()
+        .unwrap();
+    std::fs::remove_file(link).unwrap();
+    let map = report(&output);
+    assert!(map["agent_state"].as_str().unwrap().contains("link"));
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        !report(&output).contains_key("agent_state"),
+        "{:?}",
+        report(&output)
+    );
+}
+
+#[test]
+fn native_trusted_directory_redirect_is_read_normally() {
+    let home = Home::new();
+    // TEMP can grant other users Modify. Protect only this disposable holder.
+    pseudolife_stdio::board::state::private_dir(&home.0).unwrap();
+    let directory = home.0.join("original");
+    pseudolife_stdio::board::state::private_dir(&directory).unwrap();
+    private_state(&directory.join("state.json"), br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"w44-secret-value"}"#);
+    let link = home.0.join("redirect");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&directory, &link).unwrap();
+    #[cfg(windows)]
+    {
+        let output = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&directory)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(link.join("state.json"))
+        .output()
+        .unwrap();
+    #[cfg(windows)]
+    std::fs::remove_dir(link).unwrap();
+    #[cfg(unix)]
+    std::fs::remove_file(link).unwrap();
+    assert!(
+        !report(&output).contains_key("agent_state"),
+        "{:?}",
+        report(&output)
+    );
+}
+
+#[test]
+fn native_probe_header_failure_names_cause_and_continues() {
+    let daemon = RawDaemon::start(|path| {
+        if path == "/api/hook/coordination-start" {
+            (b"HTTP/1.1 200 OK\r\nX-PL-Board: on\r\nX-PL-Board: on\r\nContent-Length: 2\r\n\r\n{}".to_vec(), 0)
+        } else {
+            (b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 21\r\n\r\n{\"status\":\"degraded\"}".to_vec(), 0)
+        }
+    });
+    let home = Home::new();
+    let output = diagnose(&home, &daemon.url)
+        .env("PSEUDOLIFE_MCP_TOKEN", "w44-secret-value")
+        .output()
+        .unwrap();
+    let map = report(&output);
+    assert!(map["board"].as_str().unwrap().contains("X-PL-Board"));
+    assert!(
+        daemon
+            .paths
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|path| path == "/health")
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+}
+
+#[cfg(unix)]
+#[test]
+fn native_untrusted_directory_redirect_is_a_private_finding() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let directory = home.0.join("original");
+    std::fs::create_dir(&directory).unwrap();
+    private_state(&directory.join("state.json"), br#"{"bank_url":"http://127.0.0.1:1","agent_id":"fixture","credential":"w44-secret-value"}"#);
+    let link = home.0.join("w44-secret-value");
+    std::os::unix::fs::symlink(&directory, &link).unwrap();
+    std::fs::set_permissions(&home.0, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(link.join("state.json"))
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&home.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        report(&output)["agent_state"]
+            .as_str()
+            .unwrap()
+            .contains("replace")
+    );
+    assert!(output.stderr.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state")
+        .arg(link.join("state.json"))
+        .output()
+        .unwrap();
+    std::fs::remove_file(link).unwrap();
+    assert!(!report(&output).contains_key("agent_state"));
+}
+
+#[test]
+fn native_reports_do_not_echo_bearers_or_credential_urls_from_answers() {
+    let home = Home::new();
+    let mut failures = Vec::new();
+    for health in [
+        json!({"status":"ok", "version":"w44-secret-value https://user:w44-url-password@example.com https://example.com/?token=w44-query-secret"}),
+        json!({"status":"w44-secret-value"}),
+        json!({"status":"postgresql://fixture:w44-url-password@example.invalid/bank"}),
+    ] {
+        let fixture = Fixture::start_with(Setup {
+            health: vec![Reply::Http(200, health.to_string())],
+            ..Setup::default()
+        });
+        let output = diagnose(&home, &fixture.url)
+            .env("PSEUDOLIFE_MCP_TOKEN", "w44-secret-value")
+            .output()
+            .unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let safe = !text.contains("w44-secret-value")
+            && !text.contains("w44-url-password")
+            && !text.contains("w44-query-secret")
+            && text.contains("redacted");
+        eprintln!("response redaction cell: {safe}");
+        if !safe {
+            failures.push("reflected response credential");
+        }
+    }
+    // Redaction must not change version comparison or health classification.
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url)
+        .env("PSEUDOLIFE_MCP_TOKEN", env!("CARGO_PKG_VERSION"))
+        .output()
+        .unwrap();
+    assert!(!report(&output).contains_key("error"));
+    assert_eq!(report(&output)["ok"], true);
+    assert_eq!(report(&output)["daemon_status"], "ok");
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(
+            200,
+            json!({"status":"https://example.invalid/status"}).to_string(),
+        )],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    assert_eq!(
+        report(&output)["daemon_status"],
+        "https://example.invalid/status"
+    );
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+#[test]
+fn native_review_local_paths_redact_credentials() {
+    let home = Home::new();
+    let launcher = home.0.join(if cfg!(windows) {
+        "w44-secret-value.exe"
+    } else {
+        "w44-secret-value.é"
+    });
+    std::fs::write(&launcher, b"fixture").unwrap();
+    for token in ["w44-secret-value", "t"] {
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env("PSEUDOLIFE_MCP_TOKEN", token)
+            .env("PSEUDOLIFE_SHIM_RUNTIMES", "fixture")
+            .env("PSEUDOLIFE_SHIM_LAUNCHER", &launcher)
+            .output()
+            .unwrap();
+        let map = report(&output);
+        assert_eq!(map["error"], "DaemonUnavailable");
+        assert_eq!(map["daemon_status"], "unreachable");
+        assert_eq!(map["path_resolution"]["launcher"], "[redacted]");
+        if token != "t" {
+            assert!(!String::from_utf8_lossy(&output.stdout).contains(token));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
+            assert!(
+                map["path_resolution"]["launcher"]
+                    .as_str()
+                    .unwrap()
+                    .contains("[redacted]")
+            );
+        }
+    }
+}
+
+#[test]
+fn native_review_bad_claude_registration_keeps_codex_credentials() {
+    let home = Home::new();
+    std::fs::create_dir(home.0.join("claude")).unwrap();
+    std::fs::create_dir(home.0.join("codex")).unwrap();
+    std::fs::write(home.0.join("claude/.claude.json"), b"{").unwrap();
+    std::fs::write(
+        home.0.join("codex/config.toml"),
+        "[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN = 'w44-secret-value'\n",
+    )
+    .unwrap();
+    let fixture = healthy_fixture();
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert!(
+        map["credential_source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Codex registration")
+    );
+    assert!(
+        map["registrations"]
+            .as_str()
+            .unwrap()
+            .contains("invalid JSON")
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+    assert!(!map.contains_key("error"));
+    std::fs::write(home.0.join("claude/.claude.json"), b"{}").unwrap();
+    let output = diagnose(&home, &fixture.url).output().unwrap();
+    let map = report(&output);
+    assert!(
+        map["credential_source"]
+            .as_str()
+            .unwrap()
+            .starts_with("Codex registration")
+    );
+    assert!(!map.contains_key("registrations"));
+}
+
+#[test]
+fn native_review_registration_source_path_redacts_credentials() {
+    let home = Home::new();
+    for directory in ["w44-secret-value", "ordinary-codex"] {
+        let codex = home.0.join(directory);
+        std::fs::create_dir(&codex).unwrap();
+        std::fs::write(
+            codex.join("config.toml"),
+            "[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN = 'w44-secret-value'\n",
+        )
+        .unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env("CODEX_HOME", &codex)
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("w44-secret-value"));
+        let map = report(&output);
+        assert_eq!(map["error"], "DaemonUnavailable");
+        let source = map["credential_source"].as_str().unwrap();
+        assert!(source.starts_with("Codex registration ("));
+        if directory == "ordinary-codex" {
+            assert!(source.contains(directory));
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn native_review_git_bash_path_redacts_credentials() {
+    let home = Home::new();
+    let directory = home.0.join("w44-secret-value");
+    std::fs::create_dir(&directory).unwrap();
+    let bash = directory.join("bash.exe");
+    std::fs::write(&bash, b"fixture only; never executed").unwrap();
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .env("CLAUDE_CODE_GIT_BASH_PATH", &bash)
+        .env("PSEUDOLIFE_MCP_TOKEN", "w44-secret-value")
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("w44-secret-value"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("w44-secret-value"));
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .env("CLAUDE_CODE_GIT_BASH_PATH", &bash)
+        .output()
+        .unwrap();
+    assert_eq!(report(&output)["git_bash"], bash.to_string_lossy().as_ref());
+}
+
+#[test]
+fn native_review_expanded_codex_home_does_not_claim_plugin_absent() {
+    let home = Home::new();
+    let codex = home.0.join("codex");
+    std::fs::create_dir(&codex).unwrap();
+    std::fs::write(
+        codex.join("config.toml"),
+        "[plugins.\"pseudolife-memory@pseudolife-mcp\"]\nenabled = true\n",
+    )
+    .unwrap();
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(
+            200,
+            json!({"status":"ok", "version":env!("CARGO_PKG_VERSION"), "hooks_digest":"fixture"})
+                .to_string(),
+        )],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url)
+        .env("CODEX_HOME", "~/codex")
+        .output()
+        .unwrap();
+    let map = report(&output);
+    let line = map["codex_hooks"].as_str().unwrap();
+    assert!(
+        line.contains("CODEX_HOME") && line.contains("absolute"),
+        "{line}"
+    );
+    let fixture = Fixture::start_with(Setup {
+        health: vec![Reply::Http(
+            200,
+            json!({"status":"ok", "version":env!("CARGO_PKG_VERSION"), "hooks_digest":"fixture"})
+                .to_string(),
+        )],
+        ..Setup::default()
+    });
+    let output = diagnose(&home, &fixture.url)
+        .env("CODEX_HOME", &codex)
+        .output()
+        .unwrap();
+    let map = report(&output);
+    let line = map["codex_hooks"].as_str().unwrap();
+    assert!(line.starts_with("plugin-managed"), "{line}");
+}
+
+#[test]
+fn review_round2_recovery_registration_path_is_redacted() {
+    for (token, error) in [
+        ("w44-non-ascii-é-bearer", "BearerUnsendable"),
+        ("w44 invalid bearer", "CredentialUnavailable"),
+    ] {
+        let home = Home::new();
+        for name in [token, "ordinary-registration"] {
+            let directory = home.0.join(name);
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::write(
+                directory.join("config.toml"),
+                format!("[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN = '{token}'\n"),
+            )
+            .unwrap();
+            let output = diagnose(&home, "http://127.0.0.1:1")
+                .env("CODEX_HOME", &directory)
+                .output()
+                .unwrap();
+            let map = report(&output);
+            assert_eq!(map["error"], error);
+            assert!(!Value::Object(map.clone()).to_string().contains(token));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
+            if name != token {
+                assert!(map["recovery"].as_str().unwrap().contains(name));
+            }
+        }
+    }
+}
+
+#[test]
+fn review_round2_runtime_identity_paths_are_redacted() {
+    let home = Home::new();
+    let directory = home.0.join("w44-identity-bearer");
+    std::fs::create_dir(&directory).unwrap();
+    let template = diagnose(&home, "http://127.0.0.1:1");
+    let executable = directory.join(if cfg!(windows) {
+        "doctor.exe"
+    } else {
+        "doctor"
+    });
+    std::fs::copy(template.get_program(), &executable).unwrap();
+    let token_file = home.0.join("token");
+    private_state(&token_file, b"w44-file-bearer");
+    for (token, from_file) in [
+        ("w44-identity-bearer", false),
+        ("unrelated-bearer", false),
+        ("w44-identity-bearer", true),
+    ] {
+        let mut child = Command::new(&executable);
+        child
+            .env_clear()
+            .envs(
+                template
+                    .get_envs()
+                    .filter_map(|(key, value)| value.map(|value| (key, value))),
+            )
+            .env("PSEUDOLIFE_MCP_TOKEN", token)
+            .current_dir(&home.0)
+            .args(["doctor", "--timeout", "0.2"]);
+        if from_file {
+            child.env("PSEUDOLIFE_MCP_TOKEN_FILE", &token_file);
+        }
+        let output = child.output().unwrap();
+        let map = report(&output);
+        if token == "w44-identity-bearer" {
+            assert_eq!(map["interpreter"], "[redacted]");
+            assert_eq!(map["source"], "[redacted]");
+            assert!(!Value::Object(map).to_string().contains(token));
+        } else {
+            assert!(
+                map["interpreter"]
+                    .as_str()
+                    .unwrap()
+                    .contains("w44-identity-bearer")
+            );
+            assert!(
+                map["source"]
+                    .as_str()
+                    .unwrap()
+                    .contains("w44-identity-bearer")
+            );
+        }
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn review_round2_http_errors_name_daemon_repair_before_json() {
+    let home = Home::new();
+    for (status, error) in [(502, "DaemonUnavailable"), (200, "DaemonUnrecognized")] {
+        let daemon = RawDaemon::start(move |_| {
+            let body = b"<html>fixture gateway error</html>";
+            (format!("HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), String::from_utf8_lossy(body)).into_bytes(), 0)
+        });
+        let output = diagnose(&home, &daemon.url).output().unwrap();
+        let map = report(&output);
+        assert_eq!(map["error"], error);
+        let cause = map["health_response"].as_str().unwrap();
+        assert!(cause.contains("daemon"));
+        if status == 502 {
+            assert!(cause.contains("502"));
+        }
+        assert!(!cause.contains("correct the JSON syntax"));
+    }
+}
+
+#[test]
+fn review_round2_maintainer_http_status_precedes_json() {
+    let home = Home::new();
+    for (status, body, expected) in [
+        (500, "<html>fixture gateway error</html>", "not_checked"),
+        (
+            200,
+            "{\"rp_id\":\"localhost\",\"origin\":\"http://localhost\"}",
+            "on",
+        ),
+    ] {
+        let daemon = RawDaemon::start(move |path| {
+            let (status, body, header) = match path {
+                "/api/hook/coordination-start" => (200, "{}", "X-PL-Board: on\r\n"),
+                "/api/maintainer" => (status, body, ""),
+                _ => (503, "{\"status\":\"degraded\"}", ""),
+            };
+            (format!("HTTP/1.1 {status} Fixture\r\n{header}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).into_bytes(), 0)
+        });
+        let output = diagnose(&home, &daemon.url)
+            .env("PSEUDOLIFE_MCP_TOKEN", "w44-round2-bearer")
+            .output()
+            .unwrap();
+        let map = report(&output);
+        assert_eq!(map["maintainer_passkeys"]["state"], expected);
+        if status == 500 {
+            let line = map["maintainer_passkeys"]["line"].as_str().unwrap();
+            assert!(line.contains("HTTP 500") && line.contains("daemon"));
+            assert!(!line.contains("correct the JSON syntax"));
+        }
+    }
+}
+
+#[test]
+fn review_round2_bad_settings_preserve_independent_client_checks() {
+    let home = Home::new();
+    let config = home.0.join("claude");
+    std::fs::create_dir_all(config.join("plugins")).unwrap();
+    std::fs::write(
+        config.join(".claude.json"),
+        "{\"mcpServers\":{\"pseudolife-memory\":{}}}",
+    )
+    .unwrap();
+    std::fs::write(
+        config.join("plugins/installed_plugins.json"),
+        "{\"plugins\":{\"pseudolife-memory@pseudolife-mcp\":[{}]}}",
+    )
+    .unwrap();
+    let bash = home.0.join("bash.exe");
+    std::fs::write(&bash, b"never executed").unwrap();
+    for settings in ["{", "{}"] {
+        std::fs::write(config.join("settings.json"), settings).unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env("CLAUDE_CODE_GIT_BASH_PATH", &bash)
+            .output()
+            .unwrap();
+        let map = report(&output);
+        let wake = &map["wake"]["claude_code"];
+        assert_eq!(wake["registered"], true);
+        if settings == "{" {
+            assert!(wake.to_string().contains("settings.json"));
+            assert!(!wake.to_string().contains("~/.claude.json"));
+        } else {
+            assert_eq!(wake["stop_hook"], "on");
+        }
+        if cfg!(windows) {
+            assert_eq!(map["git_bash"], bash.to_string_lossy().as_ref());
+            assert!(map.contains_key("bash_on_path"));
+            assert_eq!(map["bash_on_path_is_wsl_launcher"], false);
+            if settings == "{" {
+                assert!(
+                    map["git_bash_settings"]
+                        .as_str()
+                        .unwrap()
+                        .contains("settings.json")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn review_round2_unreadable_registrations_are_not_absent() {
+    let home = Home::new();
+    let mut failed = Vec::new();
+    for name in ["claude/.claude.json", "codex/config.toml"] {
+        let path = home.0.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"\xff").unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
+        let map = report(&output);
+        let found = map
+            .get("registrations")
+            .and_then(Value::as_str)
+            .is_some_and(|finding| {
+                finding.contains("UTF-8")
+                    && finding.contains(path.file_name().unwrap().to_str().unwrap())
+            });
+        eprintln!("unreadable registration {name}: {found}");
+        if !found {
+            failed.push(name);
+        }
+        std::fs::remove_file(&path).unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
+        assert!(!report(&output).contains_key("registrations"));
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn review_round2_permission_denied_registration_is_reported() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let mut failed = Vec::new();
+    for name in ["claude/.claude.json", "codex/config.toml"] {
+        let path = home.0.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o0)).unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let found = report(&output)
+            .get("registrations")
+            .and_then(Value::as_str)
+            .is_some_and(|finding| finding.contains("PermissionDenied"));
+        eprintln!("registration permissions {name}: {found}");
+        if !found {
+            failed.push(name);
+        }
+        std::fs::remove_file(path).unwrap();
+        assert!(
+            !report(&diagnose(&home, "http://127.0.0.1:1").output().unwrap())
+                .contains_key("registrations")
+        );
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
+#[test]
+fn review_round2_utf8_bom_credentials_and_wake_agree() {
+    let mut failed = Vec::new();
+    for (name, text, client) in [
+        (
+            "claude/.claude.json",
+            "{\"mcpServers\":{\"pseudolife-memory\":{\"env\":{\"PSEUDOLIFE_MCP_TOKEN\":\"w44-round2-bearer\"}}}}",
+            "claude_code",
+        ),
+        (
+            "codex/config.toml",
+            "[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN='w44-round2-bearer'\n",
+            "codex",
+        ),
+    ] {
+        let home = Home::new();
+        let path = home.0.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut wakes = Vec::new();
+        for prefix in ["", "\u{feff}"] {
+            std::fs::write(&path, format!("{prefix}{text}")).unwrap();
+            let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
+            let map = report(&output);
+            assert!(!map.contains_key("registrations"));
+            let found = map["wake"][client]["registered"] == true;
+            eprintln!("BOM wake {client}, BOM={}: {found}", !prefix.is_empty());
+            if !found {
+                failed.push(client);
+            }
+            wakes.push(map["wake"][client].clone());
+            assert!(!Value::Object(map).to_string().contains("w44-round2-bearer"));
+        }
+        if wakes[0] != wakes[1] {
+            failed.push(client);
+        }
+        std::fs::write(&path, format!("\u{feff}\u{feff}{text}")).unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1").output().unwrap();
+        let map = report(&output);
+        let refused = map
+            .get("registrations")
+            .and_then(Value::as_str)
+            .is_some_and(|finding| {
+                finding.contains("byte-order marks") && finding.contains("remove")
+            });
+        eprintln!("double BOM named finding {client}: {refused}");
+        if !refused {
+            failed.push(client);
+        }
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn review_round2_git_bash_bad_settings_keeps_path_checks() {
+    let home = Home::new();
+    std::fs::create_dir(home.0.join("claude")).unwrap();
+    let bash = home.0.join("bash.exe");
+    std::fs::write(&bash, b"never executed").unwrap();
+    for settings in ["{", "{}"] {
+        std::fs::write(home.0.join("claude/settings.json"), settings).unwrap();
+        let output = diagnose(&home, "http://127.0.0.1:1")
+            .env("CLAUDE_CODE_GIT_BASH_PATH", &bash)
+            .output()
+            .unwrap();
+        let map = report(&output);
+        assert_eq!(map["git_bash"], bash.to_string_lossy().as_ref());
+        assert!(map.contains_key("bash_on_path"));
+        assert_eq!(map["bash_on_path_is_wsl_launcher"], false);
+        if settings == "{" {
+            assert!(
+                map["git_bash_settings"]
+                    .as_str()
+                    .unwrap()
+                    .contains("settings.json")
+            );
+        }
+    }
+}
+
+#[test]
+fn review_round2_native_usage_and_help_precedence() {
+    let home = Home::new();
+    let value = diagnose(&home, "http://127.0.0.1:1")
+        .arg("--agent-state=--help")
+        .output()
+        .unwrap();
+    assert_eq!(value.status.code(), Some(1));
+    assert_eq!(report(&value)["error"], "DaemonUnavailable");
+    let output = command(&home)
+        .args([
+            "doctor",
+            "--disposable-proof",
+            "--agent-state",
+            "missing.json",
+        ])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(text.contains("pseudolife-mcp doctor") && !text.contains("cli.py"));
+    assert_eq!(output.status.code(), Some(2));
+    let output = command(&home)
+        .args(["doctor", "--agent-state", "--help"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Usage: pseudolife-mcp doctor"));
+    assert!(output.stderr.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn review_round2_untrusted_credential_report_omits_link_paths() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let directory = home.0.join("original");
+    std::fs::create_dir(&directory).unwrap();
+    private_state(&directory.join("token"), b"w44-round2-bearer");
+    let link = home.0.join("w44-private-path-marker");
+    std::os::unix::fs::symlink(&directory, &link).unwrap();
+    std::fs::set_permissions(&home.0, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .env("PSEUDOLIFE_MCP_TOKEN_FILE", link.join("token"))
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&home.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // The shared opener's separate stderr sink is outside this row's ownership.
+    let map = report(&output);
+    assert_eq!(map["error"], "CredentialUnavailable");
+    assert!(
+        !Value::Object(map)
+            .to_string()
+            .contains("w44-private-path-marker")
+    );
+    let output = diagnose(&home, "http://127.0.0.1:1")
+        .env("PSEUDOLIFE_MCP_TOKEN_FILE", link.join("token"))
+        .output()
+        .unwrap();
+    assert_eq!(report(&output)["error"], "DaemonUnavailable");
+    assert!(output.stderr.is_empty());
 }

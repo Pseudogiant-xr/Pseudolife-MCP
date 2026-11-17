@@ -2,8 +2,7 @@
 //! wake path, Codex's hook copy, Git Bash, `pseudolife-mcp` on PATH and
 //! saved tunnels. File reads only; nothing here touches the network.
 use super::pyenv::{
-    self, Defer, Env, Res, Text, is_dir, is_file, join, json_loads, path_str, read_text, strip,
-    toml_loads,
+    self, Env, Finding, Res, is_dir, is_file, join, json_loads, path_str, strip, toml_loads,
 };
 use serde_json::{Map, Value, json};
 
@@ -13,6 +12,25 @@ const TOKEN_KEYS: [&str; 2] = ["PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FIL
 const URL_KEY: &str = "PSEUDOLIFE_MCP_DAEMON_URL";
 const OFF: [&str; 4] = ["0", "false", "no", "off"];
 const YES: [&str; 4] = ["1", "true", "yes", "on"];
+
+/// An absent file is distinct from one the diagnostic could not inspect.
+fn read_optional(path: &str, label: &str) -> Res<Option<String>> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(Finding::io(&error).at(label)),
+    };
+    String::from_utf8(bytes)
+        .map(|text| Some(text.replace("\r\n", "\n").replace('\r', "\n")))
+        .map_err(|_| Finding::new("file is not UTF-8; save the file as UTF-8").at(label))
+}
 
 fn claude_registration_path(env: &Env) -> Res<String> {
     Ok(match env.truthy("CLAUDE_CONFIG_DIR")? {
@@ -30,7 +48,7 @@ fn claude_config_dir(env: &Env) -> Res<String> {
 
 fn codex_config_path(env: &Env) -> Res<String> {
     let home = match env.truthy("CODEX_HOME")? {
-        Some(dir) => path_str(&dir)?,
+        Some(dir) => pyenv::expand_home(&dir, env).map_err(|cause| cause.at("CODEX_HOME"))?,
         None => join(&pyenv::home(env)?, ".codex"),
     };
     Ok(join(&home, "config.toml"))
@@ -42,7 +60,9 @@ fn toml_text(value: &toml::Value) -> Res<String> {
         toml::Value::String(text) => Ok(text.clone()),
         toml::Value::Integer(number) => Ok(number.to_string()),
         toml::Value::Boolean(flag) => Ok(if *flag { "True" } else { "False" }.into()),
-        _ => Err(Defer),
+        _ => Err(Finding::new(
+            "setting must be text, an integer, or a boolean; correct the setting type",
+        )),
     }
 }
 
@@ -52,7 +72,9 @@ fn toml_truthy(value: &toml::Value) -> Res<bool> {
         toml::Value::String(text) => Ok(!text.is_empty()),
         toml::Value::Integer(number) => Ok(*number != 0),
         toml::Value::Boolean(flag) => Ok(*flag),
-        _ => Err(Defer),
+        _ => Err(Finding::new(
+            "setting must be text, an integer, or a boolean; correct the setting type",
+        )),
     }
 }
 
@@ -61,38 +83,53 @@ pub(super) type Overrides = Vec<(String, String)>;
 
 /// `registration_credentials(os.environ)`: the overrides to apply and the
 /// credential source label.
-pub(super) fn registration_credentials(env: &Env) -> Res<(Overrides, Option<String>)> {
+pub(super) fn registration_credentials(
+    env: &Env,
+    findings: &mut Vec<Finding>,
+) -> Res<(Overrides, Option<String>)> {
     if env.var("PSEUDOLIFE_MCP_TOKEN")?.is_some() || env.var("PSEUDOLIFE_MCP_TOKEN_FILE")?.is_some()
     {
         return Ok((Vec::new(), Some("environment".into())));
     }
     // Claude Code first: ~/.claude.json's mcpServers.
-    let claude = claude_registration_path(env)?;
-    if let Text::Ok(text) = read_text(&claude, true)
-        && let Some(data) = json_loads(&text)?
-        && let Some(block) = data
-            .get("mcpServers")
-            .and_then(Value::as_object)
-            .and_then(|servers| servers.get(SERVER))
-            .and_then(Value::as_object)
-            .and_then(|server| server.get("env"))
-            .and_then(Value::as_object)
-    {
-        let text_of = |key: &str| {
-            block
-                .get(key)
-                .and_then(Value::as_str)
-                .filter(|v| !v.is_empty())
-                .map(str::to_owned)
-        };
-        if let Some(found) = credential_overrides(env, text_of)? {
-            return Ok((found, Some(format!("Claude Code registration ({claude})"))));
+    let claude_result = (|| -> Res<Option<(Overrides, String)>> {
+        let claude = claude_registration_path(env)?;
+        if let Some(text) = read_optional(&claude, "Claude Code registration (~/.claude.json)")?
+            && let Some(data) = json_loads(&text)
+                .map_err(|cause| cause.at("Claude Code registration (~/.claude.json)"))?
+            && let Some(block) = data
+                .get("mcpServers")
+                .and_then(Value::as_object)
+                .and_then(|servers| servers.get(SERVER))
+                .and_then(Value::as_object)
+                .and_then(|server| server.get("env"))
+                .and_then(Value::as_object)
+        {
+            let text_of = |key: &str| {
+                block
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_owned)
+            };
+            if let Some(found) = credential_overrides(env, text_of)? {
+                return Ok(Some((
+                    found,
+                    format!("Claude Code registration ({claude})"),
+                )));
+            }
         }
+        Ok(None)
+    })();
+    match claude_result {
+        Ok(Some((overrides, source))) => return Ok((overrides, Some(source))),
+        Ok(None) => {}
+        Err(cause) => findings.push(cause),
     }
     // Then Codex: config.toml's mcp_servers.
     let codex = codex_config_path(env)?;
-    if let Text::Ok(text) = read_text(&codex, true)
-        && let Some(data) = toml_loads(&text)?
+    if let Some(text) = read_optional(&codex, "Codex config.toml")?
+        && let Some(data) = toml_loads(&text).map_err(|cause| cause.at("Codex config.toml"))?
         && let Some(block) = data
             .get("mcp_servers")
             .and_then(toml::Value::as_table)
@@ -195,7 +232,11 @@ fn json_effective(value: Option<&Value>) -> Res<Option<String>> {
         }
         Some(Value::Array(items)) if items.is_empty() => Some(String::new()),
         Some(Value::Object(items)) if items.is_empty() => Some(String::new()),
-        Some(_) => return Err(Defer),
+        Some(_) => {
+            return Err(Finding::new(
+                "setting must be text, an integer, or a boolean; correct the setting type",
+            ));
+        }
     })
 }
 
@@ -204,26 +245,25 @@ pub(super) fn claude_code_wake(env: &Env) -> Res<ClaudeWake> {
     let registration = claude_registration_path(env)?;
     let config = claude_config_dir(env)?;
     let installed = join(&join(&config, "plugins"), "installed_plugins.json");
-    let unreadable =
-        || ClaudeWake::Fixed(json!({"registered": "unknown (unreadable ~/.claude.json)"}));
-    let mut registered = false;
+    let mut findings = Vec::new();
+    let mut load =
+        |path: &str, label: &str| match read_optional(path, label).and_then(|text| match text {
+            Some(text) => json_loads(&text).map_err(|cause| cause.at(label)),
+            None => Ok(None),
+        }) {
+            Ok(data) => data,
+            Err(cause) => {
+                findings.push(cause.to_string());
+                None
+            }
+        };
+    let registration = load(&registration, "Claude Code registration (~/.claude.json)");
+    let installed = load(&installed, "Claude Code installed_plugins.json");
+    let registered = registration
+        .as_ref()
+        .is_some_and(|data| data.to_string().contains(SERVER));
     let mut plugin_installed = false;
-    if is_file(&registration)? {
-        let Text::Ok(text) = read_text(&registration, false) else {
-            return Ok(unreadable());
-        };
-        if json_loads(&text)?.is_none() {
-            return Ok(unreadable());
-        }
-        registered = text.contains(SERVER);
-    }
-    if is_file(&installed)? {
-        let Text::Ok(text) = read_text(&installed, false) else {
-            return Ok(unreadable());
-        };
-        let Some(record) = json_loads(&text)? else {
-            return Ok(unreadable());
-        };
+    if let Some(record) = installed {
         let plugins = match &record {
             Value::Object(map) => map.get("plugins").unwrap_or(&record),
             _ => &Value::Null,
@@ -233,25 +273,35 @@ pub(super) fn claude_code_wake(env: &Env) -> Res<ClaudeWake> {
             _ => false,
         };
     }
+    let registration_unread = !findings.is_empty();
+    let settings = join(&config, "settings.json");
+    let parsed = match read_optional(&settings, "Claude Code settings.json").and_then(|text| {
+        text.map(|text| json_loads(&text).map_err(|cause| cause.at("Claude Code settings.json")))
+            .transpose()
+    }) {
+        Ok(value) => value.flatten(),
+        Err(cause) => {
+            findings.push(cause.to_string());
+            None
+        }
+    };
+    if !findings.is_empty() {
+        let registered = if registered || plugin_installed {
+            json!(true)
+        } else if registration_unread {
+            json!("unknown (registration could not be read)")
+        } else {
+            json!(false)
+        };
+        return Ok(ClaudeWake::Fixed(json!({"registered": registered,
+            "stop_hook": format!("could not read Claude Code wake configuration: {}", findings.join("; "))})));
+    }
     if !(registered || plugin_installed) {
         return Ok(ClaudeWake::Fixed(json!({"registered": false})));
     }
-    let settings = join(&config, "settings.json");
-    let mut data = Map::new();
-    if is_file(&settings)? {
-        let parsed = match read_text(&settings, false) {
-            Text::Ok(text) => json_loads(&text)?,
-            _ => None,
-        };
-        let Some(loaded) = parsed else {
-            return Ok(ClaudeWake::Fixed(
-                json!({"registered": true, "stop_hook": "unknown (unreadable settings.json)"}),
-            ));
-        };
-        if let Value::Object(map) = loaded {
-            data = map;
-        }
-    }
+    let data = parsed
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
     let block = data
         .get("env")
         .and_then(Value::as_object)
@@ -270,15 +320,21 @@ pub(super) fn claude_code_wake(env: &Env) -> Res<ClaudeWake> {
         ));
     }
     let effective = |key: &str| -> Res<String> {
-        match json_effective(block.get(key))? {
+        match json_effective(block.get(key)).map_err(|cause| cause.at(key))? {
             Some(value) => Ok(value),
             None => Ok(strip(&env.var(key)?.unwrap_or_default()).to_owned()),
         }
     };
-    Ok(ClaudeWake::Hook {
-        master: effective("PSEUDOLIFE_AGENT_COORDINATION")?,
-        flag: effective("PSEUDOLIFE_AGENT_WAKE_HOOK")?,
-    })
+    Ok(
+        match (
+            effective("PSEUDOLIFE_AGENT_COORDINATION"),
+            effective("PSEUDOLIFE_AGENT_WAKE_HOOK"),
+        ) {
+            (Ok(master), Ok(flag)) => ClaudeWake::Hook { master, flag },
+            (Err(cause), _) | (_, Err(cause)) => ClaudeWake::Fixed(json!({"registered": true,
+            "stop_hook": super::unread("Claude Code settings.json or its environment override", &cause)})),
+        },
+    )
 }
 
 /// The codex wake inputs, resolved before the daemon answers.
@@ -324,15 +380,11 @@ impl CodexWake {
 /// `_codex_wake`'s file reads and the Codex CLI lookup.
 pub(super) fn codex_wake(env: &Env) -> Res<CodexWake> {
     let config = codex_config_path(env)?;
-    if !is_file(&config)? {
+    let Some(text) = read_optional(&config, "Codex config.toml")? else {
         return Ok(CodexWake::Fixed(json!({"registered": false})));
-    }
-    let unreadable = || CodexWake::Fixed(json!({"registered": "unknown (unreadable config.toml)"}));
-    let Text::Ok(text) = read_text(&config, false) else {
-        return Ok(unreadable());
     };
-    let Some(data) = toml_loads(&text)? else {
-        return Ok(unreadable());
+    let Some(data) = toml_loads(&text).map_err(|cause| cause.at("Codex config.toml"))? else {
+        return Ok(CodexWake::Fixed(json!({"registered": false})));
     };
     let server = match data.get("mcp_servers") {
         None => None,
@@ -357,8 +409,8 @@ pub(super) fn codex_wake(env: &Env) -> Res<CodexWake> {
     };
     let effective = |key: &str| -> Res<String> {
         if let Some(value) = block.get(key) {
-            return Ok(if toml_truthy(value)? {
-                strip(&toml_text(value)?).to_owned()
+            return Ok(if toml_truthy(value).map_err(|cause| cause.at(key))? {
+                strip(&toml_text(value).map_err(|cause| cause.at(key))?).to_owned()
             } else {
                 String::new()
             });
@@ -381,38 +433,42 @@ pub(super) fn codex_wake(env: &Env) -> Res<CodexWake> {
 
 /// Whether `resolve_codex_command({**os.environ, **str(env)})` finds a CLI.
 fn codex_command(env: &Env, block: &toml::Table) -> Res<bool> {
-    // os.environ's keys are upper-case on Windows; the registration's env
-    // table keeps its own spelling and only an exact key overrides.
+    // Windows environment names are case-insensitive; ambiguous duplicates
+    // cannot describe one effective setting.
     let lookup = |key: &str| -> Res<Option<String>> {
-        if let Some(value) = block.get(key) {
-            return toml_text(value).map(Some);
+        if pyenv::WINDOWS {
+            let mut matches = block
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case(key));
+            if let Some((_, value)) = matches.next() {
+                if matches.next().is_some() {
+                    return Err(Finding::new("setting has duplicate case-insensitive names; keep one uppercase environment variable name").at(key));
+                }
+                return toml_text(value).map(Some).map_err(|cause| cause.at(key));
+            }
         }
-        if pyenv::WINDOWS && block.keys().any(|name| name.eq_ignore_ascii_case(key)) {
-            return Err(Defer);
+        if let Some(value) = block.get(key) {
+            return toml_text(value).map(Some).map_err(|cause| cause.at(key));
         }
         env.var(key)
     };
     let explicit = lookup("PSEUDOLIFE_CODEX_BIN")?.unwrap_or_default();
     let explicit = strip(&explicit);
     if !explicit.is_empty() {
-        if explicit.starts_with('~') {
-            return Err(Defer);
-        }
-        let path = std::path::Path::new(explicit);
-        let absolute = if pyenv::WINDOWS {
-            let p = path_str(explicit)?;
-            p.as_bytes().get(1) == Some(&b':') && p.as_bytes().get(2) == Some(&b'\\')
-        } else {
-            path.is_absolute()
-        };
-        return Ok(absolute && is_file(explicit)?);
+        let explicit =
+            pyenv::expand_home(explicit, env).map_err(|cause| cause.at("PSEUDOLIFE_CODEX_BIN"))?;
+        let path = std::path::Path::new(&explicit);
+        let absolute = path.is_absolute();
+        return Ok(absolute && is_file(&explicit)?);
     }
     let names: Vec<String> = if pyenv::WINDOWS {
         let pathext = lookup("PATHEXT")?
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
-        if !pathext.is_ascii() || pathext.contains(['\\', '/', ':']) {
-            return Err(Defer);
+        if pathext.contains(['\\', '/', ':']) {
+            return Err(Finding::new(
+                "PATHEXT contains a path separator; use semicolon-separated file extensions",
+            ));
         }
         pathext
             .split(';')
@@ -432,21 +488,15 @@ fn codex_command(env: &Env, block: &toml::Table) -> Res<bool> {
         if directory.is_empty() {
             continue;
         }
-        let absolute = if pyenv::WINDOWS {
-            let b = directory.as_bytes();
-            if directory.replace('/', "\\").starts_with("\\\\") {
-                return Err(Defer);
-            }
-            b.len() >= 3 && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')
-        } else {
-            directory.starts_with('/')
-        };
+        let absolute = std::path::Path::new(directory).is_absolute();
         if !absolute {
             continue;
         }
         for name in &names {
             let candidate = std::path::Path::new(directory).join(name);
-            let candidate = candidate.to_str().ok_or(Defer)?;
+            let candidate = candidate.to_str().ok_or_else(|| {
+                Finding::new("PATH candidate is not Unicode; use a Unicode executable path")
+            })?;
             if is_file(candidate)? {
                 #[cfg(unix)]
                 if rustix::fs::access(candidate, rustix::fs::Access::EXEC_OK).is_err() {
@@ -467,7 +517,8 @@ fn codex_command(env: &Env, block: &toml::Table) -> Res<bool> {
                 .join("bin");
             if let Ok(entries) = std::fs::read_dir(&bin) {
                 for entry in entries {
-                    let entry = entry.map_err(|_| Defer)?;
+                    let entry = entry
+                        .map_err(|error| Finding::io(&error).at("LOCALAPPDATA/OpenAI/Codex/bin"))?;
                     let candidate = entry.path().join("codex.exe");
                     if candidate.is_file() {
                         return Ok(true);
@@ -489,45 +540,57 @@ pub(super) enum CodexHooks {
 
 pub(super) fn codex_hooks(env: &Env) -> Res<CodexHooks> {
     let codex_home = match env.truthy("CODEX_HOME")? {
-        Some(dir) => {
-            if dir.starts_with('~') {
-                return Err(Defer);
-            }
-            path_str(&dir)?
-        }
+        Some(dir) => pyenv::expand_home(&dir, env).map_err(|cause| cause.at("CODEX_HOME"))?,
         None => join(&pyenv::user_home(env)?, ".codex"),
     };
     let hooks_root = join(&join(&codex_home, "pseudolife"), "hooks");
     if is_dir(&hooks_root)? {
         return Ok(CodexHooks::Line("bundle-present".into()));
     }
-    let config_text = match read_text(&join(&codex_home, "config.toml"), false) {
-        Text::Ok(text) => text,
-        Text::Unreadable => String::new(),
-        Text::Undecodable => return Ok(CodexHooks::Line("unknown (UnicodeDecodeError)".into())),
-    };
+    let config_text =
+        read_optional(&join(&codex_home, "config.toml"), "Codex config.toml")?.unwrap_or_default();
     if !config_text.contains(&format!("\"{PLUGIN_ID}\"")) {
         return Ok(CodexHooks::Line("not-configured".into()));
+    }
+    if env
+        .truthy("CODEX_HOME")?
+        .is_some_and(|home| home.starts_with('~'))
+    {
+        return Err(Finding::new(
+            "CODEX_HOME uses home expansion, which plugin hook verification cannot resolve; set CODEX_HOME to the expanded absolute directory",
+        ));
     }
     Ok(CodexHooks::Plugin)
 }
 
 /// `git_bash_report(os.environ)` (Windows only).
-pub(super) fn git_bash_report(env: &Env) -> Res<Vec<(&'static str, Value)>> {
+pub(super) fn git_bash_report(env: &Env, token: Option<&str>) -> Res<Vec<(&'static str, Value)>> {
     // CLAUDE_CODE_GIT_BASH_PATH from the Claude Code settings env block wins.
     let base = match env.truthy("CLAUDE_CONFIG_DIR")? {
         Some(dir) => path_str(&dir)?,
         None => join(&pyenv::home(env)?, ".claude"),
     };
-    let mut configured = None;
-    if let Text::Ok(text) = read_text(&join(&base, "settings.json"), true)
-        && let Some(Value::Object(settings)) = json_loads(&text)?
-        && let Some(Value::Object(block)) = settings.get("env")
-        && let Some(Value::String(value)) = block.get("CLAUDE_CODE_GIT_BASH_PATH")
-        && !value.is_empty()
-    {
-        configured = Some(value.clone());
-    }
+    let settings = read_optional(&join(&base, "settings.json"), "Claude Code settings.json")
+        .and_then(|text| {
+            text.map(|text| {
+                json_loads(&text).map_err(|cause| cause.at("Claude Code settings.json"))
+            })
+            .transpose()
+        });
+    let (settings, settings_problem) = match settings {
+        Ok(value) => (value.flatten(), None),
+        Err(cause) => (
+            None,
+            Some(super::unread("Claude Code settings.json", &cause)),
+        ),
+    };
+    let configured = settings
+        .as_ref()
+        .and_then(|settings| settings.get("env"))
+        .and_then(|block| block.get("CLAUDE_CODE_GIT_BASH_PATH"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
     let configured = match configured {
         Some(value) => Some(value),
         None => env.truthy("CLAUDE_CODE_GIT_BASH_PATH")?,
@@ -576,11 +639,16 @@ pub(super) fn git_bash_report(env: &Env) -> Res<Vec<(&'static str, Value)>> {
         }
         None => false,
     };
+    let git_bash = git_bash.map(|path| env.display_path(&path, token));
+    let bash_on_path = bash_on_path.map(|path| env.display_path(&path, token));
     let mut report = vec![
         ("git_bash", json!(git_bash)),
         ("bash_on_path", json!(bash_on_path)),
         ("bash_on_path_is_wsl_launcher", json!(launcher)),
     ];
+    if let Some(problem) = settings_problem {
+        report.push(("git_bash_settings", json!(problem)));
+    }
     match (&git_bash, launcher) {
         (None, _) => report.push((
             "git_bash_recovery",
@@ -609,7 +677,7 @@ call that bash.exe by its full path.",
 }
 
 /// `path_resolution()`.
-pub(super) fn path_resolution(env: &Env) -> Res<Value> {
+pub(super) fn path_resolution(env: &Env, token: Option<&str>) -> Res<Value> {
     let found = pyenv::which("pseudolife-mcp", env)?;
     let launcher = match (
         env.truthy("PSEUDOLIFE_SHIM_RUNTIMES")?,
@@ -622,9 +690,6 @@ pub(super) fn path_resolution(env: &Env) -> Res<Value> {
                 Some(index) if index > 0 && index + 1 < file.len() => &file[index..],
                 _ => "",
             };
-            if !suffix.is_ascii() {
-                return Err(Defer);
-            }
             (suffix.eq_ignore_ascii_case(".exe") == pyenv::WINDOWS).then_some(normalized)
         }
         _ => Some(if pyenv::WINDOWS {
@@ -652,14 +717,26 @@ pub(super) fn path_resolution(env: &Env) -> Res<Value> {
         _ => None,
     };
     let mut report = Map::new();
-    report.insert("on_path".into(), json!(found));
-    report.insert("launcher".into(), json!(launcher));
+    report.insert(
+        "on_path".into(),
+        json!(found.as_deref().map(|path| env.display_path(path, token))),
+    );
+    report.insert(
+        "launcher".into(),
+        json!(
+            launcher
+                .as_deref()
+                .map(|path| env.display_path(path, token))
+        ),
+    );
     if let Some(launcher) = &launcher {
         let same = match &found {
             Some(found) => pyenv::real_normcase(found)? == pyenv::real_normcase(launcher)?,
             None => false,
         };
         if !same {
+            let launcher = env.display_path(launcher, token);
+            let found = found.as_deref().map(|path| env.display_path(path, token));
             report.insert("warning".into(), json!(format!(
                 "`pseudolife-mcp` on PATH is {}, not the launcher {launcher}, so a terminal runs \
 another install. Run \"{launcher}\" update --clients-only to point the name at the launcher, then \
@@ -674,4 +751,128 @@ open a new terminal",
 /// Where saved tunnel profiles live (`tunnel_profiles.default_root`).
 pub(super) fn tunnel_root(env: &Env) -> Res<String> {
     Ok(join(&join(&pyenv::home(env)?, ".pseudolife-mcp"), "tunnel"))
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+
+    #[test]
+    fn native_home_tilde_expansion_uses_configured_home() {
+        let mut env = Env::default();
+        let home = if pyenv::WINDOWS {
+            r"C:\absent-w44"
+        } else {
+            "/absent-w44"
+        };
+        env.set("HOME", home.into());
+        env.set("USERPROFILE", home.into());
+        env.set("CODEX_HOME", "~/.codex".into());
+        env.set("PSEUDOLIFE_CODEX_BIN", "~/codex".into());
+        assert!(codex_hooks(&env).is_ok());
+        assert!(!codex_command(&env, &toml::Table::new()).unwrap());
+        assert_eq!(
+            codex_config_path(&env).unwrap(),
+            join(&join(home, ".codex"), "config.toml")
+        );
+    }
+
+    #[test]
+    fn native_launcher_unicode_suffix_is_an_ordinary_path() {
+        let mut env = Env::default();
+        env.set("PATH", String::new());
+        env.set("PSEUDOLIFE_SHIM_RUNTIMES", "fixture".into());
+        for path in ["absent-w44.é", "absent-w44.exe", "absent-w44"] {
+            env.set("PSEUDOLIFE_SHIM_LAUNCHER", path.into());
+            assert!(path_resolution(&env, None).is_ok());
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_lookup_shapes_and_near_misses() {
+        let mut env = Env::default();
+        env.set("PATH", r"Z:\absent-w44".into());
+        env.set("LOCALAPPDATA", String::new());
+        let mut block = toml::Table::new();
+        block.insert("path".into(), toml::Value::String(r"Z:\absent-w44".into()));
+        assert!(!codex_command(&env, &block).unwrap());
+        block.insert("PATH".into(), toml::Value::String(r"Z:\absent-w44".into()));
+        let text = format!("{:?}", codex_command(&env, &block));
+        assert!(
+            text.contains("PATH") && text.contains("duplicate"),
+            "{text}"
+        );
+        block.clear();
+        env.set("PATHEXT", ".EXE;bad/path".into());
+        assert!(format!("{:?}", codex_command(&env, &block)).contains("PATHEXT"));
+        env.set("PATHEXT", ".EXE;.é".into());
+        assert!(!codex_command(&env, &block).unwrap());
+    }
+
+    #[test]
+    fn native_codex_home_tilde_finding_names_setting() {
+        let mut env = Env::default();
+        env.set("CODEX_HOME", "~unknown/codex".into());
+        let text = format!("{:?}", codex_hooks(&env).map(|_| ()));
+        assert!(
+            text.contains("CODEX_HOME") && text.contains("absolute"),
+            "{text}"
+        );
+        env.set("CODEX_HOME", "absent-w44-near-miss".into());
+        assert!(codex_hooks(&env).is_ok());
+    }
+
+    #[test]
+    fn native_setting_types_report_cause_without_values() {
+        let mut failed = Vec::new();
+        for value in [
+            toml::Value::Float(1.5),
+            toml::Value::Array(vec![toml::Value::String("w44-secret-value".into())]),
+            toml::Value::Table(toml::Table::new()),
+            toml::Value::Datetime("1979-05-27T07:32:00Z".parse().unwrap()),
+        ] {
+            for text in [
+                format!("{:?}", toml_text(&value)),
+                format!("{:?}", toml_truthy(&value)),
+            ] {
+                let ok = text.contains("setting") && !text.contains("w44-secret-value");
+                eprintln!("TOML setting type {}: {ok}", value.type_str());
+                if !ok {
+                    failed.push(text);
+                }
+            }
+        }
+        for value in [
+            json!(1.5),
+            json!(["w44-secret-value"]),
+            json!({"x":"w44-secret-value"}),
+        ] {
+            let text = format!("{:?}", json_effective(Some(&value)));
+            let ok = text.contains("setting") && !text.contains("w44-secret-value");
+            eprintln!("JSON setting type: {ok}");
+            if !ok {
+                failed.push(text);
+            }
+        }
+        assert!(failed.is_empty(), "{failed:?}");
+        assert_eq!(toml_text(&toml::Value::String("on".into())).unwrap(), "on");
+        assert_eq!(
+            json_effective(Some(&json!("on"))).unwrap(),
+            Some("on".into())
+        );
+    }
+
+    #[test]
+    fn native_tilde_setting_names_cause() {
+        let mut env = Env::default();
+        env.set("PSEUDOLIFE_CODEX_BIN", "~unknown/codex".into());
+        let text = format!("{:?}", codex_command(&env, &toml::Table::new()));
+        assert!(
+            text.contains("PSEUDOLIFE_CODEX_BIN") && text.contains("absolute"),
+            "{text}"
+        );
+        env.set("PSEUDOLIFE_CODEX_BIN", "/absent/codex".into());
+        assert!(!codex_command(&env, &toml::Table::new()).unwrap());
+    }
 }
