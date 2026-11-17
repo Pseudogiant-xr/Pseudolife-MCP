@@ -3370,6 +3370,11 @@ _FAKE_UV = r'''
 import json, os, subprocess, sys
 with open(os.environ["FAKE_UV_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(sys.argv[1:]) + "\n")
+if os.environ.get("FAKE_UV_ENV_LOG"):
+    names = ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN", "SOME_SERVICE",
+             "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "PYTHONHOME")
+    with open(os.environ["FAKE_UV_ENV_LOG"], "a", encoding="utf-8") as log:
+        log.write(json.dumps({name: name in os.environ for name in names}) + "\n")
 if sys.argv[1] == "venv":
     import glob, site
     target = sys.argv[-1]
@@ -3541,6 +3546,84 @@ def test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce(harness_far):
     proc = harness_far.run_harness(head, ref, data, extra=("-Nonce", nonce))
 
     assert _verdict(proc) == f"rust-harness {nonce}: pytest exit 0", proc.stderr[-2000:]
+
+
+@needs_pwsh
+def test_harness_far_half_scrubs_ambient_environment_before_member_code(harness_far, monkeypatch):
+    seen = harness_far.tmp / "uv-environment.jsonl"
+    monkeypatch.setenv("FAKE_UV_ENV_LOG", str(seen))
+    for name in ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN"):
+        monkeypatch.setenv(name, "planted-disposable-value")
+    monkeypatch.setenv("SOME_SERVICE", "https://user:disposable@example.com/x")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k must_not_select_anything")
+    monkeypatch.setenv("PYTEST_PLUGINS", "must_not_load_this_plugin")
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", "1.94.0")
+    hook_check = """
+    if ($env:GH_TOKEN -or $env:SERVICE_DSN -or $env:PYTEST_ADDOPTS) { throw 'ambient environment reached the services hook' }
+    $env:PSEUDOLIFE_TEST_PG_PASSWORD = 'hook-test-login'
+"""
+    harness_far.hook.write_text(_FAKE_HOOK.replace("$env:FAKE_SERVICE = 'up'", hook_check + "$env:FAKE_SERVICE = 'up'"), encoding="utf-8")
+    head, ref, data = harness_far.batch(_GATE_TEST + """
+    for name in ('GH_TOKEN', 'AWS_SECRET_ACCESS_KEY', 'SERVICE_DSN', 'SOME_SERVICE',
+                 'PYTEST_ADDOPTS', 'PYTEST_PLUGINS', 'PYTEST_DISABLE_PLUGIN_AUTOLOAD'):
+        assert name not in os.environ, name
+    assert os.environ['PSEUDOLIFE_TEST_PG_PASSWORD'] == 'hook-test-login'
+    assert os.environ['RUSTUP_TOOLCHAIN'] == '1.94.0'
+""")
+    proc = harness_far.run_harness(head, ref, data)
+    observed = [json.loads(line) for line in seen.read_text(encoding="utf-8").splitlines()]
+    assert observed and all(not any(row.values()) for row in observed), observed
+    assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
+    assert "1 passed" in proc.stdout and harness_far.hook_calls() == ["start", "stop"]
+
+
+@needs_pwsh
+@pytest.mark.skipif(os.name != "nt", reason="real Windows junctions")
+@pytest.mark.parametrize("placement", ["root", "child", "nested"])
+def test_harness_far_half_refuses_junctions_without_touching_the_target(harness_far, placement):
+    head, ref, data = harness_far.batch()
+    first = harness_far.run_harness(head, ref, data)
+    assert first.returncode == 0, first.stderr
+    gate = Path(f"{harness_far.repo}.rust-harness")
+    target = harness_far.tmp / "junction-target"
+    if placement == "root":
+        gate.rename(target)
+        junction = gate
+    else:
+        target.mkdir()
+        junction = gate / ("untracked-junction" if placement == "child" else "untracked-directory/junction")
+        junction.parent.mkdir(exist_ok=True)
+    (target / "must-stay.txt").write_text("outside data\n", encoding="utf-8")
+    before = {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()}
+    script = harness_far.tmp / "junction.ps1"
+    script.write_text("param($path, $target)\nNew-Item -ItemType Junction -Path $path -Target $target -ErrorAction Stop | Out-Null\n", encoding="utf-8")
+    made = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script), str(junction), str(target)], capture_output=True, text=True, timeout=30)
+    assert made.returncode == 0, made.stderr
+    try:
+        proc = harness_far.run_harness(head, ref, data)
+        assert proc.returncode == 3, proc.stdout[-2000:] + proc.stderr[-2000:]
+        reported = re.search(r"reparse point at '([^']+)'", proc.stderr)
+        assert reported and os.path.samefile(reported.group(1), junction), proc.stderr
+        assert "remove" in proc.stderr and "retry" in proc.stderr
+        assert {str(p.relative_to(target)): p.read_bytes() for p in target.rglob("*") if p.is_file()} == before
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove the owned junction itself, never its target.
+        if placement == "root":
+            target.rename(gate)
+
+
+@needs_pwsh
+def test_harness_far_half_cleans_an_ordinary_untracked_file(harness_far):
+    head, ref, data = harness_far.batch()
+    first = harness_far.run_harness(head, ref, data)
+    assert first.returncode == 0, first.stderr
+    file = Path(f"{harness_far.repo}.rust-harness") / "ordinary-untracked.txt"
+    file.write_text("clean this owned file\n", encoding="utf-8")
+    proc = harness_far.run_harness(head, ref, data)
+    assert proc.returncode == 0, proc.stderr
+    assert not file.exists()
 
 
 @needs_pwsh
@@ -3857,6 +3940,27 @@ def test_shim_far_half_refuses_unavailable_resources(far, monkeypatch, cause):
         if held:
             held.close()
     _hold_suite_lock(far.locks / "full-suite.lock").close()
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
+def test_shim_far_half_scrubs_ambient_environment_before_member_code(far, monkeypatch):
+    head, ref, data = far.batch()
+    for name in ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN"):
+        monkeypatch.setenv(name, "planted-disposable-value")
+    monkeypatch.setenv("SOME_SERVICE", "https://user:disposable@example.com/x")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k must_not_select_anything")
+    monkeypatch.setenv("NEXTEST_FILTER_EXPR", "test(must_not_select_anything)")
+    monkeypatch.setenv("NEXTEST_PROFILE", "must-not-exist")
+    monkeypatch.setenv("RUSTUP_TOOLCHAIN", "1.94.0")
+    proc = subprocess.run(["bash", str(ROOT / "ops/shim-tests-remote.sh"), str(far.repo), far.base,
+                           head, ref, "ab" * 16, "0"], input=data, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    call = next(c for c in far.cargo_calls() if c["argv"][:2] == ["nextest", "run"])
+    visible = set(call["env"])
+    for name in ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SERVICE_DSN", "SOME_SERVICE",
+                 "PYTEST_ADDOPTS", "NEXTEST_FILTER_EXPR", "NEXTEST_PROFILE"):
+        assert name not in visible, name
+    assert call["env"]["RUSTUP_TOOLCHAIN"] == "1.94.0"
 
 
 # The real census module with only its snapshot cut down to its input
@@ -6511,14 +6615,41 @@ def test_after_drop_waits_when_no_run_on_the_new_head_is_listed(world, capsys):
     assert "Parity / windows-latest (not reported yet)" in capsys.readouterr().err
 
 
-def test_after_drop_open_waives_all_off_pc_results_even_when_supplied(world, capsys):
+@pytest.mark.parametrize("result", [{"exit_code": 1}, {"commit": "f" * 40}])
+def test_after_drop_open_still_checks_a_suite_result_it_is_given(world, capsys, result):
     _closed_red(world, capsys)
     assert _build("--after-drop", "900") == 0, capsys.readouterr()
     capsys.readouterr()
 
-    assert _open(world, exit_code=1) == 0, capsys.readouterr()
+    before = world.gh.bodies("create")
+    assert _open(world, **result) == 2, capsys.readouterr()
+    assert world.gh.bodies("create") == before
+
+
+@pytest.mark.parametrize("kind", ["rust-harness", "shim-tests"])
+@pytest.mark.parametrize("edit", [{"exit_code": 1}, {"commit": "f" * 40},
+                                 {"exit_code": None, "not_run": "offline"}])
+def test_after_drop_open_checks_each_supplied_gate_result(world, capsys, kind, edit):
+    _closed_red(world, capsys)
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+    flag = "--harness" if kind == "rust-harness" else "--shim-tests"
+    before = world.gh.bodies("create")
+    assert integrate.main(["open", flag, str(_gate_result(world, kind, **edit))]) == 2
+    assert world.gh.bodies("create") == before
+
+
+@pytest.mark.parametrize("kind,label", [("suite", "Local full suite"),
+    ("rust-harness", "Rust harness Python tests"), ("shim-tests", "Shim unit tests")])
+def test_after_drop_open_records_a_passing_supplied_result(world, capsys, kind, label):
+    _closed_red(world, capsys)
+    assert _build("--after-drop", "900") == 0, capsys.readouterr()
+    head = _git(world.work, "rev-parse", "HEAD")
+    flag = {"suite": "--suite", "rust-harness": "--harness", "shim-tests": "--shim-tests"}[kind]
+    path = _suite_result(world) if kind == "suite" else _gate_result(world, kind)
+    assert integrate.main(["open", flag, str(path)]) == 0, capsys.readouterr()
     (_, body) = world.gh.bodies("create")[-1]
-    assert "skips the suite, harness and shim tests" in body
+    line = next(line for line in body.splitlines() if line.startswith(f"- {label}"))
+    assert f"passed at `{head}`" in line and "not run" not in line
 
 
 def test_after_drop_body_says_the_harness_was_not_run(world, capsys):

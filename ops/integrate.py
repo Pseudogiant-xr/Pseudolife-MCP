@@ -3550,9 +3550,13 @@ def open_(args: argparse.Namespace) -> int:
         raise Refusal(_rust_check_refusal(plan))
     _, _, waived = _after_drop_rulings(None, None, [], plan)
     skipped = waived[0] if waived else ""
-    suite = skipped if skipped else _suite_line(args, head)
-    harness = skipped if skipped else _gate_result_line(args.harness, head, HARNESS_RESULT_KIND)
-    shim = skipped if skipped else _gate_result_line(args.shim_tests, head, "shim-tests")
+    # The fast path waives absent evidence, never evidence of a known failure.
+    suite = (skipped if skipped and args.suite is None and args.suite_note is None
+             else _suite_line(args, head))
+    harness = (skipped if skipped and args.harness is None
+               else _gate_result_line(args.harness, head, HARNESS_RESULT_KIND))
+    shim = (skipped if skipped and args.shim_tests is None
+            else _gate_result_line(args.shim_tests, head, "shim-tests"))
     if plan.after_drop:
         print(f"integrate: opening {plan.branch} after a drop, relying on:\n"
               + "\n".join(_after_drop_lines(plan.after_drop)))

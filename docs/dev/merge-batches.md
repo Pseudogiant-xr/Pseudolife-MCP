@@ -650,7 +650,7 @@ the push or `gh pr create` fails, nothing is commented on and rerunning
      `Start-HarnessServices` and `Stop-HarnessServices`: start and prove the
      VM's test PostgreSQL and Linux Docker engine, then stop them even after
      a partially failed start. Failed cleanup cannot produce a passing result.
-   - The run takes the machine's full-suite lock, its shared database lock,
+   - The run takes the machine's shared database lock, its full-suite lock,
      then its clone lock, keeping all through service shutdown. Worker
      database commands take that same database lock (dev-machines.md,
      "Sharing"). The bounded wait reports the holder and elapsed hold time;
@@ -719,7 +719,10 @@ python ops/integrate.py merge   # once `test` passed on the new head
 
 **What it skips.** The whole off-PC gate except the compile check: the
 local full suite, the Rust harness and the shim unit tests. `open` requires
-none of those three results, and the body says they were not run. This is
+none of those three results when absent, and the body says they were not run.
+Any supplied result is checked exactly as for an ordinary batch: it must
+pass on this head, and its passing evidence is recorded in the body. A
+failed, not-run or mismatched supplied result refuses the open. This is
 kept in the tool's one `_after_drop_rulings` function. The Rust
 compile check still runs, and `open` still refuses a head that did not
 pass it.

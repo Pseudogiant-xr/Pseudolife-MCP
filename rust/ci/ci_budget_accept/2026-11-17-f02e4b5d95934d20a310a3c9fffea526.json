@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "ci.yml",
-  "job": "test-lite-windows",
-  "before": "954d6243529019c3",
-  "fingerprint": "7225805f9720d8c0",
-  "reason": "Adds one real PowerShell lock-order regression using a tiny local Git bundle and fake services. The test checks that a waiting harness leaves the suite lock free for a wrapped worker. No database or Rust build, matrix expansion, setup change or limit increase."
-}

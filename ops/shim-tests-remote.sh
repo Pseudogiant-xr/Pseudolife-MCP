@@ -26,6 +26,21 @@ finish() {
 trap finish EXIT
 trap 'failure="interrupted; check the owned run before retrying"; exit 3' HUP INT TERM
 refuse() { failure=$1; exit 3; }
+run_cargo() {
+    # Member build scripts and proc macros receive the compile far half's
+    # credential scrub and no inherited test-selection controls. Isolated
+    # stdlib Python ignores ambient Python startup/import configuration.
+    python3 -I -S -c '
+import os, re, sys
+secret_name = re.compile(r"TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|DSN|DATABASE_URL|(^|_)PAT$|(^|_)(API_)?KEY(_ID)?$", re.I)
+secret_value = re.compile(r"://[^/@\s]+:[^/@\s]*@")
+test_control = re.compile(r"^(PYTEST_|NEXTEST_|CARGO_NEXTEST_)|^PYTHON(HOME|PATH|STARTUP|INSPECT)$", re.I)
+clean = {name: value for name, value in os.environ.items()
+         if not secret_name.search(name) and not secret_value.search(value) and not test_control.search(name)}
+clean["NEXTEST_COLOR"] = "never"
+os.execvpe("cargo", ["cargo", *sys.argv[1:]], clean)
+' "$@"
+}
 [[ "$head" =~ ^[0-9a-f]{40}$ && "$base" =~ ^[0-9a-f]{40}$ && "$nonce" =~ ^[0-9a-f]{32}$ ]] || refuse 'invalid head, base or nonce'
 [[ "$ref" =~ ^refs/heads/integrate/[0-9A-Za-z._-]+$ ]] || refuse 'the bundle ref must be an integrate/* branch'
 [[ "$wait_seconds" =~ ^[0-9]+$ ]] || refuse 'invalid lock wait'
@@ -35,7 +50,7 @@ repo=$(realpath -e "$repo") || refuse 'cannot resolve clone path'
 no_hooks="$repo.shim-tests-no-hooks"
 [[ ! -e "$no_hooks" && ! -L "$no_hooks" ]] || refuse 'the no-hooks path exists; remove it before retrying'
 for tool in git flock cargo python3 base64; do command -v "$tool" >/dev/null || refuse "$tool is missing; install it on the second Linux dev box"; done
-cargo nextest --version >/dev/null 2>&1 || refuse 'cargo-nextest is missing; install it on the second Linux dev box'
+run_cargo nextest --version >/dev/null 2>&1 || refuse 'cargo-nextest is missing; install it on the second Linux dev box'
 locks="${PSEUDOLIFE_SUITE_LOCK_DIR:-$HOME/.pseudolife-mcp/locks}"
 mkdir -p "$locks" || refuse 'cannot open machine lock folder'
 exec 9>>"$locks/full-suite.lock" || refuse 'cannot open full-suite.lock'
@@ -83,6 +98,6 @@ export CARGO_TARGET_DIR="$target"
 # This target belongs only to this fixed worktree. It is never shared with
 # workers or another checkout, so cargo's path-based freshness stays valid.
 printf 'shim-tests: holding full-suite lock; testing %s on the second Linux dev box\n' "$head"
-cargo nextest run --locked -p pseudolife-stdio --lib --bins -j 4 --no-fail-fast 8>&- 9>&-
+run_cargo nextest run --locked -p pseudolife-stdio --lib --bins -j 4 --no-fail-fast 8>&- 9>&-
 verdict=$?
 exit "$verdict"

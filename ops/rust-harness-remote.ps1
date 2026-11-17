@@ -87,6 +87,25 @@ function Get-FreeBytes([string] $path) {
     return [IO.DriveInfo]::new([IO.Path]::GetPathRoot($full)).AvailableFreeSpace
 }
 
+function Assert-HarnessWorktreeHasNoReparsePoint([string] $Path) {
+    try { $root = Get-Item -LiteralPath $Path -Force -ErrorAction Stop }
+    catch [System.Management.Automation.ItemNotFoundException] { return }
+    $pending = [Collections.Generic.Queue[IO.FileSystemInfo]]::new()
+    $pending.Enqueue($root)
+    while ($pending.Count) {
+        $entry = $pending.Dequeue()
+        $entry.Refresh()
+        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "reparse point at '$($entry.FullName)' in the harness worktree; remove the link itself without touching its target, then retry"
+        }
+        # Never use recursive enumeration: inspect each directory's attributes
+        # before descending, including junctions inside an untracked directory.
+        if ($entry.Attributes -band [IO.FileAttributes]::Directory) {
+            foreach ($child in $entry.EnumerateFileSystemInfos()) { $pending.Enqueue($child) }
+        }
+    }
+}
+
 
 if ($Head -notmatch '^[0-9a-f]{40}$' -or $Base -notmatch '^[0-9a-f]{40}$') { Stop-Run "the head and base must be full commit ids" }
 if ($Ref -notmatch '^refs/heads/integrate/[0-9A-Za-z._-]+$') { Stop-Run "the bundle's ref must be an integrate/* branch, not '$Ref'" }
@@ -150,6 +169,7 @@ try {
         $lock = Enter-DevDatabaseLock -Path $lockPath -Holder "batch harness clone $Head" -WaitSeconds (Remaining-Wait)
         $free = (Get-FreeBytes (Split-Path -Parent $Repo)) / 1GB
         if ($free -lt $MinFreeGB) { throw "only $([math]::Round($free, 1)) GB free beside the clone; the floor is $MinFreeGB GB" }
+        Assert-HarnessWorktreeHasNoReparsePoint $gate
         if ((Test-Path -LiteralPath $gate) -and -not (Test-Path -LiteralPath (Join-Path $gate '.git'))) {
             throw 'the harness worktree has no .git; inspect the interrupted worktree before retrying'
         }
@@ -172,8 +192,12 @@ try {
         if ("$got".Trim() -ne $Head) { $failure = "the bundle's head is '$("$got".Trim())', not the batch head $Head"; break }
 
         if (Test-Path -LiteralPath (Join-Path $gate '.git')) {
+            Assert-HarnessWorktreeHasNoReparsePoint $gate
             $r = Invoke-Git -C $gate checkout --quiet --detach --force $Head
-            if ($r.Code -eq 0) { $r = Invoke-Git -C $gate clean -ffdxq }
+            if ($r.Code -eq 0) {
+                Assert-HarnessWorktreeHasNoReparsePoint $gate
+                $r = Invoke-Git -C $gate clean -ffdxq
+            }
         } else {
             $null = Invoke-Git -C $Repo worktree prune
             $r = Invoke-Git -C $Repo worktree add --quiet --detach --force $gate $Head
@@ -182,6 +206,18 @@ try {
         $at = (& git -C $gate rev-parse HEAD 2>$null)
         if ("$at".Trim() -ne $Head) { $failure = "the harness worktree is at '$("$at".Trim())', not $Head"; break }
 
+        # Editable installs and pytest execute member code. Withhold the SSH
+        # session's credentials, as the compile far half does, and selection
+        # controls inherited from an unrelated run. The services hook supplies
+        # its disposable test login afterwards; do not scrub that login away.
+        $secretName = '(?i)TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|DSN|DATABASE_URL|(^|_)PAT$|(^|_)(API_)?KEY(_ID)?$'
+        $secretValue = '://[^/@\s]+:[^/@\s]*@'
+        $testControl = '(?i)^(PYTEST_|NEXTEST_|CARGO_NEXTEST_)|^PYTHON(HOME|PATH|STARTUP|INSPECT)$'
+        foreach ($v in @(Get-ChildItem env:)) {
+            if ($v.Name -match $secretName -or "$($v.Value)" -match $secretValue -or $v.Name -match $testControl) {
+                Remove-Item -LiteralPath "env:$($v.Name)" -ErrorAction Stop
+            }
+        }
         if (-not (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)) { $failure = "uv is not on PATH"; break }
         $py = $null
         foreach ($candidate in (Join-Path $venv 'Scripts/python.exe'), (Join-Path $venv 'bin/python')) {

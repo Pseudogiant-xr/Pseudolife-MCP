@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "ci.yml",
-  "job": "test-lite-windows",
-  "before": "954d6243529019c3",
-  "fingerprint": "876dfa43a7db78a5",
-  "reason": "Adds six real PowerShell harness cases, stdin bootstrap, and database lock lifecycle and interrupted-owner cases plus controller result validation. Tiny local Git bundles and fake uv/cargo add no database or Rust build; setup, matrix, job count and limits stay unchanged."
-}
