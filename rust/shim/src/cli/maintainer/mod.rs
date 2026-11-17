@@ -480,6 +480,6 @@ mod tests {
             OsString::from("confirm"),
             OsString::from_wide(&[0xd800, 0x61, 0x62, 0x63, 0x64, 0x65]),
         ];
-        assert_eq!(parse(&arguments), None);
+        assert_eq!(run(arguments), Some(2));
     }
 }
