@@ -822,6 +822,24 @@ jobs:
           tests/test_integrate_script.py::test_only_an_integrate_ref_is_taken
           tests/test_integrate_script.py::test_a_held_gate_lock_waits_then_refuses
           tests/test_integrate_script.py::test_build_and_the_far_half_agree_end_to_end
+          tests/test_integrate_script.py::test_the_harness_far_half_runs_the_batch_tests_with_its_services_up
+          tests/test_integrate_script.py::test_a_failing_batch_test_is_pytests_exit_and_the_services_still_stop
+          tests/test_integrate_script.py::test_services_that_do_not_start_are_not_run_and_are_stopped
+          tests/test_integrate_script.py::test_a_machine_without_a_services_hook_is_not_run
+          tests/test_integrate_script.py::test_the_harness_far_half_refuses_a_bundle_that_is_not_the_batch_head
+          tests/test_integrate_script.py::test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce
+          tests/test_integrate_script.py::test_harness_far_half_scrubs_ambient_environment_before_member_code
+          tests/test_integrate_script.py::test_harness_far_half_refuses_junctions_without_touching_the_target
+          tests/test_integrate_script.py::test_harness_far_half_cleans_an_ordinary_untracked_file
+          tests/test_integrate_script.py::test_harness_controller_ships_its_lock_helper_over_stdin
+          tests/test_integrate_script.py::test_database_lock_excludes_another_worker_and_names_holder
+          tests/test_integrate_script.py::test_database_lock_owner_death_stops_its_child_before_reuse
+          tests/test_integrate_script.py::test_database_lock_wrapper_preserves_exit_and_releases
+          tests/test_integrate_script.py::test_database_lock_reclaims_only_proven_stale_identity
+          tests/test_integrate_script.py::test_harness_database_lock_covers_services_and_releases_after_failure
+          tests/test_integrate_script.py::test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free
+          tests/test_integrate_script.py::test_the_harness_runs_on_the_dev_machine_and_open_checks_its_result
+          tests/test_integrate_script.py::test_shim_gate_records_only_the_remote_verdict
           tests/test_integrate_script.py::test_a_drive_under_the_floor_is_not_run_never_a_red_batch
           tests/test_integrate_script.py::test_a_held_full_suite_lock_is_not_run
           tests/test_integrate_script.py::test_a_suite_that_starts_during_the_check_waits_for_it

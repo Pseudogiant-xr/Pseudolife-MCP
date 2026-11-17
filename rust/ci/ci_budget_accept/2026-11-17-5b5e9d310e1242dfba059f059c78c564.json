@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "ci.yml",
+  "job": "test-lite-windows",
+  "before": "954d6243529019c3",
+  "fingerprint": "9e2cc5d53781fed5",
+  "reason": "Estimate updated from 18.6 to 24.1 min, using own hosted Windows run https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/44026738823 at 6604486a1: 20 first-attempt selection steps, median 179.5 s, maximum 229 s. Charge 3.9 min for that selection plus 1.6 min for the five F3/F5 cases measured at 68.00 s on the Windows dev VM. This approves only the final job definition; no matrix, setup or limit increase. The complete job remains estimated until its next batch measurement."
+}

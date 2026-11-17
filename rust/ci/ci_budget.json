@@ -179,8 +179,8 @@
         "estimate": "2026-11-14: the 34.0 measured (#1557) plus 1.2 for building the native client the installer tests run, from the steps' times in rust.yml's ordinary PR precheck jobs, which ran the same toolchain, cache and `cargo build --locked -p pseudolife-stdio -j 4` (runs 43513352894, 43516792342, 2026-11-13): toolchain 0.1, cache restore 0.2-0.3, build 0.4-0.9 on ubuntu-latest."
       },
       "test-lite-windows": {
-        "minutes": 18.6,
-        "estimate": "2026-11-15: the 17.6 estimated for #1541 (14.6 before the stack, plus 3.0 for tests/test_installer_client_engine.py and tests/test_installer_native_client_ps.py) plus 1.0 for the native-installer copies this change adds beside the files the lane already runs: test_installer_reruns_native.py 7.2 s, test_installer_engine_native.py 5.5 s, test_installer_claude_profile_native.py 4.6 s, test_installer_resources_native.py 2.8 s, test_installer_plugin_native.py's marketplace test 0.5 s and the rest under 0.5 s, 21 s together serially in WSL at e78826f72, taken at three times on windows-latest."
+        "minutes": 24.1,
+        "estimate": "2026-11-17 W46: existing 18.6 min plus 3.9 min for the added gate selection, conservatively charging its entire 35-case hosted selection including ten fixture guards outside this lite lane. On own hosted Windows stress run 44026738823 at 6604486a1, the Run the selection once step across 20 first attempts had median 179.5 s and maximum 229 s (3.82 min). Add 1.6 min for the five new F3/F5 cases, which passed in 68.00 s on the Windows dev VM, allowing hosted overhead. Total 18.6 + 3.9 + 1.6 = 24.1 min. No setup, matrix, job-count or limit increase; re-measure the complete lite job on its next batch."
       },
       "test-lite-macos": {
         "minutes": 21.3,

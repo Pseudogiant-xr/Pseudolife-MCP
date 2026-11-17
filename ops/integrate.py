@@ -14,7 +14,9 @@ tests"); the walkthrough is `docs/dev/merge-batches.md`.
                                               # again without its dropped culprit,
                                               # no suite ("After a drop")
     python ops/integrate.py suite             # its full suite on the remote machine
-    python ops/integrate.py open --suite <result.json> --harness-note "<result>"
+    python ops/integrate.py harness
+    python ops/integrate.py shim-tests
+    python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shim-tests <shim.json>
                                               # push it, open its PR
     python ops/integrate.py merge             # merge the open batch PR, once green
 
@@ -180,6 +182,28 @@ try:
         Path(__file__).resolve().with_name("rust-check-remote.ps1").read_text(encoding="utf-8"))
 except OSError:
     RUST_CHECK_REMOTE_SCRIPT = None
+try:
+    RUST_HARNESS_REMOTE_SCRIPT: str | None = (
+        Path(__file__).resolve().with_name("rust-harness-remote.ps1").read_text(encoding="utf-8"))
+except OSError:
+    RUST_HARNESS_REMOTE_SCRIPT = None
+# A cold harness environment plus the run took about 18 minutes on the
+# Windows dev VM (16 November 2026, 2876 tests); this only ends a hung one.
+RUST_HARNESS_REMOTE_TIMEOUT = 5400
+# Where `harness` writes its result, beside the suite's (ops/remote-suite.ps1).
+SUITE_RESULTS = Path.home() / ".pseudolife-mcp" / "suite-results"
+HARNESS_RESULT_KIND = "rust-harness"
+PYTEST_SUMMARY_RE = re.compile(r"^=*\s*(\d+ (passed|failed|errors?|skipped)\b.* in [\d.]+s.*?)\s*=*$")
+SHIM_TESTS_REMOTE = Path.home() / ".pseudolife-mcp" / "locks" / "shim-tests.remote"
+SHIM_TESTS_ARGS = ("nextest", "run", "--locked", "-p", "pseudolife-stdio", "--lib", "--bins",
+                   "-j", "4", "--no-fail-fast")
+SHIM_TESTS_COMMAND = "cargo " + " ".join(SHIM_TESTS_ARGS)
+try:
+    SHIM_TESTS_REMOTE_SCRIPT = Path(__file__).with_name("shim-tests-remote.sh").read_text(encoding="utf-8")
+    DATABASE_LOCK_SCRIPT = Path(__file__).with_name("dev-database-lock.ps1").read_text(encoding="utf-8")
+except OSError:
+    SHIM_TESTS_REMOTE_SCRIPT = DATABASE_LOCK_SCRIPT = None
+
 # The command ssh runs there: read the script from stdin's first line and
 # run it, leaving the rest of stdin (the bundle) to the script. Measured
 # 16 November 2026: through Windows' ssh.exe an -EncodedCommand of 8 KB ran
@@ -251,6 +275,7 @@ class Member:
     snapshot_required: bool | None = None
     snapshot: str = "not required"
     snapshot_why: str = ""
+    rust_jobs: str = ""
     labels: tuple[str, ...] = ()   # label names, for the Python freeze exception
 
 
@@ -1000,6 +1025,10 @@ def ready(label: str, base_sha: str | None = None) -> list[Member]:
                                            if isinstance(label, dict))))
     base_sha = base_sha or _out("rev-parse", f"{REMOTE}/{BASE}")
     for m, row in zip(members, rows):
+        jobs = {c.get("name"): c for c in _latest_checks(row.get("statusCheckRollup") or [])}
+        m.rust_jobs = "; ".join(f"{name}: {_check_state(jobs[name]).lower() or str(jobs[name].get('status', 'pending')).lower()}"
+                              if name in jobs else f"{name}: absent"
+                              for name in ("Rust / ubuntu-latest", "Rust / windows-latest"))
         if not m.draft and m.checks not in ("failing", "unverified"):
             m.snapshot_required, why = _snapshot_requirement(m, base_sha)
             m.snapshot, m.snapshot_why = _snapshot_state(
@@ -2197,42 +2226,45 @@ def _rust_check_remote() -> tuple[dict[str, str] | None, str]:
         return None, f"{RUST_CHECK_WHERE_ENV} must be local or remote, not {where!r}"
     if where == "local":
         return None, ""
-    if RUST_CHECK_REMOTE.exists() and not RUST_CHECK_REMOTE.is_file():
-        return None, f"{RUST_CHECK_REMOTE} is not a file; make it one or remove it"
-    if not RUST_CHECK_REMOTE.is_file():
-        if where == "remote":
-            return None, (f"{RUST_CHECK_WHERE_ENV}=remote, but there is no "
-                          f"{RUST_CHECK_REMOTE.name} (docs/dev/dev-machines.md)")
+    if not RUST_CHECK_REMOTE.exists() and where != "remote":
         return None, ""
+    return _remote_config(RUST_CHECK_REMOTE, RUST_CHECK_ROLES, RUST_CHECK_DEFAULT_ROLE)
+
+
+def _remote_config(path: Path, roles: tuple[str, ...], default_role: str) -> tuple[dict[str, str] | None, str]:
+    if path.exists() and not path.is_file():
+        return None, f"{path} is not a file; make it one or remove it"
+    if not path.is_file():
+        return None, f"no {path.name} (docs/dev/dev-machines.md)"
     try:
-        text = RUST_CHECK_REMOTE.read_text(encoding="utf-8-sig")
+        text = path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as exc:
         # Windows PowerShell 5.1's `>` and Out-File write UTF-16.
-        return None, (f"cannot read {RUST_CHECK_REMOTE.name} as UTF-8 ({exc.reason}); "
+        return None, (f"cannot read {path.name} as UTF-8 ({exc.reason}); "
                       "write it as UTF-8 (pwsh 7, or Set-Content -Encoding utf8)")
     except OSError as exc:
-        return None, f"cannot read {RUST_CHECK_REMOTE.name}: {exc}"
+        return None, f"cannot read {path.name}: {exc}"
     cfg: dict[str, str] = {}
     for number, line in enumerate(text.splitlines(), 1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         m = re.match(r"\s*([a-z_]+)\s*=\s*(.*?)\s*$", line)
         if not m or m.group(1) not in ("ssh", "repo", "role"):
-            return None, (f"{RUST_CHECK_REMOTE.name} line {number} is not one of ssh=, repo= "
+            return None, (f"{path.name} line {number} is not one of ssh=, repo= "
                           "or role=")
         if m.group(1) in cfg:
-            return None, f"{RUST_CHECK_REMOTE.name} gives {m.group(1)}= twice"
+            return None, f"{path.name} gives {m.group(1)}= twice"
         cfg[m.group(1)] = m.group(2)
-    bad = f"{RUST_CHECK_REMOTE.name} needs"
+    bad = f"{path.name} needs"
     # An ssh destination that starts with "-" would be read as an option.
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@-]*", cfg.get("ssh", "")):
         return None, f"{bad} ssh=<an ~/.ssh/config alias>"
     if not RUST_CHECK_REPO_RE.fullmatch(cfg.get("repo", "")):
         return None, (f"{bad} repo=<the path of a clone there>, in letters, digits, "
                       "spaces and _ . : \\ / ~ - only")
-    cfg.setdefault("role", RUST_CHECK_DEFAULT_ROLE)
-    if cfg["role"] not in RUST_CHECK_ROLES:
-        return None, (f"{bad} role= to be one of {', '.join(RUST_CHECK_ROLES)}: the batch "
+    cfg.setdefault("role", default_role)
+    if cfg["role"] not in roles:
+        return None, (f"{bad} role= to be one of {', '.join(roles)}: the batch "
                       "body prints it, so never a machine's name")
     return cfg, ""
 
@@ -2253,6 +2285,125 @@ def _ps_literal(value: str) -> str:
     if not value.isascii():
         raise Refusal(f"refusing a non-ASCII value for the far half: {value!r}")
     return "'" + value.replace("'", "''") + "'"
+
+
+def _remote_far(plan: Plan, cfg: dict[str, str], script_text: str, name: str,
+                params: str, timeout: int, *, shell: str = "pwsh",
+                log_path: Path | None = None) -> tuple[int | None, str, list[str]]:
+    """Run a far half (ops/rust-harness-remote.ps1, ops/shim-tests-remote.sh)
+    on the dev machine `cfg` names, with the batch as a git bundle on ssh's
+    stdin (`<branch> ^<base>`: everything master lacks), so nothing is pushed.
+    Returns the far half's exit code from its own verdict line (None when it
+    gave none), the cause when it did not run, and its output lines."""
+    role = cfg["role"]
+    ref = f"refs/heads/{plan.branch}"
+    if _out("rev-parse", ref) != plan.head:
+        return None, f"{plan.branch} is not at {plan.head[:12]}", []
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle = Path(tmp) / "batch.bundle"
+        try:
+            git("bundle", "create", "-q", str(bundle), ref, f"^{plan.base_sha}")
+            data = base64.b64encode(bundle.read_bytes()).decode("ascii")
+        except (Refusal, OSError) as exc:
+            return None, f"the batch bundle could not be made: {exc}", []
+    # The verdict line carries a nonce no member code sees (it travels on
+    # stdin, not argv), so a line cargo or pytest passes through cannot stand
+    # in for it.
+    nonce = secrets.token_hex(16)
+    script = ("& {\n" + script_text + "\n} -Repo " + _ps_literal(cfg["repo"])
+              + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
+              + " -Ref " + _ps_literal(ref) + params + " -Nonce " + _ps_literal(nonce))
+    if shell == "bash":
+        import shlex
+        script = "set -- " + " ".join(shlex.quote(x) for x in
+            (cfg["repo"], plan.base_sha, plan.head, ref, nonce, params)) + "\n" + script_text
+    # stdin carries the script (its first line) and then the bundle; the
+    # command line carries only RUST_CHECK_BOOTSTRAP, since an encoded
+    # command past about 8 KB is refused through Windows' ssh.exe.
+    data = base64.b64encode(script.encode("utf-8")).decode("ascii") + "\n" + data
+    argv = [*RUST_CHECK_SSH, "-o", "BatchMode=yes", "-o", "ConnectTimeout=20",
+            "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4",
+            "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ForwardX11=no", cfg["ssh"],
+            f"pwsh -NoProfile -NonInteractive -EncodedCommand {RUST_CHECK_BOOTSTRAP}"]
+    if shell == "bash":
+        import shlex
+        argv[-1] = "bash -c " + shlex.quote('IFS= read -r script; exec bash -c "$(printf %s "$script" | base64 -d)"')
+    try:
+        proc = _gate_ssh(argv, data, timeout, log_path)
+    except Refusal as exc:
+        return None, f"on the {role}: {exc}", []
+    except subprocess.TimeoutExpired:
+        lines = log_path.read_text(encoding="utf-8").splitlines() if log_path and log_path.exists() else []
+        return None, f"the {role} gave no verdict in {timeout} s; check its owned run before retrying", lines
+    lines = [line for line in (proc.stdout + proc.stderr).splitlines() if line.strip()]
+    last = lines[-1].strip() if lines else ""
+    # Only the far half's own last line decides; a run cut short has none.
+    tag = f"{name} {nonce}: "
+    said = last.removeprefix(tag) if last.startswith(tag) else None
+    exited = re.fullmatch(r"(?:cargo|pytest|nextest) exit (-?\d+)", said) if said is not None else None
+    if exited and proc.returncode == int(exited.group(1)):
+        return int(exited.group(1)), "", lines
+    if said is not None and said.startswith("not run: "):
+        return None, f"on the {role}: {said.removeprefix('not run: ')[:300]}", lines
+    how = "ssh" if proc.returncode == 255 else "the far half"
+    return None, f"on the {role}: {how} exit {proc.returncode}: {last[:300] or 'no output'}", lines
+
+
+def _gate_ssh(argv: list[str], data: str, timeout: int, log: Path | None) -> subprocess.CompletedProcess:
+    """Stream progress and lock-holder messages while feeding a possibly large bundle."""
+    import threading
+
+    lines: list[str] = []
+    errors: list[str] = []
+    try:
+        output = log.open("w", encoding="utf-8") if log else tempfile.TemporaryFile(mode="w", encoding="utf-8")
+    except OSError as exc:
+        raise Refusal(f"cannot open the gate log: {exc}") from None
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        output.close()
+        raise Refusal(f"cannot start ssh: {exc}") from None
+
+    def feed() -> None:
+        try:
+            proc.stdin.write(data)
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass  # SSH's exit and final verdict decide whether input arrived.
+
+    def drain() -> None:
+        try:
+            for line in proc.stdout:
+                lines.append(line)
+                output.write(line)
+                output.flush()
+                print(line, end="", flush=True)
+        except OSError as exc:
+            errors.append(str(exc))
+        finally:
+            output.close()
+            proc.stdout.close()
+
+    writer = threading.Thread(target=feed, daemon=True)
+    reader = threading.Thread(target=drain, daemon=True)
+    writer.start()
+    reader.start()
+    try:
+        proc.wait(timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        writer.join(timeout=5)
+        reader.join(timeout=5)
+    if reader.is_alive() or writer.is_alive():
+        raise Refusal("ssh's streams did not close; check its owned remote run before retrying")
+    if errors:
+        raise Refusal(f"could not retain the gate output: {errors[0]}")
+    return subprocess.CompletedProcess(argv, proc.returncode, "".join(lines), "")
 
 
 def _remote_rust_check(plan: Plan, cfg: dict[str, str]) -> tuple[str, str]:
@@ -2707,7 +2858,7 @@ def _after_drop_standing(rollup: list[dict] | None) -> list[dict]:
     return [c for c in bad if not replaced(c)]
 
 
-def _after_drop_rulings(test: str, scope: str | None, summaries: list[tuple[str, list[str]]],
+def _after_drop_rulings(test: str | None, scope: str | None, summaries: list[tuple[str, list[str]]],
                         plan: Plan) -> tuple[str | None, list[str], list[str]]:
     """The maintainer's rulings the fast path rests on, in one place:
     (refusal, waiting, notes).
@@ -2723,6 +2874,12 @@ def _after_drop_rulings(test: str, scope: str | None, summaries: list[tuple[str,
     on the new head, so it waits for the carried jobs it needs, and the fast
     path saves no time while they run. Whether it may be judged by its
     inputs instead is the maintainer's call (asked 17 November 2026)."""
+    # None requests the pre-open local-gate ruling. The compile verdict is
+    # always required; the whole remaining off-PC gate is waived after a drop.
+    if test is None:
+        note = (f"not run: a batch built after a drop skips the suite, harness and shim tests ({AFTER_DROP_DOC})"
+                if plan.after_drop else "")
+        return None, [], [note] if note else []
     notes = [f"{name} did not pass on #{plan.after_drop.get('batch')}'s head, so it must pass "
              f"on this one; it needs {', '.join(inputs)}, which {'is' if len(inputs) == 1 else 'are'} "
              "carried but still running, so it cannot finish before "
@@ -2920,7 +3077,8 @@ def _after_drop_merge(plan: Plan, view: dict) -> tuple[list[str], list[str], lis
     return waiting, report, notes
 
 
-def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> str:
+def body(plan: Plan, suite: str | None = None, harness: str | None = None,
+         shim: str | None = None) -> str:
     lines = [
         f"Integration batch of {len(plan.merged)} reviewed pull requests, built by "
         f"`python ops/integrate.py build` from `{BASE}` at `{plan.base_sha}`. "
@@ -2955,7 +3113,7 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
     if plan.after_drop:
         lines += ["", "## After a drop", "",
                   f"Built with `build --after-drop {plan.after_drop['batch']}` "
-                  f"({AFTER_DROP_DOC}): no local suite or harness run, and `merge` waits "
+                  f"({AFTER_DROP_DOC}): no local suite, harness or shim run, and `merge` waits "
                   "for `test` on this head, carrying the closed batch's other passes. "
                   "What it relied on, checked by the tool:", "",
                   *_after_drop_lines(plan.after_drop)]
@@ -2970,7 +3128,8 @@ def body(plan: Plan, suite: str | None = None, harness: str | None = None) -> st
         f"- Rust harness Python tests (`{RUST_HARNESS_COMMAND}`, which the full "
         f"suite does not collect): {harness or '<filled in by `open`>'}",
         f"- Rust compile check (`{RUST_CHECK_COMMAND}` in `{RUST_CHECK_DIR}/`, which "
-        f"neither run above compiles): {_rust_check_cell(plan)}",
+        f"checks all workspace targets): {_rust_check_cell(plan)}",
+        f"- Shim unit tests (`{SHIM_TESTS_COMMAND}`): {shim or '<filled in by `open`>'}",
         "- CI: this pull request's run is the combined check of its members, "
         "and their first full one: a pull request from any branch but "
         "`integrate/*` runs only the fast lanes.",
@@ -3087,7 +3246,7 @@ def build(args: argparse.Namespace) -> int:
     if plan.after_drop:
         print(f"built {plan.branch} at {plan.head[:12]} after a drop, relying on:\n"
               + "\n".join(_after_drop_lines(plan.after_drop))
-              + f"\nNo local suite or harness run is needed ({AFTER_DROP_DOC}). Next, on "
+              + f"\nNo local suite, harness or shim run is needed ({AFTER_DROP_DOC}). Next, on "
               "this checkout: python ops/integrate.py open; then `merge` once `test` "
               "passes on the new head.")
         return 0
@@ -3096,11 +3255,9 @@ def build(args: argparse.Namespace) -> int:
           f"  1. {SUITE_COMMAND}   (the full suite on the remote machine, the batch "
           "head carried as a bundle; writes ~/.pseudolife-mcp/suite-results/*.json;\n"
           f"     {REAL_CLIENT_NOTE}; {SUITE_LOCAL_NOTE})\n"
-          f"  2. {RUST_HARNESS_COMMAND}   (the Rust harness Python tests the "
-          "suite does not collect; natively is fine, with the project's dev "
-          "dependencies)\n"
-          "  3. python ops/integrate.py open --suite <that .json> --harness-note "
-          f"\"<count> passed at {plan.head[:8]}\"\n"
+          f"  2. python ops/integrate.py harness   ({RUST_HARNESS_COMMAND} on the Windows dev VM)\n"
+          f"  3. python ops/integrate.py shim-tests   ({SHIM_TESTS_COMMAND} on the second Linux dev box)\n"
+          "  4. python ops/integrate.py open --suite <suite.json> --harness <harness.json> --shim-tests <shim.json>\n"
           "A red suite: bisect locally, drop the culprit, switch back with "
           f"`git switch --detach {REMOTE}/{BASE}`, remove the local branch and build "
           "again.")
@@ -3189,7 +3346,7 @@ def suite(args: argparse.Namespace) -> int:
     print(f"integrate: suite exit {code}; its result is {results[-1]}")
     if code == 0:
         print(f"next: python ops/integrate.py open --suite {results[-1]} "
-              f"--harness-note \"<count> passed at {head[:8]}\"")
+              f"--harness <harness.json> --shim-tests <shim-tests.json>")
     return code
 
 
@@ -3246,27 +3403,42 @@ def _suite_line(args: argparse.Namespace, head: str) -> str:
             f"with the real native client built from it: {result.get('summary', '')}")
 
 
-def _harness_line(args: argparse.Namespace, head: str) -> str:
-    """The "Rust harness Python tests" line: the operator's statement of the
-    run `build` printed, naming the batch head it ran on."""
-    if not args.harness_note:
-        raise Refusal("give the Rust harness Python tests' result for this head: "
-                      f"run `{RUST_HARNESS_COMMAND}` on this checkout, then "
-                      f"`--harness-note \"<count> passed at {head[:8]}\"`; the local "
-                      "full suite does not collect them")
-    if head[:8] not in args.harness_note:
-        raise Refusal(f"a --harness-note must name the batch head it ran on "
-                      f"(at least `{head[:8]}`) with its result")
-    note = args.harness_note.lower()
-    passed = re.search(r"\b(\d+) passed\b", note)
-    # Only pytest's own non-zero counts ("3 failed", "1 error") mark a red
-    # run; the words alone also appear in prose and log paths.
-    if (not passed or int(passed.group(1)) == 0
-            or re.search(r"\b0*[1-9]\d*\s+(failed|errors?)\b", note)):
-        raise Refusal("a --harness-note must state a clean pass, pytest's own "
-                      f"`<count> passed` with no failed or error count, at {head[:8]}; "
-                      "a red run is bisected and its culprit dropped")
-    return f"{args.harness_note} (stated by the operator, not checked)"
+def _gate_result_line(path: str | None, head: str, kind: str) -> str:
+    """Accept a completed run of the entire required selection at this head."""
+    harness = kind == HARNESS_RESULT_KIND
+    name = "harness" if harness else "shim-tests"
+    role = "Windows dev VM" if harness else "second Linux dev box"
+    command = RUST_HARNESS_COMMAND if harness else SHIM_TESTS_COMMAND
+    selection = list(RUST_HARNESS if harness else SHIM_TESTS_ARGS)
+    again = f"run `python ops/integrate.py {name}` and give `open --{name} <result.json>` for {head[:8]}"
+    if not path:
+        raise Refusal(f"give the {name} result: {again}")
+    try:
+        result = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise Refusal(f"cannot read the {name} result: {exc}; {again}") from None
+    if not isinstance(result, dict) or result.get("kind") != kind:
+        raise Refusal(f"this is not a result `{name}` wrote; {again}")
+    if result.get("commit") != head:
+        raise Refusal(f"the {name} result tested {result.get('commit')}, not this batch head; {again}")
+    if result.get("command") != command or result.get("selection") != selection:
+        raise Refusal(f"the {name} result ran another selection; {again}")
+    if result.get("machine") != role:
+        raise Refusal(f"the {name} result names no known dev machine role for this gate; expected {role}; {again}")
+    try:
+        started, ended = [dt.datetime.fromisoformat(result[key]) for key in ("started", "ended")]
+        if started.tzinfo is None or ended.tzinfo is None or ended < started:
+            raise ValueError("invalid order or missing timezone")
+    except (KeyError, TypeError, ValueError):
+        raise Refusal(f"the {name} result lacks valid run timestamps; {again}") from None
+    if result.get("exit_code") is None:
+        raise Refusal(f"the {name} did not run ({result.get('not_run')}); {again}")
+    summary = result.get("summary")
+    passed = re.search(r"\b([1-9]\d*) passed\b", summary) if isinstance(summary, str) else None
+    if (type(result.get("exit_code")) is not int or result["exit_code"] != 0 or not passed
+            or result.get("not_run") or re.search(r"\b0*[1-9]\d*\s+(failed|errors?)\b", summary)):
+        raise Refusal(f"the {name} failed at {head[:12]} (exit {result.get('exit_code')}: {summary}); bisect and drop the culprit")
+    return f"passed at `{head}` on the {role}: {summary}"
 
 
 def _refuse_red_members(plan: Plan) -> None:
@@ -3305,6 +3477,80 @@ def _refuse_red_members(plan: Plan) -> None:
             raise Refusal(f"#{m.number}: {why}; nothing was opened, retry once the exact replay passes")
 
 
+def _built_batch() -> tuple[str, Plan, str]:
+    """The batch `build` left on this checkout: (branch, plan, head), or a
+    refusal naming what to do."""
+    if _out("status", "--porcelain", "--untracked-files=no"):
+        raise Refusal("the checkout has uncommitted changes to tracked files; "
+                      "nothing is fixed inside a batch")
+    branch = git("symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
+    plan = Plan.load(branch) if BATCH_RE.match(branch) else None
+    if plan is None:
+        raise Refusal(f"this checkout is not on a batch `build` left here "
+                      f"({branch or 'detached HEAD'}); run `python ops/integrate.py "
+                      "build` first")
+    head = _out("rev-parse", "HEAD")
+    if head != plan.head:
+        raise Refusal(f"{branch} moved from {plan.head[:12]} to {head[:12]} after "
+                      "build; nothing is fixed inside a batch, so rebuild it")
+    return branch, plan, head
+
+def harness(args: argparse.Namespace) -> int:
+    return _run_gate(args, HARNESS_RESULT_KIND)
+
+
+def shim_tests(args: argparse.Namespace) -> int:
+    return _run_gate(args, "shim-tests")
+
+
+def _run_gate(args: argparse.Namespace, kind: str) -> int:
+    branch, plan, head = _built_batch()
+    if plan.rust_check not in RUST_CHECK_OK:
+        raise Refusal(_rust_check_refusal(plan))
+    harness = kind == HARNESS_RESULT_KIND
+    name = "harness" if harness else "shim-tests"
+    config = RUST_CHECK_REMOTE if harness else SHIM_TESTS_REMOTE
+    role = "Windows dev VM" if harness else "second Linux dev box"
+    command = RUST_HARNESS_COMMAND if harness else SHIM_TESTS_COMMAND
+    selection = list(RUST_HARNESS if harness else SHIM_TESTS_ARGS)
+    cfg, cause = _remote_config(config, (role,), role)
+    if not cfg:
+        raise Refusal(f"{cause or 'no dev machine configured'}; configure {config.name} (docs/dev/dev-machines.md); no local fallback")
+    script = RUST_HARNESS_REMOTE_SCRIPT if harness else SHIM_TESTS_REMOTE_SCRIPT
+    if not script or (harness and not DATABASE_LOCK_SCRIPT):
+        raise Refusal(f"the {name} far half or its lock helper is missing from this checkout")
+    if harness:
+        # Ship the helper already read by this controller, not one loaded
+        # from the remote checkout after it changes to the batch head.
+        helper = base64.b64encode(DATABASE_LOCK_SCRIPT.encode("utf-8")).decode("ascii")
+        script = script.replace('# LOAD_DATABASE_LOCK',
+            f". ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{helper}'))))")
+        params = " -PytestArgs @(" + ", ".join(_ps_literal(p) for p in selection) + ")"
+        params += f" -LockWaitSeconds {args.lock_wait_seconds}"
+    else:
+        params = str(args.lock_wait_seconds)
+    started = dt.datetime.now().astimezone()
+    SUITE_RESULTS.mkdir(parents=True, exist_ok=True)
+    stem = SUITE_RESULTS / f"{started:%Y%m%d-%H%M%S-%f}-{name}-{head[:8]}"
+    log = stem.with_suffix(".log")
+    print(f"integrate: {name} at {head[:12]} on the {role}; bundle only, nothing pushed", flush=True)
+    print(f"log {log}", flush=True)
+    code, cause, lines = _remote_far(plan, cfg, script, kind, params,
+                                   RUST_HARNESS_REMOTE_TIMEOUT, shell="pwsh" if harness else "bash", log_path=log)
+    summaries = ([m.group(1) for m in map(PYTEST_SUMMARY_RE.match, lines) if m] if harness else
+                 [line.strip() for line in lines if "Summary [" in line])
+    summary = summaries[-1] if summaries else ""
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    result = {"kind": kind, "machine": role, "commit": head, "branch": branch,
+              "command": command, "selection": selection, "exit_code": code,
+              "not_run": cause or None, "summary": summary, "started": started.isoformat(),
+              "ended": dt.datetime.now().astimezone().isoformat(), "log": str(log)}
+    out = stem.with_suffix(".json")
+    out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(f"{name}: {summary or cause or 'no summary'}\nresult {out}\nlog {log}", flush=True)
+    return code if code is not None else 3
+
+
 def open_(args: argparse.Namespace) -> int:
     if _out("status", "--porcelain", "--untracked-files=no"):
         raise Refusal("the checkout has uncommitted changes to tracked files; "
@@ -3338,15 +3584,19 @@ def open_(args: argparse.Namespace) -> int:
     # resumes, as one opened from a plan that predates the check must.
     if not own and plan.rust_check not in RUST_CHECK_OK:
         raise Refusal(_rust_check_refusal(plan))
-    skipped = (f"not run: a batch built after a drop skips it ({AFTER_DROP_DOC}); closed "
-               f"batch #{plan.after_drop.get('batch')} ran it") if plan.after_drop else ""
-    suite = (skipped if skipped and not (args.suite or args.suite_note)
+    _, _, waived = _after_drop_rulings(None, None, [], plan)
+    skipped = waived[0] if waived else ""
+    # The fast path waives absent evidence, never evidence of a known failure.
+    suite = (skipped if skipped and args.suite is None and args.suite_note is None
              else _suite_line(args, head))
-    harness = skipped if skipped and not args.harness_note else _harness_line(args, head)
+    harness = (skipped if skipped and args.harness is None
+               else _gate_result_line(args.harness, head, HARNESS_RESULT_KIND))
+    shim = (skipped if skipped and args.shim_tests is None
+            else _gate_result_line(args.shim_tests, head, "shim-tests"))
     if plan.after_drop:
         print(f"integrate: opening {plan.branch} after a drop, relying on:\n"
               + "\n".join(_after_drop_lines(plan.after_drop)))
-    text = body(plan, suite, harness)
+    text = body(plan, suite, harness, shim)
     url = None
     if own:
         number, url, sha = own[0]
@@ -3765,6 +4015,12 @@ def status(args: argparse.Namespace) -> int:
         print(f"#{m.number} {m.sha[:12]}{moved}:{draft} {merge}; CI {m.checks}{shown}; "
               f"review {m.review}; labelled {m.labeled_at or 'at an unknown time'} "
               f"- {m.title}")
+        print(f"  {m.rust_jobs}; snapshot {m.snapshot}")
+        reason = _not_ready(m)
+        if head != m.sha:
+            reason = "head moved while status was read; retry status"
+        if reason:
+            print(f"  would leave out: {reason}")
     return 0
 
 
@@ -3790,16 +4046,22 @@ def main(argv: list[str] | None = None) -> int:
     evidence.add_argument("--suite", help="the passing suite result JSON for this head")
     evidence.add_argument("--suite-note",
                           help="the suite result in words, for a run without a JSON")
-    o.add_argument("--harness-note",
-                   help="the Rust harness Python tests' result in words, naming "
-                        "this head (the command `build` printed)")
+    o.add_argument("--harness", help="the matching successful harness result JSON")
+    o.add_argument("--shim-tests", help="the matching successful shim-tests result JSON")
+    for name in ("harness", "shim-tests"):
+        gate = sub.add_parser(name, help=f"run the built batch's {name} gate on its dev machine")
+        gate.add_argument("--lock-wait-seconds", type=int, default=1200,
+                          help="maximum wait for the machine's locks (default 1200)")
     sub.add_parser("suite", help="run the built batch's full suite on the remote "
                                  "machine (its head travels as a bundle)")
     sub.add_parser("merge", help="merge the published batch pull request once every "
                                  "check on its built head passed; the one path to "
                                  "master")
     args = parser.parse_args(argv)
-    commands = {"status": status, "build": build, "suite": suite, "open": open_, "merge": merge}
+    if hasattr(args, "lock_wait_seconds") and args.lock_wait_seconds < 0:
+        parser.error("--lock-wait-seconds must be nonnegative")
+    commands = {"status": status, "build": build, "suite": suite, "open": open_, "merge": merge,
+                "harness": harness, "shim-tests": shim_tests}
     try:
         return commands[args.command](args)
     except Refusal as exc:
