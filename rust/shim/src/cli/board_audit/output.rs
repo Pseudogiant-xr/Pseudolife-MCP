@@ -290,8 +290,8 @@ mod tests {
                 let path = directory.0.join("read-only-handle");
                 fs::write(&path, SECRET).unwrap();
                 let file = File::open(path).unwrap();
-                // This existing helper requires WRITE_OWNER and WRITE_DAC;
-                // a read-only handle provides neither. No product seam is used.
+                // This helper requires WRITE_OWNER and WRITE_DAC;
+                // a read-only handle provides neither.
                 let error = crate::credentials::windows_security::make_private(&file).unwrap_err();
                 let error = io::Error::new(io::ErrorKind::PermissionDenied, error);
                 assert_eq!(failure("staging", &error), 2);
@@ -306,8 +306,8 @@ mod tests {
             #[cfg(windows)]
             {
                 use std::os::windows::fs::OpenOptionsExt;
-                // Production excludes delete sharing. Construct a valid
-                // existing receiver with delete sharing to reach its fence.
+                // The command excludes delete sharing. This constructed
+                // Staged value lets the test remove its path before publish.
                 drop(staged.file.take());
                 staged.file = Some(
                     fs::OpenOptions::new()
@@ -382,15 +382,31 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn reparse_identity_has_its_own_cause() {
-        use std::os::windows::fs::{OpenOptionsExt, symlink_file};
+        use std::os::windows::{fs::OpenOptionsExt, process::CommandExt};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
         let directory = Directory::new();
         let ordinary = directory.0.join("ordinary");
         let redirect = directory.0.join("redirect");
+        let target_directory = directory.0.join("target");
         fs::write(&ordinary, SECRET).unwrap();
-        symlink_file(&ordinary, &redirect).unwrap();
+        fs::create_dir(&target_directory).unwrap();
+        // Directory junctions require no symlink privilege on the test VM.
+        let command = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("cmd.exe");
+        let output = Command::new(command)
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&redirect)
+            .arg(&target_directory)
+            .creation_flags(0x08000000)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
         let file = fs::OpenOptions::new()
             .read(true)
-            .custom_flags(0x00200000)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
             .open(redirect)
             .unwrap();
         let message = identity(&file).unwrap_err().to_string();
