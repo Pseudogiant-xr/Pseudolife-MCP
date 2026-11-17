@@ -10,6 +10,18 @@ impl Drop for Scratch {
     }
 }
 
+fn windows_registration_command(
+    script: &std::path::Path,
+    data: &std::path::Path,
+    _script_bytes: &[u8],
+    _data_bytes: &[u8],
+) -> Result<Command, String> {
+    let mut command = Command::new("powershell.exe");
+    command.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(script).arg(data);
+    Ok(command)
+}
+
 /// The exit code of a refusal over a scheduled task this shell may not
 /// change (one an elevated shell registered, or another account's): the
 /// script printed its one line and changed nothing, so callers print no
@@ -217,9 +229,11 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     let status = if cfg!(windows) {
         let script = scratch.0.join("register.ps1");
         let data = scratch.0.join("registration.json");
-        fs::write(&script,include_str!("autostart.ps1")).map_err(|e|e.to_string())?;
-        fs::write(&data,serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON")).map_err(|e|e.to_string())?;
-        Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File"]).arg(script).arg(data).status()
+        let script_bytes = include_bytes!("autostart.ps1");
+        let data_bytes = serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON");
+        fs::write(&script,script_bytes).map_err(|e|e.to_string())?;
+        fs::write(&data,&data_bytes).map_err(|e|e.to_string())?;
+        windows_registration_command(&script, &data, script_bytes, &data_bytes)?.status()
     } else if cfg!(target_os="linux") {
         let script = scratch.0.join("register.sh");
         fs::write(&script,include_str!("autostart.sh")).map_err(|e|e.to_string())?;
@@ -232,5 +246,56 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
         Err(Failure::Locked)
     } else {
         Err(format!("autostart registration failed ({status}); see the diagnostic above").into())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registration_uses_system_windows_powershell() {
+        let command = windows_registration_command("C:/fixture/register.ps1".as_ref(), "C:/fixture/registration.json".as_ref(), b"", b"").unwrap();
+        let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        assert!(std::path::Path::new(command.get_program()).is_absolute());
+        assert_eq!(command.get_program(), expected);
+        assert!(command.get_args().any(|arg| arg == "-EncodedCommand"));
+    }
+
+    #[test]
+    fn registration_checks_both_files_before_using_their_bytes() {
+        let scratch = Scratch(std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())));
+        fs::create_dir(&scratch.0).unwrap();
+        let script = scratch.0.join("register ' é.ps1");
+        let data = scratch.0.join("registration ' é.json");
+        let script_bytes = br#"param([string]$ConfigPath, [string]$ConfigJson)
+if (!$ConfigJson) { $ConfigJson = [IO.File]::ReadAllText($ConfigPath) }
+$c = $ConfigJson | ConvertFrom-Json
+[Console]::Out.WriteLine('registered ' + $c.Name)
+exit 0"#;
+        let data_bytes = br#"{"Name":"fixture"}"#;
+        // Each case uses the production command builder, with no real scheduler.
+        for changed in ["script", "data", "neither"] {
+            fs::write(&script, script_bytes).unwrap();
+            fs::write(&data, data_bytes).unwrap();
+            let mut command = windows_registration_command(&script, &data, script_bytes, data_bytes).unwrap();
+            if changed == "script" {
+                fs::write(&script, "[Console]::Out.WriteLine('changed script ran');exit 0").unwrap();
+            } else if changed == "data" {
+                fs::write(&data, br#"{"Name":"changed data read"}"#).unwrap();
+            }
+            let output = command.output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if changed == "neither" {
+                assert_eq!(output.status.code(), Some(0), "{stdout} {stderr}");
+                assert_eq!(stdout.trim(), "registered fixture");
+            } else {
+                assert_eq!(output.status.code(), Some(5), "{changed}: {stdout} {stderr}");
+                assert!(stdout.is_empty(), "{stdout}");
+                assert!(stderr.contains(&format!("autostart registration {changed} changed")), "{stderr}");
+            }
+        }
     }
 }

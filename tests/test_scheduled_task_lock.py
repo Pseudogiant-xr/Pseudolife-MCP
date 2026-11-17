@@ -123,6 +123,14 @@ def test_the_two_copies_of_the_task_lock_functions_are_identical() -> None:
     assert 'include_str!("../../../extractor_shim/autostart.ps1")' in schedule
 
 
+def test_path_resolution_never_compiles_a_temporary_assembly() -> None:
+    for path in (LOCK, NATIVE):
+        text = _block(_read(path), "task lock")
+        assert "Add-Type" not in text, path.name
+        assert "[Reflection.Emit.AssemblyBuilderAccess]::Run" in text
+        assert "GetFinalPathNameByHandleW" in text
+
+
 def test_every_logon_trigger_is_for_this_user_with_a_limited_principal() -> None:
     """A trigger for any user's logon is what made registration need
     elevation. Every logon trigger the product writes names the user, and
