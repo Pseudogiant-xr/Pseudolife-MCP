@@ -82,7 +82,15 @@ the committed golden. The separate bank never consumes candidate output.
 """
     def __init__(self, url):
         self.conn = connect(url)
-        self.conn.execute("UPDATE meta SET value = '2'::jsonb WHERE key = 'writer_lease_epoch'")
+        try:
+            # Opening the native store reapplies the schema plan, including
+            # its existing-row repairs. Apply those to the independent arm.
+            with self.conn.transaction():
+                ensure_schema(self.conn)
+                self.conn.execute("UPDATE meta SET value = '2'::jsonb WHERE key = 'writer_lease_epoch'")
+        except BaseException:
+            self.conn.close()
+            raise
 
     def close(self):
         self.conn.close()
