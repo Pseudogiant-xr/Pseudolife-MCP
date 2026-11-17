@@ -104,6 +104,13 @@ Plugin hook verification uses a shared verifier that does not expand
 that limitation and asks for the expanded absolute directory. It does not
 misreport the plugin as absent. A malformed Claude registration is reported
 while credential discovery continues with the independent Codex registration.
+Missing registration files are distinct from unreadable or non-UTF-8 files.
+Each unreadable file is named with a repair; a bad Claude settings file keeps
+known registration evidence and Git Bash's environment/default/PATH checks.
+All native client JSON/TOML readers accept one UTF-8 byte-order mark, including
+both credential discovery and wake checks. Console uses the same independent
+credential search but keeps its existing interface without per-file findings;
+doctor is the diagnostic that reports those findings.
 
 Saved-state parent components and trusted directory links are supported.
 A leaf link or an unsafe private file is reported with a remedy; the file is
@@ -116,11 +123,19 @@ Duplicate/non-ASCII board headers, unsupported response encodings, wrong
 maintainer field types, incomplete refusals and unsupported health redirects
 are named findings. Error strings omit response contents; URLs with userinfo,
 queries or fragments are redacted. Tunnel and autostart check semantics are unchanged.
+HTTP error pages name the endpoint/status and daemon-side repair; a proxy's
+non-JSON health error is availability evidence. A valid degraded health object
+remains readable on HTTP 503. Native identity and credential-source paths,
+including credential recovery text, use the same safe path display as launcher
+paths. Disposable-proof cleanup receipts also redact credential-bearing paths.
 
 The removed `doctor-agent-path-unnormalized` source mutant is replaced by
 `native_agent_json_cells_and_private_path_near_misses`; the removed Windows
 `doctor-pathlib-keeps-dot-parts` mutant is replaced by
-`native_windows_path_shapes` and `pathlib_strings`. The maintainer-skip mutant
+`review_round2_leading_dot_is_normalized` and `pathlib_strings`; the leading-dot
+test is also run against removal of the CurDir filter. The obsolete
+`doctor-toml-bom-accepted` mutant is replaced by
+`review_round2_utf8_bom_credentials_and_wake_agree`. The maintainer-skip mutant
 uses the diagnostic error type. The obsolete platform exclusion and now-empty
 `doctor-4` weekly shard are removed.
 

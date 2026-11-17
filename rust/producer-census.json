@@ -419,6 +419,7 @@
     "rust/shim/src/cli/coordination_recovery/mod.rs": "f599c1ac1e271c7dbecc396f32286bc2b2bcea7c560232aa082a73d41344c0f0",
     "rust/shim/src/cli/doctor/agent.rs": "9a572ca4b2fd938fb5d2edb5d790eaaf7a1e285cac9a6218ff4654861dbd2f7f",
     "rust/shim/src/cli/doctor/clients.rs": "4a45884cffb4d9125ef33dfca5786ffdbf8c917a35147e188fc9e05ee9948a59",
+    "rust/shim/src/cli/doctor/display.rs": "22561290db522be32f9b75b781e6e7d4db42a48886ebb5e1dbef2af27cdc848a",
     "rust/shim/src/cli/doctor/handshake.rs": "54c580f0063e838fab86da2c716894648a425a213697d444509aa100d12a53a0",
     "rust/shim/src/cli/doctor/mod.rs": "2ffcd59336dd27cd92e1026393662da60b9dfd71f8cdb6c88c98c7829ef5c424",
     "rust/shim/src/cli/doctor/probes.rs": "a6ac8c57a2fdc6d367224deeba783a1fe9386d5331f59821e70fac1de952ca49",
