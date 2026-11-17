@@ -274,7 +274,8 @@ that base just as CI does. Runtime edits already present on master do not
 turn a remaining docs-only or test-only diff into a replay requirement.
 Conflicting heads follow the existing merge/drop path rather than wait for
 replay evidence that GitHub cannot produce: budget-only conflicts retain
-the existing normalization and use the batch's replay, and other conflicts
+the existing normalization and use the batch's replay, census-only conflicts
+are regenerated on the batch head, and other conflicts
 are dropped. Documentation accompanied only by the generated
 `rust/producer-census.json` follows CI's docs-only skip; census alone or
 alongside runtime edits still requires replay. A diff reaching none satisfies
@@ -428,6 +429,15 @@ withdrew because a member changed its source (`manual_drift`), since no
 member's own diff shows it; review those and refresh their fingerprints in
 a follow-up pull request (`rust/producer-census.md`).
 
+A conflict only in `rust/producer-census.json` keeps the member: `build`
+checks that the census is a regular, unredirected file, takes the batch's
+side as a temporary value, completes the member merge, then requires the
+batch-head regeneration above to succeed. The plan, build output and batch
+body name each member whose census conflict was regenerated. A failed
+regeneration drops the census-input members and rebuilds from master,
+naming the actual failure; no temporary resolution is published. Census
+plus budget or source conflicts still drop the member.
+
 CI's Rust jobs run `python rust/producer_census.py --ci-check`. It fails a
 stale census on an `integrate/*` pull request whatever its diff, and on a
 master push or merge group whose diff changes the census inputs (the census
@@ -560,8 +570,9 @@ plan says. Notes:
   breaks an `include_str!` there (`ops/requirements.lock.txt`,
   `tests/cli_audit_float_repr.tsv`).
 
-The script never resolves a conflict (it merges with `rerere` off, so a
-remembered resolution is not replayed either) and never force-pushes. If
+The script resolves only the derived metadata exceptions above (it merges
+with `rerere` off, so a remembered resolution is not replayed either) and
+never force-pushes. If
 the push or `gh pr create` fails, nothing is commented on and rerunning
 `open` with the same arguments finishes the job.
 
