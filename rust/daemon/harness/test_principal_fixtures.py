@@ -26,13 +26,11 @@ def blocked(monkeypatch):
 def test_runner_guard_keeps_slice_restriction_without_package(blocked):
     from rust.harness_support import database_guard
     from unittest.mock import patch
-    for name in ("pl_cf_w1a_fixture", "pl_cf_w2g_fixture"):
-        with patch.object(database_guard, "assert_disposable_database", return_value=name):
-            if run.pg.DISPOSABLE_NAME.fullmatch(name):
-                run.assert_disposable(Mock())
-            else:
-                with pytest.raises(RuntimeError, match="non-disposable"):
-                    run.assert_disposable(Mock())
+    with patch.object(database_guard, "assert_disposable_database", return_value=run.pg.PREFIX + "fixture"):
+        run.assert_disposable(Mock())
+    with patch.object(database_guard, "assert_disposable_database", return_value="pl_cf_other_fixture"):
+        with pytest.raises(RuntimeError, match="non-disposable"):
+            run.assert_disposable(Mock())
 
 
 def test_readiness_classification_imports_without_package(blocked, monkeypatch):
@@ -78,10 +76,11 @@ def test_seed_paths_without_package_or_connections(blocked, monkeypatch):
     monkeypatch.setattr(fixtures, "ensure_schema", Mock())
     monkeypatch.setattr(schema, "ensure_schema", Mock())
     monkeypatch.setattr(fixtures, "assert_disposable_database", Mock())
-    monkeypatch.setattr(database_guard, "assert_disposable_database", lambda conn: "pl_cf_w1a_fixture")
+    bank = run.pg.PREFIX + "fixture"
+    monkeypatch.setattr(database_guard, "assert_disposable_database", lambda conn: bank)
     for name in ("tokens", "pairing", "stamped", "json-float-shortest-ties", "null-embedding",
                  "unconstrained-dims", "console-signin", "console-passkey-signin"):
-        run.SCENARIOS[name]().prepare_template("dbname=pl_cf_w1a_fixture")
+        run.SCENARIOS[name]().prepare_template("dbname=" + bank)
     mcp_run.seed_stored("dbname=pl_cf_w2g_fixture")
     assert conn.execute.called
 
