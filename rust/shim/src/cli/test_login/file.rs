@@ -189,6 +189,11 @@ pub(super) fn writable_shape(path: &Path) -> Result<(), &'static str> {
             return Err("is read-only; make the login file writable");
         }
         Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotADirectory => {
+            return Err(
+                "ancestor is a link or not a directory; choose a path through real directories",
+            );
+        }
         Err(error) if error.kind() != io::ErrorKind::NotFound => {
             return Err("cannot be inspected; restore access to the login file");
         }

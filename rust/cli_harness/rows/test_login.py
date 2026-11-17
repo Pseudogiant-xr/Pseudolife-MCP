@@ -395,8 +395,8 @@ def stdout_failure_rule(obs: dict) -> None:
     """Validate the frozen oracle's broken-pipe traceback before replacing
     it with the native stdout failure. Database and file state still compare."""
     if _oracle_stdout_traceback(obs):
-        text = _STDOUT_FAILURE.replace("\n", "\r\n") if WINDOWS else _STDOUT_FAILURE
-        obs["stderr"] = base64.b64encode(text.encode()).decode()
+        # Native eprintln! writes LF to stderr pipes on Windows too.
+        obs["stderr"] = base64.b64encode(_STDOUT_FAILURE.encode()).decode()
 
 
 @normalize.rule("test-login-run-tokens")

@@ -89,20 +89,41 @@ fn run(home: &Path, arguments: &[&str], env: &[(&str, &str)]) -> Output {
     command.args(arguments).output().unwrap()
 }
 
-fn assert_refused(home: &Home, arguments: &[&str], env: &[(&str, &str)]) {
+const FILE_CANONICAL: &str = "--file/PSEUDOLIFE_TEST_PG_LOGIN_FILE is non-canonical or contains control characters; use a canonical printable file path";
+const ENV_FILE_CANONICAL: &str = "PSEUDOLIFE_TEST_PG_LOGIN_FILE is non-canonical; use a path without dot components, repeated or trailing separators";
+const HOME_CAUSE: &str = "HOME/USERPROFILE is missing, non-Unicode or non-canonical; set an absolute canonical home directory";
+const DAEMON_CAUSE: &str = "PSEUDOLIFE_MCP_DATABASE_URL cannot be read unambiguously; use a supported PostgreSQL DSN with user and database in the authority and path";
+const PATH_CAUSE: &str =
+    "PATH is missing or not Unicode; set a Unicode PATH containing Docker or supply --admin-url";
+const FILE_PREFIX: &str = "--file/PSEUDOLIFE_TEST_PG_LOGIN_FILE ";
+const ANCESTOR_CAUSE: &str =
+    "ancestor is a link or not a directory; choose a path through real directories";
+
+// Parser errors are plain LF stderr; parsed preflight reports use stdout's
+// platform text encoding. Every caller pins both status and the whole cause.
+fn assert_refused(home: &Home, arguments: &[&str], env: &[(&str, &str)], code: i32, cause: &str) {
     let before = home.listing();
     let output = run(home.path(), arguments, env);
-    assert!(matches!(output.status.code(), Some(2 | 4)));
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(text.contains("test-login:"));
-    assert!(!text.contains("deferred"));
-    assert!(!text.contains("fixture-secret"));
-    assert!(!text.contains("postgresql://"));
+    assert_error(&output, code, cause);
     assert_eq!(home.listing(), before);
+}
+
+fn assert_error(output: &Output, code: i32, cause: &str) {
+    assert_eq!(output.status.code(), Some(code));
+    let expected = format!("test-login: {cause}\n");
+    if code == 2 {
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, expected.as_bytes());
+    } else {
+        assert_eq!(output.stdout, cli::native_text(&expected));
+        assert!(output.stderr.is_empty());
+    }
+    for bytes in [&output.stdout, &output.stderr] {
+        let text = String::from_utf8_lossy(bytes);
+        assert!(!text.contains("fixture-secret"));
+        assert!(!text.contains("postgresql://"));
+        assert!(!text.contains("deferred"));
+    }
 }
 
 fn assert_answer(home: &Home, arguments: &[&str], env: &[(&str, &str)], code: i32, stdout: &str) {
@@ -121,42 +142,218 @@ fn assert_answer(home: &Home, arguments: &[&str], env: &[(&str, &str)], code: i3
 #[test]
 fn malformed_argv_is_refused_before_any_effect() {
     let home = Home::new("argv");
-    let url = ["--admin-url", CLOSED_URL];
-    for arguments in [
-        &["--json", "create"][..],
-        &["create", "extra"],
-        &["create", "--rot"],
-        &["create", "--rotate", "--rotate", "--admin-url", CLOSED_URL],
-        &["create", "--json", "--json", "--admin-url", CLOSED_URL],
-        &[
-            "create",
-            "--role",
-            "a",
-            "--role",
-            "b",
-            "--admin-url",
-            CLOSED_URL,
-        ],
-        &["create", "--role"],
-        &["create", "--role", "-x", "--admin-url", CLOSED_URL],
-        &["create", "--bank", "-x", "--admin-url", CLOSED_URL],
-        &["create", "--bank", "", "--admin-url", CLOSED_URL],
-        &["create", "--admin-url", ""],
-        &[
-            "create",
-            "--admin-url",
-            CLOSED_URL,
-            "--admin-url",
-            CLOSED_URL,
-        ],
-        &["create", "--container", "", "--admin-url", CLOSED_URL],
-        &["create", "--file", "", "--admin-url", CLOSED_URL],
-        &["create", "--file", "a/../b.env", "--admin-url", CLOSED_URL],
-        &["create", "--file", "./b.env", "--admin-url", CLOSED_URL],
-        &["create", "--", "--admin-url", CLOSED_URL],
-        &[&["create", "--file", "a", "--file", "b"][..], &url[..]].concat()[..],
+    for (arguments, code, cause) in [
+        (
+            vec!["--json", "create"],
+            2,
+            "expected create; run test-login --help for usage",
+        ),
+        (
+            vec!["create", "extra"],
+            2,
+            "unexpected argument; run test-login create --help for supported options",
+        ),
+        (
+            vec!["create", "--rot"],
+            2,
+            "abbreviated option is unsupported; use --rotate",
+        ),
+        (
+            vec!["create", "--rotate", "--rotate", "--admin-url", CLOSED_URL],
+            2,
+            "--rotate was repeated; supply it once",
+        ),
+        (
+            vec!["create", "--json", "--json", "--admin-url", CLOSED_URL],
+            2,
+            "--json was repeated; supply it once",
+        ),
+        (
+            vec![
+                "create",
+                "--role",
+                "a",
+                "--role",
+                "b",
+                "--admin-url",
+                CLOSED_URL,
+            ],
+            2,
+            "--role was repeated; supply it once",
+        ),
+        (
+            vec!["create", "--role", "-x"],
+            2,
+            "--role value must not start with '-'; supply a non-option value",
+        ),
+        (
+            vec!["create", "--bank", "-x"],
+            2,
+            "--bank value must not start with '-'; supply a non-option value",
+        ),
+        (
+            vec!["create", "--bank", ""],
+            2,
+            "--bank requires a nonempty value; supply --bank=VALUE",
+        ),
+        (
+            vec!["create", "--admin-url", ""],
+            2,
+            "--admin-url requires a nonempty value; supply --admin-url=VALUE",
+        ),
+        (
+            vec![
+                "create",
+                "--admin-url",
+                CLOSED_URL,
+                "--admin-url",
+                CLOSED_URL,
+            ],
+            2,
+            "--admin-url was repeated; supply it once",
+        ),
+        (
+            vec!["create", "--container", ""],
+            2,
+            "--container requires a nonempty value; supply --container=VALUE",
+        ),
+        (
+            vec!["create", "--file", ""],
+            2,
+            "--file requires a nonempty value; supply --file=VALUE",
+        ),
+        (
+            vec!["create", "--file", "a/../b.env", "--admin-url", CLOSED_URL],
+            4,
+            FILE_CANONICAL,
+        ),
+        (
+            vec!["create", "--file", "./b.env", "--admin-url", CLOSED_URL],
+            4,
+            FILE_CANONICAL,
+        ),
+        (
+            vec!["create", "--", "--admin-url", CLOSED_URL],
+            2,
+            "unexpected argument; run test-login create --help for supported options",
+        ),
+        (
+            vec!["create", "--file", "a", "--file", "b"],
+            2,
+            "--file was repeated; supply it once",
+        ),
     ] {
-        assert_refused(&home, arguments, &[]);
+        assert_refused(&home, &arguments, &[], code, cause);
+    }
+}
+
+#[test]
+fn ambiguous_abbreviations_name_every_matching_option() {
+    let home = Home::new("ambiguous");
+    assert_refused(
+        &home,
+        &["create", "--ro", "fixture-secret"],
+        &[],
+        2,
+        "ambiguous option abbreviation; use --role or --rotate",
+    );
+    assert_refused(
+        &home,
+        &["create", "--rol", "fixture-secret"],
+        &[],
+        2,
+        "abbreviated option is unsupported; use --role",
+    );
+    assert_refused(
+        &home,
+        &["create", "--rot"],
+        &[],
+        2,
+        "abbreviated option is unsupported; use --rotate",
+    );
+    assert_refused(
+        &home,
+        &["create", "--json", "--ro"],
+        &[],
+        2,
+        "ambiguous option abbreviation; use --role or --rotate",
+    );
+}
+
+#[test]
+fn missing_values_are_distinct_from_non_unicode_values() {
+    let home = Home::new("missing");
+    for option in ["--role", "--file", "--admin-url", "--container", "--bank"] {
+        assert_refused(
+            &home,
+            &["create", option],
+            &[],
+            2,
+            &format!("{option} requires a value; supply {option}=VALUE"),
+        );
+    }
+}
+
+#[test]
+fn boolean_flags_refuse_values_and_accept_the_flag_alone() {
+    let home = Home::new("boolean");
+    for option in ["--rotate", "--json"] {
+        let with_value = format!("{option}=fixture-secret");
+        assert_refused(
+            &home,
+            &["create", &with_value],
+            &[],
+            2,
+            &format!("{option} takes no value; use {option} alone"),
+        );
+        let output = run(
+            home.path(),
+            &["create", option, "--admin-url", CLOSED_URL],
+            &[],
+        );
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        if option == "--json" {
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["exit"], 1);
+            assert!(
+                value["error"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("the database refused:")
+            );
+        } else {
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .starts_with("test-login: the database refused:")
+            );
+        }
+    }
+    assert!(home.listing().is_empty());
+}
+
+#[test]
+fn administrator_dsn_refusals_name_the_bad_setting_without_values() {
+    let home = Home::new("admin-grammar");
+    for (url, cause) in [
+        (
+            "postgresql:///postgres",
+            "--admin-url has an invalid host setting; supply a supported PostgreSQL TCP DSN",
+        ),
+        (
+            "postgresql://u:fixture-secret@127.0.0.1:1/db?application_name=x",
+            "--admin-url has unsupported option application_name; remove that option and supply a supported PostgreSQL TCP DSN",
+        ),
+        (
+            "host=127.0.0.1 port=1 service=fixture-secret",
+            "--admin-url has unsupported option service; remove that option and supply a supported PostgreSQL TCP DSN",
+        ),
+        (
+            "postgresql://u:fixture-secret@127.0.0.1:1/db#frag",
+            "--admin-url is not a supported PostgreSQL TCP DSN; supply a PostgreSQL DSN with one explicit TCP host",
+        ),
+    ] {
+        assert_refused(&home, &["create", "--admin-url", url], &[], 4, cause);
     }
 }
 
@@ -164,21 +361,25 @@ fn malformed_argv_is_refused_before_any_effect() {
 fn unsupported_settings_are_refused_before_connecting() {
     let home = Home::new("shapes");
     let create = ["create", "--admin-url", CLOSED_URL];
-    // Admin URLs outside the shared client's grammar.
-    for url in [
-        "postgresql:///postgres",
-        "postgresql://postgres@127.0.0.1:1/postgres?application_name=x",
-        "host=127.0.0.1 port=1 service=x",
-        "postgresql://postgres@127.0.0.1:1/postgres#frag",
-    ] {
-        assert_refused(&home, &["create", "--admin-url", url], &[]);
-    }
-    // libpq controls the shared client refuses.
     for name in ["PGHOST", "PGUSER", "PGSSLMODE", "PGPASSFILE", "PGSERVICE"] {
-        assert_refused(&home, &create, &[(name, "x")]);
+        assert_refused(
+            &home,
+            &create,
+            &[(name, "fixture-secret")],
+            4,
+            &format!(
+                "{name} is unsupported with --admin-url; unset that PostgreSQL environment control"
+            ),
+        );
     }
-    // Daemon DSNs that psycopg and the standard library would read differently,
-    // or that the shared client cannot read at all.
+    #[cfg(windows)]
+    assert_refused(
+        &home,
+        &create,
+        &[("pghost", "fixture-secret")],
+        4,
+        "pghost is unsupported with --admin-url; unset that PostgreSQL environment control",
+    );
     for dsn in [
         "postgresql:///pseudolife_memory",
         "postgresql://u@h/db?user=v",
@@ -186,15 +387,24 @@ fn unsupported_settings_are_refused_before_connecting() {
         "host=h user=a xuser=b",
         " postgresql://u@h/db",
     ] {
-        assert_refused(&home, &create, &[("PSEUDOLIFE_MCP_DATABASE_URL", dsn)]);
+        assert_refused(
+            &home,
+            &create,
+            &[("PSEUDOLIFE_MCP_DATABASE_URL", dsn)],
+            4,
+            DAEMON_CAUSE,
+        );
     }
-    // Login file locations that would fail with an operating-system message.
     fs::create_dir_all(home.path().join("dir.env")).unwrap();
     fs::write(home.path().join("plain"), "x").unwrap();
     assert_refused(
         &home,
         &["create", "--file", "dir.env", "--admin-url", CLOSED_URL],
         &[],
+        4,
+        &format!(
+            "{FILE_PREFIX}is a link or not a regular file; choose a regular private login file"
+        ),
     );
     assert_refused(
         &home,
@@ -206,19 +416,33 @@ fn unsupported_settings_are_refused_before_connecting() {
             CLOSED_URL,
         ],
         &[],
+        4,
+        &format!("{FILE_PREFIX}{ANCESTOR_CAUSE}"),
     );
     let as_dir = home.path().join("dir.env");
     assert_refused(
         &home,
         &create,
         &[("PSEUDOLIFE_TEST_PG_LOGIN_FILE", as_dir.to_str().unwrap())],
+        4,
+        &format!(
+            "{FILE_PREFIX}is a link or not a regular file; choose a regular private login file"
+        ),
     );
     assert_refused(
         &home,
         &create,
         &[("PSEUDOLIFE_TEST_PG_LOGIN_FILE", "a/../b")],
+        4,
+        ENV_FILE_CANONICAL,
     );
-    assert_refused(&home, &["create", "--container", ABSENT], &[]);
+    assert_refused(
+        &home,
+        &["create", "--container", ABSENT],
+        &[],
+        4,
+        PATH_CAUSE,
+    );
 }
 
 /// A directory this process cannot add entries to, restored on drop.
@@ -268,12 +492,9 @@ impl Drop for Locked {
 #[test]
 fn unwritable_paths_are_refused_before_connecting() {
     let home = Home::new("unwritable");
-    let sep = std::path::MAIN_SEPARATOR;
     if let Some(locked) = Locked::new(home.path().join("locked")) {
         let inside = locked.0.join("x.env");
         let nested = locked.0.join("sub").join("x.env");
-        // Some Windows accounts can create directories despite the deny ACL
-        // (the Python oracle can too). Only assert refusal for a blocked shape.
         let blocks_directory = match fs::create_dir(nested.parent().unwrap()) {
             Ok(()) => {
                 fs::remove_dir(nested.parent().unwrap()).unwrap();
@@ -281,8 +502,7 @@ fn unwritable_paths_are_refused_before_connecting() {
             }
             Err(_) => true,
         };
-        let files = std::iter::once(&inside).chain(blocks_directory.then_some(&nested));
-        for file in files {
+        for file in std::iter::once(&inside).chain(blocks_directory.then_some(&nested)) {
             assert_refused(
                 &home,
                 &[
@@ -293,32 +513,38 @@ fn unwritable_paths_are_refused_before_connecting() {
                     CLOSED_URL,
                 ],
                 &[],
+                4,
+                &format!(
+                    "{FILE_PREFIX}directory is not writable; choose a writable login directory"
+                ),
             );
         }
         assert_refused(
             &home,
             &["create", "--admin-url", CLOSED_URL],
             &[("PSEUDOLIFE_TEST_PG_LOGIN_FILE", inside.to_str().unwrap())],
+            4,
+            &format!("{FILE_PREFIX}directory is not writable; choose a writable login directory"),
         );
-        drop(locked);
     }
-    // The staged name `.<name>.<pid>.new` would exceed a file name's limit.
     let long = format!("{}.env", "n".repeat(244));
     assert_refused(
         &home,
         &["create", "--file", &long, "--admin-url", CLOSED_URL],
         &[],
+        4,
+        &format!("{FILE_PREFIX}file name exceeds the staging limit; choose a shorter file name"),
     );
     #[cfg(windows)]
     {
-        // Past MAX_PATH, which a Python without long-path support cannot open.
-        let deep = format!("{}{sep}{}.env", "d".repeat(240), "e".repeat(20));
+        let deep = format!("{}\\{}.env", "d".repeat(240), "e".repeat(20));
         assert_refused(
             &home,
             &["create", "--file", &deep, "--admin-url", CLOSED_URL],
             &[],
+            4,
+            &format!("{FILE_PREFIX}path exceeds Windows limits; choose a shorter login path"),
         );
-        // A read-only target: Windows refuses to replace it.
         let target = home.path().join("readonly.env");
         fs::write(&target, "PSEUDOLIFE_TEST_PG_USER=pseudolife_test\n").unwrap();
         let mut permissions = fs::metadata(&target).unwrap().permissions();
@@ -334,13 +560,14 @@ fn unwritable_paths_are_refused_before_connecting() {
                 CLOSED_URL,
             ],
             &[],
+            4,
+            &format!("{FILE_PREFIX}is read-only; make the login file writable"),
         );
         let mut permissions = fs::metadata(&target).unwrap().permissions();
         #[allow(clippy::permissions_set_readonly_false)]
         permissions.set_readonly(false);
         fs::set_permissions(&target, permissions).unwrap();
     }
-    let _ = sep;
 }
 
 #[test]
@@ -351,9 +578,7 @@ fn an_unknown_home_is_refused() {
         .current_dir(home.path())
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(4));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("HOME/USERPROFILE"));
-    assert!(output.stderr.is_empty());
+    assert_error(&output, 4, HOME_CAUSE);
     assert!(home.listing().is_empty());
 }
 
@@ -458,69 +683,18 @@ fn an_unreachable_admin_url_fails_before_any_change() {
 }
 
 #[test]
-fn native_parser_and_environment_errors_name_the_fix_without_values() {
-    let home = Home::new("messages");
-    for (arguments, setting) in [
-        (vec!["foo"], "create"),
-        (vec!["create", "--rol", "fixture-secret"], "--role"),
-        (vec!["create", "--rotate", "--rotate"], "--rotate"),
-        (vec!["create", "--json", "--json"], "--json"),
-        (
-            vec![
-                "create",
-                "--admin-url",
-                "postgresql://u:fixture-secret@h/db?service=x",
-            ],
-            "--admin-url",
-        ),
-        (vec!["create", "--file", "a/../fixture-secret"], "--file"),
-    ] {
-        let output = run(home.path(), &arguments, &[]);
-        assert!(matches!(output.status.code(), Some(2 | 4)));
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(text.contains(setting));
-        assert!(!text.contains("fixture-secret"));
-        assert!(!text.contains("postgresql://"));
-        assert!(!text.contains("deferred"));
-    }
-    for (name, value) in [
-        ("PGHOST", "fixture-secret"),
-        (
-            "PSEUDOLIFE_MCP_DATABASE_URL",
-            "postgresql:///fixture-secret",
-        ),
-    ] {
-        let output = run(
-            home.path(),
-            &["create", "--admin-url", CLOSED_URL],
-            &[(name, value)],
-        );
-        assert_eq!(output.status.code(), Some(4));
-        let text = String::from_utf8_lossy(&output.stdout);
-        assert!(text.contains(name));
-        assert!(!text.contains("fixture-secret"));
-    }
-    assert!(home.listing().is_empty());
-}
-
-#[test]
 fn invalid_homes_paths_and_ambient_tls_files_are_named() {
     let home = Home::new("preflight");
-    for arguments in [
-        vec!["create", "--file", "line\nfixture-secret.env"],
-        vec!["create", "--file", "."],
-    ] {
-        assert_refused(&home, &arguments, &[]);
+    for path in ["line\nfixture-secret.env", "."] {
+        assert_refused(&home, &["create", "--file", path], &[], 4, FILE_CANONICAL);
     }
     for value in ["relative", "line\nfixture-secret"] {
         assert_refused(
             &home,
             &["create", "--admin-url", CLOSED_URL],
             &[("HOME", value), ("USERPROFILE", value)],
+            4,
+            HOME_CAUSE,
         );
     }
     let directory = if cfg!(windows) {
@@ -531,16 +705,19 @@ fn invalid_homes_paths_and_ambient_tls_files_are_named() {
     fs::create_dir_all(&directory).unwrap();
     let crl = directory.join("root.crl");
     fs::write(&crl, "fixture-secret").unwrap();
-    let output = run(home.path(), &["create", "--admin-url", CLOSED_URL], &[]);
-    assert_eq!(output.status.code(), Some(4));
-    let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("certificate/key/CRL"));
-    assert!(text.contains("move those files out of the default PostgreSQL directory"));
-    assert!(!text.contains("fixture-secret"));
+    assert_refused(
+        &home,
+        &["create", "--admin-url", CLOSED_URL],
+        &[],
+        4,
+        "--admin-url cannot use ambient PostgreSQL certificate/key/CRL files; move those files out of the default PostgreSQL directory before retrying",
+    );
     fs::remove_file(crl).unwrap();
     let output = run(home.path(), &["create", "--admin-url", CLOSED_URL], &[]);
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("the database refused:"));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("test-login: the database refused:")
+    );
 }
 
 #[test]
@@ -582,24 +759,73 @@ fn equals_values_cannot_turn_a_container_name_into_a_docker_option() {
     assert!(home.listing().is_empty());
 }
 
+fn non_unicode_argument() -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(b"fixture-secret\xff".to_vec())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[0xd800])
+    }
+}
+
+#[test]
+fn non_unicode_arguments_and_values_have_distinct_errors() {
+    let home = Home::new("argv-unicode");
+    let output = command(home.path())
+        .arg("create")
+        .arg(non_unicode_argument())
+        .args(["--admin-url", CLOSED_URL])
+        .output()
+        .unwrap();
+    assert_error(&output, 2, "arguments must be UTF-8; use Unicode arguments");
+    let output = command(home.path())
+        .args(["create", "--role"])
+        .arg(non_unicode_argument())
+        .output()
+        .unwrap();
+    assert_error(
+        &output,
+        2,
+        "--role value must be UTF-8; supply --role=VALUE",
+    );
+    let output = run(
+        home.path(),
+        &["create", "--role", "ci_login", "--admin-url", CLOSED_URL],
+        &[],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("test-login: the database refused:")
+    );
+    assert!(home.listing().is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_settings_are_named_without_disclosing_bytes() {
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};
     let home = Home::new("nonutf8");
-    for name in [
-        "HOME",
-        "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
-        "PSEUDOLIFE_MCP_DATABASE_URL",
-        "PATH",
+    for (name, cause) in [
+        ("HOME", HOME_CAUSE),
+        (
+            "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
+            "PSEUDOLIFE_TEST_PG_LOGIN_FILE is not Unicode; set it to a canonical Unicode file path",
+        ),
+        (
+            "PSEUDOLIFE_MCP_DATABASE_URL",
+            "PSEUDOLIFE_MCP_DATABASE_URL is not Unicode; set a supported PostgreSQL DSN",
+        ),
+        ("PATH", PATH_CAUSE),
     ] {
-        let mut command = command(home.path());
-        command.args(["create", "--container", ABSENT]);
-        command.env(name, OsString::from_vec(b"fixture-secret\xff".to_vec()));
-        let output = command.output().unwrap();
-        assert_eq!(output.status.code(), Some(4));
-        let text = String::from_utf8_lossy(&output.stdout);
-        assert!(text.contains(name));
-        assert!(!text.contains("fixture-secret"));
+        let output = command(home.path())
+            .args(["create", "--container", ABSENT])
+            .env(name, OsString::from_vec(b"fixture-secret\xff".to_vec()))
+            .output()
+            .unwrap();
+        assert_error(&output, 4, cause);
     }
 }

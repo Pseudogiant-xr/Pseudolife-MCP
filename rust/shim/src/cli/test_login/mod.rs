@@ -321,14 +321,22 @@ fn parse(values: &[OsString]) -> Result<Args, String> {
             .split_once('=')
             .map_or((raw, None), |(o, v)| (o, Some(v)));
         if !OPTIONS.contains(&option) {
-            let suggestion = OPTIONS.iter().find(|known| {
-                option.starts_with("--") && option.len() > 2 && known.starts_with(option)
-            });
-            return Err(match suggestion {
-                Some(full) => format!("abbreviated option is unsupported; use {full}"),
-                None => {
+            let suggestions: Vec<_> = OPTIONS
+                .iter()
+                .filter(|known| {
+                    option.starts_with("--") && option.len() > 2 && known.starts_with(option)
+                })
+                .copied()
+                .collect();
+            return Err(match suggestions.as_slice() {
+                [full] => format!("abbreviated option is unsupported; use {full}"),
+                [] => {
                     "unexpected argument; run test-login create --help for supported options".into()
                 }
+                _ => format!(
+                    "ambiguous option abbreviation; use {}",
+                    suggestions.join(" or ")
+                ),
             });
         }
         if option != "--bank" && seen.contains(&option) {
@@ -350,8 +358,9 @@ fn parse(values: &[OsString]) -> Result<Args, String> {
             Some(value) => value,
             None => values
                 .next()
-                .and_then(|v| v.to_str())
-                .ok_or_else(|| format!("{option} requires a UTF-8 value; supply {option}=VALUE"))?,
+                .ok_or_else(|| format!("{option} requires a value; supply {option}=VALUE"))?
+                .to_str()
+                .ok_or_else(|| format!("{option} value must be UTF-8; supply {option}=VALUE"))?,
         };
         if value.starts_with('-') {
             return Err(format!(

@@ -2576,3 +2576,25 @@ def test_login_case_credentials_have_safe_repr_and_keep_child_value(monkeypatch)
         env={key: value for key, value in {"SYSTEMROOT": os.environ.get("SYSTEMROOT"), **case.env}.items() if value is not None},
         capture_output=True, check=True)
     assert child.stdout.strip() == b"True"
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_login_stdout_failure_normalization_keeps_native_pipe_lf(monkeypatch, windows):
+    from cli_harness.rows import test_login
+    monkeypatch.setattr(test_login, "WINDOWS", windows)
+    traceback = (b"Traceback (most recent call last):\n"
+                 b'  File "test_login_cli.py", line 1, in main\n'
+                 b"BrokenPipeError: closed\n"
+                 b"Exception ignored in: <_io.TextIOWrapper name='<stdout>'>\n"
+                 b"BrokenPipeError: closed\n")
+    observed = obs(exit=120, stderr=traceback, arm="python")
+    test_login.stdout_failure_rule(observed)
+    assert base64.b64decode(observed["stderr"]) == b"test-login: stdout could not be written; restore stdout and retry\n"
+    native = obs(exit=120, stderr=b"native stderr\r\n", arm="rust")
+    before = dict(native)
+    test_login.stdout_failure_rule(native)
+    assert native == before
+    malformed = obs(exit=120, stderr=b"not an oracle traceback\r\n", arm="python")
+    before = dict(malformed)
+    test_login.stdout_failure_rule(malformed)
+    assert malformed == before

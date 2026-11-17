@@ -10,8 +10,9 @@ itself. No form is deferred to the Python client.
 - `create` accepts `--rotate`, `--json`, `--role`, `--file`, `--admin-url`,
   `--container` and repeatable `--bank`. Value options accept both a separate
   argument and `--option=value`. A final `--` is accepted.
-- Unknown commands, positionals, missing/empty or dash-leading values and repeated options
-  are usage errors. Abbreviations name the full option. Diagnostics omit
+- Unknown commands, positionals, missing/empty or dash-leading values and
+  repeated options are usage errors. Ambiguous abbreviations name every
+  matching full option. Diagnostics omit
   argument values so an administrator URL cannot appear in them.
 - Home, login-file spelling, writability and staging limits are checked
   before any database connection. Missing, non-Unicode, non-canonical or
@@ -19,7 +20,8 @@ itself. No form is deferred to the Python client.
 - An unreadable or ambiguous `PSEUDOLIFE_MCP_DATABASE_URL` is refused;
   protection of the daemon user and database is never guessed.
 - Unsupported `--admin-url` grammars and ambient libpq controls are refused.
-  The refusal names the control to unset, never its value. `PGPASSWORD`
+  Identifier-shaped control names retain their actual spelling and case,
+  including lowercase Windows names; malformed names and all values are omitted. `PGPASSWORD`
   remains supported. Ambient certificate/key/CRL files are refused separately.
 - An unset/non-Unicode `PATH` is refused on the container path. Empty or
   Docker-free `PATH` retains the existing no-superuser-connection refusal.
@@ -29,7 +31,14 @@ itself. No form is deferred to the Python client.
 
 Exit codes: 0 done, 1 database/write/runtime failure, 2 usage, 4 refused
 settings, 120 stdout failure. Parsed command reports retain the existing
-stdout/JSON format; parser errors use stderr.
+stdout/JSON format. Parser usage errors are always plain text on stderr,
+even with `--json`; parsed preflight and run reports honour `--json`.
+Native stderr pipe lines end in LF on every platform, including Windows.
+
+`help` and `create-help` are the only harness cases without an absent
+container, a scrubbed PATH or a closed administrator endpoint. They are safe
+because help returns before argument parsing, home resolution or connection
+selection, with no database, file or subprocess operation.
 
 ## Security and database contract
 
@@ -61,3 +70,26 @@ Intentionally changed cases in both platform goldens:
 `admin-fresh-stdout-closed`, `admin-reapply-stdout-closed` and
 `admin-fresh-json-stdout-closed`: each exits 120 with a stdout-failure stderr
 diagnostic. Runtime construction failure has no deterministic test.
+
+## Declared divergences
+
+- Administrator-connection error detail is the native driver's text after
+  the fixed `the database refused:` prefix, rather than psycopg/libpq text.
+- Windows OS error messages use the system-default language through
+  FormatMessage; CPython uses the user's default language. C-runtime error
+  mapping retains the existing errno mapping.
+- The Windows credential file DACL carries the shared native helper's
+  auto-inherited bit. Its owner, protection and single OWNER RIGHTS
+  full-access ACE retain the existing private-file contract.
+- On Windows, the shared native PostgreSQL client's default certificate
+  directory comes from `APPDATA`; libpq asks the shell for roaming AppData.
+  Redirected `APPDATA` can therefore select a different default directory.
+- Container output is UTF-8, as selected by this harness; a locale-codepage
+  Python client may transcode Docker streams differently.
+- A frozen Python runtime without psycopg aborts the administrator-URL path;
+  the native command has no Python-driver dependency.
+- For valid JSON server answers that are not objects, the native command
+  reads missing keys as absent; the frozen oracle can raise AttributeError.
+- On POSIX, a Docker process killed by a signal retains the negative signal
+  return code in an otherwise empty error. This is retained behaviour and
+  has no harness case; Windows has no POSIX signal exit status.
