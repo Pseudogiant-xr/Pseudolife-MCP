@@ -261,10 +261,11 @@ class IndependentFixtures(unittest.TestCase):
 
 
 class CandidateRecording(unittest.TestCase):
-    def drive(self, path, write=False, cases=None):
+    def drive(self, path, write=False, cases=None, requests=None):
         case = {"index": 0, "op": "fixture", "response": {"value": 2}, "state_sha256": "candidate", "diffs": []}
         results = {}
-        with patch("graph_store.GOLDEN", path), patch("graph_store.operations", return_value=[{"op": "fixture"}]), \
+        with patch("graph_store.GOLDEN", path), \
+                patch("graph_store.operations", return_value=requests or [{"op": "fixture"}]), \
                 patch("graph_store.run", return_value=[case] if cases is None else cases) as run, \
                 patch("candidate_record.provenance", return_value={"candidate_sha256": "fixture", "commit": "head", "rust_tree": "clean"}):
             code = graph_store.record_candidate(Path("unused"), "store", write, results)
@@ -294,6 +295,28 @@ class CandidateRecording(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("PSEUDOLIFE_DAEMON_MUTANT", result["failure"])
         run.assert_not_called()
+
+    def test_recording_uses_replay_equivalence_without_hiding_missing_edges(self):
+        golden = json.loads(graph_store.GOLDEN.with_name("graph-read.json").read_text(encoding="utf-8"))
+        request = golden["operations"][30]
+        recorded = copy.deepcopy(golden["cases"][30])
+        recorded["index"] = 0
+        with tempfile.TemporaryDirectory() as home:
+            path = Path(home) / "graph-store.json"
+            path.write_text(json.dumps({"operations": [request], "cases": [recorded]}))
+            before = path.read_bytes()
+            equivalent = copy.deepcopy(recorded)
+            equivalent["response"]["value"].reverse()
+            code, result, _ = self.drive(path, cases=[equivalent], requests=[request])
+            self.assertEqual(code, 0)
+            self.assertEqual(result["recording"]["unchanged"], ["store"])
+            self.assertEqual(path.read_bytes(), before)
+            changed = copy.deepcopy(recorded)
+            changed["response"]["value"].pop()
+            code, result, _ = self.drive(path, cases=[changed], requests=[request])
+            self.assertEqual(code, 1)
+            self.assertEqual(result["recording"]["changed"], ["store"])
+            self.assertEqual(path.read_bytes(), before)
 
     def test_recording_failures_never_write(self):
         with tempfile.TemporaryDirectory() as home:

@@ -390,6 +390,20 @@ def record_candidate(candidate, row, write, results):
         failures.append("candidate did not answer every operation")
     recording = candidate_record.Recording(golden_path, tuple(observed), candidate,
                                            whole=False, defined=[row], single=True)
+    previous = recording.entry(row)
+    if previous:
+        for index, (request, case) in enumerate(zip(observed["operations"], cases)):
+            if (index >= len(previous["operations"]) or index >= len(previous["cases"])
+                    or previous["operations"][index] != request):
+                continue
+            context = case.get("comparison_context", request)
+            if context["op"] in {"derive_edges", "build_subgraph", "shortest_path"}:
+                from graph_read_compare import compare
+                recorded = previous["cases"][index]["response"]
+                # Keep the existing representation of equivalent edge/path
+                # orderings, exactly as replay's structural comparator does.
+                if not compare(context, recorded, case["response"], response_diff):
+                    case["response"] = recorded
     recording.write = write
     recording.observe(row, observed, failures, candidate_record.round_trip)
     results["recording"] = recording.report
