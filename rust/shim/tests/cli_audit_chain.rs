@@ -406,11 +406,7 @@ fn bank_actions_distinguish_a_missing_bank_from_a_failed_connection() {
             }
             let output = command.output().unwrap();
             let configured = url.is_some_and(|value| !value.is_empty());
-            assert_eq!(
-                output.status.code(),
-                Some(2),
-                "{args:?}"
-            );
+            assert_eq!(output.status.code(), Some(2), "{args:?}");
             assert!(output.stdout.is_empty());
             if configured {
                 assert_eq!(output.stderr, failure, "{args:?}");

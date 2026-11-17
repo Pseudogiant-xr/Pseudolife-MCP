@@ -17,8 +17,8 @@ Harness row: `audit` (`rust/cli_harness/rows/audit.py`).
 
 The direct bank path uses a non-empty `PSEUDOLIFE_MCP_DATABASE_URL` admitted
 by the shared native client. Without a local bank, container forwarding
-selects the installed operator CLI from the daemon engine label. The lite
-instance lifecycle remains separately deferred.
+selects the installed operator CLI from the daemon engine label. A retired
+lite bank is refused with the Docker migration instruction.
 
 ## Exact contract items
 
@@ -36,7 +36,6 @@ instance lifecycle remains separately deferred.
 | Chain walk: `broken_link` (genesis / prev hash), `sequence_gap`, `hash_mismatch`, `body_mismatch` (salt without body, body not opening `text_commitment`, body still beside its operator redact), `body_missing` / `body_not_exported` for the lowest unexplained v46 send, `unanchored_start` (cut record: daemon actor, window >= 1 day, `audit_cutoff`, first row not older), `head_pruned` (with `start_cut`), `head_missing`, `head_mismatch`; report key order and `print(json.dumps(report))` spelling | `verify_audit_chain` 1035-1150, `_cut` 988-1010, `audit_cutoff` 978-985, `body_commitment` 516-525, `_body_matches` 1024-1032 |
 | Redact: id shape (`invalid_message_id`), reason (`invalid_reason`: blank, > 240 chars, Cc/Cf/Cs/Zl/Zp), `secret_like_body`, prefix resolution (`message_not_found` / `ambiguous_message_id`), one transaction: live row `FOR UPDATE`, chain lock, send event, `gone`/`kept`/`removed` paths, `already_redacted`, `body_in_hashed_payload`, live copy blanked with `expires_at=LEAST(expires_at, now)`, chained operator `redact` event, burst siblings; refusal JSON echoes the id as given plus the `_REDACT_REFUSALS` line (`: detail` when present); busy (`LockNotAvailable`, 5 s) exit 2 | `CoordinationStore.redact` 3987-4112, `_burst_siblings` 4114, `_redact` 318-365, `_REDACT_REFUSALS` 58-71 |
 | Post-commit `_vacuum` (`SET client_min_messages TO warning`, both VACUUMs, setting restored; WARNING notices are skips), `vacuumed` and the four stderr notes, the `--expect-head` record line | `_vacuum` 283-315, `_redact` 331-365 |
-
 | `--out` failures identify staging, write or publication, the I/O kind and OS code, and the destination requirement; staged output is removed, and the final path is unchanged | native `board_audit/output.rs` |
 | Archive rows: a repeated key is reported when its object closes (`object_pairs_hook`), so a scan error or an over-long integer earlier in that object wins | `_read_export` 250-257, `_unique_keys` 224-230 |
 | A redaction whose result line stdout refuses: exit 120 after every stderr note (CPython's failed shutdown flush) | `_redact` 337-365 |
@@ -50,8 +49,9 @@ instance lifecycle remains separately deferred.
   that every printed hash reference is that arm's own validated hash.
 - CPython's ignored-exception trailer after a refused stdout (exit 120 kept):
   named substitution `audit-stdout-closed-trailer`.
-- Snapshot mechanics (one transaction instead of commit-then-reopen; a buffered
-  export instead of a server-side cursor); `extra_float_digits` (binary float8).
+- Snapshot mechanics (one transaction instead of commit-then-reopen; database
+  rows collected before encoding instead of a server-side cursor);
+  `extra_float_digits` (binary float8). Encoded stdout remains streamed.
 
 ## Native completion and refusals
 
