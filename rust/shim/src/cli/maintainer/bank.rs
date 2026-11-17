@@ -25,18 +25,9 @@ const SECRET_META_KEY: &str = "maintainer_secret_v1";
 const LIVE_KEYS: &str =
     "SELECT count(*) AS n FROM maintainer_passkeys WHERE state IN ('pending','active')";
 
-/// The most a listing may hold and still reach CPython's stdout in one piece
-/// at exit: a pipe's text stream buffers up to `io.DEFAULT_BUFFER_SIZE`
-/// (8192) bytes before its first write, so a refused stdout fails only in
-/// the shutdown flush (exit 120). A longer listing would be written, and
-/// could be refused, part way through the prints: deferred.
-const LISTING_BUFFER: usize = 8192;
-
-/// Where an action stops: deferred (before any effect), a refusal code, or
-/// a failed COMMIT, whose change may have been made durable and so takes
-/// Python's generic error path instead of a deferral.
+/// Failures preserve transaction rollback and never disclose database input.
 enum Stop {
-    Deferred,
+    Internal(&'static str),
     Refused(&'static str),
     /// The SQLSTATE the failure carried, if any.
     Failed(Option<SqlState>),
@@ -71,7 +62,7 @@ async fn commit(tx: Transaction<'_>) -> Result<(), Stop> {
         .map_err(|error| Stop::Failed(sqlstate_of(&error)))
 }
 
-/// The exit code, or `None` to defer. Nothing is printed before an outcome
+/// Native exit status. Nothing is printed before an outcome
 /// is known, except the waiting form's progress after its code committed.
 pub(super) async fn run(dsn: &pg::Dsn, action: Action) -> Option<u8> {
     let mut session = match pg::Session::open(dsn).await {
@@ -98,7 +89,14 @@ async fn act(session: &mut pg::Session, action: Action) -> Option<u8> {
         Ok(row) => row,
         Err(error) => return Some(failed(session, sqlstate_of(&error))),
     };
-    let present: bool = row.try_get(0).ok()?;
+    let present = match row.try_get::<_, bool>(0) {
+        Ok(present) => present,
+        Err(_) => {
+            return Some(internal_error(
+                "maintainer table check returned an unexpected type; have the bank maintainer verify its schema",
+            ));
+        }
+    };
     if !present {
         crate::stderrln!("error: {NO_TABLES}");
         return Some(2);
@@ -128,9 +126,7 @@ async fn act(session: &mut pg::Session, action: Action) -> Option<u8> {
         } else {
             STDOUT_REFUSED
         }),
-        Err(Stop::Refused(code)) => Some(refused(code)),
-        Err(Stop::Failed(code)) => Some(failed(session, code)),
-        Err(Stop::Deferred) => None,
+        Err(stop) => Some(stopped(session, stop)),
     }
 }
 
@@ -138,23 +134,25 @@ fn clock() -> Result<f64, Stop> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|now| now.as_secs_f64())
-        .map_err(|_| Stop::Deferred)
+        .map_err(|_| {
+            Stop::Internal(
+                "system clock is before the Unix epoch; correct the system clock and retry",
+            )
+        })
 }
 
 /// `secrets.choice(_BASE32)` ten times: a random byte's low five bits are
 /// uniform over the 32 symbols.
-fn bootstrap_code() -> Option<String> {
+fn bootstrap_code() -> Result<String, Stop> {
     let mut bytes = [0u8; 10];
     rustls::crypto::aws_lc_rs::default_provider()
         .secure_random
         .fill(&mut bytes)
-        .ok()?;
-    Some(
-        bytes
-            .iter()
-            .map(|byte| char::from(BASE32[usize::from(byte & 31)]))
-            .collect(),
-    )
+        .map_err(|_| Stop::Internal("secure random generation failed; restore the operating system random source and retry"))?;
+    Ok(bytes
+        .iter()
+        .map(|byte| char::from(BASE32[usize::from(byte & 31)]))
+        .collect())
 }
 
 /// `secrets.token_hex(32)`.
@@ -163,7 +161,7 @@ fn secret_hex() -> Result<String, Stop> {
     rustls::crypto::aws_lc_rs::default_provider()
         .secure_random
         .fill(&mut bytes)
-        .map_err(|_| Stop::Deferred)?;
+        .map_err(|_| Stop::Internal("secure random generation failed; restore the operating system random source and retry"))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
@@ -179,13 +177,14 @@ async fn rollback(tx: Transaction<'_>, stop: Stop) -> Stop {
 }
 
 async fn enrol_code(session: &mut pg::Session, wait: bool, poll: f64) -> Option<u8> {
-    let code = bootstrap_code()?;
+    let code = match bootstrap_code() {
+        Ok(code) => code,
+        Err(stop) => return Some(stopped(session, stop)),
+    };
     let hash = code_hash(&code);
     match store_code(session, &hash).await {
         Ok(()) => {}
-        Err(Stop::Refused(code)) => return Some(refused(code)),
-        Err(Stop::Failed(code)) => return Some(failed(session, code)),
-        Err(Stop::Deferred) => return None,
+        Err(stop) => return Some(stopped(session, stop)),
     }
     let minutes = BOOTSTRAP_TTL / 60;
     let shown = format!(
@@ -489,7 +488,11 @@ async fn key_change(
     })
     .to_string();
     let now = clock()?;
-    let stamp = audit_timestamp(now).map_err(|_| Stop::Deferred)?;
+    let stamp = audit_timestamp(now).map_err(|_| {
+        Stop::Internal(
+            "audit timestamp is outside its supported range; correct the system clock and retry",
+        )
+    })?;
     tx.query_one(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         &[&"coordination-audit-chain"],
@@ -508,7 +511,9 @@ async fn key_change(
         ),
         None => (0, "0".repeat(64)),
     };
-    let seq = seq.checked_add(1).ok_or(Stop::Deferred)?;
+    let seq = seq.checked_add(1).ok_or(Stop::Internal(
+        "coordination audit sequence is exhausted; contact the bank maintainer before retrying",
+    ))?;
     let hash = hex_hash(format!("{prev}{}", material(seq, &payload, &stamp)));
     tx.execute(
         "INSERT INTO coordination_events (seq,event,actor,principal,agent_id,recipient_agent_id,project,task,message_id,payload,created_at,hlc,prev_hash,hash) VALUES ($1,'maintainer_key','operator','','',NULL,'','',NULL,$2,$3,'',$4,$5)",
@@ -540,50 +545,83 @@ fn material(seq: i64, payload: &str, stamp: &str) -> String {
     format!("{},{stamp},{}", &before[..before.len() - 1], &after[1..])
 }
 
+fn internal_error(message: &'static str) -> u8 {
+    crate::stderrln!("error: {message}");
+    2
+}
+
+fn stopped(session: &pg::Session, stop: Stop) -> u8 {
+    match stop {
+        Stop::Internal(message) => internal_error(message),
+        Stop::Refused(code) => refused(code),
+        Stop::Failed(code) => failed(session, code),
+    }
+}
+
 async fn list(session: &mut pg::Session) -> Option<u8> {
-    let rows = session
-        .client()
-        .query(
-            "SELECT credential_id,label,state,enrolled_by,active_from,last_used_at,flagged_at FROM maintainer_passkeys ORDER BY created_at, credential_id",
-            &[],
-        )
-        .await
-        .ok()?;
-    let clock = display::local_clock();
+    let rows = match session.client().query(
+        "SELECT credential_id,label,state,enrolled_by,active_from,last_used_at,flagged_at FROM maintainer_passkeys ORDER BY created_at, credential_id", &[]
+    ).await {
+        Ok(rows) => rows,
+        Err(error) => {
+            let code = sqlstate_of(&error);
+            if matches!(code, Some(ref value) if *value == SqlState::UNDEFINED_COLUMN || *value == SqlState::UNDEFINED_TABLE) {
+                return Some(internal_error("maintainer_passkeys schema does not provide the listing columns; have the bank maintainer repair its schema before retrying list"));
+            }
+            if code == Some(SqlState::INSUFFICIENT_PRIVILEGE) {
+                return Some(internal_error("database role cannot read maintainer_passkeys; have the bank maintainer restore its SELECT permission before retrying list"));
+            }
+            return Some(failed(session, code));
+        }
+    };
+    let clock = display::utc_clock();
     let mut text = String::new();
     if rows.is_empty() {
         text.push_str("No passkeys.\n");
     }
     for row in &rows {
-        let key = display::Key {
-            credential_id: row.try_get("credential_id").ok()?,
-            label: row.try_get("label").ok()?,
-            state: row.try_get("state").ok()?,
-            enrolled_by: row.try_get("enrolled_by").ok()?,
-            active_from: row.try_get("active_from").ok()?,
-            last_used_at: row.try_get("last_used_at").ok()?,
-            flagged_at: row.try_get("flagged_at").ok()?,
+        let key = (|| -> Result<display::Key, tokio_postgres::Error> {
+            Ok(display::Key {
+                credential_id: row.try_get("credential_id")?,
+                label: row.try_get("label")?,
+                state: row.try_get("state")?,
+                enrolled_by: row.try_get("enrolled_by")?,
+                active_from: row.try_get("active_from")?,
+                last_used_at: row.try_get("last_used_at")?,
+                flagged_at: row.try_get("flagged_at")?,
+            })
+        })();
+        let key = match key {
+            Ok(key) => key,
+            Err(_) => {
+                return Some(internal_error(
+                    "maintainer_passkeys column types do not match the listing schema; have the bank maintainer repair them before retrying list",
+                ));
+            }
         };
-        text.push_str(&display::line(&key, &clock)?);
+        let Some(line) = display::line(&key, &clock) else {
+            return Some(internal_error(
+                "active_from or last_used_at is not a supported finite timestamp; have the bank maintainer correct passkey timestamps before retrying list",
+            ));
+        };
+        text.push_str(&line);
         text.push('\n');
     }
     listing_exit(write_report, &super::super::text_bytes(&text))
 }
 
-/// The listing's exit once written: CPython holds it all until its exit
-/// flush, which a refused stdout fails (exit 120). Deferred, before any
-/// byte is written, whenever it is too long for that buffer (8192 encoded
-/// bytes or more, whatever stdout is: a healthy one too), and when stdout
-/// refused it before any byte left.
+/// Listings have no Python buffering limit; a refused stdout is a native failure.
 fn listing_exit(write: impl FnOnce(&[u8]) -> Written, bytes: &[u8]) -> Option<u8> {
-    if bytes.len() >= LISTING_BUFFER {
-        return None;
-    }
-    match write(bytes) {
-        Written::All => Some(0),
-        Written::Nothing => None,
-        Written::Part => Some(STDOUT_REFUSED),
-    }
+    Some(match write(bytes) {
+        Written::All => 0,
+        Written::Nothing => {
+            crate::stderrln!(
+                "error: maintainer list could not write stdout; connect stdout to a writable destination and rerun list"
+            );
+            STDOUT_REFUSED
+        }
+        Written::Part => STDOUT_REFUSED,
+    })
 }
 
 #[cfg(test)]
@@ -591,15 +629,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_listing_defers_unless_python_would_hold_it_whole() {
-        let short = vec![b'x'; LISTING_BUFFER - 1];
-        assert_eq!(listing_exit(|_| Written::All, &short), Some(0));
-        assert_eq!(listing_exit(|_| Written::Part, &short), Some(120));
-        assert_eq!(listing_exit(|_| Written::Nothing, &short), None);
-        let long = vec![b'x'; LISTING_BUFFER];
+    fn large_listings_and_a_closed_stdout_are_native_results() {
+        let large = vec![b'x'; 16_384];
         assert_eq!(
-            listing_exit(|_| panic!("a long listing is never written"), &long),
-            None
+            listing_exit(
+                |bytes| {
+                    assert_eq!(bytes, large.as_slice());
+                    Written::All
+                },
+                &large
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            listing_exit(|_| Written::Nothing, b"report"),
+            Some(STDOUT_REFUSED)
+        );
+        assert_eq!(listing_exit(|_| Written::All, b"report"), Some(0));
+        assert_eq!(
+            listing_exit(|_| Written::Part, b"report"),
+            Some(STDOUT_REFUSED)
         );
     }
 
@@ -654,7 +703,7 @@ mod tests {
 
     #[test]
     fn a_bootstrap_code_is_ten_base32_symbols() {
-        let code = bootstrap_code().unwrap();
+        let code = bootstrap_code().ok().unwrap();
         assert_eq!(code.len(), 10);
         assert!(code.bytes().all(|c| BASE32.contains(&c)));
         assert_eq!(secret_hex().ok().unwrap().len(), 64);

@@ -1,155 +1,43 @@
-# CLI-MAINTAINER contract (maintainer enrol-code / confirm / revoke / reset / list)
+# Native maintainer host commands
 
-Oracle: `pseudolife_memory/maintainer_cli.py`, `pseudolife_memory/storage/maintainer.py`
-(`MaintainerStore` host operations, schema v54 tables), `_key_change`'s audit
-append in `pseudolife_memory/storage/coordination.py`. The line references
-below were read at `origin/master` 1ed871a7; that pin is historical, and
-the three files are unchanged from it to integration head 8263e7e3, so the
-references hold there too. The harness always runs the oracle checkout
-under test, not the pin. Candidate: `rust/shim/src/cli/maintainer/`.
-Harness row: `maintainer` (`rust/cli_harness/rows/maintainer.py`).
+The native `maintainer enrol-code`, `confirm`, `revoke`, `reset` and `list` commands answer every invocation. Guided `maintainer setup` remains a separate implementation and is outside this row's change.
 
-## Canonical shapes (implemented)
+## Commands and refusal order
 
-- `maintainer enrol-code [--no-wait] [--poll SECONDS]`
-- `maintainer confirm PREFIX`, `maintainer revoke PREFIX` (any single value but
-  `-h`, `--help` and `--`, including a `-`-led id prefix, which `main` guards
-  with an inserted `--`)
-- `maintainer reset [--yes]`
-- `maintainer list`
+- `enrol-code [--no-wait] [--poll SECONDS]` accepts a numeric polling value, including a value starting with a minus sign. Existing polling behavior and the order of bank checks remain intact.
+- `confirm [--] PREFIX` and `revoke [--] PREFIX` accept a literal value after `--`, including one that resembles a help flag. Prefix length and base64url validation still happen inside the existing transaction before its first statement.
+- `reset [--yes]` retains its consent check after the table probe. Repeated or abbreviated flags get usage errors; no broader reset is admitted.
+- `list` has no additional arguments. Bare, malformed or undecodable arguments receive exit 2 and a repair before any bank access. Known abbreviations name their full spelling. Argument values are not reproduced in errors.
 
-The bank is reached only through a non-empty `PSEUDOLIFE_MCP_DATABASE_URL`
-that the shared native client admits (`rust/shim/src/pg/`), with its 5 s lock
-timeout and public search path (`_bank`, maintainer_cli.py:58-80).
+Help and setup dispatch retain their existing priority. A supplied, nonempty `PSEUDOLIFE_MCP_DATABASE_URL` must pass the shared native DSN parser. Invalid Unicode, syntax, hosts, ports and unsupported options are refused with the setting name and a fixing instruction; the URL, its password and untrusted option keys are never printed. An absent or empty setting preserves container resolution, the retired lite-bank refusal and the existing missing-bank error.
 
-## Exact contract items
+## Bank behavior
 
-| Item | Python source |
+The table probe, transaction and locking order, prefix and state checks, passkey changes, session revocation and audit append remain unchanged. A failure before COMMIT rolls back through the existing path; COMMIT failures retain their existing native error handling. This completion adds no schema or authentication changes.
+
+Previously deferred failures now have native answers:
+
+| Condition | Answer |
 |---|---|
-| Exit 0 done, 1 refused, 2 nothing could be done | maintainer_cli.py:30, `main` 162-206 |
-| No maintainer tables: `to_regclass('public.maintainer_passkeys')`, `error: this bank has no maintainer tables yet (schema older than v54); start a v54 daemon once to create them`, exit 2, checked before every action (also `reset` without `--yes`) | `_bank` 70-74, 201-203 |
-| Refusals on stderr: `refused: ` + the `_REFUSALS` text, or the bare code (`coordination_unavailable`), exit 1; the transaction rolls back | `_REFUSALS` 32-38, 192-194 |
-| `enrol-code`: 10 symbols of `ABCDEFGHIJKLMNOPQRSTUVWXYZ234567`; one transaction: `LOCK TABLE maintainer_passkeys IN SHARE ROW EXCLUSIVE MODE`, refused `enrolment_closed` while any key is pending or active, `DELETE` unused codes, `INSERT (sha256(code), now+600)`; the two code lines; `--no-wait` exits 0 | `_enrol_code` 93-100, `bootstrap_code` storage/maintainer.py:724-736, `code_hash` 154-161 |
-| Waiting form: `Waiting for the Console to redeem it...`; every 2 s (`--poll` default) redeemed (code row joined to its key: prefix and label, the four instruction lines, exit 0), else burned (unused row, `failed_attempts >= 5`: the burned line, exit 1); at 600 s on the monotonic clock `The code expired unredeemed.`, exit 1; all on stdout | `_enrol_code` 101-120, `bootstrap_redeemed` 738-744, `bootstrap_burned` 746-750 |
-| Prefix: at least 6 code points of `[A-Za-z0-9_-]` (else `invalid_request`, inside the transaction, before any read); `credential_id LIKE prefix-with-_-escaped%` (`AND state='pending'` for confirm), `FOR UPDATE`; not exactly one row: `credential_not_found` | `_by_prefix` 752-762 |
-| `confirm`: `state='active', active_from=now`; `maintainer_key` event `confirm`; `Active: <12>  label: <label>` | `confirm` 764-773, 164-167 |
-| `revoke`: `state='revoked', revoked_at=now, revoked_by='host' WHERE ... AND state<>'revoked'`; only when a row changed, the key's live passkey Console sessions are revoked on the database clock (v59 `_end_sessions`; skipped on a bank without `console_sessions`) and the event appended; `Revoked: <12>  label: <label>` either way. Live cases `revoke-ends-the-keys-sign-ins` and `revoke-already-revoked-ends-nothing` seed sessions with `prepare`; they are not in the goldens, which predate them, so they run in every live run on both OSes | `revoke` 775-785, 168-171 |
-| `reset` without `--yes`: `reset revokes every passkey and rotates the secret; pass --yes` on stderr, exit 1, after the table check | 172-176 |
-| `reset --yes`: revoke every unrevoked key (count), revoke every live passkey Console session (v59; live case `reset-ends-every-passkey-sign-in`), delete every bootstrap row and the secret, insert a fresh `token_hex(32)` JSON string (`ON CONFLICT DO NOTHING`), read it back (not 64 hex: `coordination_unavailable`), event `reset` with `revoked`; `Revoked N passkey(s); secret rotated; ...` | `reset` 787-797, `_secret` 205-213, 177-180 |
-| Key-change event: `event='maintainer_key'`, `actor='operator'`, empty principal/agent/project/task/hlc, NULL recipient and message id, payload `_canonical({change, credential_id, label, by: 'host', path: 'host', revoked})`, its own clock read after the change's; chain lock `pg_advisory_xact_lock(hashtextextended('coordination-audit-chain', 0))`, head `ORDER BY seq DESC LIMIT 1` (genesis 64 zeros), `audit_hash` over the compact UTF-8 material with `float(created_at)` in CPython repr | `_key_change` 220-231, `_event` coordination.py:1223, `_chain_head` 1235, `_append` 1248, `audit_hash` 957-971 |
-| `list`: `ORDER BY created_at, credential_id`; `No passkeys.` when empty; per key `<12>  <state:8> <repr(label)>  enrolled_by=<12>  active_from=<when>  last_used=<when>` and `  FLAGGED (sign count went backwards)` when `flagged_at` is truthy (0.0 is not, NaN is); `when` is `-` for NULL else `time.strftime("%Y-%m-%d %H:%M", time.localtime(value))` (floored seconds) | 181-190, `_when` 89-90, `key_prefix` storage/maintainer.py:164 |
-| Text streams: UTF-8, LF translated to CRLF on Windows (stdout and stderr) | `print` |
-| A Windows console: the listing goes through std's stdout, which writes UTF-16 with `WriteConsoleW` as CPython's console writer (`_WindowsConsoleIO`) does, so a label such as `☎` renders whatever the console's code page; any other stdout (a pipe, a file, every POSIX stream) takes the UTF-8 bytes through a counted duplicate of the descriptor. The harness pipes stdout, so the console branch is pinned by the unit test `only_a_windows_console_takes_the_console_path` (review of #675) | `sys.stdout` on a console |
-| A committed change whose report stdout refuses: exit 120 (CPython's failed shutdown flush); the waiting form's code and `Waiting...` lines go out in one `flush=True` print, whose refusal first prints `error: <OSError on Windows, BrokenPipeError on POSIX>; check PSEUDOLIFE_MCP_DATABASE_URL` | `main` 162-191, 204-206, `_enrol_code` 96-102 |
-| A failed COMMIT (the change may be durable) and any bank error while the committed code waits: `error: <class>; check PSEUDOLIFE_MCP_DATABASE_URL`, exit 2, never a deferral. `<class>` is psycopg 3.3.4's for the error's SQLSTATE (`_sqlcodes`, then the `_base_exc_map` prefix fallback, then `DatabaseError`); for a closed connection, the SQLSTATE of the server error that ended it (a FATAL such as 57P01 `AdminShutdown` that arrived between polls), else `OperationalError` | `main` 204-206, `_Storage._txn` 50-54, psycopg `errors._class_for_state` |
+| Runtime creation | Exit 2, runtime cause and retry instruction |
+| Table-probe row cannot be decoded | Exit 2, bank schema repair instruction |
+| System clock before the epoch, random generation, audit timestamp or sequence overflow | Exit 2, named cause and repair; the transaction still rolls back |
+| Listing query fails | Exit 2, schema or SELECT-permission repair where identifiable, otherwise the existing safe SQLSTATE-class error |
+| Listing columns cannot be decoded | Exit 2, maintainer table type/schema repair |
+| Timestamp cannot be represented | Exit 2 before printing any list line, naming active_from/last_used_at and timestamp repair |
+| Listing reaches or exceeds 8192 bytes | Write the complete report without a size cutoff |
+| Stdout refuses before any byte | Exit 120 with a writable-output repair; a partial write retains exit 120 |
 
-## Free items (not contract)
+Runtime, entropy, system-clock and audit-overflow failures are practically unreachable without injection and have no dedicated failure test. Their messages contain only fixed text or the runtime's OS error, never a connection setting or credential.
 
-- The code, its hash, the rotated secret, and every timestamp the CLI writes
-  from its clock (`active_from`, `revoked_at`, a code's `expires_at`, the
-  event's `created_at`) and therefore the event's hash and a later row's
-  `prev_hash`: tokenized by the named rule `maintainer-host-write` after
-  validating each against this arm's run window, sha256 of the printed code,
-  the seed's secret, and the oracle's `audit_hash` recomputed over the row.
-  With a refused stdout the code is never shown, so the one unused code row
-  in the window has only its 64-hex shape checked.
-- CPython's ignored-exception trailer after a refused stdout (exit 120 kept):
-  named substitution `maintainer-stdout-closed-trailer`.
-- Statement texts (`SELECT credential_id,label` instead of `SELECT *` under
-  the same `FOR UPDATE`), the code drawn as random bytes masked to five bits
-  (uniform, as `secrets.choice`), the order of the code's generation and the
-  connection. The prefix check is made inside the transaction, as Python
-  makes it, before the transaction's first statement.
+## UTC timestamps
 
-## Harness instruments (test-only, on each arm's own disposable copy)
+Every displayed time is floored to a whole second and printed in UTC as `YYYY-MM-DDTHH:MM:SSZ`. Chrono's signed expanded-year form is used beyond year 9999; dates before 1970 are supported. NULL prints `-`. Non-finite values and dates outside Chrono's supported range produce the named refusal above. `TZ`, local year and daylight-saving boundaries do not select another path. Labels, credential prefixes, state padding and the flagged marker keep their existing form.
 
-- `commit-refused-*`: a deferred constraint trigger raising SQLSTATE P0001,
-  XX999 (unknown: prefix fallback) or 57P01 at COMMIT, after every statement
-  succeeded.
-- `enrol-code-wait-terminated`: `pg_terminate_backend` of this login's other
-  sessions on the arm's copy while the CLI waits between polls (guarded by
-  `assert_disposable_database` on the same connection).
-- `enrol-code-wait-lock-timeout`: `LOCK TABLE maintainer_bootstrap IN ACCESS
-  EXCLUSIVE MODE` held while the CLI polls (55P03 after the 5 s lock timeout).
-- `list-*` on Windows: `maintainer-list-guard` computes the native local-time
-  rule with CPython's `time.localtime` over the seeded values, and when it
-  trips (near New Year or a DST change) expects the deferral instead.
+## Fixtures and regression snapshots
 
-## Deferred (the dispatcher's `mode 'maintainer' is deferred` line, exit 1, before any effect)
+The existing seeded banks are created with the test login and the disposable-bank guards on the dev machine's test PostgreSQL only. Each arm receives its own copy of a seed. The row wraps connection URL values in a local str subclass with a fixed repr placeholder; the real string payload still reaches the child environment. A synthetic regression checks case repr, pytest parameter ID and actual child delivery. Bank-backed runs are redirected to private machine logs and checked for test-password disclosure before logs are copied or summarized.
 
-- Guided setup is assessed separately by its implementation owner.
-- Noncanonical argv other than explicit polling and prefix delimiters;
-  non-Unicode argv and DSN spellings the shared client does not admit.
-- The lite tier's embedded bank.
-- `list` when stdout refuses it before any byte left (CPython: exit 120 with
-  the trailer); whenever the encoded listing is 8192 bytes or longer,
-  whatever stdout is, a healthy one included (unconditional: CPython would
-  write such a listing part way through its prints, where a refused stdout
-  takes a different path, and the native leaf does not reproduce that
-  split); or when any shown time is negative, past 9999-12-31 UTC,
-  or has a local year outside 1970-9999, `TZ` is set, or (Windows) the time,
-  or a time two days either side of it, is outside the current local year
-  or has another UTC offset: CPython's C runtime applies the zone's current
-  rules to every year, Chrono asks Windows for each year's. A listing that
-  stdout refuses after some bytes left exits 120, as CPython's shutdown
-  flush does.
+Historical `defer-*` IDs remain regression cases for native outcomes. Deferral and local-time normalizers are removed; UTC output is compared directly. New `list-read-error` and `list-column-type-error` cases alter only their guarded disposable copies to exercise failed reads and row decoding, and require the database state to remain unchanged by the command.
 
-## Declared divergences and uncovered paths
-
-- A terminated backend while `enrol-code` waits (`enrol-code-wait-terminated`):
-  psycopg names the server's FATAL (`AdminShutdown`) only when libpq read that
-  message before the socket closed, and raises `OperationalError` otherwise.
-  The maintainer host printed `AdminShutdown`; hosted Windows CI printed
-  `OperationalError` (2026-10-10, run 38007737431). The native client always
-  reads the FATAL and prints `AdminShutdown`. Rule
-  `maintainer-terminated-class` rewrites only the oracle arm's exact
-  `OperationalError` line, at exit 2, in this case; the native arm is not
-  rewritten. The `maint-ending-error-ignored` source-mutant check was retired
-  on 17 November 2026.
-
-- A lost connection with no server error (I/O failure, no FATAL received)
-  prints `OperationalError`, psycopg's class there; not run by the harness.
-- A refused stdout is classed `OSError` except a POSIX broken pipe
-  (`BrokenPipeError`); other POSIX classes CPython would name for other
-  write errors (for example `PermissionError`) are not reproduced.
-- CPython buffering assumptions: the report and listing paths assume
-  CPython's default block buffering of a non-terminal stdout; with
-  `PYTHONUNBUFFERED` set the oracle writes per print and fails differently.
-- The 600 s expiry of the waiting form is implemented but not run by the
-  harness (it would hold each arm for ten minutes).
-- Runs: the new cases are no longer pending on Linux; PR #675's body
-  reports Windows 51/51 and Linux 51/51 at 267fc354. Later revisions record
-  their runs in their commits.
-
-## Goldens
-
-Seeding is deterministic (fixed credential ids and authenticator keys, the
-store's `secrets` drawn from a generator seeded per kind, the seed clock
-fixed at 2026-07-01T00:00:00Z), so a kind's bank is byte-identical on every
-host and `goldens/maintainer.<platform>.json` replays against it. Two rules
-make the listing host-independent:
-
-- `maintainer-local-times`: a listed key's `active_from` / `last_used`
-  becomes `<local>` only where it is exactly CPython's `time.localtime`
-  rendering of that key's seeded value on the host that ran the arm
-  (recorded with the observation).
-- `maintainer-list-guard` decides at comparison, on the host running the
-  candidate, from the seeded times the observation carries. Once 2026 has
-  passed, Windows hosts defer every listing with a time, so the Windows
-  listing cases check the deferral until the seed clock is re-pinned and
-  the goldens re-recorded.
-
-## Operator transport extension (2026-11-02 candidate)
-
-Engine-labelled daemon reruns select `pseudolife-mcp` for `rust` and the
-Python module for Python or absent labels, retaining the nesting guard.
-Invite adds stopped-daemon psql list/revoke for v53 and v58; pair adds
-trusted/untrusted HTTPS and terminal code input; maintainer adds help and
-polling; test-login adds help while retaining its host-local login file.
-Linux native builds and the live differential rows passed, including the engine-selected transport and help cases. Native Windows contract tests passed; pairing interruption and backspace also passed both oracle and native console arms.
-The activated former deferral cases now compare the actual oracle outcome;
-their old case IDs remain stable. Linux goldens were re-recorded from the verified oracle tree at
-`7dcd738fa736c15c111fd67c5ffb83ea3f158b91` and replayed against the native candidate.
-The corresponding Windows goldens also replayed successfully. Hosted stress
-remains a separate qualification step. This extension makes
-no claim about guided setup or lite storage.
+Goldens are recorded from the native candidate with `--record-candidate --write` only for cases whose observable output changes, then replayed. Mutating command observations retain the existing code/secret, clock and audit-chain normalization; no real bank, enrolment or credential is used.

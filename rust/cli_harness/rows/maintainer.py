@@ -46,9 +46,7 @@ ARM_DB = _bank.name(PREFIX + "arm")
 # Seed clock: a fixed whole minute, 2026-07-01T00:00:00Z, so seeded banks and
 # the goldens recorded from them are identical on every host and run. Mid
 # year: no common zone changes its UTC offset within two days of it. Windows
-# lists local times only inside the current local year (native_list_defers):
-# once 2026 has passed, the Windows listing cases check the native deferral
-# instead, until T0 is re-pinned and the goldens re-recorded.
+# uses UTC timestamps, so the seed is independent of local years and zones.
 T0 = 1782864000.0
 # The waiting cases' redemption clock: after every seed, before any run.
 HOOK_T = T0 + 3600.0
@@ -320,25 +318,8 @@ def _secret(dump) -> str | None:
 
 # --- named rules ---------------------------------------------------------------
 
-DEFERRAL = "pseudolife-stdio: mode 'maintainer' is deferred in this candidate\n"
-
-
 def _native(text: str) -> bytes:
     return (text.replace("\n", "\r\n") if core.WINDOWS else text).encode("utf-8")
-
-
-@normalize.rule("maintainer-deferral")
-def maintainer_deferral(obs: dict) -> None:
-    """A declared deferral: the candidate must print the dispatcher's
-    deferral line, exit 1 and change nothing. The oracle arm still runs (on
-    its own copy), but its exit, streams and bank are replaced by that
-    expectation: no output, and a bank equal to the seed."""
-    if obs.get("arm") != "python":
-        return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    obs["stderr"] = base64.b64encode(_native(DEFERRAL)).decode()
-    obs["db"] = "unchanged"
 
 
 _CODE_LINE = re.compile(rb"One-time enrolment code: ([A-Z2-7]{10})(\r?\n)")
@@ -470,96 +451,6 @@ LAST_SHOWN = 253_402_300_799.0
 TWO_DAYS = 2 * 86_400
 
 
-def shown_times(dump) -> dict[str, list]:
-    """Each seeded key's listed times (``active_from``, ``last_used_at``),
-    by the 12-character id prefix the listing prints."""
-    shown = {}
-    for text in dump["tables"].get("maintainer_passkeys", []):
-        row = json.loads(text)
-        shown[row["credential_id"][:12]] = [row["active_from"], row["last_used_at"]]
-    return shown
-
-
-def local_times(shown: dict[str, list]) -> dict[str, list]:
-    """``_when`` (maintainer_cli.py:89-90) of each shown time on this host:
-    ``time.strftime("%Y-%m-%d %H:%M", time.localtime(value))``."""
-    def when(value):
-        if value is None or not 0 <= value <= LAST_SHOWN:
-            return None
-        try:
-            return time.strftime("%Y-%m-%d %H:%M", time.localtime(value))
-        except (OverflowError, OSError, ValueError):
-            return None
-    return {prefix: [when(value) for value in values] for prefix, values in shown.items()}
-
-
-def native_list_defers(shown: dict[str, list]) -> bool:
-    """Whether the native listing defers its local times on this host, by
-    the rule ``display.rs`` states, computed here with CPython's own
-    ``time.localtime``: TZ set, a shown value outside 0..9999-12-31 UTC or
-    whose local year is outside 1970-9999, and on Windows a shown value that,
-    with two days either side, leaves the current local year or changes its
-    UTC offset (near New Year or a DST change)."""
-    if "TZ" in os.environ:
-        return True
-    year = time.localtime().tm_year
-    for values in shown.values():
-        for value in values:
-            if value is None:
-                continue
-            if not 0 <= value <= LAST_SHOWN:
-                return True
-            seconds = int(value // 1)
-            shown = time.localtime(seconds)
-            if not 1970 <= shown.tm_year <= 9999:
-                return True
-            if core.WINDOWS:
-                for near in (seconds - TWO_DAYS, seconds, seconds + TWO_DAYS):
-                    local = time.localtime(near)
-                    if local.tm_year != year or local.tm_gmtoff != shown.tm_gmtoff:
-                        return True
-    return False
-
-
-@normalize.rule("maintainer-list-guard")
-def maintainer_list_guard(obs: dict) -> None:
-    """A listing the native rule defers (``native_list_defers`` over the
-    seeded bank's shown times): the oracle arm's result is replaced by the
-    deferral expectation, so the branch is checked rather than skipped. It
-    is decided when the arms are compared, on the host that ran the
-    candidate: a golden's oracle side was recorded on another host, in
-    another year perhaps."""
-    if native_list_defers(obs.get("shown") or {}):
-        maintainer_deferral(obs)
-
-
-_LISTED = re.compile(rb"^(.{12})(  .*  active_from=)(.*?)(  last_used=)(.*?)"
-                     rb"((?:  FLAGGED \(sign count went backwards\))?\r?)$")
-
-
-@normalize.rule("maintainer-local-times")
-def maintainer_local_times(obs: dict) -> None:
-    """A listed key's ``active_from`` and ``last_used``, where each is
-    exactly what CPython's ``time.localtime`` renders for that key's seeded
-    value on the host that ran the arm (``local_times``, taken with the
-    observation), becomes ``<local>``: the minutes depend on that host's
-    zone, which a golden recorded elsewhere does not share. A time rendered
-    for another key, another value or another zone stays as written."""
-    rendered = obs.get("local_times") or {}
-    lines = []
-    for line in base64.b64decode(obs["stdout"]).split(b"\n"):
-        match = _LISTED.match(line)
-        expected = rendered.get(match.group(1).decode("utf-8", "replace")) if match else None
-        if expected:
-            parts = list(match.groups())
-            for index, want in ((2, expected[0]), (4, expected[1])):
-                if want is not None and parts[index] == want.encode():
-                    parts[index] = b"<local>"
-            line = b"".join(parts)
-        lines.append(line)
-    obs["stdout"] = base64.b64encode(b"\n".join(lines)).decode()
-
-
 # --- the waiting form's harness side ---------------------------------------------
 
 def _live_code(conn, proc) -> str | None:
@@ -672,6 +563,13 @@ GUARDS = {
 WRITES = ("maintainer-host-write",)
 
 
+class _DatabaseUrl(str):
+    """Keep the child environment value intact while hiding it in case reprs."""
+
+    def __repr__(self) -> str:
+        return "'<database URL withheld>'"
+
+
 def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
          stdout_closed=False, skip_if=None, prepare=(), note="", programs=(), golden=True):
     """``maintainer <argv>`` on this arm's own copy of a seeded bank;
@@ -694,28 +592,28 @@ def case(case_id, kind, argv, *, rules=WRITES, during=None, env=None, dsn=True,
         dump = _bank.dump(ARM_DB)
         baseline = arm.state["prepared"]
         obs["seed_secret"] = _secret(baseline)
-        obs["shown"] = shown_times(baseline)
-        obs["local_times"] = local_times(obs["shown"])
         obs["db"] = "unchanged" if dump == baseline else changes(baseline, dump)
 
     environment = dict(GUARDS)
     if dsn:
         environment["PSEUDOLIFE_MCP_DATABASE_URL"] = _bank.url(ARM_DB)
     environment.update(env or {})
+    key = "PSEUDOLIFE_MCP_DATABASE_URL"
+    if environment.get(key) is not None:
+        environment[key] = _DatabaseUrl(environment[key])
     return core.Case(case_id, ["maintainer", *argv], env=environment, setup=setup,
                      during=during, after=after, rules=rules, timeout=60,
                      stdout_closed=stdout_closed, skip_if=skip_if, note=note,
                      programs=programs, golden=golden)
 
 
-LISTING = WRITES + ("maintainer-list-guard", "maintainer-local-times")
+LISTING = WRITES
 CLOSED = WRITES + ("maintainer-stdout-closed-trailer",)
 
 
 def defer(case_id, kind, argv, **kwargs):
-    if case_id in {"defer-help", "defer-list-help", "defer-enrol-poll", "defer-confirm-double-dash", "defer-no-dsn"}:
-        return case(case_id, kind, argv, **kwargs)
-    return case(case_id, kind, argv, rules=("maintainer-deferral",), **kwargs)
+    """Retain historical case IDs while testing their native answers."""
+    return case(case_id, kind, argv, **kwargs)
 
 
 def cases() -> list[core.Case]:
@@ -735,6 +633,10 @@ def cases() -> list[core.Case]:
         case("list-empty", "empty", ["list"]),
         case("list-pending", "pending", ["list"], rules=LISTING),
         case("list-rich", "rich", ["list"], rules=LISTING),
+        case("list-read-error", "rich", ["list"], prepare=(
+            "ALTER TABLE maintainer_passkeys RENAME COLUMN label TO hidden_label",)),
+        case("list-column-type-error", "rich", ["list"], prepare=(
+            "ALTER TABLE maintainer_passkeys ALTER COLUMN label TYPE jsonb USING to_jsonb(label)",)),
         # the bank has no maintainer tables (schema before v54)
         case("no-tables-list", "notables", ["list"]),
         case("no-tables-enrol-code", "notables", ["enrol-code", "--no-wait"]),
@@ -801,7 +703,7 @@ def cases() -> list[core.Case]:
              stdout_closed=True, rules=CLOSED),
         case("enrol-code-wait-stdout-closed", "fresh", ["enrol-code"], stdout_closed=True,
              rules=CLOSED),
-        # deferred before any effect (the oracle arm writes; the candidate must not)
+        # Historical argument, environment and stdout regressions.
         defer("defer-list-stdout-closed", "rich", ["list"], stdout_closed=True),
         defer("defer-list-tz-set", "rich", ["list"], env={"TZ": "UTC"}),
         defer("defer-help", "rich", ["--help"]),

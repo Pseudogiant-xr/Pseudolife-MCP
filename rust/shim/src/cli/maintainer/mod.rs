@@ -19,14 +19,13 @@ enum Action {
     List,
 }
 
-/// The argv shapes real producers use (the docs, `maintainer setup`, the
-/// guide), including explicit polling and the prefix delimiter. Help is
-/// handled before parsing; guided setup is integrated separately.
-fn parse(arguments: &[OsString]) -> Option<Action> {
-    let arguments: Vec<&str> = arguments
+/// Parse the host actions; prefix validation remains inside the transaction.
+fn parse(arguments: &[OsString]) -> Result<Action, String> {
+    let arguments = arguments
         .iter()
         .map(|argument| argument.to_str())
-        .collect::<Option<_>>()?;
+        .collect::<Option<Vec<_>>>()
+        .ok_or("argument is not valid Unicode; retype it as Unicode text")?;
     if arguments.first() == Some(&"enrol-code") {
         let mut wait = true;
         let mut poll = 2.0;
@@ -34,28 +33,65 @@ fn parse(arguments: &[OsString]) -> Option<Action> {
         while let Some(item) = items.next() {
             match *item {
                 "--no-wait" => wait = false,
-                "--poll" => poll = items.next()?.parse().ok()?,
-                item if item.starts_with("--poll=") => poll = item[7..].parse().ok()?,
-                _ => return None,
+                "--poll" => {
+                    let value = items.next().ok_or("--poll needs seconds; use --poll 2")?;
+                    poll = value.parse().map_err(|_| "--poll needs numeric seconds; use --poll 2")?;
+                }
+                item if item.starts_with("--poll=") => {
+                    poll = item[7..].parse().map_err(|_| "--poll needs numeric seconds; use --poll 2")?;
+                }
+                item if item.starts_with("--no-wait=") => return Err("--no-wait takes no value; use --no-wait".into()),
+                item if item.len() > 2 && item.starts_with("--") && "--no-wait".starts_with(item) =>
+                    return Err("abbreviated option; use --no-wait in full".into()),
+                item if item.len() > 2 && item.starts_with("--") && "--poll".starts_with(item) =>
+                    return Err("abbreviated option; use --poll SECONDS in full".into()),
+                _ => return Err("unexpected enrol-code argument; run pseudolife-mcp maintainer enrol-code --help".into()),
             }
         }
-        return Some(Action::EnrolCode { wait, poll });
+        return Ok(Action::EnrolCode { wait, poll });
     }
-    Some(match arguments.as_slice() {
-        // `main` inserts `--` before a lone prefix that starts with `-`
-        // (a base64url id does one time in 64), so every value but these
-        // three is the prefix.
-        ["confirm", prefix] | ["confirm", "--", prefix] if prefix_argument(prefix) => {
-            Action::Confirm((*prefix).to_owned())
+    match arguments.as_slice() {
+        ["confirm", prefix] if prefix_argument(prefix) => Ok(Action::Confirm((*prefix).to_owned())),
+        ["revoke", prefix] if prefix_argument(prefix) => Ok(Action::Revoke((*prefix).to_owned())),
+        ["confirm", "--", prefix] => Ok(Action::Confirm((*prefix).to_owned())),
+        ["revoke", "--", prefix] => Ok(Action::Revoke((*prefix).to_owned())),
+        ["reset"] => Ok(Action::Reset { yes: false }),
+        ["reset", "--yes"] => Ok(Action::Reset { yes: true }),
+        ["list"] => Ok(Action::List),
+        [] => Err("an action is required; run pseudolife-mcp maintainer --help".into()),
+        ["confirm", ..] => Err(
+            "confirm needs one credential prefix; use pseudolife-mcp maintainer confirm -- PREFIX"
+                .into(),
+        ),
+        ["revoke", ..] => Err(
+            "revoke needs one credential prefix; use pseudolife-mcp maintainer revoke -- PREFIX"
+                .into(),
+        ),
+        ["reset", option]
+            if *option == "-y" || (option.starts_with("--") && "--yes".starts_with(*option)) =>
+        {
+            Err("abbreviated option; use --yes in full".into())
         }
-        ["revoke", prefix] | ["revoke", "--", prefix] if prefix_argument(prefix) => {
-            Action::Revoke((*prefix).to_owned())
+        ["reset", ..] => {
+            Err("reset accepts --yes once; use pseudolife-mcp maintainer reset --yes".into())
         }
-        ["reset"] => Action::Reset { yes: false },
-        ["reset", "--yes"] => Action::Reset { yes: true },
-        ["list"] => Action::List,
-        _ => return None,
-    })
+        ["list", ..] => Err("list takes no arguments; use pseudolife-mcp maintainer list".into()),
+        [word, ..] => {
+            let choices = ["enrol-code", "confirm", "revoke", "reset", "list", "setup"];
+            let matches: Vec<_> = choices
+                .into_iter()
+                .filter(|action| !word.is_empty() && action.starts_with(*word))
+                .collect();
+            if matches.is_empty() {
+                Err("unrecognized maintainer action; run pseudolife-mcp maintainer --help".into())
+            } else {
+                Err(format!(
+                    "abbreviated maintainer action; spell {} in full",
+                    matches.join(" or ")
+                ))
+            }
+        }
+    }
 }
 
 fn prefix_argument(value: &str) -> bool {
@@ -80,7 +116,7 @@ fn help(arguments: &[OsString]) -> Option<&'static str> {
     })
 }
 
-/// Run the action after `maintainer`; `None` defers before any effect.
+/// Every host action is answered natively; setup retains its separate path.
 pub fn run(arguments: Vec<OsString>) -> Option<i32> {
     if arguments.first().is_some_and(|value| value == "setup") {
         return Some(i32::from(setup::run(
@@ -91,18 +127,30 @@ pub fn run(arguments: Vec<OsString>) -> Option<i32> {
         let _ = print(&help.replace("\r\n", "\n"));
         return Some(0);
     }
-    let action = parse(&arguments)?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let action = match parse(&arguments) {
+        Ok(action) => action,
+        Err(message) => {
+            crate::stderrln!("error: {message}");
+            return Some(2);
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .ok()?;
-    runtime.block_on(async {
-        if let Some(dsn) = dsn() {
-            return bank::run(&dsn, action).await.map(i32::from);
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            crate::stderrln!(
+                "error: could not create maintainer runtime ({error}); free system resources and retry"
+            );
+            return Some(2);
         }
-        if std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").is_some_and(|v| !v.is_empty()) {
-            // Preserve the shared client's explicit DSN-domain boundary.
-            return None;
+    };
+    runtime.block_on(async {
+        match dsn() {
+            Ok(Some(dsn)) => return bank::run(&dsn, action).await.map(i32::from),
+            Ok(None) => {},
+            Err(message) => { crate::stderrln!("error: {message}"); return Some(2); }
         }
         // A running daemon container wins: a completed Docker migration can
         // leave a stopped lite cluster behind (ops/preflight_lite.py).
@@ -118,15 +166,26 @@ pub fn run(arguments: Vec<OsString>) -> Option<i32> {
     })
 }
 
-/// The configured DSN, or `None` (no or empty variable, a value that is not
-/// Unicode, or a DSN spelling the native client does not admit): the lite
-/// tier's embedded bank and the container re-run are reached only then.
-fn dsn() -> Option<crate::pg::Dsn> {
-    let value = std::env::var("PSEUDOLIFE_MCP_DATABASE_URL").ok()?;
-    if value.is_empty() {
-        return None;
-    }
-    crate::pg::Dsn::parse(&value).ok()
+/// Missing or empty settings retain the existing container and retired-bank checks.
+fn dsn() -> Result<Option<crate::pg::Dsn>, &'static str> {
+    let Some(value) = std::env::var_os("PSEUDOLIFE_MCP_DATABASE_URL").filter(|v| !v.is_empty())
+    else {
+        return Ok(None);
+    };
+    let value = value.into_string().map_err(
+        |_| "PSEUDOLIFE_MCP_DATABASE_URL is not Unicode; set it to a Unicode PostgreSQL URL",
+    )?;
+    crate::pg::Dsn::parse(&value).map(Some).map_err(|error| match error {
+        crate::pg::Error::UnsupportedOption(ref option) if option == "sslmode" =>
+            "PSEUDOLIFE_MCP_DATABASE_URL has an unsupported sslmode; use disable, prefer, require, verify-ca or verify-full",
+        crate::pg::Error::UnsupportedOption(_) =>
+            "PSEUDOLIFE_MCP_DATABASE_URL has an unsupported option; use only host, port, user, password, dbname, sslmode and sslrootcert",
+        crate::pg::Error::InvalidOption("host") =>
+            "PSEUDOLIFE_MCP_DATABASE_URL needs one TCP host; set it to a single-host PostgreSQL URL",
+        crate::pg::Error::InvalidOption("port") =>
+            "PSEUDOLIFE_MCP_DATABASE_URL has an invalid port; set its port to 1 through 65535",
+        _ => "PSEUDOLIFE_MCP_DATABASE_URL is not an admitted PostgreSQL connection setting; set it to a valid single-host PostgreSQL URL",
+    })
 }
 
 /// `print(..., file=out)` lines on stdout, flushed; the error when stdout
@@ -254,35 +313,38 @@ mod tests {
     }
 
     #[test]
-    fn canonical_shapes_parse_and_every_other_shape_defers() {
+    fn canonical_shapes_parse_and_every_other_shape_is_rejected() {
         assert_eq!(
-            parse(&argv(&["enrol-code"])),
+            parse(&argv(&["enrol-code"])).ok(),
             Some(Action::EnrolCode {
                 wait: true,
                 poll: 2.0
             })
         );
         assert_eq!(
-            parse(&argv(&["enrol-code", "--no-wait"])),
+            parse(&argv(&["enrol-code", "--no-wait"])).ok(),
             Some(Action::EnrolCode {
                 wait: false,
                 poll: 2.0
             })
         );
         assert_eq!(
-            parse(&argv(&["confirm", "-abcdef"])),
+            parse(&argv(&["confirm", "-abcdef"])).ok(),
             Some(Action::Confirm("-abcdef".into()))
         );
         assert_eq!(
-            parse(&argv(&["revoke", ""])),
+            parse(&argv(&["revoke", ""])).ok(),
             Some(Action::Revoke(String::new()))
         );
-        assert_eq!(parse(&argv(&["reset"])), Some(Action::Reset { yes: false }));
         assert_eq!(
-            parse(&argv(&["reset", "--yes"])),
+            parse(&argv(&["reset"])).ok(),
+            Some(Action::Reset { yes: false })
+        );
+        assert_eq!(
+            parse(&argv(&["reset", "--yes"])).ok(),
             Some(Action::Reset { yes: true })
         );
-        assert_eq!(parse(&argv(&["list"])), Some(Action::List));
+        assert_eq!(parse(&argv(&["list"])).ok(), Some(Action::List));
         for deferred in [
             &[][..],
             &["setup"],
@@ -303,7 +365,49 @@ mod tests {
             &["lis"],
             &["enrol"],
         ] {
-            assert_eq!(parse(&argv(deferred)), None, "{deferred:?}");
+            assert_eq!(parse(&argv(deferred)).ok(), None, "{deferred:?}");
+        }
+    }
+
+    #[test]
+    fn malformed_commands_are_native_usage_errors() {
+        for items in [
+            &[][..],
+            &["list", "extra"],
+            &["enrol-code", "--no-w"],
+            &["enrol-code", "--poll"],
+            &["enrol-code", "--poll", "not-a-number"],
+            &["confirm"],
+            &["reset", "--ye"],
+            &["reset", "--yes", "--yes"],
+            &["lis"],
+        ] {
+            assert_eq!(run(argv(items)), Some(2), "{items:?}");
+        }
+        assert_eq!(
+            parse(&argv(&["confirm", "--", "--help"])).ok(),
+            Some(Action::Confirm("--help".into()))
+        );
+        assert_eq!(
+            parse(&argv(&["enrol-code", "--poll", "-1", "--no-wait"])).ok(),
+            Some(Action::EnrolCode {
+                wait: false,
+                poll: -1.0
+            })
+        );
+    }
+
+    #[test]
+    fn a_prefix_after_the_delimiter_is_a_literal_value() {
+        for prefix in ["--help", "-h", "--", "-abcdef"] {
+            assert_eq!(
+                parse(&argv(&["confirm", "--", prefix])).ok(),
+                Some(Action::Confirm(prefix.into()))
+            );
+            assert_eq!(
+                parse(&argv(&["revoke", "--", prefix])).ok(),
+                Some(Action::Revoke(prefix.into()))
+            );
         }
     }
 
@@ -362,15 +466,15 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn non_unicode_arguments_defer() {
+    fn non_unicode_arguments_refuse_natively() {
         use std::os::unix::ffi::OsStringExt;
         let arguments = vec![OsString::from("confirm"), OsString::from_vec(vec![0xff; 8])];
-        assert_eq!(parse(&arguments), None);
+        assert_eq!(run(arguments), Some(2));
     }
 
     #[cfg(windows)]
     #[test]
-    fn non_unicode_arguments_defer() {
+    fn non_unicode_arguments_refuse_natively() {
         use std::os::windows::ffi::OsStringExt;
         let arguments = vec![
             OsString::from("confirm"),

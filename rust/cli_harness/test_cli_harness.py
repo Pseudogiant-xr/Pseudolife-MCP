@@ -2558,3 +2558,25 @@ def test_replay_passes_on_oracle_goldens_and_ignores_candidate_provenance(
     path.write_text(json.dumps(golden), encoding="utf-8")
     assert runner.main(["--row", "probe", "--golden", "--candidate", str(candidate)]) == 0
     assert capsys.readouterr().out.count("2/2 match") == 2
+
+
+def test_maintainer_case_repr_hides_dsn_but_child_receives_it(tmp_path, monkeypatch):
+    import hashlib
+    import subprocess
+    from cli_harness.rows import maintainer
+
+    fake_password = "SYNTHETIC_MAINTAINER_PASSWORD_7281"
+    url = "postgresql://fixture:" + fake_password + "@127.0.0.1:9/pl_cf_repr"
+    monkeypatch.setattr(maintainer._bank, "url", lambda _: url)
+    case = maintainer.case("repr-safety", "rich", ["list"])
+    assert fake_password not in repr(case)
+    parameter = pytest.param(case, id=repr(case))
+    assert fake_password not in parameter.id
+    arm = core.Arm("rust", tmp_path, tmp_path)
+    target = core.Target("rust", [sys.executable])
+    environment = core._environment(case, arm, target)
+    script = ("import hashlib,os; print(hashlib.sha256("
+              "os.environ['PSEUDOLIFE_MCP_DATABASE_URL'].encode()).hexdigest())")
+    child = subprocess.run([sys.executable, "-I", "-c", script], env=environment,
+                           capture_output=True, text=True, check=True, timeout=20)
+    assert child.stdout.strip() == hashlib.sha256(url.encode()).hexdigest()

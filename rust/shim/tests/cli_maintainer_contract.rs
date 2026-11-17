@@ -8,8 +8,6 @@
 mod cli;
 use std::{fs, path::Path, process::Command};
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'maintainer' is deferred in this candidate\n";
-
 fn command(home: &Path) -> Command {
     let mut command = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")));
     command
@@ -21,7 +19,7 @@ fn command(home: &Path) -> Command {
     command
 }
 
-fn assert_deferred(arguments: &[&str], dsn: Option<&str>) {
+fn assert_native_error(arguments: &[&str], dsn: Option<&str>) {
     let home = std::env::temp_dir().join(format!("maintainer-defer-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&home).unwrap();
     let mut command = command(&home);
@@ -31,13 +29,15 @@ fn assert_deferred(arguments: &[&str], dsn: Option<&str>) {
     let output = command.args(arguments).output().unwrap();
     let remaining = fs::read_dir(&home).unwrap().count();
     fs::remove_dir_all(&home).unwrap();
-    assert_eq!(output.status.code(), Some(1), "{arguments:?} {dsn:?}");
-    assert!(output.stdout.is_empty(), "{arguments:?} {dsn:?}");
-    assert_eq!(
-        output.stderr,
-        cli::native_text(DEFERRED),
-        "{arguments:?} {dsn:?}"
-    );
+    assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+    assert!(output.stdout.is_empty(), "{arguments:?}");
+    assert!(output.stderr.starts_with(&cli::native_text("error: ")));
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(!error.contains("is deferred in this candidate"));
+    assert!(error.contains("maintainer") || error.contains("PSEUDOLIFE_MCP_DATABASE_URL"));
+    if let Some(value) = dsn {
+        assert!(!error.contains(value), "database URL was printed");
+    }
     assert_eq!(remaining, 0, "{arguments:?} wrote under the home");
 }
 
@@ -71,7 +71,7 @@ fn help_does_not_open_the_bank_or_enter_the_container() {
 }
 
 #[test]
-fn non_canonical_argv_defers_before_the_bank() {
+fn non_canonical_argv_refuses_before_the_bank() {
     for arguments in [
         &[][..],
         &["list", "extra"],
@@ -84,7 +84,7 @@ fn non_canonical_argv_defers_before_the_bank() {
         &["lis"],
     ] {
         // Even with a reachable-looking DSN: nothing connects first.
-        assert_deferred(arguments, Some(UNREACHABLE));
+        assert_native_error(arguments, Some(UNREACHABLE));
     }
 }
 
@@ -99,7 +99,7 @@ fn canonical_argv_without_a_bank_reports_the_native_error() {
         &["reset"],
         &["reset", "--yes"],
     ] {
-        assert_deferred(
+        assert_native_error(
             arguments,
             Some("postgresql://user:secret@127.0.0.1:9/db?application_name=x"),
         );
@@ -121,4 +121,60 @@ fn canonical_argv_without_a_bank_reports_the_native_error() {
             fs::remove_dir_all(home).unwrap();
         }
     }
+}
+
+#[test]
+fn non_unicode_database_setting_is_refused_without_falling_through() {
+    use std::ffi::OsString;
+    #[cfg(unix)]
+    let value = {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(vec![0xff])
+    };
+    #[cfg(windows)]
+    let value = {
+        use std::os::windows::ffi::OsStringExt;
+        OsString::from_wide(&[0xd800])
+    };
+    let home = std::env::temp_dir().join(format!("maintainer-setting-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    let output = command(&home)
+        .arg("list")
+        .env("PSEUDOLIFE_MCP_DATABASE_URL", value)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("PSEUDOLIFE_MCP_DATABASE_URL") && error.contains("Unicode"));
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn malformed_database_settings_never_echo_credentials_or_option_keys() {
+    const MARKER: &str = "SYNTHETIC_PRIVATE_VALUE_6312";
+    let home = std::env::temp_dir().join(format!("maintainer-private-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&home).unwrap();
+    for value in [
+        format!("postgresql://fixture:{MARKER}@127.0.0.1:9/pl_cf_none?application_name=x"),
+        format!("postgresql://fixture:fixture@127.0.0.1:9/pl_cf_none?{MARKER}=x"),
+        format!("invalid-{MARKER}"),
+    ] {
+        let output = command(&home)
+            .arg("list")
+            .env("PSEUDOLIFE_MCP_DATABASE_URL", &value)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("PSEUDOLIFE_MCP_DATABASE_URL"));
+        assert!(
+            !error.contains(MARKER) && !error.contains(&value),
+            "private input was printed"
+        );
+    }
+    assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+    fs::remove_dir_all(home).unwrap();
 }
