@@ -19,8 +19,7 @@ the Program Files default moved into the home) and a data dir that holds no
 
 Named rules: ``invite-written`` (a written row's clocks inside the arm's own
 window, the stored code hash equal to the SHA-256 of the code that arm
-printed, and the printed expiry equal to the stored one) and
-``invite-deferral`` (a declared deferral case's expectation).
+printed, and the printed expiry equal to the stored one).
 """
 
 from __future__ import annotations
@@ -47,7 +46,6 @@ BANK_ID = "fixture-invite-bank"
 FINGERPRINT = hashlib.sha256(BANK_ID.encode()).hexdigest()[:16]
 OTHER_FINGERPRINT = "0123456789abcdef"
 SEP = "\\" if core.WINDOWS else "/"
-DEFERRAL = "pseudolife-stdio: mode 'invite' is deferred in this candidate\n"
 
 
 # ── seeds ───────────────────────────────────────────────────────────────────
@@ -383,25 +381,6 @@ def invite_written(obs: dict) -> None:
     db["tables"]["principals"] = sorted(json.dumps(row, sort_keys=True) for row in rows)
 
 
-@normalize.rule("invite-deferral")
-def invite_deferral(obs: dict) -> None:
-    """A declared deferral case: the candidate must print the dispatcher's
-    deferral line, exit 1, send no request and change nothing. The oracle
-    arm still runs (on its own bank, with no tool or real bank reachable);
-    its observation is replaced by that expectation."""
-    if obs.get("arm") != "python":
-        return
-    obs["exit"] = 1
-    obs["stdout"] = ""
-    native = DEFERRAL.replace("\n", "\r\n") if core.WINDOWS else DEFERRAL
-    obs["stderr"] = base64.b64encode(native.encode()).decode()
-    obs["files"] = dict(obs.get("before", {}))
-    obs["modes"] = dict(obs.get("before_modes", {}))
-    if "requests" in obs:
-        obs["requests"] = []
-    obs["db"] = "unchanged"
-
-
 # ── cases ───────────────────────────────────────────────────────────────────
 
 def _stash(arm) -> None:
@@ -692,15 +671,15 @@ def _cases() -> list[core.Case]:
             argv.append("--json")
         add(read_case(case_id, "states", argv, daemon=_daemon(port, payload, status)))
     port = free_port()
-    add(read_case("daemon-other-bank", "states", ["laptop", "--port", str(port), "--url", "u"],
+    add(read_case("daemon-other-bank", "states", ["laptop", "--port", str(port), "--url", "http://example.com"],
                   daemon=_daemon(port, health(bank=OTHER_FINGERPRINT))))
     port = free_port()
     add(read_case("daemon-other-bank-json", "nometa",
-                  ["laptop", "--port", str(port), "--url", "u", "--json"],
+                  ["laptop", "--port", str(port), "--url", "http://example.com", "--json"],
                   daemon=_daemon(port, health())))
     port = free_port()
     add(read_case("no-principals-table", "noschema",
-                  ["laptop", "--port", str(port), "--url", "u"], daemon=_daemon(port, health())))
+                  ["laptop", "--port", str(port), "--url", "http://example.com"], daemon=_daemon(port, health())))
 
     # /health values only CPython's reader holds: lone surrogates, nesting
     # up to expose_cli's 100-bracket bound (past it, as far as CPython's
@@ -726,7 +705,7 @@ def _cases() -> list[core.Case]:
             ("health-int-past-limit", json.dumps(health())[:-1].encode()
              + b', "x": 1' + b"0" * 4300 + b"}", False, ())):
         port = free_port()
-        argv = ["laptop", "--port", str(port), "--url", "u"] + (["--json"] if json_mode else [])
+        argv = ["laptop", "--port", str(port), "--url", "http://example.com"] + (["--json"] if json_mode else [])
         add(read_case(case_id, "states", argv, daemon=_daemon(port, payload), rules=rules))
 
     # `target = args.name or args.revoke`: an empty --revoke is a target.
@@ -762,48 +741,48 @@ def _cases() -> list[core.Case]:
     inviting("invite-new-placeholder-json", "states", ["laptop", "--json"])
     inviting("invite-empty-url", "states", ["laptop", "--url", ""])
     inviting("invite-options", "states",
-             ["--tier", "core", "--no-board", "--expires", "2h", "laptop", "--url", "u"], ttl=7200)
-    inviting("invite-board", "states", ["laptop", "--board", "--expires", "90", "--url", "u",
+             ["--tier", "core", "--no-board", "--expires", "2h", "laptop", "--url", "http://example.com"], ttl=7200)
+    inviting("invite-board", "states", ["laptop", "--board", "--expires", "90", "--url", "http://example.com",
                                         "--json"], ttl=5400)
-    inviting("invite-minutes-half-even", "states", ["laptop", "--expires", "150s", "--url", "u"],
+    inviting("invite-minutes-half-even", "states", ["laptop", "--expires", "150s", "--url", "http://example.com"],
              ttl=150)
-    inviting("invite-minutes-up", "states", ["laptop", "--expires", "91S", "--url", "u"], ttl=91)
-    inviting("invite-day", "states", ["laptop", "--expires", "1d", "--url", "u"], ttl=86400)
-    inviting("reinvite-pending", "states", ["alpha", "--url", "u"])
-    inviting("reinvite-expired-tier-json", "states", ["delta", "--tier", "full", "--url", "u",
+    inviting("invite-minutes-up", "states", ["laptop", "--expires", "91S", "--url", "http://example.com"], ttl=91)
+    inviting("invite-day", "states", ["laptop", "--expires", "1d", "--url", "http://example.com"], ttl=86400)
+    inviting("reinvite-pending", "states", ["alpha", "--url", "http://example.com"])
+    inviting("reinvite-expired-tier-json", "states", ["delta", "--tier", "full", "--url", "http://example.com",
                                                      "--json"])
-    inviting("reinvite-expired-board", "states", ["delta", "--board", "--url", "u"])
-    inviting("paired-needs-replace", "states", ["bravo", "--url", "u"])
-    inviting("paired-needs-replace-json", "states", ["bravo", "--url", "u", "--json"])
-    inviting("paired-replace", "states", ["bravo", "--replace", "--url", "u"])
-    inviting("revoked-reinvite-json", "states", ["charlie", "--url", "u", "--json"])
+    inviting("reinvite-expired-board", "states", ["delta", "--board", "--url", "http://example.com"])
+    inviting("paired-needs-replace", "states", ["bravo", "--url", "http://example.com"])
+    inviting("paired-needs-replace-json", "states", ["bravo", "--url", "http://example.com", "--json"])
+    inviting("paired-replace", "states", ["bravo", "--replace", "--url", "http://example.com"])
+    inviting("revoked-reinvite-json", "states", ["charlie", "--url", "http://example.com", "--json"])
     # v59 ownership: a new machine that is someone else's, a re-invite that
     # keeps it, --mine undoing it, and --mine on a new name (no flag note).
-    inviting("invite-someone-else", "states", ["laptop", "--someone-else", "--url", "u"])
-    inviting("invite-someone-else-json", "states", ["--someone-else", "laptop", "--url", "u",
+    inviting("invite-someone-else", "states", ["laptop", "--someone-else", "--url", "http://example.com"])
+    inviting("invite-someone-else-json", "states", ["--someone-else", "laptop", "--url", "http://example.com",
                                                     "--json"])
-    inviting("reinvite-keeps-someone-else", "states", ["echo", "--url", "u"])
-    inviting("reinvite-keeps-someone-else-json", "states", ["echo", "--url", "u", "--json"])
-    inviting("reinvite-mine", "states", ["echo", "--mine", "--url", "u"])
-    inviting("invite-mine-json", "states", ["laptop", "--mine", "--url", "u", "--json"])
-    inviting("reinvite-pending-someone-else", "states", ["alpha", "--someone-else", "--url", "u"])
+    inviting("reinvite-keeps-someone-else", "states", ["echo", "--url", "http://example.com"])
+    inviting("reinvite-keeps-someone-else-json", "states", ["echo", "--url", "http://example.com", "--json"])
+    inviting("reinvite-mine", "states", ["echo", "--mine", "--url", "http://example.com"])
+    inviting("invite-mine-json", "states", ["laptop", "--mine", "--url", "http://example.com", "--json"])
+    inviting("reinvite-pending-someone-else", "states", ["alpha", "--someone-else", "--url", "http://example.com"])
     # A paired machine's ownership alone: no --replace, no new code.
-    inviting("paired-someone-else", "states", ["bravo", "--someone-else", "--url", "u"])
-    inviting("paired-mine-json", "states", ["bravo", "--mine", "--url", "u", "--json"])
+    inviting("paired-someone-else", "states", ["bravo", "--someone-else", "--url", "http://example.com"])
+    inviting("paired-mine-json", "states", ["bravo", "--mine", "--url", "http://example.com", "--json"])
     inviting("paired-mine-tier-refused", "states", ["bravo", "--mine", "--tier", "core",
-                                                    "--url", "u"])
+                                                    "--url", "http://example.com"])
     # A bank before v59: invites and lists work; the ownership flags are
     # refused before any write, naming the update.
     add(read_case("prev59-list", "prev59", ["--list"]))
     add(read_case("prev59-list-json", "prev59", ["--list", "--json"]))
-    inviting("prev59-invite", "prev59", ["zulu.1", "--url", "u"])
-    inviting("prev59-invite-json", "prev59", ["zulu.1", "--url", "u", "--json"])
-    inviting("prev59-reinvite", "prev59", ["bravo", "--url", "u"])
-    inviting("prev59-someone-else-refused", "prev59", ["zulu.1", "--someone-else", "--url", "u"])
-    inviting("prev59-mine-refused-json", "prev59", ["alpha", "--mine", "--url", "u", "--json"])
-    inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "u"])
-    inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "u"])
-    inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "u", "--json"])
+    inviting("prev59-invite", "prev59", ["zulu.1", "--url", "http://example.com"])
+    inviting("prev59-invite-json", "prev59", ["zulu.1", "--url", "http://example.com", "--json"])
+    inviting("prev59-reinvite", "prev59", ["bravo", "--url", "http://example.com"])
+    inviting("prev59-someone-else-refused", "prev59", ["zulu.1", "--someone-else", "--url", "http://example.com"])
+    inviting("prev59-mine-refused-json", "prev59", ["alpha", "--mine", "--url", "http://example.com", "--json"])
+    inviting("invite-bank-match", "states", ["laptop", "--bank", FINGERPRINT, "--url", "http://example.com"])
+    inviting("invite-bank-other", "states", ["laptop", "--bank", OTHER_FINGERPRINT, "--url", "http://example.com"])
+    inviting("invite-empty-bank", "empty", ["zulu.1", "--url", "http://example.com", "--json"])
     # The --someone-else note on a plain invite, one text however invite ran.
     # First exactly as the released v0.21.0 host CLI runs it in the daemon's
     # container: `docker exec -i` with no PSEUDOLIFE_DAEMON_EXEC, the name,
@@ -812,17 +791,17 @@ def _cases() -> list[core.Case]:
     # says to update it first.
     for case_id, json_flag in [("invite-v021-forward", []), ("invite-v021-forward-json", ["--json"])]:
         port = free_port()
-        add(write_case(case_id, "empty", ["zulu.1", "--expires", "900s", "--url", "u", *json_flag],
+        add(write_case(case_id, "empty", ["zulu.1", "--expires", "900s", "--url", "http://example.com", *json_flag],
                        extra_env={"PSEUDOLIFE_MCP_PORT": str(port), "PSEUDOLIFE_DAEMON_EXEC": None},
                        daemon=_daemon(port, health())))
     # Run with PSEUDOLIFE_DAEMON_EXEC set, as a current host CLI forwards it
     # (here with --port too, which no host forwards): the same note.
-    inviting("invite-forwarded", "empty", ["zulu.1", "--expires", "900s", "--url", "u"],
+    inviting("invite-forwarded", "empty", ["zulu.1", "--expires", "900s", "--url", "http://example.com"],
              extra_env={"PSEUDOLIFE_DAEMON_EXEC": "1"})
-    inviting("invite-health-int-at-limit", "states", ["laptop", "--url", "u", "--json"],
+    inviting("invite-health-int-at-limit", "states", ["laptop", "--url", "http://example.com", "--json"],
              payload=json.dumps(health())[:-1].encode() + b', "x": -' + b"9" * 4300 + b"}")
     port = free_port()
-    add(write_case("invite-env-port", "states", ["laptop", "--url", "u"],
+    add(write_case("invite-env-port", "states", ["laptop", "--url", "http://example.com"],
                    extra_env={"PSEUDOLIFE_MCP_PORT": str(port)},
                    daemon=_daemon(port, health())))
     add(write_case("revoke", "states", ["--revoke", "alpha", "--yes"]))
@@ -833,58 +812,53 @@ def _cases() -> list[core.Case]:
     add(write_case("revoke-other-bank", "states", ["--revoke", "alpha", "--yes", "--bank",
                                                    OTHER_FINGERPRINT]))
 
-    # Declared deferrals: before any effect, whatever the oracle does.
-    deferred = ("invite-deferral",)
-
-    def deferral(case_id, argv, kind="states", **options):
-        native = case_id in {"defer-no-dsn", "defer-list-no-dsn", "defer-tailscale-present", "defer-config-yaml", "defer-help",
-                             # v59: the list and the invite read the config natively.
-                             "defer-list-config-yaml", "defer-list-config-env", "defer-invite-config-env",
-                             "list-config-names-normalised"}
+    # Former fallback inputs now have native outcomes. Keep case IDs so each
+    # deliberately changed golden remains traceable.
+    def edge_case(case_id, argv, kind="states", **options):
         port = free_port()
-        add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=("invite-written",) if native else deferred,
+        add(write_case(case_id, kind, [*argv, "--port", str(port)], rules=("invite-written",),
                        daemon=_daemon(port, health()), **options))
 
-    deferral("defer-no-dsn", ["laptop", "--url", "u"],
+    edge_case("defer-no-dsn", ["laptop", "--url", "http://example.com"],
              extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": None})
     # The oracle asks /health first, then fails to log in (exit 1); the
-    # candidate opens the session first, so it defers before any request.
-    deferral("defer-refused-login", ["laptop", "--url", "u"],
+    # candidate checks the session before sending a daemon request.
+    edge_case("defer-refused-login", ["laptop", "--url", "http://example.com"],
              extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": refused_login_url()})
-    deferral("defer-list-no-dsn", ["--list"], extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": ""})
+    edge_case("defer-list-no-dsn", ["--list"], extra_env={"PSEUDOLIFE_MCP_DATABASE_URL": ""})
     tailscale = "tailscale.exe" if core.WINDOWS else "tailscale"
-    deferral("defer-tailscale-present", ["laptop"],
+    edge_case("defer-tailscale-present", ["laptop"],
              extra_env={"PATH": "{HOME}" + SEP + "tools"},
              files={"tools/" + tailscale: b"not a program\n"})
-    deferral("defer-config-yaml", ["laptop", "--url", "u"],
+    edge_case("defer-config-yaml", ["laptop", "--url", "http://example.com"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  allowed_principals: [laptop]\n"})
     # v59: --list reads coordination.not_owner_principals from the config.
-    deferral("defer-list-config-yaml", ["--list"],
+    edge_case("defer-list-config-yaml", ["--list"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data"},
              files={"data/config.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
     # The config's names as load_config keeps them: stripped, lower-cased.
     # codex is an environment row here, so reverting the normalisation shows
     # it as the owner's in one arm only.
-    deferral("list-config-names-normalised", ["--list"],
+    edge_case("list-config-names-normalised", ["--list"],
              extra_env={"PSEUDOLIFE_MCP_DATA_DIR": "{HOME}" + SEP + "data",
                         "PSEUDOLIFE_MCP_TOKENS": "seed-env-token:codex"},
              files={"data/config.yaml": b"coordination:\n  not_owner_principals: [' Codex ']\n"})
-    deferral("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "u"])
+    edge_case("defer-mine-and-someone-else", ["laptop", "--mine", "--someone-else", "--url", "http://example.com"])
     # PSEUDOLIFE_MCP_CONFIG comes first for the daemon, so the oracle reads it.
-    deferral("defer-list-config-env", ["--list"],
+    edge_case("defer-list-config-env", ["--list"],
              extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "elsewhere.yaml"},
              files={"elsewhere.yaml": b"coordination:\n  not_owner_principals: [codex]\n"})
-    deferral("defer-invite-config-env", ["laptop", "--url", "u"],
+    edge_case("defer-invite-config-env", ["laptop", "--url", "http://example.com"],
              extra_env={"PSEUDOLIFE_MCP_CONFIG": "{HOME}" + SEP + "absent.yaml"})
-    deferral("defer-malformed-token-map", ["laptop", "--url", "u"],
+    edge_case("defer-malformed-token-map", ["laptop", "--url", "http://example.com"],
              extra_env={"PSEUDOLIFE_MCP_TOKENS": "no-separator"})
-    deferral("defer-help", ["--help"])
-    deferral("defer-expires-too-short", ["laptop", "--expires", "30s", "--url", "u"])
-    deferral("defer-unknown-tier", ["laptop", "--tier", "writer", "--url", "u"])
-    deferral("defer-repeated-option", ["laptop", "--url", "u", "--url", "v"])
-    deferral("defer-equals-spelling", ["laptop", "--url=u"])
-    deferral("defer-env-port-spelling", ["laptop", "--url", "u"],
+    edge_case("defer-help", ["--help"])
+    edge_case("defer-expires-too-short", ["laptop", "--expires", "30s", "--url", "http://example.com"])
+    edge_case("defer-unknown-tier", ["laptop", "--tier", "writer", "--url", "http://example.com"])
+    edge_case("defer-repeated-option", ["laptop", "--url", "http://example.com", "--url", "http://other.example.com"], kind="empty")
+    edge_case("defer-equals-spelling", ["laptop", "--url=http://example.com"], kind="empty")
+    edge_case("defer-env-port-spelling", ["laptop", "--url", "http://example.com"], kind="empty",
              extra_env={"PSEUDOLIFE_MCP_PORT": " 8765"})
     return out
 
