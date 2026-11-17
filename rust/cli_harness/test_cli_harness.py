@@ -2558,3 +2558,15 @@ def test_replay_passes_on_oracle_goldens_and_ignores_candidate_provenance(
     path.write_text(json.dumps(golden), encoding="utf-8")
     assert runner.main(["--row", "probe", "--golden", "--candidate", str(candidate)]) == 0
     assert capsys.readouterr().out.count("2/2 match") == 2
+
+
+def test_login_case_credentials_have_safe_repr_and_keep_child_value(monkeypatch):
+    from cli_harness.rows import test_login
+    marker = "recognisable-fake-password"
+    monkeypatch.setattr(test_login._cluster, "SUPERUSER_PASSWORD", marker)
+    case = test_login._admin_case("safe-credential-id", ["--admin-url", test_login.ADMIN_URL],
+                                  env={"PSEUDOLIFE_MCP_DATABASE_URL": f"postgresql://u:{marker}@127.0.0.1:1/db"})
+    assert marker not in repr(case)
+    assert marker not in case.id
+    assert str(case.env["PGPASSWORD"]) == marker
+    assert str(case.env["PSEUDOLIFE_MCP_DATABASE_URL"]) == f"postgresql://u:{marker}@127.0.0.1:1/db"

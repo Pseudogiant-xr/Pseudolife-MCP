@@ -34,12 +34,24 @@ fn with_dbname(url: &str, database: &str) -> String {
     }
 }
 
-/// The admin URL parses in the admitted grammar and no ambient libpq control
-/// this client refuses is set; otherwise the caller defers before any effect.
-pub(super) fn admin_url_admitted(url: &str) -> bool {
-    Dsn::parse(url).is_ok()
-        && Dsn::parse(&with_dbname(url, "postgres")).is_ok()
-        && TlsEnvironment::from_environment().validate().is_ok()
+/// Refuse unsupported settings without including the administrator URL or values.
+pub(super) fn admin_url_admitted(url: &str) -> Result<(), String> {
+    if Dsn::parse(url).is_err() || Dsn::parse(&with_dbname(url, "postgres")).is_err() {
+        return Err("--admin-url uses unsupported connection settings; supply a supported PostgreSQL TCP DSN".into());
+    }
+    let environment = TlsEnvironment::from_environment();
+    if let Some(control) = environment.ambient_controls.first() {
+        // The key can itself be user-controlled (PGSSL*); never echo unknown keys.
+        let control = if control.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+            control.as_str()
+        } else {
+            "PGSSL*/PGTLS*"
+        };
+        return Err(format!(
+            "{control} is unsupported with --admin-url; unset that PostgreSQL environment control"
+        ));
+    }
+    environment.validate().map_err(|_| "--admin-url cannot use ambient PostgreSQL certificate/key/CRL files; remove those ambient files or configure supported TLS options in the DSN".into())
 }
 
 fn exception_name(error: &std::io::Error) -> &'static str {

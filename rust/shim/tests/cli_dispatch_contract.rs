@@ -72,10 +72,9 @@ fn recognized_deferred_modes_are_not_reported_as_python_unknown_modes() {
     let state = home.join("watch.json");
     let state = state.to_str().unwrap();
     let start = ["--sto", "--state", state];
-    let cases: [(&str, &[&str]); 5] = [
+    let cases: [(&str, &[&str]); 4] = [
         ("maintainer", &[]),
         ("console", &["--help"]),
-        ("test-login", &[]),
         ("conductor-watch", &start),
         ("delegate-watch", &start),
     ];

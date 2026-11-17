@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 //! `test-login create` without a database: the refusals that come before any
-//! connection, and every deferral. Server-backed behaviour (the --admin-url
+//! connection, and every native refusal. Server-backed behaviour (the --admin-url
 //! path on a throwaway cluster, the container path on a disposable container)
 //! is proven against the Python oracle by `rust/cli_harness --row test_login`.
 #[path = "common/cli.rs"]
@@ -11,7 +11,6 @@ use std::{
     process::{Command, Output},
 };
 
-const DEFERRED: &str = "pseudolife-stdio: mode 'test-login' is deferred in this candidate\n";
 /// A loopback port nothing listens on: a case that failed to defer would
 /// answer with a connection refusal, never reach a server.
 const CLOSED_URL: &str = "postgresql://postgres@127.0.0.1:1/postgres";
@@ -20,7 +19,7 @@ const ABSENT: &str = "pl-cf-w1c-testlogin-absent";
 #[test]
 fn help_does_not_require_an_admin_connection_or_write_a_login() {
     let home = Home::new("help");
-    for arguments in [&["--help"][..], &["create", "--help"]] {
+    for arguments in [&[][..], &["--help"], &["create", "--help"]] {
         let output = run(home.path(), arguments, &[]);
         assert_eq!(output.status.code(), Some(0));
         assert!(
@@ -90,21 +89,20 @@ fn run(home: &Path, arguments: &[&str], env: &[(&str, &str)]) -> Output {
     command.args(arguments).output().unwrap()
 }
 
-fn assert_deferred(home: &Home, arguments: &[&str], env: &[(&str, &str)]) {
+fn assert_refused(home: &Home, arguments: &[&str], env: &[(&str, &str)]) {
     let before = home.listing();
     let output = run(home.path(), arguments, env);
-    assert_eq!(output.status.code(), Some(1), "{arguments:?} {env:?}");
-    assert!(
-        output.stdout.is_empty(),
-        "{arguments:?} {env:?}: {:?}",
-        String::from_utf8_lossy(&output.stdout)
+    assert!(matches!(output.status.code(), Some(2 | 4)));
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(
-        output.stderr,
-        cli::native_text(DEFERRED),
-        "{arguments:?} {env:?}"
-    );
-    assert_eq!(home.listing(), before, "{arguments:?} changed the home");
+    assert!(text.contains("test-login:"));
+    assert!(!text.contains("deferred"));
+    assert!(!text.contains("fixture-secret"));
+    assert!(!text.contains("postgresql://"));
+    assert_eq!(home.listing(), before);
 }
 
 fn assert_answer(home: &Home, arguments: &[&str], env: &[(&str, &str)], code: i32, stdout: &str) {
@@ -121,17 +119,15 @@ fn assert_answer(home: &Home, arguments: &[&str], env: &[(&str, &str)], code: i3
 }
 
 #[test]
-fn non_canonical_argv_defers_before_any_effect() {
+fn malformed_argv_is_refused_before_any_effect() {
     let home = Home::new("argv");
     let url = ["--admin-url", CLOSED_URL];
     for arguments in [
-        &[][..],
-        &["--json", "create"],
+        &["--json", "create"][..],
         &["create", "extra"],
         &["create", "--rot"],
         &["create", "--rotate", "--rotate", "--admin-url", CLOSED_URL],
         &["create", "--json", "--json", "--admin-url", CLOSED_URL],
-        &["create", "--role=x", "--admin-url", CLOSED_URL],
         &[
             "create",
             "--role",
@@ -160,12 +156,12 @@ fn non_canonical_argv_defers_before_any_effect() {
         &["create", "--", "--admin-url", CLOSED_URL],
         &[&["create", "--file", "a", "--file", "b"][..], &url[..]].concat()[..],
     ] {
-        assert_deferred(&home, arguments, &[]);
+        assert_refused(&home, arguments, &[]);
     }
 }
 
 #[test]
-fn shapes_this_port_cannot_answer_exactly_defer_before_connecting() {
+fn unsupported_settings_are_refused_before_connecting() {
     let home = Home::new("shapes");
     let create = ["create", "--admin-url", CLOSED_URL];
     // Admin URLs outside the shared client's grammar.
@@ -175,11 +171,11 @@ fn shapes_this_port_cannot_answer_exactly_defer_before_connecting() {
         "host=127.0.0.1 port=1 service=x",
         "postgresql://postgres@127.0.0.1:1/postgres#frag",
     ] {
-        assert_deferred(&home, &["create", "--admin-url", url], &[]);
+        assert_refused(&home, &["create", "--admin-url", url], &[]);
     }
     // libpq controls the shared client refuses.
     for name in ["PGHOST", "PGUSER", "PGSSLMODE", "PGPASSFILE", "PGSERVICE"] {
-        assert_deferred(&home, &create, &[(name, "x")]);
+        assert_refused(&home, &create, &[(name, "x")]);
     }
     // Daemon DSNs that psycopg and the standard library would read differently,
     // or that the shared client cannot read at all.
@@ -190,17 +186,17 @@ fn shapes_this_port_cannot_answer_exactly_defer_before_connecting() {
         "host=h user=a xuser=b",
         " postgresql://u@h/db",
     ] {
-        assert_deferred(&home, &create, &[("PSEUDOLIFE_MCP_DATABASE_URL", dsn)]);
+        assert_refused(&home, &create, &[("PSEUDOLIFE_MCP_DATABASE_URL", dsn)]);
     }
     // Login file locations that would fail with an operating-system message.
     fs::create_dir_all(home.path().join("dir.env")).unwrap();
     fs::write(home.path().join("plain"), "x").unwrap();
-    assert_deferred(
+    assert_refused(
         &home,
         &["create", "--file", "dir.env", "--admin-url", CLOSED_URL],
         &[],
     );
-    assert_deferred(
+    assert_refused(
         &home,
         &[
             "create",
@@ -212,18 +208,17 @@ fn shapes_this_port_cannot_answer_exactly_defer_before_connecting() {
         &[],
     );
     let as_dir = home.path().join("dir.env");
-    assert_deferred(
+    assert_refused(
         &home,
         &create,
         &[("PSEUDOLIFE_TEST_PG_LOGIN_FILE", as_dir.to_str().unwrap())],
     );
-    assert_deferred(
+    assert_refused(
         &home,
         &create,
         &[("PSEUDOLIFE_TEST_PG_LOGIN_FILE", "a/../b")],
     );
-    // Without PATH, Python would search its default path: deferred.
-    assert_deferred(&home, &["create", "--container", ABSENT], &[]);
+    assert_refused(&home, &["create", "--container", ABSENT], &[]);
 }
 
 /// A directory this process cannot add entries to, restored on drop.
@@ -271,7 +266,7 @@ impl Drop for Locked {
 }
 
 #[test]
-fn write_failures_the_oracle_would_report_defer_before_connecting() {
+fn unwritable_paths_are_refused_before_connecting() {
     let home = Home::new("unwritable");
     let sep = std::path::MAIN_SEPARATOR;
     if let Some(locked) = Locked::new(home.path().join("locked")) {
@@ -288,7 +283,7 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
         };
         let files = std::iter::once(&inside).chain(blocks_directory.then_some(&nested));
         for file in files {
-            assert_deferred(
+            assert_refused(
                 &home,
                 &[
                     "create",
@@ -300,7 +295,7 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
                 &[],
             );
         }
-        assert_deferred(
+        assert_refused(
             &home,
             &["create", "--admin-url", CLOSED_URL],
             &[("PSEUDOLIFE_TEST_PG_LOGIN_FILE", inside.to_str().unwrap())],
@@ -309,7 +304,7 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
     }
     // The staged name `.<name>.<pid>.new` would exceed a file name's limit.
     let long = format!("{}.env", "n".repeat(244));
-    assert_deferred(
+    assert_refused(
         &home,
         &["create", "--file", &long, "--admin-url", CLOSED_URL],
         &[],
@@ -318,7 +313,7 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
     {
         // Past MAX_PATH, which a Python without long-path support cannot open.
         let deep = format!("{}{sep}{}.env", "d".repeat(240), "e".repeat(20));
-        assert_deferred(
+        assert_refused(
             &home,
             &["create", "--file", &deep, "--admin-url", CLOSED_URL],
             &[],
@@ -329,7 +324,7 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
         let mut permissions = fs::metadata(&target).unwrap().permissions();
         permissions.set_readonly(true);
         fs::set_permissions(&target, permissions).unwrap();
-        assert_deferred(
+        assert_refused(
             &home,
             &[
                 "create",
@@ -349,16 +344,16 @@ fn write_failures_the_oracle_would_report_defer_before_connecting() {
 }
 
 #[test]
-fn an_unknown_home_defers() {
+fn an_unknown_home_is_refused() {
     let home = Home::new("nohome");
     let output = cli::cleared_command(Path::new(env!("CARGO_BIN_EXE_pseudolife-stdio")))
         .args(["test-login", "create", "--admin-url", CLOSED_URL])
         .current_dir(home.path())
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert_eq!(output.stderr, cli::native_text(DEFERRED));
+    assert_eq!(output.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("HOME/USERPROFILE"));
+    assert!(output.stderr.is_empty());
     assert!(home.listing().is_empty());
 }
 
@@ -460,4 +455,100 @@ fn an_unreachable_admin_url_fails_before_any_change() {
     );
     assert!(output.stderr.is_empty());
     assert_eq!(home.listing(), before);
+}
+
+#[test]
+fn native_parser_and_environment_errors_name_the_fix_without_values() {
+    let home = Home::new("messages");
+    for (arguments, setting) in [
+        (vec!["foo"], "create"),
+        (vec!["create", "--rol", "fixture-secret"], "--role"),
+        (vec!["create", "--rotate", "--rotate"], "--rotate"),
+        (vec!["create", "--json", "--json"], "--json"),
+        (
+            vec![
+                "create",
+                "--admin-url",
+                "postgresql://u:fixture-secret@h/db?service=x",
+            ],
+            "--admin-url",
+        ),
+        (vec!["create", "--file", "a/../fixture-secret"], "--file"),
+    ] {
+        let output = run(home.path(), &arguments, &[]);
+        assert!(matches!(output.status.code(), Some(2 | 4)));
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(text.contains(setting));
+        assert!(!text.contains("fixture-secret"));
+        assert!(!text.contains("postgresql://"));
+        assert!(!text.contains("deferred"));
+    }
+    for (name, value) in [
+        ("PGHOST", "fixture-secret"),
+        (
+            "PSEUDOLIFE_MCP_DATABASE_URL",
+            "postgresql:///fixture-secret",
+        ),
+    ] {
+        let output = run(
+            home.path(),
+            &["create", "--admin-url", CLOSED_URL],
+            &[(name, value)],
+        );
+        assert_eq!(output.status.code(), Some(4));
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains(name));
+        assert!(!text.contains("fixture-secret"));
+    }
+    assert!(home.listing().is_empty());
+}
+
+#[test]
+fn equals_options_and_terminal_separator_reach_the_native_connection() {
+    let home = Home::new("equals");
+    for suffix in [vec![], vec!["--"]] {
+        let mut arguments = vec![
+            "create",
+            "--role=ci_login",
+            "--file=login.env",
+            "--bank=extra",
+            "--container=absent",
+            "--admin-url=postgresql://postgres@127.0.0.1:1/postgres",
+        ];
+        arguments.extend(suffix);
+        let output = run(home.path(), &arguments, &[]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .starts_with("test-login: the database refused:")
+        );
+        assert!(output.stderr.is_empty());
+    }
+    assert!(home.listing().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_settings_are_named_without_disclosing_bytes() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    let home = Home::new("nonutf8");
+    for name in [
+        "HOME",
+        "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
+        "PSEUDOLIFE_MCP_DATABASE_URL",
+        "PATH",
+    ] {
+        let mut command = command(home.path());
+        command.args(["create", "--container", ABSENT]);
+        command.env(name, OsString::from_vec(b"fixture-secret\xff".to_vec()));
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(4));
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains(name));
+        assert!(!text.contains("fixture-secret"));
+    }
 }

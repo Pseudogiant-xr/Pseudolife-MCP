@@ -58,7 +58,7 @@ pub(super) fn py_splitlines(text: &str) -> Vec<&str> {
 }
 
 /// `str(Path(value)) == value` with no `..`: such a path prints and joins as
-/// written. Every other spelling defers.
+/// written. Other spellings are refused before a connection.
 #[cfg(not(windows))]
 pub(super) fn canonical(value: &str) -> bool {
     let rest = value.strip_prefix('/').unwrap_or(value);
@@ -105,7 +105,8 @@ pub(super) fn home() -> Option<PathBuf> {
         std::env::var_os("HOME").filter(|home| !home.is_empty())?
     };
     let text = home.into_string().ok()?;
-    canonical(&text).then(|| PathBuf::from(text))
+    (Path::new(&text).is_absolute() && canonical(&text) && !text.chars().any(char::is_control))
+        .then(|| PathBuf::from(text))
 }
 
 /// `_shown`: `~/` and the POSIX form of the part under the home, else the path.
@@ -166,10 +167,10 @@ pub(super) fn read_file(path: &Path) -> HashMap<String, String> {
 /// already connected: an ancestor that is not a directory, a target that is
 /// not a regular file (or, on Windows, is read-only), a directory this
 /// process cannot add entries to, or names past the platform's limits.
-/// Checked before any effect, so they defer.
-pub(super) fn writable_shape(path: &Path) -> bool {
+/// Checked before any connection or role change.
+pub(super) fn writable_shape(path: &Path) -> Result<(), &'static str> {
     let Some(name) = path.file_name() else {
-        return false;
+        return Err("has no file name; choose a regular login file");
     };
     let name_units = if cfg!(windows) {
         name.to_string_lossy().encode_utf16().count()
@@ -178,31 +179,53 @@ pub(super) fn writable_shape(path: &Path) -> bool {
     };
     // `.<name>.<pid>.new`: ten digits is the widest pid either arm can have.
     if name_units + 16 > 255 {
-        return false;
+        return Err("file name exceeds the staging limit; choose a shorter file name");
     }
     match fs::symlink_metadata(path) {
-        Ok(meta) if !meta.file_type().is_file() => return false,
-        Ok(meta) if cfg!(windows) && meta.permissions().readonly() => return false,
+        Ok(meta) if !meta.file_type().is_file() => {
+            return Err("is a link or not a regular file; choose a regular private login file");
+        }
+        Ok(meta) if cfg!(windows) && meta.permissions().readonly() => {
+            return Err("is read-only; make the login file writable");
+        }
         Ok(_) => {}
-        Err(error) if error.kind() != io::ErrorKind::NotFound => return false,
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            return Err("cannot be inspected; restore access to the login file");
+        }
         Err(_) => {}
     }
     if cfg!(windows) && !within_max_path(path) {
-        return false;
+        return Err("path exceeds Windows limits; choose a shorter login path");
     }
     let mut ancestor = path.parent();
     let mut missing = false;
     while let Some(dir) = ancestor.filter(|dir| !dir.as_os_str().is_empty()) {
         match fs::symlink_metadata(dir) {
-            Ok(meta) => return meta.is_dir() && can_add_entries(dir, missing),
+            Ok(meta) => {
+                return if !meta.is_dir() || meta.file_type().is_symlink() {
+                    Err(
+                        "ancestor is a link or not a directory; choose a path through real directories",
+                    )
+                } else if !can_add_entries(dir, missing) {
+                    Err("directory is not writable; choose a writable login directory")
+                } else {
+                    Ok(())
+                };
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 missing = true;
                 ancestor = dir.parent();
             }
-            Err(_) => return false,
+            Err(_) => {
+                return Err("ancestor cannot be inspected; restore access to the login directory");
+            }
         }
     }
-    can_add_entries(Path::new("."), missing)
+    if can_add_entries(Path::new("."), missing) {
+        Ok(())
+    } else {
+        Err("directory is not writable; choose a writable login directory")
+    }
 }
 
 /// Python 3.11 on Windows without long-path support: under MAX_PATH (260)
