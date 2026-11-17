@@ -72,13 +72,14 @@ fn native_explicit_state_stop_does_not_require_a_unicode_home() {
 #[test]
 fn native_closed_stdout_names_the_writable_stream_remedy() {
     let sandbox = Sandbox::new();
-    let target = sandbox.root.join("read-only-output");
-    fs::write(&target, b"unchanged").unwrap();
-    // The child's stdout is a read-only descriptor, so its first write
-    // fails deterministically before any reader scheduling can matter.
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    // The reader is closed before spawn, so every write fails regardless
+    // of how quickly the parent or child gets scheduled.
     let out = sandbox
         .command(&["--help"])
-        .stdout(Stdio::from(fs::File::open(&target).unwrap()))
+        .env("COLUMNS", "80")
+        .stdout(writer)
         .stderr(Stdio::piped())
         .output()
         .unwrap();
@@ -88,7 +89,6 @@ fn native_closed_stdout_names_the_writable_stream_remedy() {
         "{}",
         text(&out.stderr)
     );
-    assert_eq!(fs::read(&target).unwrap(), b"unchanged");
     assert_eq!(sandbox.board.count("register"), 0);
 }
 
