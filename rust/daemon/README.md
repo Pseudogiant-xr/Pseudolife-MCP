@@ -68,6 +68,15 @@ re-record goldens from the Rust candidate through that same replay path
 `record_routes.py --check` keep the embedded schema DDL and route table equal
 to the Python source.
 
+Dream cursor snapshots use `python rust/daemon/harness/dream_cursors.py golden
+--rust-bin <dream-contract> --record-candidate [--write] [--only <scenario>]`.
+The default dry run prints differences; `--write` records changed cases from
+Rust with candidate provenance, refusing active mutants and invalid recordings.
+Replay the result on Linux and Windows before committing an intentional change;
+the shared snapshots retain response types and complete normalized database state.
+The old Python live/record modes are retired. `dream_cursor_oracle.py --seed -`
+is now only a SQL fixture loader, and `mutants` checks the committed goldens.
+
 The principal-store extension reuses the disposable database guard, catalog
 dumper and type-strict comparison. It runs service operations in the native
 process, using synthetic credentials and `pl_cf_prn_*` banks, without loading
