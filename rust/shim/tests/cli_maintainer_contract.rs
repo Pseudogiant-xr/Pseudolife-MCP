@@ -1,9 +1,7 @@
 #![forbid(unsafe_code)]
-//! `pseudolife-mcp maintainer` paths that need no database: every argv shape
-//! outside the canonical five, and every bank the native leaf does not
-//! reach (no, empty or unsupported DSN; an unreachable server), defer with
-//! the dispatcher's line before any effect. Bank-backed behaviour is proven
-//! by the CLI harness row `maintainer` against the Python oracle.
+//! Host maintainer argument and connection-setting refusals, with isolated
+//! homes and closed loopback endpoints. Bank-backed behavior is exercised
+//! by the native maintainer row on guarded disposable databases.
 #[path = "common/cli.rs"]
 mod cli;
 use std::{fs, path::Path, process::Command};
