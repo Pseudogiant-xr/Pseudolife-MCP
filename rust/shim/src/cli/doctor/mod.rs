@@ -181,6 +181,15 @@ fn display_text(text: &str, token: Option<&str>) -> String {
     value.as_str().unwrap().to_owned()
 }
 
+fn display_path(path: &str, token: Option<&str>) -> String {
+    let shown = display_text(path, token);
+    if shown == path {
+        shown
+    } else {
+        "[redacted]".into()
+    }
+}
+
 pub(super) fn run(values: Vec<OsString>) -> Option<ExitCode> {
     if values
         .iter()
@@ -905,7 +914,7 @@ async fn diagnose(
             source
                 .strip_prefix(prefix)
                 .and_then(|path| path.strip_suffix(')'))
-                .map(|path| format!("{prefix}{})", display_text(path, token.as_deref())))
+                .map(|path| format!("{prefix}{})", display_path(path, token.as_deref())))
         })
         .unwrap_or_else(|| source.to_owned());
     put(&mut report, "credential_source", json!(source_display));

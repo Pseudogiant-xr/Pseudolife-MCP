@@ -2001,6 +2001,7 @@ fn native_review_local_paths_redact_credentials() {
         let map = report(&output);
         assert_eq!(map["error"], "DaemonUnavailable");
         assert_eq!(map["daemon_status"], "unreachable");
+        assert_eq!(map["path_resolution"]["launcher"], "[redacted]");
         if token != "t" {
             assert!(!String::from_utf8_lossy(&output.stdout).contains(token));
             assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
