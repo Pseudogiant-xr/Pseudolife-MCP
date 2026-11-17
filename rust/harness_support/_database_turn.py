@@ -180,10 +180,16 @@ def _acquire(path: Path, *, holder: str, wait_seconds: float,
         if owner is not None and _ancestor(owner, backend):
             # The OS handle is still held. A flag or a stale record alone
             # cannot grant this reuse; the live owner must be an ancestor.
-            return Lease(None, pid=os.getpid(), delegated=True)
+            lease = Lease(None, pid=os.getpid(), delegated=True)
+            if contain:
+                backend.contain_process_tree()
+                lease.contained = True
+            return lease
         who = _holder(record, owner)
         message = (f"database turn is held by {who}; wait for that run to finish, "
-                   "or use --database-turn-wait-seconds with a bounded wait")
+                   "or request a bounded wait from the repository root by prefixing the command with "
+                   "pwsh -NoProfile -NonInteractive -File ops/dev-database-lock.ps1 "
+                   "-WaitSeconds <seconds> -- <command>")
         now = time.monotonic()
         if now >= deadline:
             raise TurnUnavailable(message)

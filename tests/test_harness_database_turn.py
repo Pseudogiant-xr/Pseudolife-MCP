@@ -122,7 +122,10 @@ def test_live_unrelated_holder_is_named_and_environment_flag_cannot_bypass_it(tm
     with pytest.raises(turn.TurnUnavailable, match="another database run") as error:
         turn.acquire(path, holder="arriving run")
     assert f"PID {backend.holder}" in str(error.value) and "held for" in str(error.value)
-    assert "--database-turn-wait-seconds" in str(error.value)
+    message = str(error.value)
+    assert "bounded wait" in message and "-WaitSeconds <seconds> -- <command>" in message
+    assert "ops/dev-database-lock.ps1" in message and "repository root" in message
+    assert "--database-turn-wait-seconds" not in message
 
 
 @pytest.mark.parametrize("edit", ["none", "reused", "wrong-owner", "dead", "new-parent"])
@@ -148,7 +151,8 @@ def test_only_verified_live_ancestor_grants_reuse(tmp_path, backend, edit):
             turn.acquire(path, holder="child")
     else:
         lease = turn.acquire(path, holder="child", contain=True)
-        assert lease.delegated and lease.stream is None and backend.contains == 0
+        assert lease.delegated and lease.stream is None and backend.contains == 1
+        assert lease.contained
         lease.close()
         assert json.loads(path.read_text()) == record
 
@@ -158,7 +162,8 @@ def test_same_creation_tick_does_not_reject_a_legitimate_parent(tmp_path, backen
     path = tmp_path / "turn.lock"
     path.write_text(json.dumps(holder_record(backend)))
     backend.identities[backend.current] = Identity(backend.current, "100", "test-owner", backend.holder)
-    assert turn.acquire(path, holder="child").delegated
+    lease = turn.acquire(path, holder="child")
+    assert lease.delegated and not lease.contained and backend.contains == 0
 
 
 def test_repeated_owned_call_reuses_handle_and_contains_only_on_explicit_request(tmp_path, backend):

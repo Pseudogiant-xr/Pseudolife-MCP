@@ -190,6 +190,71 @@ exit $result
     assert run.returncode == 0, run.stdout + run.stderr
 
 
+@pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="Windows delegated job containment")
+def test_delegating_child_contains_its_descendants_under_a_plain_holder(tmp_path):
+    home = tmp_path / "home"
+    env = environment(home)
+    lock = marker(home)
+    ready = tmp_path / "grandchild.json"
+    leaf = tmp_path / "grandchild.py"
+    leaf.write_text('''import json,os,psutil,sys,time
+from pathlib import Path
+ready=Path(sys.argv[1]); pending=ready.with_suffix('.writing')
+pending.write_text(json.dumps({'pid':os.getpid(),'started':psutil.Process().create_time()}))
+pending.replace(ready)
+time.sleep(90)
+''', encoding="utf-8")
+    owner = tmp_path / "owner.py"
+    owner.write_text(f'''import runpy,subprocess,sys,time
+from pathlib import Path
+from rust.harness_support.database_turn import ensure_turn
+runpy.run_path({str(ROOT / "tests/windowless_children.py")!r})['install']()
+lease=ensure_turn(holder='delegating child',contain=True)
+assert lease.delegated
+child=subprocess.Popen([sys._base_executable,sys.argv[1],sys.argv[2]],
+    stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+deadline=time.monotonic()+20
+while not Path(sys.argv[2]).exists() and child.poll() is None and time.monotonic()<deadline:
+    time.sleep(.05)
+assert Path(sys.argv[2]).exists()
+''', encoding="utf-8")
+    parent = tmp_path / "plain-holder.ps1"
+    parent.write_text('''param($helper,$lock,$python,$owner,$leaf,$ready)
+. $helper
+$hold=Enter-DevDatabaseLock -Path $lock -Holder 'plain ancestor' -WaitSeconds 0
+try { & $python $owner $leaf $ready; $code=$LASTEXITCODE }
+finally { Exit-DevDatabaseLock $hold }
+exit $code
+''', encoding="utf-8")
+    identity = None
+    try:
+        run = subprocess.run([PWSH, "-NoProfile", "-NonInteractive", "-File", str(parent),
+            str(ROOT / "ops/dev-database-lock.ps1"), str(lock), sys.executable,
+            str(owner), str(leaf), str(ready)], env=env, capture_output=True, text=True, timeout=45)
+        assert run.returncode == 0, run.stdout + run.stderr
+        identity = json.loads(ready.read_text())
+        try:
+            child = psutil.Process(identity["pid"])
+            if child.create_time() == identity["started"]:
+                try:
+                    child.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    pytest.fail("the delegating run left its grandchild alive")
+        except psutil.NoSuchProcess:
+            pass
+    finally:
+        if identity is None and ready.exists():
+            identity = json.loads(ready.read_text())
+        if identity is not None:
+            try:
+                child = psutil.Process(identity["pid"])
+                if child.create_time() == identity["started"]:
+                    child.kill()
+                    child.wait(timeout=15)
+            except psutil.NoSuchProcess:
+                pass
+
+
 @pytest.mark.skipif(PWSH is None, reason="PowerShell interoperation")
 def test_python_holder_excludes_the_powershell_worker_wrapper(tmp_path):
     home = tmp_path / "home"

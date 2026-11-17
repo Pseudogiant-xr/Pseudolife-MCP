@@ -195,6 +195,13 @@ def test_direct_unittest_files_keep_their_original_runner(tree):
     assert selection.Command("unittest-file", ("rust/test_extra.py",)) in recipe(tree).commands
 
 
+@pytest.mark.parametrize("arguments", ["--unknown-option", "SomeOtherTest", "--help"])
+def test_direct_unittest_arguments_cannot_be_silently_discarded(tree, arguments):
+    workflow(tree, "parity-checks", "python rust/test_extra.py " + arguments)
+    with pytest.raises(selection.SelectionError, match="unittest arguments"):
+        recipe(tree)
+
+
 def test_unit_fixture_dependencies_use_the_batch_workflows_exact_pins(tree):
     value = json.loads(tree[selection.CLASSIFICATION])
     value["files"]["rust/test_extra.py"]["requirements"] = ["onnx"]

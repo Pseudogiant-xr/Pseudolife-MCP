@@ -329,6 +329,8 @@ def recipe(read, tree_paths):
                             raise SelectionError(f"unittest file {file} has no candidate-free classification")
                     additional.append(command)
             elif path.startswith("rust/") and PurePosixPath(path).name.startswith("test_"):
+                if len(words) != 2:
+                    raise SelectionError("unsupported direct unittest arguments; declare the literal file without options")
                 if classifications.get(path, {}).get("kind") != "unit":
                     raise SelectionError(f"direct unittest file {path} has no candidate-free classification")
                 additional.append(Command("unittest-file", (path,)))
