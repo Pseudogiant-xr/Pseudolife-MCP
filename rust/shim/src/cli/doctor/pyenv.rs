@@ -532,6 +532,20 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn review_round2_leading_dot_is_normalized() {
+        assert_eq!(
+            path_str(r".\folder\state.json").unwrap(),
+            r"folder\state.json"
+        );
+        assert_eq!(
+            path_str(r"folder\state.json").unwrap(),
+            r"folder\state.json"
+        );
+        assert_eq!(path_str(r".\").unwrap(), ".");
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn native_windows_path_shapes() {
         let mut failed = Vec::new();
         for path in [

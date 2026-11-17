@@ -905,6 +905,59 @@ fn cleanup_failure(
 mod loader_tests;
 
 #[cfg(test)]
+mod path_privacy_tests {
+    use super::*;
+
+    #[test]
+    fn review_round2_cleanup_path_redaction() {
+        const CHILD: &str = "PSEUDOLIFE_DOCTOR_PROOF_PATH_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.env_clear();
+            for key in ["SYSTEMROOT", "WINDIR"] {
+                if let Some(value) = std::env::var_os(key) {
+                    command.env(key, value);
+                }
+            }
+            let output = command
+                .env(CHILD, "1")
+                .env("PSEUDOLIFE_MCP_TOKEN", "w44-proof-path-bearer")
+                .args([
+                    "--exact",
+                    "cli::doctor::proof::path_privacy_tests::review_round2_cleanup_path_redaction",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            return;
+        }
+        for path in [
+            "w44-proof-path-bearer/fixture",
+            "https://user:w44-url-secret@example.invalid/fixture",
+        ] {
+            let value =
+                cleanup_report("fixture", Path::new(path), true, Err("fixture error")).unwrap();
+            assert_eq!(value["fixture_directory"], "[redacted]");
+            assert!(!value.to_string().contains("w44-proof-path-bearer"));
+            assert!(!value.to_string().contains("w44-url-secret"));
+        }
+        let value = cleanup_report(
+            "fixture",
+            Path::new("ordinary-fixture"),
+            true,
+            Err("fixture error"),
+        )
+        .unwrap();
+        assert_eq!(value["fixture_directory"], "ordinary-fixture");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
