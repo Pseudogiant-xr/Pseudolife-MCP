@@ -205,18 +205,21 @@ pending.replace(ready)
 time.sleep(90)
 ''', encoding="utf-8")
     owner = tmp_path / "owner.py"
-    owner.write_text(f'''import runpy,subprocess,sys,time
+    owner.write_text(f'''import os,runpy,subprocess,sys,time
 from pathlib import Path
 from rust.harness_support.database_turn import ensure_turn
 runpy.run_path({str(ROOT / "tests/windowless_children.py")!r})['install']()
 lease=ensure_turn(holder='delegating child',contain=True)
 assert lease.delegated
-child=subprocess.Popen([sys._base_executable,sys.argv[1],sys.argv[2]],
-    stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-deadline=time.monotonic()+20
-while not Path(sys.argv[2]).exists() and child.poll() is None and time.monotonic()<deadline:
-    time.sleep(.05)
-assert Path(sys.argv[2]).exists()
+errors=Path(sys.argv[2]).with_suffix('.log')
+with errors.open('w') as log:
+    child=subprocess.Popen([sys._base_executable,sys.argv[1],sys.argv[2]],
+        env=dict(os.environ,PYTHONPATH=os.pathsep.join(sys.path)),
+        stdin=subprocess.DEVNULL,stdout=log,stderr=log)
+    deadline=time.monotonic()+20
+    while not Path(sys.argv[2]).exists() and child.poll() is None and time.monotonic()<deadline:
+        time.sleep(.05)
+    assert Path(sys.argv[2]).exists(),errors.read_text()
 ''', encoding="utf-8")
     parent = tmp_path / "plain-holder.ps1"
     parent.write_text('''param($helper,$lock,$python,$owner,$leaf,$ready)
