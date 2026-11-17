@@ -348,7 +348,7 @@ if ($target -eq 'local') {
     # exec: PowerShell ends piped stdin with CRLF, and bash must never read
     # on past the run (a stray "\r" line would replace pytest's exit code).
     # The inner shell deletes the script copy and keeps pytest's code.
-    $lines.Add('exec sudo --preserve-env systemd-run --quiet --scope -p MemoryMax="$memory" --uid="$(id -u)" --gid="$(id -g)" -- env HOME="$HOME" PATH="$PATH" bash -c ''bash "$1" "${@:2}"; code=$?; rm -f -- "$1"; exit $code'' _ "$script" "$@"')
+    $lines.Add('exec sudo --preserve-env systemd-run --quiet --scope -p MemoryMax="$memory" --uid="$(id -u)" --gid="$(id -g)" -- env HOME="$HOME" PATH="$PATH" TMPDIR="$TMPDIR" bash -c ''bash "$1" "${@:2}"; code=$?; rm -f -- "$1"; exit $code'' _ "$script" "$@"')
     $body = ($lines -join "`n") + "`n"
     $quotedArgs = ($args | ForEach-Object { Quote ([string]$_) }) -join ' '
     # Keepalives: a silently dropped link ends the run's ssh in ~2 min

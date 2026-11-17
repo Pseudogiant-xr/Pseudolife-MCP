@@ -1917,6 +1917,9 @@ HOME="$REMOTE_HOME" PATH="$FAKE_BIN:$PATH" PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.
 '''
 _FAKE_SUDO = r'''#!/bin/bash
 # The dispatch's last step: report what the remote clone now holds.
+for arg in "$@"; do
+    case "$arg" in TMPDIR=*) printf '%s\n' "${arg#TMPDIR=}" > "$TMP_SEEN" ;; esac
+done
 repo="${PSEUDOLIFE_SUITE_GIT_COMMON%/.git}"
 got="$(git -C "$repo" rev-parse --verify --quiet "refs/heads/suite/$PSEUDOLIFE_SUITE_COMMIT" || echo missing)"
 echo "ran $PSEUDOLIFE_SUITE_COMMIT $got" >> "$SSH_CALLS"
@@ -1972,6 +1975,7 @@ def _bundle_world(tmp_path: Path, *, push_head: bool, move_head: bool = False, t
     env = {"HOME": str(home), "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
            "REMOTE_HOME": str(remote_home), "FAKE_BIN": str(fake_bin),
            "SSH_CALLS": str(tmp_path / "ssh-calls"), "WSL_CALLS": str(tmp_path / "wsl-calls"),
+           "TMP_SEEN": str(tmp_path / "tmp-seen"),
            "PSEUDOLIFE_SUITE_REMOTE": "box", "PSEUDOLIFE_SUITE_WHERE": "remote",
            "PSEUDOLIFE_SUITE_NATIVE_CLIENT": None, "PSEUDOLIFE_MCP_TOKEN": None,
            "PSEUDOLIFE_WSL_DISTRO": None, "WSLENV": None, "PSEUDOLIFE_SUITE_POLL_SECONDS": "0",
@@ -1998,6 +2002,17 @@ def test_the_remote_machine_gets_the_commit_and_an_unpushed_one_is_never_pushed(
     dispatch = tmp_path / "remote-home/.cache/pseudolife-suite/dispatch"
     assert dispatch.is_dir() and not list(dispatch.iterdir())
     assert (tmp_path / "remote-home/.cache/pseudolife-suite/tmp").is_dir()
+
+
+@_LINUX_ONLY
+@_NEEDS_PWSH
+@_NEEDS_GIT
+def test_the_remote_suite_passes_its_disk_temporary_path_across_the_scope_boundary(tmp_path):
+    proc, _, _ = _bundle_world(tmp_path, push_head=False)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    # sudo/systemd-run drops ambient TMPDIR on the dev boxes; the final env
+    # command must supply it explicitly to the suite, as it does HOME/PATH.
+    assert _read(tmp_path / "tmp-seen") == [str(tmp_path / "remote-home/.cache/pseudolife-suite/tmp")]
 
 
 @_LINUX_ONLY

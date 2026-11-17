@@ -1,6 +1,10 @@
 {
   "schema": 1,
   "files": {
+    "rust/cli_harness/test_audit_native.py": {
+      "kind": "native",
+      "reason": "Every test consumes the parity lane's built native candidate, including file-only and mocked container cases."
+    },
     "rust/cli_harness/test_audit_stats.py": {
       "kind": "unit",
       "reason": "Harness comparison and transport fixtures use mocks or owned Python stand-ins, not a Rust candidate."
