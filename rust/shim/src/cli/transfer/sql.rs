@@ -6,8 +6,8 @@ use tokio_postgres::{SimpleQueryMessage, error::Severity};
 pub(super) type Rows = Vec<Vec<Option<String>>>;
 
 /// One statement's text-format rows.
-pub(super) async fn rows(client: &Client, sql: &str) -> Result<Rows, ()> {
-    let messages = client.simple_query(sql).await.map_err(|_| ())?;
+pub(super) async fn rows(client: &Client, sql: &str) -> Result<Rows, tokio_postgres::Error> {
+    let messages = client.simple_query(sql).await?;
     Ok(messages
         .iter()
         .filter_map(|message| match message {
@@ -22,7 +22,10 @@ pub(super) async fn rows(client: &Client, sql: &str) -> Result<Rows, ()> {
 }
 
 /// The first column of the first row.
-pub(super) async fn scalar(client: &Client, sql: &str) -> Result<Option<String>, ()> {
+pub(super) async fn scalar(
+    client: &Client,
+    sql: &str,
+) -> Result<Option<String>, tokio_postgres::Error> {
     Ok(rows(client, sql)
         .await?
         .into_iter()
@@ -31,8 +34,8 @@ pub(super) async fn scalar(client: &Client, sql: &str) -> Result<Option<String>,
 }
 
 /// Row counts of every command in a (possibly multi-statement) query.
-pub(super) async fn affected(client: &Client, sql: &str) -> Result<u64, ()> {
-    let messages = client.simple_query(sql).await.map_err(|_| ())?;
+pub(super) async fn affected(client: &Client, sql: &str) -> Result<u64, tokio_postgres::Error> {
+    let messages = client.simple_query(sql).await?;
     Ok(messages
         .iter()
         .map(|message| match message {
@@ -42,8 +45,27 @@ pub(super) async fn affected(client: &Client, sql: &str) -> Result<u64, ()> {
         .sum())
 }
 
-pub(super) async fn execute(client: &Client, sql: &str) -> Result<(), ()> {
-    client.batch_execute(sql).await.map_err(|_| ())
+pub(super) async fn execute(client: &Client, sql: &str) -> Result<(), tokio_postgres::Error> {
+    client.batch_execute(sql).await
+}
+
+/// SQLSTATE identifies the cause without printing queries, row data or credentials.
+pub(super) fn refusal(error: tokio_postgres::Error, operation: &str) -> String {
+    let (cause, fix) = match error.as_db_error() {
+        Some(db) => {
+            let fix = match db.code().code() {
+                "42501" => "grant the configured database role the required transfer privileges",
+                "55P03" | "57014" => "stop competing database work and retry",
+                _ => "correct the reported database condition and retry",
+            };
+            (format!("PostgreSQL SQLSTATE {}", db.code().code()), fix)
+        }
+        None => (
+            "PostgreSQL connection or protocol failure".into(),
+            "restore database access and retry",
+        ),
+    };
+    format!("cannot {operation} for PSEUDOLIFE_MCP_DATABASE_URL: {cause} — {fix}.")
 }
 
 /// How a COMMIT failed.

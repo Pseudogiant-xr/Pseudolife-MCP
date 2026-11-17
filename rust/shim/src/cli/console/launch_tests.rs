@@ -3,6 +3,73 @@
 use super::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+#[test]
+fn windows_command_is_inspectable_without_starting_a_program() {
+    let args = vec![
+        "--new-window".to_owned(),
+        "http://example.invalid/".to_owned(),
+    ];
+    let command = browser_command("browser-standin.exe", &args);
+    assert_eq!(command.get_program(), "browser-standin.exe");
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        args.iter().map(std::ffi::OsStr::new).collect::<Vec<_>>()
+    );
+    // The same builder runs on Windows. Rust 1.94 exposes its stdio settings
+    // in alternate Debug on Unix only; inspecting it starts no process.
+    #[cfg(unix)]
+    {
+        let settings: String = format!("{command:#?}").split_whitespace().collect();
+        for stream in ["stdin", "stdout", "stderr"] {
+            assert!(
+                settings.contains(&format!("{stream}:Some(Null,)")),
+                "{settings}"
+            );
+        }
+    }
+}
+
+#[test]
+fn windows_launch_failures_keep_the_cause_and_recovery_without_spawning() {
+    let result = spawn_result("C:/stub/browser.exe", || {
+        Err("could not start C:/stub/browser.exe (permission denied)".to_owned())
+    });
+    assert!(
+        matches!(result, Err(Some(ref why)) if why.contains("permission denied") && why.contains("printed link")),
+        "{result:?}"
+    );
+    for code in [0, 2, 3, 5, 8, 26, 27, 28, 29, 30, 31, 32] {
+        let result = shell_result(code);
+        assert!(
+            matches!(result, Err(Some(ref why)) if why.contains("default browser") && why.contains("printed link")),
+            "{code}: {result:?}"
+        );
+    }
+    assert_eq!(shell_result(33), Ok(()));
+    assert_eq!(spawn_result("stub", || Ok(None)), Ok(()));
+}
+
+#[test]
+fn windows_immediate_exit_is_decided_by_its_status() {
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
+    assert_eq!(
+        spawn_result("stub", || Ok(Some(std::process::ExitStatus::from_raw(0)))),
+        Ok(())
+    );
+    #[cfg(unix)]
+    let status = std::process::ExitStatus::from_raw(7 << 8);
+    #[cfg(windows)]
+    let status = std::process::ExitStatus::from_raw(7);
+    let result = spawn_result("stub", || Ok(Some(status)));
+    assert!(
+        matches!(result, Err(Some(ref why)) if why.contains("stub failed") && why.contains(&status.to_string()) && why.contains("printed link")),
+        "{result:?}"
+    );
+}
+
 /// A launch plan whose program cannot exist: were the interception ever
 /// removed, the start would fail with "not found" instead of opening
 /// anything on the machine running the tests.
@@ -144,6 +211,33 @@ mod stubs {
         let program = stubs.launcher("exit 0");
         assert_eq!(open(&plan(program, &["--new", "%s"]), url), Ok(()));
         assert_eq!(stubs.argv(), ["--new", url]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn explorer_exit_one_is_a_handoff_but_other_failures_are_not() {
+        let stubs = Stubs::new("explorer");
+        let ordinary = stubs.launcher("exit 1");
+        let explorer = stubs.path("explorer.exe");
+        std::fs::copy(&ordinary, &explorer).unwrap();
+        let args = vec!["http://h/".to_owned()];
+        assert_eq!(posix::background_with_wsl(&explorer, &args, true), Ok(()));
+        assert!(posix::background_with_wsl(&ordinary, &args, true).is_err());
+        std::fs::write(&explorer, "#!/bin/sh\nexit 2\n").unwrap();
+        assert!(posix::background_with_wsl(&explorer, &args, true).is_err());
+        assert_eq!(stubs.argv(), ["http://h/", "http://h/"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn plain_linux_does_not_accept_explorer_exit_one() {
+        let stubs = Stubs::new("plain-linux-explorer");
+        let ordinary = stubs.launcher("exit 1");
+        let explorer = stubs.path("explorer.exe");
+        std::fs::copy(&ordinary, &explorer).unwrap();
+        let args = vec!["http://example.invalid/".to_owned()];
+        assert!(posix::background_with_wsl(&explorer, &args, false).is_err());
+        assert!(posix::background_with_wsl(&explorer, &args, true).is_ok());
     }
 
     #[test]
