@@ -2561,6 +2561,7 @@ def test_replay_passes_on_oracle_goldens_and_ignores_candidate_provenance(
 
 
 def test_login_case_credentials_have_safe_repr_and_keep_child_value(monkeypatch):
+    import subprocess
     from cli_harness.rows import test_login
     marker = "recognisable-fake-password"
     monkeypatch.setattr(test_login._cluster, "SUPERUSER_PASSWORD", marker)
@@ -2570,3 +2571,8 @@ def test_login_case_credentials_have_safe_repr_and_keep_child_value(monkeypatch)
     assert marker not in case.id
     assert str(case.env["PGPASSWORD"]) == marker
     assert str(case.env["PSEUDOLIFE_MCP_DATABASE_URL"]) == f"postgresql://u:{marker}@127.0.0.1:1/db"
+    child = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.environ['PGPASSWORD'] == 'recognisable-fake-password' and 'recognisable-fake-password' in os.environ['PSEUDOLIFE_MCP_DATABASE_URL'])"],
+        env={key: value for key, value in {"SYSTEMROOT": os.environ.get("SYSTEMROOT"), **case.env}.items() if value is not None},
+        capture_output=True, check=True)
+    assert child.stdout.strip() == b"True"
