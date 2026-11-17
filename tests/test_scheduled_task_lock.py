@@ -24,7 +24,6 @@ table. No test registers, reads, stops or removes a real task or process.
 
 import base64
 import hashlib
-import json
 import os
 import re
 import shutil

@@ -93,6 +93,17 @@ pub(crate) fn run_cli(
         let Some(program) = argv.first() else {
             return (1, String::new());
         };
+        #[cfg(windows)]
+        let powershell_environment = if crate::windows_powershell::executable()
+            .is_ok_and(|expected| program.eq_ignore_ascii_case(&expected))
+        {
+            match crate::windows_powershell::environment() {
+                Ok(environment) => environment,
+                Err(message) => return (1, message),
+            }
+        } else {
+            std::collections::BTreeMap::new()
+        };
         use process_wrap::tokio::{CommandWrap, KillOnDrop};
         use tokio::io::AsyncReadExt;
         #[cfg(windows)]
@@ -107,6 +118,8 @@ pub(crate) fn run_cli(
             if let Some(env) = env {
                 command.env_clear().envs(env);
             }
+            #[cfg(windows)]
+            command.envs(&powershell_environment);
             if stream {
                 command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
             } else {

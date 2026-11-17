@@ -27,6 +27,27 @@ pub(crate) fn path_expression(path: &std::path::Path) -> Result<String, String> 
     ))
 }
 
+/// Windows PowerShell's runtime also consumes these directory variables.
+/// Give the child the operating system's values without changing its parent.
+pub(crate) fn environment()
+-> Result<std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>, String> {
+    #[cfg(windows)]
+    {
+        let root = crate::credentials::windows_security::system_windows_directory()
+            .map_err(|e| format!("cannot prepare Windows PowerShell environment: {e}"))?;
+        Ok([
+            ("SystemRoot".into(), root.as_os_str().to_owned()),
+            ("WINDIR".into(), root.into_os_string()),
+        ]
+        .into_iter()
+        .collect())
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Windows PowerShell registration requires Windows".into())
+    }
+}
+
 pub(crate) fn encoded(script: &str) -> Result<Vec<String>, String> {
     Ok(vec![
         executable()?,

@@ -119,7 +119,9 @@ fn windows_registration_command(
     );
     let argv = crate::windows_powershell::encoded(&bootstrap)?;
     let mut command = Command::new(&argv[0]);
-    command.args(&argv[1..]);
+    command
+        .args(&argv[1..])
+        .envs(crate::windows_powershell::environment()?);
     Ok(command)
 }
 
