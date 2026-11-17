@@ -219,15 +219,15 @@ def test_a_cache_key_has_one_saver():
 
 
 def test_one_matrix_job_saving_one_key_from_many_runs_is_refused():
-    # Every source-mutant shard saved under one key until 2026-10-24.
+    # Multiple shards of one job must not all save the same cache key.
     workflow, raw = rust()
     for target in (workflow, raw):
-        step = next(s for s in target["jobs"]["source-mutants"]["steps"]
-                    if str(s.get("uses", "")).startswith("Swatinem/rust-cache"))
-        step["with"].pop("save-if")
-    shards = len(workflow["jobs"]["source-mutants"]["strategy"]["matrix"]["shard"])
-    assert shards > 1
-    assert any(f"v0-rust-?-cli-source-mutants-source-mutants on Linux is saved by {shards} runs" in problem
+        target["jobs"]["cache-probe"] = {
+            "runs-on": "ubuntu-latest",
+            "strategy": {"matrix": {"shard": ["first", "second"]}},
+            "steps": [{"uses": "Swatinem/rust-cache@v2", "with": {"key": "probe"}}],
+        }
+    assert any("v0-rust-probe-cache-probe on Linux is saved by 2 runs" in problem
                for problem in check(workflow, raw))
 
 

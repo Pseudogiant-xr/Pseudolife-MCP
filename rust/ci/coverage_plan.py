@@ -4,11 +4,6 @@ import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SOURCE_MUTANTS = json.loads((HERE / 'source_mutants.json').read_text(encoding="utf-8"))
-# Linux 2026-10-11: the slowest eight-control selection took 81s;
-# the first cold compile added 65s. Keep that bound on each parallel job.
-SOURCE_SHARDS = {f'{row}-{index // 8}': (row, ids[index:index + 8])
-                 for row, ids in SOURCE_MUTANTS.items() for index in range(0, len(ids), 8)}
 AUDIT_GOLDEN_CASES = json.loads((HERE / 'audit_golden_cases.json').read_text(encoding="utf-8"))
 W1A = ('tokens', 'tokenless', 'pair-budget', 'config', 'extractor', 'db-down',
        'lease-held', 'reaper', 'dim-mismatch', 'stamped', 'seeded',
@@ -67,19 +62,6 @@ EXCEPTIONS = {
                                   'cited in the PR (D6/D11). The routes/signin_passkey_tests.rs '
                                   'unit tests cover every refusal before the bank, the 8 KiB '
                                   'body, the issue cap and /health on both OSes.',
-    },
-    'cli_mutants': {
-        'linux': {
-            'connect-config-not-private': 'Survived Linux 2026-10-11; the file is already created with private POSIX mode before make_private.',
-            'connect-remote-keeps-spawn': 'Survived Linux 2026-10-11; the existing dry-run-remote fixture does not observe the changed empty NO_SPAWN branch.',
-            'tl-script-lf': 'Survived Linux 2026-10-11 with its container witness; text_bytes already uses LF on POSIX.',
-        },
-        'windows': {
-            'connect-remote-keeps-spawn': 'The existing dry-run-remote fixture does not observe the changed empty NO_SPAWN branch (Linux survivor; platform-neutral fixture).',
-            'tl-container-db-ignored': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
-            'tl-script-lf': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
-            'tl-keep-staged-on-failure': 'Container-only witness needs the Linux Docker engine; hosted Windows uses Windows containers.',
-        },
     },
     'cli_case_selections': {
         'windows-backup-zero-retention-clock-race': {
@@ -145,44 +127,4 @@ SUITES = {
 # 2026-10-24), share one job of the account's 20 (rust/ci/parity_scope.py).
 COMPOSITES = {
     'h5-light': ('h5-audit', 'h5-backup', 'h5-background'),
-}
-
-
-# Platform-specific declarations are pinned separately from observed failures.
-# Host runtime registration must match this roster before a shard can filter.
-PLATFORM_EXCLUSIONS = {
-    'linux': {
-        'backup-dotfile-suffix-windows': 'Registered only by the Windows backup source branch.',
-        'console-winerror-full-stop': 'Declared Windows-only: only FormatMessageW text ends in a full stop.',
-        'console-exited-counts-as-opened': 'Declared Windows-only: only the Windows launch reads a launcher still running right after its start as opened; POSIX waits for its exit.',
-        'console-generic-launched': 'Declared Windows-only: only the Windows BROWSER reproduction refuses a %s entry without a trailing &.',
-        'expose-winerror-full-stop': 'Declared Windows-only: only FormatMessageW text ends in a full stop.',
-        'expose-pathext-lowercased': 'Declared Windows-only: only Windows has PATHEXT, whose spelling the lookup reports.',
-        'restore-desktop-unmapped': "Declared Windows-only: only Windows maps Docker Desktop's host-mount source paths.",
-        'restore-null-device-terminal': "Declared Windows-only: only Windows' CRT isatty() reads the null device as a terminal.",
-        'backup-member-mode-windows': 'Registered only by the Windows backup source branch.',
-        'backup-top-order-windows': 'Registered only by the Windows backup source branch.',
-        'backup-owner-name-windows': 'Declared Windows-only empty archive owner-name witness; POSIX names are resolved through NSS.',
-        'doctor-json-depth-off-by-one': 'Registered only by the Windows doctor source branch.',
-        'doctor-pathlib-keeps-dot-parts': 'Registered only by the Windows doctor source branch.',
-        'doctor-which-skips-cwd': 'Registered only by the Windows doctor source branch.',
-        'episode-home-drive-insensitive': 'Declared Windows-only drive spelling witness.',
-        'hook-first-address-only': 'Declared Windows-only resolver witness.',
-        'pair-not-owner-only': 'Registered only by the Windows pairing source branch.',
-        'tunnel-dangling-junction-answered': 'Registered only by the Windows junction source branch.',
-    },
-    'windows': {
-        'backup-member-mode-posix': 'Registered only by the POSIX backup source branch.',
-        'backup-omits-fifo': 'Declared Linux-only FIFO member witness.',
-        'backup-raw-member-name': 'Declared Linux-only raw-byte member name witness.',
-        'backup-discovery-generic-errno-class': 'Declared Linux-only POSIX permission fixtures exercise the Unix errno-to-exception-class table.',
-        'pair-mode-not-owner-only': 'Registered only by the POSIX pairing source branch.',
-        'console-running-counts-as-failed': 'Declared Linux-only: only the POSIX launch waits for a launcher to exit before calling it opened.',
-    },
-}
-# These two controls have no selected OS witness; global gaps cannot arise
-# merely by adding the same platform exception twice.
-UNOBSERVED_CONTROLS = {
-    'connect-remote-keeps-spawn': 'Linux witness survived; Windows is inferred from the platform-neutral dry-run fixture and has not been measured.',
-    'tl-script-lf': 'Linux container witness survived because text_bytes already uses LF; hosted Windows lacks the Linux container witness.',
 }

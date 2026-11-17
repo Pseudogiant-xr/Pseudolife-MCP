@@ -1,4 +1,4 @@
-"""Accepted CLI rows and source controls must have executable CI selections."""
+"""Accepted CLI rows must have executable golden CI selections."""
 
 import copy
 import json
@@ -11,6 +11,57 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "rust" / "daemon" / "harness"))
+
+
+def test_source_mutant_job_is_retired():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    assert 'source-mutants' not in workflow['jobs']
+    assert 'source-mutants' not in workflow['jobs']['parity']['needs']
+
+
+def test_inventory_rejects_reintroduced_source_mutant_job():
+    from inventory import check
+    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
+    workflow['jobs'].setdefault('source-mutants', {'steps': []})
+    with pytest.raises(AssertionError, match='source-mutant job is retired'):
+        check(workflow)
+
+
+@pytest.mark.parametrize('job', ['candidate', 'source-mutants'])
+@pytest.mark.parametrize('command', [
+    'python rust/cli_harness --row mail --mutants',
+    'python rust/ci/run_coverage.py --source-shard mail-0 --out-dir out',
+])
+def test_source_mutant_commands_have_no_live_oracle_exemption(job, command):
+    from inventory import live_invocations
+    workflow = {'jobs': {job: {'steps': [{'run': command}]}}}
+    assert live_invocations(workflow)
+
+
+def test_cli_rows_have_no_source_mutant_maintenance_contract():
+    import ast
+    for path in (ROOT / 'rust/cli_harness/rows').glob('*.py'):
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        assert not any(isinstance(node, ast.Name) and node.id == 'MUTANTS'
+                       for node in ast.walk(tree)), path
+        assert not any(isinstance(node, ast.ImportFrom) and node.module == 'mutants'
+                       for node in ast.walk(tree)), path
+    for relative in ('rust/cli_harness/mutants.py', 'rust/ci/source_mutants.json',
+                     'rust/ci/control_selection.py', 'rust/ci/source_mutant_witnesses.json'):
+        assert not (ROOT / relative).exists(), relative
+
+
+@pytest.mark.parametrize('flag', ['--mutants', '--mutant'])
+def test_retired_mutant_flags_fail_before_constructing_an_oracle(monkeypatch, flag):
+    from rust.cli_harness import core, runner
+
+    def forbidden(*args):
+        pytest.fail('a retired mode constructed a live oracle')
+
+    monkeypatch.setattr(core, 'python_target', forbidden)
+    with pytest.raises(SystemExit) as error:
+        runner.main(['--row', 'mail', flag])
+    assert error.value.code == 2
 
 
 def test_w1a_offline_fixture_preserves_scenario_configuration(tmp_path, monkeypatch):
@@ -38,7 +89,7 @@ def test_w1a_offline_fixture_preserves_scenario_configuration(tmp_path, monkeypa
     assert environment["PSEUDOLIFE_DAEMON_ONNX_DIR"] == str(home / "model")
 
 
-def test_ported_row_and_mutant_ci_inventory():
+def test_ported_row_ci_inventory():
     from inventory import check
     check(yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8")))
 
@@ -72,11 +123,11 @@ def test_backup_zero_exception_rejects_broader_or_partial_scope(monkeypatch, fie
 
 
 @pytest.mark.parametrize('event', ['push', 'schedule'])
-def test_inventory_rejects_missing_source_event(event):
+def test_inventory_rejects_missing_ci_event(event):
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
     workflow[True].pop(event, None)
-    with pytest.raises(AssertionError, match='source events'):
+    with pytest.raises(AssertionError, match='CI events'):
         check(workflow)
 
 
@@ -88,7 +139,7 @@ def test_inventory_rejects_aggregate_accepting_any_skipped_job():
     gate = workflow['jobs']['parity']['steps'][1]
     gate['run'] = """
 $results = ConvertFrom-Json $env:GATE_RESULTS -AsHashtable
-foreach ($job in @('rust', 'candidate', 'parity-checks', 'source-mutants')) {
+foreach ($job in @('rust', 'candidate', 'parity-checks')) {
   if ($results[$job].result -cne 'success' -and $results[$job].result -cne 'skipped') {
     exit 1
   }
@@ -123,19 +174,6 @@ def test_inventory_rejects_a_gate_that_skips_a_cancelled_or_failed_job(change, m
         check(workflow)
 
 
-@pytest.mark.parametrize('event', ['schedule', 'workflow_dispatch'])
-def test_inventory_rejects_source_filter_dropping_event(event):
-    from inventory import check
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    source = workflow['jobs']['source-mutants']
-    dropped = ("(github.event_name == 'schedule' && github.event.schedule == '23 3 * * 0') || " if event == 'schedule'
-               else " || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci')")
-    assert dropped in source['if']
-    source['if'] = source['if'].replace(dropped, '')
-    with pytest.raises(AssertionError, match='source event selection'):
-        check(workflow)
-
-
 def test_inventory_reads_utf8_sources_under_windows_default_encoding(monkeypatch):
     from inventory import check
     workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
@@ -146,61 +184,6 @@ def test_inventory_reads_utf8_sources_under_windows_default_encoding(monkeypatch
 
     monkeypatch.setattr(Path, 'read_text', windows_read_text)
     check(workflow)
-
-
-def test_source_control_target_is_bound_at_step_scope():
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8"))
-    source = workflow['jobs']['source-mutants']
-    invocation = next(s for s in source['steps'] if s.get('name') == 'CLI source mutants')
-    assert invocation.get('env') == {'CARGO_TARGET_DIR': '${{ runner.temp }}/source-mutants-target'}
-    assert 'runner.temp' not in str(source.get('env', {}))
-
-
-def test_cli_mutant_summary_names_witnesses_and_durations(tmp_path, monkeypatch):
-    from rust.cli_harness import mutants
-    mutant = mutants.Mutant("fixture-control", "mail", "unused", "a", "b")
-    monkeypatch.setattr(mutants.rows, "mutants", lambda row: [mutant] if row == "mail" else [])
-    monkeypatch.setattr(mutants, "run_mutant", lambda *args: (True, ["fixture-witness"]))
-    monkeypatch.setattr(mutants, "_sync_source", lambda *args: None)
-    output = tmp_path / "mutants.json"
-    assert mutants.main(["mail"], [], None, False, out=output) == 0
-    result = json.loads(output.read_text(encoding="utf-8"))
-    assert result["mutants"]["fixture-control"]["caught_by"] == ["fixture-witness"]
-    assert result["mutants"]["fixture-control"]["seconds"] >= 0
-    assert result["survivors"] == []
-
-
-def test_inventory_rejects_each_dropped_source_shard():
-    from inventory import check
-    from coverage_plan import SOURCE_SHARDS
-    workflow = yaml.safe_load((ROOT / ".github/workflows/rust.yml").read_text(encoding="utf-8"))
-    for shard in SOURCE_SHARDS:
-        mutated = copy.deepcopy(workflow)
-        mutated["jobs"]["source-mutants"]["strategy"]["matrix"]["shard"].remove(shard)
-        with pytest.raises(AssertionError, match="source mutant shard dropped"):
-            check(mutated)
-
-
-def test_inventory_rejects_a_control_dropped_from_an_executable_shard(monkeypatch):
-    from inventory import check
-    from coverage_plan import SOURCE_SHARDS
-    row, ids = SOURCE_SHARDS['audit-0']
-    monkeypatch.setitem(SOURCE_SHARDS, 'audit-0', (row, [m for m in ids if m != 'audit-body-reason-swap']))
-    with pytest.raises(AssertionError, match='executable source controls'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding="utf-8")))
-
-
-@pytest.mark.parametrize('host_separator', [':', ';'])
-def test_linux_test_login_selects_its_bundled_icu(tmp_path, monkeypatch, host_separator):
-    import run_coverage
-    from run_coverage import source_environment
-    monkeypatch.setattr(run_coverage.os, 'pathsep', host_separator)
-    installation = tmp_path / '.pg0/installation/18.1.0'
-    (installation / 'bin').mkdir(parents=True)
-    (installation / 'lib').mkdir()
-    environment = source_environment('test_login', 'linux', tmp_path, {'LD_LIBRARY_PATH': 'existing'})
-    assert environment['LD_LIBRARY_PATH'] == str(installation / 'lib') + ':existing'
-    assert source_environment('test_login', 'windows', tmp_path, {}) == {}
 
 
 def test_w1a_named_golden_exceptions_match_scenario_support():
@@ -256,81 +239,17 @@ def test_daemon_replays_the_selected_temporary_golden_directory(tmp_path, monkey
     assert observed == [tmp_path / 'goldens']
 
 
-@pytest.mark.parametrize('job,step', [('source-mutants', 'CLI source mutants')])
-def test_inventory_rejects_masked_source_control_exit(job, step):
-    from inventory import check
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    selected = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == step)
-    selected['run'] = selected['run'].replace('exit $LASTEXITCODE', 'exit 0')
-    with pytest.raises(AssertionError, match='exit propagation'):
-        check(workflow)
-
-
 def test_inventory_includes_runtime_daemon_registrations():
     import run
     from inventory import daemon_scenarios
     assert daemon_scenarios() == set(run.SCENARIOS)
 
 
-@pytest.mark.parametrize('mutation', ['unregistered', 'platform_removed'])
-def test_inventory_rejects_runtime_source_control_drift(monkeypatch, mutation):
-    from dataclasses import replace
-    from inventory import check
-    from rust.cli_harness import core, rows
-    original = rows.mutants
-
-    def changed(row):
-        controls = original(row)
-        if row == 'audit':
-            if mutation == 'unregistered':
-                controls = [m for m in controls if m.id != 'audit-body-reason-swap']
-            else:
-                controls = [replace(m, platforms=tuple(p for p in m.platforms if p != core.PLATFORM))
-                            if m.id == 'audit-body-reason-swap' else m for m in controls]
-        return controls
-
-    monkeypatch.setattr(rows, 'mutants', changed)
-    with pytest.raises(AssertionError, match='runtime source-control'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
-
-
 def test_inventory_rejects_empty_exception_reason(monkeypatch):
     from inventory import check
     from coverage_plan import EXCEPTIONS
-    monkeypatch.setitem(EXCEPTIONS['cli_mutants']['linux'], 'connect-config-not-private', ' ')
+    monkeypatch.setitem(EXCEPTIONS['w1a'], 'tokens', ' ')
     with pytest.raises(AssertionError, match='exception reason'):
-        check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
-
-
-@pytest.mark.parametrize('mutation', ['unregistered', 'platform_removed'])
-def test_dispatcher_rejects_runtime_source_control_drift(monkeypatch, tmp_path, mutation):
-    from dataclasses import replace
-    from rust.cli_harness import core, rows
-    import run_coverage
-    original = rows.mutants
-
-    def changed(row):
-        controls = original(row)
-        if row == 'audit':
-            if mutation == 'unregistered':
-                return [m for m in controls if m.id != 'audit-body-reason-swap']
-            return [replace(m, platforms=tuple(p for p in m.platforms if p != core.PLATFORM))
-                    if m.id == 'audit-body-reason-swap' else m for m in controls]
-        return controls
-
-    monkeypatch.setattr(rows, 'mutants', changed)
-    monkeypatch.setattr(sys, 'argv', ['run_coverage.py', '--source-shard', 'audit-0',
-                                    '--out-dir', str(tmp_path)])
-    with pytest.raises(AssertionError, match='runtime source-control'):
-        run_coverage.main()
-
-
-def test_inventory_rejects_control_excepted_on_every_os_without_global_reason(monkeypatch):
-    from inventory import check
-    from coverage_plan import EXCEPTIONS
-    for platform in ('linux', 'windows'):
-        monkeypatch.setitem(EXCEPTIONS['cli_mutants'][platform], 'audit-body-reason-swap', 'fixture exclusion')
-    with pytest.raises(AssertionError, match='without any OS execution'):
         check(yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8')))
 
 
@@ -439,19 +358,6 @@ def test_settled_map_order_records_and_replays_on_both_platforms(monkeypatch, tm
     assert ('live', 'map-order') in selected
     assert ('golden', 'map-order') in selected
     assert ('live', 'map-order-reversed') in selected and ('golden', 'map-order-reversed') in selected
-
-
-@pytest.mark.parametrize('job, name', [('source-mutants', 'CLI source mutants')])
-@pytest.mark.parametrize('suffix', ['; exit 0', '; python -c "raise SystemExit(0)"'])
-def test_inventory_rejects_failure_mask_on_invocation_line(job, name, suffix):
-    from inventory import check
-    workflow = yaml.safe_load((ROOT / '.github/workflows/rust.yml').read_text(encoding='utf-8'))
-    step = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == name)
-    lines = step['run'].splitlines()
-    lines[0] += suffix
-    step['run'] = '\n'.join(lines)
-    with pytest.raises(AssertionError, match='driver command'):
-        check(workflow)
 
 
 @pytest.mark.parametrize('keep_going', [True, False])
@@ -568,7 +474,6 @@ def test_inventory_rejects_a_live_comparison_in_any_gating_job(job, line):
     "python rust/daemon/harness/run.py golden --rust-bin $candidate --only static-build",
     "python rust/daemon/harness/graph_store.py golden --row read --candidate $candidate",
     "python -m pytest -q rust/cli_harness/test_cli_harness.py",
-    "python rust/ci/run_coverage.py --source-shard audit-0 --out-dir x",
     "# python rust/daemon/harness/run.py live --rust-bin x (a comment)",
 ])
 def test_golden_replays_and_self_tests_are_not_live_comparisons(line):
@@ -613,15 +518,6 @@ def test_inventory_rejects_a_stress_plan_that_runs_outside_a_stress_dispatch():
         check(workflow)
 
 
-def test_the_weekly_source_mutants_may_compare_live():
-    from inventory import check, live_invocations
-    workflow = workflow_copy()
-    workflow['jobs']['source-mutants']['steps'].append(
-        {'name': 'Extra', 'run': 'python rust/cli_harness --row mail --mutants'})
-    assert live_invocations(workflow) == []
-    check(workflow)
-
-
 def test_inventory_rejects_a_scenario_whose_golden_replay_is_dropped():
     from inventory import check
     workflow = workflow_copy()
@@ -654,16 +550,6 @@ def test_inventory_rejects_w1c_rows_that_stop_replaying_goldens():
     step = next(s for s in workflow['jobs']['parity-checks']['steps'] if s.get('name') == 'CLI W1-C golden harness')
     step['run'] = step['run'].replace('@golden --golden', '@golden')
     with pytest.raises(AssertionError):
-        check(workflow)
-
-
-def test_inventory_rejects_an_oracle_binding_in_the_source_mutants():
-    from inventory import check
-    workflow = workflow_copy()
-    workflow['jobs']['source-mutants']['steps'].insert(0, {
-        'name': 'Bind the source-control Python oracle',
-        'run': "python -m evals.rust_port.oracle_selection --out x --github-env $env:GITHUB_ENV"})
-    with pytest.raises(AssertionError, match='event oracle'):
         check(workflow)
 
 

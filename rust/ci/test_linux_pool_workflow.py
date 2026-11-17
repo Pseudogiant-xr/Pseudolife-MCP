@@ -131,7 +131,7 @@ def test_secret_is_confined_to_the_hosted_planner_step_and_gates_keep_their_mean
     assert planner["steps"][0]["with"]["persist-credentials"] is False
     assert workflow[True]["push"]["branches"] == ["master"]
     assert jobs["parity"]["name"] == "Parity / ${{ matrix.os }}"
-    assert jobs["parity"]["needs"] == ["scope", "rust", "candidate", "parity-checks", "source-mutants"]
+    assert jobs["parity"]["needs"] == ["scope", "rust", "candidate", "parity-checks"]
     assert not jobs["parity-checks"].get("continue-on-error", False)
     assert "parity-pool" in jobs["parity-checks"]["needs"]
 

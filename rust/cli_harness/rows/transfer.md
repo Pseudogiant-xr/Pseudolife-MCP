@@ -88,8 +88,8 @@ Committed goldens retain six cases: export/import help, no-database refusals,
 and float-tie round trips. Update only deliberately changed snapshots with
 `--record-candidate`, following the harness README. The historical live
 Python cases remain fixtures; their old deferral expectations are not the
-native contract. Source mutants tied to those superseded expectations are
-replaced by native tests, while unrelated transfer mutants remain.
+native contract. Native tests replaced the superseded deferral expectations;
+the remaining source mutants were retired on 17 November 2026.
 
 Import reads each member in full; its memory use is bounded by the largest
 member. Supporting additional compression methods, non-UTF8 databases,

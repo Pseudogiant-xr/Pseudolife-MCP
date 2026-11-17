@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "workflow": "rust.yml",
+  "job": "parity",
+  "before": "f8acb83e13126842",
+  "fingerprint": "1fe2f405b77eded3",
+  "reason": "Removes the retired source-mutants dependency and verdict branch. The two lightweight result-gate jobs remain; removing a result check adds no setup or execution cost, so their measured cost remains an upper bound."
+}

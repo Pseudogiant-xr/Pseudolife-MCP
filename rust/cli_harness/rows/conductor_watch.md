@@ -136,5 +136,5 @@ The row runs live on both OSes in the `w1c-connection` shard. Every case is
 built from fixed bytes, so all are golden cases. Both goldens bind the
 oracle tree with the conductor-watch defect fixes (the `_state_path`,
 `_stop`, `_running` and `_non_negative` refusals above): Windows from this
-checkout (CPython 3.11.9), Linux from WSL Ubuntu. Its source mutants run
-in the `conductor_watch-0` and `conductor_watch-1` shards.
+checkout (CPython 3.11.9), Linux from WSL Ubuntu. The source-mutant shards
+were retired on 17 November 2026; committed golden replay remains.

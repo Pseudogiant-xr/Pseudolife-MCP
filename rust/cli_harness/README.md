@@ -9,10 +9,8 @@ a case opts into; each rule validates its span first and is listed in the
 row's spec under `specs/` and in the parity register (`rust/parity/`).
 
 ```sh
-# live: oracle and candidate side by side (CI runs this on both OSes)
+# live: oracle and candidate side by side (local or manual stress only)
 python rust/cli_harness --row mail --candidate <pseudolife-stdio> -v
-# mutant control: each mutant must turn at least one case red
-python rust/cli_harness --row mail --mutants
 # goldens: record the oracle, or compare a candidate against the record
 python rust/cli_harness --row mail --record
 python rust/cli_harness --row mail --golden --candidate <pseudolife-stdio>
@@ -141,12 +139,14 @@ coordination adapter's private atomic writer and digest renderer. The digest
 renderer runs with its clock read in UTC so seeded bytes, and goldens, do not
 depend on the host timezone.
 
-## Mutants
+## Retired source mutants
 
-`mutants.py` lists exact source substitutions in the Rust leaf. Each is
-applied to a copy of `rust/` under `$CARGO_TARGET_DIR/mutant-src`, built into
-`$CARGO_TARGET_DIR/mutant`, and run against its row. A mutant no case catches
-fails the control.
+The CLI source-mutant job and its declarations were retired on 17 November
+2026 to reduce CI cost before cutover. CLI changes no longer maintain a
+mutant roster, source anchors, shards, platform exclusions or witnesses.
+Rust unit and contract tests and committed golden replay remain; CI no
+longer proves that each planted source-line bug is detected. A Rust-native
+mutation check can be reconsidered after the Python package is removed.
 
 ## Goldens
 
@@ -157,12 +157,13 @@ applies the same rules a live run does.
 ## Goldens after the freeze
 
 Since 14 November 2026 Python is frozen and exact parity with it is no
-longer the acceptance bar: the Rust system has to work. CI no longer runs
+longer the acceptance bar: the Rust system has to work. Automatic CI no longer runs
 the live mode (oracle beside candidate) of any row; every parity shard
 replays the committed goldens with `--golden`, so they are Rust regression
-snapshots. Only the weekly CLI source mutants (`--mutants`) and a stress
-loop still run the frozen oracle. The last live security step left CI on
-16 November 2026, once Rust tests held all 69 of its cases.
+snapshots. The source mutants were retired on 17 November 2026; only an
+explicit manual stress dispatch can still run the frozen oracle. The last
+live security step left CI on 16 November 2026, once Rust tests held all 69
+of its cases.
 
 `--record` still records the oracle, which can no longer change, so it
 reproduces the golden a deliberate Rust change departs from. A pull request

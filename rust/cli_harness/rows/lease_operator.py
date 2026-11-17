@@ -11,7 +11,6 @@ import time
 
 from .. import core, normalize
 from ..core import Case
-from ..mutants import Mutant
 from . import _bank
 from .lease import Board, TOKEN, T0, _Holder, _after, _local, _release_local, coordination_state
 
@@ -25,7 +24,6 @@ class OperatorBoard(Board):
             self.states.append({"action": action, "state": _bank.dump(self.name)})
             return 200, reply
         return super().dispatch(action, body, headers)
-
 
 
 @normalize.rule("lease-fixture-pid")
@@ -481,36 +479,3 @@ def cases():
     from .lease_transport import cases as transport_cases
     result.extend(transport_cases())
     return result
-
-
-MUTANTS = [
-    Mutant("lease-hold-status", "lease_operator", "shim/src/cli/lease/hold.rs",
-           "        Ok(0)\n    };", "        Ok(7)\n    };", ("hold-no-board",)),
-    Mutant("lease-break-holder", "lease_operator", "shim/src/cli/lease/operator/store.rs",
-           "holder_agent_id=NULL,holder_principal=''", "holder_agent_id=holder_agent_id,holder_principal=''",
-           ("break-held",)),
-    Mutant("lease-conductor-duration", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
-           "let expires_at = now + hold as f64;", "let expires_at = now + (hold + 1) as f64;",
-           ("conductor-normal",)),
-    Mutant("lease-deprecated-warning", "lease_operator", "shim/src/cli/lease/args.rs",
-           "is deprecated: use pseudolife-mcp lease {new}",
-           "is deprecated: changed alias warning {new}", ("delegate-normal", "designate-normal")),
-    # A swallowed audit failure leaves an aborted block whose COMMIT the
-    # server answers with ROLLBACK, so break would report success.
-    Mutant("lease-break-audit-swallowed", "lease_operator", "shim/src/cli/lease/operator/store.rs",
-           "settle(&tx, name, now, &mut events).await?;\n        append(&tx, events, now).await?;",
-           "settle(&tx, name, now, &mut events).await?;\n        let _ = append(&tx, events, now).await;",
-           ("break-audit-insert-fails",)),
-    # A COMMIT whose answer never came must not be reported as a grant.
-    Mutant("lease-conductor-commit-ignored", "lease_operator", "shim/src/cli/lease/operator/store/conductor.rs",
-           "    commit(tx).await?;\n    Ok(Granted {", "    let _ = commit(tx).await;\n    Ok(Granted {",
-           ("conductor-commit-lost",)),
-    # A FATAL or lost COMMIT answer must not be reported as certainly
-    # rolled back, and an ERROR at COMMIT must not be reported as unknown.
-    Mutant("lease-commit-unknown-certain", "lease_operator", "shim/src/cli/lease/operator/store.rs",
-           "_ => Error::CommitUnknown,", "_ => Error::Database,",
-           ("break-commit-lost", "conductor-commit-lost")),
-    Mutant("lease-commit-refused-unknown", "lease_operator", "shim/src/cli/lease/operator/store.rs",
-           "Some(Severity::Error) => Error::Database,", "Some(Severity::Error) => Error::CommitUnknown,",
-           ("break-commit-refused", "conductor-commit-refused")),
-]

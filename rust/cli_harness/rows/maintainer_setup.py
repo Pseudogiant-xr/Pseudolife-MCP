@@ -14,13 +14,7 @@ import sys
 
 from .. import core, normalize
 from ..fixture_daemon import FixtureDaemon, json_body
-from ..mutants import Mutant
 
-MUTANTS = [
-    Mutant("setup-consent-bypassed", "maintainer_setup",
-           "shim/src/cli/maintainer/setup/mod.rs",
-           "if args.yes {", "if true {", ("setup-noninteractive-consent",)),
-]
 
 ORIGINAL = ("memory:\n  preset: flat\n  nested: {flag: yes, octal: 017, label: 'on'}\n"
             "coordination:\n  enabled: false\n  maintainer:\n    maintainer_per_recipient_per_hour: 7\n")

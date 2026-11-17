@@ -38,7 +38,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .. import core, normalize
-from ..mutants import Mutant
 
 CODE = "abcd-efgh-jkmn"
 CANONICAL = "ABCDEFGHJKMN"
@@ -578,44 +577,4 @@ def cases() -> list[core.Case]:
     return out
 
 
-MUTANTS = [
-    Mutant("pair-file-kept-on-refusal", "pair", "shim/src/cli/pairing/pair.rs",
-           "match std::fs::remove_file(&target) {",
-           "match Ok::<(), std::io::Error>(()) {",
-           cases=("daemon-refused-code", "daemon-rate-limited")),
-    Mutant("pair-constant-digest", "pair", "shim/src/cli/pairing/pair.rs",
-           "super::sha256_hex(&token)\n", "\"0\".repeat(64)\n",
-           cases=("daemon-refused-code",)),
-    Mutant("pair-retry-flipped", "pair", "shim/src/cli/pairing/pair.rs",
-           "if uncertain && (300..500).contains(&status) {",
-           "if !uncertain && (300..500).contains(&status) {",
-           cases=("daemon-refused-code", "lost-then-rate-limited")),
-    Mutant("pair-unknown-exit", "pair", "shim/src/cli/pairing/pair.rs",
-           "const EXIT_UNKNOWN: u8 = 5;", "const EXIT_UNKNOWN: u8 = 1;",
-           cases=("unverified-json",)),
-    Mutant("pair-message-token", "pair", "shim/src/cli/pairing/pair.rs",
-           "pairing is rate-limited on the daemon, try again in a minute",
-           "pairing is rate limited on the daemon, try again in a minute",
-           cases=("daemon-rate-limited",)),
-    Mutant("pair-hash-of-wrong-text", "pair", "shim/src/cli/pairing/pair.rs",
-           "super::sha256_hex(&token)\n", "super::sha256_hex(&code)\n",
-           cases=("success-json",)),
-    Mutant("pair-reserved-name-moves", "pair", "shim/src/cli/pairing/pair.rs",
-           ".filter(|name| super::valid_principal_name(name) && !super::RESERVED.contains(name));",
-           ".filter(|name| super::valid_principal_name(name));",
-           cases=("rogue-name-4",)),
-]
 # Owner-only is made differently per platform, so each has its own break.
-if core.WINDOWS:
-    # The protected DACL is the whole protection (the CRT ignores the mode).
-    MUTANTS.append(Mutant("pair-not-owner-only", "pair", "shim/src/cli/pairing/token_file.rs",
-                          "        protect(&file)?;\n", "", cases=("success",)))
-
-else:
-    # `.mode(0o600)` at creation would hide a removed protect(): widen the
-    # fchmod instead, which the owner-only validation then refuses.
-    MUTANTS.append(Mutant("pair-mode-not-owner-only", "pair",
-                          "shim/src/cli/pairing/token_file.rs",
-                          "file.set_permissions(fs::Permissions::from_mode(0o600))",
-                          "file.set_permissions(fs::Permissions::from_mode(0o640))",
-                          cases=("success",)))

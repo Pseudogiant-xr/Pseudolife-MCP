@@ -10,14 +10,14 @@
     "docs/atlas/atlas.html": "a6b4c8f505d05c9c176fc7eb24b72e47b186c0c8e172ce61ac07cdf5e4cc94cb",
     "docs/atlas/atlas.json": "58525c896dae613c9a9c4bfc98bc33c291b2ac8f0c87377877f4803340fbf19e",
     "docs/cortex-mcp-spec.md": "43fba1fe5e5cd3710f59d7e99b414f7b78ea15eaa70b620b23716f3fae308d32",
-    "docs/dev/ci-budget.md": "f0e6018eec46d0811d452a45a346444bea604cef3297f918250ef5b2e9a87b68",
+    "docs/dev/ci-budget.md": "26be709d1393421f83ca452e1966dd3130688e50405256c9de5edfad04e0d071",
     "docs/dev/dev-machines.md": "d9512921927ba2e89dc03d6d5aedd351564b4852c6b53fc1e125c702790326be",
     "docs/dev/glossary.md": "23d7e082465bdbb994f976a56e680da4e30aa49de87848b0fac41567254f1341",
     "docs/dev/install-ux.md": "a4dd9f0834016731b36ec2c3a170fe0ecaf799e2e3d2218f7ffc131d940d7484",
-    "docs/dev/merge-batches.md": "97033008ab5a11452bec3b6abc49e630a001403126a7af968141b218c6571775",
+    "docs/dev/merge-batches.md": "f7d11872bb2cdad262dc9eae51a0477e5e75f39e7ff113f22e9511f0ddd9600d",
     "docs/dev/native-client-updates.md": "dc0847090e9696348569d1f0a9c063f34f57c2c61f9b4a97600db76367c1e21e",
     "docs/dev/native-runtimes.md": "02104e3aaac74c9b578e007f6b37b16e59a163d4ff9adafd920844e805bec3f7",
-    "docs/dev/python-retirement.md": "d830ecf284b1a24a328b255b14291f59a2f0d10724ecfe6511dfb96a5551acb0",
+    "docs/dev/python-retirement.md": "59a9cc1c2f8f8e394afd5f34cb54899f97637da60ce4654a1f507ac58a5b9d1d",
     "docs/dev/release-assets.md": "5d47a4afb2b05f8226b22ee5bf1a4b29e8c5f23f8f52c05959f902fa073c8589",
     "docs/dev/run-rust-beside-python.md": "12d52aa9774f05ae699cd67277173b04ff1b837b1772c2c96700b2fb0b110b15",
     "docs/dev/worktree-retention.md": "3a20b61f9927cbecedb3ec3f960e57922663daf1f7e82a111c61e3673a794e6e",
@@ -58268,7 +58268,7 @@
         {
           "dynamic": "unresolved",
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:612",
+          "location": "docs/dev/merge-batches.md:613",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -58402,7 +58402,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:575",
+          "location": "docs/dev/merge-batches.md:576",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -58417,7 +58417,7 @@
         },
         {
           "evidence": "documented",
-          "location": "docs/dev/merge-batches.md:584",
+          "location": "docs/dev/merge-batches.md:585",
           "shape": {
             "channel": "environment",
             "complete": true,
@@ -77738,7 +77738,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:588",
+      "location": "docs/dev/merge-batches.md:589",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY",
       "shape": {
         "channel": "environment",
@@ -77752,7 +77752,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:604",
+      "location": "docs/dev/merge-batches.md:605",
       "name": "PSEUDOLIFE_SUITE_CARGO_TARGET_DIR",
       "shape": {
         "channel": "environment",
@@ -77766,7 +77766,7 @@
       "dynamic": "unresolved",
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:649",
+      "location": "docs/dev/merge-batches.md:650",
       "name": "PSEUDOLIFE_TEST_PG_LOGIN_FILE",
       "shape": {
         "channel": "environment",
@@ -92044,7 +92044,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:498",
+      "location": "docs/dev/merge-batches.md:499",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -92060,7 +92060,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:500",
+      "location": "docs/dev/merge-batches.md:501",
       "name": "PSEUDOLIFE_RUST_CHECK_WHERE",
       "shape": {
         "channel": "environment",
@@ -92076,7 +92076,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:589",
+      "location": "docs/dev/merge-batches.md:590",
       "name": "PSEUDOLIFE_NATIVE_TEST_BINARY_REQUIRED",
       "shape": {
         "channel": "environment",
@@ -92092,7 +92092,7 @@
     {
       "evidence": "documented",
       "kind": "environment",
-      "location": "docs/dev/merge-batches.md:594",
+      "location": "docs/dev/merge-batches.md:595",
       "name": "PSEUDOLIFE_SUITE_NATIVE_CLIENT",
       "shape": {
         "channel": "environment",
@@ -96753,31 +96753,31 @@
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:588",
+      "location": "docs/dev/merge-batches.md:589",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_NATIVE_TEST_BINARY"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:604",
+      "location": "docs/dev/merge-batches.md:605",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_SUITE_CARGO_TARGET_DIR"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:612",
+      "location": "docs/dev/merge-batches.md:613",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_SUITE_SLOTS"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:649",
+      "location": "docs/dev/merge-batches.md:650",
       "reason": "Unknown or forwarded inventory target/shape.",
       "surface": "inventory-gap:environment:PSEUDOLIFE_TEST_PG_LOGIN_FILE"
     },
     {
       "dynamic": "unresolved",
-      "location": "docs/dev/merge-batches.md:801",
+      "location": "docs/dev/merge-batches.md:802",
       "reason": "forwarded parameters"
     },
     {
