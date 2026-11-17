@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
-//! `invite` and `pair` without a database: canonical refusals pinned to the
-//! oracle's text, deferrals before any effect, and `pair` end to end against
+//! `invite` and `pair` without a database: actionable native refusals
+//! before any effect, and `pair` end to end against
 //! an in-test stand-in daemon (the owner-only token file, the hash-only
 //! redemption, the kept file of an unknown outcome). Database-backed
-//! `invite` behaviour is proven by the differential harness
-//! (`rust/cli_harness/rows/invite.py`).
+//! `invite` behaviour is covered by the golden harness and
+//! `rust/cli_harness/test_pairing_native.py`.
 #[path = "common/cli.rs"]
 mod cli;
 use sha2::{Digest, Sha256};
@@ -14,10 +14,396 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 
-const DEFER_INVITE: &str = "pseudolife-stdio: mode 'invite' is deferred in this candidate\n";
-const DEFER_PAIR: &str = "pseudolife-stdio: mode 'pair' is deferred in this candidate\n";
+// Keep failed assertions free of argv, input and output: all three may carry
+// a credential. Each case must fail on the original generic deferral.
+fn native_refusal(mode: &str, argv: &[&str], env: &[(&str, &str)], input: &[u8], cause: &str) {
+    let home = Home::new("native-refusal");
+    let mut cmd = command(&home.0, mode);
+    cmd.args(argv).envs(env.iter().copied());
+    let output = run(cmd, input);
+    let combined = [output.stdout, output.stderr].concat();
+    let text = String::from_utf8_lossy(&combined);
+    assert!(!output.status.success(), "invalid input was accepted");
+    assert!(!text.contains("deferred"), "generic deferral remains");
+    assert!(text.contains(cause), "refusal did not name the cause");
+    assert!(
+        !text.contains("fixture-private-secret"),
+        "diagnostic exposed a secret"
+    );
+    assert!(home.entries().is_empty(), "refusal changed local state");
+}
 
-/// An argv and the environment variables a deferral case adds.
+macro_rules! native_refusal_case {
+    ($name:ident, $mode:literal, $args:expr, $env:expr, $input:expr, $cause:literal) => {
+        #[test]
+        fn $name() {
+            native_refusal($mode, $args, $env, $input, $cause);
+        }
+    };
+}
+
+native_refusal_case!(
+    native_refusal_expiry_short,
+    "invite",
+    &["laptop", "--expires", "59s"],
+    &[],
+    b"",
+    "--expires"
+);
+native_refusal_case!(
+    native_refusal_expiry_long,
+    "invite",
+    &["laptop", "--expires", "25h"],
+    &[],
+    b"",
+    "--expires"
+);
+native_refusal_case!(
+    native_refusal_expiry_shape,
+    "invite",
+    &["laptop", "--expires", "fixture-private-secret"],
+    &[],
+    b"",
+    "--expires"
+);
+native_refusal_case!(
+    native_refusal_port_range,
+    "invite",
+    &["--list", "--port", "65536"],
+    &[],
+    b"",
+    "--port"
+);
+native_refusal_case!(
+    native_refusal_port_shape,
+    "invite",
+    &["--list", "--port", "fixture-private-secret"],
+    &[],
+    b"",
+    "--port"
+);
+native_refusal_case!(
+    native_refusal_env_port,
+    "invite",
+    &["--list"],
+    &[("PSEUDOLIFE_MCP_PORT", "fixture-private-secret")],
+    b"",
+    "PSEUDOLIFE_MCP_PORT"
+);
+native_refusal_case!(
+    native_refusal_tier,
+    "invite",
+    &["laptop", "--tier", "fixture-private-secret"],
+    &[],
+    b"",
+    "--tier"
+);
+native_refusal_case!(
+    native_refusal_ownership,
+    "invite",
+    &["laptop", "--mine", "--someone-else"],
+    &[],
+    b"",
+    "--mine"
+);
+native_refusal_case!(
+    native_refusal_board_conflict,
+    "invite",
+    &["laptop", "--board", "--no-board"],
+    &[],
+    b"",
+    "--board"
+);
+native_refusal_case!(
+    native_refusal_missing_value,
+    "invite",
+    &["laptop", "--expires"],
+    &[],
+    b"",
+    "--expires"
+);
+native_refusal_case!(
+    native_refusal_unknown_argument,
+    "invite",
+    &["--fixture-private-secret"],
+    &[],
+    b"",
+    "--help"
+);
+native_refusal_case!(
+    native_refusal_extra_name,
+    "invite",
+    &["laptop", "fixture-private-secret"],
+    &[],
+    b"",
+    "name"
+);
+native_refusal_case!(
+    native_refusal_token_map_separator,
+    "invite",
+    &["laptop"],
+    &[("PSEUDOLIFE_MCP_TOKENS", "fixture-private-secret")],
+    b"",
+    "PSEUDOLIFE_MCP_TOKENS"
+);
+native_refusal_case!(
+    native_refusal_token_map_duplicate,
+    "invite",
+    &["laptop"],
+    &[(
+        "PSEUDOLIFE_MCP_TOKENS",
+        "fixture-private-secret:a,fixture-private-secret:b"
+    )],
+    b"",
+    "PSEUDOLIFE_MCP_TOKENS"
+);
+native_refusal_case!(
+    native_refusal_token_map_reserved,
+    "invite",
+    &["laptop"],
+    &[("PSEUDOLIFE_MCP_TOKENS", "fixture-private-secret:maintainer")],
+    b"",
+    "PSEUDOLIFE_MCP_TOKENS"
+);
+native_refusal_case!(
+    native_refusal_token_map_unicode,
+    "invite",
+    &["laptop"],
+    &[("PSEUDOLIFE_MCP_TOKENS", "fixture-private-secret:é")],
+    b"",
+    "PSEUDOLIFE_MCP_TOKENS"
+);
+native_refusal_case!(
+    native_refusal_tier_map,
+    "invite",
+    &["laptop"],
+    &[("PSEUDOLIFE_MCP_TIER_MAP", "fixture-private-secret:writer")],
+    b"",
+    "PSEUDOLIFE_MCP_TIER_MAP"
+);
+native_refusal_case!(
+    native_refusal_dsn_shape,
+    "invite",
+    &["--list"],
+    &[("PSEUDOLIFE_MCP_DATABASE_URL", "fixture-private-secret")],
+    b"",
+    "PSEUDOLIFE_MCP_DATABASE_URL"
+);
+native_refusal_case!(
+    native_refusal_dsn_connection,
+    "invite",
+    &["--list"],
+    &[(
+        "PSEUDOLIFE_MCP_DATABASE_URL",
+        "postgresql://unused:fixture-private-secret@127.0.0.1:9/pl_cf_unused"
+    )],
+    b"",
+    "PSEUDOLIFE_MCP_DATABASE_URL"
+);
+native_refusal_case!(
+    native_refusal_pair_missing_url,
+    "pair",
+    &[],
+    &[],
+    b"",
+    "URL"
+);
+native_refusal_case!(
+    native_refusal_pair_missing_path,
+    "pair",
+    &["http://127.0.0.1:9", "--token-file"],
+    &[],
+    b"",
+    "--token-file"
+);
+native_refusal_case!(
+    native_refusal_pair_extra_argument,
+    "pair",
+    &[
+        "http://127.0.0.1:9",
+        "abcd-efgh-jkmn",
+        "fixture-private-secret"
+    ],
+    &[],
+    b"",
+    "--help"
+);
+native_refusal_case!(
+    native_refusal_url_unicode,
+    "pair",
+    &["https://fixture-private-secret:pw@é", "abcd-efgh-jkmn"],
+    &[],
+    b"",
+    "URL"
+);
+native_refusal_case!(
+    native_refusal_url_space,
+    "pair",
+    &[
+        "http://example.com/fixture-private-secret x",
+        "abcd-efgh-jkmn"
+    ],
+    &[],
+    b"",
+    "URL"
+);
+native_refusal_case!(
+    native_refusal_url_zone,
+    "pair",
+    &["http://[fe80::1%fixture-private-secret]", "abcd-efgh-jkmn"],
+    &[],
+    b"",
+    "URL"
+);
+native_refusal_case!(
+    native_refusal_url_ipvfuture,
+    "pair",
+    &["http://[v1.fixture-private-secret]", "abcd-efgh-jkmn"],
+    &[],
+    b"",
+    "URL"
+);
+native_refusal_case!(
+    native_refusal_url_bracket,
+    "pair",
+    &["http://[fixture-private-secret]", "abcd-efgh-jkmn"],
+    &[],
+    b"",
+    "URL"
+);
+native_refusal_case!(
+    native_refusal_stdin_utf8,
+    "pair",
+    &["http://127.0.0.1:9", "--read-code"],
+    &[],
+    b"fixture-private-secret\xff\n",
+    "--read-code"
+);
+native_refusal_case!(
+    native_refusal_home_relative,
+    "pair",
+    &["http://127.0.0.1:9", "abcd-efgh-jkmn"],
+    &[("USERPROFILE", "relative"), ("HOME", "relative")],
+    b"",
+    "HOME"
+);
+
+#[test]
+fn native_arguments_accept_equals_and_repeated_flags() {
+    let home = Home::new("native-arguments");
+    for args in [
+        vec!["--version-check", "--expires=1m"],
+        vec!["--version-check", "--json", "--json"],
+        vec!["--version-check", "--port=00001"],
+    ] {
+        let mut cmd = command(&home.0, "invite");
+        cmd.args(args);
+        assert!(
+            run(cmd, b"").status.success(),
+            "ordinary argument spelling refused"
+        );
+    }
+    for args in [
+        vec!["--json", "http://127.0.0.1:9", "invalid"],
+        vec!["http://127.0.0.1:9", "--json", "invalid", "--json"],
+        vec![
+            "http://127.0.0.1:9",
+            "invalid",
+            "--token-file=x.token",
+            "--json",
+        ],
+    ] {
+        let mut cmd = command(&home.0, "pair");
+        cmd.args(args);
+        let result = run(cmd, b"");
+        assert!(
+            result.status.code() == Some(2),
+            "parser did not reach code validation"
+        );
+        assert!(serde_json::from_slice::<serde_json::Value>(&result.stdout).is_ok());
+    }
+    assert!(home.entries().is_empty());
+}
+
+#[test]
+fn native_refusal_json_is_structured_and_secret_free() {
+    let home = Home::new("native-json");
+    for (mode, args) in [
+        (
+            "invite",
+            vec!["laptop", "--expires=fixture-private-secret", "--json"],
+        ),
+        (
+            "pair",
+            vec!["https://fixture-private-secret:pw@é", "--json"],
+        ),
+    ] {
+        let mut cmd = command(&home.0, mode);
+        cmd.args(args);
+        let result = run(cmd, b"");
+        let value = serde_json::from_slice::<serde_json::Value>(&result.stdout);
+        assert!(value.is_ok(), "native refusal did not return JSON");
+        assert!(result.stderr.is_empty());
+        assert!(!String::from_utf8_lossy(&result.stdout).contains("fixture-private-secret"));
+    }
+}
+
+#[test]
+fn native_refusal_near_misses_reach_the_next_check() {
+    let home = Home::new("near-misses");
+    for args in [
+        vec!["--list", "--expires", "60s"],
+        vec!["--list", "--expires", "24h"],
+        vec!["--list", "--port", "1"],
+        vec!["--list", "--port", "65535"],
+        vec!["laptop", "--tier", "core"],
+        vec!["laptop", "--mine"],
+        vec!["laptop", "--someone-else"],
+        vec!["laptop", "--board"],
+        vec!["laptop", "--no-board"],
+    ] {
+        let mut cmd = command(&home.0, "invite");
+        cmd.args(args);
+        let result = run(cmd, b"");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("no database found"),
+            "valid arguments refused"
+        );
+    }
+    for (key, value) in [
+        ("PSEUDOLIFE_MCP_PORT", "8765"),
+        ("PSEUDOLIFE_MCP_TOKENS", "fixture-private-secret:other"),
+        (
+            "PSEUDOLIFE_MCP_TOKENS",
+            "fixture-private-secret:other,distinct-token:another",
+        ),
+        ("PSEUDOLIFE_MCP_TIER_MAP", "other:core"),
+    ] {
+        let mut cmd = command(&home.0, "invite");
+        cmd.arg("laptop").env(key, value);
+        let result = run(cmd, b"");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("no database found"),
+            "valid environment refused"
+        );
+    }
+    for url in [
+        "http://example.com",
+        "https://xn--9ca.example",
+        "http://[::1]:8765",
+    ] {
+        let mut cmd = command(&home.0, "pair");
+        cmd.args([url, "--read-code"]);
+        let result = run(cmd, b"invalid-code\n");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("not a pairing code"),
+            "valid URL or stdin refused"
+        );
+    }
+    assert!(home.entries().is_empty());
+}
+
+/// Arguments and environment variables for an invalid input.
 type Shape<'a> = (Vec<&'a str>, Vec<(&'a str, PathBuf)>);
 
 struct Home(PathBuf);
@@ -96,13 +482,13 @@ fn invite_refusals_before_the_database_match_the_oracle() {
             &["--list", "--revoke", ""],
             2,
             "",
-            "invite: '' is not a principal name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
+            "invite: the principal name is invalid: use lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
         ),
         (
             &["", "--list", "--revoke", ""],
             2,
             "",
-            "invite: '' is not a principal name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
+            "invite: the principal name is invalid: use lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
         ),
         (
             &[],
@@ -114,7 +500,7 @@ fn invite_refusals_before_the_database_match_the_oracle() {
             &["Laptop"],
             2,
             "",
-            "invite: 'Laptop' is not a principal name: lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
+            "invite: the principal name is invalid: use lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most 64 characters\n",
         ),
         (
             &["daemon"],
@@ -154,7 +540,7 @@ fn invite_refusals_before_the_database_match_the_oracle() {
     }
     let mut tokens = command(&home.0, "invite");
     tokens
-        .args(["laptop", "--url", "u"])
+        .args(["laptop", "--url", "http://example.com"])
         .env("PSEUDOLIFE_MCP_TOKENS", "tok:Laptop");
     assert_output(
         &run(tokens, b""),
@@ -183,7 +569,7 @@ fn invite_version_check_still_answers_an_older_host_cli() {
 }
 
 #[test]
-fn invite_defers_before_any_effect() {
+fn invite_failures_leave_local_state_unchanged() {
     let home = Home::new("invite-defer");
     // An address nothing listens on: a deferral must come before any use.
     let dsn = "postgresql://nobody:nothing@127.0.0.1:9/pl_cf_unused";
@@ -200,11 +586,11 @@ fn invite_defers_before_any_effect() {
         (vec!["--list"], vec![]),
         (vec!["laptop", "--expires", "30s"], vec![]),
         (vec!["laptop", "--tier", "writer"], vec![]),
-        (vec!["laptop", "--url=u"], vec![]),
+        (vec!["laptop", "--url=http://example.com"], vec![]),
         (vec!["laptop", "--json", "--json"], vec![]),
         (vec!["laptop"], vec![("PATH", home.0.join("tools"))]),
         (
-            vec!["laptop", "--url", "u"],
+            vec!["laptop", "--url", "http://example.com"],
             vec![("PSEUDOLIFE_MCP_DATA_DIR", home.0.join("data"))],
         ),
     ];
@@ -215,14 +601,18 @@ fn invite_defers_before_any_effect() {
         for (name, value) in extra {
             command.env(name, value);
         }
-        assert_output(&run(command, b""), 1, "", DEFER_INVITE);
+        let result = run(command, b"");
+        assert!(!result.status.success());
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("deferred"));
     }
     let mut malformed = command(&home.0, "invite");
     malformed
-        .args(["laptop", "--url", "u"])
+        .args(["laptop", "--url", "http://example.com"])
         .env("PSEUDOLIFE_MCP_DATABASE_URL", dsn)
         .env("PSEUDOLIFE_MCP_TOKENS", "no-separator");
-    assert_output(&run(malformed, b""), 1, "", DEFER_INVITE);
+    let result = run(malformed, b"");
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("PSEUDOLIFE_MCP_TOKENS"));
     assert_eq!(home.entries(), before);
 }
 
@@ -256,6 +646,14 @@ struct Daemon {
 }
 
 fn daemon(health: &'static str, answers: Vec<&'static str>) -> Daemon {
+    daemon_with_hook(health, answers, None)
+}
+
+fn daemon_with_hook(
+    health: &'static str,
+    answers: Vec<&'static str>,
+    hook: Option<Box<dyn Fn() + Send>>,
+) -> Daemon {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -294,6 +692,11 @@ fn daemon(health: &'static str, answers: Vec<&'static str>) -> Daemon {
             let mut body = vec![0; length];
             reader.read_exact(&mut body).unwrap();
             let body = String::from_utf8(body).unwrap();
+            if method == "POST"
+                && let Some(hook) = &hook
+            {
+                hook();
+            }
             record
                 .lock()
                 .unwrap()
@@ -335,6 +738,93 @@ fn daemon(health: &'static str, answers: Vec<&'static str>) -> Daemon {
         }
     });
     Daemon { url, seen }
+}
+
+#[test]
+fn native_refusal_cleanup_keeps_token_and_names_recovery() {
+    let home = Home::new("cleanup-error");
+    let directory = home.0.join("tokens");
+    std::fs::create_dir(&directory).unwrap();
+    let target = directory.join("new.token");
+    let held = Arc::new(Mutex::new(None::<std::fs::File>));
+    let hook_target = target.clone();
+    let hook_held = Arc::clone(&held);
+    let fixture = daemon_with_hook(
+        r#"{"status":"ok","auth":true}"#,
+        vec!["429"],
+        Some(Box::new(move || {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                *hook_held.lock().unwrap() = Some(
+                    std::fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(3)
+                        .open(&hook_target)
+                        .unwrap(),
+                );
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = &hook_held;
+                std::fs::set_permissions(
+                    hook_target.parent().unwrap(),
+                    std::fs::Permissions::from_mode(0o500),
+                )
+                .unwrap();
+            }
+        })),
+    );
+    let mut cmd = command(&home.0, "pair");
+    cmd.args([fixture.url.as_str(), "abcd-efgh-jkmn", "--token-file"])
+        .arg(&target)
+        .arg("--json");
+    let output = run(cmd, b"");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    held.lock().unwrap().take();
+    let token = std::fs::read_to_string(&target).unwrap();
+    assert_eq!(output.status.code(), Some(5));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["state"] == "cleanup_failed",
+        "cleanup state was lost"
+    );
+    assert!(
+        report["refusal_state"] == "rate_limited",
+        "original refusal state was lost"
+    );
+    assert!(
+        report["token_file"] == target.to_str().unwrap(),
+        "JSON lost token path"
+    );
+    let combined = [output.stdout, output.stderr].concat();
+    let diagnostic = String::from_utf8_lossy(&combined);
+    assert!(
+        report["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(target.to_str().unwrap()),
+        "cleanup error lost token path"
+    );
+    assert!(
+        diagnostic.contains("remove"),
+        "cleanup error has no recovery step"
+    );
+    assert!(
+        !diagnostic.contains(&token),
+        "cleanup error exposed the token"
+    );
+    assert!(
+        !diagnostic.contains("abcd-efgh-jkmn"),
+        "cleanup error exposed the code"
+    );
+    assert!(!diagnostic.contains("deferred"));
+    assert_owner_only(&target);
 }
 
 fn token_files(home: &Path) -> Vec<PathBuf> {
@@ -476,7 +966,7 @@ fn pair_refusals_before_any_change_match_the_oracle() {
             vec![fixture.url.clone(), "abcd-efgh-jkmn".into()],
             b"",
             4,
-            format!("pair: the daemon at {} does not report authentication (auth: \"yes\"); pairing needs a daemon with a bearer token. Nothing was changed\n", fixture.url),
+            format!("pair: the daemon at {} does not report authentication (auth: <invalid auth value>); pairing needs a daemon with a bearer token. Nothing was changed\n", fixture.url),
         ),
     ];
     for (argv, stdin, code, stderr) in cases {
@@ -499,7 +989,7 @@ fn pair_answers_health_values_only_python_holds() {
         4,
         "",
         &format!(
-            "pair: the daemon at {} does not report authentication (auth: [\"\\ud800\", Infinity]); pairing needs a daemon with a bearer token. Nothing was changed\n",
+            "pair: the daemon at {} does not report authentication (auth: <invalid auth value>); pairing needs a daemon with a bearer token. Nothing was changed\n",
             fixture.url
         ),
     );
@@ -527,27 +1017,18 @@ fn pair_answers_health_values_only_python_holds() {
 }
 
 #[test]
-fn pair_defers_before_any_effect() {
-    let home = Home::new("pair-defer");
-    let fixture = daemon(r#"{"status": "ok", "auth": true}"#, vec![]);
-    let shapes: Vec<Vec<String>> = vec![
+fn invalid_pair_arguments_leave_local_state_unchanged() {
+    let home = Home::new("pair-invalid");
+    for argv in [
         vec![],
-        vec![
-            fixture.url.clone(),
-            "--json".into(),
-            "abcd-efgh-jkmn".into(),
-        ],
-        vec![
-            fixture.url.clone(),
-            "abcd-efgh-jkmn".into(),
-            "--token-file=x".into(),
-        ],
-    ];
-    for argv in shapes {
-        let mut pair = command(&home.0, "pair");
-        pair.args(&argv);
-        assert_output(&run(pair, b""), 1, "", DEFER_PAIR);
+        vec!["--unknown"],
+        vec!["http://example.com", "--token-file"],
+    ] {
+        let mut cmd = command(&home.0, "pair");
+        cmd.args(argv);
+        let result = run(cmd, b"");
+        assert!(result.status.code() == Some(2));
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("deferred"));
     }
-    assert!(fixture.seen.lock().unwrap().is_empty());
-    assert_eq!(home.entries(), Vec::<String>::new());
+    assert!(home.entries().is_empty());
 }

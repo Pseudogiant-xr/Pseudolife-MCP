@@ -1,8 +1,8 @@
 //! `urllib.parse.urlsplit` (CPython 3.11) for the printable-ASCII domain, and
 //! connect's three uses of it: the target's validation
 //! (`codex_connection._validated_daemon_url`), `_shown_url` and
-//! `_is_loopback_url`. Anything outside that domain defers.
-use super::Defer;
+//! `_is_loopback_url`. Unsupported forms receive a secret-free refusal.
+use super::Refusal;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub(in crate::cli) struct Split {
@@ -16,9 +16,11 @@ pub(in crate::cli) struct Split {
 const SCHEME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-.";
 
 /// `Ok(Err(()))` is Python's ValueError.
-pub(in crate::cli) fn urlsplit(url: &str) -> Result<Result<Split, ()>, Defer> {
+pub(in crate::cli) fn urlsplit(url: &str) -> Result<Result<Split, ()>, Refusal> {
     if !url.chars().all(|c| ('!'..='~').contains(&c)) {
-        return Err(Defer);
+        return Err(Refusal::usage(
+            "the daemon URL contains whitespace, control characters or non-ASCII text; supply an ASCII http(s) origin (use the hostname's ASCII IDNA spelling)",
+        ));
     }
     let mut scheme = String::new();
     let mut rest = url;
@@ -45,13 +47,17 @@ pub(in crate::cli) fn urlsplit(url: &str) -> Result<Result<Split, ()>, Defer> {
                 .split_once('[')
                 .map_or("", |(_, b)| b.split_once(']').map_or(b, |(h, _)| h));
             if bracketed.starts_with('v') || bracketed.contains('%') {
-                return Err(Defer);
+                return Err(Refusal::usage(
+                    "the daemon URL uses an IPvFuture or scoped IPv6 address that cannot be validated; supply a DNS hostname or an unscoped IP address",
+                ));
             }
             if bracketed.parse::<Ipv6Addr>().is_err() {
                 if bracketed.parse::<Ipv4Addr>().is_ok() {
                     return Ok(Err(()));
                 }
-                return Err(Defer);
+                return Err(Refusal::usage(
+                    "the daemon URL has an invalid bracketed host; use brackets only around a valid IPv6 address",
+                ));
             }
         }
     }
@@ -127,7 +133,7 @@ impl Split {
 }
 
 /// `codex_connection._validated_daemon_url`: `Ok(Err(()))` is SetupError.
-pub(super) fn validated(url: &str) -> Result<Result<String, ()>, Defer> {
+pub(super) fn validated(url: &str) -> Result<Result<String, ()>, Refusal> {
     let parsed = match urlsplit(url)? {
         Ok(parsed) => parsed,
         Err(()) => return Ok(Err(())),
@@ -155,7 +161,7 @@ pub(super) fn validated(url: &str) -> Result<Result<String, ()>, Defer> {
 }
 
 /// `_shown_url`: scheme and host[:port] only.
-pub(super) fn shown(value: &str) -> Result<String, Defer> {
+pub(super) fn shown(value: &str) -> Result<String, Refusal> {
     const UNREADABLE: &str = "<unreadable URL>";
     let parsed = match urlsplit(value)? {
         Ok(parsed) => parsed,
@@ -182,8 +188,10 @@ pub(super) fn shown(value: &str) -> Result<String, Defer> {
 }
 
 /// `daemon_url._is_loopback_url` for an already validated URL.
-pub(super) fn is_loopback(url: &str) -> Result<bool, Defer> {
-    let parsed = urlsplit(url)?.map_err(|()| Defer)?;
+pub(super) fn is_loopback(url: &str) -> Result<bool, Refusal> {
+    let parsed = urlsplit(url)?.map_err(|()| {
+        Refusal::usage("the daemon URL cannot be parsed; supply a valid http(s) origin")
+    })?;
     let host = parsed.hostname().unwrap_or_default();
     if host == "localhost" {
         return Ok(true);
