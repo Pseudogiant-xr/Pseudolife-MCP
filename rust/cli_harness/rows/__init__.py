@@ -45,8 +45,3 @@ def fixture_login_secrets(row: str) -> tuple[str, ...]:
         return ()
     return tuple(getattr(importlib.import_module(f"{__name__}.{row}"),
                          "FIXTURE_LOGIN_SECRETS", ()))
-
-
-def mutants(row: str) -> list:
-    """The row module's own ``MUTANTS`` list (empty when it has none)."""
-    return list(getattr(importlib.import_module(f"{__name__}.{row}"), "MUTANTS", []))

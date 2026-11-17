@@ -8,22 +8,9 @@ import subprocess
 import sys
 import time
 
-from coverage_plan import COMPOSITES, EXCEPTIONS, PLATFORM_EXCLUSIONS, SOURCE_SHARDS, SUITES, UNOBSERVED_CONTROLS
-from control_selection import select_controls
+from coverage_plan import COMPOSITES, EXCEPTIONS, SUITES
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def source_environment(row, platform, home, environment):
-    environment = dict(environment)
-    if row == 'test_login' and platform == 'linux':
-        # pg0 supplies libicu with PostgreSQL; initdb's child must find it
-        # on hosts whose system ICU has a different major version.
-        versions = sorted(p for p in (home / '.pg0/installation').iterdir() if (p / 'bin').is_dir())
-        library = str(versions[-1] / 'lib')
-        previous = environment.get('LD_LIBRARY_PATH')
-        environment['LD_LIBRARY_PATH'] = library + (':' + previous if previous else '')
-    return environment
 
 
 def command(action, binaries, debug, output):
@@ -35,14 +22,10 @@ def command(action, binaries, debug, output):
                          str(binaries / ('pseudolife-stdio' + suffix)), '-v']
         if mode != 'live':
             argv += ['--' + mode]
-        if action['row'] == 'episode' and mode == 'mutants':
-            argv += ['--fixture']
         if mode in ('record', 'golden'):
             argv += ['--golden-dir', str(output.parent / 'goldens')]
         for case in action.get('cases', []):
             argv += ['--case', case]
-        for mutant in action.get('mutants', []):
-            argv += ['--mutant', mutant]
     elif kind == 'graph':
         argv = prefix + ['rust/daemon/harness/graph_store.py', mode, '--row', action['row'],
                          '--candidate', str(binaries / ('graph-contract' + suffix))]
@@ -76,9 +59,7 @@ def suite_actions(suite, platform):
 
 def main():
     parser = argparse.ArgumentParser()
-    selector = parser.add_mutually_exclusive_group(required=True)
-    selector.add_argument('--suite', choices=[*SUITES, *COMPOSITES])
-    selector.add_argument('--source-shard', choices=SOURCE_SHARDS)
+    parser.add_argument('--suite', choices=[*SUITES, *COMPOSITES], required=True)
     parser.add_argument('--out-dir', type=Path, required=True)
     parser.add_argument('--candidate-dir', type=Path, default=ROOT / 'rust/target/release')
     parser.add_argument('--debug-dir', type=Path, default=ROOT / 'rust/target/debug')
@@ -87,15 +68,6 @@ def main():
     args.out_dir.mkdir(parents=True, exist_ok=True)
     os.environ['PL_HARNESS_SCRATCH'] = str(args.out_dir.resolve() / 'scratch')
     platform = 'windows' if os.name == 'nt' else 'linux'
-    if args.source_shard:
-        row, selected = SOURCE_SHARDS[args.source_shard]
-        ids = select_controls(row, selected, platform)
-        assert ids, 'no source mutants selected'
-        actions = [dict(kind='cli', mode='mutants', row=row, mutants=ids)]
-        environment = source_environment(row, platform, Path.home(), os.environ)
-        omitted = {name: (EXCEPTIONS['cli_mutants'][platform].get(name) or PLATFORM_EXCLUSIONS[platform][name])
-                   for name in selected if name not in ids}
-        return run_selection(args, platform, 'source-' + args.source_shard, actions, environment, omitted, {}, {})
     # A composite runs its suites in order, each as if alone.
     code = 0
     for suite in COMPOSITES.get(args.suite, (args.suite,)):
@@ -126,8 +98,7 @@ def run_selection(args, platform, selection, actions, environment, omitted,
         (args.out_dir / f'{selection}-timings.json').write_text(
             json.dumps(dict(platform=platform, receipts=receipts, exceptions=EXCEPTIONS,
                             omitted_controls=omitted, omitted_scenarios=omitted_scenarios,
-                            omitted_selections=omitted_selections,
-                            unobserved_controls=UNOBSERVED_CONTROLS), indent=2),
+                            omitted_selections=omitted_selections), indent=2),
             encoding='utf-8')
         if code and not args.keep_going:
             return report_failures(selection, receipts) and code

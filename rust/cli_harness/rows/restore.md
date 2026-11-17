@@ -95,9 +95,10 @@ binding on 8765, and the only daemon URL named is the closed loopback port
 process of its own. Fixture files are checked unchanged after each arm and
 then removed, so the goldens hold no compressor-dependent bytes.
 
-## Mutants
+## Retired mutants
 
-50 source mutants, one per decision the row pins, each caught by a named
+Before retirement on 17 November 2026, the row held 50 source mutants,
+one per decision the row pins, each caught by a named
 case: the refusal's exit code, `--yes`, the null device (Windows), the state
 check and its order after the dump check, argparse's error order and
 negative numbers, the COPY pattern, lone `\r`, gzip padding and CRC, tar

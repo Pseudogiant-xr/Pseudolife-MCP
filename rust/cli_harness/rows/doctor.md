@@ -190,7 +190,8 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   parsed JSON, is gone (review of #678): mutants
   `doctor-cache-compact-separator`, `doctor-cache-url-last` and
   `doctor-cache-raw-utf8` (case `healthy-non-ascii-instructions`) escaped
-  it and are caught now.
+  it and were then caught. Those automatic source-mutant checks were retired
+  on 17 November 2026; the cache bytes remain compared by the harness.
 - `shim-handshake-cache-name` (`rows/_handshake_cache.py`): the handshake
   shim names its cache `sha256(daemon url)[:16]`, and the fixture's port
   differs per run, so a golden and its replay name the same file apart.
@@ -223,12 +224,12 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   repeats it. Every other byte, key order included, must equal Python's.
   A candidate report that does not bind keeps its raw values and the
   comparison appends the reason; an oracle report that does not bind stops
-  the run. A native report carrying Python's identity (mutant
-  `doctor-identity-claims-python`) or naming a nonexistent same-basename
+  the run. A native report carrying Python's identity or naming a nonexistent same-basename
   executable in another directory with a consistent source and the right
-  version (mutant `doctor-identity-wrong-path`, which the earlier
-  basename-and-consistency check accepted, review of #669) stays a
-  difference.
+  version stays a difference. The historical `doctor-identity-claims-python`
+  and `doctor-identity-wrong-path` controls demonstrated this before the
+  automatic source-mutant checks retired on 17 November 2026; the earlier
+  basename-and-consistency check accepted the latter (review of #669).
   `tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`
   asserts `interpreter == sys.executable` and can never hold for a native
   runtime.
@@ -260,8 +261,8 @@ prior executable-directory lookup; this follow-up does not claim macOS testing.
   on Windows; another interpreter build can move it by a few levels. On
   Linux (CPython 3.11.15 under WSL, 2026-10-09) the oracle parses depth 978,
   so the threshold differs there and is not measured: the three threshold
-  cases and their mutant run on Windows only. No daemon answer nests this
-  deep.
+  cases run on Windows only. Their automatic source-mutant check was retired
+  on 17 November 2026. No daemon answer nests this deep.
 - The context POST advertises `gzip, deflate` because the oracle
   environments (Windows CPython 3.11, the WSL venv) have httpx 0.28.1 and
   none of brotli, brotlicffi or zstandard; with one of those installed httpx

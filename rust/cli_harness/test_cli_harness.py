@@ -2171,89 +2171,6 @@ def test_tls_fixture_is_warm_before_an_arm_connects(monkeypatch):
         daemon.close()
 
 
-def test_mutant_source_copy_drops_files_the_checkout_no_longer_has(tmp_path, monkeypatch):
-    # 2026-10-17: a target dir last used on a 2026-10-09 tree kept
-    # shim/src/cli/doctor.rs after master moved it to doctor/mod.rs, and
-    # every mutant build failed with rustc E0761.
-    from cli_harness import mutants
-
-    def write(path: Path, text: str = "x") -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-
-    source, target = tmp_path / "rust", tmp_path / "target"
-    write(source / "shim" / "src" / "cli" / "doctor" / "mod.rs", "new")
-    write(source / "shim" / "src" / "main.rs")
-    write(source / "daemon" / "src" / "lib.rs")
-    write(source / "daemon" / "src" / "storage" / "mod.rs")
-    write(source / "cli_harness" / "rows" / "mail.py")
-    copy = target / "mutant-src" / "rust"
-    stale = [copy / "shim" / "src" / "cli" / "doctor.rs",
-             copy / "shim" / "src" / "gone" / "old.rs",
-             copy / "daemon" / "src" / "lib.rs" / "was_a_dir.rs"]
-    for path in stale:
-        write(path, "stale")
-    write(copy / "shim" / "src" / "cli" / "doctor" / "mod.rs", "old")
-    write(copy / "daemon" / "src" / "storage", "was a file")
-    ignored = [copy / "target" / "debug" / "keep", copy / "shim" / "target" / "keep",
-               copy / "cli_harness" / "keep.py", copy / "shim" / "__pycache__" / "keep.pyc"]
-    for path in ignored:
-        write(path, "keep")
-    old = time.time() - 3600
-    os.utime(source / "shim" / "src" / "main.rs", (old, old))
-    monkeypatch.setattr(mutants, "RUST", source)
-    monkeypatch.setenv("CARGO_TARGET_DIR", str(target))
-
-    mutant = mutants.Mutant("m", "row", "shim/src/main.rs", "x", "y")
-    assert mutants._sync_source([mutant]) == copy
-
-    assert [p for p in stale if p.exists()] == []
-    assert not (copy / "shim" / "src" / "gone").exists()
-    assert (copy / "daemon" / "src" / "lib.rs").read_text(encoding="utf-8") == "x"
-    assert (copy / "daemon" / "src" / "storage" / "mod.rs").read_text(encoding="utf-8") == "x"
-    assert (copy / "shim" / "src" / "cli" / "doctor" / "mod.rs").read_text(encoding="utf-8") == "new"
-    assert all(p.read_text(encoding="utf-8") == "keep" for p in ignored)
-    # Cargo must see the mutated file as newer than any earlier build.
-    assert (copy / "shim" / "src" / "main.rs").stat().st_mtime > old + 1800
-
-
-def _mutant_compile_input_fixture(tmp_path, monkeypatch):
-    from cli_harness import mutants
-    inputs = ("evals/prompts/assistant_facts_provenance.txt", "evals/prompts/sonnet_extractor_v5.md")
-    source, target = tmp_path / "checkout/rust", tmp_path / "target"
-    source.mkdir(parents=True)
-    (source / "Cargo.toml").write_text("[workspace]\n")
-    for index, relative in enumerate(inputs):
-        path = source.parent / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(f"prompt-{index}\r\n".encode())
-        old = time.time() - 3600
-        os.utime(path, (old, old))
-    monkeypatch.setattr(mutants, "RUST", source)
-    monkeypatch.setenv("CARGO_TARGET_DIR", str(target))
-    return mutants, source, target, inputs
-
-
-def test_mutant_copy_preserves_compile_inputs_and_invalidates_old_builds(tmp_path, monkeypatch):
-    mutants, source, target, inputs = _mutant_compile_input_fixture(tmp_path, monkeypatch)
-    copy = mutants._sync_source([])
-    for relative in inputs:
-        original, copied = source.parent / relative, copy.parent / relative
-        assert copied.read_bytes() == original.read_bytes()
-        assert copied.stat().st_mtime > original.stat().st_mtime + 1800
-    assert copy == target / "mutant-src/rust"
-
-
-def test_mutant_copy_updates_and_prunes_compile_inputs(tmp_path, monkeypatch):
-    mutants, source, _, inputs = _mutant_compile_input_fixture(tmp_path, monkeypatch)
-    copy = mutants._sync_source([])
-    (source.parent / inputs[0]).write_bytes(b"updated\n")
-    (source.parent / inputs[1]).unlink()
-    mutants._sync_source([])
-    assert (copy.parent / inputs[0]).read_bytes() == b"updated\n"
-    assert not (copy.parent / inputs[1]).exists()
-
-
 # ---- RealDaemon start: the readiness contract, and an oracle older than it --
 
 def _health_stub(answers):
@@ -2444,24 +2361,6 @@ def test_the_runner_pins_the_umask_before_recording_or_replaying(monkeypatch):
     for mode in (["--record"], ["--golden"]):
         with pytest.raises(Pinned):
             runner.main(["--row", "invite", *mode])
-
-
-def test_every_source_mutant_matches_its_source_exactly_once():
-    """A mutant is applied by replacing its ``old`` text, which must match
-    its file exactly once. A pull request runs only the mutant shards of the
-    rows its diff reaches, so an edit to a file another row's mutant names
-    used to fail that shard in the nightly run and nowhere else."""
-    from cli_harness import rows
-
-    root = Path(__file__).resolve().parent.parent
-    stale = []
-    for row in rows.ROWS:
-        for mutant in rows.mutants(row):
-            data = (root / mutant.file).read_bytes()
-            counts = [data.count(mutant.old.replace("\n", eol).encode()) for eol in ("\n", "\r\n")]
-            if 1 not in counts:
-                stale.append(f"{mutant.id}: {max(counts)} matches in {mutant.file}")
-    assert stale == []
 
 
 # ---- --record-candidate: re-recording a golden from the Rust candidate ------------

@@ -37,7 +37,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .. import core, normalize
-from ..mutants import Mutant
 from . import _bank
 
 PREFIX = "pl_cf_w1c_pairing_"
@@ -861,40 +860,3 @@ def _cases() -> list[core.Case]:
     edge_case("defer-env-port-spelling", ["laptop", "--url", "http://example.com"], kind="empty",
              extra_env={"PSEUDOLIFE_MCP_PORT": " 8765"})
     return out
-
-
-MUTANTS = [
-    # A code lifetime 0.6 s short: inside the arm's run window, outside the
-    # clock witness's slack.
-    Mutant("invite-ttl-shortened", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "VALUES ($1, $2, $3, $4, {NOW} + $5, {NOW})",
-           "VALUES ($1, $2, $3, $4, {NOW} + $5 - 0.6, {NOW})",
-           cases=("invite-new", "invite-new-json")),
-    Mutant("invite-revoke-dropped", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "SET revoked_at = COALESCE(revoked_at, {NOW}), ",
-           "SET revoked_at = revoked_at, ", cases=("revoke", "revoke-json")),
-    # The list's order is the final in-code sort (stored and environment
-    # names together); the SQL ORDER BY no longer decides it.
-    Mutant("invite-list-order", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "out.sort_by(|a, b| a.principal.cmp(&b.principal));",
-           "out.sort_by(|a, b| b.principal.cmp(&a.principal));", cases=("list", "list-json")),
-    Mutant("invite-refusal-exit", "invite", "shim/src/cli/pairing/invite.rs",
-           "return Ok(report.fail_units(EXIT_REFUSED, refusal));",
-           "return Ok(report.fail_units(EXIT_FAILED, refusal));",
-           cases=("daemon-unreachable", "daemon-no-auth-json")),
-    Mutant("invite-message-token", "invite", "shim/src/cli/pairing/invite.rs",
-           "single use, expires in {} min",
-           "single-use, expires in {} min", cases=("invite-new",)),
-    Mutant("invite-keep-tier-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "given.push_str(&format!(\", tier = ${}\", params.len()));",
-           "given.push_str(&format!(\", tier = ${}, board = TRUE\", params.len()));",
-           cases=("reinvite-expired-tier-json",)),
-    # v59: a re-invite without a flag must keep someone else's machine so.
-    Mutant("invite-keep-owned-lost", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "\"UPDATE public.principals p SET code_hash = $1, ",
-           "\"UPDATE public.principals p SET owned = TRUE, code_hash = $1, ",
-           cases=("reinvite-keeps-someone-else",)),
-    Mutant("invite-expired-is-pending", "invite", "shim/src/cli/pairing/invite_db.rs",
-           "expires.is_some_and(|expires| expires > now)",
-           "expires.is_some()", cases=("list",)),
-]

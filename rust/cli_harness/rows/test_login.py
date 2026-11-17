@@ -41,7 +41,6 @@ from pathlib import Path
 
 from .. import normalize
 from ..core import WINDOWS, Case
-from ..mutants import Mutant
 from . import _cluster
 
 ROLE = "pseudolife_test"
@@ -803,84 +802,3 @@ def _with_run_tokens(case: Case) -> Case:
     case.after = after
     case.rules = (*case.rules, "test-login-run-tokens")
     return case
-
-
-# ── mutants ──────────────────────────────────────────────────────────────────
-
-_MOD = "shim/src/cli/test_login/mod.rs"
-_SQL = "shim/src/cli/test_login/sql.rs"
-_FILE = "shim/src/cli/test_login/file.rs"
-_EXEC = "shim/src/cli/test_login/exec.rs"
-
-MUTANTS = [
-    Mutant("tl-skip-template1-revoke", "test_login", _SQL,
-           '    statements.push(format!(\n        "REVOKE CONNECT ON DATABASE {} FROM PUBLIC",\n'
-           '        ident("template1")\n    ));\n',
-           "", ("admin-fresh",)),
-    Mutant("tl-refused-exit-3", "test_login", _MOD,
-           "const EXIT_REFUSED: u8 = 4;", "const EXIT_REFUSED: u8 = 3;",
-           ("admin-exists-no-file", "no-docker")),
-    Mutant("tl-closed-token", "test_login", _MOD,
-           '"already closed to PUBLIC"\n        };', '"already closed to public"\n        };',
-           ("admin-reapply",)),
-    Mutant("tl-skip-file-replace", "test_login", _MOD,
-           "if let Err(error) = std::fs::rename(&staged, path) {",
-           "if let Err(error) = Ok::<(), std::io::Error>(()) {", ("admin-fresh",)),
-    Mutant("tl-banks-reverse", "test_login", _MOD,
-           "    present.sort();\n", "    present.sort();\n    present.reverse();\n",
-           ("admin-extra-banks-json",)),
-    Mutant("tl-skip-leftovers", "test_login", _MOD,
-           "LEFTOVER.is_match(name) && !banks", "!LEFTOVER.is_match(name) && !banks",
-           ("admin-fresh",)),
-    Mutant("tl-reuse-flag", "test_login", _MOD,
-           '("password_reused", Value::Bool(reuse))', '("password_reused", Value::Bool(!reuse))',
-           ("admin-reapply-json",)),
-    Mutant("tl-file-not-private", "test_login", _FILE,
-           "    let mut file = open_private(&staged)?;",
-           "    let mut file = fs::File::create(&staged).map_err(|e| e.to_string())?;",
-           ("admin-fresh",)),
-    Mutant("tl-no-bom-strip", "test_login", _FILE,
-           'let data = data.strip_prefix(b"\\xef\\xbb\\xbf").unwrap_or(&data);',
-           "let data = &data[..];", ("admin-reapply-hand-edited",)),
-    Mutant("tl-container-db-ignored", "test_login", _MOD,
-           "        && executor.is_container()\n", "        && !executor.is_container()\n",
-           ("container-other-db-json",)),
-    # Review round 1 (2026-10-09).
-    Mutant("tl-refusal-order", "test_login", _MOD,
-           "if let Some(first) = owned.first().or(owners.first()) {",
-           "if let Some(first) = owned.first().or(owners.first())"
-           ".filter(|_| daemon_user != Some(role_name)) {",
-           ("admin-two-refusals-owner-daemon",)),
-    Mutant("tl-scram-iterations", "test_login", _MOD,
-           "&scram::verifier(&password, &salt, 4096),", "&scram::verifier(&password, &salt, 4097),",
-           ("admin-fresh", "container-reapply")),
-    Mutant("tl-script-lf", "test_login", _EXEC,
-           "let script = super::super::text_bytes(&script);", "let script = script.into_bytes();",
-           ("container-reapply",)),
-    Mutant("tl-verify-owner-connect", "test_login", _MOD,
-           'if !truthy(info.get("owner_connect")) {',
-           'if false && !truthy(info.get("owner_connect")) {', ("admin-after-change-problem",)),
-    Mutant("tl-keep-staged-on-failure", "test_login", _MOD,
-           "let _ = std::fs::remove_file(&staged);", "let _ = &staged;",
-           ("container-role-reserved",)),
-    Mutant("tl-grant-predefined", "test_login", _SQL,
-           "    statements.push(\"SELECT 'ok'\".into());",
-           "    statements.push(\"GRANT pg_read_all_data TO pseudolife\".into());\n"
-           "    statements.push(\"SELECT 'ok'\".into());", ("admin-fresh",)),
-    Mutant("tl-role-config", "test_login", _SQL,
-           "    statements.push(\"SELECT 'ok'\".into());",
-           "    statements.push(format!(\"ALTER ROLE {role_ident} SET work_mem = '8MB'\"));\n"
-           "    statements.push(\"SELECT 'ok'\".into());", ("admin-fresh",)),
-    Mutant("tl-reapply-draws-new", "test_login", _MOD,
-           "let password = if reuse {", "let password = if reuse && false {",
-           ("admin-reapply-generated",)),
-    # Review of #678 (2026-10-10): a refused stdout stops the run.
-    Mutant("tl-stdout-refusal-ignored", "test_login", _MOD,
-           "if !self.json && !self.print(&line) {", "if !self.json && !self.print(&line) && false {",
-           ("admin-fresh-stdout-closed",)),
-    Mutant("tl-stdout-exit-ignored", "test_login", _MOD,
-           "if !self.stdout_failed.get() {", "if true || !self.stdout_failed.get() {",
-           ("admin-fresh-json-stdout-closed",)),
-    Mutant("tl-json-compact-colon", "test_login", _MOD,
-           'out.push_str(": ");', 'out.push_str(":");', ("admin-bad-password-json",)),
-]

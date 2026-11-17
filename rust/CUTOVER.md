@@ -23,6 +23,7 @@ deploy or a live-bank change.
 | 2026-11-14 | Banks older than the Rust daemon can open step through 0.23.x. | A bank below schema 57, or one that still keeps counters in `weights.pt` or documents in Chroma, is first updated to 0.23.1, whose Python daemon imports them. Those imports are not ported. |
 | 2026-11-14 | `move` and `tunnel` are rebuilt in Rust as features, after the native client ships. | Until then the native command refuses plainly. Everything else unported is finished or retired first (below). |
 | 2026-11-14 | Two CI trims: the Python lanes do not re-run on the master push of a Rust-only batch, and the source mutants run weekly, not nightly. | Folded into the CI change under "Stop comparing with Python". |
+| 2026-11-17 | Retire the CLI source mutants to reduce CI cost; reconsider a Rust-native mutation check after cutover. | Remove the job and its declarations, shards and upkeep checks. Rust unit/contract tests and committed golden replay remain; automatic proof that each planted source-line bug is detected is lost. Manual stress is unchanged. |
 | 2026-11-07 | G2: Docker installs and updates select the Rust daemon. | Shipped in 0.23.0 (2026-11-11). `DEFAULT_ENGINE` is `"rust"` in `pseudolife_memory/update_engine.py` and `rust/shim/src/cli/update/release.rs`. |
 
 ## What runs where today
