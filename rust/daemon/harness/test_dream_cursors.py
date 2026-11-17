@@ -182,6 +182,18 @@ class DreamHarnessTests(unittest.TestCase):
                         self.fail("unsafe fixture admitted")
                 connect.assert_not_called()
 
+    def test_fixture_guard_checks_the_connected_database_before_writing(self):
+        from dream_fixtures import connection
+        from rust.harness_support.database_guard import ProductionDatabaseError
+        for reached in ("pseudolife_memory", "pl_cf_w3d_different"):
+            with patch("psycopg.connect") as connect:
+                conn = connect.return_value.__enter__.return_value
+                conn.execute.return_value.fetchone.return_value = (reached,)
+                with self.assertRaises((ValueError, ProductionDatabaseError)):
+                    with connection("dbname=pl_cf_w3d_probe"):
+                        self.fail("wrong database admitted")
+                conn.execute.assert_called_once_with("SELECT current_database()")
+
 
 if __name__ == "__main__":
     unittest.main()
