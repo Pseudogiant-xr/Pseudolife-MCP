@@ -463,7 +463,7 @@ fn sendable(token: &str) -> bool {
 /// decision 2026-10-09).
 /// A path this runtime cannot name (not UTF-8, or unresolvable) is
 /// `unknown`; the version is always known.
-fn identity(token: Option<&str>) -> Vec<(&'static str, String)> {
+fn identity(env: &Env, token: Option<&str>) -> Vec<(&'static str, String)> {
     let executable = std::env::current_exe().ok();
     let resolved = executable
         .as_deref()
@@ -479,8 +479,8 @@ fn identity(token: Option<&str>) -> Vec<(&'static str, String)> {
         })
         .unwrap_or_else(|| "unknown".to_owned());
     vec![
-        ("interpreter", display_path(&interpreter, token)),
-        ("source", display_path(&source, token)),
+        ("interpreter", env.display_path(&interpreter, token)),
+        ("source", env.display_path(&source, token)),
         ("pseudolife-mcp", env!("CARGO_PKG_VERSION").to_owned()),
     ]
 }
@@ -851,7 +851,7 @@ async fn diagnose(
         |cause| json!({"on_path": unread("PATH or the launcher location", &cause)}),
     );
     let tunnel_root = clients::tunnel_root(&env).ok();
-    let identity = identity(token.as_deref());
+    let identity = identity(&env, token.as_deref());
     // A saved instance is read now; its context request runs after the
     // handshake, as in Python. Claude Desktop is never checked.
     let saved = match (&args.agent_state, &url) {
@@ -881,7 +881,7 @@ async fn diagnose(
             source
                 .strip_prefix(prefix)
                 .and_then(|path| path.strip_suffix(')'))
-                .map(|path| format!("{prefix}{})", display_path(path, token.as_deref())))
+                .map(|path| format!("{prefix}{})", env.display_path(path, token.as_deref())))
         })
         .unwrap_or_else(|| source.to_owned());
     put(&mut report, "credential_source", json!(&source_display));

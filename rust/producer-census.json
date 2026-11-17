@@ -418,15 +418,15 @@
     "rust/shim/src/cli/coordination_recovery/help.txt": "a7c5af87cafc5865595dac3bf7c384bb02b47ace5cc8789912635f1429d40c8c",
     "rust/shim/src/cli/coordination_recovery/mod.rs": "f599c1ac1e271c7dbecc396f32286bc2b2bcea7c560232aa082a73d41344c0f0",
     "rust/shim/src/cli/doctor/agent.rs": "9a572ca4b2fd938fb5d2edb5d790eaaf7a1e285cac9a6218ff4654861dbd2f7f",
-    "rust/shim/src/cli/doctor/clients.rs": "4a45884cffb4d9125ef33dfca5786ffdbf8c917a35147e188fc9e05ee9948a59",
+    "rust/shim/src/cli/doctor/clients.rs": "a2c02cd98d45f4bd6c7a29a1cf0bf2529ba2325796d35f42a3ddb2aa056bd08b",
     "rust/shim/src/cli/doctor/display.rs": "22561290db522be32f9b75b781e6e7d4db42a48886ebb5e1dbef2af27cdc848a",
     "rust/shim/src/cli/doctor/handshake.rs": "54c580f0063e838fab86da2c716894648a425a213697d444509aa100d12a53a0",
-    "rust/shim/src/cli/doctor/mod.rs": "2ffcd59336dd27cd92e1026393662da60b9dfd71f8cdb6c88c98c7829ef5c424",
+    "rust/shim/src/cli/doctor/mod.rs": "2f16a1ebcec9263cac32c72b9bfca0f173073ec89e285c8c39df5583d47830c5",
     "rust/shim/src/cli/doctor/probes.rs": "bb3125030f5b6b696a5cda371ebd108a8ba38198e1dc901ad12c8b2228f5d464",
     "rust/shim/src/cli/doctor/proof.rs": "80fd710f5e6a0d19f4de3c580ed790367c35c7d628fd0e944e72eca354dde0c9",
     "rust/shim/src/cli/doctor/proof_diagnostics.rs": "211bdb9072a840db3aade9033735b3de03e74ac1cae5c880a66e82232004d9f9",
     "rust/shim/src/cli/doctor/proof_process.rs": "9c485255fcae4fb13cec74bf377f4c3d321d779ff024678ae8f34d760373ec3a",
-    "rust/shim/src/cli/doctor/pyenv.rs": "93cf79bce0ece3ce1b39a7cc307b271fff03d32bab313623cb3437eab03bec23",
+    "rust/shim/src/cli/doctor/pyenv.rs": "d9c270c19d54eb39d523dab17366ed0d81b3e89a8aab61266b2c227928215796",
     "rust/shim/src/cli/doctor/pyjson.rs": "4a60384b4a0d3329c5b95de68d860d846f44acb67b35a79d64d248719dd57d1e",
     "rust/shim/src/cli/doorbell_files.rs": "d14f64a6e978d508d5b281bf56704da83b5dc36ad1b6444a44bf4481c16c2c6b",
     "rust/shim/src/cli/doorbell_json.rs": "331e9444e3b4491af7664c456a54217262618eaec613626f09211d95c4b982c3",
@@ -49414,6 +49414,19 @@
           "dynamic": "unresolved",
           "evidence": "static",
           "location": "rust/shim/src/cli/doctor/proof.rs:897",
+          "shape": {
+            "channel": "environment",
+            "complete": false,
+            "expression": "reference",
+            "omitted_optional": null,
+            "parameters": {}
+          },
+          "usage": "reference"
+        },
+        {
+          "dynamic": "unresolved",
+          "evidence": "static",
+          "location": "rust/shim/src/cli/doctor/pyenv.rs:54",
           "shape": {
             "channel": "environment",
             "complete": false,
@@ -122929,6 +122942,12 @@
       "location": "rust/shim/src/cli/doctor/proof.rs:90",
       "reason": "Producer parameters, method or config/environment use is not fully resolved.",
       "surface": "environment:PSEUDOLIFE_MCP_DATA_DIR"
+    },
+    {
+      "dynamic": "unresolved",
+      "location": "rust/shim/src/cli/doctor/pyenv.rs:54",
+      "reason": "Producer parameters, method or config/environment use is not fully resolved.",
+      "surface": "environment:PSEUDOLIFE_MCP_TOKEN"
     },
     {
       "dynamic": "unresolved",

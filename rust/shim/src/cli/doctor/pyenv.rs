@@ -48,6 +48,13 @@ impl Env {
         &self.overlay
     }
 
+    /// A configured inline credential is sensitive even when invalid or a file wins.
+    pub(super) fn display_path(&self, path: &str, token: Option<&str>) -> String {
+        let shown = super::display_path(path, token);
+        let configured = self.var("PSEUDOLIFE_MCP_TOKEN").ok().flatten();
+        super::display_path(&shown, configured.as_deref())
+    }
+
     /// Read text without ever displaying an undecodable value.
     pub(super) fn var(&self, key: &str) -> Res<Option<String>> {
         if let Some((_, value)) = self.overlay.iter().find(|(name, _)| name == key) {

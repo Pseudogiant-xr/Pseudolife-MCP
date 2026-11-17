@@ -639,8 +639,8 @@ pub(super) fn git_bash_report(env: &Env, token: Option<&str>) -> Res<Vec<(&'stat
         }
         None => false,
     };
-    let git_bash = git_bash.map(|path| super::display_path(&path, token));
-    let bash_on_path = bash_on_path.map(|path| super::display_path(&path, token));
+    let git_bash = git_bash.map(|path| env.display_path(&path, token));
+    let bash_on_path = bash_on_path.map(|path| env.display_path(&path, token));
     let mut report = vec![
         ("git_bash", json!(git_bash)),
         ("bash_on_path", json!(bash_on_path)),
@@ -719,18 +719,14 @@ pub(super) fn path_resolution(env: &Env, token: Option<&str>) -> Res<Value> {
     let mut report = Map::new();
     report.insert(
         "on_path".into(),
-        json!(
-            found
-                .as_deref()
-                .map(|path| super::display_path(path, token))
-        ),
+        json!(found.as_deref().map(|path| env.display_path(path, token))),
     );
     report.insert(
         "launcher".into(),
         json!(
             launcher
                 .as_deref()
-                .map(|path| super::display_path(path, token))
+                .map(|path| env.display_path(path, token))
         ),
     );
     if let Some(launcher) = &launcher {
@@ -739,10 +735,8 @@ pub(super) fn path_resolution(env: &Env, token: Option<&str>) -> Res<Value> {
             None => false,
         };
         if !same {
-            let launcher = super::display_path(launcher, token);
-            let found = found
-                .as_deref()
-                .map(|path| super::display_path(path, token));
+            let launcher = env.display_path(launcher, token);
+            let found = found.as_deref().map(|path| env.display_path(path, token));
             report.insert("warning".into(), json!(format!(
                 "`pseudolife-mcp` on PATH is {}, not the launcher {launcher}, so a terminal runs \
 another install. Run \"{launcher}\" update --clients-only to point the name at the launcher, then \

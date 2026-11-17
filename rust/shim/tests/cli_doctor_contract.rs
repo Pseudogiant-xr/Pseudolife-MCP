@@ -2153,26 +2153,30 @@ fn native_review_expanded_codex_home_does_not_claim_plugin_absent() {
 
 #[test]
 fn review_round2_recovery_registration_path_is_redacted() {
-    let home = Home::new();
-    let token = "w44-non-ascii-é-bearer";
-    for name in [token, "ordinary-registration"] {
-        let directory = home.0.join(name);
-        std::fs::create_dir(&directory).unwrap();
-        std::fs::write(
-            directory.join("config.toml"),
-            format!("[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN = '{token}'\n"),
-        )
-        .unwrap();
-        let output = diagnose(&home, "http://127.0.0.1:1")
-            .env("CODEX_HOME", &directory)
-            .output()
+    for (token, error) in [
+        ("w44-non-ascii-é-bearer", "BearerUnsendable"),
+        ("w44 invalid bearer", "CredentialUnavailable"),
+    ] {
+        let home = Home::new();
+        for name in [token, "ordinary-registration"] {
+            let directory = home.0.join(name);
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::write(
+                directory.join("config.toml"),
+                format!("[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN = '{token}'\n"),
+            )
             .unwrap();
-        let map = report(&output);
-        assert_eq!(map["error"], "BearerUnsendable");
-        assert!(!Value::Object(map.clone()).to_string().contains(token));
-        assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
-        if name != token {
-            assert!(map["recovery"].as_str().unwrap().contains(name));
+            let output = diagnose(&home, "http://127.0.0.1:1")
+                .env("CODEX_HOME", &directory)
+                .output()
+                .unwrap();
+            let map = report(&output);
+            assert_eq!(map["error"], error);
+            assert!(!Value::Object(map.clone()).to_string().contains(token));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains(token));
+            if name != token {
+                assert!(map["recovery"].as_str().unwrap().contains(name));
+            }
         }
     }
 }
@@ -2189,8 +2193,15 @@ fn review_round2_runtime_identity_paths_are_redacted() {
         "doctor"
     });
     std::fs::copy(template.get_program(), &executable).unwrap();
-    for token in ["w44-identity-bearer", "unrelated-bearer"] {
-        let output = Command::new(&executable)
+    let token_file = home.0.join("token");
+    private_state(&token_file, b"w44-file-bearer");
+    for (token, from_file) in [
+        ("w44-identity-bearer", false),
+        ("unrelated-bearer", false),
+        ("w44-identity-bearer", true),
+    ] {
+        let mut child = Command::new(&executable);
+        child
             .env_clear()
             .envs(
                 template
@@ -2199,9 +2210,11 @@ fn review_round2_runtime_identity_paths_are_redacted() {
             )
             .env("PSEUDOLIFE_MCP_TOKEN", token)
             .current_dir(&home.0)
-            .args(["doctor", "--timeout", "0.2"])
-            .output()
-            .unwrap();
+            .args(["doctor", "--timeout", "0.2"]);
+        if from_file {
+            child.env("PSEUDOLIFE_MCP_TOKEN_FILE", &token_file);
+        }
+        let output = child.output().unwrap();
         let map = report(&output);
         if token == "w44-identity-bearer" {
             assert_eq!(map["interpreter"], "[redacted]");
