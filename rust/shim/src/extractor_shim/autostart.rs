@@ -13,12 +13,27 @@ impl Drop for Scratch {
 fn windows_registration_command(
     script: &std::path::Path,
     data: &std::path::Path,
-    _script_bytes: &[u8],
-    _data_bytes: &[u8],
+    script_bytes: &[u8],
+    data_bytes: &[u8],
 ) -> Result<Command, String> {
-    let mut command = Command::new("powershell.exe");
-    command.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(script).arg(data);
+    use sha2::{Digest, Sha256};
+    let literal = |path: &std::path::Path| {
+        path.to_str()
+            .map(|p| format!("'{}'", p.replace('\'', "''")))
+            .ok_or("the temporary autostart registration path must be UTF-8")
+    };
+    // Read each file once, verify those bytes, then run/parse only those
+    // bytes. Neither the script nor its JSON is reopened after verification.
+    let bootstrap = format!(
+        "$ErrorActionPreference='Stop';try{{$s=[Security.Cryptography.SHA256]::Create();$b=[IO.File]::ReadAllBytes({script});$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{script_digest}'){{[Console]::Error.WriteLine('autostart registration script changed after it was written; nothing was run; rerun install-autostart');exit 5}};$d=[IO.File]::ReadAllBytes({data});$h=-join ($s.ComputeHash($d)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{data_digest}'){{[Console]::Error.WriteLine('autostart registration data changed after it was written; nothing was run; rerun install-autostart');exit 5}}}}catch{{[Console]::Error.WriteLine('cannot verify autostart registration files; rerun install-autostart: '+$_.Exception.Message);exit 1}}finally{{if($s){{$s.Dispose()}}}};& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b))) -ConfigJson ([Text.Encoding]::UTF8.GetString($d))",
+        script = literal(script)?,
+        data = literal(data)?,
+        script_digest = format!("{:x}", Sha256::digest(script_bytes)),
+        data_digest = format!("{:x}", Sha256::digest(data_bytes)),
+    );
+    let argv = crate::windows_powershell::encoded(&bootstrap)?;
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
     Ok(command)
 }
 
@@ -255,7 +270,13 @@ mod tests {
 
     #[test]
     fn registration_uses_system_windows_powershell() {
-        let command = windows_registration_command("C:/fixture/register.ps1".as_ref(), "C:/fixture/registration.json".as_ref(), b"", b"").unwrap();
+        let command = windows_registration_command(
+            "C:/fixture/register.ps1".as_ref(),
+            "C:/fixture/registration.json".as_ref(),
+            b"",
+            b"",
+        )
+        .unwrap();
         let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
             .join("System32/WindowsPowerShell/v1.0/powershell.exe");
         assert!(std::path::Path::new(command.get_program()).is_absolute());
@@ -279,7 +300,9 @@ mod tests {
     }
 
     fn registration_fixture(changed: &str) {
-        let scratch = Scratch(std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())));
+        let scratch = Scratch(
+            std::env::temp_dir().join(format!("autostart-bootstrap-{}", uuid::Uuid::new_v4())),
+        );
         fs::create_dir(&scratch.0).unwrap();
         let script = scratch.0.join("register ' é.ps1");
         let data = scratch.0.join("registration ' é.json");
@@ -293,9 +316,14 @@ exit 0"#;
         {
             fs::write(&script, script_bytes).unwrap();
             fs::write(&data, data_bytes).unwrap();
-            let mut command = windows_registration_command(&script, &data, script_bytes, data_bytes).unwrap();
+            let mut command =
+                windows_registration_command(&script, &data, script_bytes, data_bytes).unwrap();
             if changed == "script" {
-                fs::write(&script, "[Console]::Out.WriteLine('changed script ran');exit 0").unwrap();
+                fs::write(
+                    &script,
+                    "[Console]::Out.WriteLine('changed script ran');exit 0",
+                )
+                .unwrap();
             } else if changed == "data" {
                 fs::write(&data, br#"{"Name":"changed data read"}"#).unwrap();
             }
@@ -306,9 +334,16 @@ exit 0"#;
                 assert_eq!(output.status.code(), Some(0), "{stdout} {stderr}");
                 assert_eq!(stdout.trim(), "registered fixture");
             } else {
-                assert_eq!(output.status.code(), Some(5), "{changed}: {stdout} {stderr}");
+                assert_eq!(
+                    output.status.code(),
+                    Some(5),
+                    "{changed}: {stdout} {stderr}"
+                );
                 assert!(stdout.is_empty(), "{stdout}");
-                assert!(stderr.contains(&format!("autostart registration {changed} changed")), "{stderr}");
+                assert!(
+                    stderr.contains(&format!("autostart registration {changed} changed")),
+                    "{stderr}"
+                );
             }
         }
     }

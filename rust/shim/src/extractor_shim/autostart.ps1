@@ -1,6 +1,7 @@
-param([string]$ConfigPath)
+param([string]$ConfigPath, [string]$ConfigJson)
 $ErrorActionPreference = 'Stop'
-$c = Get-Content -Raw -Encoding UTF8 -LiteralPath $ConfigPath | ConvertFrom-Json
+$c = if ($PSBoundParameters.ContainsKey('ConfigJson')) { $ConfigJson | ConvertFrom-Json }
+else { Get-Content -Raw -Encoding UTF8 -LiteralPath $ConfigPath | ConvertFrom-Json }
 $native = [string]$c.Native
 $ownerExe = [string]$c.OwnerExe
 $kind = [string]$c.Kind
@@ -397,34 +398,41 @@ function Get-CanonicalPath([string]$Path) {
     # reached through another spelling names the same PID file. The full
     # path where the file system cannot be asked (or off Windows).
     $full = [IO.Path]::GetFullPath($Path)
-    if (-not ('PseudolifeFinalPath' -as [type])) {
+    if (-not $script:finalPathApi) {
         try {
-            Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-using Microsoft.Win32.SafeHandles;
-public static class PseudolifeFinalPath {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
-    public static string Of(string path) {
-        // No access rights, every share mode, OPEN_EXISTING, and
-        // FILE_FLAG_BACKUP_SEMANTICS so a directory opens too.
-        using (SafeFileHandle handle = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
-            if (handle.IsInvalid) { return null; }
-            StringBuilder buffer = new StringBuilder(32768);
-            uint length = GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Capacity, 0);
-            if (length == 0 || length >= buffer.Capacity) { return null; }
-            return buffer.ToString();
-        }
-    }
-}
-'@
+            # Emit only the two interop declarations in memory: Run has no
+            # assembly file to compile or load from the temporary directory.
+            $assemblyName = [Reflection.AssemblyName]::new('PseudolifeFinalPath')
+            $access = [Reflection.Emit.AssemblyBuilderAccess]::Run
+            $assembly = if ($PSVersionTable.PSEdition -eq 'Desktop') {
+                [AppDomain]::CurrentDomain.DefineDynamicAssembly($assemblyName, $access)
+            } else { [Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly($assemblyName, $access) }
+            $type = $assembly.DefineDynamicModule('Paths').DefineType('PseudolifeFinalPath', [Reflection.TypeAttributes]::Public)
+            foreach ($signature in @(
+                @{ Name='CreateFileW'; Return=[Microsoft.Win32.SafeHandles.SafeFileHandle]; Parameters=[type[]]@([string],[uint32],[uint32],[IntPtr],[uint32],[uint32],[IntPtr]) },
+                @{ Name='GetFinalPathNameByHandleW'; Return=[uint32]; Parameters=[type[]]@([Microsoft.Win32.SafeHandles.SafeFileHandle],[Text.StringBuilder],[uint32],[uint32]) }
+            )) {
+                $method = $type.DefinePInvokeMethod($signature.Name, 'kernel32.dll',
+                    [Reflection.MethodAttributes]'Public,Static,PinvokeImpl', [Reflection.CallingConventions]::Standard,
+                    $signature.Return, $signature.Parameters, [Runtime.InteropServices.CallingConvention]::Winapi,
+                    [Runtime.InteropServices.CharSet]::Unicode)
+                $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+            }
+            $script:finalPathApi = $type.CreateType()
         } catch { return $full }
     }
-    $final = try { [PseudolifeFinalPath]::Of($full) } catch { $null }
+    $final = try {
+        # No access rights, every share mode, OPEN_EXISTING, and
+        # FILE_FLAG_BACKUP_SEMANTICS so a directory opens too.
+        $handle = $script:finalPathApi::CreateFileW($full, 0, 7, [IntPtr]::Zero, 3, 0x02000000, [IntPtr]::Zero)
+        try {
+            if ($handle.IsInvalid) { return $full }
+            $buffer = [Text.StringBuilder]::new(32768)
+            $length = $script:finalPathApi::GetFinalPathNameByHandleW($handle, $buffer, $buffer.Capacity, 0)
+            if ($length -eq 0 -or $length -ge $buffer.Capacity) { return $full }
+            $buffer.ToString()
+        } finally { $handle.Dispose() }
+    } catch { $null }
     if (-not $final) { return $full }
     if ($final.StartsWith('\\?\UNC\')) { return '\\' + $final.Substring(8) }
     if ($final.StartsWith('\\?\')) { return $final.Substring(4) }

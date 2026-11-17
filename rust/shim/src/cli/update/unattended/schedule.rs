@@ -1,4 +1,5 @@
 use super::*;
+use crate::windows_powershell::base64;
 
 const TASK: &str = "Pseudolife Unattended Update";
 const CLIENT_TASK: &str = "Pseudolife Client Update";
@@ -394,13 +395,7 @@ fn powershell_literal(text: &str) -> Result<String> {
 }
 
 fn windows_powershell() -> Result<String> {
-    std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .ok_or_else(|| UpdateError::usage("SystemRoot is missing; cannot locate Windows PowerShell for the scheduled environment"))?
-        .join("System32/WindowsPowerShell/v1.0/powershell.exe")
-        .to_str()
-        .map(str::to_owned)
-        .ok_or_else(|| UpdateError::usage("the scheduler executable path must be UTF-8"))
+    crate::windows_powershell::executable().map_err(UpdateError::usage)
 }
 
 fn schedule_windows(argv: &[String]) -> Result<(String, String)> {
@@ -512,19 +507,8 @@ const SCRIPT_CHANGED: i32 = 5;
 /// can write this user's temporary folder (an unelevated one, when this
 /// command runs elevated) cannot swap the script in between.
 fn windows_script_argv(path: &std::path::Path, digest: &str) -> Result<Vec<String>> {
-    Ok(vec![
-        windows_powershell()?,
-        "-NoLogo".into(),
-        "-NoProfile".into(),
-        "-NonInteractive".into(),
-        "-EncodedCommand".into(),
-        base64(
-            &windows_script_bootstrap(path, digest)?
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes)
-                .collect::<Vec<_>>(),
-        ),
-    ])
+    crate::windows_powershell::encoded(&windows_script_bootstrap(path, digest)?)
+        .map_err(UpdateError::usage)
 }
 
 /// The bootstrap [`windows_script_argv`] encodes: read the file once, check
@@ -629,29 +613,6 @@ fn windows_registration(
         powershell_literal(executable)?,
         powershell_literal(arguments)?,
     ))
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let a = chunk[0] as usize;
-        let b = chunk.get(1).copied().unwrap_or(0) as usize;
-        let c = chunk.get(2).copied().unwrap_or(0) as usize;
-        out.push(ALPHABET[a >> 2] as char);
-        out.push(ALPHABET[((a & 3) << 4) | (b >> 4)] as char);
-        out.push(if chunk.len() > 1 {
-            ALPHABET[((b & 15) << 2) | (c >> 6)] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            ALPHABET[c & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
 }
 
 /// Whether `--schedule` writes the client schedule here (a shim runtime with
