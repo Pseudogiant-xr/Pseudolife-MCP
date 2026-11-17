@@ -1978,6 +1978,8 @@ def _merge_members(plan: Plan, members: list[Member], freeze=None, prepass: _Pre
         if _merge_census_conflict(plan.base_sha, conflicted):
             if _undo_merge_if_frozen(plan, m, freeze):
                 continue
+            if _undo_merge_if_harness_incomplete(plan, m, before):
+                continue
             plan.merged.append(m)
             plan.census_conflicts.append(m.number)
             print(f"  merged #{m.number} {m.sha[:12]}; census conflict awaits regeneration")

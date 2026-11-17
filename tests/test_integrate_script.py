@@ -2230,6 +2230,53 @@ def test_an_unreadable_base_workflow_refuses_without_blaming_a_member(tmp_path, 
     assert world.remote_branches() == [] and world.gh.mutations() == []
 
 
+@pytest.mark.parametrize("invalid", [False, True])
+def test_census_conflict_resolution_still_checks_the_tentative_harness_selection(monkeypatch, invalid):
+    from types import SimpleNamespace
+
+    member = integrate.Member(12, "new test", "a" * 40, "https://github.example/pr/12", "NONE", "passing")
+    plan = integrate.Plan("integrate/2026-11-17-batch-1", "b" * 40)
+    before, merged = "c" * 40, "d" * 40
+    current = [before]
+    calls = []
+    monkeypatch.setattr(integrate, "_fetch_head", lambda number: member.sha)
+    monkeypatch.setattr(integrate, "_budget_member_evidence", lambda *args: [])
+    monkeypatch.setattr(integrate, "_undo_merge_if_frozen", lambda *args: False)
+
+    def out(*args):
+        return current[0] if args == ("rev-parse", "HEAD") else integrate.CENSUS_JSON
+    def git(*args, **kwargs):
+        if args[:2] == ("reset", "--hard"):
+            assert args[2] == before
+            current[0] = before
+            return subprocess.CompletedProcess(args, 0, "", "")
+        assert "merge" in args
+        return subprocess.CompletedProcess(args, 1, "", "")
+    def resolve(*args):
+        current[0] = merged
+        return True
+    def recipe(head):
+        calls.append(head)
+        if head == merged and invalid:
+            raise integrate.Refusal("RUST_HARNESS omits the new test")
+    monkeypatch.setattr(integrate, "_out", out)
+    monkeypatch.setattr(integrate, "git", git)
+    monkeypatch.setattr(integrate, "_merge_census_conflict", resolve)
+    monkeypatch.setattr(integrate, "_harness_recipe", recipe)
+
+    integrate._merge_members(plan, [member], freeze=object(), prepass=SimpleNamespace(refused={}))
+
+    if invalid:
+        assert not plan.merged and not plan.census_conflicts
+        assert len(plan.dropped) == 1 and plan.dropped[0].member == member
+        assert "RUST_HARNESS omits" in plan.dropped[0].reason
+        assert current[0] == before
+    else:
+        assert plan.merged == [member] and plan.census_conflicts == [member.number]
+        assert not plan.dropped and current[0] == merged
+    assert calls == [before, merged]
+
+
 def test_open_refuses_without_the_rust_harness_result_for_this_head(world, capsys):
     _three_with_a_collision(world)
     assert _build() == 0
@@ -3539,7 +3586,8 @@ class HarnessFar(Far):
         monkeypatch.delenv("FAKE_HOOK_FAIL", raising=False)
         monkeypatch.delenv("FAKE_SERVICE", raising=False)
 
-    def batch(self, body: str = _GATE_TEST, *, unit_body: str | None = None) -> tuple[str, str, str]:
+    def batch(self, body: str = _GATE_TEST, *, unit_body: str | None = None,
+              unit_name: str = "unit_gate.py") -> tuple[str, str, str]:
         self.n += 1
         branch = f"integrate/{DATE}-batch-{self.n}"
         _git(self.seed, "switch", "-q", "-C", branch, self.base)
@@ -3548,7 +3596,7 @@ class HarnessFar(Far):
         (gate_tests / "conftest.py").write_text(_GATE_CONFTEST, encoding="utf-8", newline="\n")
         (gate_tests / "test_gate.py").write_text(body, encoding="utf-8", newline="\n")
         if unit_body is not None:
-            (gate_tests / "unit_gate.py").write_text(unit_body, encoding="utf-8", newline="\n")
+            (gate_tests / unit_name).write_text(unit_body, encoding="utf-8", newline="\n")
         _git(self.seed, "add", "-A")
         _git(self.seed, "commit", "-q", "-m", f"batch {self.n}")
         head = _git(self.seed, "rev-parse", "HEAD")
@@ -3558,14 +3606,14 @@ class HarnessFar(Far):
         return head, f"refs/heads/{branch}", base64.b64encode(bundle.read_bytes()).decode()
 
     def run_harness(self, head: str, ref: str, data: str, *, hook: Path | None = None,
-                    extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
+                    extra: tuple[str, ...] = (), pytest_path: str = "gate_tests") -> subprocess.CompletedProcess:
         return subprocess.run(
             [_PWSH, "-NoProfile", "-NonInteractive", "-File",
              str(ROOT / "ops" / "rust-harness-remote.ps1"), "-Repo", str(self.repo),
              "-Base", self.base, "-Head", head, "-Ref", ref,
              "-ServicesHook", str(hook or self.hook), "-DatabaseLockPath", str(self.tmp / "own-database.lock"),
              "-TurnMarkerPath", str(self.turn_marker),
-             "-PytestArgs", "gate_tests", *extra],
+             "-PytestArgs", pytest_path, *extra],
             input=data, capture_output=True, text=True, encoding="utf-8", timeout=600)
 
     def hook_calls(self) -> list[str]:
@@ -3660,15 +3708,20 @@ def test_the_harness_far_half_tags_its_verdict_with_the_runs_nonce(harness_far):
 
 @needs_pwsh
 @pytest.mark.parametrize("outcome", ["pass", "fail", "empty"])
-def test_harness_far_half_requires_every_unittest_command_to_execute_and_pass(harness_far, outcome):
+@pytest.mark.parametrize("runner", ["unittest-file", "unittest-discover"])
+def test_harness_far_half_requires_every_unittest_command_to_execute_and_pass(harness_far, outcome, runner):
     body = "import unittest\n"
     if outcome != "empty":
         body += "class UnitCase(unittest.TestCase):\n    def test_unit(self):\n        self.assertTrue(" + str(outcome == "pass") + ")\n"
     body += "if __name__ == '__main__': unittest.main()\n"
-    head, ref, data = harness_far.batch(unit_body=body)
-    units = [{"runner": "unittest-file", "paths": ["gate_tests/unit_gate.py"], "start": "", "pattern": ""}]
+    unit_name = "test_unit.py" if runner == "unittest-discover" else "unit_gate.py"
+    head, ref, data = harness_far.batch(unit_body=body, unit_name=unit_name)
+    units = [{"runner": runner, "paths": ["gate_tests/" + unit_name],
+              "start": "gate_tests" if runner == "unittest-discover" else "",
+              "pattern": "test_unit.py" if runner == "unittest-discover" else ""}]
     encoded = base64.b64encode(json.dumps(units).encode()).decode()
-    proc = harness_far.run_harness(head, ref, data, extra=("-UnitCommands", encoded))
+    proc = harness_far.run_harness(head, ref, data, extra=("-UnitCommands", encoded),
+                                   pytest_path="gate_tests/test_gate.py")
     assert "1 passed" in proc.stdout and harness_far.hook_calls() == ["start", "stop"]
     assert proc.returncode == {"pass": 0, "fail": 1, "empty": 3}[outcome], proc.stdout + proc.stderr
     if outcome == "pass":
