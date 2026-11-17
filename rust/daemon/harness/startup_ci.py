@@ -15,6 +15,8 @@ import argparse
 import json
 import os
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import re
 import subprocess
 import sys
@@ -140,6 +142,16 @@ def main(argv: list[str] | None = None) -> int:
                              "(candidate_record.py): a dry run that exits 1 if anything would change, unless --write")
     parser.add_argument("--write", action="store_true", help="with --record-candidate: write the changed and new cases")
     args = parser.parse_args(argv)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     if args.record_goldens and args.record_candidate:
         parser.error("--record-goldens records the oracle and --record-candidate the candidate; give one")
     if args.write and not args.record_candidate:

@@ -183,7 +183,7 @@
       },
       "test-lite-windows": {
         "minutes": 24.1,
-        "estimate": "2026-11-17 W46: existing 18.6 min plus 3.9 min for the added gate selection, conservatively charging its entire 35-case hosted selection including ten fixture guards outside this lite lane. On own hosted Windows stress run 44026738823 at 6604486a1, the Run the selection once step across 20 first attempts had median 179.5 s and maximum 229 s (3.82 min). Add 1.6 min for the five new F3/F5 cases, which passed in 68.00 s on the Windows dev VM, allowing hosted overhead. Total 18.6 + 3.9 + 1.6 = 24.1 min. No setup, matrix, job-count or limit increase; re-measure the complete lite job on its next batch."
+        "estimate": "2026-11-17: existing 18.6 min plus 3.9 min for the added gate selection, conservatively charging its entire 35-case hosted selection including ten fixture guards outside this lite lane. On own hosted Windows stress run 44026738823 at 6604486a1, the Run the selection once step across 20 first attempts had median 179.5 s and maximum 229 s (3.82 min). Add 1.6 min for the five new F3/F5 cases, which passed in 68.00 s on the Windows dev VM, allowing hosted overhead. Total 18.6 + 3.9 + 1.6 = 24.1 min. No setup, matrix, job-count or limit increase; re-measure the complete lite job on its next batch."
       },
       "test-lite-macos": {
         "minutes": 21.3,

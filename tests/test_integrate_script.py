@@ -555,6 +555,32 @@ def test_old_builder_plan_opens_with_the_new_batch_script(world):
     assert _git(world.origin, "rev-parse", branch) == plan.head
 
 
+def test_plan_load_ignores_unknown_fields_at_every_dataclass_level(tmp_path, monkeypatch):
+    member = integrate.Member(10, "member", "b" * 40, "https://github.example/pr/10", "APPROVED", "passing")
+    dropped = integrate.Dropped(member, "left out", comment=False)
+    plan = integrate.Plan(f"integrate/{DATE}-batch-1", "a" * 40, head="c" * 40,
+                          merged=[member], dropped=[dropped])
+    raw = integrate.asdict(plan)
+    raw["future_plan_field"] = "from a newer builder"
+    raw["merged"][0]["future_member_field"] = True
+    raw["dropped"][0]["future_drop_field"] = ["new metadata"]
+    raw["dropped"][0]["member"]["future_member_field"] = True
+    raw["dropped"][0]["waiting"] = True  # The historical census-waiter field.
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(integrate.Plan, "path", staticmethod(lambda branch: path))
+
+    loaded = integrate.Plan.load(plan.branch)
+
+    assert loaded.head == plan.head and loaded.base_sha == plan.base_sha
+    assert loaded.merged[0].number == member.number and loaded.merged[0].sha == member.sha
+    assert loaded.dropped[0].member.sha == member.sha
+    assert loaded.dropped[0].reason == dropped.reason and loaded.dropped[0].comment is False
+    assert not hasattr(loaded, "future_plan_field")
+    assert not hasattr(loaded.merged[0], "future_member_field")
+    assert not hasattr(loaded.dropped[0], "future_drop_field")
+
+
 def _second_parents(origin: Path, branch: str) -> list[str]:
     """The heads merged into `branch`, in merge order (origin is bare)."""
     log = _git(origin, "log", "--first-parent", "--format=%P", f"master..{branch}")
@@ -3378,8 +3404,13 @@ if os.environ.get("FAKE_UV_ENV_LOG"):
 if sys.argv[1] == "venv":
     import glob, site
     target = sys.argv[-1]
-    code = subprocess.run([sys.executable, "-m", "venv", target]).returncode
+    code = subprocess.run([sys.executable, "-m", "venv", "--copies", target]).returncode
     if code == 0:
+        # Match the Windows environment's regular-file layout so the far
+        # half's no-reparse cleanup is exercised on Linux too.
+        compatibility = os.path.join(target, "lib64")
+        if os.path.islink(compatibility):
+            os.unlink(compatibility)
         # The new environment sees this interpreter's packages (pytest),
         # also when this interpreter is itself a virtual environment.
         # lib64 is a link to lib on some Linux venvs: one is enough.
@@ -3416,6 +3447,8 @@ def test_the_services_are_up(request):
 class HarnessFar(Far):
     def __init__(self, tmp_path, monkeypatch):
         super().__init__(tmp_path, monkeypatch)
+        self.turn_marker = tmp_path / "test-postgres.turn-enabled"
+        self.turn_marker.touch()
         bin_dir = tmp_path / "bin"
         (bin_dir / "fake_uv.py").write_text(_FAKE_UV, encoding="utf-8")
         if os.name == "nt":
@@ -3458,6 +3491,7 @@ class HarnessFar(Far):
              str(ROOT / "ops" / "rust-harness-remote.ps1"), "-Repo", str(self.repo),
              "-Base", self.base, "-Head", head, "-Ref", ref,
              "-ServicesHook", str(hook or self.hook), "-DatabaseLockPath", str(self.tmp / "own-database.lock"),
+             "-TurnMarkerPath", str(self.turn_marker),
              "-PytestArgs", "gate_tests", *extra],
             input=data, capture_output=True, text=True, encoding="utf-8", timeout=600)
 
@@ -3487,7 +3521,10 @@ def test_the_harness_far_half_runs_the_batch_tests_with_its_services_up(harness_
     gate = Path(f"{harness_far.repo}.rust-harness")
     assert _git(gate, "rev-parse", "HEAD") == head
     installs = [json.loads(line) for line in harness_far.uv_log.read_text(encoding="utf-8").splitlines()]
-    assert installs[0][0] == "venv" and Path(installs[0][-1]) == Path(f"{harness_far.repo}.rust-harness-venv")
+    assert installs[0][0] == "venv"
+    environment = Path(installs[0][-1])
+    assert environment.name.startswith(harness_far.repo.name + ".rust-harness-env-")
+    assert not environment.exists()
     assert installs[1][:2] == ["pip", "install"] and installs[1][-1] == f"{gate}[dev]"
     assert harness_far.harness_leftovers() == []
 
@@ -3640,6 +3677,7 @@ def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkey
     monkeypatch.setattr(integrate, "_remote_config", lambda *args: (cfg, ""))
     script = integrate.RUST_HARNESS_REMOTE_SCRIPT.replace("$ServicesHook = ''", "$ServicesHook = " + integrate._ps_literal(str(harness_far.hook)))
     script = script.replace("$DatabaseLockPath = ''", "$DatabaseLockPath = " + integrate._ps_literal(str(tmp_path / "own-database.lock")))
+    script = script.replace("$TurnMarkerPath = ''", "$TurnMarkerPath = " + integrate._ps_literal(str(harness_far.turn_marker)))
     monkeypatch.setattr(integrate, "RUST_HARNESS_REMOTE_SCRIPT", script)
     monkeypatch.setattr(integrate, "RUST_HARNESS", ("gate_tests",))
     monkeypatch.setattr(integrate, "RUST_HARNESS_COMMAND", "python -m pytest -q -p no:cacheprovider --require-databases gate_tests")
@@ -3649,6 +3687,42 @@ def test_harness_controller_ships_its_lock_helper_over_stdin(harness_far, monkey
     assert "passed" in integrate._gate_result_line(str(result), head, "rust-harness")
     assert harness_far.hook_calls() == ["start", "stop"]
     assert harness_far.harness_leftovers() == []
+    environments = [json.loads(line)[-1] for line in harness_far.uv_log.read_text(encoding="utf-8").splitlines()
+                    if json.loads(line)[0] == "venv"]
+    assert environments and all(not Path(path).exists() for path in environments)
+
+
+@needs_pwsh
+def test_harness_environment_cannot_retain_a_removed_dependency(harness_far):
+    first, first_ref, first_bundle = harness_far.batch("""
+def test_install_old_dependency():
+    from pathlib import Path
+    import site
+    (Path(site.getsitepackages()[0]) / 'removed_gate_dependency.py').write_text('old = True\\n')
+""")
+    old = harness_far.run_harness(first, first_ref, first_bundle)
+    assert old.returncode == 0, old.stdout[-2000:] + old.stderr[-2000:]
+    second, second_ref, second_bundle = harness_far.batch("""
+def test_removed_dependency_is_not_available():
+    import importlib.util
+    assert importlib.util.find_spec('removed_gate_dependency') is None
+""")
+    new = harness_far.run_harness(second, second_ref, second_bundle)
+    assert new.returncode == 0, new.stdout[-2000:] + new.stderr[-2000:]
+    environments = [Path(row[-1]) for row in map(json.loads, harness_far.uv_log.read_text(encoding="utf-8").splitlines())
+                    if row[0] == "venv"]
+    assert len(environments) == len(set(environments)) == 2
+    assert all(not path.exists() for path in environments)
+
+
+@needs_pwsh
+def test_service_managing_harness_refuses_a_missing_turn_marker(harness_far):
+    head, ref, data = harness_far.batch()
+    harness_far.turn_marker.unlink()
+    proc = harness_far.run_harness(head, ref, data)
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+    assert "marker is missing" in proc.stderr and "New-Item -ItemType File" in proc.stderr
+    assert harness_far.hook_calls() == [] and not harness_far.uv_log.exists()
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")
@@ -3729,7 +3803,8 @@ def test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free(harness
                str(ROOT / "ops/rust-harness-remote.ps1"), "-Repo", str(harness_far.repo),
                "-Base", harness_far.base, "-Head", head, "-Ref", ref,
                "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock),
-               "-LockWaitSeconds", "60", "-PytestArgs", "gate_tests"]
+               "-TurnMarkerPath", str(harness_far.turn_marker),
+               "-LockWaitSeconds", "60", "-DatabaseTurnWaitSeconds", "60", "-PytestArgs", "gate_tests"]
     gate = None
     output = tmp_path / "gate.log"
     with (tmp_path / "worker.log").open("w", encoding="utf-8") as worker_log, output.open("w", encoding="utf-8") as gate_log:
@@ -3827,7 +3902,8 @@ def test_database_lock_owner_death_stops_its_child_before_reuse(harness_far, tmp
         head, ref, data = harness_far.batch("def test_child():\n" + "\n".join("    " + line for line in child_code.splitlines()) + "\n")
         command = [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(ROOT / "ops/rust-harness-remote.ps1"),
                    "-Repo", str(harness_far.repo), "-Base", harness_far.base, "-Head", head, "-Ref", ref,
-                   "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock), "-PytestArgs", "gate_tests"]
+                   "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock),
+                   "-TurnMarkerPath", str(harness_far.turn_marker), "-PytestArgs", "gate_tests"]
     child = None
     identity = None
     with (tmp_path / "owner.log").open("w", encoding="utf-8") as log:
@@ -3870,7 +3946,7 @@ def test_database_lock_owner_death_stops_its_child_before_reuse(harness_far, tmp
 
 @needs_pwsh
 @pytest.mark.parametrize("state", ["alive", "reused", "unreadable"])
-def test_database_lock_reclaims_only_proven_stale_identity(tmp_path, state):
+def test_database_lock_free_handle_overwrites_old_metadata(tmp_path, state):
     lock = tmp_path / "own-database.lock"
     script = tmp_path / "identity.ps1"
     script.write_text("""
@@ -3889,11 +3965,8 @@ try {
     run = subprocess.run([_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script),
                           str(ROOT / "ops/dev-database-lock.ps1"), str(lock), state],
                          capture_output=True, text=True, timeout=30)
-    assert run.returncode == (0 if state == "reused" else 3), run.stderr
-    if state == "unreadable":
-        assert "identity" in run.stderr and "cannot" in run.stderr
-    if state == "alive":
-        assert "previous worker" in run.stderr
+    assert run.returncode == 0, run.stderr
+    assert lock.read_bytes() == b""
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="Linux shim far half")

@@ -14,6 +14,8 @@ import json
 import math
 import os
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import subprocess
 import sys
 import tempfile
@@ -423,6 +425,16 @@ def main():
         parser.error("--write needs --record-candidate")
     if args.record_candidate and args.mode != "golden":
         parser.error("--record-candidate belongs to golden mode")
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     results = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO,
                                                text=True).strip(),
                "platform": sys.platform,

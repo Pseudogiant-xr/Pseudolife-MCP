@@ -15,6 +15,8 @@ import json
 import math
 import os
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import queue
 import random
 import subprocess
@@ -718,6 +720,16 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--mutants", nargs="+", choices=MUTANTS)
     args = parser.parse_args()
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     normalizer_controls()
     prefix_controls = prefix_mutant_control()
     if args.mode != "oracle" and args.rust_bin is None:

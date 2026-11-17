@@ -359,12 +359,18 @@ class Plan:
         # A field this loader does not know (one a newer or reverted tool
         # wrote) is dropped, so a plan crosses tool versions; a missing one
         # takes its default.
-        known = {f.name for f in fields(Plan)}
-        raw = {k: v for k, v in raw.items() if k in known}
-        raw["merged"] = [Member(**m) for m in raw["merged"]]
-        for d in raw["dropped"]:
-            d.pop("waiting", None)   # census waiters, from plans built before 2026-10-27
-        raw["dropped"] = [Dropped(Member(**d.pop("member")), **d) for d in raw["dropped"]]
+        def known(cls, row):
+            names = {f.name for f in fields(cls)}
+            return {k: v for k, v in row.items() if k in names}
+
+        raw = known(Plan, raw)
+        raw["merged"] = [Member(**known(Member, m)) for m in raw["merged"]]
+        dropped = []
+        for entry in raw["dropped"]:
+            row = known(Dropped, entry)
+            row["member"] = Member(**known(Member, row["member"]))
+            dropped.append(Dropped(**row))
+        raw["dropped"] = dropped
         return Plan(**raw)
 
 
@@ -2306,9 +2312,9 @@ def _remote_far(plan: Plan, cfg: dict[str, str], script_text: str, name: str,
             data = base64.b64encode(bundle.read_bytes()).decode("ascii")
         except (Refusal, OSError) as exc:
             return None, f"the batch bundle could not be made: {exc}", []
-    # The verdict line carries a nonce no member code sees (it travels on
-    # stdin, not argv), so a line cargo or pytest passes through cannot stand
-    # in for it.
+    # The nonce associates a verdict with this dispatch; it is not a secret
+    # (Bash exposes its script text in -c argv). The SSH exit code must also
+    # agree with the verdict, so member output alone cannot make a pass.
     nonce = secrets.token_hex(16)
     script = ("& {\n" + script_text + "\n} -Repo " + _ps_literal(cfg["repo"])
               + " -Base " + _ps_literal(plan.base_sha) + " -Head " + _ps_literal(plan.head)
@@ -2423,8 +2429,8 @@ def _remote_rust_check(plan: Plan, cfg: dict[str, str]) -> tuple[str, str]:
             data = base64.b64encode(bundle.read_bytes()).decode("ascii")
         except (Refusal, OSError) as exc:
             return f"not run: the batch bundle could not be made: {exc}", ""
-    # The verdict line carries a nonce no member code sees (it travels on
-    # stdin, not argv), so a line cargo passes through cannot stand in for it.
+    # The nonce associates a verdict with this dispatch. The verdict must
+    # also agree with the SSH exit code; tagged stdout alone is not a pass.
     nonce = secrets.token_hex(16)
     try:
         script = ("& {\n" + RUST_CHECK_REMOTE_SCRIPT + "\n} -Repo " + _ps_literal(cfg["repo"])
@@ -3527,6 +3533,7 @@ def _run_gate(args: argparse.Namespace, kind: str) -> int:
             f". ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{helper}'))))")
         params = " -PytestArgs @(" + ", ".join(_ps_literal(p) for p in selection) + ")"
         params += f" -LockWaitSeconds {args.lock_wait_seconds}"
+        params += f" -DatabaseTurnWaitSeconds {args.database_turn_wait_seconds}"
     else:
         params = str(args.lock_wait_seconds)
     started = dt.datetime.now().astimezone()
@@ -4052,6 +4059,9 @@ def main(argv: list[str] | None = None) -> int:
         gate = sub.add_parser(name, help=f"run the built batch's {name} gate on its dev machine")
         gate.add_argument("--lock-wait-seconds", type=int, default=1200,
                           help="maximum wait for the machine's locks (default 1200)")
+        if name == "harness":
+            gate.add_argument("--database-turn-wait-seconds", type=int, default=0,
+                              help="explicit bounded wait for a held database turn (default: refuse immediately)")
     sub.add_parser("suite", help="run the built batch's full suite on the remote "
                                  "machine (its head travels as a bundle)")
     sub.add_parser("merge", help="merge the published batch pull request once every "
@@ -4060,6 +4070,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if hasattr(args, "lock_wait_seconds") and args.lock_wait_seconds < 0:
         parser.error("--lock-wait-seconds must be nonnegative")
+    if hasattr(args, "database_turn_wait_seconds") and not 0 <= args.database_turn_wait_seconds <= 86400:
+        parser.error("--database-turn-wait-seconds must be between 0 and 86400")
     commands = {"status": status, "build": build, "suite": suite, "open": open_, "merge": merge,
                 "harness": harness, "shim-tests": shim_tests}
     try:

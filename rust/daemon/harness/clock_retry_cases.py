@@ -16,6 +16,8 @@ import json
 import os
 import re
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import subprocess
 import sys
 import tempfile
@@ -320,6 +322,16 @@ def main(argv=None):
     parser.add_argument("--oracle-cell", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--seed-cell", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     if pg.SLICE != "pgs":
         parser.error("clock retry cells require PL_HARNESS_SLICE=pgs")
     if args.dump_db:

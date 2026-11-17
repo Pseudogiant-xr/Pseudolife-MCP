@@ -29,6 +29,8 @@ import json
 import math
 import os
 from pathlib import Path
+
+_DATABASE_TURN_MARKER = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
 import re
 import sys
 from urllib.parse import urlencode, urlsplit
@@ -316,6 +318,16 @@ def main(argv=None):
     parser.add_argument("--triage", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
+    if _DATABASE_TURN_MARKER.exists():
+        _turn_sys = __import__("sys")
+        _turn_root = str(__import__("pathlib").Path(__file__).resolve().parents[3])
+        _turn_sys.path.insert(0, _turn_root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="standalone database harness", contain=True)
+        finally:
+            _turn_sys.path.remove(_turn_root)
     try:
         if args.limit < 1:
             raise ValueError("limit must be positive")

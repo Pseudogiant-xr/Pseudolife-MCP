@@ -33,6 +33,7 @@ import json
 from collections import Counter
 import math
 import os
+from pathlib import Path
 import re
 import time as clock
 import uuid
@@ -42,6 +43,27 @@ from decimal import Decimal
 import psycopg
 from psycopg import sql
 from psycopg.rows import tuple_row
+
+
+def _connect(*args, **kwargs):
+    marker = Path.home() / ".pseudolife-mcp/locks/test-postgres.turn-enabled"
+    if marker.exists():
+        # Standalone comparator tests need no repository-root import path on
+        # ordinary machines. Resolve the optional support package only here.
+        import sys
+
+        root = str(Path(__file__).resolve().parents[3])
+        inserted = root not in sys.path
+        if inserted:
+            sys.path.insert(0, root)
+        try:
+            from rust.harness_support.database_turn import require_turn
+
+            require_turn(holder="database state harness")
+        finally:
+            if inserted:
+                sys.path.remove(root)
+    return psycopg.connect(*args, **kwargs)
 
 # (table, column) -> why its value is not reproducible across two runs.
 NONDETERMINISTIC: dict[tuple[str, str], str] = {}
@@ -314,7 +336,7 @@ def _base_hashes(dsn: str) -> dict[str, Counter] | None:
             raise ValueError(f"refusing base database {base!r}: expected pl_cf_mir_*")
         info = psycopg.conninfo.make_conninfo(dsn, dbname=base)
         out, keys, located = {}, {}, {}
-        with psycopg.connect(info, autocommit=True) as conn:
+        with _connect(info, autocommit=True) as conn:
             _BASE_RENDER[base] = conn.execute(_RENDER).fetchone()[0]
             for qualified, body in _load_base(conn, base).items():
                 out[qualified] = Counter(r[2] for r in body["rows"])
@@ -351,7 +373,7 @@ def prior_rows(before: dict, qualified: str, current: list) -> list:
     if not missing:
         return rows
     schema, table = qualified.split(".", 1)
-    with psycopg.connect(_BASE_INFO[base], autocommit=True) as conn:
+    with _connect(_BASE_INFO[base], autocommit=True) as conn:
         select, first = _select_list(conn, schema, table)
         rows += [_plain(list(r)) for r in conn.execute(
             f'SELECT {select} FROM "{schema}"."{table}" WHERE "{first}"::text = ANY(%s)',
@@ -547,9 +569,9 @@ def dump(dsn: str, timeout: float = 60.0) -> dict:
 def _dump_once(dsn: str) -> dict:
     out: dict = {"catalog": {}, "rows": {}}
     base = _base_hashes(dsn)
-    with psycopg.connect(dsn, autocommit=True) as conn:
+    with _connect(dsn, autocommit=True) as conn:
         tables = _tables(conn)
-    with psycopg.connect(dsn) as conn:
+    with _connect(dsn) as conn:
         conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
         conn.read_only = True
         # Neither statement takes the snapshot; the first catalog query does,
