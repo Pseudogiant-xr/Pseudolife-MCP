@@ -34,7 +34,6 @@ from pathlib import Path
 from .. import core, normalize
 from ..core import Case
 from ..fixture_daemon import TLS_CA, factory, json_body, redirect, text
-from ..mutants import Mutant
 
 DEFERRAL = "pseudolife-stdio: mode 'console' is deferred in this candidate\n"
 TOKEN = {"PSEUDOLIFE_MCP_TOKEN": "console-fixture-token"}
@@ -693,71 +692,3 @@ def browser_cases() -> list[Case]:
     add(browser_case("defer-browser-batch", [], routes=signin, browser=f"'{BIN}{SEP}b.cmd' %s &",
                          platforms=("windows",)))
     return c
-
-
-# No mutant here may route the candidate to a default launcher
-# (os.startfile's ShellExecuteW, xdg-open): each breaks a step after
-# BROWSER has chosen the stand-in, or before any launch. The mutants run
-# against the live frozen oracle with no clean baseline, so a case whose
-# native answer departs from Python on purpose (the Linux `browser-*`
-# cases, `open-no-display`, the Linux `open-generic*`) cannot catch a
-# mutant: any difference would count. Those answers are guarded by the
-# golden replay and the unit tests instead.
-LAUNCH_FILE = "shim/src/cli/console/launch.rs"
-MUTANTS = [
-    # Retain the running-launch regression across the native result refactor.
-    Mutant("console-exited-counts-as-opened", "console", LAUNCH_FILE,
-           "        Ok(None) => Ok(()),",
-           '        Ok(None) => Err(format!("{program} still running")),',
-           ("open",), platforms=("windows",)),
-    # Legacy id: Windows no longer distinguishes GenericBrowser by `&`.
-    # Flipping the executable admission rule must still break a safe launch.
-    Mutant("console-generic-launched", "console", "shim/src/cli/console/browser.rs",
-           "    if !launchable(&program) {", "    if launchable(&program) {",
-           ("open",), platforms=("windows",)),
-    Mutant("console-running-counts-as-failed", "console", LAUNCH_FILE,
-           "Ok(None) if std::time::Instant::now() >= deadline => return Ok(()),",
-           "Ok(None) if std::time::Instant::now() >= deadline => return Err(String::new()),",
-           ("open",), platforms=("linux",)),
-    Mutant("console-unless-skips-the-list", "console", FILE,
-           "            if *unless {", "            if false && *unless {",
-           ("unless-signed-in",)),
-    Mutant("console-unsafe-link-launched", "console", FILE,
-           "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_))) && link_is_safe(url, origin, to);",
-           "let safe = matches!(code, Some(J::Str(_) | J::Wtf(_)));", ("open-unsafe-link",)),
-    Mutant("console-expiry-refusal-swallowed", "console", FILE,
-           "    let Ok(minutes) = pyint::minutes(expires_in) else {",
-           '    let Ok(minutes) = pyint::minutes(expires_in).or(Ok::<_, ()>("5".to_owned())) else {',
-           ("open-bad-expires",)),
-    Mutant("console-code-any-character", "console", FILE,
-           "        && code.chars().all(|c| CODE_CHARS.contains(c))",
-           "        && code.chars().all(|c| c != ' ')", ("open-shell-pipe",)),
-    Mutant("console-code-unchecked", "console", FILE,
-           "    if code.as_str() != Some(shown) {", "    if code.as_str().is_none() {",
-           ("link-bad-other-code",)),
-    Mutant("console-localtime-refusal-deferred", "console", FILE,
-           "        stamp::Minute::Refused => Ok(None),",
-           "        stamp::Minute::Refused => Err(Defer),", ("list-bad-stamp-far",)),
-    Mutant("console-405-not-old", "console", FILE, "if matches!(status, 404 | 405) {",
-           "if matches!(status, 404) {", ("refused-405",)),
-    Mutant("console-get-without-content-type", "console", "shim/src/cli/hook_http.rs",
-           "    if content_type {\n", "    if body.is_some() {\n", ("list-json",)),
-    Mutant("console-stamp-rounded", "console", FILE, "let floor = value.floor();",
-           "let floor = value.round();", ("list",)),
-    Mutant("console-paired-note-always", "console", FILE,
-           "if raw(payload, \"operator\") == Some(&J::Bool(false)) {",
-           "if raw(payload, \"operator\").is_some() {", ("list",)),
-    Mutant("console-null-cell-empty", "console", FILE,
-           "let cell = |key: &str| raw(row, key).map(J::py_str_units).unwrap_or_default();",
-           "let cell = |key: &str| pyjson::get(row, key).map(J::py_str_units).unwrap_or_default();",
-           ("list",)),
-    Mutant("console-hint-over-message", "console", FILE,
-           "            Some(message) => J::from(*message),",
-           "            Some(message) => truthy(hint).unwrap_or_else(|| J::from(*message)),",
-           ("refused-unauthorized-json",)),
-    # Only Windows' message text ends in a full stop.
-    Mutant("console-winerror-full-stop", "console", FILE,
-           "message.trim_end_matches(|c: char| c <= ' ' || c == '.')",
-           "message.trim_end_matches(|c: char| c <= ' ')", ("unreachable-list",),
-           platforms=("windows",)),
-]

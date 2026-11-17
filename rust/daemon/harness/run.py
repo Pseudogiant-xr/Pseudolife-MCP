@@ -60,6 +60,7 @@ import candidate_record  # noqa: E402
 import daemons  # noqa: E402
 import dbstate  # noqa: E402
 import pgdisposable  # noqa: E402
+from principal_fixtures import env_auth, prepare_bank, seed_principal  # noqa: E402
 from mcp_wire import send_while_reading  # noqa: E402
 
 # The launcher picks the slice (http for the static shards); w1a by default.
@@ -728,7 +729,7 @@ def gate_cases(auth: tuple[str, str] | None) -> list[dict]:
 
 class Tokens(Scenario):
     """Auth configured: singular token plus a map; two stored principals
-    (one paired, one revoked) written by Python's principal store."""
+    (one paired, one revoked) written as disposable SQL fixtures."""
     name = "tokens"
     seeds_principals = True
 
@@ -739,17 +740,11 @@ class Tokens(Scenario):
     def prepare_template(self, dsn: str) -> None:
         import psycopg
         sys.path.insert(0, str(REPO))
-        from pseudolife_memory import principal_store
-        from pseudolife_memory.principals import secret_sha256
-        from pseudolife_memory.storage.postgres import PostgresStorage
-        PostgresStorage(dsn).close()   # the bank exists before principals are written
+        prepare_bank(dsn)
         with psycopg.connect(dsn, autocommit=True) as conn:
             for name in ("carol", "dave", "alice"):
-                inv = principal_store.create_invite(conn, name, tier="core", board=True,
-                                                    ttl_seconds=3600, replace=False)
-                token = f"stored-{name}-token-w1a"
-                principal_store.redeem(dsn, secret_sha256(inv["code"]), secret_sha256(token))
-            principal_store.revoke(conn, "dave")
+                seed_principal(conn, name, tier="core", token=f"stored-{name}-token-w1a",
+                               revoked=name == "dave")
 
     def cases(self):
         auth = bearer(T_DEFAULT)
@@ -869,7 +864,7 @@ class Pairing(Scenario):
     spec BK4): success and the token working at once, the same-token retry, a
     spent, expired or revoked code, a name the environment maps (refused, its
     code left unspent), a token hash already held (refused, the second code
-    left unspent, then paired). Invites are written by Python's own store on
+    left unspent, then paired). Invites are written as SQL fixtures on
     the template, so both arms redeem the same codes. Live only: the codes and
     hashes are the template's (D6/D11 evidence is the Linux dev box run)."""
     name = "pairing"
@@ -885,16 +880,11 @@ class Pairing(Scenario):
     def prepare_template(self, dsn: str) -> None:
         import psycopg
         sys.path.insert(0, str(REPO))
-        from pseudolife_memory import principal_store
-        from pseudolife_memory.storage.postgres import PostgresStorage
-        PostgresStorage(dsn).close()   # the bank exists before principals are written
+        prepare_bank(dsn)
         with psycopg.connect(dsn, autocommit=True) as conn:
             for name, tier in (("laptop", "core"), ("held", None), ("old", None),
                                ("gone", None), ("alice", None)):
-                options = {"tier": tier} if tier else {}
-                invite = principal_store.create_invite(conn, name, ttl_seconds=3600,
-                                                       replace=False, **options)
-                self.codes[name] = invite["code"]
+                self.codes[name] = seed_principal(conn, name, tier=tier)
             conn.execute("UPDATE principals SET code_expires_at = 1 WHERE principal = 'old'")
             # Revoked with its code still in place (``revoke`` clears the code
             # too, which would make this the unknown-code case): only the
@@ -1101,7 +1091,7 @@ class Reaper(Scenario):
 def assert_disposable(conn) -> None:
     """The server's own name for this database must be a disposable one
     before the harness alters or deletes anything in it."""
-    from pseudolife_memory.storage.schema import assert_disposable_database
+    from rust.harness_support.database_guard import assert_disposable_database
     name = assert_disposable_database(conn)
     if not pg.DISPOSABLE_NAME.fullmatch(name):
         raise RuntimeError(f"refusing to modify non-disposable database {name!r}")
@@ -1200,8 +1190,7 @@ class StampedBank(Scenario):
     def prepare_template(self, dsn: str) -> None:
         import psycopg
         sys.path.insert(0, str(REPO))
-        from pseudolife_memory.storage.postgres import PostgresStorage
-        PostgresStorage(dsn).close()
+        prepare_bank(dsn)
         with psycopg.connect(dsn, autocommit=True) as conn:
             assert_disposable(conn)
             conn.execute("UPDATE meta SET value = '99'::jsonb WHERE key = 'schema_version'")
@@ -1282,8 +1271,7 @@ class JsonFloatTies(Scenario):
 
     def prepare_template(self, dsn):
         import psycopg
-        from pseudolife_memory.storage.postgres import PostgresStorage
-        PostgresStorage(dsn).close()
+        prepare_bank(dsn)
         with psycopg.connect(dsn, autocommit=True) as conn:
             assert_disposable(conn)
             for index, token in enumerate(self.timestamps):
@@ -1484,8 +1472,7 @@ class NullEmbedding(Scenario):
     def prepare_template(self, dsn: str) -> None:
         import psycopg
         sys.path.insert(0, str(REPO))
-        from pseudolife_memory.storage.postgres import PostgresStorage
-        PostgresStorage(dsn).close()
+        prepare_bank(dsn)
         with psycopg.connect(dsn, autocommit=True) as conn:
             assert_disposable(conn)
             conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
@@ -1511,8 +1498,7 @@ class UnconstrainedDims(Scenario):
     def prepare_template(self, dsn: str) -> None:
         import psycopg
         sys.path.insert(0, str(REPO))
-        from pseudolife_memory.storage.postgres import PostgresStorage
-        PostgresStorage(dsn).close()
+        prepare_bank(dsn)
         with psycopg.connect(dsn, autocommit=True) as conn:
             assert_disposable(conn)
             conn.execute("ALTER TABLE entries ALTER COLUMN embedding TYPE vector")
@@ -2071,19 +2057,24 @@ def compare_case(c: dict, py: dict | None, rs: dict, *, golden: bool = False) ->
         return row
     if c.get("refusal_policy") in {"lexical-outside-root", "parent-space-refusal"}:
         sys.path.insert(0, str(REPO))
-        from pseudolife_memory.web.api import CONSOLE_SECURITY_HEADERS
-        headers = {k.decode(): v.decode() for k, v in CONSOLE_SECURITY_HEADERS}
+        headers = {"content-security-policy": "default-src 'self'; script-src 'self'; "
+                   "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+                   "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+                   "frame-ancestors 'none'; form-action 'self'",
+                   "x-frame-options": "DENY", "referrer-policy": "no-referrer",
+                   "x-content-type-options": "nosniff"}
         headers.update({"content-type": "text/plain", "cache-control": "no-store", "content-length": "9"})
         want = {"status": 403, "headers": headers, "bytes": "forbidden"}
         row["substitution"] = c["refusal_policy"]
         row["diffs"] = diff_values(want, rs)
         return row
     if c.get("future_schema_refusal"):
-        from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+        from rust.harness_support.schema import load_plan
+        schema_version = load_plan()[0]["schema_version"]
         body = rs.get("json", {})
         message = body.get("init_refusal", "")
         if rs["status"] != 503 or body.get("status") != "degraded" \
-                or "99" not in message or str(SCHEMA_META_VERSION) not in message \
+                or "99" not in message or str(schema_version) not in message \
                 or "newer than" not in message or "db" in body:
             row["diffs"].append("Rust must refuse future schema 99 before opening storage")
         if py is not None and (py["status"] != 503 or py.get("json", {}).get("status") != "degraded"
@@ -2257,7 +2248,6 @@ def _run_scenario(scn: Scenario, binary: Path, root: Path, mode: str, record: bo
             # A generator timeline runs its next steps before the next case.
             scn.case_in_flight = None
         if not scn.settle and scn.snapshot_settle and not scn.unreachable_database:
-            from pseudolife_memory.principals import env_auth
             mapped, singular = env_auth(scn.env)
             # Hosted Windows run 38226818257 matched 22/22 pair-budget
             # responses but compared initialized/empty bank catalogs.
@@ -2441,17 +2431,17 @@ def load_golden(name: str) -> dict:
 def adjust_loaded_golden(name: str, data: dict) -> dict:
     """The host-dependent parts of a golden, recomputed on this host for replay."""
     # The replay process and its daemon share the host's cgroup/proc view.
-    # Recompute only this host-dependent shape from the Python oracle. Raw
+    # Recompute only this host-dependent shape from independent file probes. Raw
     # candidate values still pass normalize_memory; source, optional keys,
-    # nullability and scalar kinds must match that oracle on this host.
+    # nullability and scalar kinds must match the available host telemetry.
     if name in {"tokens", "tokenless"}:
-        from pseudolife_memory.utils.memory_headroom import read_memory_headroom
+        from host_memory import memory_shape
         for c, response in zip(SCENARIOS[name]().cases(), data["responses"], strict=True):
             body = response.get("json", {})
             if urllib.parse.unquote(c["path"]) == "/health" and isinstance(body, dict) \
                     and isinstance(body.get("memory"), dict) \
                     and body["memory"].get("source") in {"cgroup", "process", "unavailable"}:
-                body["memory"] = normalize_memory(read_memory_headroom())
+                body["memory"] = memory_shape()
     if name.startswith("static-build-"):
         for c, response in zip(StaticBuild().cases(), data["responses"], strict=True):
             platform_static_type(c, response)
@@ -2475,7 +2465,7 @@ def static_contract_type(path: str, *, version: tuple[int, ...] | None = None) -
     one). Platform tables override builtins in both versions, so on 3.12 or
     later this is exactly the interpreter's own answer."""
     sys.path.insert(0, str(REPO))
-    from pseudolife_memory.web.api import mimetypes
+    import mimetypes
     kind = mimetypes.guess_type(path)[0]
     if kind is None and (version or tuple(sys.version_info)) < (3, 12):
         kind = PY312_ADDED_BUILTIN_TYPES.get(os.path.splitext(urllib.parse.unquote(path))[1].lower())

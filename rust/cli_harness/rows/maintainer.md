@@ -104,7 +104,8 @@ timeout and public search path (`_bank`, maintainer_cli.py:58-80).
   reads the FATAL and prints `AdminShutdown`. Rule
   `maintainer-terminated-class` rewrites only the oracle arm's exact
   `OperationalError` line, at exit 2, in this case; the native arm is not
-  rewritten (mutant `maint-ending-error-ignored` stays caught).
+  rewritten. The `maint-ending-error-ignored` source-mutant check was retired
+  on 17 November 2026.
 
 - A lost connection with no server error (I/O failure, no FATAL received)
   prints `OperationalError`, psycopg's class there; not run by the harness.

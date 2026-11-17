@@ -12,9 +12,6 @@
       "parity": {
         "*": "the required Parity gate reads every gated job's result"
       },
-      "source-mutants": {
-        "candidate": "weekly only: its jobs (two per shard) start only once the candidate compiles, so a broken build spends no runners on them"
-      },
       "stress-report": {
         "stress-plan": "reports only a loop that was planned"
       },

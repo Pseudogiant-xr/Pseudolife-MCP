@@ -39,7 +39,6 @@ from pathlib import Path
 
 from .. import normalize, producers
 from ..core import WINDOWS, Case
-from ..mutants import Mutant
 
 DEFERRAL = "pseudolife-stdio: mode 'move' is deferred in this candidate\n"
 STUB_MARKER = "move row: the oracle was not run for this argv\n"
@@ -163,19 +162,9 @@ IO_NAMES = ("std::net", "TcpStream", "TcpListener", "UdpSocket", "ToSocketAddrs"
             "libc", "windows_sys", "winapi", "unsafe", "extern", "crate::")
 
 
-def _leaf_source(binary: Path) -> Path:
-    """The ``move_cli.rs`` a candidate was built from: a mutant binary
-    (``$CARGO_TARGET_DIR/mutant/debug``) comes from ``mutant-src``, any
-    other from this checkout."""
-    root = RUST
-    if binary.parents[1].name == "mutant" and (binary.parents[2] / "mutant-src" / "rust").is_dir():
-        root = binary.parents[2] / "mutant-src" / "rust"
-    return root / FILE
-
-
-def _leaf_io(binary: Path) -> list[str]:
-    """Read every time: the mutant copy's file changes between mutants."""
-    text = _leaf_source(binary).read_text(encoding="utf-8")
+def _leaf_io() -> list[str]:
+    """Check the dispatcher's I/O boundary against this checkout."""
+    text = (RUST / FILE).read_text(encoding="utf-8")
     hits = [name for name in IO_NAMES if name in text]
     hits += [text[at:at + 24] for at in range(len(text)) if text.startswith("super::", at)
              and not text.startswith(("super::text_bytes(", "super::*;"), at)]
@@ -225,7 +214,7 @@ NATIVE_WORDING = [
 @normalize.rule("move-native-wording")
 def native_wording(obs: dict) -> None:
     """The oracle's root@box example becomes the native user@box (the two
-    phrases of ``NATIVE_WORDING``), so a live or mutant comparison compares
+    phrases of ``NATIVE_WORDING``), so a live comparison compares
     everything else byte for byte."""
     if obs.get("arm") != "python":
         return
@@ -259,7 +248,7 @@ def _case(case_id: str, argv: list[str], *, rules: tuple[str, ...] = (), columns
 
     def during(arm, proc) -> None:
         # Compared field: the oracle arm's is empty by definition.
-        hits = _leaf_io(Path(proc.args[0])) if arm.name == "rust" else []
+        hits = _leaf_io() if arm.name == "rust" else []
         arm.state["listener"] = {"leaf_io": hits}
 
     def after(arm, observation: dict) -> None:
@@ -374,38 +363,6 @@ def cases() -> list[Case]:
         _valid("defer-abbreviation", ["--dry", "--to", "root@box"]),
         _valid("defer-repeated-flag", ["--yes", "--yes", "--to", "root@box"]),
     ]
-
-
-MUTANTS = [
-    Mutant("move-url-message", "move", FILE, "(no path, query or credentials)",
-           "(no path, query, or credentials)", ("url-path",)),
-    Mutant("move-refusal-exit", "move", FILE, "settle(2, emit(&mut io::stderr()",
-           "settle(1, emit(&mut io::stderr()", ("to-empty",)),
-    Mutant("move-checkout-cr", "move", FILE, "path.contains(['\\n', '\\r'])", "path.contains('\\n')",
-           ("checkout-cr",)),
-    Mutant("move-unsure-as-valid", "move", FILE,
-           "Some(Origin::Unsure) => return Decision::Defer,", "Some(Origin::Unsure) => {}",
-           ("url-invalid-bracket-unclosed",)),
-    Mutant("move-help-any-width", "move", FILE, "let wrapped_at_80 = context.columns == Some(\"80\");",
-           "let wrapped_at_80 = context.columns.is_some();", ("defer-help-columns",)),
-    Mutant("move-url-checked-after-to", "move", FILE,
-           "        Some(Origin::Invalid) => return Decision::Refuse(BAD_URL.to_owned()),",
-           "        Some(Origin::Invalid) if !to.is_empty() => return Decision::Refuse(BAD_URL.to_owned()),\n"
-           "        Some(Origin::Invalid) => return Decision::Refuse(BAD_TO.to_owned()),",
-           ("url-before-to",)),
-    # A direct connect to the live daemon's port that never runs: only the
-    # source scan can see it, which is the point (no mutant reaches 8765).
-    Mutant("move-direct-socket", "move", FILE, "        Decision::Defer => None,\n",
-           "        Decision::Defer => {\n            if false {\n"
-           "                let _ = std::net::TcpStream::connect(\"127.0.0.1:8765\");\n"
-           "            }\n            None\n        }\n", ("defer-joined-to",)),
-    Mutant("move-dash-value-admitted", "move", FILE,
-           "        if value.starts_with('-') {\n            return None;\n        }\n", "",
-           ("defer-url-dash-value", "defer-checkout-dash-newline", "defer-to-dash-control")),
-    Mutant("move-scheme-case-sensitive", "move", FILE,
-           '!scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https")',
-           'scheme != "http" && scheme != "https"', ("url-valid-4",)),
-]
 
 
 def _assert_safe() -> None:

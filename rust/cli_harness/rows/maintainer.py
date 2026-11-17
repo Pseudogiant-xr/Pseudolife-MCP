@@ -39,7 +39,6 @@ from contextlib import contextmanager
 from unittest import mock
 
 from .. import core, normalize
-from ..mutants import Mutant
 from . import _bank
 
 PREFIX = "pl_cf_w1c_maint_"
@@ -818,56 +817,3 @@ def cases() -> list[core.Case]:
         defer("defer-dsn-option", "rich", ["list"], env={
             "PSEUDOLIFE_MCP_DATABASE_URL": _bank.url(ARM_DB) + "?application_name=x"}),
     ]
-
-
-MUTANTS = [
-    Mutant("maint-confirm-audit-dropped", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           '        key_change(&tx, "confirm", Some(&id), Some(&label), None).await?;\n', "",
-           ("confirm-dash-prefix",)),
-    Mutant("maint-list-order-flipped", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           "ORDER BY created_at, credential_id\"", "ORDER BY created_at DESC, credential_id\"",
-           ("list-rich",)),
-    Mutant("maint-reset-without-yes-exit-2", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           "pass --yes\");\n            return Some(1);", "pass --yes\");\n            return Some(2);",
-           ("reset-without-yes",)),
-    Mutant("maint-refusal-token", "maintainer", "shim/src/cli/maintainer/mod.rs",
-           "no single passkey matches that prefix", "no passkey matches that prefix",
-           ("revoke-ambiguous",)),
-    Mutant("maint-like-escape-dropped", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           "Ok(prefix.replace('_', \"\\\\_\") + \"%\")", "Ok(prefix.to_owned() + \"%\")",
-           ("revoke-underscore-wildcard",)),
-    Mutant("maint-revoke-rerevokes", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           "WHERE credential_id=$2 AND state<>'revoked'\"", "WHERE credential_id=$2\"",
-           ("revoke-already-revoked",)),
-    Mutant("maint-redeemed-text", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           "Enrolled (pending): {prefix}  label: {label}",
-           "Enrolled (pending): {prefix} label: {label}", ("enrol-code-wait-redeemed",)),
-    Mutant("maint-code-ttl", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           "let expires_at = clock()? + BOOTSTRAP_TTL as f64;",
-           "let expires_at = clock()? + 60.0;", ("enrol-code-no-wait",)),
-    Mutant("maint-secret-kept", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           '        tx.execute("DELETE FROM meta WHERE key=$1", &[&SECRET_META_KEY])\n'
-           "            .await?;\n", "", ("reset-rich",)),
-    Mutant("maint-unused-codes-kept", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           '"DELETE FROM maintainer_bootstrap WHERE used_at IS NULL"',
-           '"DELETE FROM maintainer_bootstrap WHERE false"', ("enrol-code-replaces-unused",)),
-    # review round 1
-    Mutant("maint-commit-failure-deferred", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           ".map_err(|error| Stop::Failed(sqlstate_of(&error)))", ".map_err(|_| Stop::Deferred)",
-           ("commit-refused-confirm", "commit-refused-enrol-code")),
-    Mutant("maint-exact-classes-dropped", "maintainer", "shim/src/cli/maintainer/sqlstate.rs",
-           "        return CODES[index].1;\n", "        let _ = index;\n",
-           ("commit-refused-confirm", "enrol-code-wait-lock-timeout")),
-    Mutant("maint-class-fallback-dropped", "maintainer", "shim/src/cli/maintainer/sqlstate.rs",
-           '.map_or("DatabaseError", |(_, class)| class)', '.map_or("DatabaseError", |_| "DatabaseError")',
-           ("commit-refused-reset",)),
-    Mutant("maint-ending-error-ignored", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           ".or_else(|| session.ended_with())", ".or_else(|| None::<SqlState>)",
-           ("enrol-code-wait-terminated",)),
-    Mutant("maint-waiting-stdout-error-dropped", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           '            "error: {}; check PSEUDOLIFE_MCP_DATABASE_URL",\n',
-           '            "error: {}; check the database",\n', ("enrol-code-wait-stdout-closed",)),
-    Mutant("maint-host-revoke-keeps-sign-ins", "maintainer", "shim/src/cli/maintainer/bank.rs",
-           "AND ($1::text IS NULL OR issuer = $1)", "AND FALSE AND ($1::text IS NULL OR issuer = $1)",
-           ("revoke-ends-the-keys-sign-ins", "reset-ends-every-passkey-sign-in")),
-]

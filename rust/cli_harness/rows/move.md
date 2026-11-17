@@ -124,7 +124,7 @@ stderr-on-`/dev/full` arm.
 The `--to` help and refusal give `user@box` as the example target, where
 the frozen oracle says `root@box`. Every case applies `move-native-wording`,
 which rewrites those two oracle phrases (and only those, so an argv that
-passes `root@box` stays compared) before a live or mutant comparison.
+passes `root@box` stays compared) before a live comparison.
 
 ## Safety of the harness
 
@@ -147,9 +147,10 @@ raw-OS names, and for any crate module but the dispatcher's
 `super::text_bytes` (the native module is a separate file, reached
 through the dispatcher): by `the_leaf_source_reaches_no_io_beyond_its_answer`
 in the contract test, and by every harness case on the source the
-candidate binary was built from (the mutant copy under `--mutants`). The
-`move-direct-socket` mutant inserts such a connect behind `if false`, so it
-never runs and only the scan can catch it.
+candidate is tested against in this checkout. The former
+`move-direct-socket` mutant inserted such a connect behind `if false`, so
+only the scan could catch it. Source mutants were retired on 17 November
+2026; the contract test and harness source scan remain.
 
 ## Hosted CI and goldens
 

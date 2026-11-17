@@ -1191,7 +1191,8 @@ def test_open_refuses_without_dropping_when_annotations_cannot_be_read(world, ca
 # cancelled after the `Rust / <os>` jobs started, and the `Parity / <os>` gate,
 # which runs under `always()`, still ran and failed only because the jobs it
 # needs were cancelled (job 123859514294). The run's jobs, as the Actions API
-# lists them: (id, name, conclusion).
+# lists them: (id, name, conclusion), omitting the retired source-mutant job
+# so the fixture still describes the current workflow's gate dependencies.
 RUN, ATTEMPT, HEAD = "7", "1", "3dda95a1"
 _RUN_1059 = [
     ("500", "Scope", "success"),
@@ -1200,7 +1201,6 @@ _RUN_1059 = [
     ("503", "Rust daemon / disposable image", "cancelled"),
     ("504", "Candidate / ${{ matrix.os }}", "skipped"),
     ("505", "Parity checks / ${{ matrix.os }} / ${{ matrix.suite }}", "skipped"),
-    ("506", "Source mutants / ${{ matrix.os }} / ${{ matrix.shard }}", "skipped"),
     ("507", "Stress report", "skipped"),
     ("508", "Parity / windows-latest", "failure"),
     ("509", "Parity / ubuntu-latest", "failure"),
