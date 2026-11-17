@@ -1342,17 +1342,29 @@ pub(crate) fn create_owner_only(path: &Path) -> io::Result<File> {
 /// A file's DACL as SDDL, for tests that pin what a creation produced.
 #[cfg(test)]
 pub(crate) fn dacl_sddl(file: &File) -> String {
+    security_sddl(file, Security::DACL_SECURITY_INFORMATION)
+}
+
+/// A file's owner as SDDL, for creation-policy tests.
+#[cfg(test)]
+pub(crate) fn owner_sddl(file: &File) -> String {
+    security_sddl(file, Security::OWNER_SECURITY_INFORMATION)
+}
+
+#[cfg(test)]
+fn security_sddl(file: &File, information: u32) -> String {
     use windows_sys::Win32::Security::Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW;
     // SAFETY: the handle is live; both descriptors are freed by their guards
     // after the string is copied out.
     unsafe {
-        let (mut dacl, mut descriptor) = (ptr::null_mut(), ptr::null_mut());
+        let (mut owner, mut dacl, mut descriptor) =
+            (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
         assert_eq!(
             GetSecurityInfo(
                 file.as_raw_handle() as HANDLE,
                 SE_FILE_OBJECT,
-                Security::DACL_SECURITY_INFORMATION,
-                ptr::null_mut(),
+                information,
+                &mut owner,
                 ptr::null_mut(),
                 &mut dacl,
                 ptr::null_mut(),
@@ -1366,7 +1378,7 @@ pub(crate) fn dacl_sddl(file: &File) -> String {
             ConvertSecurityDescriptorToStringSecurityDescriptorW(
                 descriptor,
                 1,
-                Security::DACL_SECURITY_INFORMATION,
+                information,
                 &mut text,
                 &mut length,
             ) != 0

@@ -50,6 +50,15 @@ impl Scratch {
     }
 
     fn write(&mut self, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        self.write_with(name, bytes, || Ok(()))
+    }
+
+    fn write_with(
+        &mut self,
+        name: &str,
+        bytes: &[u8],
+        before_open: impl FnOnce() -> std::io::Result<()>,
+    ) -> Result<PathBuf, String> {
         use std::io::Write as _;
         #[cfg(windows)]
         let _directory = {
@@ -84,6 +93,7 @@ impl Scratch {
                 windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
             );
         }
+        before_open().map_err(|e| format!("registration scratch control failed: {e}"))?;
         let mut file = options.open(&path).map_err(|e| {
             format!("cannot create new registration file {name}: {e}; rerun install-autostart")
         })?;
@@ -91,6 +101,16 @@ impl Scratch {
             .map_err(|e| format!("cannot write registration file {name}: {e}"))?;
         Ok(path)
     }
+}
+
+fn registration_data(mut fields: serde_json::Value) -> Result<Vec<u8>, String> {
+    fields.as_object_mut().expect("registration object").insert(
+        "PowerShell".into(),
+        crate::windows_powershell::executable()?
+            .replace('/', "\\")
+            .into(),
+    );
+    Ok(serde_json::to_vec(&fields).expect("registration JSON"))
 }
 
 impl Drop for Scratch {
@@ -330,7 +350,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     }
     let status = if cfg!(windows) {
         let script_bytes = include_bytes!("autostart.ps1");
-        let data_bytes = serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"PowerShell":crate::windows_powershell::executable()?.replace('/', "\\"),"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON");
+        let data_bytes = registration_data(json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args}))?;
         let script = scratch.write("register.ps1", script_bytes)?;
         let data = scratch.write("registration.json", &data_bytes)?;
         windows_registration_command(&script, &data, script_bytes, &data_bytes)?.status()
@@ -441,7 +461,8 @@ mod tests {
             .output()
             .unwrap();
         assert!(
-            output.status.success(),
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
             "{} {}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
@@ -516,6 +537,144 @@ mod tests {
     }
 
     #[test]
+    fn held_registration_directory_refuses_rename() {
+        let holder = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-held-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let scratch = Scratch::create(holder.path.join("registration")).unwrap();
+        let result = fs::rename(&scratch.path, holder.path.join("moved"));
+        assert!(result.is_err(), "a held registration directory was renamed");
+        assert_eq!(
+            result.unwrap_err().raw_os_error(),
+            Some(32),
+            "expected a sharing violation"
+        );
+        assert!(scratch.path.is_dir());
+    }
+
+    #[test]
+    fn held_registration_directory_prevents_write_redirection() {
+        let holder = Scratch::create(
+            std::env::temp_dir().join(format!("autostart-held-write-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let mut scratch = Scratch::create(holder.path.join("registration")).unwrap();
+        let path = scratch.path.clone();
+        let moved = holder.path.join("moved");
+        let outside = holder.path.join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"unchanged").unwrap();
+        let mut rename_error = None;
+        let written = scratch
+            .write_with("register.ps1", b"fixture script", || {
+                match fs::rename(&path, &moved) {
+                    Ok(()) => crate::credentials::windows_security::make_junction_for_test(
+                        &path, &outside,
+                    )?,
+                    Err(error) => rename_error = Some(error),
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            rename_error.as_ref().and_then(std::io::Error::raw_os_error),
+            Some(32),
+            "the held folder could be swapped before file creation"
+        );
+        assert!(
+            !outside.join("register.ps1").exists(),
+            "registration file was redirected"
+        );
+        assert_eq!(fs::read(written).unwrap(), b"fixture script");
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"unchanged");
+    }
+
+    #[test]
+    fn rust_registration_data_drives_the_action_and_os_fallback() {
+        let embedded = include_str!("autostart.ps1");
+        let header = &embedded[..embedded.find("$native =").unwrap()];
+        let functions = &embedded[embedded.find("function Get-NativeTaskCode(").unwrap()
+            ..embedded.find("function Get-RegisteredInvocation(").unwrap()];
+        let action = &embedded[embedded.find("function Quote-Argument(").unwrap()
+            ..embedded
+                .find("$user = [Security.Principal.WindowsIdentity]")
+                .unwrap()];
+        let source = format!(
+            "{header}\n{functions}\n$native=[string]$c.Native;$ownerExe=[string]$c.OwnerExe\nfunction New-ScheduledTaskAction {{ param($Execute,$Argument) @{{Execute=$Execute;Arguments=$Argument}} }}\n$originalRoot=$env:SystemRoot;$env:SystemRoot='C:/fixture-windows'\n{action}\n$env:SystemRoot=$originalRoot\n[Console]::Out.WriteLine($action.Execute)\n[Console]::Out.WriteLine($action.Arguments)"
+        );
+        let producer = registration_data(json!({
+            "Native":"C:\\fixture\\launcher.exe", "OwnerExe":"C:\\fixture\\runtime.exe",
+            "ServeArgs":["extractor-shim","claude","--env-file","C:\\fixture\\settings.env"]
+        }))
+        .unwrap();
+        let fields: serde_json::Value = serde_json::from_slice(&producer).unwrap();
+        let resolved = fields["PowerShell"]
+            .as_str()
+            .expect("Rust registration data must name PowerShell");
+        let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        assert_eq!(resolved, expected.to_str().unwrap());
+        assert!(
+            !resolved.contains('/'),
+            "registered action must retain Windows separators"
+        );
+        for case in ["producer", "provided value", "fallback"] {
+            let mut value = fields.clone();
+            if case == "provided value" {
+                value["PowerShell"] = "C:\\fixture-action\\powershell.exe".into();
+            }
+            if case == "fallback" {
+                value.as_object_mut().unwrap().remove("PowerShell");
+            }
+            let bytes = if case == "producer" {
+                producer.clone()
+            } else {
+                serde_json::to_vec(&value).unwrap()
+            };
+            let mut scratch = Scratch::create(
+                std::env::temp_dir()
+                    .join(format!("autostart-action-data-{}", uuid::Uuid::new_v4())),
+            )
+            .unwrap();
+            let script = scratch.write("register.ps1", source.as_bytes()).unwrap();
+            let data = scratch.write("registration.json", &bytes).unwrap();
+            let output = windows_registration_command(&script, &data, source.as_bytes(), &bytes)
+                .unwrap()
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{case}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut lines = stdout.lines();
+            let execute = lines.next().unwrap();
+            if case == "fallback" {
+                assert!(
+                    execute.eq_ignore_ascii_case(expected.to_str().unwrap()),
+                    "{execute}"
+                );
+            } else {
+                assert_eq!(execute, value["PowerShell"].as_str().unwrap());
+            }
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .starts_with("-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ")
+            );
+            assert!(lines.next().is_none());
+        }
+    }
+
+    #[test]
     fn registration_scratch_removes_its_own_folder() {
         let mut scratch = Scratch::create(
             std::env::temp_dir().join(format!("autostart-cleanup-{}", uuid::Uuid::new_v4())),
@@ -544,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn elevated_registration_scratch_has_a_protected_admin_dacl() {
+    fn registration_scratch_has_admin_acl_and_owner_when_elevated() {
         use std::os::windows::fs::OpenOptionsExt;
         use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, READ_CONTROL};
         let output = Command::new(crate::windows_powershell::executable().unwrap())
@@ -565,6 +724,11 @@ mod tests {
             .unwrap();
         let dacl = crate::credentials::windows_security::dacl_sddl(&directory);
         if elevated {
+            let owner = crate::credentials::windows_security::owner_sddl(&directory);
+            assert!(
+                matches!(owner.as_str(), "O:BA" | "O:SY"),
+                "scratch owner is not Administrators or SYSTEM: {owner}"
+            );
             assert!(
                 dacl.starts_with("D:P"),
                 "scratch DACL is not protected: {dacl}"
@@ -623,7 +787,7 @@ mod tests {
             ("cleanup", registration_scratch_removes_its_own_folder),
             (
                 "protected folder",
-                elevated_registration_scratch_has_a_protected_admin_dacl,
+                registration_scratch_has_admin_acl_and_owner_when_elevated,
             ),
         ] {
             eprintln!("registration control: {name}");
