@@ -484,6 +484,15 @@ mod tests {
     }
 
     #[test]
+    fn main_help_abbreviation_has_only_its_spelling_repair() {
+        let Parsed::Error(None, message) = run(&["--he"]) else {
+            panic!("usage expected")
+        };
+        assert!(message.contains("use --help in full"));
+        assert!(!message.contains("after") && !message.contains("follow"));
+    }
+
+    #[test]
     fn help_with_an_explicit_value_names_the_flag_error() {
         for argv in [
             vec!["--help=1"],
