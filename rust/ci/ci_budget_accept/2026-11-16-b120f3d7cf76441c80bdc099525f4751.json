@@ -1,8 +1,0 @@
-{
-  "schema": 1,
-  "workflow": "rust.yml",
-  "job": "parity-checks",
-  "before": "106263c781ce47c4",
-  "fingerprint": "6e9165d4848e3386",
-  "reason": "Adds native pairing regressions to the existing PostgreSQL harness step with no job, service, dependency or build added. All 52 cases took 11.59 seconds on the Linux dev box. This initial cost acceptance will be replaced by measurements from this PR hosted run before readiness."
-}
