@@ -178,7 +178,9 @@ must have git, PowerShell 7 and uv. The machine's private
 `~/.pseudolife-mcp/rust-harness-services.ps1` defines `Start-HarnessServices`
 (start and prove its test PostgreSQL and Linux Docker engine; set the test
 login/environment) and `Stop-HarnessServices` (clean up even after partial
-startup). The controller holds the suite and database locks through cleanup.
+startup). The controller takes the database turn before the suite lock, matching
+a wrapped worker command whose pytest child takes the suite lock during startup.
+It holds both through cleanup and releases them in reverse order.
 It keeps its own `<repo>.rust-harness` worktree, `.rust-harness-venv`, and
 clone lock beside that configured clone, and refuses under 8 GB free there.
 

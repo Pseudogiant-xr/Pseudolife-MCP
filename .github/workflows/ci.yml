@@ -831,6 +831,7 @@ jobs:
           tests/test_integrate_script.py::test_database_lock_wrapper_preserves_exit_and_releases
           tests/test_integrate_script.py::test_database_lock_reclaims_only_proven_stale_identity
           tests/test_integrate_script.py::test_harness_database_lock_covers_services_and_releases_after_failure
+          tests/test_integrate_script.py::test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free
           tests/test_integrate_script.py::test_the_harness_runs_on_the_dev_machine_and_open_checks_its_result
           tests/test_integrate_script.py::test_shim_gate_records_only_the_remote_verdict
           tests/test_integrate_script.py::test_a_drive_under_the_floor_is_not_run_never_a_red_batch

@@ -120,7 +120,9 @@ $failure = $null
 $started = $false
 try {
     do {
-        # One order everywhere: machine suite, machine database, clone.
+        # A worker wrapper holds the database turn before its pytest child
+        # takes the suite lock. Match that order so neither waits on the other.
+        $databaseHold = Enter-DevDatabaseLock -Path $DatabaseLockPath -Holder "batch harness $Head" -WaitSeconds (Remaining-Wait)
         $locks = if ($env:PSEUDOLIFE_SUITE_LOCK_DIR) { $env:PSEUDOLIFE_SUITE_LOCK_DIR } else { Join-Path $HOME '.pseudolife-mcp/locks' }
         $null = [IO.Directory]::CreateDirectory($locks)
         $suitePath = Join-Path $locks 'full-suite.lock'
@@ -144,7 +146,6 @@ try {
                 Start-Sleep -Milliseconds 200
             }
         }
-        $databaseHold = Enter-DevDatabaseLock -Path $DatabaseLockPath -Holder "batch harness $Head" -WaitSeconds (Remaining-Wait)
         # The clone lock uses the same holder metadata and stale-identity rules.
         $lock = Enter-DevDatabaseLock -Path $lockPath -Holder "batch harness clone $Head" -WaitSeconds (Remaining-Wait)
         $free = (Get-FreeBytes (Split-Path -Parent $Repo)) / 1GB
@@ -229,8 +230,8 @@ try {
         Remove-Item -LiteralPath $bundle -Force -ErrorAction SilentlyContinue
     }
     Exit-DevDatabaseLock $lock
-    Exit-DevDatabaseLock $databaseHold
     if ($suiteHold) { $suiteHold.Dispose() }
+    Exit-DevDatabaseLock $databaseHold
 }
 if ($null -ne $failure) { Stop-Run $failure }
 [Console]::Error.WriteLine("$tag pytest exit $verdict")

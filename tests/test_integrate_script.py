@@ -3630,6 +3630,58 @@ def test_harness_database_lock_covers_services_and_releases_after_failure(harnes
 
 
 @needs_pwsh
+def test_harness_waiting_for_worker_database_turn_leaves_suite_lock_free(harness_far, tmp_path):
+    import time
+
+    ready, release = tmp_path / "worker-ready", tmp_path / "worker-release"
+    worker_script = tmp_path / "worker.py"
+    worker_script.write_text(
+        "from pathlib import Path\nimport time\n"
+        f"Path({str(ready)!r}).touch()\n"
+        f"while not Path({str(release)!r}).exists(): time.sleep(.05)\n",
+        encoding="utf-8")
+    lock = tmp_path / "own-database.lock"
+    head, ref, data = harness_far.batch()
+    command = [_PWSH, "-NoProfile", "-NonInteractive", "-File",
+               str(ROOT / "ops/rust-harness-remote.ps1"), "-Repo", str(harness_far.repo),
+               "-Base", harness_far.base, "-Head", head, "-Ref", ref,
+               "-ServicesHook", str(harness_far.hook), "-DatabaseLockPath", str(lock),
+               "-LockWaitSeconds", "60", "-PytestArgs", "gate_tests"]
+    gate = None
+    output = tmp_path / "gate.log"
+    with (tmp_path / "worker.log").open("w", encoding="utf-8") as worker_log, output.open("w", encoding="utf-8") as gate_log:
+        worker = subprocess.Popen(_lock_command(lock, sys.executable, str(worker_script)),
+                                  stdout=worker_log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 30
+            while not ready.exists() and worker.poll() is None and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert ready.exists(), (tmp_path / "worker.log").read_text(encoding="utf-8")
+            gate = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=gate_log,
+                                    stderr=subprocess.STDOUT, text=True)
+            gate.stdin.write(data)
+            gate.stdin.close()
+            deadline = time.monotonic() + 30
+            while "database lock: waiting" not in output.read_text(encoding="utf-8") and gate.poll() is None and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert "database lock: waiting" in output.read_text(encoding="utf-8")
+            # A wrapped full suite reaches this lock after taking its database
+            # turn. The queued harness must not hold it while waiting on us.
+            _hold_suite_lock(harness_far.locks / "full-suite.lock").close()
+            release.touch()
+            assert worker.wait(timeout=30) == 0
+            assert gate.wait(timeout=180) == 0, output.read_text(encoding="utf-8")
+            assert harness_far.hook_calls() == ["start", "stop"]
+        finally:
+            release.touch()
+            if worker.poll() is None:
+                worker.wait(timeout=30)
+            if gate is not None and gate.poll() is None:
+                gate.kill()  # the owned Popen handle, never a process-name search
+                gate.wait(timeout=30)
+
+
+@needs_pwsh
 def test_database_lock_excludes_another_worker_and_names_holder(tmp_path):
     import time
     lock = tmp_path / "own-database.lock"
