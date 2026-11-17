@@ -141,7 +141,8 @@ def test_the_interactive_task_action_keeps_its_exact_bytes(planted_root: str | N
     function = text[text.index("function Get-NativeTaskCode("):text.index("function Get-RegisteredInvocation(")]
     action = text[text.index("function Quote-Argument("):text.index("$user = [Security.Principal.WindowsIdentity]")]
     system_root = os.environ.get("SystemRoot", "/fixture/windows")
-    powershell = str(Path(system_root) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+    powershell = (str(Path(system_root) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+                  if os.name == "nt" else "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
     script = (function + "\n" + f"$env:SystemRoot = '{planted_root or system_root}'\n" +
               "$native = 'C:\\fixture dir\\launcher.exe'\n"
               "$ownerExe = 'C:\\fixture dir\\runtime.exe'\n"
@@ -168,7 +169,7 @@ def test_the_interactive_task_action_keeps_its_exact_bytes(planted_root: str | N
         encoded = arguments.rsplit(" ", 1)[1]
         # The here-string uses the source file's line endings on each host.
         assert base64.b64decode(encoded).decode("utf-16-le").replace("\r\n", "\n") == expected
-        assert result["Execute"] == str(Path(system_root) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        assert result["Execute"] == powershell
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows final path APIs")

@@ -133,12 +133,10 @@ fn user_environment(name: &str) -> Option<String> {
         let script = format!(
             "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); [Environment]::GetEnvironmentVariable('{name}','User') | ConvertTo-Json -Compress"
         );
-        let shell = std::env::var_os("SystemRoot")
-            .map(PathBuf::from)?
-            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let shell = crate::windows_powershell::executable().ok()?;
         let (code, out) = seams::run_cli(
             &[
-                shell.to_str()?.into(),
+                shell,
                 "-NoLogo".into(),
                 "-NoProfile".into(),
                 "-NonInteractive".into(),
@@ -514,12 +512,10 @@ fn windows_script_argv(path: &std::path::Path, digest: &str) -> Result<Vec<Strin
 /// The bootstrap [`windows_script_argv`] encodes: read the file once, check
 /// its hash, run those same bytes.
 fn windows_script_bootstrap(path: &std::path::Path, digest: &str) -> Result<String> {
-    let path = path
-        .to_str()
-        .ok_or_else(|| UpdateError::usage("the temporary scheduler script path must be UTF-8"))?;
+    let path = crate::windows_powershell::path_expression(path).map_err(UpdateError::usage)?;
     Ok(format!(
         "$b=[IO.File]::ReadAllBytes({});$s=[Security.Cryptography.SHA256]::Create();$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{digest}'){{[Console]::Error.WriteLine('the scheduler script changed after it was written; nothing was run');exit {SCRIPT_CHANGED}}};try{{. ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b)))}}catch{{[Console]::Out.WriteLine(($_.Exception.Message -replace '\\s+',' ').Trim());exit 1}}",
-        powershell_literal(path)?
+        path
     ))
 }
 
@@ -1130,7 +1126,15 @@ Connection: close
         // UTF-16 base64 of the bootstrap stays far below the limit.
         assert!(bootstrap.len() * 2 * 4 / 3 < 2000);
         assert!(task_lock_functions().len() > 4000);
-        assert!(bootstrap.contains("ReadAllBytes('C:/temp/pseudolife-schedule-x.ps1')"));
+        assert!(
+            bootstrap.contains(&format!(
+                "ReadAllBytes({})",
+                crate::windows_powershell::path_expression(std::path::Path::new(
+                    "C:/temp/pseudolife-schedule-x.ps1"
+                ))
+                .unwrap()
+            ))
+        );
         let check = bootstrap.find(&format!("if($h -ne '{digest}')")).unwrap();
         assert!(check < bootstrap.find("[scriptblock]::Create").unwrap());
         assert!(bootstrap.contains(&format!("exit {SCRIPT_CHANGED}")));

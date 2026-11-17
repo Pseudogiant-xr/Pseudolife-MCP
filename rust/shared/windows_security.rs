@@ -32,6 +32,204 @@ use windows_sys::Win32::{
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
 
+/// The Windows directory reported by the operating system, never by the
+/// process environment. Only an absolute path on a local drive is admitted.
+pub(crate) fn system_windows_directory() -> io::Result<std::path::PathBuf> {
+    use std::{
+        os::windows::ffi::OsStringExt,
+        path::{Component, Prefix},
+    };
+    use windows_sys::Win32::{
+        Storage::FileSystem::GetDriveTypeW,
+        System::SystemInformation::GetSystemWindowsDirectoryW,
+        System::WindowsProgramming::{DRIVE_CDROM, DRIVE_FIXED, DRIVE_RAMDISK, DRIVE_REMOVABLE},
+    };
+    let mut buffer = vec![0u16; 260];
+    let length = loop {
+        // SAFETY: the writable UTF-16 buffer has exactly the advertised
+        // capacity; the API's returned length is checked before reading it.
+        let length = unsafe { GetSystemWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) }
+            as usize;
+        if length == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if length < buffer.len() {
+            break length;
+        }
+        if length >= 32768 {
+            return Err(io::Error::other(
+                "Windows directory exceeds the supported path length",
+            ));
+        }
+        buffer.resize(length + 1, 0);
+    };
+    let path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]));
+    let drive = match path.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) if path.is_absolute() => drive,
+            _ => {
+                return Err(io::Error::other(
+                    "Windows directory is not an absolute local path",
+                ));
+            }
+        },
+        _ => {
+            return Err(io::Error::other(
+                "Windows directory is not an absolute local path",
+            ));
+        }
+    };
+    let root = [u16::from(drive), u16::from(b':'), u16::from(b'\\'), 0];
+    // SAFETY: the drive root is a live, NUL-terminated UTF-16 string.
+    let kind = unsafe { GetDriveTypeW(root.as_ptr()) };
+    if !matches!(
+        kind,
+        DRIVE_FIXED | DRIVE_REMOVABLE | DRIVE_CDROM | DRIVE_RAMDISK
+    ) {
+        return Err(io::Error::other(
+            "Windows directory is not on an available local drive",
+        ));
+    }
+    Ok(path)
+}
+
+/// Query this process's token, closing the owned token handle on every path.
+pub(crate) fn process_elevated() -> io::Result<bool> {
+    // SAFETY: the token output and TOKEN_ELEVATION buffer are initialized,
+    // correctly sized, live for the calls, and no borrowed pointer escapes.
+    unsafe {
+        let mut handle = ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), Security::TOKEN_QUERY, &mut handle) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let _token = Token(handle);
+        let mut elevation: Security::TOKEN_ELEVATION = mem::zeroed();
+        let mut returned = 0;
+        if Security::GetTokenInformation(
+            handle,
+            Security::TokenElevation,
+            (&mut elevation as *mut Security::TOKEN_ELEVATION).cast(),
+            mem::size_of::<Security::TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if returned != mem::size_of::<Security::TOKEN_ELEVATION>() as u32 {
+            return Err(io::Error::other(
+                "Windows returned an incomplete elevation token",
+            ));
+        }
+        Ok(elevation.TokenIsElevated != 0)
+    }
+}
+
+/// Create an elevated registration folder with an Administrators owner and
+/// a protected, inheritable Administrators/SYSTEM DACL from its first instant.
+pub(crate) fn create_registration_directory(path: &Path) -> io::Result<()> {
+    use windows_sys::Win32::{
+        Security::SECURITY_ATTRIBUTES, Storage::FileSystem::CreateDirectoryW,
+    };
+    let wide = verbatim(path)?;
+    let sddl: Vec<u16> = "O:BAD:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)"
+        .encode_utf16()
+        .chain([0])
+        .collect();
+    // SAFETY: the two strings are live and NUL-terminated. The descriptor
+    // remains owned until CreateDirectoryW has copied its security data.
+    unsafe {
+        let mut descriptor = ptr::null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            1,
+            &mut descriptor,
+            ptr::null_mut(),
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let _descriptor = Descriptor(descriptor);
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor,
+            bInheritHandle: 0,
+        };
+        if CreateDirectoryW(wide.as_ptr(), &attributes) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+/// Pin a plain registration directory without delete sharing. Holding this
+/// handle prevents its removal or rename while registration files are opened.
+pub(crate) fn open_registration_directory(path: &Path, elevated: bool) -> io::Result<File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL,
+    };
+    let directory = OpenOptions::new()
+        .read(true)
+        .access_mode(FILE_READ_ATTRIBUTES | READ_CONTROL)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let metadata = directory.metadata()?;
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::Error::other(
+            "registration scratch directory is a reparse point",
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(io::Error::other(
+            "registration scratch path is not a directory",
+        ));
+    }
+    if elevated {
+        // SAFETY: the live directory owns the handle; the descriptor owns
+        // all inspected SID/ACL pointers until the checks complete. Only
+        // Administrators or SYSTEM may be the owner or an effective writer.
+        unsafe {
+            let (mut owner, mut dacl, mut descriptor) =
+                (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+            let result = GetSecurityInfo(
+                directory.as_raw_handle() as HANDLE,
+                SE_FILE_OBJECT,
+                Security::OWNER_SECURITY_INFORMATION | Security::DACL_SECURITY_INFORMATION,
+                &mut owner,
+                ptr::null_mut(),
+                &mut dacl,
+                ptr::null_mut(),
+                &mut descriptor,
+            );
+            let _descriptor = Descriptor(descriptor);
+            if result != 0 {
+                return Err(io::Error::from_raw_os_error(result as i32));
+            }
+            if owner.is_null() || descriptor.is_null() {
+                return Err(io::Error::other(
+                    "registration scratch permissions are unavailable",
+                ));
+            }
+            let mut control = 0;
+            let mut revision = 0;
+            if (Security::IsWellKnownSid(owner, Security::WinBuiltinAdministratorsSid) == 0
+                && Security::IsWellKnownSid(owner, Security::WinLocalSystemSid) == 0)
+                || Security::GetSecurityDescriptorControl(descriptor, &mut control, &mut revision)
+                    == 0
+                || control & Security::SE_DACL_PROTECTED == 0
+                || access_distrust(owner, dacl, owner, Rule::Folder).is_some()
+            {
+                return Err(io::Error::other(
+                    "registration scratch directory is not protected for Administrators and SYSTEM",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
 pub(crate) fn inspect_redirect(path: &Path) -> io::Result<bool> {
     let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
     if path[..path.len() - 1].contains(&0) {

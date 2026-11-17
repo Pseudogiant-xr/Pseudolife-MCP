@@ -1,17 +1,30 @@
 //! Windows PowerShell invocation shared by the scheduler registration paths.
-use std::path::PathBuf;
 
 pub(crate) fn executable() -> Result<String, String> {
-    let root = std::env::var_os("SystemRoot").map(PathBuf::from).ok_or(
-        "SystemRoot is missing; cannot locate Windows PowerShell for the scheduled environment",
-    )?;
-    if !root.is_absolute() {
-        return Err("SystemRoot must be an absolute Windows directory; restore SystemRoot before retrying registration".into());
+    #[cfg(windows)]
+    {
+        let root = crate::credentials::windows_security::system_windows_directory()
+            .map_err(|e| format!("cannot locate Windows PowerShell using GetSystemWindowsDirectoryW: {e}; retry registration"))?;
+        root.join("System32/WindowsPowerShell/v1.0/powershell.exe")
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "the scheduler executable path must be UTF-8".into())
     }
-    root.join("System32/WindowsPowerShell/v1.0/powershell.exe")
+    #[cfg(not(windows))]
+    {
+        Err("Windows PowerShell registration requires Windows".into())
+    }
+}
+
+/// Carry a file path as data so no PowerShell quote or metacharacter is parsed.
+pub(crate) fn path_expression(path: &std::path::Path) -> Result<String, String> {
+    let path = path
         .to_str()
-        .map(str::to_owned)
-        .ok_or_else(|| "the scheduler executable path must be UTF-8".into())
+        .ok_or("the temporary PowerShell file path must be UTF-8")?;
+    Ok(format!(
+        "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{}'))",
+        base64(path.as_bytes())
+    ))
 }
 
 pub(crate) fn encoded(script: &str) -> Result<Vec<String>, String> {
@@ -56,6 +69,7 @@ pub(crate) fn base64(bytes: &[u8]) -> String {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn check_interpreter_root(planted: Option<&str>) {
         let expected = PathBuf::from(std::env::var_os("SystemRoot").unwrap())

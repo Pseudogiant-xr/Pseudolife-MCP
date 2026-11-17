@@ -667,7 +667,11 @@ $argument = (@($c.ServeArgs | ForEach-Object { Quote-Argument ([string]$_) }) -j
 # console Rust executables otherwise open a visible window at interactive logon.
 $inner = Get-NativeTaskCode $native $argument $ownerExe
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
-$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$powershell = if ($c.PowerShell) { [string]$c.PowerShell }
+else { Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe' }
+if ($powershell -notmatch '^[A-Za-z]:[\\/]') {
+    throw 'Windows PowerShell path is not an absolute local path; rerun install-autostart'
+}
 $action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encoded"
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 # This user, limited token, and a logon trigger for this user only: the

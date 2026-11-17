@@ -5,10 +5,21 @@ use std::{ffi::OsString, fs, path::PathBuf, process::Command};
 
 struct Scratch {
     path: PathBuf,
+    #[cfg(windows)]
+    directory: Option<fs::File>,
+    #[cfg(windows)]
+    elevated: bool,
 }
 
 fn create_registration_directory(path: &std::path::Path) -> Result<(), String> {
-    fs::create_dir(path).map_err(|e| e.to_string())
+    #[cfg(windows)]
+    if crate::credentials::windows_security::process_elevated()
+        .map_err(|e| format!("cannot check registration token elevation: {e}"))?
+    {
+        return crate::credentials::windows_security::create_registration_directory(path)
+            .map_err(|e| format!("cannot create protected registration scratch directory: {e}; rerun install-autostart"));
+    }
+    fs::create_dir(path).map_err(|e| format!("cannot create registration scratch directory: {e}"))
 }
 
 impl Scratch {
@@ -18,18 +29,74 @@ impl Scratch {
     }
 
     fn open_created(path: PathBuf) -> Result<Self, String> {
-        Ok(Self { path })
+        #[cfg(windows)]
+        let elevated = crate::credentials::windows_security::process_elevated()
+            .map_err(|e| format!("cannot check registration token elevation: {e}"))?;
+        #[cfg(windows)]
+        let directory =
+            crate::credentials::windows_security::open_registration_directory(&path, elevated)
+                .map_err(|e| {
+                    format!(
+                        "cannot open registration scratch directory: {e}; rerun install-autostart"
+                    )
+                })?;
+        Ok(Self {
+            path,
+            #[cfg(windows)]
+            directory: Some(directory),
+            #[cfg(windows)]
+            elevated,
+        })
     }
 
     fn write(&mut self, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        use std::io::Write as _;
+        #[cfg(windows)]
+        let _directory = {
+            let directory = crate::credentials::windows_security::open_registration_directory(
+                &self.path,
+                self.elevated,
+            )
+            .map_err(|e| {
+                format!("cannot open registration scratch directory: {e}; rerun install-autostart")
+            })?;
+            let held = self
+                .directory
+                .as_ref()
+                .ok_or("registration scratch directory is closed")?;
+            let identity = crate::credentials::windows_security::folder_identity;
+            if identity(held).map_err(|e| e.to_string())?
+                != identity(&directory).map_err(|e| e.to_string())?
+            {
+                return Err(format!(
+                    "registration scratch directory changed; refusing to create {name}; rerun install-autostart"
+                ));
+            }
+            directory
+        };
         let path = self.path.join(name);
-        fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.custom_flags(
+                windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
+            );
+        }
+        let mut file = options.open(&path).map_err(|e| {
+            format!("cannot create new registration file {name}: {e}; rerun install-autostart")
+        })?;
+        file.write_all(bytes)
+            .map_err(|e| format!("cannot write registration file {name}: {e}"))?;
         Ok(path)
     }
 }
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        drop(self.directory.take());
         let _ = fs::remove_dir_all(&self.path);
     }
 }
@@ -41,26 +108,14 @@ fn windows_registration_command(
     data_bytes: &[u8],
 ) -> Result<Command, String> {
     use sha2::{Digest, Sha256};
-    let path_expression = |path: &std::path::Path| {
-        path.to_str()
-            // PowerShell also recognizes typographic quote delimiters.
-            // Carry paths as data rather than quoting them as source.
-            .map(|p| {
-                format!(
-                    "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{}'))",
-                    crate::windows_powershell::base64(p.as_bytes()),
-                )
-            })
-            .ok_or("the temporary autostart registration path must be UTF-8")
-    };
     // Read each file once, verify those bytes, then run/parse only those
     // bytes. Neither the script nor its JSON is reopened after verification.
     let script_digest = format!("{:x}", Sha256::digest(script_bytes));
     let data_digest = format!("{:x}", Sha256::digest(data_bytes));
     let bootstrap = format!(
-        "$ErrorActionPreference='Stop';try{{$s=[Security.Cryptography.SHA256]::Create();$b=[IO.File]::ReadAllBytes({script});$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{script_digest}'){{[Console]::Error.WriteLine('autostart registration script changed after it was written; nothing was run; rerun install-autostart');exit 5}};$d=[IO.File]::ReadAllBytes({data});$h=-join ($s.ComputeHash($d)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{data_digest}'){{[Console]::Error.WriteLine('autostart registration data changed after it was written; nothing was run; rerun install-autostart');exit 5}}}}catch{{[Console]::Error.WriteLine('cannot verify autostart registration files; rerun install-autostart: '+$_.Exception.Message);exit 1}}finally{{if($s){{$s.Dispose()}}}};& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b))) -ConfigJson ([Text.Encoding]::UTF8.GetString($d))",
-        script = path_expression(script)?,
-        data = path_expression(data)?,
+        "$ErrorActionPreference='Stop';try{{$s=[Security.Cryptography.SHA256]::Create();$b=[IO.File]::ReadAllBytes({script});$h=-join ($s.ComputeHash($b)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{script_digest}'){{[Console]::Error.WriteLine('autostart registration script changed after it was written; nothing was run; rerun install-autostart');exit 5}};$d=[IO.File]::ReadAllBytes({data});$h=-join ($s.ComputeHash($d)|ForEach-Object {{$_.ToString('x2')}});if($h -ne '{data_digest}'){{[Console]::Error.WriteLine('autostart registration data changed after it was written; nothing was run; rerun install-autostart');exit 5}}}}catch{{[Console]::Error.WriteLine('cannot verify autostart registration files; rerun install-autostart: '+$_.Exception.Message);exit 1}}finally{{if($s){{$s.Dispose()}}}};try{{& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString($b))) -ConfigJson ([Text.Encoding]::UTF8.GetString($d))}}catch{{[Console]::Out.WriteLine(($_.Exception.Message -replace '\\s+',' ').Trim());exit 1}}",
+        script = crate::windows_powershell::path_expression(script)?,
+        data = crate::windows_powershell::path_expression(data)?,
     );
     let argv = crate::windows_powershell::encoded(&bootstrap)?;
     let mut command = Command::new(&argv[0]);
@@ -273,7 +328,7 @@ pub(super) fn install(args: &[OsString], remove: bool) -> Result<(), Failure> {
     }
     let status = if cfg!(windows) {
         let script_bytes = include_bytes!("autostart.ps1");
-        let data_bytes = serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON");
+        let data_bytes = serde_json::to_vec(&json!({"Native":native,"OwnerExe":owner_exe,"Kind":kind,"EnvFile":env_file,"Name":name,"ReplaceSibling":replace,"Remove":remove,"Port":port,"Host":host,"Timeout":wait,"LogonType":logon,"LockExitCode":TASK_LOCKED_EXIT,"PowerShell":crate::windows_powershell::executable()?.replace('/', "\\"),"ConfigArgs":config_args,"ServeArgs":serve_args})).expect("registration JSON");
         let script = scratch.write("register.ps1", script_bytes)?;
         let data = scratch.write("registration.json", &data_bytes)?;
         windows_registration_command(&script, &data, script_bytes, &data_bytes)?.status()
