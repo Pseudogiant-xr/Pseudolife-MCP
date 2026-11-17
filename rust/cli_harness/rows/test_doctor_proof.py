@@ -10,6 +10,26 @@ import sys
 import pytest
 
 
+@pytest.fixture(scope="module")
+def _proof_case_paths():
+    paths = []
+    yield paths
+    # Optional model/library fixtures have their own lifetimes; this budget
+    # covers retained executable scratch, the source of repeated large copies.
+    names = {"pseudolife-stdio", "pseudolife-stdio.exe", "pseudolife-daemon", "pseudolife-daemon.exe"}
+    names.update(Path(value).name for key in ("PSEUDOLIFE_PROOF_CANDIDATE", "PSEUDOLIFE_RUST_BINARY")
+                 if (value := os.environ.get(key)))
+    retained = sum(path.stat().st_size for root in paths if root.exists()
+                   for path in root.rglob("*") if path.name in names and path.is_file())
+    limit = 1024**3
+    assert retained < limit, f"proof module retained {retained} bytes of executable scratch (limit {limit})"
+
+
+@pytest.fixture(autouse=True)
+def _record_proof_case_path(tmp_path, _proof_case_paths):
+    _proof_case_paths.append(tmp_path)
+
+
 def _candidate() -> Path:
     value = os.environ.get("PSEUDOLIFE_PROOF_CANDIDATE") or os.environ.get("PSEUDOLIFE_RUST_BINARY")
     if not value:
@@ -33,6 +53,41 @@ def _run(tmp_path: Path, *arguments: str, dsn: str | None = None, models: Path |
     env.update(extra_env or {})
     return subprocess.run([str(candidate), "doctor", "--disposable-proof", *arguments],
                           env=env, cwd=tmp_path, capture_output=True, text=True, timeout=15)
+
+
+@pytest.mark.parametrize("copy_fallback", [False, True])
+@pytest.mark.parametrize("call_fails", [False, True])
+def test_case_candidate_is_released_when_call_finishes(tmp_path, monkeypatch, copy_fallback, call_fails):
+    import errno
+    source = tmp_path / "build" / "native-cli"
+    source.parent.mkdir()
+    source.write_bytes(b"synthetic executable")
+    case = tmp_path / "case"
+    case.mkdir()
+    candidate = case / source.name
+    monkeypatch.setattr(sys.modules[__name__], "_candidate", lambda: source)
+    if copy_fallback:
+        def cross_device(*args, **kwargs):
+            raise OSError(errno.EXDEV, "cross-device link")
+        monkeypatch.setattr(os, "link", cross_device)
+
+    def invoke(arguments, *, env, cwd, **kwargs):
+        assert Path(arguments[0]) == candidate and candidate.read_bytes() == source.read_bytes()
+        assert cwd == case
+        assert env["PATH"] == env["HOME"] == env["USERPROFILE"] == str(case)
+        if call_fails:
+            raise subprocess.TimeoutExpired(arguments, 15)
+        return subprocess.CompletedProcess(arguments, 2, stdout="{}", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", invoke)
+    if call_fails:
+        with pytest.raises(subprocess.TimeoutExpired):
+            _run(case)
+    else:
+        assert _run(case).returncode == 2
+    retained = candidate.stat().st_size if candidate.exists() else 0
+    assert retained == 0, f"call retained {retained} bytes of executable scratch"
+    assert source.read_bytes() == b"synthetic executable"
 
 
 def test_missing_fixture_dsn_never_starts_daemon(tmp_path):
