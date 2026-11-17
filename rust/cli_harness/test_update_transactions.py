@@ -804,6 +804,9 @@ def test_optional_test_login_uses_selected_project_postgres(tmp_path):
         assert ["port", "fixture-pg", "5432/tcp"] in calls
         assert not any("pseudolife-mcp-postgres" in call for call in calls)
         assert any(call[:3] == ["exec", "-i", "fixture-pg"] and any("psql" in arg for arg in call) for call in calls)
+        if os.name == "nt":
+            retained = Path(binary).stat().st_size if Path(binary).exists() else 0
+            assert retained == 0, f"test-login call retained {retained} bytes of executable scratch"
 
 
 def test_builtin_backup_has_independent_container_deadlines(tmp_path):
