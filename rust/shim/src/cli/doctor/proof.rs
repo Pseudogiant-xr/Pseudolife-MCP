@@ -941,12 +941,12 @@ mod path_privacy_tests {
             "https://user:w44-url-secret@example.invalid/fixture",
         ] {
             let value =
-                cleanup_report("fixture", Path::new(path), true, Err("fixture error")).unwrap();
+                cleanup_failure("fixture", Path::new(path), true, Err("fixture error")).unwrap();
             assert_eq!(value["fixture_directory"], "[redacted]");
             assert!(!value.to_string().contains("w44-proof-path-bearer"));
             assert!(!value.to_string().contains("w44-url-secret"));
         }
-        let value = cleanup_report(
+        let value = cleanup_failure(
             "fixture",
             Path::new("ordinary-fixture"),
             true,

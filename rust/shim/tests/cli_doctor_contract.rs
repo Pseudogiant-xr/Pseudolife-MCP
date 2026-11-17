@@ -609,7 +609,7 @@ struct RawDaemon {
 }
 
 impl RawDaemon {
-    fn start(answer: fn(&str) -> (Vec<u8>, u64)) -> Self {
+    fn start(answer: impl Fn(&str) -> (Vec<u8>, u64) + Send + Sync + 'static) -> Self {
         use std::io::{Read, Write};
         use std::sync::atomic::Ordering;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -617,6 +617,7 @@ impl RawDaemon {
         let url = format!("http://{}", listener.local_addr().unwrap());
         let paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let answer = std::sync::Arc::new(answer);
         let (seen, halt) = (paths.clone(), stop.clone());
         let thread = std::thread::spawn(move || {
             while !halt.load(Ordering::SeqCst) {
@@ -625,6 +626,7 @@ impl RawDaemon {
                     continue;
                 };
                 let (seen, halt) = (seen.clone(), halt.clone());
+                let answer = answer.clone();
                 std::thread::spawn(move || {
                     stream.set_nonblocking(false).unwrap();
                     let mut head = Vec::new();
